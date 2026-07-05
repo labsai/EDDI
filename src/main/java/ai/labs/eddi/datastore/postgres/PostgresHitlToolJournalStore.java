@@ -23,6 +23,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * PostgreSQL implementation of {@link IHitlToolJournalStore}. Annotated
  * {@code @DefaultBean} so {@code DataStoreProducers} can select it when
@@ -117,8 +119,8 @@ public class PostgresHitlToolJournalStore implements IHitlToolJournalStore {
         ensureSchema();
         String sql = """
                 INSERT INTO hitl_tool_execution_journal
-                    (conversation_id, pause_epoch, call_id, tool_name, status, claimed_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (conversation_id, pause_epoch, call_id, tool_name, status, claimed_at, decided_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (conversation_id, pause_epoch, call_id) DO NOTHING
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -128,10 +130,13 @@ public class PostgresHitlToolJournalStore implements IHitlToolJournalStore {
             ps.setString(4, toolName);
             ps.setString(5, Status.EXECUTING.name());
             ps.setLong(6, Instant.now().toEpochMilli());
+            // Persist the approver identity at claim time (parity with the Mongo store):
+            // without this, find() reads decidedBy back as null on Postgres.
+            ps.setString(7, decidedBy);
             int rows = ps.executeUpdate();
             if (rows == 0) {
                 LOGGER.infof("HITL tool journal: claim already exists for conversationId=%s pauseEpoch=%s callId=%s — not re-executing",
-                        conversationId, pauseEpoch, callId);
+                        sanitize(conversationId), sanitize(pauseEpoch), sanitize(callId));
                 return false;
             }
             return true;
@@ -140,7 +145,7 @@ public class PostgresHitlToolJournalStore implements IHitlToolJournalStore {
             // conflated with "already claimed". Propagate so the caller fails cleanly
             // and can retry, rather than silently skipping a human-approved tool.
             LOGGER.errorf(e, "HITL tool journal: failed to claim conversationId=%s pauseEpoch=%s callId=%s",
-                    conversationId, pauseEpoch, callId);
+                    sanitize(conversationId), sanitize(pauseEpoch), sanitize(callId));
             throw new RuntimeException("Failed to claim HITL tool execution", e);
         }
     }
@@ -164,11 +169,11 @@ public class PostgresHitlToolJournalStore implements IHitlToolJournalStore {
             int rows = ps.executeUpdate();
             if (rows == 0) {
                 LOGGER.warnf("HITL tool journal: markExecuted found no claimed entry for conversationId=%s pauseEpoch=%s callId=%s",
-                        conversationId, pauseEpoch, callId);
+                        sanitize(conversationId), sanitize(pauseEpoch), sanitize(callId));
             }
         } catch (SQLException e) {
             LOGGER.errorf(e, "HITL tool journal: failed to markExecuted conversationId=%s pauseEpoch=%s callId=%s",
-                    conversationId, pauseEpoch, callId);
+                    sanitize(conversationId), sanitize(pauseEpoch), sanitize(callId));
             throw new RuntimeException("Failed to mark HITL tool execution", e);
         }
     }
@@ -205,7 +210,7 @@ public class PostgresHitlToolJournalStore implements IHitlToolJournalStore {
             }
         } catch (SQLException e) {
             LOGGER.errorf(e, "HITL tool journal: failed to find conversationId=%s pauseEpoch=%s callId=%s",
-                    conversationId, pauseEpoch, callId);
+                    sanitize(conversationId), sanitize(pauseEpoch), sanitize(callId));
             throw new RuntimeException("Failed to read HITL tool execution", e);
         }
     }
@@ -218,7 +223,7 @@ public class PostgresHitlToolJournalStore implements IHitlToolJournalStore {
             ps.setString(1, conversationId);
             return ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.errorf(e, "HITL tool journal: failed to delete entries for conversationId=%s", conversationId);
+            LOGGER.errorf(e, "HITL tool journal: failed to delete entries for conversationId=%s", sanitize(conversationId));
             throw new RuntimeException("Failed to delete HITL tool journal entries", e);
         }
     }
