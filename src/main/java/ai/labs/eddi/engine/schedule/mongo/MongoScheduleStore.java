@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.*;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static com.mongodb.client.model.Filters.*;
 import static com.mongodb.client.model.Updates.*;
 
@@ -209,7 +210,7 @@ public class MongoScheduleStore implements IScheduleStore {
     public void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException {
         try {
             scheduleCollection.deleteOne(eq(ID, scheduleId));
-            LOGGER.infof("Deleted schedule id=%s", scheduleId);
+            LOGGER.infof("Deleted schedule id=%s", sanitize(scheduleId));
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to delete schedule " + scheduleId, e);
         }
@@ -221,7 +222,7 @@ public class MongoScheduleStore implements IScheduleStore {
             var result = scheduleCollection.deleteMany(eq(AGENT_ID, agentId));
             int count = (int) result.getDeletedCount();
             if (count > 0) {
-                LOGGER.infof("Cascade-deleted %d schedule(s) for Agent %s", count, agentId);
+                LOGGER.infof("Cascade-deleted %d schedule(s) for Agent %s", count, sanitize(agentId));
             }
             return count;
         } catch (Exception e) {
@@ -235,7 +236,7 @@ public class MongoScheduleStore implements IScheduleStore {
             var result = scheduleCollection.deleteMany(eq(NAME, name));
             int count = (int) result.getDeletedCount();
             if (count > 0) {
-                LOGGER.infof("Deleted %d HITL timeout schedule(s) with name '%s'", count, name);
+                LOGGER.infof("Deleted %d HITL timeout schedule(s) with name '%s'", count, sanitize(name));
             }
             return count;
         } catch (Exception e) {

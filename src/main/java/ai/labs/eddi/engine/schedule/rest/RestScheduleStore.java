@@ -31,6 +31,8 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * JAX-RS implementation of {@link IRestScheduleStore}.
  *
@@ -235,7 +237,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             // via SchedulePollerService bypasses this REST surface and is unaffected.
             if (isHitlSchedule(schedule)) {
                 LOGGER.warnf("Refused manual fire of HITL timeout schedule %s (name=%s) — "
-                        + "human decisions must go through /resume or /cancel", scheduleId, schedule.getName());
+                        + "human decisions must go through /resume or /cancel", sanitize(scheduleId), sanitize(schedule.getName()));
                 return Response.status(Response.Status.CONFLICT)
                         .entity("This schedule is a human-in-the-loop approval timeout and cannot be fired manually. "
                                 + "Approve or reject via POST /agents/{conversationId}/resume, "
@@ -372,13 +374,14 @@ public class RestScheduleStore implements IRestScheduleStore {
         } catch (Exception e) {
             // Fail closed: we could not prove this is NOT a HITL safety timeout, so we
             // must not let the mutation proceed unauthenticated.
-            LOGGER.error("Failed to verify HITL guard for schedule " + scheduleId + " (" + operation + ")", e);
+            LOGGER.error("Failed to verify HITL guard for schedule " + sanitize(scheduleId) + " (" + sanitize(operation) + ")", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity("Unable to verify schedule authorization; refusing to " + operation + " schedule.")
                     .build();
         }
         if (isHitlSchedule(stored) && !ownershipValidator.isAdmin(identity)) {
-            LOGGER.warnf("Refused %s of HITL timeout schedule %s (name=%s) by non-admin", operation, scheduleId, stored.getName());
+            LOGGER.warnf("Refused %s of HITL timeout schedule %s (name=%s) by non-admin",
+                    sanitize(operation), sanitize(scheduleId), sanitize(stored.getName()));
             return Response.status(Response.Status.FORBIDDEN)
                     .entity("This schedule is a human-in-the-loop approval timeout; only an administrator may " + operation
                             + " it. The pending approval is resolved via POST /agents/{conversationId}/resume or .../cancel.")

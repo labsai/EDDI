@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * @author ginccc
  */
@@ -59,7 +61,7 @@ public class RuleSetStore extends AbstractResourceStore<RuleSetConfiguration> im
      */
     private void lintReservedActionNearMisses(RuleSetConfiguration behaviorConfiguration) {
         for (String warning : ReservedActionLint.checkReservedActionNearMisses(behaviorConfiguration)) {
-            LOGGER.warn("ruleset save: " + warning);
+            LOGGER.warn("ruleset save: " + sanitize(warning));
         }
     }
 

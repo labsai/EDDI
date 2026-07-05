@@ -37,6 +37,7 @@ import java.util.List;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.redactRawPendingToolCallsForRead;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -265,12 +266,12 @@ public class RestConversationStore implements IRestConversationStore {
                 }
             } catch (Exception e) {
                 log.warn(format("HITL cleanup before permanent delete failed for conversation %s: %s",
-                        conversationId, e.getMessage()));
+                        sanitize(conversationId), e.getMessage()));
             }
 
             deleteAttachmentsForConversation(conversationId);
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
-            log.info(format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
+            log.info(format("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId)));
         }
 
         // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this

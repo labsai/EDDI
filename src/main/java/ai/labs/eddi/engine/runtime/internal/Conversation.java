@@ -34,6 +34,7 @@ import static ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversati
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT_INITIAL;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -242,7 +243,7 @@ public class Conversation implements IConversation {
         }
         if (conversationMemory.getHitlPendingToolCalls() != null || conversationMemory.getHitlPauseType() != null) {
             LOGGER.warnf("Clearing stale HITL tool-pause state at turn start for conversation %s (not AWAITING_HUMAN)",
-                    conversationMemory.getConversationId());
+                    sanitize(conversationMemory.getConversationId()));
             conversationMemory.setHitlPendingToolCalls(null);
             conversationMemory.setHitlPauseType(null);
             conversationMemory.setHitlResumeDecision(null);

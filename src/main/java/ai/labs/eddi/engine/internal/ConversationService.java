@@ -66,6 +66,7 @@ import java.util.concurrent.*;
 import java.util.function.Consumer;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.*;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RestUtilities.createURI;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -2347,10 +2348,10 @@ public class ConversationService implements IConversationService {
                     HitlSchedules.METADATA_CONVERSATION_ID_KEY, conversationId));
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Scheduled HITL timeout for conversation %s at %s (policy: %s)",
-                    conversationId, fireAt, policyName);
+                    sanitize(conversationId), fireAt, policyName);
         } catch (Exception e) {
             LOGGER.warnf("Failed to schedule HITL timeout for conversation %s: %s",
-                    conversationId, e.getMessage());
+                    sanitize(conversationId), e.getMessage());
         }
     }
 
@@ -2362,11 +2363,11 @@ public class ConversationService implements IConversationService {
         try {
             int deleted = scheduleStore.deleteSchedulesByName(HitlSchedules.regularTimeoutScheduleName(conversationId));
             if (deleted > 0) {
-                LOGGER.infof("Cleaned up %d HITL timeout schedule(s) for conversation %s", deleted, conversationId);
+                LOGGER.infof("Cleaned up %d HITL timeout schedule(s) for conversation %s", deleted, sanitize(conversationId));
             }
         } catch (Exception e) {
             LOGGER.warnf("Failed to delete HITL timeout schedule for conversation %s: %s",
-                    conversationId, e.getMessage());
+                    sanitize(conversationId), e.getMessage());
         }
     }
 }
