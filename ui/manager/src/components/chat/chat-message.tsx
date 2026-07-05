@@ -4,8 +4,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { cn } from "@/lib/utils";
-import type { ChatMessage as ChatMessageType } from "@/lib/api/chat";
-import { Bot, User, Copy, Check } from "lucide-react";
+import type { ChatMessage as ChatMessageType, MessageAttachment } from "@/lib/api/chat";
+import { isImageMime, formatBytes } from "@/lib/api/attachments";
+import { Bot, User, Copy, Check, FileText, AlertTriangle } from "lucide-react";
 
 // ==================== Helpers ====================
 
@@ -77,7 +78,14 @@ export const ChatMessage = memo(function ChatMessage({
           )}
         >
           {isUser ? (
-            <p className="whitespace-pre-wrap">{message.content}</p>
+            <div className="flex flex-col gap-2">
+              {message.attachments?.length ? (
+                <MessageAttachments attachments={message.attachments} />
+              ) : null}
+              {message.content && (
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              )}
+            </div>
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
               {message.content ? (
@@ -115,6 +123,54 @@ export const ChatMessage = memo(function ChatMessage({
     </div>
   );
 });
+
+// ==================== Attachments ====================
+
+/** Render the attachments a user sent with a message (image thumbnails / file chips). */
+function MessageAttachments({ attachments }: { attachments: MessageAttachment[] }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap gap-2" data-testid="message-attachments">
+      {attachments.map((att, i) => {
+        const showImage = isImageMime(att.mimeType) && att.previewUrl;
+        const tooLarge = att.forwardableInline === false;
+        return (
+          <div key={`${att.fileName}-${i}`} className="flex flex-col gap-1">
+            {showImage ? (
+              <img
+                src={att.previewUrl}
+                alt={att.fileName}
+                className="max-h-40 max-w-[220px] rounded-lg object-cover"
+              />
+            ) : (
+              <div
+                className="flex items-center gap-2 rounded-lg bg-primary-foreground/10 px-2.5 py-1.5"
+                title={att.fileName}
+              >
+                <FileText className="h-4 w-4 shrink-0 opacity-80" />
+                <div className="flex min-w-0 flex-col text-xs">
+                  <span className="max-w-[160px] truncate font-medium">{att.fileName}</span>
+                  {att.sizeBytes != null && (
+                    <span className="opacity-70">{formatBytes(att.sizeBytes)}</span>
+                  )}
+                </div>
+              </div>
+            )}
+            {tooLarge && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] text-amber-200/90"
+                data-testid="attachment-not-forwarded"
+              >
+                <AlertTriangle className="h-3 w-3" />
+                {t("chat.attachNotForwarded", "Not sent to model")}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 // ==================== Copy Button ====================
 

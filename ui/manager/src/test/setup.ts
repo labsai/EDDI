@@ -47,6 +47,12 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
+// jsdom doesn't implement URL.revokeObjectURL; provide a no-op so attachment
+// preview cleanup (revoke on unmount / message clear) never throws in tests.
+if (typeof URL.revokeObjectURL !== "function") {
+  URL.revokeObjectURL = () => {};
+}
+
 import "@/i18n/config";
 
 // Start MSW server before all tests
