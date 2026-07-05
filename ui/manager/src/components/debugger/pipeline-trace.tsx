@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useDebugStore, type PipelineTurn, type PipelineEvent } from "@/hooks/use-debug-events";
+import { useDebugStore, buildCascadeSteps, type PipelineTurn, type PipelineEvent } from "@/hooks/use-debug-events";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
 import { cn, formatDuration } from "@/lib/utils";
+import { CascadeStepTrace } from "@/components/cascade-step-trace";
 import { Clock, Zap, ChevronDown, AlertTriangle } from "lucide-react";
 
 
@@ -173,6 +174,12 @@ function TurnChart({ turn }: { turn: PipelineTurn }) {
             ))}
         </div>
       )}
+
+      <CascadeStepTrace
+        steps={buildCascadeSteps(turn.events)}
+        testId="cascade-summary"
+        className="rounded-md border border-purple-500/20 bg-purple-500/5 p-2"
+      />
     </div>
   );
 }
@@ -193,6 +200,11 @@ function LiveEventsChart({ events }: { events: PipelineEvent[] }) {
       {tasks.map((task, i) => (
         <TaskBar key={i} task={task} maxDuration={maxDuration} />
       ))}
+      <CascadeStepTrace
+        steps={buildCascadeSteps(events)}
+        testId="cascade-summary"
+        className="rounded-md border border-purple-500/20 bg-purple-500/5 p-2"
+      />
     </div>
   );
 }
@@ -215,6 +227,7 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
   return (
     <div>
       <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
         className="group flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-start transition-colors hover:bg-muted/50"

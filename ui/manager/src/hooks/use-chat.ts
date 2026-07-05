@@ -543,6 +543,72 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
       });
       return false;
     }
+    case "cascade_step_start": {
+      // A cascade step is starting — keep the "thinking" indicator on while
+      // buffered steps run (only a live-streamed final step emits tokens).
+      store.getState().setThinking(true);
+      let taskId = "cascade";
+      let modelType = "unknown";
+      let modelName: string | undefined;
+      let stepIndex = 0;
+      let totalSteps: number | undefined;
+      try {
+        const parsed = JSON.parse(event.data);
+        taskId = parsed.taskId ?? parsed.id ?? "cascade";
+        modelType = parsed.modelType ?? parsed.type ?? "unknown";
+        modelName = parsed.modelName ?? parsed.model;
+        stepIndex = parsed.stepIndex ?? 0;
+        totalSteps = parsed.totalSteps;
+      } catch {
+        // non-JSON payload — leave defaults
+      }
+      debug.addEvent({
+        type: "cascade_step_start",
+        taskId,
+        taskType: modelType,
+        index: stepIndex,
+        stepIndex,
+        modelName,
+        totalSteps,
+        timestamp: Date.now(),
+      });
+      return false;
+    }
+    case "cascade_escalation": {
+      let taskId = "cascade";
+      let fromStep = 0;
+      let toStep = 0;
+      let confidence: number | undefined;
+      let threshold: number | undefined;
+      let reason: string | undefined;
+      let durationMs: number | undefined;
+      try {
+        const parsed = JSON.parse(event.data);
+        taskId = parsed.taskId ?? parsed.id ?? "cascade";
+        fromStep = parsed.fromStep ?? 0;
+        toStep = parsed.toStep ?? 0;
+        confidence = parsed.confidence;
+        threshold = parsed.threshold;
+        reason = parsed.reason;
+        durationMs = parsed.durationMs ?? parsed.duration;
+      } catch {
+        // non-JSON payload — leave defaults
+      }
+      debug.addEvent({
+        type: "cascade_escalation",
+        taskId,
+        taskType: "cascade",
+        index: fromStep,
+        fromStep,
+        toStep,
+        confidence,
+        threshold,
+        reason,
+        durationMs,
+        timestamp: Date.now(),
+      });
+      return false;
+    }
     default:
       return false;
   }
