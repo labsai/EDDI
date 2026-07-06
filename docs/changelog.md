@@ -5,6 +5,14 @@
 
 ---
 
+## 🐛 mcpcalls — register McpCallsTask via startup module (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+`McpCallsTask` (the MCP-client httpcall lifecycle task) was tracked and committed, but its bootstrap registration was not — so on a fresh checkout the task was never inserted into the lifecycle-task provider map (`@LifecycleExtensions`) and the mcpcalls feature silently failed to wire into the pipeline. Added `McpCallsModule` (`@Startup(1000)` + `@PostConstruct`), mirroring the seven sibling bootstraps (`ApiCallsModule`, `LlmModule`, `OutputGenerationModule`, `PropertySetterModule`, `RulesModule`, `SemanticParserModule`, `TemplateEngineModule`), which registers `McpCallsTask.ID`. The file existed but was untracked in the working tree; surfaced while auditing the tree during the MCP-whitelist review and committed here as a wiring bug relevant to this branch. Compiles clean.
+
+---
+
 ## 🔌 MCP tool filter — expose HITL/memory/GDPR tools + build-time regression guard (2026-07-06)
 
 **Repo:** EDDI (`feat/hitl-framework`)
