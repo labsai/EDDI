@@ -11,8 +11,13 @@ import {
   redoConversation as redoConversationApi,
   rerunLastStep,
   type ChatMessage,
+  type MessageAttachment,
   type SSEEvent,
 } from "@/lib/api/chat";
+import {
+  buildAttachmentContext,
+  type AttachmentRef,
+} from "@/lib/api/attachments";
 import {
   getConversationDescriptors,
   type SimpleConversationMemorySnapshot,
@@ -31,6 +36,59 @@ import {
 } from "@/lib/api/agents";
 import { useDebugStore } from "@/hooks/use-debug-events";
 import { isApiError } from "@/lib/api-client";
+
+/** An uploaded attachment being sent with a turn (context ref + display preview). */
+export interface SentAttachment extends AttachmentRef {
+  /** Object URL for an inline image preview on the sent bubble. */
+  previewUrl?: string;
+}
+
+/** Project a sent attachment down to the fields the message bubble renders. */
+function toMessageAttachment(att: SentAttachment): MessageAttachment {
+  return {
+    fileName: att.fileName,
+    mimeType: att.mimeType,
+    sizeBytes: att.sizeBytes,
+    previewUrl: att.previewUrl,
+    forwardableInline: att.forwardableInline,
+  };
+}
+
+/** Free the object URLs held by message attachment previews before messages are dropped. */
+function revokeMessagePreviews(messages: ChatMessage[]): void {
+  for (const message of messages) {
+    message.attachments?.forEach((a) => {
+      if (a.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(a.previewUrl);
+    });
+  }
+}
+
+/**
+ * Carry client-only attachment previews from the previous messages onto rebuilt
+ * ones, matched by user-message order. Snapshots (undo/redo/rerun) never carry
+ * attachments, so without this an earlier image message loses its thumbnail when
+ * a later turn is undone. (On a fresh load the previous list is already empty.)
+ */
+function preserveAttachments(prev: ChatMessage[], next: ChatMessage[]): ChatMessage[] {
+  const prevUserAttachments = prev.filter((m) => m.role === "user").map((m) => m.attachments);
+  let i = 0;
+  return next.map((m) => {
+    if (m.role !== "user") return m;
+    const att = prevUserAttachments[i++];
+    return att && att.length ? { ...m, attachments: att } : m;
+  });
+}
+
+/** Revoke only the preview URLs present in `prev` that no message in `next` still references. */
+function revokeOrphanedPreviews(prev: ChatMessage[], next: ChatMessage[]): void {
+  const kept = new Set<string>();
+  next.forEach((m) => m.attachments?.forEach((a) => a.previewUrl && kept.add(a.previewUrl)));
+  prev.forEach((m) =>
+    m.attachments?.forEach((a) => {
+      if (a.previewUrl?.startsWith("blob:") && !kept.has(a.previewUrl)) URL.revokeObjectURL(a.previewUrl);
+    }),
+  );
+}
 
 // --- Zustand Store ---
 
@@ -150,13 +208,25 @@ export const useChatStore = create<ChatState>((set) => ({
       return { streamingEnabled: next };
     }),
 
-  clearMessages: () => set({ messages: [], conversationId: null, undoAvailable: false, redoAvailable: false, quickReplies: [], activeInputField: null, isSecretMode: false, isPaused: false, pauseReason: null }),
+  clearMessages: () =>
+    set((s) => {
+      revokeMessagePreviews(s.messages);
+      return { messages: [], conversationId: null, undoAvailable: false, redoAvailable: false, quickReplies: [], activeInputField: null, isSecretMode: false, isPaused: false, pauseReason: null };
+    }),
 
   setUndoRedo: (undo, redo) => set({ undoAvailable: undo, redoAvailable: redo }),
 
   setQuickReplies: (replies) => set({ quickReplies: replies }),
 
-  replaceMessages: (messages) => set({ messages }),
+  replaceMessages: (messages) =>
+    set((s) => {
+      // Undo/redo/rerun rebuild from a snapshot (no attachments). Carry the
+      // client-side previews forward so thumbnails survive, and revoke only the
+      // previews that are genuinely gone.
+      const merged = preserveAttachments(s.messages, messages);
+      revokeOrphanedPreviews(s.messages, merged);
+      return { messages: merged };
+    }),
 
   setInputField: (field) => set({ activeInputField: field }),
 
@@ -167,20 +237,23 @@ export const useChatStore = create<ChatState>((set) => ({
   setPaused: (isPaused, reason = null) => set({ isPaused, pauseReason: reason ?? null }),
 
   reset: () =>
-    set({
-      messages: [],
-      conversationId: null,
-      selectedAgentId: null,
-      selectedAgentName: null,
-      isProcessing: false,
-      isThinking: false,
-      undoAvailable: false,
-      redoAvailable: false,
-      quickReplies: [],
-      activeInputField: null,
-      isSecretMode: false,
-      isPaused: false,
-      pauseReason: null,
+    set((s) => {
+      revokeMessagePreviews(s.messages);
+      return {
+        messages: [],
+        conversationId: null,
+        selectedAgentId: null,
+        selectedAgentName: null,
+        isProcessing: false,
+        isThinking: false,
+        undoAvailable: false,
+        redoAvailable: false,
+        quickReplies: [],
+        activeInputField: null,
+        isSecretMode: false,
+        isPaused: false,
+        pauseReason: null,
+      };
     }),
 }));
 
@@ -272,19 +345,45 @@ export function useStartConversation() {
 export function useSendMessage() {
   const store = useChatStore;
   return useMutation({
-    mutationFn: async ({ message, isSecret }: { message: string; isSecret?: boolean }) => {
+    mutationFn: async ({
+      message,
+      isSecret,
+      attachments,
+    }: {
+      message: string;
+      isSecret?: boolean;
+      /** Already-uploaded attachments to forward to the LLM this turn. */
+      attachments?: SentAttachment[];
+    }) => {
       const state = store.getState();
       const { selectedAgentId, conversationId, streamingEnabled } = state;
       if (!selectedAgentId || !conversationId) {
         throw new Error("No active conversation");
       }
 
-      // Add user message (masked if secret)
+      // Build the turn context: secret-input flag + attachment_* keys.
+      // A secret turn never forwards attachments — a masked turn must not leak a
+      // file to the model. The UI blocks the combination up front, but guard
+      // here too since secret input can also be backend-requested.
+      const context: Record<string, unknown> = {};
+      if (isSecret) {
+        context.secretInput = { type: "string", value: "true" };
+      }
+      if (attachments?.length && !isSecret) {
+        Object.assign(context, buildAttachmentContext(attachments));
+      }
+      const hasContext = Object.keys(context).length > 0;
+
+      // Add user message (masked if secret), carrying attachment chips for
+      // display — never on a secret turn (they'd unmask the filename/thumbnail).
       state.addMessage({
         id: `user-${Date.now()}`,
         role: "user",
         content: isSecret ? "●●●●●●●●" : message,
         timestamp: Date.now(),
+        attachments: !isSecret && attachments?.length
+          ? attachments.map(toMessageAttachment)
+          : undefined,
       });
       state.setProcessing(true);
       // Clear stale quick replies immediately so old buttons don't flash
@@ -320,7 +419,7 @@ export function useSendMessage() {
           "production",
           selectedAgentId,
           conversationId,
-          { input: message },
+          hasContext ? { input: message, context } : { input: message },
           abort.signal,
         );
 
@@ -361,15 +460,12 @@ export function useSendMessage() {
         });
 
         let snapshot;
-        if (isSecret) {
+        if (hasContext) {
           snapshot = await sendMessageWithContext(
             "production",
             selectedAgentId,
             conversationId,
-            {
-              input: message,
-              context: { secretInput: { type: "string", value: "true" } },
-            }
+            { input: message, context }
           );
         } else {
           snapshot = await sendMessage(
@@ -590,6 +686,72 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
         actions,
         confidence,
         toolTrace,
+        timestamp: Date.now(),
+      });
+      return false;
+    }
+    case "cascade_step_start": {
+      // A cascade step is starting — keep the "thinking" indicator on while
+      // buffered steps run (only a live-streamed final step emits tokens).
+      store.getState().setThinking(true);
+      let taskId = "cascade";
+      let modelType = "unknown";
+      let modelName: string | undefined;
+      let stepIndex = 0;
+      let totalSteps: number | undefined;
+      try {
+        const parsed = JSON.parse(event.data);
+        taskId = parsed.taskId ?? parsed.id ?? "cascade";
+        modelType = parsed.modelType ?? parsed.type ?? "unknown";
+        modelName = parsed.modelName ?? parsed.model;
+        stepIndex = parsed.stepIndex ?? 0;
+        totalSteps = parsed.totalSteps;
+      } catch {
+        // non-JSON payload — leave defaults
+      }
+      debug.addEvent({
+        type: "cascade_step_start",
+        taskId,
+        taskType: modelType,
+        index: stepIndex,
+        stepIndex,
+        modelName,
+        totalSteps,
+        timestamp: Date.now(),
+      });
+      return false;
+    }
+    case "cascade_escalation": {
+      let taskId = "cascade";
+      let fromStep = 0;
+      let toStep = 0;
+      let confidence: number | undefined;
+      let threshold: number | undefined;
+      let reason: string | undefined;
+      let durationMs: number | undefined;
+      try {
+        const parsed = JSON.parse(event.data);
+        taskId = parsed.taskId ?? parsed.id ?? "cascade";
+        fromStep = parsed.fromStep ?? 0;
+        toStep = parsed.toStep ?? 0;
+        confidence = parsed.confidence;
+        threshold = parsed.threshold;
+        reason = parsed.reason;
+        durationMs = parsed.durationMs ?? parsed.duration;
+      } catch {
+        // non-JSON payload — leave defaults
+      }
+      debug.addEvent({
+        type: "cascade_escalation",
+        taskId,
+        taskType: "cascade",
+        index: fromStep,
+        fromStep,
+        toStep,
+        confidence,
+        threshold,
+        reason,
+        durationMs,
         timestamp: Date.now(),
       });
       return false;

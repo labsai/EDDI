@@ -1,7 +1,11 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import type { PipelineEvent, ToolTraceEntry } from "@/hooks/use-debug-events";
+import {
+  buildCascadeSteps,
+  type PipelineEvent,
+  type ToolTraceEntry,
+} from "@/hooks/use-debug-events";
 import {
   Zap,
   ChevronDown,
@@ -14,6 +18,7 @@ import {
   Copy,
 } from "lucide-react";
 import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
+import { CascadeStepTrace } from "@/components/cascade-step-trace";
 
 // ==================== Types ====================
 
@@ -103,6 +108,7 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
   const [expanded, setExpanded] = useState(isLive);
 
   const tasks = useMemo(() => buildTaskSummaries(events), [events]);
+  const cascadeSteps = useMemo(() => buildCascadeSteps(events), [events]);
 
   const totalDuration = useMemo(
     () => tasks.reduce((sum, task) => sum + (task.durationMs ?? 0), 0),
@@ -124,7 +130,7 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
   // Auto-expand when live processing starts, auto-collapse when done
   const shouldPulse = isLive && hasRunning;
 
-  if (tasks.length === 0) return null;
+  if (tasks.length === 0 && cascadeSteps.length === 0) return null;
 
   return (
     <div className="flex justify-center px-4 py-1" data-testid="chat-activity">
@@ -138,6 +144,7 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
       >
         {/* Summary bar — always visible */}
         <button
+          type="button"
           onClick={() => setExpanded(!expanded)}
           className={cn(
             "flex w-full items-center gap-2 px-3 py-2 text-start text-xs transition-colors",
@@ -197,6 +204,13 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
           )}
         >
           <div className="border-t border-border/30 px-3 pb-2.5 pt-1.5 space-y-0.5">
+            {cascadeSteps.length > 0 && (
+              <CascadeStepTrace
+                steps={cascadeSteps}
+                testId="cascade-trace"
+                className="mb-1 rounded-lg border border-purple-500/20 bg-purple-500/5 p-2"
+              />
+            )}
             {tasks.map((task, i) => (
               <TaskRow key={`${task.taskType}-${task.index}-${i}`} task={task} />
             ))}
@@ -245,6 +259,7 @@ function TaskRow({ task }: { task: TaskSummary }) {
         {/* Tool call badge */}
         {hasTools && (
           <button
+            type="button"
             onClick={() => setToolsExpanded(!toolsExpanded)}
             className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
           >
@@ -293,6 +308,7 @@ function ToolCallRow({
   return (
     <div>
       <button
+        type="button"
         onClick={() => setShowDetail(!showDetail)}
         className="flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] text-start hover:bg-muted/50 transition-colors"
         data-testid="tool-call-row"
@@ -353,6 +369,7 @@ function CopyButton({ text }: { text: string }) {
 
   return (
     <button
+      type="button"
       onClick={(e) => {
         e.stopPropagation();
         navigator.clipboard.writeText(text);

@@ -8,18 +8,33 @@ export interface InputData {
   context?: Record<string, unknown>;
 }
 
+/** A file attached to a user message, shown as a chip/thumbnail on the bubble. */
+export interface MessageAttachment {
+  fileName: string;
+  mimeType: string;
+  sizeBytes?: number;
+  /** Object URL for an inline image preview (revoked when the message is cleared). */
+  previewUrl?: string;
+  /** `false` when the file was too large to forward inline to the model. */
+  forwardableInline?: boolean;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "agent";
   content: string;
   timestamp: number;
   isStreaming?: boolean;
+  /** Attachments the user sent alongside this message. */
+  attachments?: MessageAttachment[];
 }
 
 export type SSEEventType =
   | "token"
   | "task_start"
   | "task_complete"
+  | "cascade_step_start"
+  | "cascade_escalation"
   | "done"
   | "error";
 

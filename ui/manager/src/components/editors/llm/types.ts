@@ -25,6 +25,30 @@ export interface CascadeStep {
   parameters?: Record<string, string>;
   confidenceThreshold?: number | null;
   timeoutMs?: number;
+  /** Per-step token pricing overrides (USD per 1M tokens). Must be ≥ 0. */
+  inputPricePer1M?: number;
+  outputPricePer1M?: number;
+}
+
+/** Judge model for the `judge_model` confidence-evaluation strategy. */
+export interface CascadeJudgeModel {
+  type?: string;
+  parameters?: Record<string, string>;
+}
+
+/**
+ * Overrides for the `heuristic` confidence-evaluation strategy. Every field is
+ * optional; an omitted field falls back to the backend's built-in English
+ * default. Scores are clamped to [0, 1] by the backend.
+ */
+export interface CascadeHeuristic {
+  lowConfidencePhrases?: string[];
+  refusalPhrases?: string[];
+  shortLengthThreshold?: number;
+  shortScore?: number;
+  refusalScore?: number;
+  hedgingScore?: number;
+  defaultScore?: number;
 }
 
 export interface ModelCascadeConfig {
@@ -33,6 +57,19 @@ export interface ModelCascadeConfig {
   evaluationStrategy?: string;
   enableInAgentMode?: boolean;
   steps?: CascadeStep[];
+  /** Judge model config — used when evaluationStrategy is "judge_model". */
+  judgeModel?: CascadeJudgeModel;
+  /** Overrides for the "heuristic" evaluation strategy. */
+  heuristic?: CascadeHeuristic;
+  /** Wall-clock ceiling across the whole cascade (ms). Must be > 0 when set. */
+  maxTotalDurationMs?: number;
+  /** Dollar ceiling for a single run. Must be ≥ 0 when set. */
+  maxCostPerRun?: number;
+  /** Cascade-level default token pricing (USD per 1M tokens); steps may override. Must be ≥ 0. */
+  inputPricePer1M?: number;
+  outputPricePer1M?: number;
+  /** Return the highest-scoring step's response even if a later step was finally accepted. */
+  returnBestAcrossSteps?: boolean;
 }
 
 /** Pre-request instructions — same model as HttpCalls PreRequest on the backend */

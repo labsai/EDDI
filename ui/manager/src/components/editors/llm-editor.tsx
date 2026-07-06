@@ -46,6 +46,8 @@ export type {
   A2AAgentConfig,
   CascadeStep,
   ModelCascadeConfig,
+  CascadeJudgeModel,
+  CascadeHeuristic,
   LangchainTask,
   LlmTask,
   KnowledgeBaseReference,

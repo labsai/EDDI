@@ -4549,13 +4549,38 @@ export const backupSyncHandlers = [
 
   // ── Conversation Attachments ──
 
-  http.post("*/conversations/:conversationId/attachments", () => {
-    return HttpResponse.json({
-      storageRef: `attachment-${Date.now()}`,
-      fileName: "document.pdf",
-      mimeType: "application/pdf",
-      sizeBytes: 102400,
-    });
+  http.post("*/conversations/:conversationId/attachments", ({ params }) => {
+    return HttpResponse.json(
+      {
+        storageRef: `attachment-${Date.now()}`,
+        fileName: "document.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 102400,
+        conversationId: params.conversationId,
+        forwardableInline: true,
+      },
+      { status: 201 },
+    );
+  }),
+
+  http.get("*/conversations/:conversationId/attachments", ({ params }) => {
+    return HttpResponse.json([
+      {
+        storageRef: "attachment-1",
+        filename: "document.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 102400,
+        conversationId: params.conversationId,
+      },
+    ]);
+  }),
+
+  http.delete("*/conversations/:conversationId/attachments/:storageRef", ({ params }) => {
+    return HttpResponse.json({ storageRef: params.storageRef, deleted: true });
+  }),
+
+  http.delete("*/conversations/:conversationId/attachments", ({ params }) => {
+    return HttpResponse.json({ conversationId: params.conversationId, deletedCount: 1 });
   }),
 
   // ── Channel Integration Store ──
