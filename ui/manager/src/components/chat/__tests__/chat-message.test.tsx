@@ -132,4 +132,57 @@ describe("ChatMessage", () => {
     expect(msgDiv?.className).toContain("flex-row");
     expect(msgDiv?.className).not.toContain("flex-row-reverse");
   });
+
+  it("renders an image thumbnail for an image attachment", () => {
+    renderWithProviders(
+      <ChatMessage
+        message={{
+          id: "a1", role: "user", content: "", timestamp: Date.now(),
+          attachments: [{ fileName: "pic.png", mimeType: "image/png", previewUrl: "blob:x" }],
+        }}
+      />
+    );
+    const img = screen.getByRole("img", { name: "pic.png" });
+    expect(img).toHaveAttribute("src", "blob:x");
+  });
+
+  it("renders a file chip with name and size for a non-image attachment", () => {
+    renderWithProviders(
+      <ChatMessage
+        message={{
+          id: "a2", role: "user", content: "see this", timestamp: Date.now(),
+          attachments: [{ fileName: "report.pdf", mimeType: "application/pdf", sizeBytes: 2048 }],
+        }}
+      />
+    );
+    expect(screen.getByText("report.pdf")).toBeInTheDocument();
+    expect(screen.getByText("2.0 KB")).toBeInTheDocument();
+    expect(screen.getByText("see this")).toBeInTheDocument();
+  });
+
+  it("flags an attachment that was not forwarded to the model", () => {
+    renderWithProviders(
+      <ChatMessage
+        message={{
+          id: "a3", role: "user", content: "", timestamp: Date.now(),
+          attachments: [{ fileName: "big.png", mimeType: "image/png", previewUrl: "blob:x", forwardableInline: false }],
+        }}
+      />
+    );
+    expect(screen.getByTestId("attachment-not-forwarded")).toBeInTheDocument();
+  });
+
+  it("escapes a malicious filename instead of rendering it as HTML", () => {
+    const evil = '<img src=x onerror=alert(1)>.pdf';
+    const { container } = renderWithProviders(
+      <ChatMessage
+        message={{
+          id: "a4", role: "user", content: "", timestamp: Date.now(),
+          attachments: [{ fileName: evil, mimeType: "application/pdf", sizeBytes: 1 }],
+        }}
+      />
+    );
+    expect(screen.getByText(evil)).toBeInTheDocument();
+    expect(container.querySelector("img[onerror]")).toBeNull();
+  });
 });

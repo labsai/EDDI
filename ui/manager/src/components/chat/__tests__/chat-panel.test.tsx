@@ -177,35 +177,293 @@ describe("ChatPanel", () => {
     expect(await screen.findByText("●●●●●●●●")).toBeInTheDocument();
   });
 
-  it("supports file attachments uploading and triggers uploadAttachment", async () => {
+  it("blocks attachments in secret mode — disables attach, drops staged files, never forwards", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+
+    let sentBody:
+      | { input?: string; context?: Record<string, { value?: { storageRef?: string } }> }
+      | null = null;
+    let deleteCalled = false;
+    server.use(
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json(
+          { storageRef: "ref-secret", fileName: "secret.txt", mimeType: "text/plain", sizeBytes: 3, forwardableInline: true },
+          { status: 201 },
+        ),
+      ),
+      http.delete("*/conversations/conv1/attachments/:storageRef", () => {
+        deleteCalled = true;
+        return HttpResponse.json({ deleted: true });
+      }),
+      http.post("*/agents/conv1", async ({ request }) => {
+        sentBody = (await request.json()) as typeof sentBody;
+        return HttpResponse.json({ conversationOutputs: [] });
+      }),
+    );
+
+    renderWithProviders(<ChatPanel />);
+
+    // Stage a file and wait for the upload to settle (remove button only shows
+    // once status leaves "uploading"), then flip secret mode on.
+    await user.upload(
+      screen.getByTestId("chat-file-input"),
+      new File(["abc"], "secret.txt", { type: "text/plain" }),
+    );
+    await screen.findByTestId("attachment-remove");
+    await user.click(screen.getByTestId("chat-secret-toggle"));
+
+    // Attach is disabled and the staged chip is dropped (its blob deleted).
+    expect(screen.getByTestId("chat-attach-btn")).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(deleteCalled).toBe(true));
+
+    // Send the masked secret — no attachment_* context, no chip in the bubble.
+    await user.type(screen.getByTestId("chat-input"), "my-secret");
+    await user.click(screen.getByTestId("chat-send"));
+
+    expect(await screen.findByText("●●●●●●●●")).toBeInTheDocument();
+    // The secret turn is sent with the secret flag but NO attachment_* context.
+    await waitFor(() => {
+      expect(sentBody?.context?.secretInput).toBeTruthy();
+      expect(sentBody?.context?.attachment_0).toBeUndefined();
+    });
+    expect(screen.queryByTestId("message-attachments")).not.toBeInTheDocument();
+  });
+
+  it("uploads a picked file as a pending attachment, not an inline text message", async () => {
     const user = userEvent.setup();
     useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
     useChatStore.getState().setConversationId("conv1");
 
     server.use(
-      http.post("*/conversations/conv1/attachments", () => {
-        return HttpResponse.json({ storageRef: "attachments-ref-123" });
-      }),
-      http.post("*/agents/conv1", () => {
-        return HttpResponse.json({
-          conversationOutputs: [],
-        });
-      })
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json(
+          {
+            storageRef: "attachments-ref-123",
+            fileName: "test-file.txt",
+            mimeType: "text/plain",
+            sizeBytes: 13,
+            forwardableInline: true,
+          },
+          { status: 201 },
+        ),
+      ),
     );
 
     renderWithProviders(<ChatPanel />);
 
-    const attachBtn = screen.getByTestId("chat-attach-btn");
-    expect(attachBtn).toBeInTheDocument();
-
     const fileInput = screen.getByTestId("chat-file-input");
-    
     const file = new File(["dummy content"], "test-file.txt", { type: "text/plain" });
     await user.upload(fileInput, file);
 
+    // A pending chip appears — the file is NOT sent as inline "[ref:...]" text.
+    expect(await screen.findByTestId("attachment-chip")).toBeInTheDocument();
+    // Uploading must add NO chat message at all (regression guard: it used to
+    // push "📎 file [ref:...]" as inline text the backend never parsed). The
+    // chip lives in local component state, not the conversation.
+    expect(useChatStore.getState().messages).toHaveLength(0);
+  });
+
+  it("forwards an uploaded attachment as attachment_* context when sent", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+
+    let sentBody:
+      | { input?: string; context?: Record<string, { value?: { storageRef?: string } }> }
+      | null = null;
+
+    server.use(
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json(
+          {
+            storageRef: "attachments-ref-123",
+            fileName: "test-file.txt",
+            mimeType: "text/plain",
+            sizeBytes: 13,
+            forwardableInline: true,
+          },
+          { status: 201 },
+        ),
+      ),
+      http.post("*/agents/conv1", async ({ request }) => {
+        sentBody = (await request.json()) as typeof sentBody;
+        return HttpResponse.json({ conversationOutputs: [] });
+      }),
+    );
+
+    renderWithProviders(<ChatPanel />);
+
+    const fileInput = screen.getByTestId("chat-file-input");
+    const file = new File(["dummy content"], "test-file.txt", { type: "text/plain" });
+    await user.upload(fileInput, file);
+    await screen.findByTestId("attachment-chip");
+
+    await user.type(screen.getByTestId("chat-input"), "look at this");
+    await user.click(screen.getByTestId("chat-send"));
+
     await waitFor(() => {
-      expect(useChatStore.getState().messages.some(m => m.content.includes("attachments-ref-123"))).toBe(true);
+      expect(sentBody?.context?.attachment_0?.value?.storageRef).toBe("attachments-ref-123");
     });
+    // The user bubble renders the sent attachment.
+    expect(await screen.findByTestId("message-attachments")).toBeInTheDocument();
+  });
+
+  it("allows an attachment-only turn (empty text) and forwards it as context", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+
+    let sentBody:
+      | { input?: string; context?: Record<string, { value?: { storageRef?: string } }> }
+      | null = null;
+    server.use(
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json(
+          { storageRef: "ref-only", fileName: "a.txt", mimeType: "text/plain", sizeBytes: 5, forwardableInline: true },
+          { status: 201 },
+        ),
+      ),
+      http.post("*/agents/conv1", async ({ request }) => {
+        sentBody = (await request.json()) as typeof sentBody;
+        return HttpResponse.json({ conversationOutputs: [] });
+      }),
+    );
+
+    renderWithProviders(<ChatPanel />);
+    await user.upload(screen.getByTestId("chat-file-input"), new File(["hello"], "a.txt", { type: "text/plain" }));
+    await screen.findByTestId("attachment-chip");
+
+    // No text typed — send is enabled purely by the ready attachment.
+    await user.click(screen.getByTestId("chat-send"));
+
+    await waitFor(() => {
+      expect(sentBody?.context?.attachment_0?.value?.storageRef).toBe("ref-only");
+      expect(sentBody?.input).toBe("");
+    });
+  });
+
+  it("shows an error chip when an upload is rejected", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+
+    server.use(
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json({ error: "MIME type not allowed", code: "ATTACHMENT_REJECTED" }, { status: 400 }),
+      ),
+    );
+
+    renderWithProviders(<ChatPanel />);
+    await user.upload(screen.getByTestId("chat-file-input"), new File(["x"], "bad.exe", { type: "text/plain" }));
+
+    expect(await screen.findByText("MIME type not allowed")).toBeInTheDocument();
+  });
+
+  it("enforces the per-turn attachment cap in the UI", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+
+    server.use(
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json(
+          { storageRef: `ref-${Math.random()}`, fileName: "f.txt", mimeType: "text/plain", sizeBytes: 1, forwardableInline: true },
+          { status: 201 },
+        ),
+      ),
+    );
+
+    renderWithProviders(<ChatPanel />);
+    const files = Array.from({ length: 6 }, (_, i) => new File(["x"], `f${i}.txt`, { type: "text/plain" }));
+    await user.upload(screen.getByTestId("chat-file-input"), files);
+
+    await waitFor(() => expect(screen.getAllByTestId("attachment-chip")).toHaveLength(5));
+  });
+
+  it("removes a chip and deletes the blob server-side", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+
+    let deleteCalled = false;
+    server.use(
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json(
+          { storageRef: "ref-del", fileName: "a.txt", mimeType: "text/plain", sizeBytes: 1, forwardableInline: true },
+          { status: 201 },
+        ),
+      ),
+      http.delete("*/conversations/conv1/attachments/:storageRef", () => {
+        deleteCalled = true;
+        return HttpResponse.json({ deleted: true });
+      }),
+    );
+
+    renderWithProviders(<ChatPanel />);
+    await user.upload(screen.getByTestId("chat-file-input"), new File(["x"], "a.txt", { type: "text/plain" }));
+    await screen.findByTestId("attachment-chip");
+    await waitFor(() => expect(screen.getByTestId("attachment-remove")).toBeInTheDocument());
+
+    await user.click(screen.getByTestId("attachment-remove"));
+
+    await waitFor(() => expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument());
+    await waitFor(() => expect(deleteCalled).toBe(true));
+  });
+
+  it("renders an image thumbnail chip for image uploads", async () => {
+    const user = userEvent.setup();
+    const origCreate = URL.createObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:mock");
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+
+    server.use(
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json(
+          { storageRef: "ref-img", fileName: "pic.png", mimeType: "image/png", sizeBytes: 9, forwardableInline: true },
+          { status: 201 },
+        ),
+      ),
+    );
+
+    try {
+      renderWithProviders(<ChatPanel />);
+      await user.upload(screen.getByTestId("chat-file-input"), new File(["x"], "pic.png", { type: "image/png" }));
+      const chip = await screen.findByTestId("attachment-chip");
+      const img = chip.querySelector("img");
+      expect(img).toHaveAttribute("src", "blob:mock");
+    } finally {
+      URL.createObjectURL = origCreate;
+    }
+  });
+
+  it("warns that an oversized attachment was stored but not sent to the model", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+
+    server.use(
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json(
+          { storageRef: "ref-big", fileName: "big.txt", mimeType: "text/plain", sizeBytes: 15000000, forwardableInline: false },
+          { status: 201 },
+        ),
+      ),
+      http.post("*/agents/conv1", () => HttpResponse.json({ conversationOutputs: [] })),
+    );
+
+    renderWithProviders(<ChatPanel />);
+    await user.upload(screen.getByTestId("chat-file-input"), new File(["x"], "big.txt", { type: "text/plain" }));
+    await screen.findByTestId("attachment-chip");
+    await user.click(screen.getByTestId("chat-send"));
+
+    // The sent user bubble flags that the file was not forwarded to the model.
+    expect(await screen.findByTestId("attachment-not-forwarded")).toBeInTheDocument();
   });
 
   it("displays rerun button after error and runs rerun mutation", async () => {
