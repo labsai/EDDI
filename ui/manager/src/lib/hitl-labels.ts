@@ -43,3 +43,16 @@ export function rejectionPolicyLabel(t: TFunction, policy?: string | null): stri
   const entry = REJECTION_LABEL[policy];
   return entry ? t(entry[0], entry[1]) : policy;
 }
+
+const NO_PROGRESS_LABEL: Record<string, [key: string, fallback: string]> = {
+  WAIT_FOR_HUMAN: ["hitl.noProgressWaitForHuman", "Wait for a human"],
+  AUTO_REJECT: ["hitl.noProgressAutoReject", "Auto-reject"],
+  ABORT: ["hitl.noProgressAbort", "Abort"],
+};
+
+/** Localized label for a tool-approval `onNoProgress` (loop-protection) value. */
+export function noProgressPolicyLabel(t: TFunction, policy?: string | null): string {
+  if (!policy) return "";
+  const entry = NO_PROGRESS_LABEL[policy];
+  return entry ? t(entry[0], entry[1]) : policy;
+}
