@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -44,6 +44,7 @@ import {
   Hash,
   Clock,
   Layers,
+  HandMetal,
 } from "lucide-react";
 
 export function ChatPanel() {
@@ -65,6 +66,8 @@ export function ChatPanel() {
   const conversationId = useChatStore((s) => s.conversationId);
   const isProcessing = useChatStore((s) => s.isProcessing);
   const isThinking = useChatStore((s) => s.isThinking);
+  const isPaused = useChatStore((s) => s.isPaused);
+  const pauseReason = useChatStore((s) => s.pauseReason);
   const undoAvailable = useChatStore((s) => s.undoAvailable);
   const redoAvailable = useChatStore((s) => s.redoAvailable);
   const quickReplies = useChatStore((s) => s.quickReplies);
@@ -456,8 +459,9 @@ export function ChatPanel() {
           />
         )}
 
-        {/* Quick replies */}
-        {quickReplies.length > 0 && !isProcessing && (
+        {/* Quick replies — hidden while paused so a pill can't fire a send
+            against an AWAITING_HUMAN conversation (the input/send are also guarded). */}
+        {quickReplies.length > 0 && !isProcessing && !isPaused && (
           <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
             {quickReplies.map((reply, i) => (
               <button
@@ -507,6 +511,28 @@ export function ChatPanel() {
           </div>
         )}
 
+        {/* Awaiting-approval notice — input is disabled while a turn is paused
+            for human approval; the decision is made on the conversation's
+            review page (which renders the full approval banner). */}
+        {isPaused && conversationId && (
+          <div
+            className="flex flex-wrap items-center gap-2 border-t border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-xs"
+            data-testid="chat-pause-banner"
+          >
+            <HandMetal className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+            <span className="text-amber-600 dark:text-amber-400">
+              {pauseReason || t("hitl.chatPaused", "This conversation is awaiting human approval.")}
+            </span>
+            <Link
+              to={`/manage/conversationview/${conversationId}`}
+              className="ms-auto rounded-md bg-amber-500/10 px-2.5 py-1 font-medium text-amber-600 hover:bg-amber-500/20 transition-colors dark:text-amber-400"
+              data-testid="chat-pause-review"
+            >
+              {t("hitl.review", "Review")}
+            </Link>
+          </div>
+        )}
+
         {/* Input — show SecretInput when backend requests it or user toggles 🔒 */}
         {activeInputField ? (
           <SecretInputField
@@ -518,12 +544,12 @@ export function ChatPanel() {
               handleSend(val, true);
               clearInputField();
             }}
-            disabled={isProcessing}
+            disabled={isProcessing || isPaused}
           />
         ) : (
           <ChatInputWithSecretToggle
             onSend={handleSend}
-            disabled={!conversationId}
+            disabled={!conversationId || isPaused}
             isProcessing={isProcessing}
             isSecretMode={isSecretMode}
             onToggleSecret={toggleSecretMode}

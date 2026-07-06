@@ -30,6 +30,7 @@ import {
   parseResourceUri,
 } from "@/lib/api/agents";
 import { useDebugStore } from "@/hooks/use-debug-events";
+import { isApiError } from "@/lib/api-client";
 
 // --- Zustand Store ---
 
@@ -48,6 +49,12 @@ interface ChatState {
   activeInputField: InputField | null;
   /** Set when the user toggles the 🔒 secret mode on the chat input. */
   isSecretMode: boolean;
+  /** True while the current conversation is paused awaiting a human approval
+   *  (backend conversationState === AWAITING_HUMAN). Input is disabled and a
+   *  review affordance is shown while set. */
+  isPaused: boolean;
+  /** Approver-facing reason for the pause, when the backend reported one. */
+  pauseReason: string | null;
 
   // Actions
   setSelectedAgent: (agentId: string | null, agentName: string | null) => void;
@@ -65,6 +72,7 @@ interface ChatState {
   setInputField: (field: InputField) => void;
   clearInputField: () => void;
   toggleSecretMode: () => void;
+  setPaused: (isPaused: boolean, reason?: string | null) => void;
   reset: () => void;
 }
 
@@ -89,6 +97,8 @@ export const useChatStore = create<ChatState>((set) => ({
   quickReplies: [],
   activeInputField: null,
   isSecretMode: false,
+  isPaused: false,
+  pauseReason: null,
 
   setSelectedAgent: (agentId, agentName) =>
     set({
@@ -96,6 +106,8 @@ export const useChatStore = create<ChatState>((set) => ({
       selectedAgentName: agentName,
       conversationId: null,
       messages: [],
+      isPaused: false,
+      pauseReason: null,
     }),
 
   setConversationId: (id) => set({ conversationId: id }),
@@ -138,7 +150,7 @@ export const useChatStore = create<ChatState>((set) => ({
       return { streamingEnabled: next };
     }),
 
-  clearMessages: () => set({ messages: [], conversationId: null, undoAvailable: false, redoAvailable: false, quickReplies: [], activeInputField: null, isSecretMode: false }),
+  clearMessages: () => set({ messages: [], conversationId: null, undoAvailable: false, redoAvailable: false, quickReplies: [], activeInputField: null, isSecretMode: false, isPaused: false, pauseReason: null }),
 
   setUndoRedo: (undo, redo) => set({ undoAvailable: undo, redoAvailable: redo }),
 
@@ -151,6 +163,8 @@ export const useChatStore = create<ChatState>((set) => ({
   clearInputField: () => set({ activeInputField: null }),
 
   toggleSecretMode: () => set((s) => ({ isSecretMode: !s.isSecretMode })),
+
+  setPaused: (isPaused, reason = null) => set({ isPaused, pauseReason: reason ?? null }),
 
   reset: () =>
     set({
@@ -165,6 +179,8 @@ export const useChatStore = create<ChatState>((set) => ({
       quickReplies: [],
       activeInputField: null,
       isSecretMode: false,
+      isPaused: false,
+      pauseReason: null,
     }),
 }));
 
@@ -273,6 +289,9 @@ export function useSendMessage() {
       state.setProcessing(true);
       // Clear stale quick replies immediately so old buttons don't flash
       state.setQuickReplies([]);
+      // Optimistically clear any prior pause; re-set below if this turn pauses
+      // (or if the backend rejects the send with 409 in onError).
+      state.setPaused(false, null);
 
       // Clear input field state after send
       if (isSecret) {
@@ -391,10 +410,37 @@ export function useSendMessage() {
         const qr = extractQuickReplies(lastOutput);
         state.setQuickReplies(qr);
         state.setProcessing(false);
+
+        // A pause commits as AWAITING_HUMAN. Its pendingMessage / pauseReason is
+        // already rendered as the agent output above; flag the pause so the
+        // input is disabled and a review affordance is shown.
+        if (snapshot.conversationState === "AWAITING_HUMAN") {
+          state.setPaused(true, snapshot.hitlPauseReason ?? null);
+        }
       }
     },
     onError: (error) => {
       const state = store.getState();
+      // A 409 means the conversation is paused awaiting human approval — the
+      // send was rejected WITHOUT being consumed. Show the localized pause
+      // banner (via isPaused) instead of a raw error bubble.
+      if (isApiError(error) && error.status === 409) {
+        // The send was rejected without being consumed. Drop the trailing empty
+        // placeholder bubble (streaming or non-streaming) so no perpetual typing
+        // indicator lingers beneath the pause banner.
+        store.setState((s) => {
+          const msgs = [...s.messages];
+          const last = msgs[msgs.length - 1];
+          if (last?.role === "agent" && last.isStreaming && !last.content.trim()) {
+            msgs.pop();
+          }
+          return { messages: msgs };
+        });
+        state.setPaused(true, null);
+        state.setProcessing(false);
+        state.setQuickReplies([]);
+        return;
+      }
       // Surface the error as a visible agent message so it's not silently
       // swallowed (the user would otherwise see processing start then stop
       // with no feedback).
@@ -438,6 +484,11 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
       if (event.data) {
         try {
           const snapshot = JSON.parse(event.data);
+          // A streamed turn that ends AWAITING_HUMAN paused for approval — the
+          // pendingMessage/pauseReason is in the snapshot output; flag the pause.
+          if (snapshot.conversationState === "AWAITING_HUMAN") {
+            store.getState().setPaused(true, snapshot.hitlPauseReason ?? null);
+          }
           if (snapshot.conversationOutputs?.length) {
             const lastOutput = snapshot.conversationOutputs[
               snapshot.conversationOutputs.length - 1
@@ -612,6 +663,15 @@ export function useLoadConversation() {
       store.getState().setUndoRedo(
         snapshot.conversationSteps.length > 0,
         snapshot.redoAvailable ?? false
+      );
+      // Re-establish the pause state when loading a conversation that is still
+      // AWAITING_HUMAN — otherwise a paused conversation opened from history
+      // would show an enabled input with no banner until a send is rejected 409.
+      // The snapshot carries the backend hitlPauseReason, so surface it rather
+      // than falling back to the generic default banner text.
+      store.getState().setPaused(
+        snapshot.conversationState === "AWAITING_HUMAN",
+        snapshot.hitlPauseReason ?? null,
       );
 
       return snapshot;
