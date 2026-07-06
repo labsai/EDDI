@@ -8,6 +8,19 @@ import {
   cancelGroupDiscussion,
   type HitlDecision,
 } from "@/lib/api/hitl";
+import { useChatStore } from "@/hooks/use-chat";
+
+/** Clear a stale pause banner in the (persistent, app-wide) chat store when the
+ *  conversation it belongs to is resumed/cancelled from elsewhere (e.g. the
+ *  conversation-detail page or the approvals inbox) — the chat panel/drawer
+ *  doesn't reload on its own and would otherwise keep showing "awaiting
+ *  approval" for an already-resolved conversation. */
+function clearChatPauseIfCurrent(conversationId: string) {
+  const chatState = useChatStore.getState();
+  if (chatState.conversationId === conversationId) {
+    chatState.setPaused(false, null);
+  }
+}
 
 // ── Queries ──────────────────────────────────────────────────────
 
@@ -23,7 +36,9 @@ export function usePendingApprovals(limit = 200) {
 /**
  * Cross-group HITL inbox — every group's pending approvals in ONE request via
  * the backend's `GET /groups/pending-approvals` (no per-group fan-out). The
- * backend caps the response at `limit`; `truncated` signals when more exist.
+ * backend returns a plain, `limit`-capped list with no truncation flag of its
+ * own; `truncated` is a client-side heuristic (result count reached `limit`)
+ * and can false-positive when the true count is exactly `limit`.
  */
 export function useAllGroupPendingApprovals(limit = 200) {
   const query = useQuery({
@@ -65,6 +80,7 @@ export function useResumeConversation() {
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["pending-approvals"] });
       qc.invalidateQueries({ queryKey: ["approval-status", conversationId] });
+      clearChatPauseIfCurrent(conversationId);
     },
   });
 }
@@ -78,6 +94,7 @@ export function useCancelConversation() {
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["pending-approvals"] });
       qc.invalidateQueries({ queryKey: ["approval-status", conversationId] });
+      clearChatPauseIfCurrent(conversationId);
     },
   });
 }

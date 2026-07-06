@@ -43,6 +43,12 @@ export function ToolApprovalsEditor({
   const [reason, setReason] = useState(value.pauseReason ?? "");
   const [pending, setPending] = useState(value.pendingMessage ?? "");
   const [timeoutDraft, setTimeoutDraft] = useState(value.approvalTimeout ?? "");
+  const [maxPausesDraft, setMaxPausesDraft] = useState(
+    value.maxPausesPerTurn != null ? String(value.maxPausesPerTurn) : "",
+  );
+  const [maxAutoDraft, setMaxAutoDraft] = useState(
+    value.maxAutoApprovalsPerTurn != null ? String(value.maxAutoApprovalsPerTurn) : "",
+  );
 
   const finite = requiresApprovalTimeout(value.timeoutPolicy);
 
@@ -55,9 +61,23 @@ export function ToolApprovalsEditor({
   // draft from the committed value, discarding a stale unsaved (possibly invalid)
   // draft that would otherwise linger in the re-shown input.
   useEffect(() => setTimeoutDraft(value.approvalTimeout ?? ""), [value.approvalTimeout, finite]);
+  useEffect(
+    () => setMaxPausesDraft(value.maxPausesPerTurn != null ? String(value.maxPausesPerTurn) : ""),
+    [value.maxPausesPerTurn],
+  );
+  useEffect(
+    () => setMaxAutoDraft(value.maxAutoApprovalsPerTurn != null ? String(value.maxAutoApprovalsPerTurn) : ""),
+    [value.maxAutoApprovalsPerTurn],
+  );
 
   const parseList = (s: string): string[] =>
     s.split("\n").map((x) => x.trim()).filter((x) => x.length > 0);
+
+  const numberOrNull = (raw: string): number | null => {
+    if (raw.trim() === "") return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
 
   // Validate the LIVE (draft) config so errors reflect what is being typed.
   const preview: ToolApprovalsConfig = {
@@ -67,16 +87,12 @@ export function ToolApprovalsEditor({
     pauseReason: reason.trim() || null,
     pendingMessage: pending.trim() || null,
     approvalTimeout: timeoutDraft.trim() || null,
+    maxPausesPerTurn: numberOrNull(maxPausesDraft),
+    maxAutoApprovalsPerTurn: numberOrNull(maxAutoDraft),
   };
   const errors = validateToolApprovals(preview);
 
   const showDemotionWarn = toolApprovalsInheritsAutoApprove(agentTimeoutPolicy, value);
-
-  const numberOrNull = (raw: string): number | null => {
-    if (raw.trim() === "") return null;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : null;
-  };
 
   const errText = (msg?: string) =>
     msg ? (
@@ -142,8 +158,9 @@ export function ToolApprovalsEditor({
             type="number"
             min={1}
             max={10}
-            value={value.maxPausesPerTurn ?? ""}
-            onChange={(e) => onChange({ maxPausesPerTurn: numberOrNull(e.target.value) })}
+            value={maxPausesDraft}
+            onChange={(e) => setMaxPausesDraft(e.target.value)}
+            onBlur={() => onChange({ maxPausesPerTurn: numberOrNull(maxPausesDraft) })}
             disabled={disabled}
             placeholder="3"
             className={`h-8 w-full rounded-md border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${errors.maxPausesPerTurn ? "border-destructive" : "border-input"}`}
@@ -159,8 +176,9 @@ export function ToolApprovalsEditor({
             type="number"
             min={0}
             max={10}
-            value={value.maxAutoApprovalsPerTurn ?? ""}
-            onChange={(e) => onChange({ maxAutoApprovalsPerTurn: numberOrNull(e.target.value) })}
+            value={maxAutoDraft}
+            onChange={(e) => setMaxAutoDraft(e.target.value)}
+            onBlur={() => onChange({ maxAutoApprovalsPerTurn: numberOrNull(maxAutoDraft) })}
             disabled={disabled}
             placeholder="2"
             className={`h-8 w-full rounded-md border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${errors.maxAutoApprovalsPerTurn ? "border-destructive" : "border-input"}`}

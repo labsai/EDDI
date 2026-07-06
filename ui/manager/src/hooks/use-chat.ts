@@ -344,6 +344,10 @@ export function useStartConversation() {
  *  Supports secret mode: masks user message and sends secretInput context. */
 export function useSendMessage() {
   const store = useChatStore;
+  // Tracks the optimistic user message added by the in-flight send, so onError
+  // can remove it on a 409 (the backend never consumed it — leaving it visible
+  // would misleadingly look like the message was sent and received).
+  let pendingUserMessageId: string | null = null;
   return useMutation({
     mutationFn: async ({
       message,
@@ -376,8 +380,10 @@ export function useSendMessage() {
 
       // Add user message (masked if secret), carrying attachment chips for
       // display — never on a secret turn (they'd unmask the filename/thumbnail).
+      const userMessageId = `user-${Date.now()}`;
+      pendingUserMessageId = userMessageId;
       state.addMessage({
-        id: `user-${Date.now()}`,
+        id: userMessageId,
         role: "user",
         content: isSecret ? "●●●●●●●●" : message,
         timestamp: Date.now(),
@@ -523,14 +529,21 @@ export function useSendMessage() {
       if (isApiError(error) && error.status === 409) {
         // The send was rejected without being consumed. Drop the trailing empty
         // placeholder bubble (streaming or non-streaming) so no perpetual typing
-        // indicator lingers beneath the pause banner.
+        // indicator lingers beneath the pause banner, AND the optimistic user
+        // message itself — otherwise it stays in the transcript looking sent
+        // even though the backend never received it.
+        const rejectedUserMessageId = pendingUserMessageId;
+        pendingUserMessageId = null;
         store.setState((s) => {
           const msgs = [...s.messages];
           const last = msgs[msgs.length - 1];
           if (last?.role === "agent" && last.isStreaming && !last.content.trim()) {
             msgs.pop();
           }
-          return { messages: msgs };
+          if (!rejectedUserMessageId) return { messages: msgs };
+          const rejected = msgs.find((m) => m.id === rejectedUserMessageId);
+          if (rejected) revokeMessagePreviews([rejected]);
+          return { messages: msgs.filter((m) => m.id !== rejectedUserMessageId) };
         });
         state.setPaused(true, null);
         state.setProcessing(false);

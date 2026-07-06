@@ -16,7 +16,6 @@ import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
 import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@/lib/hitl-config";
 import {
   AMENDED_ARGS_MAX_BYTES,
-  MAX_TOOL_CALL_NOTE_LENGTH,
   type HitlVerdict,
   type PauseDetails,
   type PendingToolCallView,
@@ -597,7 +596,10 @@ function ToolCallRow({
               placeholder={t("hitl.amendPlaceholder", 'Full replacement JSON object, e.g. {"to":"ops@acme.com"}. Leave blank to keep original.')}
               className="mt-1 w-full resize-none rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-[11px] focus:outline-none focus:ring-2 focus:ring-ring"
               rows={3}
-              maxLength={MAX_TOOL_CALL_NOTE_LENGTH * 40}
+              // Cap at the byte budget (chars ≤ bytes in UTF-8) so the input can't
+              // hold far more than the backend accepts; submit still does the exact
+              // byte check (amendTooLarge) for multi-byte content.
+              maxLength={AMENDED_ARGS_MAX_BYTES}
               data-testid={`tool-amend-${call.callId}`}
             />
           )}

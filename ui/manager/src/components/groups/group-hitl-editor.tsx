@@ -78,7 +78,10 @@ export function GroupHitlEditor({
     if (enabled) {
       phases = applyApprovalPhases(basePhases, [...approvalPhases]);
       hitlConfig = {
-        approvalTimeout: timeoutDraft.trim() || null,
+        // Only a finite timeout policy needs a duration — drop any leftover draft
+        // when the policy was switched back to WAIT_INDEFINITELY (the field hides
+        // but its draft state persists), so we don't persist an unused timeout.
+        approvalTimeout: finite ? timeoutDraft.trim() || null : null,
         timeoutPolicy: hitl.timeoutPolicy,
         // TASK granularity only applies to TASK_FORCE (the only EXECUTE style).
         granularity: isTaskForce ? hitl.granularity : "PHASE",

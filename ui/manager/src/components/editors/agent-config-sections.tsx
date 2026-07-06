@@ -22,7 +22,7 @@ import {
 import { useUpdateAgent } from "@/hooks/use-agents";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
-import type { AgentHitlConfig, ToolApprovalsConfig } from "@/lib/api/hitl";
+import { MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
 import { isApiError } from "@/lib/api-client";
@@ -1146,7 +1146,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                 type="text"
                 value={hitl.pauseReason ?? ""}
                 onCommit={(v) => patchHitl({ pauseReason: v.trim() || null })}
-                maxLength={500}
+                maxLength={MAX_PAUSE_REASON_LENGTH}
                 placeholder={t("agentDetail.hitlPauseReasonPlaceholder", "e.g. Deletion requires manager sign-off")}
                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 data-testid="hitl-pause-reason"

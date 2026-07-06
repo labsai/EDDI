@@ -35,6 +35,24 @@ describe("ToolApprovalsEditor", () => {
     expect(screen.getByText(/between 1 and 10/)).toBeInTheDocument();
   });
 
+  it("commits maxPausesPerTurn on blur, not on every keystroke", () => {
+    const { onChange } = renderEditor();
+    const maxPauses = screen.getByTestId("hitl-tool-max-pauses");
+    fireEvent.change(maxPauses, { target: { value: "5" } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(maxPauses);
+    expect(onChange).toHaveBeenCalledWith({ maxPausesPerTurn: 5 });
+  });
+
+  it("commits maxAutoApprovalsPerTurn on blur, not on every keystroke", () => {
+    const { onChange } = renderEditor();
+    const maxAuto = screen.getByTestId("hitl-tool-max-auto");
+    fireEvent.change(maxAuto, { target: { value: "4" } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(maxAuto);
+    expect(onChange).toHaveBeenCalledWith({ maxAutoApprovalsPerTurn: 4 });
+  });
+
   it("commits an onNoProgress change immediately", () => {
     const { onChange } = renderEditor();
     fireEvent.change(screen.getByTestId("hitl-tool-no-progress"), { target: { value: "ABORT" } });

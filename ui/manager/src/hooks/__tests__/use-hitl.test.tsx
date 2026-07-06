@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -7,6 +7,9 @@ import {
   useAllGroupPendingApprovals,
   useResumeConversation,
 } from "@/hooks/use-hitl";
+import { useChatStore } from "@/hooks/use-chat";
+
+afterEach(() => act(() => useChatStore.getState().reset()));
 
 function makeWrapper() {
   const qc = new QueryClient({
@@ -63,5 +66,39 @@ describe("use-hitl", () => {
         }),
       ).rejects.toMatchObject({ status: 400 });
     });
+  });
+
+  it("clears the open conversation's chat pause banner when it is resumed", async () => {
+    act(() => {
+      useChatStore.getState().setConversationId("conv-awaiting-1");
+      useChatStore.getState().setPaused(true, "needs sign-off");
+    });
+    const { result } = renderHook(() => useResumeConversation(), { wrapper: makeWrapper() });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        conversationId: "conv-awaiting-1",
+        decision: { verdict: "APPROVED" },
+      });
+    });
+
+    await waitFor(() => expect(useChatStore.getState().isPaused).toBe(false));
+  });
+
+  it("leaves the chat pause banner untouched when a different conversation is resumed", async () => {
+    act(() => {
+      useChatStore.getState().setConversationId("conv-other");
+      useChatStore.getState().setPaused(true, "needs sign-off");
+    });
+    const { result } = renderHook(() => useResumeConversation(), { wrapper: makeWrapper() });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        conversationId: "conv-awaiting-1",
+        decision: { verdict: "APPROVED" },
+      });
+    });
+
+    expect(useChatStore.getState().isPaused).toBe(true);
   });
 });

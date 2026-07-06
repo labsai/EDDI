@@ -634,4 +634,28 @@ describe("useSendMessage", () => {
     expect(errorMessage).toBeDefined();
     expect(useChatStore.getState().isProcessing).toBe(false);
   });
+
+  it("removes the rejected optimistic user message and shows the pause banner on 409", async () => {
+    server.use(
+      http.post("*/agents/:conversationId", () => {
+        return new HttpResponse(null, { status: 409 });
+      }),
+    );
+
+    const { result } = renderHook(() => useSendMessage(), {
+      wrapper: createWrapper(),
+    });
+
+    result.current.mutate({ message: "already paused, try again" });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    const state = useChatStore.getState();
+    // The backend never consumed the send — the optimistic user message must
+    // not linger in the transcript looking sent, and no dangling typing
+    // placeholder should remain.
+    expect(state.messages.some((m) => m.content === "already paused, try again")).toBe(false);
+    expect(state.messages).toHaveLength(0);
+    expect(state.isPaused).toBe(true);
+    expect(state.isProcessing).toBe(false);
+  });
 });
