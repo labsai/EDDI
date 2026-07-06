@@ -5,6 +5,14 @@
 
 ---
 
+## 🔧 Dependency bumps — Quarkus 3.37.1, quarkus-mcp-server 1.13.1 (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Patch bumps in `pom.xml`: `quarkus.platform.version` `3.37.0` → `3.37.1` and `quarkus-mcp-server.version` `1.13.0` → `1.13.1` (used by `io.quarkiverse.mcp:quarkus-mcp-server-http`). Both are single-property changes; the version is defined only in `pom.xml`, so no other current-state reference needed updating (historical changelog/release-note mentions left as-is). Verified locally with `./mvnw -B compile` — BUILD SUCCESS against the new BOM (`quarkus:3.37.1:generate-code` ran) and `quarkus-mcp-server-http:1.13.1` resolved into the local repo; full test suite runs in CI.
+
+---
+
 ## 📝 AI-agent docs audit — AGENTS.md overhaul + linked-doc consistency fixes (2026-07-06)
 
 **Repo:** EDDI (`feat/hitl-framework`)
