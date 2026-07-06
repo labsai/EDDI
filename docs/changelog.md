@@ -5,6 +5,25 @@
 
 ---
 
+## 🧹 ChannelTargetRouter — drop dead getPlatformConfig() null-checks + duplicate allocations (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A Copilot review of the HITL PR flagged one site in `ChannelTargetRouter.getIntegrationByApprovalChannel` where `getPlatformConfig()` was called twice behind a redundant `!= null` guard. Verified against `ChannelIntegrationConfiguration.getPlatformConfig()`: it returns `new HashMap<>(platformConfig)` — a fresh defensive copy, with the field initialized non-null and the setter null-guarded — so it **never returns null**. That makes every `getPlatformConfig() != null` sub-check dead code, and each doubled call allocates a throwaway map per invocation.
+
+The same pattern existed in **five other methods** Copilot did not flag; fixed all six for consistency:
+- `getIntegrationByApprovalChannel` (the flagged one) — cache the copy once, drop the dead guard
+- `getBotToken`, the config-load loop, `ResolvedTarget.botToken`, `ResolvedTarget.signingSecret` — drop the redundant `&& getPlatformConfig() != null` clause
+- `deepCopyConfig` — drop the always-true `if` wrapper, single call
+
+Every **genuine** guard is preserved (`integration != null`, `config != null`, `getChannelType() != null`); only the provably-dead `getPlatformConfig() != null` sub-checks and the duplicate allocations were removed. Behavior is identical because the getter cannot return null.
+
+**Copilot's second comment — rejected (verified against tooling):** it wanted `IRestAgentEngine.listPendingApprovals` collapsed to one line. The `formatter-maven-plugin` (Eclipse formatter, bound to the build) produces exactly the two-line split it objects to and auto-reverts the single-line form on every `mvnw compile`, so the nit conflicts with the project's enforced format — no change made.
+
+Verified: `./mvnw compile` exits 0 (checkstyle at `validate`, formatter at `process-sources`, javac all clean). Change isolated to `ChannelTargetRouter.java`. Nothing pushed.
+
+---
+
 ## 🐛 mcpcalls — register McpCallsTask via startup module (2026-07-06)
 
 **Repo:** EDDI (`feat/hitl-framework`)

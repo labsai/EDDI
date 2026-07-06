@@ -272,8 +272,8 @@ public class ChannelTargetRouter {
                 continue;
             }
             var cfg = entry.getValue();
-            if (cfg.getPlatformConfig() != null
-                    && approvalChannelId.equals(cfg.getPlatformConfig().get("hitlApprovalChannel"))) {
+            var platformConfig = cfg.getPlatformConfig();
+            if (approvalChannelId.equals(platformConfig.get("hitlApprovalChannel"))) {
                 return Optional.of(cfg);
             }
         }
@@ -318,7 +318,7 @@ public class ChannelTargetRouter {
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
         String key = normalizedType + ":" + platformChannelId;
         ChannelIntegrationConfiguration integration = integrationMap.get(key);
-        if (integration != null && integration.getPlatformConfig() != null) {
+        if (integration != null) {
             String token = integration.getPlatformConfig().get("botToken");
             if (token != null && !token.isBlank()) {
                 return token;
@@ -452,8 +452,7 @@ public class ChannelTargetRouter {
                     var resId = extractResourceId(descriptor.getResource());
                     var config = channelStore.read(resId.getId(),
                             resId.getVersion());
-                    if (config != null && config.getChannelType() != null
-                            && config.getPlatformConfig() != null) {
+                    if (config != null && config.getChannelType() != null) {
 
                         // Deep-copy before resolving secrets so the store's
                         // cached instance keeps vault references intact
@@ -568,9 +567,7 @@ public class ChannelTargetRouter {
         copy.setName(src.getName());
         copy.setChannelType(src.getChannelType());
         copy.setDefaultTargetName(src.getDefaultTargetName());
-        if (src.getPlatformConfig() != null) {
-            copy.setPlatformConfig(new HashMap<>(src.getPlatformConfig()));
-        }
+        copy.setPlatformConfig(new HashMap<>(src.getPlatformConfig()));
         if (src.getTargets() != null) {
             copy.setTargets(new ArrayList<>(src.getTargets()));
         }
@@ -610,7 +607,7 @@ public class ChannelTargetRouter {
             String legacySigningSecret) {
         /** Get bot token — from integration or legacy. */
         public String botToken() {
-            if (integration != null && integration.getPlatformConfig() != null) {
+            if (integration != null) {
                 return integration.getPlatformConfig().get("botToken");
             }
             return legacyBotToken;
@@ -618,7 +615,7 @@ public class ChannelTargetRouter {
 
         /** Get signing secret — from integration or legacy. */
         public String signingSecret() {
-            if (integration != null && integration.getPlatformConfig() != null) {
+            if (integration != null) {
                 return integration.getPlatformConfig().get("signingSecret");
             }
             return legacySigningSecret;
