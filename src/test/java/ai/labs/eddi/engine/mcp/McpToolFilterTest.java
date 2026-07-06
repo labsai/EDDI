@@ -10,8 +10,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.lang.reflect.Method;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -45,7 +54,18 @@ class McpToolFilterTest {
             "delete_schedule", "fire_schedule_now", "retry_failed_schedule",
             "list_channel_integrations", "read_channel_integration",
             "create_channel_integration", "update_channel_integration",
-            "delete_channel_integration"
+            "delete_channel_integration",
+            // HITL approval surface (McpHitlTools)
+            "list_pending_approvals", "get_approval_status", "resume_conversation",
+            "cancel_conversation", "list_group_pending_approvals",
+            "list_all_group_pending_approvals", "get_group_approval_status",
+            "approve_group_phase", "cancel_group_discussion",
+            // Persistent user memory (McpMemoryTools)
+            "list_user_memories", "get_visible_memories", "search_user_memories",
+            "get_memory_by_key", "upsert_user_memory", "delete_user_memory",
+            "delete_all_user_memories", "count_user_memories",
+            // GDPR/CCPA (McpGdprTools)
+            "delete_user_data", "export_user_data"
     })
     void test_whitelistedTools_returnsTrue(String toolName) {
         var toolInfo = mock(ToolInfo.class);
@@ -92,60 +112,124 @@ class McpToolFilterTest {
         assertFalse(filter.test(toolInfo, (FilterContext) null));
     }
 
-    // --- Structural regression: all Mcp* @Tool methods must be whitelisted ---
+    // --- Structural regression: every quarkus-MCP @Tool must be whitelisted ---
 
     /**
-     * Scans all {@code Mcp*} classes in the MCP package for methods annotated with
-     * {@code @Tool(name = "...")} and verifies every declared tool name is present
-     * in the {@link McpToolFilter} whitelist.
+     * Auto-discovers <em>every</em> class in the {@code ai.labs.eddi.engine.mcp}
+     * package (by scanning the compiled-classes directory), collects each method
+     * annotated with the quarkus MCP {@code @Tool}, resolves its effective tool
+     * name (explicit {@code name} or, when defaulted, the method name), and
+     * verifies each one is present in the {@link McpToolFilter} whitelist.
      * <p>
-     * This prevents the common regression where a new MCP tool is added to a
-     * {@code Mcp*Tools} class but the developer forgets to register it in the
-     * filter — making the tool invisible to MCP clients.
+     * This is the guard that prevents the class of bug where a new
+     * {@code Mcp*Tools} class (or a new method on an existing one) ships with a
+     * {@code @Tool} annotation but is never added to {@code MCP_TOOLS} — making the
+     * tool invisible to MCP clients despite being implemented. Because a
+     * quarkus-MCP {@code @Tool} has <em>no other</em> invocation path, a
+     * non-whitelisted one is unreachable dead code: it must be either whitelisted
+     * (usable) or removed.
+     * <p>
+     * Discovery is intentionally reflection/filesystem-based (not a hardcoded class
+     * list) so that adding a brand-new MCP tool class is automatically covered
+     * without touching this test.
      */
     @Test
     void test_allMcpToolMethods_areWhitelisted() {
-        // Collect all @Tool-annotated method names from Mcp* classes
-        Set<String> declaredTools = new LinkedHashSet<>();
-        Class<?>[] mcpClasses = {
-                McpConversationTools.class,
-                McpAdminTools.class,
-                McpSetupTools.class,
-                McpGroupTools.class,
-        };
-
-        for (Class<?> clazz : mcpClasses) {
+        Map<String, String> declaredToolToClass = new LinkedHashMap<>();
+        for (Class<?> clazz : discoverMcpPackageClasses()) {
             for (Method method : clazz.getDeclaredMethods()) {
-                var toolAnnotation = method.getAnnotation(
-                        io.quarkiverse.mcp.server.Tool.class);
-                if (toolAnnotation != null) {
-                    String annotatedName = toolAnnotation.name();
-                    // Quarkus MCP uses "<<element name>>" as the sentinel default
-                    // when no explicit name is set — fall back to method name.
-                    String name = (annotatedName.isEmpty()
-                            || annotatedName.startsWith("<<"))
-                                    ? method.getName()
-                                    : annotatedName;
-                    declaredTools.add(name);
+                var toolAnnotation = method.getAnnotation(io.quarkiverse.mcp.server.Tool.class);
+                if (toolAnnotation == null) {
+                    continue;
                 }
+                String annotatedName = toolAnnotation.name();
+                // Quarkus MCP uses "<<element name>>" as the sentinel default when no
+                // explicit name is set — fall back to the method name (this is how
+                // McpGroupTools names its tools).
+                String name = (annotatedName.isEmpty() || annotatedName.startsWith("<<"))
+                        ? method.getName()
+                        : annotatedName;
+                declaredToolToClass.put(name, clazz.getSimpleName());
             }
         }
 
-        assertFalse(declaredTools.isEmpty(),
-                "Should find at least one @Tool method in Mcp* classes");
+        assertFalse(declaredToolToClass.isEmpty(),
+                "Discovery found no @Tool methods in package " + McpToolFilter.class.getPackageName()
+                        + " — the classpath scan is broken");
 
-        // Verify each declared tool passes the filter
-        Set<String> missingTools = new LinkedHashSet<>();
-        for (String toolName : declaredTools) {
+        // Guard the discovery itself: each anchor lives in a distinct Mcp*Tools
+        // class, so their combined presence proves the scan reached every known
+        // tool class. If a refactor breaks discovery, this fails loudly rather than
+        // passing vacuously.
+        Set<String> anchors = new LinkedHashSet<>(List.of(
+                "list_agents", // McpConversationTools
+                "deploy_agent", // McpAdminTools
+                "setup_agent", // McpSetupTools
+                "describe_discussion_styles", // McpGroupTools
+                "resume_conversation", // McpHitlTools
+                "list_user_memories", // McpMemoryTools
+                "delete_user_data")); // McpGdprTools
+        Set<String> missingAnchors = new LinkedHashSet<>(anchors);
+        missingAnchors.removeAll(declaredToolToClass.keySet());
+        assertTrue(missingAnchors.isEmpty(),
+                "MCP tool discovery did not reach these anchor tools (the scan is incomplete): " + missingAnchors);
+
+        // Every discovered @Tool must pass the whitelist filter.
+        Map<String, String> missing = new LinkedHashMap<>();
+        for (var entry : declaredToolToClass.entrySet()) {
             var toolInfo = mock(ToolInfo.class);
-            when(toolInfo.name()).thenReturn(toolName);
+            when(toolInfo.name()).thenReturn(entry.getKey());
             if (!filter.test(toolInfo, (FilterContext) null)) {
-                missingTools.add(toolName);
+                missing.put(entry.getKey(), entry.getValue());
             }
         }
 
-        assertTrue(missingTools.isEmpty(),
-                "The following @Tool methods in Mcp* classes are NOT whitelisted in McpToolFilter. "
-                        + "Add them to the MCP_TOOLS set: " + missingTools);
+        assertTrue(missing.isEmpty(),
+                "The following quarkus-MCP @Tool methods are NOT whitelisted in McpToolFilter. A non-whitelisted "
+                        + "MCP tool is unreachable dead code — either add it to the MCP_TOOLS set (to make it usable) "
+                        + "or remove the tool. Missing {toolName=class}: " + missing);
+    }
+
+    /**
+     * Enumerates the top-level classes in the {@code ai.labs.eddi.engine.mcp}
+     * package by listing the compiled {@code .class} files next to
+     * {@link McpToolFilter} (which resolves to {@code target/classes/...} under a
+     * Maven/Surefire run with exploded output).
+     */
+    private static List<Class<?>> discoverMcpPackageClasses() {
+        String pkg = McpToolFilter.class.getPackageName();
+        var codeSource = McpToolFilter.class.getProtectionDomain().getCodeSource();
+        assertNotNull(codeSource,
+                "Cannot locate the compiled-classes code source to scan for MCP tools");
+        Path classesRoot;
+        try {
+            classesRoot = Paths.get(codeSource.getLocation().toURI());
+        } catch (URISyntaxException e) {
+            throw new IllegalStateException("Invalid classes-root URI: " + codeSource.getLocation(), e);
+        }
+        Path pkgDir = classesRoot.resolve(pkg.replace('.', '/'));
+        assertTrue(Files.isDirectory(pkgDir),
+                "Expected the compiled MCP package directory at " + pkgDir
+                        + " (run under `mvn test` with exploded classes)");
+
+        List<Class<?>> classes = new ArrayList<>();
+        try (var paths = Files.list(pkgDir)) {
+            paths.map(p -> p.getFileName().toString())
+                    .filter(fn -> fn.endsWith(".class"))
+                    .map(fn -> fn.substring(0, fn.length() - ".class".length()))
+                    // Skip nested/inner classes ($) — MCP @Tool methods are top-level.
+                    .filter(simple -> !simple.contains("$"))
+                    .sorted()
+                    .forEach(simple -> {
+                        try {
+                            classes.add(Class.forName(pkg + "." + simple));
+                        } catch (ClassNotFoundException e) {
+                            throw new IllegalStateException("Cannot load discovered MCP class " + simple, e);
+                        }
+                    });
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to scan MCP package directory " + pkgDir, e);
+        }
+        return classes;
     }
 }

@@ -5,6 +5,29 @@
 
 ---
 
+## 🔌 MCP tool filter — expose HITL/memory/GDPR tools + build-time regression guard (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A client reported that new HITL MCP tools were "implemented but not available." Confirmed: `McpToolFilter` is a **name whitelist** (`ToolFilter` SPI — quarkus-MCP only surfaces a tool's *name*, not its declaring class/annotation, so filtering must be by name), and it exposes only the intended MCP tools while hiding the langchain4j built-in agent tools (calculator, websearch, etc.) that leak into the same scan. Three `Mcp*Tools` classes had shipped `@Tool`s that were **never added to the whitelist**, making them unreachable dead code — a quarkus-MCP `@Tool` has no other invocation path:
+
+- **`McpHitlTools`** (9): `list_pending_approvals`, `get_approval_status`, `resume_conversation`, `cancel_conversation`, `list_group_pending_approvals`, `list_all_group_pending_approvals`, `get_group_approval_status`, `approve_group_phase`, `cancel_group_discussion` — documented as the MCP HITL surface in `docs/hitl.md` but invisible.
+- **`McpMemoryTools`** (8): `list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`, `count_user_memories`.
+- **`McpGdprTools`** (2): `delete_user_data`, `export_user_data`.
+
+**Why it slipped through:** the existing regression test (`McpToolFilterTest.test_allMcpToolMethods_areWhitelisted`) scanned only a **hardcoded array of 4** `Mcp*Tools` classes — HITL, memory, and GDPR were not in it, so CI stayed green.
+
+**Fix:**
+- **`McpToolFilter.java`** — added all 19 names to `MCP_TOOLS` (whitelist 55 → 74 = every declared quarkus-MCP `@Tool`). Verified there is **no name collision** with any langchain4j built-in tool (effective names cross-checked), so whitelisting a name cannot accidentally expose an internal agent tool. All three classes already enforce their own authz (`requireRole` viewer/admin + per-user `OwnershipValidator`; GDPR delete is admin-only + `CONFIRM` arg), identical to their REST counterparts — MCP is a transport, not new authority.
+- **`McpToolFilterTest.java`** — rewrote the guard to **auto-discover** every class in the `ai.labs.eddi.engine.mcp` package by scanning the compiled-classes directory (no hardcoded class list), resolve each `@Tool`'s effective name (explicit `name`, else method name — the `McpGroupTools` convention), and fail the build if any is not whitelisted. Anchor tools (one per `Mcp*Tools` class) guard against a broken scan passing vacuously. Any *future* MCP tool that isn't whitelisted now turns CI red.
+- **`docs/mcp-server.md`** — corrected the stale tool count (63 → 74), documented the name-only `ToolFilter` constraint and the new build-time guard.
+
+**Decision:** whitelist (not delete) memory/GDPR — they were intended MCP tools (Phase 11a persistent memory, GDPR/CCPA framework) that were simply never wired into the filter; the annotation encodes intent to expose.
+
+**Method:** verified the whole diagnosis against source (annotation imports, `ToolInfo` API via `javap`, collision analysis) before changing anything. `./mvnw -o test -Dtest=McpToolFilterTest` green. **Nothing pushed** — that stays the maintainer's call.
+
+---
+
 ## 🔧 Dependency bumps — Quarkus 3.37.1, quarkus-mcp-server 1.13.1 (2026-07-06)
 
 **Repo:** EDDI (`feat/hitl-framework`)
