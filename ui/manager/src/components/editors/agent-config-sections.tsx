@@ -22,11 +22,12 @@ import {
 import { useUpdateAgent } from "@/hooks/use-agents";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
-import type { AgentHitlConfig } from "@/lib/api/hitl";
+import type { AgentHitlConfig, ToolApprovalsConfig } from "@/lib/api/hitl";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
 import { isApiError } from "@/lib/api-client";
 import { EditorSection } from "./editor-section";
+import { ToolApprovalsEditor } from "./tool-approvals-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
@@ -1145,6 +1146,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                 type="text"
                 value={hitl.pauseReason ?? ""}
                 onCommit={(v) => patchHitl({ pauseReason: v.trim() || null })}
+                maxLength={500}
                 placeholder={t("agentDetail.hitlPauseReasonPlaceholder", "e.g. Deletion requires manager sign-off")}
                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 data-testid="hitl-pause-reason"
@@ -1209,6 +1211,36 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                 </p>
               </div>
             )}
+
+            {/* Tool-level approval gating (surface 3) — pause when the model
+                invokes a matching tool, before it executes. */}
+            <div className="border-t border-border pt-3">
+              <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={!!hitl.toolApprovals}
+                  onChange={(e) => patchHitl({ toolApprovals: e.target.checked ? {} : null })}
+                  disabled={updateAgent.isPending}
+                  className="h-3.5 w-3.5 rounded border-input accent-primary"
+                  data-testid="hitl-tool-enabled"
+                />
+                {t("agentDetail.toolApprovalsEnable", "Gate specific tool calls for approval")}
+              </label>
+              {hitl.toolApprovals && (
+                <div className="mt-3">
+                  <ToolApprovalsEditor
+                    value={hitl.toolApprovals}
+                    disabled={updateAgent.isPending}
+                    agentTimeoutPolicy={hitl.timeoutPolicy}
+                    onChange={(u) =>
+                      patchHitl({
+                        toolApprovals: { ...(hitl.toolApprovals as ToolApprovalsConfig), ...u },
+                      })
+                    }
+                  />
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

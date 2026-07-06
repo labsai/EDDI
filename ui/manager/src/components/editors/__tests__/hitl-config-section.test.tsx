@@ -107,4 +107,74 @@ describe("HitlConfigSection", () => {
     const payload = mockMutate.mock.calls[0]![0];
     expect(payload.agent.hitlConfig).toBeUndefined();
   });
+
+  it("caps the approval-reason input at 500 characters", () => {
+    const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };
+    renderWithProviders(<HitlConfigSection agent={agent} agentId="a1" version={1} />);
+    expect(screen.getByTestId("hitl-pause-reason")).toHaveAttribute("maxLength", "500");
+  });
+
+  describe("tool-level approval gating", () => {
+    it("enabling tool gating adds an empty toolApprovals block", () => {
+      const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };
+      renderWithProviders(<HitlConfigSection agent={agent} agentId="a1" version={1} />);
+      expect(screen.queryByTestId("tool-approvals-editor")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("hitl-tool-enabled"));
+      expect(mockMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agent: expect.objectContaining({
+            hitlConfig: expect.objectContaining({ toolApprovals: {} }),
+          }),
+        }),
+      );
+    });
+
+    it("renders the tool-approvals editor when a block is present", () => {
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", toolApprovals: { requireApproval: ["mcp:*"] } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} agentId="a1" version={1} />);
+      expect(screen.getByTestId("tool-approvals-editor")).toBeInTheDocument();
+      expect(screen.getByTestId("hitl-tool-require")).toHaveValue("mcp:*");
+    });
+
+    it("shows the AUTO_APPROVE demotion warning when the tool block inherits it", () => {
+      const agent: Agent = {
+        hitlConfig: {
+          timeoutPolicy: "AUTO_APPROVE",
+          approvalTimeout: "PT15M",
+          toolApprovals: { requireApproval: ["mcp:*"] },
+        },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} agentId="a1" version={1} />);
+      expect(screen.getByTestId("hitl-tool-demotion-warning")).toBeInTheDocument();
+    });
+
+    it("hides the demotion warning once the tool block sets its own policy", () => {
+      const agent: Agent = {
+        hitlConfig: {
+          timeoutPolicy: "AUTO_APPROVE",
+          approvalTimeout: "PT15M",
+          toolApprovals: { requireApproval: ["mcp:*"], timeoutPolicy: "AUTO_REJECT", approvalTimeout: "PT10M" },
+        },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} agentId="a1" version={1} />);
+      expect(screen.queryByTestId("hitl-tool-demotion-warning")).not.toBeInTheDocument();
+    });
+
+    it("disabling tool gating clears the block to null", () => {
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", toolApprovals: { requireApproval: ["mcp:*"] } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} agentId="a1" version={1} />);
+      fireEvent.click(screen.getByTestId("hitl-tool-enabled"));
+      expect(mockMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agent: expect.objectContaining({
+            hitlConfig: expect.objectContaining({ toolApprovals: null }),
+          }),
+        }),
+      );
+    });
+  });
 });

@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 import { TaskCascadeSection } from "./llm/task-cascade-section";
 import { TaskMemorySection } from "./llm/task-memory-section";
 import { TaskRagSection } from "./llm/task-rag-section";
+import { TaskToolApprovalsSection } from "./llm/task-tool-approvals-section";
 
 // Re-export types so existing imports still work
 export type {
@@ -1751,6 +1752,9 @@ function TaskEditor({
 
 
           <TaskRagSection task={task} onChange={onChange} readOnly={readOnly} />
+
+
+          <TaskToolApprovalsSection task={task} onChange={onChange} readOnly={readOnly} />
 
 
           {/* ══════ Pre/Post Instructions ══════ */}

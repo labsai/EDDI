@@ -8,6 +8,7 @@ import type {
   OutputBuildingInstruction,
   QuickRepliesBuildingInstruction,
 } from "../apicalls-editor";
+import type { ToolApprovalsConfig } from "@/lib/api/hitl";
 
 // ─── Types matching LlmConfiguration backend model ───────────────────────────
 
@@ -109,6 +110,12 @@ export interface LlmTask {
   // Behavioral Counterweight & Identity Masking (Wave 1)
   counterweight?: CounterweightConfig;
   identityMasking?: IdentityMaskingConfig;
+
+  /**
+   * Per-task tool-approval override (tool-level HITL). A FULL REPLACE of the
+   * agent-level `hitlConfig.toolApprovals` for this task — no field merge.
+   */
+  toolApprovals?: ToolApprovalsConfig | null;
 }
 
 export interface ConversationSummaryConfig {
