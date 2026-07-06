@@ -1,6 +1,10 @@
 # EDDI Backend — AI Agent Instructions
 
 > **This file is automatically loaded by AI coding assistants. Follow ALL rules below.**
+>
+> **New here?** Read the [README](README.md) first — it has setup, the quick start, and a feature tour. This file is the working guide for building *in* the codebase: architecture, code patterns, and conventions.
+
+**Contents:** [1. Project Context](#1-project-context) · [2. Workflow Protocol](#2-mandatory-workflow-protocol) · [3. Roadmap](#3-development-roadmap) · [4. Backend Java Guidelines](#4-backend-java-guidelines) · [5. Agent Config Authoring](#5-agent-config-authoring-reference) · [6. Session Protocol](#6-session-protocol)
 
 ## 1. Project Context
 
@@ -18,6 +22,8 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 | **eddi-chat-ui**                                                | React, TypeScript          | Standalone chat widget                                       |
 | **eddi-website**                                                | Astro, Starlight           | Marketing site + documentation at eddi.labs.ai               |
 
+> **Versions live in `pom.xml`** (Java, Quarkus, every dependency) — treat it as the single source of truth. This file names the Java baseline for context but deliberately does not restate specific Quarkus/library versions, which drift. See §2 rule 7.
+
 ### Key Architecture
 
 - **Config-driven engine**: Agent logic is JSON configs, Java is the processing engine. When designing a new feature, always ask: "should this be configurable by the agent designer?" If yes, expose it as a config field with sensible defaults — don't hardcode behavior or pick a single "best" approach.
@@ -25,7 +31,28 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 - **Stateless tasks, stateful memory**: `ILifecycleTask` implementations are singletons; all state lives in `IConversationMemory`
 - **Action-based orchestration**: Tasks emit/listen for string-based actions, never call each other directly
 - **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IUserMemoryStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in MongoDB or imported via ZIP.
-- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`v6.0.0-RC2` → `labsai/eddi:6.0.0-RC2`)
+- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`v6.0.0-RC2` → `labsai/eddi:6.0.0-RC2`). Separate security workflows run CodeQL, Trivy, Gitleaks, ZAP, CycloneDX (SBOM), and Jazzer fuzzing.
+
+### Build & Test Commands
+
+**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev` (app on port **7070**, Dev UI at `/q/dev`).
+
+**Toolchain:** commands use the bundled Maven wrapper — no local Maven needed. **On Windows, substitute `.\mvnw.cmd` for `./mvnw` below.** If you use [mise](https://mise.jdx.dev), `mise.toml` pins the exact JDK 25 + Maven and mirrors these as tasks (`mise run dev`, `mise run test`, …) that auto-install the toolchain — the lowest-friction path; treat `mise.toml` as canonical for tool *versions*.
+
+**Once per clone:** run `git config core.hooksPath .githooks` to activate the pre-push safety hook (§2 rule 4) — a fresh clone does not enable it automatically.
+
+The [README "Maven Command Reference"](README.md#maven-command-reference) is the canonical full command list (verify against it if a command changes); the essentials:
+
+| Command | What it does |
+| ------- | ------------ |
+| `./mvnw compile quarkus:dev` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev` |
+| `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6 |
+| `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
+| `./mvnw test -Dtest=ClassName` | Run a single test class |
+| `./mvnw verify` | Full build **including** integration tests — requires Docker |
+| `./mvnw validate` · `./mvnw formatter:format` | Checkstyle check · auto-format with the project Eclipse formatter |
+
+> **Sandbox caveat:** integration tests (`*IT.java`) and any test that binds a loopback/HTTP socket need Docker and frequently cannot run in sandboxed agent environments — CI verifies those. Locally, rely on `./mvnw test` (unit tests) and treat a green CI run as the source of truth for the rest.
 
 ---
 
@@ -35,7 +62,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 1. **Read the key docs**:
    - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** 9 architectural pillars governing all EDDI development
-   - [`docs/changelog.md`](docs/changelog.md) — **READ FIRST.** Running log of all changes, decisions, and reasoning across ALL repos and sessions
+   - [`docs/changelog.md`](docs/changelog.md) — **Read the most recent entries first** (newest are at the top). Running log of changes, decisions, and reasoning across all repos and sessions. It is long (hundreds of entries) — skim the top 2–3 entries for current context rather than reading the whole file.
    - [`docs/architecture.md`](docs/architecture.md) — Architecture overview, configuration model, pipeline, and DB-agnostic design
    - If working on **EDDI-Manager**: also read `EDDI-Manager/AGENTS.md` in the Manager repo
 2. **Check git status**: Run `git status` and `git log -5 --oneline` to see current branch state and recent work.
@@ -44,12 +71,13 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 3. **Branching**: Check `git branch --show-current` and `git log -5 --oneline` to understand the current branch context. **Do NOT commit directly to `main`.** If unsure which branch to use, ask the user.
    - **Always branch from `origin/main`**, never from another feature branch. Run `git fetch origin main` then `git checkout -b my-branch origin/main` to guarantee a clean base.
-4. **Never force-push**: `git push --force` and `git push --force-with-lease` are **forbidden**. To avoid ever needing them, follow these sub-rules:
+   - **External contributors** (no push access to `labsai/EDDI`): fork first, point `origin` at your fork and `upstream` at `labsai/EDDI`, and branch from `upstream/main`. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full fork-and-PR workflow.
+4. **Push discipline — ask before pushing, never force-push**: Committing locally is free, but **pushing to the remote requires explicit human approval — always ask first** (separate from, and in addition to, the force-push ban). `git push --force` and `git push --force-with-lease` are **forbidden**. To avoid ever needing a force-push, follow these sub-rules:
    - **Never `git commit --amend` after pushing.** Amend only works on unpushed commits. If you already pushed, make a new commit instead.
    - **Never `git rebase -i` on a pushed branch.** Interactive rebase rewrites history. If the branch is pushed, history is immutable.
    - **Never `git reset` on a pushed branch.** Use `git revert` to undo pushed commits (it creates a new forward commit).
    - **Always `git pull --rebase` before pushing** if the remote has new commits.
-   - A `.githooks/pre-push` hook will block non-fast-forward pushes as a safety net.
+   - A `.githooks/pre-push` hook blocks non-fast-forward pushes as a safety net — **opt-in per clone**: activate it once with `git config core.hooksPath .githooks` (see [Build & Test Commands](#build--test-commands)).
 5. **Commit often and selectively**: Every working unit gets a commit. Use conventional commits:
    ```
    feat(scope): description
@@ -57,6 +85,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
    chore(scope): description
    refactor(scope): description
    ```
+   **Commits and PRs are attributed to the human author.** Do NOT add AI co-authorship trailers (e.g. `Co-Authored-By: <assistant>`) or tool-advertising footers (e.g. `Generated with…`, `🤖 …`) to commit messages or PR descriptions — keep the history human-attributed.
    **Only stage files you actually worked on.** Never use `git add .` or `git add -A`. The working tree may contain changes from other people, other branches, or other tools — those are not yours to commit. Always:
    - Stage files individually: `git add path/to/file1 path/to/file2`
    - Run `git status` before committing — if any staged file is not part of your task, unstage it
@@ -91,6 +120,8 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 Follow this order unless the user explicitly requests something different.
 **Backend first, then testing, then frontend. Website last.**
 
+> This roadmap is indicative and hand-maintained — it may lag reality. [`docs/changelog.md`](docs/changelog.md) is the source of truth for what has actually landed.
+
 ### Completed ✅
 
 | Phase | Area                     | Highlights                                                                                          |
@@ -103,14 +134,14 @@ Follow this order unless the user explicitly requests something different.
 | 5     | NATS JetStream           | Event bus abstraction, async processing, coordinator dashboard                                      |
 | 6     | DB-Agnostic Architecture | PostgreSQL adapter, MongoDB sync driver, Caffeine cache, Lombok removal, langchain4j core migration |
 | 7     | Security & Compliance    | Secrets Vault, Audit Ledger (EU AI Act), tenant quota stub                                          |
-| 8     | MCP Integration          | MCP Server (33 tools), MCP Client, agent discovery, managed conversations                           |
+| 8     | MCP Integration          | MCP Server (60+ tools), MCP Client, agent discovery, managed conversations                           |
 | 8c    | RAG Foundation           | Config-driven vector store retrieval, pgvector, httpCall RAG                                        |
 | 10    | Group Conversations      | Multi-agent debate orchestration, 6 styles (incl. Task Force), group-of-groups                      |
 | 10b   | Dynamic Agents           | Runtime agent creation/recruitment/delegation, DynamicAgentConfig guardrails, lifecycle policies, SharedTaskList |
 | —     | A2A Protocol             | Agent-to-Agent peer communication, Agent Cards, skill discovery                                     |
 | —     | Multi-Model Cascading    | Sequential model escalation with confidence routing                                                 |
-| —     | LLM Provider Expansion   | 7 → 12 providers (Mistral, Azure OpenAI, Bedrock, Oracle GenAI)                                     |
-| —     | Quarkus 3.34.1           | LTS upgrade, Java 25 module fix                                                                     |
+| —     | LLM Provider Expansion   | Added Mistral, Azure OpenAI, Bedrock, Oracle GenAI (12 providers; see `docs/langchain.md`)                                     |
+| —     | Quarkus LTS              | LTS platform upgrade, Java 25 module fix (version pinned in `pom.xml`)                              |
 | 12    | CI/CD                    | GitHub Actions unified pipeline, Docker Hub push, CircleCI removed                                  |
 | 11a   | Persistent Memory        | IUserMemoryStore, UserMemoryTool, DreamService, McpMemoryTools, Property.Visibility                 |
 | —     | Conversation Windows     | Token-aware windowing, rolling summary, ConversationRecallTool                                      |
@@ -123,21 +154,22 @@ Follow this order unless the user explicitly requests something different.
 | —     | Template Preview         | REST endpoint for previewing resolved system prompts with sample/live data                          |
 | —     | Test Coverage            | 9,000+ tests, >90% instruction / >80% branch coverage, OpenSSF Gold compliance                     |
 | —     | Security Hardening v6.0.2 | SSRF prevention, SafeHttpClient, auth guard, vault salt, security headers, CodeQL + Trivy CI       |
+| 9b    | HITL Framework           | Two human-approval gates (turn-level `PAUSE_CONVERSATION` + per-tool-call gating), timeout/no-progress policies, audit ledger, Slack + MCP approval surfaces, crash recovery — see [`docs/hitl.md`](docs/hitl.md) |
 
 ### In Progress / Upcoming
 
 | Phase | Area                      | Description                                                                                                                               |
 | ----- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| —     | Memory Architecture       | Commit flags, RAG threshold, context selection, auto-compaction, property consolidation (see `docs/planning/memory-architecture-plan.md`) |
+| —     | Memory Architecture       | Commit flags, RAG threshold, context selection, auto-compaction, property consolidation (see `planning/memory-architecture-plan.md`) |
 | —     | Session Forking           | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7)                                                 |
-| —     | Conversation Chaining     | Cross-session context carry-over (see `docs/planning/conversation-window-management.md` Strategy 3)                                       |
+| —     | Conversation Chaining     | Cross-session context carry-over (see `planning/conversation-window-management.md` Strategy 3)                                       |
 | 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing                                                                                   |
-| 9b    | HITL Framework            | Human-in-the-loop pause/resume/approve                                                                                                    |
-| —     | Guardrails                | Config-driven input/output guardrails in LlmTask (see `docs/planning/guardrails-architecture.md`)                                         |
-| 11b   | Multi-Channel             | Slack, Teams adapters (see `docs/planning/multi-agent-ux-improvements.md`)                                                                |
+| —     | HITL — remaining          | EDDI-Manager approvals UI (Manager repo) and the reserved `inGroupTurns: INBOX` group-approval mode (core framework shipped — see Completed)              |
+| —     | Guardrails                | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`)                                         |
+| 11b   | Multi-Channel             | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`)                        |
 | 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder                                                                                          |
 | 14    | Website                   | Astro + Starlight documentation site                                                                                                      |
-| —     | Native Image              | GraalVM native compilation (see `docs/planning/native-image-migration.md`)                                                                |
+| —     | Native Image              | GraalVM native compilation (see `planning/native-image-migration.md`)                                                                |
 
 ---
 
@@ -150,6 +182,8 @@ Follow this order unless the user explicitly requests something different.
 3. **Action-Based Orchestration** — Tasks MUST NOT call other tasks directly. The system is event-driven. Tasks are orchestrated by string-based **actions**. A task (like `RulesEvaluationTask`) emits actions, and other tasks (like `OutputGenerationTask` or `ApiCallsTask`) listen for them.
 4. **Dependency Injection via Quarkus CDI** — All components (`ILifecycleTask`s, `IResourceStore`s) use `@ApplicationScoped` and `@Inject`. No manual module registration — Quarkus auto-discovers beans.
 5. **Thread Safety** — The `ConversationCoordinator` handles concurrency _between_ conversations. Code must be thread-safe and non-blocking. REST endpoints use JAX-RS `AsyncResponse`. Tasks execute synchronously but must not block for extended periods.
+
+> These five rules operationalize Pillars 1, 3, and 5 of the [nine architectural pillars](docs/project-philosophy.md) (the supreme directive). The other pillars — deterministic governance (2), security-as-architecture (4), observability (6), progressive disclosure (7), persistent memory (8), portability (9) — are applied in §4.2, §4.4, and §4.7; read `project-philosophy.md` for the full set and the _why_ behind each.
 
 ### 4.2 Core Architecture
 
@@ -273,7 +307,7 @@ Several infrastructure components are already built and should be reused, not du
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **`ScheduleFireExecutor`** + **`SchedulePollerService`** | Cluster-aware scheduled task execution with fire logging, retries, and configurable conversation strategies (persistent vs new) | ANY background/scheduled work: Dream consolidation, async summarization, maintenance jobs. Never build custom schedulers.                                                                                    |
 | **`ToolExecutionService.executeToolWrapped()`**          | Rate limiting → cache check → execute → cost tracking pipeline for LLM tool calls                                               | Any operation that needs rate limiting, caching, or cost tracking.                                                                                                                                           |
-| **`CostTracker`** (via ToolExecutionService)             | Dollar-based LLM cost tracking per conversation                                                                                 | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
+| **`ToolCostTracker`** (via ToolExecutionService)         | Dollar-based LLM cost tracking per conversation                                                                                 | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
 | **`SecretResolver`**                                     | Vault-based secret resolution for API keys and credentials                                                                      | Any feature that needs secrets (LLM providers, external APIs).                                                                                                                                               |
 | **Micrometer `MeterRegistry`**                           | Metrics collection (counters, timers, gauges) exposed at `/q/metrics`                                                           | Always add metrics to new features for observability.                                                                                                                                                        |
 | **`SafeHttpClient`**                                     | SSRF-safe HTTP wrapper — `Redirect.NEVER` + per-hop validated redirects, configurable timeout                                   | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in tool code.                                                                                                      |
@@ -402,7 +436,7 @@ Pipeline: `Tool Call → Rate Limiter → Cache Check → Execute → Cost Track
 - **Always validate URLs** with `UrlValidationUtils.validateUrl(url)` before fetching user-controlled input
 - **Only allow `http`/`https`** — never `file://`, `ftp://`, etc.
 - **Block private/internal addresses** — handled automatically by `SafeHttpClient.sendValidated()`
-- **Never use `ScriptEngine`** — use `SafeMathParser` (recursive-descent)
+- **Never use `ScriptEngine`** — use a recursive-descent parser (e.g. `SafeMathParser`, a static inner class of `CalculatorTool` — inject `CalculatorTool`, not the parser)
 
 ```java
 @Inject SafeHttpClient httpClient;
@@ -576,12 +610,13 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)             |
 | `src/main/resources/initial-agents/`        | Agent Father and sample agent configs                       |
 | `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)       |
-| `docs/`                                     | 40 markdown files, published at docs.labs.ai                |
+| `docs/`                                     | Markdown documentation, published at docs.labs.ai           |
 | `docker-compose.yml`                        | EDDI + MongoDB local setup                                  |
+| `mise.toml`                                 | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
 | `docs/agent-configs/`                       | Agent config sources (e.g. Agent Father) — reference for AI |
 | `src/main/java/.../httpclient/SafeHttpClient.java` | Centralized SSRF-safe HTTP client wrapper              |
 | `src/main/java/.../security/AuthStartupGuard.java` | Production auth enforcement guard                      |
-| `.env.example`                              | Required environment variables                              |
+| `.env.example`                              | Docker Compose env var reference (copy to `.env`; optional for basic local dev) |
 
 ### Docker & Container Security
 
@@ -710,7 +745,7 @@ Do NOT reuse system action names as quick reply expressions. The reserved action
 ✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
 ```
 
-> **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 8 tool sources), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [`docs/hitl.md`](docs/hitl.md).
+> **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 7 tool sources: `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [`docs/hitl.md`](docs/hitl.md).
 
 #### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
 
@@ -853,7 +888,7 @@ Always use v6 canonical URIs in new configs:
 The **Agent Father** (`docs/agent-configs/agent-father/`) is a complete, working, rule-based agent config. Use it as the canonical reference for:
 
 - Behavior rule patterns with `actionmatcher` + `inputmatcher`
-- Property setter with `scope: "secret"` for auto-vault
+- Property setter capturing free-text input via `{memory.current.input}` (it uses `scope: "conversation"` throughout and delegates secret vaulting to the receiving `create_agent` HTTP call — the wizard pattern from §5.4, deliberately **not** `scope: "secret"`)
 - HTTP call template syntax
 - Output with quick replies
 - Provider-aware branching (local vs. cloud LLM providers)

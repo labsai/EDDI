@@ -211,7 +211,7 @@ A TASK-gate pause caused by turn-budget exhaustion could previously loop forever
 
 ## Tool-Level Approval Gating
 
-The two surfaces above pause **turns** (a behavior-rule `PAUSE_CONVERSATION`) or **phases** (`requiresApproval`). Tool-level HITL is a third, finer gate: it pauses when the LLM **invokes a matching tool**, before that tool executes. It works for **all eight tool sources** — built-in `@Tool`, `http` (httpcall), `mcp`, `a2a`, `dynamic` (dynamic agents), `memory`, and `recall`.
+The two surfaces above pause **turns** (a behavior-rule `PAUSE_CONVERSATION`) or **phases** (`requiresApproval`). Tool-level HITL is a third, finer gate: it pauses when the LLM **invokes a matching tool**, before that tool executes. It works for **all seven tool sources** — built-in `@Tool`, `http` (httpcall), `mcp`, `a2a`, `dynamic` (dynamic agents), `memory`, and `recall`.
 
 The gate lives in the tool-execution loop (`AgentOrchestrator`), so it is **fail-safe**: a gated call is intercepted *before* execution. It reuses the existing pause machinery — same `AWAITING_HUMAN` state, same `POST /agents/{id}/resume` endpoint, same timeout/audit/Slack/crash-recovery paths — with `hitlPauseType = "TOOL_CALL"` distinguishing it from a `RULE` pause. A single resume verdict resolves either pause type.
 

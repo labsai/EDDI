@@ -5,6 +5,24 @@
 
 ---
 
+## 📝 AI-agent docs audit — AGENTS.md overhaul + linked-doc consistency fixes (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Audited `AGENTS.md` (the instruction file AI coding assistants load; `CLAUDE.md` just delegates to it) against every authoritative source it relies on, then rewrote it for correctness and frictionless cold-checkout onboarding. Verification ran as five parallel research agents cross-checking claims against `pom.xml`, `ci.yml`, `Dockerfile`, `README.md`, `docs/project-philosophy.md`, `docs/architecture.md`, `docs/hitl.md`, and the Agent Father config, plus an independent "fresh contributor" friction review.
+
+**AGENTS.md — factual fixes:** Quarkus `3.34.1` de-pinned (versions now reference `pom.xml` as the single source of truth, per the file's own rule 7); MCP `33 tools` → `60+`; `CostTracker` → `ToolCostTracker` (real class name); `SafeMathParser` clarified as a static inner class of `CalculatorTool`; HITL tool-source count `8` → `7` (verified against `ToolApprovalPatterns.KNOWN_SOURCES`); §5.6 corrected (Agent Father uses `scope: "conversation"`, not `secret`); HITL moved Upcoming → Completed with residual work (Manager approvals UI, `inGroupTurns: INBOX`) kept in Upcoming; Multi-Channel narrowed to Teams (Slack ships via HITL); five broken `docs/planning/` → `planning/` links.
+
+**AGENTS.md — onboarding & policy:** added a table of contents, a Build & Test Commands section (Windows `.\mvnw.cmd` note, sandbox/IT caveat, `mise.toml` toolchain, prerequisites → README, pre-push hook activation), an external-contributor fork-model pointer, and a pillar cross-reference. Codified two team policies: **no AI co-authorship trailers or tool-advertising footers on commits/PRs** (§2 rule 5) and **ask before pushing** (§2 rule 4).
+
+**Linked-doc consistency fixes:** `docs/hitl.md` `eight` → `seven` tool sources; `docs/architecture.md` retired stale v5 `package` terminology across the Agent Composition section (`packagestore` → `workflowstore`, `.package.json` → `.workflow.json`, `packageExtensions`/`WorkflowExtension` → `workflowSteps`/`WorkflowStep`, `configs.packages.model` → `configs.workflows.model`, `"packages"` → `"workflows"`) and fixed the LLM URI `llmstore/llmconfigs` → `llmstore/llms` — all verified against `WorkflowConfiguration.java` and the Agent Father config; `CONTRIBUTING.md` reconciled "squash fixup commits" with the never-rewrite-pushed-history rule.
+
+**Decisions:** kept all content inline in AGENTS.md (no extraction to new files) per maintainer preference and because the architecture audit confirmed AGENTS.md's prescriptive content is high-value and, on workflow-vs-package naming, *more* current than `architecture.md` was; prefer referencing canonical sources over restating drift-prone numbers/versions; committed to `feat/hitl-framework` rather than a new branch off `origin/main` because `docs/hitl.md` exists only on this branch.
+
+**Method:** six delegated research/critique agents, each finding verified against source before acceptance. **Nothing pushed** — that stays the maintainer's call.
+
+---
+
 ## 🧭 HITL — whole-branch merge review (round 2) + all 22 findings fixed + fix-batch review (2026-07-05)
 
 **Repo:** EDDI (`feat/hitl-framework`)
