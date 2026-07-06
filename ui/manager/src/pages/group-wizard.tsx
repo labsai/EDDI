@@ -191,6 +191,7 @@ export function GroupWizardPage() {
       maxRounds: tmpl.maxRounds,
       members: tmpl.roles.map((r, i) => createEmptySlot(i, r.displayName, r.role)),
       moderator: tmpl.moderatorSuggested ? createModeratorSlot() : null,
+      approvalPhases: [],
     });
     setCurrentStep(1);
   }
