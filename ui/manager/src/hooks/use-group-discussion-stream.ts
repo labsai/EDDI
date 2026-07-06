@@ -35,6 +35,10 @@ export interface GroupStreamState {
   synthesizedAnswer: string | null;
   /** Error message if the discussion failed */
   error: string | null;
+  /** Classifies a failure so the UI can offer recovery guidance.
+   *  "config_drift" = the group's phases changed while paused, so the resume was
+   *  aborted and the discussion is still awaiting approval (recoverable). */
+  errorKind: "config_drift" | "generic" | null;
   /** Timestamp when the stream was started (stable, not recalculated per render) */
   startedAt: string | null;
   /** Task plan received from task_plan_created SSE event */
@@ -74,6 +78,7 @@ const initialState: GroupStreamState = {
   activeSpeakers: new Set(),
   synthesizedAnswer: null,
   error: null,
+  errorKind: null,
   startedAt: null,
   taskPlan: null,
   taskVerifications: new Map(),
@@ -121,6 +126,7 @@ export function useGroupDiscussionStream() {
             isStreaming: false,
             state: "FAILED",
             error: errorMsg,
+            errorKind: "generic",
           }));
         }
       }
@@ -451,10 +457,10 @@ function handleSSEEvent(
       return true;
     }
 
-    // "group_error" is the generic failure event; "error" is what the
-    // approve/stream endpoint emits for expected rejections (409 concurrent
-    // decision, 400 invalid taskApprovals/note). Both are terminal failures.
-    case "error":
+    // "group_error" is the generic terminal failure event. It also carries the
+    // approve/stream endpoint's expected resume rejections (409 concurrent
+    // decision, 400 invalid taskApprovals/note); the backend emits those as
+    // "group_error", never a bare "error" (EDDI issue #36).
     case "group_error": {
       let errorMsg = "Unknown error";
       try {
@@ -464,11 +470,16 @@ function handleSSEEvent(
         console.warn('[SSE] Failed to parse error event:', e);
         errorMsg = event.data || errorMsg;
       }
+      // Config-drift aborts leave the discussion AWAITING_APPROVAL on the
+      // backend (the pause is restored) — classify it so the UI can guide the
+      // user to fix the config and re-approve rather than treat it as terminal.
+      const configDrift = /config changed while paused|fix the config and retry/i.test(errorMsg);
       setState((s) => ({
         ...s,
         isStreaming: false,
         state: "FAILED",
         error: errorMsg,
+        errorKind: configDrift ? "config_drift" : "generic",
         activeSpeakers: new Set(),
       }));
       return true;

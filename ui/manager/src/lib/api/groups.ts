@@ -353,9 +353,11 @@ export type GroupSSEEventType =
   | "phase_complete"
   | "synthesis_start"
   | "group_complete"
+  // Generic terminal failure. Also carries expected approve/stream resume
+  // rejections (e.g. 409 concurrent decision, 400 invalid taskApprovals) — the
+  // backend emits these as "group_error", never a bare "error", which would
+  // collide with the browser EventSource transport-error event (EDDI issue #36).
   | "group_error"
-  // Emitted by the approve/stream endpoint for expected resume rejections.
-  | "error"
   | "task_plan_created"
   | "task_verified"
   | "awaiting_approval"

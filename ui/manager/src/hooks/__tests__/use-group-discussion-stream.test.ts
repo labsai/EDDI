@@ -486,15 +486,16 @@ describe("useGroupDiscussionStream", () => {
     expect(result.current.streamState.activeSpeakers.has("a1")).toBe(false);
   });
 
-  it("surfaces an in-band 'error' event (approve/stream rejection) as FAILED", async () => {
+  it("surfaces an in-band 'group_error' event (approve/stream rejection) as FAILED", async () => {
     async function* paused() {
       yield { type: "group_start", data: JSON.stringify({ groupConversationId: "c1", question: "Q" }) };
       yield { type: "awaiting_approval", data: JSON.stringify({ phaseIndex: 0, phaseName: "P", reason: "r", granularity: "PHASE" }) };
     }
-    // The approve/stream endpoint emits event name "error" (not "group_error")
-    // for expected rejections like a concurrent/duplicate decision (409).
+    // The approve/stream endpoint emits event name "group_error" for expected
+    // rejections like a concurrent/duplicate decision (409) — EDDI issue #36
+    // (a bare "error" would collide with the EventSource transport-error event).
     async function* rejected() {
-      yield { type: "error", data: JSON.stringify({ error: "Concurrent modification" }) };
+      yield { type: "group_error", data: JSON.stringify({ error: "Concurrent modification" }) };
     }
     mockStreamGroupDiscussion.mockReturnValue(paused());
     mockStreamGroupApproval.mockReturnValue(rejected());
