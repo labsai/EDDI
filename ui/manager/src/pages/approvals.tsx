@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Search,
   ExternalLink,
+  Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -23,14 +24,22 @@ import {
   useCancelConversation,
 } from "@/hooks/use-hitl";
 import { timeoutPolicyLabel } from "@/lib/hitl-labels";
+import { useHasRole } from "@/hooks/use-auth";
 import type { PendingApprovalSummary, HitlVerdict } from "@/lib/api/hitl";
 
 export function ApprovalsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
+  // The backend scopes the inbox by role: admins/approvers see every pending
+  // approval, everyone else sees only their own conversations. Communicate
+  // which scope the list reflects so an owner-scoped empty queue isn't mistaken
+  // for "nothing pending anywhere".
+  const isAdmin = useHasRole("eddi-admin");
+  const isApproverRole = useHasRole("eddi-approver");
+  const isApprover = isAdmin || isApproverRole;
   const queryClient = useQueryClient();
   const { data: regular, isLoading, isError, refetch } = usePendingApprovals();
-  const { data: groupPendings, isError: groupsError, truncated: groupsTruncated } = useAllGroupPendingApprovals();
+  const { data: groupPendings, isLoading: groupsLoading, isError: groupsError, truncated: groupsTruncated } = useAllGroupPendingApprovals();
   const resumeMutation = useResumeConversation();
   const cancelMutation = useCancelConversation();
 
@@ -84,8 +93,9 @@ export function ApprovalsPage() {
     }
   };
 
-  // Loading state
-  if (isLoading) {
+  // Loading state — wait for BOTH the regular and cross-group queries so an
+  // empty regular list doesn't flash "No pending approvals" before group items load.
+  if (isLoading || groupsLoading) {
     return (
       <div className="space-y-6">
         <div className="space-y-2">
@@ -174,6 +184,11 @@ export function ApprovalsPage() {
             <><CheckCircle2 className="h-4 w-4" /> {t("hitl.emptyQueue", "No pending approvals")}</>
           )}
         </span>
+        <span className="text-xs text-muted-foreground" data-testid="approvals-scope">
+          {isApprover
+            ? t("hitl.scopeAll", "Showing all pending approvals across the system.")
+            : t("hitl.scopeOwn", "Showing pending approvals for your conversations.")}
+        </span>
         {groupsTruncated && (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="approvals-truncated">
             <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
@@ -243,7 +258,17 @@ export function ApprovalsPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground max-w-xs truncate">
-                    {item.pauseReason || "—"}
+                    {item.pauseType === "TOOL_CALL" && (
+                      <span
+                        className="me-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600"
+                        data-testid={`tool-badge-${item.conversationId}`}
+                      >
+                        <Wrench className="h-3 w-3" /> {t("hitl.tool", "Tool")}
+                      </span>
+                    )}
+                    {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
+                      ? item.toolNames.join(", ")
+                      : item.pauseReason || "—"}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground text-xs">
                     {item.pausedAt
@@ -257,7 +282,30 @@ export function ApprovalsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
-                      {!item.groupId && (
+                      {/* Tool-call pauses must NOT be quick-approved blind — a
+                          reviewer has to see the gated tool + arguments first,
+                          so route to the detail view where the full banner
+                          renders per-call decisions. */}
+                      {!item.groupId && item.pauseType === "TOOL_CALL" && (
+                        <>
+                          <Link
+                            to={`/manage/conversationview/${item.conversationId}`}
+                            className="rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600 hover:bg-amber-500/20 transition-colors"
+                            data-testid={`review-${item.conversationId}`}
+                          >
+                            {t("hitl.review", "Review")}
+                          </Link>
+                          <button
+                            onClick={() => handleCancel(item)}
+                            disabled={cancelMutation.isPending && cancelMutation.variables === item.conversationId}
+                            className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                            data-testid={`cancel-${item.conversationId}`}
+                          >
+                            {t("hitl.cancel", "Cancel")}
+                          </button>
+                        </>
+                      )}
+                      {!item.groupId && item.pauseType !== "TOOL_CALL" && (
                         <>
                           <button
                             onClick={() => handleQuickAction(item, "APPROVED")}

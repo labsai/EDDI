@@ -25,6 +25,7 @@ import {
   ChevronsUpDown,
   Fingerprint,
   ShieldAlert,
+  HandMetal,
 } from "lucide-react";
 import { useAuditTrail, useAuditTrailByAgent } from "@/hooks/use-audit";
 import type { AuditEntry } from "@/lib/api/audit";
@@ -39,6 +40,7 @@ const TASK_TYPE_STYLES: Record<string, { bg: string; text: string; icon: typeof 
   expressions:  { bg: "bg-amber-500/15",  text: "text-amber-400",   icon: Eye },
   httpcalls:    { bg: "bg-orange-500/15",  text: "text-orange-400",  icon: Cpu },
   propertysetter: { bg: "bg-teal-500/15", text: "text-teal-400",    icon: Settings },
+  hitl:         { bg: "bg-amber-500/15",  text: "text-amber-500",   icon: HandMetal },
 };
 
 const DEFAULT_STYLE = { bg: "bg-gray-500/15", text: "text-gray-400", icon: Hash };
@@ -136,6 +138,61 @@ function JsonBlock({ data, label }: { data: Record<string, unknown> | unknown[] 
   );
 }
 
+/** Render an `hitl.approval` audit entry's decision (verdict / decider /
+ *  automated flag / note) as first-class fields — the EU AI Act human-oversight
+ *  trail — rather than leaving it buried in the raw output JSON. */
+function HitlDecisionSummary({
+  output,
+  t,
+}: {
+  output: Record<string, unknown> | null;
+  t: ReturnType<typeof useTranslation>["t"];
+}) {
+  if (!output) return null;
+  const verdict = typeof output.verdict === "string" ? output.verdict : undefined;
+  const decidedBy = typeof output.decidedBy === "string" ? output.decidedBy : undefined;
+  const automated = output.automated === true;
+  const note = typeof output.note === "string" ? output.note : undefined;
+  if (!verdict && !decidedBy && !note) return null;
+  const approved = verdict === "APPROVED";
+  const rejected = verdict === "REJECTED";
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="hitl-decision-summary">
+      {verdict && (
+        <span
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+            approved
+              ? "bg-emerald-500/15 text-emerald-500"
+              : rejected
+                ? "bg-destructive/15 text-destructive"
+                : "bg-foreground/10 text-foreground/70"
+          }`}
+          data-testid="hitl-verdict"
+        >
+          {verdict}
+        </span>
+      )}
+      {decidedBy && (
+        <span
+          className="inline-flex items-center rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-foreground/70"
+          data-testid="hitl-decided-by"
+        >
+          {t("audit.decidedBy", "by")} {decidedBy}
+        </span>
+      )}
+      {automated && (
+        <span
+          className="inline-flex items-center rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-500"
+          data-testid="hitl-automated"
+        >
+          {t("audit.automated", "automated")}
+        </span>
+      )}
+      {note && <span className="text-[11px] italic text-foreground/60">“{note}”</span>}
+    </div>
+  );
+}
+
 function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTranslation>["t"] }) {
   const style = getTaskStyle(entry.taskType);
   const Icon = style.icon;
@@ -195,6 +252,10 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
           </span>
         )}
       </div>
+
+      {/* HITL human-oversight decision — surface verdict / decider / note as
+          first-class fields rather than burying them in the output JSON. */}
+      {entry.taskType === "hitl" && <HitlDecisionSummary output={entry.output} t={t} />}
 
       {/* Actions */}
       {entry.actions && entry.actions.length > 0 && (

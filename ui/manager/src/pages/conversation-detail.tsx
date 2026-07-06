@@ -39,8 +39,12 @@ import type {
 import { extractInput, extractOutput, extractActions } from "@/lib/api/conversations";
 import { useNavigate } from "react-router-dom";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
-import { useResumeConversation, useCancelConversation } from "@/hooks/use-hitl";
-import type { HitlVerdict } from "@/lib/api/hitl";
+import {
+  useResumeConversation,
+  useCancelConversation,
+  useApprovalStatus,
+} from "@/hooks/use-hitl";
+import type { HitlVerdict, ToolCallDecision } from "@/lib/api/hitl";
 
 // Status icons — labels resolved via i18n in component
 const stateIcons: Record<
@@ -78,6 +82,13 @@ export function ConversationDetailPage() {
 
   const { data: conversation, isLoading, isError, refetch } =
     useSimpleConversation(id!, true, false);
+
+  // Structured pause details (incl. TOOL_CALL per-call tool names + redacted
+  // arguments) — fetched only while the conversation is actually paused.
+  const { data: approvalStatus } = useApprovalStatus(
+    id,
+    conversation?.conversationState === "AWAITING_HUMAN",
+  );
 
   function handleDelete() {
     deleteMutation.mutate(
@@ -231,10 +242,17 @@ export function ConversationDetailPage() {
           pausedAt={conversation.hitlPausedAt}
           timeoutPolicy={conversation.hitlTimeoutPolicy}
           approvalTimeout={conversation.hitlApprovalTimeout}
+          pauseDetails={approvalStatus?.pauseDetails ?? null}
+          pauseDetailsPending={!approvalStatus}
           isSubmitting={resumeMutation.isPending || cancelMutation.isPending}
-          onDecide={(verdict: HitlVerdict, note?: string) => {
+          onDecide={(
+            verdict: HitlVerdict,
+            note?: string,
+            _taskApprovals?: Record<string, string>,
+            toolDecisions?: Record<string, ToolCallDecision>,
+          ) => {
             resumeMutation.mutate(
-              { conversationId: id!, decision: { verdict, note } },
+              { conversationId: id!, decision: { verdict, note, toolDecisions } },
               {
                 onSuccess: () => {
                   toast.success(verdict === "APPROVED"
