@@ -177,6 +177,63 @@ describe("ChatPanel", () => {
     expect(await screen.findByText("●●●●●●●●")).toBeInTheDocument();
   });
 
+  it("blocks attachments in secret mode — disables attach, drops staged files, never forwards", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+
+    let sentBody:
+      | { input?: string; context?: Record<string, { value?: { storageRef?: string } }> }
+      | null = null;
+    let deleteCalled = false;
+    server.use(
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json(
+          { storageRef: "ref-secret", fileName: "secret.txt", mimeType: "text/plain", sizeBytes: 3, forwardableInline: true },
+          { status: 201 },
+        ),
+      ),
+      http.delete("*/conversations/conv1/attachments/:storageRef", () => {
+        deleteCalled = true;
+        return HttpResponse.json({ deleted: true });
+      }),
+      http.post("*/agents/conv1", async ({ request }) => {
+        sentBody = (await request.json()) as typeof sentBody;
+        return HttpResponse.json({ conversationOutputs: [] });
+      }),
+    );
+
+    renderWithProviders(<ChatPanel />);
+
+    // Stage a file and wait for the upload to settle (remove button only shows
+    // once status leaves "uploading"), then flip secret mode on.
+    await user.upload(
+      screen.getByTestId("chat-file-input"),
+      new File(["abc"], "secret.txt", { type: "text/plain" }),
+    );
+    await screen.findByTestId("attachment-remove");
+    await user.click(screen.getByTestId("chat-secret-toggle"));
+
+    // Attach is disabled and the staged chip is dropped (its blob deleted).
+    expect(screen.getByTestId("chat-attach-btn")).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(deleteCalled).toBe(true));
+
+    // Send the masked secret — no attachment_* context, no chip in the bubble.
+    await user.type(screen.getByTestId("chat-input"), "my-secret");
+    await user.click(screen.getByTestId("chat-send"));
+
+    expect(await screen.findByText("●●●●●●●●")).toBeInTheDocument();
+    // The secret turn is sent with the secret flag but NO attachment_* context.
+    await waitFor(() => {
+      expect(sentBody?.context?.secretInput).toBeTruthy();
+      expect(sentBody?.context?.attachment_0).toBeUndefined();
+    });
+    expect(screen.queryByTestId("message-attachments")).not.toBeInTheDocument();
+  });
+
   it("uploads a picked file as a pending attachment, not an inline text message", async () => {
     const user = userEvent.setup();
     useChatStore.getState().setSelectedAgent("agent1", "Test Agent");

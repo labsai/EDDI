@@ -195,8 +195,42 @@ export function ChatPanel() {
     [],
   );
 
+  // Discard a staged attachment: free its object URL and best-effort delete the
+  // uploaded blob server-side. Runs OUTSIDE any state updater (StrictMode
+  // double-invokes updaters, which would double-fire the revoke / DELETE).
+  const discardPending = useCallback(
+    (a: PendingAttachment) => {
+      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      if (a.status === "ready" && a.result && conversationId) {
+        deleteAttachment(conversationId, a.result.storageRef).catch(() => {});
+      }
+    },
+    [conversationId],
+  );
+
+  // Secret mode and attachments are mutually exclusive — a masked turn must not
+  // carry a file. Discard anything staged the moment secret mode switches on.
+  useEffect(() => {
+    if (!isSecretMode || pendingRef.current.length === 0) return;
+    pendingRef.current.forEach(discardPending);
+    pendingRef.current = [];
+    setPendingAttachments([]);
+  }, [isSecretMode, discardPending]);
+
   const handleSend = useCallback(
     (message: string, isSecret?: boolean) => {
+      // Secret turns never carry attachments — a masked bubble must not leak a
+      // filename or thumbnail. Discard anything staged (freeing previews and
+      // best-effort deleting the blob) instead of forwarding or displaying it.
+      if (isSecret) {
+        if (!message.trim()) return; // nothing to send once attachments are dropped
+        pendingAttachments.forEach(discardPending);
+        pendingRef.current = [];
+        setPendingAttachments([]);
+        sendMessage.mutate({ message, isSecret: true });
+        return;
+      }
+
       // Forward only successfully-uploaded attachments as context this turn.
       const sent: SentAttachment[] = pendingAttachments
         .filter((a): a is PendingAttachment & { result: AttachmentResult } =>
@@ -228,7 +262,7 @@ export function ChatPanel() {
       pendingRef.current = [];
       setPendingAttachments([]);
     },
-    [sendMessage, pendingAttachments]
+    [sendMessage, pendingAttachments, discardPending]
   );
 
   const handleQuickReply = useCallback(
@@ -250,8 +284,7 @@ export function ChatPanel() {
       const room = Math.max(0, MAX_ATTACHMENTS_PER_TURN - activeCount);
       if (files.length > room) {
         toast.error(
-          t("chat.attachLimit", {
-            defaultValue: "You can attach up to {{max}} files per message.",
+          t("chat.attachLimit", "You can attach up to {{max}} files per message.", {
             max: MAX_ATTACHMENTS_PER_TURN,
           })
         );
@@ -279,11 +312,11 @@ export function ChatPanel() {
             );
             if (result.forwardableInline === false) {
               toast.warning(
-                t("chat.attachTooLargeToForward", {
-                  defaultValue:
-                    "{{name}} is stored but too large to send to the model inline.",
-                  name: result.fileName || entry.file.name,
-                })
+                t(
+                  "chat.attachTooLargeToForward",
+                  "{{name}} is stored but too large to send to the model inline.",
+                  { name: result.fileName || entry.file.name },
+                )
               );
             }
           } catch (err) {
@@ -306,17 +339,11 @@ export function ChatPanel() {
 
   const handleRemoveAttachment = useCallback(
     (id: string) => {
-      // Side effects run OUTSIDE the state updater — StrictMode double-invokes
-      // updaters, which would fire a duplicate DELETE / revoke.
       const target = pendingRef.current.find((a) => a.id === id);
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
-      // Best-effort server cleanup for blobs that already uploaded.
-      if (target?.status === "ready" && target.result && conversationId) {
-        deleteAttachment(conversationId, target.result.storageRef).catch(() => {});
-      }
+      if (target) discardPending(target);
       setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
     },
-    [conversationId]
+    [discardPending]
   );
 
   // ── Rerun last step ──
@@ -862,12 +889,15 @@ function ChatInputWithSecretToggle({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={!hasConversation || isUploading}
+          disabled={!hasConversation || isUploading || isSecretMode}
           className={cn(
             "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors",
             isUploading
               ? "bg-primary/10 text-primary animate-pulse"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            // Attachments and secret mode are mutually exclusive (a masked turn
+            // must not carry a file).
+            isSecretMode && "cursor-not-allowed opacity-40"
           )}
           title={t("chat.attach", "Attach file")}
           data-testid="chat-attach-btn"

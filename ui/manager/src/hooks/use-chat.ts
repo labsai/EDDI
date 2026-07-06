@@ -346,22 +346,26 @@ export function useSendMessage() {
       }
 
       // Build the turn context: secret-input flag + attachment_* keys.
+      // A secret turn never forwards attachments — a masked turn must not leak a
+      // file to the model. The UI blocks the combination up front, but guard
+      // here too since secret input can also be backend-requested.
       const context: Record<string, unknown> = {};
       if (isSecret) {
         context.secretInput = { type: "string", value: "true" };
       }
-      if (attachments?.length) {
+      if (attachments?.length && !isSecret) {
         Object.assign(context, buildAttachmentContext(attachments));
       }
       const hasContext = Object.keys(context).length > 0;
 
-      // Add user message (masked if secret), carrying attachment chips for display.
+      // Add user message (masked if secret), carrying attachment chips for
+      // display — never on a secret turn (they'd unmask the filename/thumbnail).
       state.addMessage({
         id: `user-${Date.now()}`,
         role: "user",
         content: isSecret ? "●●●●●●●●" : message,
         timestamp: Date.now(),
-        attachments: attachments?.length
+        attachments: !isSecret && attachments?.length
           ? attachments.map(toMessageAttachment)
           : undefined,
       });
