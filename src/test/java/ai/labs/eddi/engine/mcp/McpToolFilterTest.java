@@ -136,7 +136,7 @@ class McpToolFilterTest {
     @Test
     void test_allMcpToolMethods_areWhitelisted() {
         Map<String, String> declaredToolToClass = new LinkedHashMap<>();
-        for (Class<?> clazz : discoverMcpPackageClasses()) {
+        for (Class<?> clazz : discoverClassesUnder(McpToolFilter.class.getPackageName(), false)) {
             for (Method method : clazz.getDeclaredMethods()) {
                 var toolAnnotation = method.getAnnotation(io.quarkiverse.mcp.server.Tool.class);
                 if (toolAnnotation == null) {
@@ -191,16 +191,80 @@ class McpToolFilterTest {
     }
 
     /**
-     * Enumerates the top-level classes in the {@code ai.labs.eddi.engine.mcp}
-     * package by listing the compiled {@code .class} files next to
-     * {@link McpToolFilter} (which resolves to {@code target/classes/...} under a
-     * Maven/Surefire run with exploded output).
+     * The inverse guard: no INTERNAL langchain4j agent tool
+     * ({@code dev.langchain4j.agent.tool.Tool}) may share a name with a whitelisted
+     * MCP tool. Those tools are meant for agent-pipeline execution only, but the
+     * {@code ToolFilter} keys purely on the tool NAME — so a name collision would
+     * expose an internal tool (e.g. arbitrary configured-httpcall execution via
+     * {@code EddiToolBridge}) to external MCP clients. This turns the one-time
+     * manual "no collision" check into a build-time invariant: rename either side
+     * or the build goes red.
+     * <p>
+     * Effective names are structurally disjoint today (built-ins use camelCase
+     * method names, MCP tools use snake_case), but a future snake_case
+     * {@code @Tool(name = ...)} or renamed method could collide silently without
+     * this guard.
      */
-    private static List<Class<?>> discoverMcpPackageClasses() {
-        String pkg = McpToolFilter.class.getPackageName();
+    @Test
+    void test_noLangchain4jBuiltinToolIsWhitelisted() {
+        Map<String, String> builtinTools = new LinkedHashMap<>();
+        for (Class<?> clazz : discoverClassesUnder("ai.labs.eddi.modules.llm.tools", true)) {
+            for (Method method : clazz.getDeclaredMethods()) {
+                var tool = method.getAnnotation(dev.langchain4j.agent.tool.Tool.class);
+                if (tool == null) {
+                    continue;
+                }
+                // langchain4j: @Tool value() is the description; name() defaults to ""
+                // and the effective tool name is then the method name.
+                String explicit = tool.name();
+                String name = (explicit == null || explicit.isEmpty()) ? method.getName() : explicit;
+                builtinTools.put(name, clazz.getSimpleName());
+            }
+        }
+
+        assertFalse(builtinTools.isEmpty(),
+                "Discovery found no langchain4j @Tool methods under modules.llm.tools — the scan is broken");
+
+        // Guard the scan against a vacuous pass — these are real built-in tool names.
+        Set<String> anchors = new LinkedHashSet<>(List.of("calculate", "searchWeb", "rememberFact"));
+        Set<String> missingAnchors = new LinkedHashSet<>(anchors);
+        missingAnchors.removeAll(builtinTools.keySet());
+        assertTrue(missingAnchors.isEmpty(),
+                "langchain4j tool discovery is incomplete (missing anchors): " + missingAnchors);
+
+        Map<String, String> leaked = new LinkedHashMap<>();
+        for (var entry : builtinTools.entrySet()) {
+            var toolInfo = mock(ToolInfo.class);
+            when(toolInfo.name()).thenReturn(entry.getKey());
+            if (filter.test(toolInfo, (FilterContext) null)) {
+                leaked.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        assertTrue(leaked.isEmpty(),
+                "These internal langchain4j agent tools share a name with a whitelisted MCP tool and would be "
+                        + "exposed to external MCP clients — rename the tool or remove the whitelist entry. "
+                        + "{toolName=class}: " + leaked);
+    }
+
+    /**
+     * Enumerates the classes under a package by scanning the compiled
+     * {@code .class} files next to {@link McpToolFilter} (which resolves to
+     * {@code target/classes/...} under a Maven/Surefire run with exploded output).
+     * Classes are loaded WITHOUT running their static initializers
+     * ({@code Class.forName(name, false, ...)}) — reflecting over annotations needs
+     * no initialization, so the scan is free of any bean/config static-init side
+     * effects.
+     *
+     * @param pkg
+     *            fully-qualified package name to scan
+     * @param recursive
+     *            whether to descend into sub-packages
+     */
+    private static List<Class<?>> discoverClassesUnder(String pkg, boolean recursive) {
         var codeSource = McpToolFilter.class.getProtectionDomain().getCodeSource();
         assertNotNull(codeSource,
-                "Cannot locate the compiled-classes code source to scan for MCP tools");
+                "Cannot locate the compiled-classes code source to scan for tools");
         Path classesRoot;
         try {
             classesRoot = Paths.get(codeSource.getLocation().toURI());
@@ -209,26 +273,27 @@ class McpToolFilterTest {
         }
         Path pkgDir = classesRoot.resolve(pkg.replace('.', '/'));
         assertTrue(Files.isDirectory(pkgDir),
-                "Expected the compiled MCP package directory at " + pkgDir
+                "Expected the compiled package directory at " + pkgDir
                         + " (run under `mvn test` with exploded classes)");
 
         List<Class<?>> classes = new ArrayList<>();
-        try (var paths = Files.list(pkgDir)) {
-            paths.map(p -> p.getFileName().toString())
-                    .filter(fn -> fn.endsWith(".class"))
-                    .map(fn -> fn.substring(0, fn.length() - ".class".length()))
-                    // Skip nested/inner classes ($) — MCP @Tool methods are top-level.
-                    .filter(simple -> !simple.contains("$"))
+        try (var paths = recursive ? Files.walk(pkgDir) : Files.list(pkgDir)) {
+            paths.filter(Files::isRegularFile)
+                    .map(p -> classesRoot.relativize(p).toString().replace('\\', '/'))
+                    .filter(rel -> rel.endsWith(".class"))
+                    .map(rel -> rel.substring(0, rel.length() - ".class".length()).replace('/', '.'))
+                    // Skip nested/inner classes ($) and package-info — tool methods are top-level.
+                    .filter(fqcn -> !fqcn.contains("$") && !fqcn.endsWith("package-info"))
                     .sorted()
-                    .forEach(simple -> {
+                    .forEach(fqcn -> {
                         try {
-                            classes.add(Class.forName(pkg + "." + simple));
+                            classes.add(Class.forName(fqcn, false, McpToolFilterTest.class.getClassLoader()));
                         } catch (ClassNotFoundException e) {
-                            throw new IllegalStateException("Cannot load discovered MCP class " + simple, e);
+                            throw new IllegalStateException("Cannot load discovered class " + fqcn, e);
                         }
                     });
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to scan MCP package directory " + pkgDir, e);
+            throw new IllegalStateException("Failed to scan package directory " + pkgDir, e);
         }
         return classes;
     }

@@ -573,15 +573,19 @@ To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.jav
 
 - The MCP endpoint inherits EDDI's existing OIDC/Keycloak authentication
 - When auth is enabled (`quarkus.oidc.tenant-enabled=true`), MCP clients must provide valid tokens
-- Admin tools (deploy, undeploy, delete) should be production to authorized users via `@RolesAllowed`
+- Authorization is enforced **in-code**, not via `@RolesAllowed`: most tools call `requireRole(identity, authEnabled, "<role>")` (`McpToolUtils`), and the HITL tools use the shared `HitlAccessGuard` (per-conversation owner / `eddi-admin` / `eddi-approver`). When `authorization.enabled=false` (the default dev posture) `requireRole` is a no-op — production is guarded by `AuthStartupGuard`, which fails startup if OIDC is disabled.
 - **Future**: Per-agent MCP access control via agent configuration for multi-tenant SaaS
 
-### Recommended Role Mapping
+### Role Mapping
 
-| Role        | Tools                                                                                                                                                                                                            |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mcp-user`  | `list_agents`, `discover_agents`, `create_conversation`, `talk_to_agent`, `chat_with_agent`, `chat_managed`, `read_conversation*`, `list_agent_triggers`, `read_agent_logs`, `read_audit_trail`, `describe_discussion_styles`, `discuss_with_group`, `read_group_conversation`, `list_group_conversations` |
-| `mcp-admin` | All user tools + `deploy_agent`, `undeploy_agent`, `create_agent`, `delete_agent`, `update_agent`, `setup_agent`, `create_api_agent`, resource CRUD, `apply_agent_changes`, `list_agent_resources`, trigger CRUD, group CRUD (`create_group`, `update_group`, `delete_group`) |
+These are the **actual Keycloak role strings** the tools check (not aliases). Roles are additive in intent — grant an editor/admin the read scope too. For exact per-tool roles see the code (`requireRole` calls) and the per-category sections above (HITL / Memory / GDPR).
+
+| Role           | Scope |
+| -------------- | ----- |
+| `eddi-viewer`  | Read-only + running conversations: `list_*`, `read_*`, `get_*`, `discover_agents`, `chat_with_agent`/`talk_to_agent`/`chat_managed`, `read_agent_logs`/`read_audit_trail`, and the memory **read** tools (`list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `count_user_memories`) |
+| `eddi-editor`  | Viewer + authoring: `setup_agent`, `create_api_agent`, group create/update, resource create/update, trigger/schedule/channel authoring |
+| `eddi-admin`   | Editor + destructive/deployment ops: `deploy_agent`/`undeploy_agent`, `delete_*`, resource delete, and the **memory writes** (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`) + **GDPR** tools (`delete_user_data`, `export_user_data`) |
+| `eddi-approver`| Decide HITL approvals (with the conversation owner and `eddi-admin`): `resume_conversation`, `approve_group_phase`, `cancel_*`, `*_pending_approvals`, `*_approval_status` — see [HITL](hitl.md#who-may-decide) |
 
 ## Sentiment Monitoring
 

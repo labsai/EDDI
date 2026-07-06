@@ -24,7 +24,12 @@ A client reported that new HITL MCP tools were "implemented but not available." 
 
 **Decision:** whitelist (not delete) memory/GDPR — they were intended MCP tools (Phase 11a persistent memory, GDPR/CCPA framework) that were simply never wired into the filter; the annotation encodes intent to expose.
 
-**Method:** verified the whole diagnosis against source (annotation imports, `ToolInfo` API via `javap`, collision analysis) before changing anything. `./mvnw -o test -Dtest=McpToolFilterTest` green. **Nothing pushed** — that stays the maintainer's call.
+**Follow-up — adversarial code review + fixes:** the commit was then put through a 4-dimension adversarial review (whitelist-correctness, test-robustness, security/authz, docs-completeness), each finding skeptic-verified. Whitelist-correctness and test-robustness came back **clean**; 3 low-severity findings survived and 2 were addressed here:
+- **Doc role-name fix** (`docs/mcp-server.md`): the "Recommended Role Mapping" table named non-existent roles `mcp-user`/`mcp-admin` and cited `@RolesAllowed`; the code actually enforces `eddi-viewer`/`eddi-editor`/`eddi-admin` (via `requireRole`) and `eddi-approver`/owner (via `HitlAccessGuard`). Rewrote the section with the real role strings and mechanism; this became load-bearing now that 10 role-guarded memory/GDPR tools are reachable.
+- **Collision-guard test** (`McpToolFilterTest.test_noLangchain4jBuiltinToolIsWhitelisted`): the "no name collision with langchain4j built-ins" property was a one-time manual check. Added the **inverse** build-time guard — auto-discovers every `dev.langchain4j.agent.tool.Tool` under `modules.llm.tools` and fails if any effective name is whitelisted (would leak an internal agent tool to MCP). Also hardened both discovery helpers to load classes **without static init** (`Class.forName(name, false, …)`).
+- **Not fixed (decision deferred):** the memory/GDPR mutation tools lack an independent MCP mutation kill-switch like HITL's `eddi.mcp.hitl.mutations.enabled` — flagged low, consistent with the pre-existing posture of other whitelisted destructive tools (`delete_agent`, etc.); left for the maintainer to decide whether to add symmetric kill-switches across the MCP mutation surface.
+
+**Method:** verified the whole diagnosis against source (annotation imports, `ToolInfo`/langchain4j `@Tool` APIs via `javap`, collision analysis) before changing anything; both regression guards were proven to fail on an injected regression, then restored. `./mvnw -o test -Dtest=McpToolFilterTest` → 90 green; `./mvnw -o validate` clean. **Nothing pushed** — that stays the maintainer's call.
 
 ---
 
