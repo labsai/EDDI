@@ -247,7 +247,23 @@
     "hitlTimeoutInvalid": "有限策略需要正的 ISO-8601 时长，例如 PT15M。",
     "hitlTimeoutHint": "例如 PT30S、PT15M、PT2H。",
     "hitlPauseReason": "审批原因（对审批者显示）",
-    "hitlPauseReasonPlaceholder": "例如：删除需要经理批准"
+    "hitlPauseReasonPlaceholder": "例如：删除需要经理批准",
+    "toolApprovalsEnable": "拦截特定工具调用以供审批",
+    "toolApprovalsDesc": "当模型调用匹配的工具时，在其运行前暂停。空的“需要审批”列表将禁用工具拦截。",
+    "toolRequireApproval": "需要审批（glob 模式，每行一个）",
+    "toolPatternHint": "“*”是唯一的通配符。可选的来源前缀：",
+    "toolExempt": "豁免（始终允许，每行一个）",
+    "toolMaxPauses": "每轮最大暂停次数 (1–10)",
+    "toolMaxAuto": "每轮最大自动审批次数 (0–10)",
+    "toolOnNoProgress": "无进展时重新暂停",
+    "toolTimeoutPolicy": "工具暂停超时策略",
+    "toolTimeoutInherit": "继承自智能体",
+    "toolAutoApproveDemotion": "智能体级别的 AUTO_APPROVE 不适用于工具审批——除非你在上方设置工具暂停超时策略，否则工具暂停将无限期等待。",
+    "toolPauseReason": "审批者理由（允许使用 {toolNames}）",
+    "toolPauseReasonPlaceholder": "例如：{toolNames} 需要审批",
+    "toolPendingMessage": "暂停期间显示给终端用户的消息（允许使用 {toolNames}）",
+    "toolPendingMessagePlaceholder": "例如：正在等待人工审批 {toolNames}…",
+    "toolInGroupTurns": "在群组回合中，成员被拦截的工具调用将被自动拒绝 (REJECT)。"
   },
   "wizard": {
     "title": "Agent 向导"
@@ -711,7 +727,10 @@
     "toolCount": "已选 {{selected}}/{{total}}",
     "toolSources": "工作流工具来源",
     "toolSourcesInfo": "默认启用两种来源 — 所有工作流 HTTP 调用和 MCP 调用自动公开为 LLM 工具。禁用某来源以排除。",
-    "included": "已包含"
+    "included": "已包含",
+    "toolApprovals": "工具审批拦截（按任务）",
+    "toolApprovalsEnable": "为此任务覆盖工具审批",
+    "toolApprovalsDesc": "仅为此任务覆盖智能体级别的工具审批——是完全替换，而非合并。"
   },
   "outputEditor": {
     "language": "语言",
@@ -975,7 +994,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "由",
+    "automated": "自动"
   },
   "schedules": {
     "title": "定时任务",
@@ -1024,7 +1045,9 @@
     "retryError": "重试失败",
     "deleteSuccess": "定时任务已删除",
     "deleteError": "定时任务删除失败",
-    "fireHistory": "执行历史"
+    "fireHistory": "执行历史",
+    "hitlTimeout": "HITL 超时",
+    "hitlTimeoutHint": "系统管理的 HITL 审批超时——请通过会话的审批来处理，而非在此处。"
   },
   "debugDrawer": {
     "title": "调试",
@@ -1393,6 +1416,7 @@
     "guidedSetupDesc": "使用分步向导设置LLM模型、提示词及默认规则。"
   },
   "groups": {
+    "hitlSelectPhase": "请至少选择一个需要审批的阶段。",
     "empty": "暂无群组",
     "emptyDescription": "群组允许多个 Agent 在结构化讨论中协作。",
     "createGroup": "创建群组",
@@ -1515,7 +1539,14 @@
     "showConfig": "显示配置面板",
     "hitlSection": "人工批准",
     "hitlApprovalPoints": "批准于",
-    "hitlOnTaskRejection": "拒绝时"
+    "hitlOnTaskRejection": "拒绝时",
+    "hitlEdit": "编辑",
+    "hitlSaved": "审批设置已保存",
+    "hitlEnable": "需要人工审批",
+    "hitlApprovalPhases": "需要审批的阶段",
+    "hitlNotConfigured": "未配置审批拦截——点击“编辑”以要求人工审批。",
+    "driftTitle": "群组配置在暂停期间发生更改",
+    "driftRecovery": "由于群组的阶段已更改，恢复操作已中止。讨论仍在等待审批——请修正配置（在“配置”面板中点击“编辑”）并再次批准，或将其取消。"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -1920,9 +1951,15 @@
     "triggers": "触发器",
     "type": "频道类型",
     "webhookHint": "将此 URL 粘贴到您的 Slack 应用的 Event Subscriptions → Request URL 字段中。",
-    "webhookUrl": "Webhook URL"
+    "webhookUrl": "Webhook URL",
+    "hitlSection": "人机协同审批 (HITL)（可选）",
+    "hitlApprovalChannel": "审批频道 ID",
+    "hitlApprovalChannelHint": "会话暂停时接收审批卡片的 Slack 频道。",
+    "hitlApproverUserIds": "审批者用户 ID",
+    "hitlApproverUserIdsHint": "以逗号分隔、允许通过按钮进行审批的 Slack 用户 ID。若无此列表，则不渲染按钮（默认关闭）。"
   },
   "hitl": {
+    "loadingApprovalDetails": "正在加载审批详情…",
     "awaitingHuman": "等待人工",
     "awaitingApproval": "等待审批",
     "approve": "批准",
@@ -1960,6 +1997,27 @@
     "rejectionFail": "将任务标记为失败",
     "rejectionRetry": "重试任务",
     "groupsTruncated": "存在的群组审批多于此处显示的数量。",
-    "groupsLoadError": "无法加载群组审批。"
+    "groupsLoadError": "无法加载群组审批。",
+    "toolApprovalRequired": "需要工具审批",
+    "toolCallsAwaiting": "等待审批的工具调用",
+    "executedUngated": "已执行（未拦截）",
+    "outcomeUnknown": "上一次审批在执行过程中被中断——其影响未知；重试前请在外部核实。",
+    "outcomeUnknownShort": "结果未知",
+    "toolApprovalHint": "批准将应用你对每次调用的选择（未更改的调用将被批准）。拒绝将拒绝整批调用。",
+    "gateReason": "匹配的模式",
+    "argsTruncated": "参数已截断",
+    "amendArguments": "修改参数（可选）",
+    "amendPlaceholder": "用于完整替换的 JSON 对象，例如 {\"to\":\"ops@acme.com\"}。留空则保留原始值。",
+    "amendTruncated": "无法修改参数已被截断的调用——请原样批准或拒绝。",
+    "amendInvalidJson": "修改后的参数必须是有效的 JSON 对象。",
+    "amendTooLarge": "修改后的参数过大。",
+    "review": "审阅",
+    "tool": "工具",
+    "scopeAll": "显示系统中所有待审批项。",
+    "scopeOwn": "显示你的会话的待审批项。",
+    "chatPaused": "此会话正在等待人工审批。",
+    "noProgressWaitForHuman": "等待人工处理",
+    "noProgressAutoReject": "自动拒绝",
+    "noProgressAbort": "中止"
   }
 }

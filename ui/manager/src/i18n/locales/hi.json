@@ -247,7 +247,23 @@
     "hitlTimeoutInvalid": "एक सीमित नीति के लिए धनात्मक ISO-8601 अवधि आवश्यक है, जैसे PT15M।",
     "hitlTimeoutHint": "जैसे PT30S, PT15M, PT2H।",
     "hitlPauseReason": "स्वीकृति का कारण (अनुमोदकों को दिखाया गया)",
-    "hitlPauseReasonPlaceholder": "उदा. हटाने के लिए प्रबंधक की स्वीकृति आवश्यक है"
+    "hitlPauseReasonPlaceholder": "उदा. हटाने के लिए प्रबंधक की स्वीकृति आवश्यक है",
+    "toolApprovalsEnable": "विशिष्ट टूल कॉल को अनुमोदन के लिए गेट करें",
+    "toolApprovalsDesc": "जब मॉडल किसी मिलान वाले टूल को आमंत्रित करे तो उसके चलने से पहले रुकें। खाली \"अनुमोदन आवश्यक\" सूची टूल गेटिंग को अक्षम कर देती है।",
+    "toolRequireApproval": "अनुमोदन आवश्यक (ग्लोब पैटर्न, प्रति पंक्ति एक)",
+    "toolPatternHint": "'*' एकमात्र वाइल्डकार्ड है। वैकल्पिक स्रोत उपसर्ग:",
+    "toolExempt": "छूट प्राप्त (हमेशा अनुमत, प्रति पंक्ति एक)",
+    "toolMaxPauses": "अधिकतम विराम / टर्न (1–10)",
+    "toolMaxAuto": "अधिकतम स्वतः-अनुमोदन / टर्न (0–10)",
+    "toolOnNoProgress": "बिना-प्रगति पुनः-विराम पर",
+    "toolTimeoutPolicy": "टूल-विराम टाइमआउट नीति",
+    "toolTimeoutInherit": "एजेंट से इनहेरिट करें",
+    "toolAutoApproveDemotion": "एजेंट-स्तरीय AUTO_APPROVE टूल अनुमोदनों पर लागू नहीं होता — जब तक आप ऊपर टूल-विराम टाइमआउट नीति सेट नहीं करते, टूल विराम अनिश्चित काल तक प्रतीक्षा करेंगे।",
+    "toolPauseReason": "अनुमोदक कारण ({toolNames} अनुमत)",
+    "toolPauseReasonPlaceholder": "जैसे {toolNames} के लिए अनुमोदन आवश्यक",
+    "toolPendingMessage": "विराम के दौरान अंतिम-उपयोगकर्ता संदेश ({toolNames} अनुमत)",
+    "toolPendingMessagePlaceholder": "जैसे {toolNames} को अनुमोदित करने के लिए मानव की प्रतीक्षा…",
+    "toolInGroupTurns": "समूह टर्न के भीतर, किसी सदस्य की गेटेड टूल कॉल स्वतः अस्वीकृत (REJECT) होती है।"
   },
   "wizard": {
     "title": "Agent विज़ार्ड"
@@ -711,7 +727,10 @@
     "toolCount": "{{total}} में से {{selected}} चयनित",
     "toolSources": "वर्कफ़्लो उपकरण स्रोत",
     "toolSourcesInfo": "दोनों स्रोत डिफ़ॉल्ट रूप से सक्षम हैं — सभी वर्कफ़्लो HTTP कॉल और MCP कॉल स्वतः LLM उपकरण के रूप में उपलब्ध कराए जाते हैं। बहिष्कृत करने के लिए स्रोत अक्षम करें।",
-    "included": "शामिल"
+    "included": "शामिल",
+    "toolApprovals": "टूल अनुमोदन गेटिंग (प्रति-कार्य)",
+    "toolApprovalsEnable": "इस कार्य के लिए टूल अनुमोदन ओवरराइड करें",
+    "toolApprovalsDesc": "केवल इस कार्य के लिए एजेंट-स्तरीय टूल अनुमोदनों को ओवरराइड करता है — यह पूर्ण प्रतिस्थापन है, विलय नहीं।"
   },
   "outputEditor": {
     "language": "भाषा",
@@ -975,7 +994,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "द्वारा",
+    "automated": "स्वचालित"
   },
   "schedules": {
     "title": "शेड्यूल",
@@ -1024,7 +1045,9 @@
     "retryError": "पुनः प्रयास विफल",
     "deleteSuccess": "शेड्यूल हटाया गया",
     "deleteError": "शेड्यूल हटाने में विफल",
-    "fireHistory": "निष्पादन इतिहास"
+    "fireHistory": "निष्पादन इतिहास",
+    "hitlTimeout": "HITL टाइमआउट",
+    "hitlTimeoutHint": "सिस्टम-प्रबंधित HITL अनुमोदन टाइमआउट — इसे यहाँ नहीं, बल्कि बातचीत के अनुमोदन के माध्यम से हल करें।"
   },
   "debugDrawer": {
     "title": "डीबग",
@@ -1393,6 +1416,7 @@
     "guidedSetupDesc": "LLM प्रदाता, प्रॉम्प्ट (Prompts) और डिप्लॉयमेंट (Deployment) के साथ चरण-दर-चरण विज़ार्ड।"
   },
   "groups": {
+    "hitlSelectPhase": "अनुमोदन के लिए कम से कम एक चरण चुनें।",
     "empty": "अभी तक कोई Group नहीं",
     "emptyDescription": "Group कई Agent को संरचित चर्चाओं में सहयोग करने देते हैं।",
     "createGroup": "Group बनाएं",
@@ -1515,7 +1539,14 @@
     "showConfig": "कॉन्फ़िगरेशन पैनल दिखाएँ",
     "hitlSection": "मानवीय स्वीकृति",
     "hitlApprovalPoints": "स्वीकृति पर",
-    "hitlOnTaskRejection": "अस्वीकृति पर"
+    "hitlOnTaskRejection": "अस्वीकृति पर",
+    "hitlEdit": "संपादित करें",
+    "hitlSaved": "अनुमोदन सेटिंग्स सहेजी गईं",
+    "hitlEnable": "मानव अनुमोदन आवश्यक",
+    "hitlApprovalPhases": "अनुमोदन आवश्यक चरण",
+    "hitlNotConfigured": "कोई अनुमोदन गेट कॉन्फ़िगर नहीं — मानव अनुमोदन आवश्यक करने के लिए संपादित करें पर क्लिक करें।",
+    "driftTitle": "विराम के दौरान समूह कॉन्फ़िगरेशन बदल गया",
+    "driftRecovery": "समूह के चरण बदलने के कारण पुनरारंभ निरस्त कर दिया गया। चर्चा अभी भी अनुमोदन की प्रतीक्षा में है — कॉन्फ़िगरेशन ठीक करें (कॉन्फ़िगरेशन पैनल में, संपादित करें) और पुनः अनुमोदित करें, या इसे रद्द करें।"
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",
@@ -1920,9 +1951,15 @@
     "triggers": "ट्रिगर",
     "type": "चैनल प्रकार",
     "webhookHint": "इस URL को अपने Slack ऐप के Event Subscriptions → Request URL फ़ील्ड में पेस्ट करें।",
-    "webhookUrl": "वेबहुक URL"
+    "webhookUrl": "वेबहुक URL",
+    "hitlSection": "ह्यूमन-इन-द-लूप अनुमोदन (वैकल्पिक)",
+    "hitlApprovalChannel": "अनुमोदन चैनल ID",
+    "hitlApprovalChannelHint": "Slack चैनल जिसे बातचीत रुकने पर अनुमोदन कार्ड प्राप्त होता है।",
+    "hitlApproverUserIds": "अनुमोदक उपयोगकर्ता ID",
+    "hitlApproverUserIdsHint": "अल्पविराम-पृथक Slack उपयोगकर्ता ID जिन्हें बटन के माध्यम से अनुमोदन की अनुमति है। इस सूची के बिना, बटन प्रदर्शित नहीं होते (फेल-क्लोज्ड)।"
   },
   "hitl": {
+    "loadingApprovalDetails": "अनुमोदन विवरण लोड हो रहा है…",
     "awaitingHuman": "मानव की प्रतीक्षा",
     "awaitingApproval": "अनुमोदन की प्रतीक्षा",
     "approve": "अनुमोदन",
@@ -1960,6 +1997,27 @@
     "rejectionFail": "कार्य विफल करें",
     "rejectionRetry": "कार्य पुनः प्रयास करें",
     "groupsTruncated": "यहाँ दिखाई गई से अधिक समूह स्वीकृतियाँ मौजूद हैं।",
-    "groupsLoadError": "समूह स्वीकृतियाँ लोड नहीं हो सकीं।"
+    "groupsLoadError": "समूह स्वीकृतियाँ लोड नहीं हो सकीं।",
+    "toolApprovalRequired": "टूल अनुमोदन आवश्यक",
+    "toolCallsAwaiting": "अनुमोदन की प्रतीक्षा में टूल कॉल",
+    "executedUngated": "पहले ही निष्पादित (अनगेटेड)",
+    "outcomeUnknown": "पिछला अनुमोदन निष्पादन के बीच में बाधित हुआ था — इसका प्रभाव अज्ञात है; पुनः प्रयास करने से पहले बाहरी रूप से सत्यापित करें।",
+    "outcomeUnknownShort": "परिणाम अज्ञात",
+    "toolApprovalHint": "अनुमोदन आपके प्रति-कॉल विकल्पों को लागू करता है (जिन कॉल को आपने नहीं बदला वे अनुमोदित हैं)। अस्वीकार पूरे बैच को अस्वीकार करता है।",
+    "gateReason": "मिलान पैटर्न",
+    "argsTruncated": "आर्ग्युमेंट छोटे किए गए",
+    "amendArguments": "आर्ग्युमेंट संशोधित करें (वैकल्पिक)",
+    "amendPlaceholder": "पूर्ण प्रतिस्थापन JSON ऑब्जेक्ट, जैसे {\"to\":\"ops@acme.com\"}। मूल रखने के लिए खाली छोड़ें।",
+    "amendTruncated": "जिस कॉल के आर्ग्युमेंट छोटे किए गए हों उसे संशोधित नहीं किया जा सकता — इसे यथावत अनुमोदित या अस्वीकार करें।",
+    "amendInvalidJson": "संशोधित आर्ग्युमेंट एक मान्य JSON ऑब्जेक्ट होना चाहिए।",
+    "amendTooLarge": "संशोधित आर्ग्युमेंट बहुत बड़े हैं।",
+    "review": "समीक्षा",
+    "tool": "टूल",
+    "scopeAll": "पूरे सिस्टम में सभी लंबित अनुमोदन दिखाए जा रहे हैं।",
+    "scopeOwn": "आपकी बातचीत के लंबित अनुमोदन दिखाए जा रहे हैं।",
+    "chatPaused": "यह बातचीत मानव अनुमोदन की प्रतीक्षा में है।",
+    "noProgressWaitForHuman": "मानव की प्रतीक्षा करें",
+    "noProgressAutoReject": "स्वतः-अस्वीकार",
+    "noProgressAbort": "निरस्त करें"
   }
 }

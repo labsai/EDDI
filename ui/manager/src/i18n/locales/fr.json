@@ -247,7 +247,23 @@
     "hitlTimeoutInvalid": "Une politique finie nécessite une durée ISO-8601 positive, p. ex. PT15M.",
     "hitlTimeoutHint": "p. ex. PT30S, PT15M, PT2H.",
     "hitlPauseReason": "Motif d'approbation (visible par les approbateurs)",
-    "hitlPauseReasonPlaceholder": "p. ex. La suppression nécessite l'accord du responsable"
+    "hitlPauseReasonPlaceholder": "p. ex. La suppression nécessite l'accord du responsable",
+    "toolApprovalsEnable": "Soumettre certains appels d'outils à approbation",
+    "toolApprovalsDesc": "Mettre en pause lorsque le modèle invoque un outil correspondant, avant son exécution. Une liste « exiger une approbation » vide désactive le contrôle des outils.",
+    "toolRequireApproval": "Exiger une approbation (motifs glob, un par ligne)",
+    "toolPatternHint": "'*' est le seul caractère générique. Préfixe de source facultatif :",
+    "toolExempt": "Exemptés (toujours autorisés, un par ligne)",
+    "toolMaxPauses": "Pauses max / tour (1–10)",
+    "toolMaxAuto": "Approbations automatiques max / tour (0–10)",
+    "toolOnNoProgress": "En cas de nouvelle pause sans progression",
+    "toolTimeoutPolicy": "Politique de délai d'expiration des pauses d'outil",
+    "toolTimeoutInherit": "Hériter de l'agent",
+    "toolAutoApproveDemotion": "Le AUTO_APPROVE au niveau de l'agent ne s'applique pas aux approbations d'outils — les pauses d'outil attendront indéfiniment sauf si vous définissez ci-dessus une politique de délai d'expiration des pauses d'outil.",
+    "toolPauseReason": "Motif de l'approbateur ({toolNames} autorisé)",
+    "toolPauseReasonPlaceholder": "p. ex. Approbation requise pour {toolNames}",
+    "toolPendingMessage": "Message pour l'utilisateur final pendant la pause ({toolNames} autorisé)",
+    "toolPendingMessagePlaceholder": "p. ex. En attente de l'approbation humaine de {toolNames}…",
+    "toolInGroupTurns": "Au sein d'un tour de groupe, l'appel d'outil contrôlé d'un membre est automatiquement rejeté (REJECT)."
   },
   "wizard": {
     "title": "Assistant Agent"
@@ -711,7 +727,10 @@
     "toolCount": "{{selected}} sur {{total}} sélectionnés",
     "toolSources": "Sources d’outils du workflow",
     "toolSourcesInfo": "Les deux sources sont actives par défaut — tous les appels HTTP et MCP du workflow sont automatiquement exposés en tant qu’outils LLM. Désactivez une source pour l’exclure.",
-    "included": "Inclus"
+    "included": "Inclus",
+    "toolApprovals": "Contrôle des approbations d'outils (par tâche)",
+    "toolApprovalsEnable": "Remplacer les approbations d'outils pour cette tâche",
+    "toolApprovalsDesc": "Remplace les approbations d'outils au niveau de l'agent pour CETTE tâche uniquement — un remplacement complet, pas une fusion."
   },
   "outputEditor": {
     "language": "Langue",
@@ -975,7 +994,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "par",
+    "automated": "automatisé"
   },
   "schedules": {
     "title": "Planifications",
@@ -1024,7 +1045,9 @@
     "retryError": "Échec de la relance",
     "deleteSuccess": "Planification supprimée",
     "deleteError": "Échec de la suppression",
-    "fireHistory": "Historique d'exécution"
+    "fireHistory": "Historique d'exécution",
+    "hitlTimeout": "Délai d'expiration HITL",
+    "hitlTimeoutHint": "Délai d'expiration d'approbation HITL géré par le système — résolvez-le via l'approbation de la conversation, pas ici."
   },
   "debugDrawer": {
     "title": "Débogage",
@@ -1393,6 +1416,7 @@
     "guidedSetupDesc": "Configuration pas à pas : fournisseur LLM, prompts et déploiement."
   },
   "groups": {
+    "hitlSelectPhase": "Sélectionnez au moins une phase nécessitant une approbation.",
     "empty": "Aucun groupe",
     "emptyDescription": "Les groupes permettent à plusieurs agents de collaborer lors de discussions structurées.",
     "createGroup": "Créer un groupe",
@@ -1515,7 +1539,14 @@
     "showConfig": "Afficher le panneau de configuration",
     "hitlSection": "Approbation humaine",
     "hitlApprovalPoints": "Approbation à",
-    "hitlOnTaskRejection": "En cas de rejet"
+    "hitlOnTaskRejection": "En cas de rejet",
+    "hitlEdit": "Modifier",
+    "hitlSaved": "Paramètres d'approbation enregistrés",
+    "hitlEnable": "Exiger une approbation humaine",
+    "hitlApprovalPhases": "Phases nécessitant une approbation",
+    "hitlNotConfigured": "Aucune barrière d'approbation configurée — cliquez sur Modifier pour exiger une approbation humaine.",
+    "driftTitle": "La configuration du groupe a changé pendant la pause",
+    "driftRecovery": "La reprise a été interrompue car les phases du groupe ont changé. La discussion est toujours en attente d'approbation — corrigez la configuration (Modifier, dans le panneau Configuration) et approuvez à nouveau, ou annulez-la."
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -1920,9 +1951,15 @@
     "triggers": "déclencheurs",
     "type": "Type de canal",
     "webhookHint": "Collez cette URL dans le champ Request URL des Event Subscriptions de votre application Slack.",
-    "webhookUrl": "URL du webhook"
+    "webhookUrl": "URL du webhook",
+    "hitlSection": "Approbations Human-in-the-Loop (facultatif)",
+    "hitlApprovalChannel": "ID du canal d'approbation",
+    "hitlApprovalChannelHint": "Canal Slack qui reçoit une carte d'approbation lorsqu'une conversation est mise en pause.",
+    "hitlApproverUserIds": "ID des utilisateurs approbateurs",
+    "hitlApproverUserIdsHint": "ID d'utilisateurs Slack séparés par des virgules, autorisés à approuver via les boutons. Sans cette liste, les boutons ne sont pas affichés (échec par fermeture)."
   },
   "hitl": {
+    "loadingApprovalDetails": "Chargement des détails d’approbation…",
     "awaitingHuman": "En attente humaine",
     "awaitingApproval": "En attente d'approbation",
     "approve": "Approuver",
@@ -1960,6 +1997,27 @@
     "rejectionFail": "Faire échouer la tâche",
     "rejectionRetry": "Réessayer la tâche",
     "groupsTruncated": "Il existe plus d'approbations de groupe que celles affichées ici.",
-    "groupsLoadError": "Impossible de charger les approbations de groupe."
+    "groupsLoadError": "Impossible de charger les approbations de groupe.",
+    "toolApprovalRequired": "Approbation d'outil requise",
+    "toolCallsAwaiting": "Appels d'outils en attente d'approbation",
+    "executedUngated": "Déjà exécuté (non contrôlé)",
+    "outcomeUnknown": "Une approbation précédente a été interrompue en cours d'exécution — son effet est inconnu ; vérifiez-le en externe avant de réessayer.",
+    "outcomeUnknownShort": "résultat inconnu",
+    "toolApprovalHint": "Approuver applique vos choix par appel (les appels que vous n'avez pas modifiés sont approuvés). Rejeter rejette l'ensemble du lot.",
+    "gateReason": "Motif correspondant",
+    "argsTruncated": "arguments tronqués",
+    "amendArguments": "Modifier les arguments (facultatif)",
+    "amendPlaceholder": "Objet JSON de remplacement complet, p. ex. {\"to\":\"ops@acme.com\"}. Laissez vide pour conserver l'original.",
+    "amendTruncated": "Impossible de modifier un appel dont les arguments ont été tronqués — approuvez-le ou rejetez-le tel quel.",
+    "amendInvalidJson": "Les arguments modifiés doivent être un objet JSON valide.",
+    "amendTooLarge": "Les arguments modifiés sont trop volumineux.",
+    "review": "Examiner",
+    "tool": "Outil",
+    "scopeAll": "Affichage de toutes les approbations en attente dans le système.",
+    "scopeOwn": "Affichage des approbations en attente pour vos conversations.",
+    "chatPaused": "Cette conversation est en attente d'approbation humaine.",
+    "noProgressWaitForHuman": "Attendre un humain",
+    "noProgressAutoReject": "Rejet automatique",
+    "noProgressAbort": "Interrompre"
   }
 }

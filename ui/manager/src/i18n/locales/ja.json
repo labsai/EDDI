@@ -247,7 +247,23 @@
     "hitlTimeoutInvalid": "有限のポリシーには正の ISO-8601 期間が必要です（例: PT15M）。",
     "hitlTimeoutHint": "例: PT30S、PT15M、PT2H。",
     "hitlPauseReason": "承認理由（承認者に表示）",
-    "hitlPauseReasonPlaceholder": "例: 削除にはマネージャーの承認が必要です"
+    "hitlPauseReasonPlaceholder": "例: 削除にはマネージャーの承認が必要です",
+    "toolApprovalsEnable": "特定のツール呼び出しを承認のためにゲートする",
+    "toolApprovalsDesc": "モデルが一致するツールを呼び出したとき、実行前に一時停止します。「承認が必要」リストが空の場合、ツールのゲートは無効になります。",
+    "toolRequireApproval": "承認が必要（グロブパターン、1 行に 1 つ）",
+    "toolPatternHint": "ワイルドカードは '*' のみです。ソースプレフィックスは任意:",
+    "toolExempt": "除外（常に許可、1 行に 1 つ）",
+    "toolMaxPauses": "ターンあたりの最大一時停止数 (1–10)",
+    "toolMaxAuto": "ターンあたりの最大自動承認数 (0–10)",
+    "toolOnNoProgress": "進展がない場合の再一時停止時",
+    "toolTimeoutPolicy": "ツール一時停止のタイムアウトポリシー",
+    "toolTimeoutInherit": "エージェントから継承",
+    "toolAutoApproveDemotion": "エージェントレベルの AUTO_APPROVE はツールの承認には適用されません。上でツール一時停止のタイムアウトポリシーを設定しない限り、ツールの一時停止は無期限に待機します。",
+    "toolPauseReason": "承認者向けの理由（{toolNames} が使用可能）",
+    "toolPauseReasonPlaceholder": "例: {toolNames} には承認が必要です",
+    "toolPendingMessage": "一時停止中にエンドユーザーへ表示するメッセージ（{toolNames} が使用可能）",
+    "toolPendingMessagePlaceholder": "例: {toolNames} の承認を人間が行うのを待っています…",
+    "toolInGroupTurns": "グループターン内では、メンバーのゲートされたツール呼び出しは自動的に拒否されます (REJECT)。"
   },
   "wizard": {
     "title": "Agent ウィザード"
@@ -711,7 +727,10 @@
     "toolCount": "{{total}}中 {{selected}}を選択",
     "toolSources": "ワークフローツールソース",
     "toolSourcesInfo": "両方のソースがデフォルトで有効です — ワークフローのHTTP呼び出しとMCP呼び出しはすべてLLMツールとして自動公開されます。ソースを無効にして除外できます。",
-    "included": "含まれています"
+    "included": "含まれています",
+    "toolApprovals": "ツール承認ゲート（タスクごと）",
+    "toolApprovalsEnable": "このタスクのツール承認を上書きする",
+    "toolApprovalsDesc": "このタスクに限りエージェントレベルのツール承認を上書きします。マージではなく完全な置き換えです。"
   },
   "outputEditor": {
     "language": "言語",
@@ -975,7 +994,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "実行者",
+    "automated": "自動"
   },
   "schedules": {
     "title": "スケジュール",
@@ -1024,7 +1045,9 @@
     "retryError": "再試行に失敗しました",
     "deleteSuccess": "スケジュールが削除されました",
     "deleteError": "スケジュールの削除に失敗しました",
-    "fireHistory": "実行履歴"
+    "fireHistory": "実行履歴",
+    "hitlTimeout": "HITL タイムアウト",
+    "hitlTimeoutHint": "システム管理の HITL 承認タイムアウト。ここではなく、会話の承認から解決してください。"
   },
   "debugDrawer": {
     "title": "デバッグ",
@@ -1393,6 +1416,7 @@
     "guidedSetupDesc": "LLMプロバイダー、プロンプトを含むステップバイステップのウィザード。"
   },
   "groups": {
+    "hitlSelectPhase": "承認が必要なフェーズを少なくとも1つ選択してください。",
     "empty": "グループはまだありません",
     "emptyDescription": "グループを使用すると、複数のエージェントが構造化されたディスカッションで協力できます。",
     "createGroup": "グループ作成",
@@ -1515,7 +1539,14 @@
     "showConfig": "設定パネルを表示",
     "hitlSection": "人間の承認",
     "hitlApprovalPoints": "承認箇所",
-    "hitlOnTaskRejection": "却下時"
+    "hitlOnTaskRejection": "却下時",
+    "hitlEdit": "編集",
+    "hitlSaved": "承認設定を保存しました",
+    "hitlEnable": "人間の承認を必須にする",
+    "hitlApprovalPhases": "承認が必要なフェーズ",
+    "hitlNotConfigured": "承認ゲートが未設定です。「編集」をクリックして人間の承認を必須にしてください。",
+    "driftTitle": "一時停止中にグループ設定が変更されました",
+    "driftRecovery": "グループのフェーズが変更されたため、再開は中止されました。ディスカッションはまだ承認を待っています。設定を修正し（「設定」パネルの「編集」から）、再度承認するか、キャンセルしてください。"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -1920,9 +1951,15 @@
     "triggers": "トリガー",
     "type": "チャネルタイプ",
     "webhookHint": "この URL を Slack アプリの Event Subscriptions → Request URL フィールドに貼り付けてください。",
-    "webhookUrl": "Webhook URL"
+    "webhookUrl": "Webhook URL",
+    "hitlSection": "Human-in-the-Loop 承認（任意）",
+    "hitlApprovalChannel": "承認チャネル ID",
+    "hitlApprovalChannelHint": "会話が一時停止したときに承認カードを受け取る Slack チャネル。",
+    "hitlApproverUserIds": "承認者ユーザー ID",
+    "hitlApproverUserIdsHint": "ボタンで承認できる Slack ユーザー ID（カンマ区切り）。このリストがない場合、ボタンは表示されません（フェイルクローズ）。"
   },
   "hitl": {
+    "loadingApprovalDetails": "承認の詳細を読み込んでいます…",
     "awaitingHuman": "人間待ち",
     "awaitingApproval": "承認待ち",
     "approve": "承認",
@@ -1960,6 +1997,27 @@
     "rejectionFail": "タスクを失敗にする",
     "rejectionRetry": "タスクを再試行する",
     "groupsTruncated": "ここに表示されているよりも多くのグループ承認があります。",
-    "groupsLoadError": "グループ承認を読み込めませんでした。"
+    "groupsLoadError": "グループ承認を読み込めませんでした。",
+    "toolApprovalRequired": "ツールの承認が必要",
+    "toolCallsAwaiting": "承認待ちのツール呼び出し",
+    "executedUngated": "実行済み（ゲートなし）",
+    "outcomeUnknown": "前回の承認が実行中に中断されました。その影響は不明です。再試行する前に外部で確認してください。",
+    "outcomeUnknownShort": "結果不明",
+    "toolApprovalHint": "「承認」は呼び出しごとの選択を適用します（変更していない呼び出しは承認されます）。「拒否」はバッチ全体を拒否します。",
+    "gateReason": "一致したパターン",
+    "argsTruncated": "引数は切り詰められました",
+    "amendArguments": "引数を修正（任意）",
+    "amendPlaceholder": "置き換える完全な JSON オブジェクト。例: {\"to\":\"ops@acme.com\"}。空欄のままにすると元の値を保持します。",
+    "amendTruncated": "引数が切り詰められた呼び出しは修正できません。そのまま承認または拒否してください。",
+    "amendInvalidJson": "修正後の引数は有効な JSON オブジェクトである必要があります。",
+    "amendTooLarge": "修正後の引数が大きすぎます。",
+    "review": "レビュー",
+    "tool": "ツール",
+    "scopeAll": "システム全体の保留中の承認をすべて表示しています。",
+    "scopeOwn": "あなたの会話の保留中の承認を表示しています。",
+    "chatPaused": "この会話は人間の承認を待っています。",
+    "noProgressWaitForHuman": "人間を待つ",
+    "noProgressAutoReject": "自動拒否",
+    "noProgressAbort": "中止"
   }
 }

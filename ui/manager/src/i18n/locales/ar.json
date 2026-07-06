@@ -247,7 +247,23 @@
     "hitlTimeoutInvalid": "تتطلب السياسة المحدودة مدة ISO-8601 موجبة، مثل PT15M.",
     "hitlTimeoutHint": "مثل PT30S وPT15M وPT2H.",
     "hitlPauseReason": "سبب الموافقة (يظهر للموافقين)",
-    "hitlPauseReasonPlaceholder": "مثال: يتطلب الحذف موافقة المدير"
+    "hitlPauseReasonPlaceholder": "مثال: يتطلب الحذف موافقة المدير",
+    "toolApprovalsEnable": "حجب استدعاءات أدوات محددة للموافقة عليها",
+    "toolApprovalsDesc": "الإيقاف المؤقت عند استدعاء النموذج لأداة مطابقة، قبل تشغيلها. قائمة \"تتطلب الموافقة\" الفارغة تعطّل حجب الأدوات.",
+    "toolRequireApproval": "تتطلب الموافقة (أنماط glob، نمط واحد في كل سطر)",
+    "toolPatternHint": "'*' هو حرف البدل الوحيد. بادئة المصدر اختيارية:",
+    "toolExempt": "معفاة (مسموح بها دائمًا، واحدة في كل سطر)",
+    "toolMaxPauses": "الحد الأقصى للإيقافات / الدور (1–10)",
+    "toolMaxAuto": "الحد الأقصى للموافقات التلقائية / الدور (0–10)",
+    "toolOnNoProgress": "عند إعادة الإيقاف بدون تقدّم",
+    "toolTimeoutPolicy": "سياسة مهلة إيقاف الأداة",
+    "toolTimeoutInherit": "الوراثة من الوكيل",
+    "toolAutoApproveDemotion": "لا ينطبق AUTO_APPROVE على مستوى الوكيل على موافقات الأدوات — ستنتظر إيقافات الأدوات إلى أجل غير مسمى ما لم تضبط سياسة مهلة لإيقاف الأداة أعلاه.",
+    "toolPauseReason": "سبب الموافِق (يُسمح بـ {toolNames})",
+    "toolPauseReasonPlaceholder": "مثال الموافقة مطلوبة لـ {toolNames}",
+    "toolPendingMessage": "رسالة المستخدم النهائي أثناء الإيقاف (يُسمح بـ {toolNames})",
+    "toolPendingMessagePlaceholder": "مثال بانتظار موافقة بشرية على {toolNames}…",
+    "toolInGroupTurns": "داخل دور المجموعة، يُرفض تلقائيًا استدعاء الأداة المحجوب لأحد الأعضاء (REJECT)."
   },
   "wizard": {
     "title": "معالج Agent"
@@ -711,7 +727,10 @@
     "toolCount": "{{selected}} من {{total}} محددة",
     "toolSources": "مصادر أدوات مسار العمل",
     "toolSourcesInfo": "كلا المصدرين مفعلان افتراضياً — جميع استدعاءات HTTP وMCP في مسار العمل تُكشف تلقائياً كأدوات LLM. عطّل مصدراً لاستبعاده.",
-    "included": "مُضمّن"
+    "included": "مُضمّن",
+    "toolApprovals": "حجب موافقة الأدوات (لكل مهمة)",
+    "toolApprovalsEnable": "تجاوز موافقات الأدوات لهذه المهمة",
+    "toolApprovalsDesc": "يتجاوز موافقات الأدوات على مستوى الوكيل لهذه المهمة فقط — استبدال كامل، وليس دمجًا."
   },
   "outputEditor": {
     "language": "اللغة",
@@ -975,7 +994,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "بواسطة",
+    "automated": "آلي"
   },
   "schedules": {
     "title": "الجداول",
@@ -1024,7 +1045,9 @@
     "retryError": "فشل إعادة المحاولة",
     "deleteSuccess": "تم حذف الجدول",
     "deleteError": "فشل حذف الجدول",
-    "fireHistory": "سجل التنفيذ"
+    "fireHistory": "سجل التنفيذ",
+    "hitlTimeout": "مهلة HITL",
+    "hitlTimeoutHint": "مهلة موافقة HITL يديرها النظام — عالجها عبر موافقة المحادثة، وليس من هنا."
   },
   "debugDrawer": {
     "title": "تصحيح",
@@ -1393,6 +1416,7 @@
     "guidedSetupDesc": "معالج خطوة بخطوة من خيارات LLM والمطالبات والنشر."
   },
   "groups": {
+    "hitlSelectPhase": "حدد مرحلة واحدة على الأقل تتطلب الموافقة.",
     "empty": "لا توجد مجموعات بعد",
     "emptyDescription": "تتيح المجموعات لعدة وكلاء التعاون في مناقشات منظمة.",
     "createGroup": "إنشاء مجموعة",
@@ -1515,7 +1539,14 @@
     "showConfig": "إظهار لوحة الإعدادات",
     "hitlSection": "الموافقة البشرية",
     "hitlApprovalPoints": "الموافقة عند",
-    "hitlOnTaskRejection": "عند الرفض"
+    "hitlOnTaskRejection": "عند الرفض",
+    "hitlEdit": "تعديل",
+    "hitlSaved": "تم حفظ إعدادات الموافقة",
+    "hitlEnable": "تتطلب موافقة بشرية",
+    "hitlApprovalPhases": "المراحل التي تتطلب الموافقة",
+    "hitlNotConfigured": "لم تُهيّأ أي بوابات موافقة — انقر تعديل لطلب موافقة بشرية.",
+    "driftTitle": "تغيّر إعداد المجموعة أثناء الإيقاف المؤقت",
+    "driftRecovery": "تم إلغاء الاستئناف لأن مراحل المجموعة تغيّرت. لا تزال المناقشة بانتظار الموافقة — أصلح الإعداد (تعديل، في لوحة الإعداد) ووافق مجددًا، أو ألغِها."
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -1920,9 +1951,15 @@
     "triggers": "مشغلات",
     "type": "نوع القناة",
     "webhookHint": "الصق هذا الرابط في حقل Request URL ضمن Event Subscriptions في تطبيق Slack.",
-    "webhookUrl": "رابط الويب هوك"
+    "webhookUrl": "رابط الويب هوك",
+    "hitlSection": "موافقات الإنسان في الحلقة (اختياري)",
+    "hitlApprovalChannel": "معرّف قناة الموافقة",
+    "hitlApprovalChannelHint": "قناة Slack التي تتلقى بطاقة موافقة عند إيقاف المحادثة مؤقتًا.",
+    "hitlApproverUserIds": "معرّفات مستخدمي الموافِقين",
+    "hitlApproverUserIdsHint": "معرّفات مستخدمي Slack مفصولة بفواصل ويُسمح لهم بالموافقة عبر الأزرار. بدون هذه القائمة لا تُعرض الأزرار (فشل مغلق)."
   },
   "hitl": {
+    "loadingApprovalDetails": "جارٍ تحميل تفاصيل الموافقة…",
     "awaitingHuman": "في انتظار الإنسان",
     "awaitingApproval": "في انتظار الموافقة",
     "approve": "موافقة",
@@ -1960,6 +1997,27 @@
     "rejectionFail": "إفشال المهمة",
     "rejectionRetry": "إعادة محاولة المهمة",
     "groupsTruncated": "توجد موافقات مجموعات أكثر مما هو معروض هنا.",
-    "groupsLoadError": "تعذر تحميل موافقات المجموعات."
+    "groupsLoadError": "تعذر تحميل موافقات المجموعات.",
+    "toolApprovalRequired": "مطلوب الموافقة على الأداة",
+    "toolCallsAwaiting": "استدعاءات الأدوات بانتظار الموافقة",
+    "executedUngated": "تم التنفيذ بالفعل (بدون بوابة)",
+    "outcomeUnknown": "تمت مقاطعة موافقة سابقة أثناء التنفيذ — أثرها غير معروف؛ تحقق خارجيًا قبل إعادة المحاولة.",
+    "outcomeUnknownShort": "النتيجة غير معروفة",
+    "toolApprovalHint": "الموافقة تُطبّق اختياراتك لكل استدعاء (الاستدعاءات التي لم تغيّرها تتم الموافقة عليها). الرفض يرفض الدفعة بأكملها.",
+    "gateReason": "النمط المطابق",
+    "argsTruncated": "الوسائط مقتطعة",
+    "amendArguments": "تعديل الوسائط (اختياري)",
+    "amendPlaceholder": "كائن JSON بديل كامل، مثال {\"to\":\"ops@acme.com\"}. اتركه فارغًا للإبقاء على الأصل.",
+    "amendTruncated": "لا يمكن تعديل استدعاء تم اقتطاع وسائطه — وافق عليه أو ارفضه كما هو.",
+    "amendInvalidJson": "يجب أن تكون الوسائط المعدّلة كائن JSON صالحًا.",
+    "amendTooLarge": "الوسائط المعدّلة كبيرة جدًا.",
+    "review": "مراجعة",
+    "tool": "الأداة",
+    "scopeAll": "عرض جميع الموافقات المعلّقة عبر النظام.",
+    "scopeOwn": "عرض الموافقات المعلّقة لمحادثاتك.",
+    "chatPaused": "هذه المحادثة بانتظار موافقة بشرية.",
+    "noProgressWaitForHuman": "انتظار موافقة بشرية",
+    "noProgressAutoReject": "الرفض التلقائي",
+    "noProgressAbort": "إلغاء"
   }
 }

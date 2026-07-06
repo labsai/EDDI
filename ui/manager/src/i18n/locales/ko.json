@@ -247,7 +247,23 @@
     "hitlTimeoutInvalid": "유한 정책에는 양수 ISO-8601 기간이 필요합니다(예: PT15M).",
     "hitlTimeoutHint": "예: PT30S, PT15M, PT2H.",
     "hitlPauseReason": "승인 사유 (승인자에게 표시)",
-    "hitlPauseReasonPlaceholder": "예: 삭제하려면 관리자 승인이 필요합니다"
+    "hitlPauseReasonPlaceholder": "예: 삭제하려면 관리자 승인이 필요합니다",
+    "toolApprovalsEnable": "특정 도구 호출을 승인 대상으로 게이트",
+    "toolApprovalsDesc": "모델이 일치하는 도구를 호출하면 실행 전에 일시 정지합니다. \"승인 필요\" 목록이 비어 있으면 도구 게이트가 비활성화됩니다.",
+    "toolRequireApproval": "승인 필요 (글로브 패턴, 한 줄에 하나씩)",
+    "toolPatternHint": "'*' 가 유일한 와일드카드입니다. 선택적 소스 접두사:",
+    "toolExempt": "면제 (항상 허용, 한 줄에 하나씩)",
+    "toolMaxPauses": "턴당 최대 일시 정지 수 (1–10)",
+    "toolMaxAuto": "턴당 최대 자동 승인 수 (0–10)",
+    "toolOnNoProgress": "진행 없이 재정지 시",
+    "toolTimeoutPolicy": "도구 일시 정지 타임아웃 정책",
+    "toolTimeoutInherit": "에이전트에서 상속",
+    "toolAutoApproveDemotion": "에이전트 수준 AUTO_APPROVE는 도구 승인에 적용되지 않습니다 — 위에서 도구 일시 정지 타임아웃 정책을 설정하지 않으면 도구 일시 정지가 무기한 대기합니다.",
+    "toolPauseReason": "승인자 사유 ({toolNames} 허용됨)",
+    "toolPauseReasonPlaceholder": "예: {toolNames} 에 승인이 필요합니다",
+    "toolPendingMessage": "일시 정지 중 최종 사용자 메시지 ({toolNames} 허용됨)",
+    "toolPendingMessagePlaceholder": "예: {toolNames} 승인을 위해 사람을 기다리는 중…",
+    "toolInGroupTurns": "그룹 턴 내부에서는 멤버의 게이트된 도구 호출이 자동으로 거부됩니다(REJECT)."
   },
   "wizard": {
     "title": "Agent 마법사"
@@ -711,7 +727,10 @@
     "toolCount": "{{total}}개 중 {{selected}}개 선택",
     "toolSources": "워크플로 도구 소스",
     "toolSourcesInfo": "기본적으로 두 소스 모두 활성화 — 워크플로의 모든 HTTP 호출 및 MCP 호출이 LLM 도구로 자동 노출됩니다. 소스를 비활성화하여 제외할 수 있습니다.",
-    "included": "포함됨"
+    "included": "포함됨",
+    "toolApprovals": "도구 승인 게이트 (작업별)",
+    "toolApprovalsEnable": "이 작업에 대해 도구 승인 재정의",
+    "toolApprovalsDesc": "이 작업에만 에이전트 수준 도구 승인을 재정의합니다 — 병합이 아닌 전체 대체입니다."
   },
   "outputEditor": {
     "language": "언어",
@@ -975,7 +994,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "처리자",
+    "automated": "자동화됨"
   },
   "schedules": {
     "title": "스케줄",
@@ -1024,7 +1045,9 @@
     "retryError": "재시도 실패",
     "deleteSuccess": "스케줄 삭제됨",
     "deleteError": "스케줄 삭제 실패",
-    "fireHistory": "실행 기록"
+    "fireHistory": "실행 기록",
+    "hitlTimeout": "HITL 타임아웃",
+    "hitlTimeoutHint": "시스템이 관리하는 HITL 승인 타임아웃 — 여기가 아니라 대화의 승인을 통해 해결하세요."
   },
   "debugDrawer": {
     "title": "디버그",
@@ -1393,6 +1416,7 @@
     "guidedSetupDesc": "LLM 제공자, 프롬프트 및 배포를 포함한 단계별 마법사."
   },
   "groups": {
+    "hitlSelectPhase": "승인이 필요한 단계를 하나 이상 선택하세요.",
     "empty": "아직 그룹이 없습니다",
     "emptyDescription": "그룹을 사용하면 여러 에이전트가 구조화된 토론에서 협업할 수 있습니다.",
     "createGroup": "그룹 만들기",
@@ -1515,7 +1539,14 @@
     "showConfig": "설정 패널 표시",
     "hitlSection": "사람 승인",
     "hitlApprovalPoints": "승인 지점",
-    "hitlOnTaskRejection": "거부 시"
+    "hitlOnTaskRejection": "거부 시",
+    "hitlEdit": "편집",
+    "hitlSaved": "승인 설정이 저장되었습니다",
+    "hitlEnable": "사람 승인 필요",
+    "hitlApprovalPhases": "승인이 필요한 단계",
+    "hitlNotConfigured": "구성된 승인 게이트가 없습니다 — 사람 승인을 요구하려면 편집을 클릭하세요.",
+    "driftTitle": "일시 정지 중 그룹 구성이 변경됨",
+    "driftRecovery": "그룹의 단계가 변경되어 재개가 중단되었습니다. 논의는 여전히 승인을 기다리고 있습니다 — 구성(구성 패널의 편집)을 수정하고 다시 승인하거나 취소하세요."
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -1920,9 +1951,15 @@
     "triggers": "트리거",
     "type": "채널 유형",
     "webhookHint": "이 URL을 Slack 앱의 Event Subscriptions → Request URL 필드에 붙여넣으세요.",
-    "webhookUrl": "Webhook URL"
+    "webhookUrl": "Webhook URL",
+    "hitlSection": "Human-in-the-Loop 승인 (선택 사항)",
+    "hitlApprovalChannel": "승인 채널 ID",
+    "hitlApprovalChannelHint": "대화가 일시 정지될 때 승인 카드를 받는 Slack 채널입니다.",
+    "hitlApproverUserIds": "승인자 사용자 ID",
+    "hitlApproverUserIdsHint": "버튼으로 승인할 수 있는 쉼표로 구분된 Slack 사용자 ID입니다. 이 목록이 없으면 버튼이 렌더링되지 않습니다(기본 차단)."
   },
   "hitl": {
+    "loadingApprovalDetails": "승인 세부 정보를 불러오는 중…",
     "awaitingHuman": "사람 대기 중",
     "awaitingApproval": "승인 대기 중",
     "approve": "승인",
@@ -1960,6 +1997,27 @@
     "rejectionFail": "작업 실패 처리",
     "rejectionRetry": "작업 재시도",
     "groupsTruncated": "여기에 표시된 것보다 더 많은 그룹 승인이 있습니다.",
-    "groupsLoadError": "그룹 승인을 불러오지 못했습니다."
+    "groupsLoadError": "그룹 승인을 불러오지 못했습니다.",
+    "toolApprovalRequired": "도구 승인 필요",
+    "toolCallsAwaiting": "승인 대기 중인 도구 호출",
+    "executedUngated": "이미 실행됨 (게이트 없음)",
+    "outcomeUnknown": "이전 승인이 실행 도중 중단되었습니다 — 결과를 알 수 없으니 재시도 전에 외부에서 확인하세요.",
+    "outcomeUnknownShort": "결과 불명",
+    "toolApprovalHint": "승인은 호출별 선택을 적용합니다(변경하지 않은 호출은 승인됩니다). 거부는 전체 배치를 거부합니다.",
+    "gateReason": "일치한 패턴",
+    "argsTruncated": "인수 잘림",
+    "amendArguments": "인수 수정 (선택 사항)",
+    "amendPlaceholder": "전체를 대체할 JSON 객체, 예: {\"to\":\"ops@acme.com\"}. 원본을 유지하려면 비워 두세요.",
+    "amendTruncated": "인수가 잘린 호출은 수정할 수 없습니다 — 그대로 승인하거나 거부하세요.",
+    "amendInvalidJson": "수정된 인수는 유효한 JSON 객체여야 합니다.",
+    "amendTooLarge": "수정된 인수가 너무 큽니다.",
+    "review": "검토",
+    "tool": "도구",
+    "scopeAll": "시스템 전체의 모든 대기 중인 승인을 표시합니다.",
+    "scopeOwn": "내 대화의 대기 중인 승인을 표시합니다.",
+    "chatPaused": "이 대화는 사람의 승인을 기다리고 있습니다.",
+    "noProgressWaitForHuman": "사람 대기",
+    "noProgressAutoReject": "자동 거부",
+    "noProgressAbort": "중단"
   }
 }

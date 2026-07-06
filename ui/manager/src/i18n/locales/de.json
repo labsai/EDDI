@@ -247,7 +247,23 @@
     "hitlTimeoutInvalid": "Eine endliche Richtlinie benötigt eine positive ISO-8601-Dauer, z. B. PT15M.",
     "hitlTimeoutHint": "z. B. PT30S, PT15M, PT2H.",
     "hitlPauseReason": "Freigabegrund (für Genehmiger sichtbar)",
-    "hitlPauseReasonPlaceholder": "z. B. Löschung erfordert Freigabe durch den Manager"
+    "hitlPauseReasonPlaceholder": "z. B. Löschung erfordert Freigabe durch den Manager",
+    "toolApprovalsEnable": "Bestimmte Tool-Aufrufe zur Freigabe sperren",
+    "toolApprovalsDesc": "Pausiert, wenn das Modell ein passendes Tool aufruft, bevor es ausgeführt wird. Eine leere Liste \"Freigabe erforderlich\" deaktiviert die Tool-Sperrung.",
+    "toolRequireApproval": "Freigabe erforderlich (Glob-Muster, eines pro Zeile)",
+    "toolPatternHint": "'*' ist das einzige Platzhalterzeichen. Optionales Quellpräfix:",
+    "toolExempt": "Ausgenommen (immer erlaubt, eines pro Zeile)",
+    "toolMaxPauses": "Max. Pausen / Zug (1–10)",
+    "toolMaxAuto": "Max. automatische Freigaben / Zug (0–10)",
+    "toolOnNoProgress": "Bei erneuter Pause ohne Fortschritt",
+    "toolTimeoutPolicy": "Zeitlimit-Richtlinie für Tool-Pause",
+    "toolTimeoutInherit": "Vom Agenten erben",
+    "toolAutoApproveDemotion": "AUTO_APPROVE auf Agentenebene gilt nicht für Tool-Freigaben — Tool-Pausen warten unbegrenzt, sofern du oben keine Zeitlimit-Richtlinie für Tool-Pausen festlegst.",
+    "toolPauseReason": "Grund des Freigebers ({toolNames} erlaubt)",
+    "toolPauseReasonPlaceholder": "z. B. Freigabe erforderlich für {toolNames}",
+    "toolPendingMessage": "Endbenutzer-Nachricht während der Pause ({toolNames} erlaubt)",
+    "toolPendingMessagePlaceholder": "z. B. Warte auf menschliche Freigabe für {toolNames}…",
+    "toolInGroupTurns": "Innerhalb eines Gruppenzugs wird der gesperrte Tool-Aufruf eines Mitglieds automatisch abgelehnt (REJECT)."
   },
   "wizard": {
     "title": "Agent-Assistent"
@@ -711,7 +727,10 @@
     "toolCount": "{{selected}} von {{total}} ausgewählt",
     "toolSources": "Workflow-Werkzeugquellen",
     "toolSourcesInfo": "Beide Quellen sind standardmäßig aktiv — alle HTTP- und MCP-Aufrufe im Workflow werden automatisch als LLM-Werkzeuge bereitgestellt. Deaktivieren Sie eine Quelle, um sie auszuschließen.",
-    "included": "Enthalten"
+    "included": "Enthalten",
+    "toolApprovals": "Tool-Freigabesperrung (pro Aufgabe)",
+    "toolApprovalsEnable": "Tool-Freigaben für diese Aufgabe überschreiben",
+    "toolApprovalsDesc": "Überschreibt die Tool-Freigaben auf Agentenebene nur für DIESE Aufgabe — ein vollständiger Ersatz, keine Zusammenführung."
   },
   "outputEditor": {
     "language": "Sprache",
@@ -975,7 +994,9 @@
     "integrityNone": "Unsignierte Audit-Einträge",
     "integrityNoneDesc": "Konfigurieren Sie einen Vault-Master-Key, um automatische HMAC-SHA256-Signierung fuer alle zukuenftigen Audit-Eintraege zu aktivieren.",
     "signed": "Signiert",
-    "allSigned": "Alle signiert"
+    "allSigned": "Alle signiert",
+    "decidedBy": "von",
+    "automated": "automatisiert"
   },
   "schedules": {
     "title": "Zeitpläne",
@@ -1024,7 +1045,9 @@
     "retryError": "Wiederholung fehlgeschlagen",
     "deleteSuccess": "Zeitplan gelöscht",
     "deleteError": "Zeitplan konnte nicht gelöscht werden",
-    "fireHistory": "Ausführungsverlauf"
+    "fireHistory": "Ausführungsverlauf",
+    "hitlTimeout": "HITL-Zeitlimit",
+    "hitlTimeoutHint": "Systemverwaltetes HITL-Freigabe-Zeitlimit — über die Freigabe der Konversation lösen, nicht hier."
   },
   "debugDrawer": {
     "title": "Debug",
@@ -1393,6 +1416,7 @@
     "guidedSetupDesc": "Schrittweises Setup mit LLM-Provider, Prompts und Deployment."
   },
   "groups": {
+    "hitlSelectPhase": "Wählen Sie mindestens eine Phase aus, die eine Freigabe erfordert.",
     "empty": "Noch keine Gruppen",
     "emptyDescription": "Gruppen ermöglichen es mehreren Agents, bei strukturierten Diskussionen zusammenzuarbeiten.",
     "createGroup": "Gruppe erstellen",
@@ -1515,7 +1539,14 @@
     "showConfig": "Konfigurationsbereich einblenden",
     "hitlSection": "Menschliche Freigabe",
     "hitlApprovalPoints": "Freigabe bei",
-    "hitlOnTaskRejection": "Bei Ablehnung"
+    "hitlOnTaskRejection": "Bei Ablehnung",
+    "hitlEdit": "Bearbeiten",
+    "hitlSaved": "Freigabe-Einstellungen gespeichert",
+    "hitlEnable": "Menschliche Freigabe erforderlich",
+    "hitlApprovalPhases": "Freigabepflichtige Phasen",
+    "hitlNotConfigured": "Keine Freigabesperren konfiguriert — auf Bearbeiten klicken, um eine menschliche Freigabe zu verlangen.",
+    "driftTitle": "Gruppenkonfiguration während der Pause geändert",
+    "driftRecovery": "Die Fortsetzung wurde abgebrochen, weil sich die Phasen der Gruppe geändert haben. Die Diskussion wartet weiterhin auf eine Freigabe — die Konfiguration korrigieren (Bearbeiten, im Konfigurationsbereich) und erneut freigeben oder abbrechen."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -1920,9 +1951,15 @@
     "triggers": "Trigger",
     "type": "Kanaltyp",
     "webhookHint": "Fügen Sie diese URL in das Feld „Request URL“ unter Event Subscriptions Ihrer Slack-App ein.",
-    "webhookUrl": "Webhook-URL"
+    "webhookUrl": "Webhook-URL",
+    "hitlSection": "Human-in-the-Loop-Freigaben (optional)",
+    "hitlApprovalChannel": "Freigabe-Channel-ID",
+    "hitlApprovalChannelHint": "Slack-Channel, der eine Freigabekarte erhält, wenn eine Konversation pausiert.",
+    "hitlApproverUserIds": "Benutzer-IDs der Freigeber",
+    "hitlApproverUserIdsHint": "Kommagetrennte Slack-Benutzer-IDs, die über Buttons freigeben dürfen. Ohne diese Liste werden keine Buttons angezeigt (fail-closed)."
   },
   "hitl": {
+    "loadingApprovalDetails": "Freigabedetails werden geladen …",
     "awaitingHuman": "Warten auf Mensch",
     "awaitingApproval": "Warten auf Genehmigung",
     "approve": "Genehmigen",
@@ -1960,6 +1997,27 @@
     "rejectionFail": "Aufgabe fehlschlagen lassen",
     "rejectionRetry": "Aufgabe wiederholen",
     "groupsTruncated": "Es gibt mehr Gruppenfreigaben, als hier angezeigt werden.",
-    "groupsLoadError": "Gruppenfreigaben konnten nicht geladen werden."
+    "groupsLoadError": "Gruppenfreigaben konnten nicht geladen werden.",
+    "toolApprovalRequired": "Tool-Freigabe erforderlich",
+    "toolCallsAwaiting": "Tool-Aufrufe warten auf Freigabe",
+    "executedUngated": "Bereits ausgeführt (ohne Freigabe)",
+    "outcomeUnknown": "Eine vorherige Freigabe wurde mitten in der Ausführung unterbrochen — ihre Wirkung ist unbekannt; vor einem erneuten Versuch extern prüfen.",
+    "outcomeUnknownShort": "Ergebnis unbekannt",
+    "toolApprovalHint": "Freigeben wendet deine Auswahl je Aufruf an (nicht geänderte Aufrufe werden freigegeben). Ablehnen lehnt den gesamten Stapel ab.",
+    "gateReason": "Übereinstimmendes Muster",
+    "argsTruncated": "Argumente gekürzt",
+    "amendArguments": "Argumente ändern (optional)",
+    "amendPlaceholder": "Vollständiges Ersatz-JSON-Objekt, z. B. {\"to\":\"ops@acme.com\"}. Leer lassen, um das Original zu behalten.",
+    "amendTruncated": "Ein Aufruf mit gekürzten Argumenten kann nicht geändert werden — unverändert freigeben oder ablehnen.",
+    "amendInvalidJson": "Geänderte Argumente müssen ein gültiges JSON-Objekt sein.",
+    "amendTooLarge": "Geänderte Argumente sind zu groß.",
+    "review": "Prüfen",
+    "tool": "Tool",
+    "scopeAll": "Alle ausstehenden Freigaben im gesamten System werden angezeigt.",
+    "scopeOwn": "Ausstehende Freigaben für deine Konversationen werden angezeigt.",
+    "chatPaused": "Diese Konversation wartet auf eine menschliche Freigabe.",
+    "noProgressWaitForHuman": "Auf einen Menschen warten",
+    "noProgressAutoReject": "Automatisch ablehnen",
+    "noProgressAbort": "Abbrechen"
   }
 }

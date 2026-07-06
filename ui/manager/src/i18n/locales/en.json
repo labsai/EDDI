@@ -274,7 +274,23 @@
     "hitlTimeoutInvalid": "A finite policy needs a positive ISO-8601 duration, e.g. PT15M.",
     "hitlTimeoutHint": "e.g. PT30S, PT15M, PT2H.",
     "hitlPauseReason": "Approval reason (shown to approvers)",
-    "hitlPauseReasonPlaceholder": "e.g. Deletion requires manager sign-off"
+    "hitlPauseReasonPlaceholder": "e.g. Deletion requires manager sign-off",
+    "toolApprovalsEnable": "Gate specific tool calls for approval",
+    "toolApprovalsDesc": "Pause when the model invokes a matching tool, before it runs. An empty \"require approval\" list disables tool gating.",
+    "toolRequireApproval": "Require approval (glob patterns, one per line)",
+    "toolPatternHint": "'*' is the only wildcard. Optional source prefix:",
+    "toolExempt": "Exempt (always allowed, one per line)",
+    "toolMaxPauses": "Max pauses / turn (1–10)",
+    "toolMaxAuto": "Max auto-approvals / turn (0–10)",
+    "toolOnNoProgress": "On no-progress re-pause",
+    "toolTimeoutPolicy": "Tool-pause timeout policy",
+    "toolTimeoutInherit": "Inherit from agent",
+    "toolAutoApproveDemotion": "Agent-level AUTO_APPROVE does not apply to tool approvals — tool pauses will wait indefinitely unless you set a tool-pause timeout policy above.",
+    "toolPauseReason": "Approver reason ({toolNames} allowed)",
+    "toolPauseReasonPlaceholder": "e.g. Approval required for {toolNames}",
+    "toolPendingMessage": "End-user message while paused ({toolNames} allowed)",
+    "toolPendingMessagePlaceholder": "e.g. Waiting for a human to approve {toolNames}…",
+    "toolInGroupTurns": "Inside a group turn, a member's gated tool call is auto-rejected (REJECT)."
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -747,7 +763,10 @@
     "toolCount": "{{selected}} of {{total}} selected",
     "toolSources": "Workflow Tool Sources",
     "toolSourcesInfo": "Both sources are enabled by default — all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it.",
-    "included": "Included"
+    "included": "Included",
+    "toolApprovals": "Tool Approval Gating (per-task)",
+    "toolApprovalsEnable": "Override tool approvals for this task",
+    "toolApprovalsDesc": "Overrides the agent-level tool approvals for THIS task only — a full replace, not a merge."
   },
   "outputEditor": {
     "language": "Language",
@@ -1048,7 +1067,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "by",
+    "automated": "automated"
   },
   "schedules": {
     "title": "Schedules",
@@ -1097,7 +1118,9 @@
     "retryError": "Failed to retry schedule",
     "deleteSuccess": "Schedule deleted",
     "deleteError": "Failed to delete schedule",
-    "fireHistory": "Fire History"
+    "fireHistory": "Fire History",
+    "hitlTimeout": "HITL timeout",
+    "hitlTimeoutHint": "System-managed HITL approval timeout — resolve it via the conversation's approval, not here."
   },
   "debugDrawer": {
     "title": "Debug",
@@ -1435,6 +1458,7 @@
     }
   },
   "groups": {
+    "hitlSelectPhase": "Select at least one phase to require approval.",
     "empty": "No groups yet",
     "emptyDescription": "Groups let multiple agents collaborate on structured discussions.",
     "createGroup": "Create Group",
@@ -1557,7 +1581,14 @@
     "showConfig": "Show config panel",
     "hitlSection": "Human Approval",
     "hitlApprovalPoints": "Approval at",
-    "hitlOnTaskRejection": "On rejection"
+    "hitlOnTaskRejection": "On rejection",
+    "hitlEdit": "Edit",
+    "hitlSaved": "Approval settings saved",
+    "hitlEnable": "Require human approval",
+    "hitlApprovalPhases": "Phases requiring approval",
+    "hitlNotConfigured": "No approval gates configured — click Edit to require human approval.",
+    "driftTitle": "Group configuration changed while paused",
+    "driftRecovery": "The resume was aborted because the group's phases changed. The discussion is still awaiting approval — fix the configuration (Edit, in the Configuration panel) and approve again, or cancel it."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -1949,9 +1980,15 @@
     "triggers": "triggers",
     "type": "Channel Type",
     "webhookHint": "Paste this URL into your Slack App’s Event Subscriptions → Request URL field.",
-    "webhookUrl": "Webhook URL"
+    "webhookUrl": "Webhook URL",
+    "hitlSection": "Human-in-the-Loop Approvals (optional)",
+    "hitlApprovalChannel": "Approval Channel ID",
+    "hitlApprovalChannelHint": "Slack channel that receives an approval card when a conversation pauses.",
+    "hitlApproverUserIds": "Approver User IDs",
+    "hitlApproverUserIdsHint": "Comma-separated Slack user IDs allowed to approve via buttons. Without this list, buttons are not rendered (fail-closed)."
   },
   "hitl": {
+    "loadingApprovalDetails": "Loading approval details…",
     "awaitingHuman": "Awaiting Human",
     "awaitingApproval": "Awaiting Approval",
     "approve": "Approve",
@@ -1989,6 +2026,27 @@
     "rejectionFail": "Fail the task",
     "rejectionRetry": "Retry the task",
     "groupsTruncated": "More group approvals exist than are shown here.",
-    "groupsLoadError": "Group approvals could not be loaded."
+    "groupsLoadError": "Group approvals could not be loaded.",
+    "toolApprovalRequired": "Tool Approval Required",
+    "toolCallsAwaiting": "Tool calls awaiting approval",
+    "executedUngated": "Already executed (ungated)",
+    "outcomeUnknown": "A previous approval was interrupted mid-execution — its effect is unknown; verify externally before retrying.",
+    "outcomeUnknownShort": "outcome unknown",
+    "toolApprovalHint": "Approve applies your per-call choices (calls you didn't change are approved). Reject rejects the whole batch.",
+    "gateReason": "Matched pattern",
+    "argsTruncated": "arguments truncated",
+    "amendArguments": "Amend arguments (optional)",
+    "amendPlaceholder": "Full replacement JSON object, e.g. {\"to\":\"ops@acme.com\"}. Leave blank to keep original.",
+    "amendTruncated": "Cannot amend a call whose arguments were truncated — approve or reject it as-is.",
+    "amendInvalidJson": "Amended arguments must be a valid JSON object.",
+    "amendTooLarge": "Amended arguments are too large.",
+    "review": "Review",
+    "tool": "Tool",
+    "scopeAll": "Showing all pending approvals across the system.",
+    "scopeOwn": "Showing pending approvals for your conversations.",
+    "chatPaused": "This conversation is awaiting human approval.",
+    "noProgressWaitForHuman": "Wait for a human",
+    "noProgressAutoReject": "Auto-reject",
+    "noProgressAbort": "Abort"
   }
 }
