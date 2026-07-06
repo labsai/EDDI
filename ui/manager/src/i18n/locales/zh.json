@@ -44,6 +44,7 @@
     "capabilities": "能力",
     "sync": "同步",
     "channels": "频道",
+    "approvals": "审批",
     "userConversations": "用户对话",
     "userData": "用户数据",
     "variables": "变量"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "群组",
       "subtitle": "多 Agent 讨论组，用于结构化辩论和协作"
-    }
+    },
+    "approvals": "待审批",
+    "approvalsSubtitle": "审查并决定等待人工输入的对话"
   },
   "common": {
     "loading": "加载中...",
@@ -134,7 +137,11 @@
     "saving": "保存中…",
     "showMore": "Show More",
     "showLess": "Show Less",
-    "copyFailed": "复制到剪贴板失败"
+    "copyFailed": "复制到剪贴板失败",
+    "loadError": "加载数据失败",
+    "actions": "操作",
+    "view": "查看",
+    "refresh": "刷新"
   },
   "agents": {
     "deploy": "部署",
@@ -232,7 +239,32 @@
     "slackStep2": "将 Bot 令牌 (xoxb-…) 和签名密钥复制到 EDDI 保管库中，并在下方配置频道。",
     "slackStep3": "然后在 Slack 应用中启用 Event Subscriptions，粘贴上面的 Webhook URL，并订阅：",
     "slackSetupNote": "重要提示：在启用 Event Subscriptions 之前，请先在下方配置频道 — Slack 会发送 URL 验证请求，需要在 EDDI 中配置签名密钥。",
-    "slackRequiredScopes": "所需的 Bot 令牌权限"
+    "slackRequiredScopes": "所需的 Bot 令牌权限",
+    "hitlConfig": "人机协同",
+    "hitlConfigDesc": "当此智能体为人工批准暂停对话时，这些设置控制等待时长以及未及时决定时的处理方式。",
+    "hitlEnable": "配置人工批准超时",
+    "hitlTimeoutPolicy": "若未及时决定",
+    "hitlApprovalTimeout": "批准超时（ISO-8601）",
+    "hitlTimeoutInvalid": "有限策略需要正的 ISO-8601 时长，例如 PT15M。",
+    "hitlTimeoutHint": "例如 PT30S、PT15M、PT2H。",
+    "hitlPauseReason": "审批原因（对审批者显示）",
+    "hitlPauseReasonPlaceholder": "例如：删除需要经理批准",
+    "toolApprovalsEnable": "拦截特定工具调用以供审批",
+    "toolApprovalsDesc": "当模型调用匹配的工具时，在其运行前暂停。空的“需要审批”列表将禁用工具拦截。",
+    "toolRequireApproval": "需要审批（glob 模式，每行一个）",
+    "toolPatternHint": "“*”是唯一的通配符。可选的来源前缀：",
+    "toolExempt": "豁免（始终允许，每行一个）",
+    "toolMaxPauses": "每轮最大暂停次数 (1–10)",
+    "toolMaxAuto": "每轮最大自动审批次数 (0–10)",
+    "toolOnNoProgress": "无进展时重新暂停",
+    "toolTimeoutPolicy": "工具暂停超时策略",
+    "toolTimeoutInherit": "继承自智能体",
+    "toolAutoApproveDemotion": "智能体级别的 AUTO_APPROVE 不适用于工具审批——除非你在上方设置工具暂停超时策略，否则工具暂停将无限期等待。",
+    "toolPauseReason": "审批者理由（允许使用 {toolNames}）",
+    "toolPauseReasonPlaceholder": "例如：{toolNames} 需要审批",
+    "toolPendingMessage": "暂停期间显示给终端用户的消息（允许使用 {toolNames}）",
+    "toolPendingMessagePlaceholder": "例如：正在等待人工审批 {toolNames}…",
+    "toolInGroupTurns": "在群组回合中，成员被拦截的工具调用将被自动拒绝 (REJECT)。"
   },
   "wizard": {
     "title": "Agent 向导"
@@ -751,7 +783,10 @@
     "toolCount": "已选 {{selected}}/{{total}}",
     "toolSources": "工作流工具来源",
     "toolSourcesInfo": "默认启用两种来源 — 所有工作流 HTTP 调用和 MCP 调用自动公开为 LLM 工具。禁用某来源以排除。",
-    "included": "已包含"
+    "included": "已包含",
+    "toolApprovals": "工具审批拦截（按任务）",
+    "toolApprovalsEnable": "为此任务覆盖工具审批",
+    "toolApprovalsDesc": "仅为此任务覆盖智能体级别的工具审批——是完全替换，而非合并。"
   },
   "outputEditor": {
     "language": "语言",
@@ -1015,7 +1050,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "由",
+    "automated": "自动"
   },
   "schedules": {
     "title": "定时任务",
@@ -1064,7 +1101,9 @@
     "retryError": "重试失败",
     "deleteSuccess": "定时任务已删除",
     "deleteError": "定时任务删除失败",
-    "fireHistory": "执行历史"
+    "fireHistory": "执行历史",
+    "hitlTimeout": "HITL 超时",
+    "hitlTimeoutHint": "系统管理的 HITL 审批超时——请通过会话的审批来处理，而非在此处。"
   },
   "cascadeTrace": {
     "title": "模型级联",
@@ -1445,6 +1484,7 @@
     "guidedSetupDesc": "使用分步向导设置LLM模型、提示词及默认规则。"
   },
   "groups": {
+    "hitlSelectPhase": "请至少选择一个需要审批的阶段。",
     "empty": "暂无群组",
     "emptyDescription": "群组允许多个 Agent 在结构化讨论中协作。",
     "createGroup": "创建群组",
@@ -1460,6 +1500,7 @@
     "maxRounds": "最大轮次",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "等待审批",
+    "stateCancelled": "已取消",
     "phasePlan": "规划",
     "phaseExecute": "执行",
     "phaseVerify": "验证",
@@ -1563,7 +1604,17 @@
     "hideDiscussions": "隐藏讨论面板",
     "showDiscussions": "显示讨论面板",
     "hideConfig": "隐藏配置面板",
-    "showConfig": "显示配置面板"
+    "showConfig": "显示配置面板",
+    "hitlSection": "人工批准",
+    "hitlApprovalPoints": "批准于",
+    "hitlOnTaskRejection": "拒绝时",
+    "hitlEdit": "编辑",
+    "hitlSaved": "审批设置已保存",
+    "hitlEnable": "需要人工审批",
+    "hitlApprovalPhases": "需要审批的阶段",
+    "hitlNotConfigured": "未配置审批拦截——点击“编辑”以要求人工审批。",
+    "driftTitle": "群组配置在暂停期间发生更改",
+    "driftRecovery": "由于群组的阶段已更改，恢复操作已中止。讨论仍在等待审批——请修正配置（在“配置”面板中点击“编辑”）并再次批准，或将其取消。"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -1582,7 +1633,8 @@
     "verificationPassed": "通过",
     "verificationFailed": "未通过",
     "showMore": "显示更多",
-    "showLess": "收起"
+    "showLess": "收起",
+    "awaitingApproval": "等待审批"
   },
   "memories": {
     "title": "用户记忆",
@@ -1843,7 +1895,21 @@
     "hintTaskForce": "主持人创建任务计划，将工作并行分配给代理，然后验证并综合结果。",
     "hintCustom": "手动定义您自己的阶段。自定义阶段可以在创建后通过 API 进行配置。",
     "hintRoundTable": "所有成员分享意见，然后在多轮中讨论彼此的观点，最后由主持人进行综合。",
-    "protocolSummary": "协议"
+    "protocolSummary": "协议",
+    "hitlTitle": "需要人工批准",
+    "hitlDesc": "在所选阶段暂停讨论，等待人工决定后再继续。",
+    "hitlApprovalPoints": "在以下阶段暂停以待批准",
+    "hitlNoPhases": "此样式没有可控制的预设阶段。",
+    "hitlNoApprovalPoints": "请至少选择一个阶段，否则讨论将永不暂停。",
+    "hitlTimeoutPolicy": "若未及时决定",
+    "hitlApprovalTimeout": "批准超时",
+    "hitlTimeoutInvalid": "请输入正的 ISO-8601 时长，例如 PT15M 或 PT1H30M。",
+    "hitlTimeoutHint": "ISO-8601 时长，例如 PT30S、PT15M、PT2H。",
+    "hitlGranularity": "批准粒度",
+    "hitlGranularityHint": "任务级批准适用于 TASK_FORCE 执行——可逐个批准或拒绝每个任务。",
+    "hitlOnTaskRejection": "当任务被拒绝时",
+    "hitlPinNote": "启用批准点会固定该组的讨论阶段（{{granularity}} 粒度）。",
+    "hitlReviewBadge": "人工批准"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -1953,6 +2019,73 @@
     "triggers": "触发器",
     "type": "频道类型",
     "webhookHint": "将此 URL 粘贴到您的 Slack 应用的 Event Subscriptions → Request URL 字段中。",
-    "webhookUrl": "Webhook URL"
+    "webhookUrl": "Webhook URL",
+    "hitlSection": "人机协同审批 (HITL)（可选）",
+    "hitlApprovalChannel": "审批频道 ID",
+    "hitlApprovalChannelHint": "会话暂停时接收审批卡片的 Slack 频道。",
+    "hitlApproverUserIds": "审批者用户 ID",
+    "hitlApproverUserIdsHint": "以逗号分隔、允许通过按钮进行审批的 Slack 用户 ID。若无此列表，则不渲染按钮（默认关闭）。"
+  },
+  "hitl": {
+    "loadingApprovalDetails": "正在加载审批详情…",
+    "awaitingHuman": "等待人工",
+    "awaitingApproval": "等待审批",
+    "approve": "批准",
+    "reject": "拒绝",
+    "cancel": "取消",
+    "approved": "已批准",
+    "rejected": "已拒绝",
+    "cancelled": "已取消",
+    "pending": "待处理",
+    "emptyQueue": "没有待审批项",
+    "emptyQueueDescription": "所有对话正常进行 — 目前不需要人工输入。",
+    "surface": "类型",
+    "regular": "对话",
+    "group": "群组",
+    "pauseReason": "原因",
+    "pausedAt": "暂停时间",
+    "timeoutPolicy": "超时策略",
+    "timeRemaining": "剩余时间",
+    "overdue": "已超时",
+    "phase": "阶段",
+    "granularity": "粒度",
+    "taskApprovals": "任务审批",
+    "approveAll": "全部批准",
+    "note": "添加备注（可选）",
+    "notePlaceholder": "为决定添加备注...",
+    "discussionCancelled": "讨论已取消",
+    "cancelDiscussion": "取消讨论",
+    "rejectAll": "全部拒绝",
+    "timeoutWaitIndefinitely": "无限期等待",
+    "timeoutAutoApprove": "自动批准",
+    "timeoutAutoReject": "自动拒绝",
+    "timeoutAbort": "中止",
+    "granularityPhase": "阶段",
+    "granularityTask": "任务",
+    "rejectionFail": "将任务标记为失败",
+    "rejectionRetry": "重试任务",
+    "groupsTruncated": "存在的群组审批多于此处显示的数量。",
+    "groupsLoadError": "无法加载群组审批。",
+    "toolApprovalRequired": "需要工具审批",
+    "toolCallsAwaiting": "等待审批的工具调用",
+    "executedUngated": "已执行（未拦截）",
+    "outcomeUnknown": "上一次审批在执行过程中被中断——其影响未知；重试前请在外部核实。",
+    "outcomeUnknownShort": "结果未知",
+    "toolApprovalHint": "批准将应用你对每次调用的选择（未更改的调用将被批准）。拒绝将拒绝整批调用。",
+    "gateReason": "匹配的模式",
+    "argsTruncated": "参数已截断",
+    "amendArguments": "修改参数（可选）",
+    "amendPlaceholder": "用于完整替换的 JSON 对象，例如 {\"to\":\"ops@acme.com\"}。留空则保留原始值。",
+    "amendTruncated": "无法修改参数已被截断的调用——请原样批准或拒绝。",
+    "amendInvalidJson": "修改后的参数必须是有效的 JSON 对象。",
+    "amendTooLarge": "修改后的参数过大。",
+    "review": "审阅",
+    "tool": "工具",
+    "scopeAll": "显示系统中所有待审批项。",
+    "scopeOwn": "显示你的会话的待审批项。",
+    "chatPaused": "此会话正在等待人工审批。",
+    "noProgressWaitForHuman": "等待人工处理",
+    "noProgressAutoReject": "自动拒绝",
+    "noProgressAbort": "中止"
   }
 }

@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Filter,
   Bot,
+  HandMetal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
@@ -45,10 +46,11 @@ const stateIcons: Record<
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
   ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
   EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-500/10" },
+  AWAITING_HUMAN: { icon: HandMetal, color: "text-orange-500", bg: "bg-orange-500/10" },
 };
 
 const STATE_FILTER_VALUES: (ConversationState | "ALL")[] = [
-  "ALL", "READY", "IN_PROGRESS", "ENDED", "ERROR",
+  "ALL", "READY", "IN_PROGRESS", "ENDED", "ERROR", "AWAITING_HUMAN",
 ];
 
 export function ConversationsPage() {
@@ -67,6 +69,7 @@ export function ConversationsPage() {
     ERROR: t("status.error", "Error"),
     ENDED: t("conversations.stateEnded", "Ended"),
     EXECUTION_INTERRUPTED: t("conversations.stateInterrupted", "Interrupted"),
+    AWAITING_HUMAN: t("hitl.awaitingHuman", "Awaiting Human"),
   };
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("conversations"));

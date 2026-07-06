@@ -1,0 +1,1 @@
+{"name":"ds-sync-deps","private":true,"dependencies":{"@tailwindcss/cli":"^4.3.2","@types/react":"^19.2.17","esbuild":"^0.28.1","ts-morph":"^28.0.0"}}

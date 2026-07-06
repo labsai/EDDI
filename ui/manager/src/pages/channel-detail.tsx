@@ -249,6 +249,32 @@ export function ChannelDetailPage() {
             <label className="text-xs font-medium">{t("channelDetail.signingSecret", "Signing Secret")}</label>
             <SecretKeyPicker value={draft.platformConfig.signingSecret ?? ""} onChange={(v) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, signingSecret: v } })} placeholder="${vault:slack-signing-secret}" />
           </div>
+
+          {/* Human-in-the-Loop approvals (optional) — routes HITL approval cards
+              to Slack and gates who may decide via buttons (fail-closed). */}
+          <div className="space-y-3 border-t border-border/50 pt-3">
+            <p className="text-xs font-semibold text-muted-foreground">{t("channelDetail.hitlSection", "Human-in-the-Loop Approvals (optional)")}</p>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">{t("channelDetail.hitlApprovalChannel", "Approval Channel ID")}</label>
+              <Input
+                data-testid="hitl-approval-channel-input"
+                value={draft.platformConfig.hitlApprovalChannel ?? ""}
+                onChange={(e) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, hitlApprovalChannel: e.target.value } })}
+                placeholder="C0123ABCDEF"
+              />
+              <p className="text-[10px] text-muted-foreground">{t("channelDetail.hitlApprovalChannelHint", "Slack channel that receives an approval card when a conversation pauses.")}</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">{t("channelDetail.hitlApproverUserIds", "Approver User IDs")}</label>
+              <Input
+                data-testid="hitl-approver-ids-input"
+                value={draft.platformConfig.hitlApproverUserIds ?? ""}
+                onChange={(e) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, hitlApproverUserIds: e.target.value } })}
+                placeholder="U012ABC,U345DEF"
+              />
+              <p className="text-[10px] text-muted-foreground">{t("channelDetail.hitlApproverUserIdsHint", "Comma-separated Slack user IDs allowed to approve via buttons. Without this list, buttons are not rendered (fail-closed).")}</p>
+            </div>
+          </div>
         </div>
       </section>
 

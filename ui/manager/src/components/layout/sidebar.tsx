@@ -32,6 +32,7 @@ import {
   Users,
   Cable,
   Variable,
+  HandMetal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -68,6 +69,7 @@ const navSections = [
       { path: "/manage/logs", icon: ScrollText, labelKey: "nav.logs" },
       { path: "/manage/conversations", icon: MessagesSquare, labelKey: "nav.conversations" },
       { path: "/manage/coordinator", icon: Activity, labelKey: "nav.coordinator" },
+      { path: "/manage/approvals", icon: HandMetal, labelKey: "nav.approvals" },
       { path: "/manage/audit", icon: ShieldCheck, labelKey: "nav.audit" },
     ],
   },

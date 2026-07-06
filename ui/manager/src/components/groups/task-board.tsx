@@ -10,6 +10,7 @@ import {
   Shield,
   ChevronDown,
   ChevronUp,
+  Hand,
 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -43,9 +44,11 @@ interface TaskBoardProps {
   taskVerifications: Map<string, TaskVerification>;
   /** Whether the stream is still active */
   isStreaming: boolean;
+  /** Set of task IDs awaiting HITL approval */
+  tasksAwaitingApproval?: Set<string>;
 }
 
-type TaskStatus = "pending" | "in-progress" | "completed" | "verified";
+type TaskStatus = "pending" | "in-progress" | "awaiting-approval" | "completed" | "verified";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -67,8 +70,12 @@ function deriveStatus(
   tasksInProgress: Set<string>,
   tasksCompleted: Set<string>,
   taskVerifications: Map<string, TaskVerification>,
+  tasksAwaitingApproval?: Set<string>,
 ): TaskStatus {
   if (taskVerifications.has(taskId)) return "verified";
+  // A task awaiting human approval must surface in the Awaiting Approval column
+  // even though it has already "completed" execution (both sets contain it).
+  if (tasksAwaitingApproval?.has(taskId)) return "awaiting-approval";
   if (tasksCompleted.has(taskId)) return "completed";
   if (tasksInProgress.has(taskId)) return "in-progress";
   return "pending";
@@ -103,6 +110,8 @@ function TaskCard({
         status === "pending" && "bg-secondary/30 border-border",
         status === "in-progress" &&
           "bg-amber-500/10 border-amber-500/40 animate-[pulse-border_2s_ease-in-out_infinite]",
+        status === "awaiting-approval" &&
+          "bg-orange-500/10 border-orange-500/40",
         status === "completed" && "bg-sky-500/10 border-sky-500/40",
         status === "verified" && verification?.passed &&
           "bg-emerald-500/10 border-emerald-500/40",
@@ -276,6 +285,7 @@ export function TaskBoard({
   tasksCompleted,
   taskVerifications,
   isStreaming,
+  tasksAwaitingApproval,
 }: TaskBoardProps) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(() => {
@@ -283,10 +293,11 @@ export function TaskBoard({
   });
 
   // Bucket tasks into columns
-  const { pending, inProgress, completed, verified } = useMemo(() => {
+  const { pending, inProgress, awaitingApproval, completed, verified } = useMemo(() => {
     const buckets = {
       pending: [] as Task[],
       inProgress: [] as Task[],
+      awaitingApproval: [] as Task[],
       completed: [] as Task[],
       verified: [] as Task[],
     };
@@ -299,6 +310,7 @@ export function TaskBoard({
         tasksInProgress,
         tasksCompleted,
         taskVerifications,
+        tasksAwaitingApproval,
       );
       switch (status) {
         case "pending":
@@ -306,6 +318,9 @@ export function TaskBoard({
           break;
         case "in-progress":
           buckets.inProgress.push(task);
+          break;
+        case "awaiting-approval":
+          buckets.awaitingApproval.push(task);
           break;
         case "completed":
           buckets.completed.push(task);
@@ -317,7 +332,7 @@ export function TaskBoard({
     }
 
     return buckets;
-  }, [taskPlan, tasksInProgress, tasksCompleted, taskVerifications]);
+  }, [taskPlan, tasksInProgress, tasksCompleted, taskVerifications, tasksAwaitingApproval]);
 
   const total = taskPlan?.length ?? 0;
 
@@ -358,6 +373,13 @@ export function TaskBoard({
       icon: <Zap className="h-4 w-4 text-amber-500" />,
       colorClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
       tasks: inProgress,
+    },
+    {
+      key: "awaiting-approval" as const,
+      label: t("taskBoard.awaitingApproval", "Awaiting Approval"),
+      icon: <Hand className="h-4 w-4 text-orange-500" />,
+      colorClass: "bg-orange-500/15 text-orange-700 dark:text-orange-300",
+      tasks: awaitingApproval,
     },
     {
       key: "completed" as const,
@@ -411,7 +433,7 @@ export function TaskBoard({
 
       {/* ---- Desktop: 4-column kanban ---- */}
       {!collapsed && (
-      <div className="hidden md:grid md:grid-cols-4 gap-3" id="task-board-content">
+      <div className="hidden md:grid md:grid-cols-5 gap-3" id="task-board-content">
         {columns.map((col) => (
           <div
             key={col.key}

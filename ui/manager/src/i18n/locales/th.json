@@ -44,6 +44,7 @@
     "capabilities": "ขีดความสามารถ",
     "sync": "ซิงค์",
     "channels": "ช่องทาง",
+    "approvals": "การอนุมัติ",
     "userConversations": "การสนทนาของผู้ใช้",
     "userData": "ข้อมูลผู้ใช้",
     "variables": "ตัวแปร"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "กลุ่ม",
       "subtitle": "กลุ่มสนทนาหลาย Agent สำหรับการอภิปรายเชิงโครงสร้างและการทำงานร่วมกัน"
-    }
+    },
+    "approvals": "การอนุมัติที่รอดำเนินการ",
+    "approvalsSubtitle": "ตรวจสอบและตัดสินใจเกี่ยวกับการสนทนาที่รอการป้อนข้อมูลของมนุษย์"
   },
   "common": {
     "loading": "กำลังโหลด...",
@@ -134,7 +137,11 @@
     "saving": "กำลังบันทึก…",
     "showMore": "Show More",
     "showLess": "Show Less",
-    "copyFailed": "คัดลอกไปยังคลิปบอร์ดล้มเหลว"
+    "copyFailed": "คัดลอกไปยังคลิปบอร์ดล้มเหลว",
+    "loadError": "โหลดข้อมูลไม่สำเร็จ",
+    "actions": "การดำเนินการ",
+    "view": "ดู",
+    "refresh": "รีเฟรช"
   },
   "agents": {
     "deploy": "ติดตั้ง (Deploy)",
@@ -232,7 +239,32 @@
     "slackStep2": "คัดลอกโทเค็นบอท (xoxb-…) และซีเคร็ตลายเซ็นไปยัง vault ของ EDDI แล้วกำหนดค่าช่องด้านล่าง",
     "slackStep3": "จากนั้นเปิดใช้งาน Event Subscriptions ในแอป Slack วาง URL Webhook ด้านบนแล้วสมัครรับ:",
     "slackSetupNote": "สำคัญ: กำหนดค่าช่องด้านล่างก่อนเปิดใช้งาน Event Subscriptions — Slack จะส่งคำท้าทายการตรวจสอบ URL ที่ต้องกำหนดค่าซีเคร็ตลายเซ็นใน EDDI",
-    "slackRequiredScopes": "สิทธิ์โทเค็นบอทที่จำเป็น"
+    "slackRequiredScopes": "สิทธิ์โทเค็นบอทที่จำเป็น",
+    "hitlConfig": "Human-in-the-Loop",
+    "hitlConfigDesc": "เมื่อเอเจนต์นี้หยุดการสนทนาเพื่อขออนุมัติจากมนุษย์ การตั้งค่าเหล่านี้จะควบคุมระยะเวลารอและสิ่งที่จะเกิดขึ้นหากไม่มีการตัดสินใจในเวลาที่กำหนด",
+    "hitlEnable": "กำหนดค่าการหมดเวลาการอนุมัติจากมนุษย์",
+    "hitlTimeoutPolicy": "หากไม่มีการตัดสินใจในเวลาที่กำหนด",
+    "hitlApprovalTimeout": "หมดเวลาการอนุมัติ (ISO-8601)",
+    "hitlTimeoutInvalid": "นโยบายแบบจำกัดต้องมีระยะเวลา ISO-8601 ที่เป็นบวก เช่น PT15M",
+    "hitlTimeoutHint": "เช่น PT30S, PT15M, PT2H",
+    "hitlPauseReason": "เหตุผลการอนุมัติ (แสดงต่อผู้อนุมัติ)",
+    "hitlPauseReasonPlaceholder": "เช่น การลบต้องได้รับการอนุมัติจากผู้จัดการ",
+    "toolApprovalsEnable": "ควบคุมการเรียกเครื่องมือบางรายการเพื่อขออนุมัติ",
+    "toolApprovalsDesc": "หยุดชั่วคราวเมื่อโมเดลเรียกเครื่องมือที่ตรงกัน ก่อนที่จะทำงาน รายการ \"require approval\" ที่ว่างเปล่าจะปิดการควบคุมเครื่องมือ",
+    "toolRequireApproval": "ต้องอนุมัติ (รูปแบบ glob, หนึ่งรายการต่อบรรทัด)",
+    "toolPatternHint": "'*' เป็นไวลด์การ์ดเดียวที่ใช้ได้ คำนำหน้าแหล่งที่มา (ไม่บังคับ):",
+    "toolExempt": "ยกเว้น (อนุญาตเสมอ, หนึ่งรายการต่อบรรทัด)",
+    "toolMaxPauses": "หยุดสูงสุด / รอบ (1–10)",
+    "toolMaxAuto": "อนุมัติอัตโนมัติสูงสุด / รอบ (0–10)",
+    "toolOnNoProgress": "เมื่อหยุดซ้ำโดยไม่มีความคืบหน้า",
+    "toolTimeoutPolicy": "นโยบายหมดเวลาการหยุดเครื่องมือ",
+    "toolTimeoutInherit": "สืบทอดจากเอเจนต์",
+    "toolAutoApproveDemotion": "AUTO_APPROVE ระดับเอเจนต์ไม่มีผลกับการอนุมัติเครื่องมือ — การหยุดเครื่องมือจะรอไม่มีกำหนดเว้นแต่คุณจะตั้งนโยบายหมดเวลาการหยุดเครื่องมือด้านบน",
+    "toolPauseReason": "เหตุผลของผู้อนุมัติ (ใช้ {toolNames} ได้)",
+    "toolPauseReasonPlaceholder": "เช่น ต้องอนุมัติสำหรับ {toolNames}",
+    "toolPendingMessage": "ข้อความถึงผู้ใช้ปลายทางระหว่างหยุด (ใช้ {toolNames} ได้)",
+    "toolPendingMessagePlaceholder": "เช่น กำลังรอมนุษย์อนุมัติ {toolNames}…",
+    "toolInGroupTurns": "ภายในรอบของกลุ่ม การเรียกเครื่องมือที่ถูกควบคุมของสมาชิกจะถูกปฏิเสธอัตโนมัติ (REJECT)"
   },
   "wizard": {
     "title": "ตัวช่วยสร้าง Agent"
@@ -751,7 +783,10 @@
     "toolCount": "เลือก {{selected}} จาก {{total}}",
     "toolSources": "แหล่งเครื่องมือเวิร์กโฟลว์",
     "toolSourcesInfo": "แหล่งทั้งสองเปิดใช้งานโดยค่าเริ่มต้น — การเรียก HTTP และ MCP ทั้งหมดในเวิร์กโฟลว์จะถูกเปิดเผยเป็นเครื่องมือ LLM โดยอัตโนมัติ ปิดแหล่งเพื่อยกเว้น",
-    "included": "รวมอยู่"
+    "included": "รวมอยู่",
+    "toolApprovals": "การควบคุมการอนุมัติเครื่องมือ (ต่องาน)",
+    "toolApprovalsEnable": "แทนที่การอนุมัติเครื่องมือสำหรับงานนี้",
+    "toolApprovalsDesc": "แทนที่การอนุมัติเครื่องมือระดับเอเจนต์สำหรับงานนี้เท่านั้น — เป็นการแทนที่ทั้งหมด ไม่ใช่การรวม"
   },
   "outputEditor": {
     "language": "ภาษา",
@@ -1015,7 +1050,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "โดย",
+    "automated": "อัตโนมัติ"
   },
   "schedules": {
     "title": "การกำหนดเวลา",
@@ -1064,7 +1101,9 @@
     "retryError": "ลองใหม่ล้มเหลว",
     "deleteSuccess": "ลบการกำหนดเวลาแล้ว",
     "deleteError": "ลบการกำหนดเวลาล้มเหลว",
-    "fireHistory": "ประวัติการดำเนินการ"
+    "fireHistory": "ประวัติการดำเนินการ",
+    "hitlTimeout": "หมดเวลา HITL",
+    "hitlTimeoutHint": "การหมดเวลาอนุมัติ HITL ที่จัดการโดยระบบ — แก้ไขผ่านการอนุมัติของการสนทนา ไม่ใช่ที่นี่"
   },
   "cascadeTrace": {
     "title": "โมเดลคาสเคด",
@@ -1445,6 +1484,7 @@
     "guidedSetupDesc": "แบบฟอร์มแนะนำทีละขั้นตอน โดยครอบคลุม LLM, Prompts, เครื่องมือ, และการ Deploy."
   },
   "groups": {
+    "hitlSelectPhase": "เลือกอย่างน้อยหนึ่งเฟสที่ต้องขออนุมัติ",
     "empty": "ยังไม่มี Group",
     "emptyDescription": "Group ช่วยให้ Agent หลายตัวทำงานร่วมกันในการสนทนาเชิงโครงสร้าง",
     "createGroup": "สร้าง Group",
@@ -1460,6 +1500,7 @@
     "maxRounds": "รอบสูงสุด",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "รอการอนุมัติ",
+    "stateCancelled": "ยกเลิก",
     "phasePlan": "วางแผน",
     "phaseExecute": "ดำเนินการ",
     "phaseVerify": "ตรวจสอบ",
@@ -1563,7 +1604,17 @@
     "hideDiscussions": "ซ่อนแผงการสนทนา",
     "showDiscussions": "แสดงแผงการสนทนา",
     "hideConfig": "ซ่อนแผงการกำหนดค่า",
-    "showConfig": "แสดงแผงการกำหนดค่า"
+    "showConfig": "แสดงแผงการกำหนดค่า",
+    "hitlSection": "การอนุมัติจากมนุษย์",
+    "hitlApprovalPoints": "อนุมัติที่",
+    "hitlOnTaskRejection": "เมื่อปฏิเสธ",
+    "hitlEdit": "แก้ไข",
+    "hitlSaved": "บันทึกการตั้งค่าการอนุมัติแล้ว",
+    "hitlEnable": "ต้องมีการอนุมัติจากมนุษย์",
+    "hitlApprovalPhases": "ระยะที่ต้องอนุมัติ",
+    "hitlNotConfigured": "ยังไม่ได้ตั้งค่าการควบคุมการอนุมัติ — คลิกแก้ไขเพื่อกำหนดให้ต้องมีการอนุมัติจากมนุษย์",
+    "driftTitle": "การกำหนดค่ากลุ่มเปลี่ยนแปลงขณะหยุดชั่วคราว",
+    "driftRecovery": "การดำเนินการต่อถูกยกเลิกเนื่องจากระยะของกลุ่มเปลี่ยนแปลง การสนทนายังคงรอการอนุมัติ — แก้ไขการกำหนดค่า (แก้ไข ในแผงการกำหนดค่า) แล้วอนุมัติอีกครั้ง หรือยกเลิก"
   },
   "taskBoard": {
     "title": "บอร์ดงาน",
@@ -1582,7 +1633,8 @@
     "verificationPassed": "ผ่าน",
     "verificationFailed": "ไม่ผ่าน",
     "showMore": "แสดงเพิ่มเติม",
-    "showLess": "แสดงน้อยลง"
+    "showLess": "แสดงน้อยลง",
+    "awaitingApproval": "รอการอนุมัติ"
   },
   "memories": {
     "title": "หน่วยความจำผู้ใช้",
@@ -1843,7 +1895,21 @@
     "hintTaskForce": "ผู้ดำเนินรายการสร้างแผนงาน มอบหมายงานให้เอเจนต์แบบขนาน จากนั้นตรวจสอบและสังเคราะห์ผลลัพธ์",
     "hintCustom": "กำหนดเฟสของคุณเองด้วยตนเอง เฟสที่กำหนดเองสามารถตั้งค่าผ่าน API หลังจากสร้าง",
     "hintRoundTable": "สมาชิกทุกคนแบ่งปันความเห็น จากนั้นอภิปรายมุมมองของกันและกันหลายรอบก่อนที่ผู้ดำเนินรายการจะสังเคราะห์",
-    "protocolSummary": "โปรโตคอล"
+    "protocolSummary": "โปรโตคอล",
+    "hitlTitle": "ต้องได้รับการอนุมัติจากมนุษย์",
+    "hitlDesc": "หยุดการสนทนาชั่วคราวที่เฟสที่เลือกและรอการตัดสินใจจากมนุษย์ก่อนดำเนินการต่อ",
+    "hitlApprovalPoints": "หยุดเพื่อขออนุมัติที่",
+    "hitlNoPhases": "รูปแบบนี้ไม่มีเฟสที่กำหนดไว้ล่วงหน้าให้ควบคุม",
+    "hitlNoApprovalPoints": "เลือกอย่างน้อยหนึ่งเฟส มิฉะนั้นการสนทนาจะไม่หยุดเลย",
+    "hitlTimeoutPolicy": "หากไม่มีการตัดสินใจในเวลาที่กำหนด",
+    "hitlApprovalTimeout": "หมดเวลาการอนุมัติ",
+    "hitlTimeoutInvalid": "ป้อนระยะเวลา ISO-8601 ที่เป็นบวก เช่น PT15M หรือ PT1H30M",
+    "hitlTimeoutHint": "ระยะเวลา ISO-8601 เช่น PT30S, PT15M, PT2H",
+    "hitlGranularity": "ระดับการอนุมัติ",
+    "hitlGranularityHint": "การอนุมัติระดับงานใช้กับการดำเนินการ TASK_FORCE — อนุมัติหรือปฏิเสธแต่ละงานทีละงาน",
+    "hitlOnTaskRejection": "เมื่องานถูกปฏิเสธ",
+    "hitlPinNote": "การเปิดใช้จุดอนุมัติจะตรึงเฟสการสนทนาของกลุ่มนี้ (ระดับ {{granularity}})",
+    "hitlReviewBadge": "การอนุมัติจากมนุษย์"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -1953,6 +2019,73 @@
     "triggers": "ทริกเกอร์",
     "type": "ประเภทช่อง",
     "webhookHint": "วาง URL นี้ในฟิลด์ Request URL ของ Event Subscriptions ในแอป Slack",
-    "webhookUrl": "URL เว็บฮุก"
+    "webhookUrl": "URL เว็บฮุก",
+    "hitlSection": "การอนุมัติแบบ Human-in-the-Loop (ไม่บังคับ)",
+    "hitlApprovalChannel": "ID ช่องอนุมัติ",
+    "hitlApprovalChannelHint": "ช่อง Slack ที่รับการ์ดอนุมัติเมื่อการสนทนาหยุดชั่วคราว",
+    "hitlApproverUserIds": "ID ผู้ใช้ที่เป็นผู้อนุมัติ",
+    "hitlApproverUserIdsHint": "ID ผู้ใช้ Slack คั่นด้วยจุลภาคที่ได้รับอนุญาตให้อนุมัติผ่านปุ่ม หากไม่มีรายการนี้ ปุ่มจะไม่ถูกแสดง (ปิดโดยปริยายเมื่อล้มเหลว)"
+  },
+  "hitl": {
+    "loadingApprovalDetails": "กำลังโหลดรายละเอียดการอนุมัติ…",
+    "awaitingHuman": "รอมนุษย์",
+    "awaitingApproval": "รอการอนุมัติ",
+    "approve": "อนุมัติ",
+    "reject": "ปฏิเสธ",
+    "cancel": "ยกเลิก",
+    "approved": "อนุมัติแล้ว",
+    "rejected": "ปฏิเสธแล้ว",
+    "cancelled": "ยกเลิกแล้ว",
+    "pending": "รอดำเนินการ",
+    "emptyQueue": "ไม่มีการอนุมัติที่รอดำเนินการ",
+    "emptyQueueDescription": "การสนทนาทั้งหมดดำเนินไปอย่างราบรื่น — ไม่ต้องการการป้อนข้อมูลจากมนุษย์ในขณะนี้",
+    "surface": "ประเภท",
+    "regular": "การสนทนา",
+    "group": "กลุ่ม",
+    "pauseReason": "เหตุผล",
+    "pausedAt": "หยุดชั่วคราว",
+    "timeoutPolicy": "นโยบายหมดเวลา",
+    "timeRemaining": "เหลือ",
+    "overdue": "เลยกำหนด",
+    "phase": "เฟส",
+    "granularity": "ความละเอียด",
+    "taskApprovals": "การอนุมัติงาน",
+    "approveAll": "อนุมัติทั้งหมด",
+    "note": "เพิ่มหมายเหตุ (ไม่บังคับ)",
+    "notePlaceholder": "เพิ่มหมายเหตุสำหรับการตัดสินใจ...",
+    "discussionCancelled": "ยกเลิกการสนทนาแล้ว",
+    "cancelDiscussion": "ยกเลิกการสนทนา",
+    "rejectAll": "ปฏิเสธทั้งหมด",
+    "timeoutWaitIndefinitely": "รอไม่มีกำหนด",
+    "timeoutAutoApprove": "อนุมัติอัตโนมัติ",
+    "timeoutAutoReject": "ปฏิเสธอัตโนมัติ",
+    "timeoutAbort": "ยกเลิก",
+    "granularityPhase": "เฟส",
+    "granularityTask": "งาน",
+    "rejectionFail": "ทำให้งานล้มเหลว",
+    "rejectionRetry": "ลองทำงานใหม่",
+    "groupsTruncated": "มีการอนุมัติกลุ่มมากกว่าที่แสดงที่นี่",
+    "groupsLoadError": "ไม่สามารถโหลดการอนุมัติกลุ่มได้",
+    "toolApprovalRequired": "ต้องอนุมัติการเรียกเครื่องมือ",
+    "toolCallsAwaiting": "การเรียกเครื่องมือที่รออนุมัติ",
+    "executedUngated": "ดำเนินการไปแล้ว (ไม่ผ่านการควบคุม)",
+    "outcomeUnknown": "การอนุมัติก่อนหน้าถูกขัดจังหวะระหว่างการดำเนินการ — ไม่ทราบผลลัพธ์ ตรวจสอบจากภายนอกก่อนลองใหม่",
+    "outcomeUnknownShort": "ไม่ทราบผลลัพธ์",
+    "toolApprovalHint": "อนุมัติจะใช้ตัวเลือกต่อการเรียกของคุณ (การเรียกที่คุณไม่ได้เปลี่ยนจะได้รับการอนุมัติ) ปฏิเสธจะปฏิเสธทั้งชุด",
+    "gateReason": "รูปแบบที่ตรงกัน",
+    "argsTruncated": "อาร์กิวเมนต์ถูกตัดทอน",
+    "amendArguments": "แก้ไขอาร์กิวเมนต์ (ไม่บังคับ)",
+    "amendPlaceholder": "อ็อบเจ็กต์ JSON ที่ใช้แทนที่ทั้งหมด เช่น {\"to\":\"ops@acme.com\"} เว้นว่างไว้เพื่อคงค่าเดิม",
+    "amendTruncated": "ไม่สามารถแก้ไขการเรียกที่อาร์กิวเมนต์ถูกตัดทอนได้ — อนุมัติหรือปฏิเสธตามเดิม",
+    "amendInvalidJson": "อาร์กิวเมนต์ที่แก้ไขต้องเป็นอ็อบเจ็กต์ JSON ที่ถูกต้อง",
+    "amendTooLarge": "อาร์กิวเมนต์ที่แก้ไขมีขนาดใหญ่เกินไป",
+    "review": "ตรวจสอบ",
+    "tool": "เครื่องมือ",
+    "scopeAll": "กำลังแสดงการอนุมัติที่รอดำเนินการทั้งหมดในระบบ",
+    "scopeOwn": "กำลังแสดงการอนุมัติที่รอดำเนินการสำหรับการสนทนาของคุณ",
+    "chatPaused": "การสนทนานี้กำลังรอการอนุมัติจากมนุษย์",
+    "noProgressWaitForHuman": "รอมนุษย์",
+    "noProgressAutoReject": "ปฏิเสธอัตโนมัติ",
+    "noProgressAbort": "ยกเลิก"
   }
 }

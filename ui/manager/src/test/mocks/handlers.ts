@@ -1052,6 +1052,32 @@ export const handlers = [
     });
   }),
 
+  // List pending HITL approvals (1:1 surface). MUST precede the ":conversationId"
+  // catch-all below, or MSW (first-match-wins) treats "pending-approvals" as a
+  // conversation id and returns a single conversation object.
+  http.get("*/agents/pending-approvals", () => {
+    return HttpResponse.json([
+      {
+        conversationId: "conv-awaiting-1",
+        agentId: "agent1",
+        userId: "user-123",
+        pausedAt: new Date(Date.now() - 300_000).toISOString(),
+        pauseReason: "High-value transaction requires human review",
+        timeoutPolicy: "WAIT_INDEFINITELY",
+        approvalTimeout: null,
+      },
+      {
+        conversationId: "conv-awaiting-2",
+        agentId: "agent2",
+        userId: "user-456",
+        pausedAt: new Date(Date.now() - 120_000).toISOString(),
+        pauseReason: "Agent requested escalation to human operator",
+        timeoutPolicy: "AUTO_REJECT",
+        approvalTimeout: "PT15M",
+      },
+    ]);
+  }),
+
   // Read conversation (v6: GET /agents/:conversationId)
   http.get("*/agents/:conversationId", () => {
     return HttpResponse.json({
@@ -3604,6 +3630,30 @@ export const scheduleHandlers = [
     ]);
   }),
 
+  // Cross-group HITL inbox (GET /groups/pending-approvals). Group summaries
+  // carry a groupId (that drives the "Group" badge / View link on the queue).
+  http.get("*/groups/pending-approvals", () => {
+    return HttpResponse.json([
+      {
+        conversationId: "gconv-awaiting-1",
+        agentId: null,
+        groupId: "group1",
+        userId: "manager-user",
+        pausedAt: new Date(Date.now() - 90_000).toISOString(),
+        pauseReason: "Group discussion needs sign-off before synthesis",
+        timeoutPolicy: "WAIT_INDEFINITELY",
+        approvalTimeout: null,
+      },
+    ]);
+  }),
+
+  // List this group's pending HITL approvals. MUST be registered before the
+  // ":convId" catch-all below, or MSW (first-match-wins) would treat
+  // "pending-approvals" as a conversation id and return a single object.
+  http.get("*/groups/:groupId/conversations/pending-approvals", () => {
+    return HttpResponse.json([]);
+  }),
+
   // Get single group conversation (detailed transcript)
   http.get("*/groups/:groupId/conversations/:convId", () => {
     const now = new Date();
@@ -4698,5 +4748,79 @@ export const backupSyncHandlers = [
 
   http.post("*/agents/:conversationId/rerun", () => {
     return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── HITL — Human-in-the-Loop ──
+  // (GET */agents/pending-approvals is registered earlier, before the
+  //  ":conversationId" catch-all, so it isn't shadowed.)
+
+  http.post("*/agents/:conversationId/resume", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { note?: string };
+    if (body?.note && body.note.length > 4096) {
+      return HttpResponse.json(
+        { message: "Decision note exceeds the maximum length of 4096 characters" },
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/agents/:conversationId/cancel", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.get("*/agents/:conversationId/approval-status", () => {
+    return HttpResponse.json({
+      conversationId: "conv-awaiting-1",
+      state: "AWAITING_HUMAN",
+      pausedAt: new Date(Date.now() - 300_000).toISOString(),
+      pauseReason: "High-value transaction requires human review",
+    });
+  }),
+
+  // Non-streaming approve (programmatic binding). Validates the note cap.
+  http.post("*/groups/:groupId/conversations/:gcId/approve", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { decision?: { note?: string } };
+    if (body?.decision?.note && body.decision.note.length > 4096) {
+      return HttpResponse.json(
+        { message: "Decision note exceeds the maximum length of 4096 characters" },
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Streaming approve/resume — emits hitl_resume then group_complete over SSE.
+  http.post("*/groups/:groupId/conversations/:gcId/approve/stream", () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'event: hitl_resume\ndata: {"verdict":"APPROVED","decidedBy":"manager-user"}\n\n',
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            'event: group_complete\ndata: {"state":"COMPLETED","synthesizedAnswer":"Resumed and completed."}\n\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    return new HttpResponse(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }),
+
+  http.post("*/groups/:groupId/conversations/:gcId/cancel", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.get("*/groups/:groupId/conversations/:gcId/approval-status", () => {
+    return HttpResponse.json({
+      state: "AWAITING_APPROVAL",
+      pausedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
   }),
 ];

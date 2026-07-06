@@ -21,6 +21,7 @@ import {
   MessageCircle,
   Download,
   Search,
+  HandMetal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -37,6 +38,13 @@ import type {
 } from "@/lib/api/conversations";
 import { extractInput, extractOutput, extractActions } from "@/lib/api/conversations";
 import { useNavigate } from "react-router-dom";
+import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import {
+  useResumeConversation,
+  useCancelConversation,
+  useApprovalStatus,
+} from "@/hooks/use-hitl";
+import type { HitlVerdict, ToolCallDecision } from "@/lib/api/hitl";
 
 // Status icons — labels resolved via i18n in component
 const stateIcons: Record<
@@ -48,6 +56,7 @@ const stateIcons: Record<
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
   ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
   EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-500/10" },
+  AWAITING_HUMAN: { icon: HandMetal, color: "text-orange-500", bg: "bg-orange-500/10" },
 };
 
 export function ConversationDetailPage() {
@@ -64,12 +73,22 @@ export function ConversationDetailPage() {
     ERROR: t("status.error", "Error"),
     ENDED: t("conversations.stateEnded", "Ended"),
     EXECUTION_INTERRUPTED: t("conversations.stateInterrupted", "Interrupted"),
+    AWAITING_HUMAN: t("hitl.awaitingHuman", "Awaiting Human"),
   };
 
   const deleteMutation = useDeleteConversation();
+  const resumeMutation = useResumeConversation();
+  const cancelMutation = useCancelConversation();
 
   const { data: conversation, isLoading, isError, refetch } =
     useSimpleConversation(id!, true, false);
+
+  // Structured pause details (incl. TOOL_CALL per-call tool names + redacted
+  // arguments) — fetched only while the conversation is actually paused.
+  const { data: approvalStatus } = useApprovalStatus(
+    id,
+    conversation?.conversationState === "AWAITING_HUMAN",
+  );
 
   function handleDelete() {
     deleteMutation.mutate(
@@ -214,6 +233,48 @@ export function ConversationDetailPage() {
           </button>
         </div>
       </div>
+
+      {/* HITL Approval Banner */}
+      {state === "AWAITING_HUMAN" && (
+        <ApprovalBanner
+          surface="regular"
+          pauseReason={conversation.hitlPauseReason}
+          pausedAt={conversation.hitlPausedAt}
+          timeoutPolicy={conversation.hitlTimeoutPolicy}
+          approvalTimeout={conversation.hitlApprovalTimeout}
+          pauseDetails={approvalStatus?.pauseDetails ?? null}
+          pauseDetailsPending={!approvalStatus}
+          isSubmitting={resumeMutation.isPending || cancelMutation.isPending}
+          onDecide={(
+            verdict: HitlVerdict,
+            note?: string,
+            _taskApprovals?: Record<string, string>,
+            toolDecisions?: Record<string, ToolCallDecision>,
+          ) => {
+            resumeMutation.mutate(
+              { conversationId: id!, decision: { verdict, note, toolDecisions } },
+              {
+                onSuccess: () => {
+                  toast.success(verdict === "APPROVED"
+                    ? t("hitl.approved", "Approved")
+                    : t("hitl.rejected", "Rejected"));
+                  refetch();
+                },
+                onError: (err) => toast.error(getErrorMessage(err)),
+              }
+            );
+          }}
+          onCancel={() => {
+            cancelMutation.mutate(id!, {
+              onSuccess: () => {
+                toast.success(t("hitl.cancelled", "Cancelled"));
+                refetch();
+              },
+              onError: (err) => toast.error(getErrorMessage(err)),
+            });
+          }}
+        />
+      )}
 
       {/* Conversation Properties */}
       {conversation.conversationProperties &&

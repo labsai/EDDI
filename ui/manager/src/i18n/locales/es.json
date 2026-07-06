@@ -44,6 +44,7 @@
     "capabilities": "Capacidades",
     "sync": "Sincronización",
     "channels": "Canales",
+    "approvals": "Aprobaciones",
     "userConversations": "Conversaciones de usuario",
     "userData": "Datos del usuario",
     "variables": "Variables"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "Grupos",
       "subtitle": "Grupos de discusión multi-agente para debate estructurado y colaboración"
-    }
+    },
+    "approvals": "Aprobaciones pendientes",
+    "approvalsSubtitle": "Revise y decida sobre conversaciones que esperan intervención humana"
   },
   "common": {
     "loading": "Cargando...",
@@ -134,7 +137,11 @@
     "saving": "Guardando…",
     "showMore": "Show More",
     "showLess": "Show Less",
-    "copyFailed": "Error al copiar al portapapeles"
+    "copyFailed": "Error al copiar al portapapeles",
+    "loadError": "Error al cargar los datos",
+    "actions": "Acciones",
+    "view": "Ver",
+    "refresh": "Actualizar"
   },
   "agents": {
     "deploy": "Desplegar",
@@ -232,7 +239,32 @@
     "slackStep2": "Copia el token del bot (xoxb-…) y el secreto de firma en el vault de EDDI y configura los canales abajo.",
     "slackStep3": "Luego activa Event Subscriptions en tu aplicación Slack, pega la URL del webhook arriba y suscríbete a:",
     "slackSetupNote": "Importante: Configura el canal abajo antes de activar Event Subscriptions — Slack envía un desafío de verificación de URL que requiere que el secreto de firma esté configurado en EDDI.",
-    "slackRequiredScopes": "Permisos requeridos para el token del bot"
+    "slackRequiredScopes": "Permisos requeridos para el token del bot",
+    "hitlConfig": "Human-in-the-Loop",
+    "hitlConfigDesc": "Cuando este agente pausa una conversación para aprobación humana, estos ajustes controlan cuánto esperar y qué ocurre si no se decide a tiempo.",
+    "hitlEnable": "Configurar tiempos de espera de aprobación humana",
+    "hitlTimeoutPolicy": "Si no hay decisión a tiempo",
+    "hitlApprovalTimeout": "Tiempo de espera de aprobación (ISO-8601)",
+    "hitlTimeoutInvalid": "Una política finita necesita una duración ISO-8601 positiva, p. ej. PT15M.",
+    "hitlTimeoutHint": "p. ej. PT30S, PT15M, PT2H.",
+    "hitlPauseReason": "Motivo de aprobación (visible para los aprobadores)",
+    "hitlPauseReasonPlaceholder": "p. ej. La eliminación requiere aprobación del gerente",
+    "toolApprovalsEnable": "Controlar la aprobación de llamadas de herramienta específicas",
+    "toolApprovalsDesc": "Pausa cuando el modelo invoca una herramienta coincidente, antes de ejecutarla. Una lista de \"requerir aprobación\" vacía desactiva el control de herramientas.",
+    "toolRequireApproval": "Requerir aprobación (patrones glob, uno por línea)",
+    "toolPatternHint": "'*' es el único comodín. Prefijo de origen opcional:",
+    "toolExempt": "Exentas (siempre permitidas, una por línea)",
+    "toolMaxPauses": "Máx. pausas / turno (1–10)",
+    "toolMaxAuto": "Máx. aprobaciones automáticas / turno (0–10)",
+    "toolOnNoProgress": "Al repausar sin progreso",
+    "toolTimeoutPolicy": "Política de tiempo de espera de pausa de herramienta",
+    "toolTimeoutInherit": "Heredar del agente",
+    "toolAutoApproveDemotion": "El AUTO_APPROVE a nivel de agente no se aplica a las aprobaciones de herramienta — las pausas de herramienta esperarán indefinidamente a menos que establezcas arriba una política de tiempo de espera de pausa de herramienta.",
+    "toolPauseReason": "Motivo del aprobador ({toolNames} permitido)",
+    "toolPauseReasonPlaceholder": "p. ej. Se requiere aprobación para {toolNames}",
+    "toolPendingMessage": "Mensaje al usuario durante la pausa ({toolNames} permitido)",
+    "toolPendingMessagePlaceholder": "p. ej. Esperando a que una persona apruebe {toolNames}…",
+    "toolInGroupTurns": "Dentro de un turno de grupo, la llamada de herramienta controlada de un miembro se rechaza automáticamente (REJECT)."
   },
   "wizard": {
     "title": "Asistente de Agent"
@@ -751,7 +783,10 @@
     "toolCount": "{{selected}} de {{total}} seleccionadas",
     "toolSources": "Fuentes de herramientas del flujo",
     "toolSourcesInfo": "Ambas fuentes están activas por defecto — todas las llamadas HTTP y MCP del flujo se exponen automáticamente como herramientas LLM. Desactive una fuente para excluirla.",
-    "included": "Incluido"
+    "included": "Incluido",
+    "toolApprovals": "Control de aprobación de herramientas (por tarea)",
+    "toolApprovalsEnable": "Anular las aprobaciones de herramienta para esta tarea",
+    "toolApprovalsDesc": "Anula las aprobaciones de herramienta a nivel de agente solo para ESTA tarea — un reemplazo completo, no una combinación."
   },
   "outputEditor": {
     "language": "Idioma",
@@ -1015,7 +1050,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "por",
+    "automated": "automatizado"
   },
   "schedules": {
     "title": "Programaciones",
@@ -1064,7 +1101,9 @@
     "retryError": "Error al reintentar",
     "deleteSuccess": "Programación eliminada",
     "deleteError": "Error al eliminar la programación",
-    "fireHistory": "Historial de ejecución"
+    "fireHistory": "Historial de ejecución",
+    "hitlTimeout": "Tiempo de espera HITL",
+    "hitlTimeoutHint": "Tiempo de espera de aprobación HITL gestionado por el sistema — resuélvelo mediante la aprobación de la conversación, no aquí."
   },
   "cascadeTrace": {
     "title": "Cascada de modelos",
@@ -1445,6 +1484,7 @@
     "guidedSetupDesc": "Asistente paso a paso con proveedor de LLM, prompts y despliegue."
   },
   "groups": {
+    "hitlSelectPhase": "Seleccione al menos una fase que requiera aprobación.",
     "empty": "Sin grupos aún",
     "emptyDescription": "Los grupos permiten que múltiples agentes colaboren en discusiones estructuradas.",
     "createGroup": "Crear grupo",
@@ -1460,6 +1500,7 @@
     "maxRounds": "Rondas máx.",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "Pendiente de aprobación",
+    "stateCancelled": "Cancelado",
     "phasePlan": "Planificación",
     "phaseExecute": "Ejecución",
     "phaseVerify": "Verificación",
@@ -1563,7 +1604,17 @@
     "hideDiscussions": "Ocultar panel de discusiones",
     "showDiscussions": "Mostrar panel de discusiones",
     "hideConfig": "Ocultar panel de configuración",
-    "showConfig": "Mostrar panel de configuración"
+    "showConfig": "Mostrar panel de configuración",
+    "hitlSection": "Aprobación humana",
+    "hitlApprovalPoints": "Aprobación en",
+    "hitlOnTaskRejection": "Al rechazar",
+    "hitlEdit": "Editar",
+    "hitlSaved": "Configuración de aprobación guardada",
+    "hitlEnable": "Requerir aprobación humana",
+    "hitlApprovalPhases": "Fases que requieren aprobación",
+    "hitlNotConfigured": "No hay controles de aprobación configurados — haz clic en Editar para requerir aprobación humana.",
+    "driftTitle": "La configuración del grupo cambió durante la pausa",
+    "driftRecovery": "La reanudación se abortó porque las fases del grupo cambiaron. La discusión sigue a la espera de aprobación — corrige la configuración (Editar, en el panel de Configuración) y aprueba de nuevo, o cancélala."
   },
   "taskBoard": {
     "title": "Tablero de tareas",
@@ -1582,7 +1633,8 @@
     "verificationPassed": "Aprobado",
     "verificationFailed": "Fallido",
     "showMore": "mostrar más",
-    "showLess": "mostrar menos"
+    "showLess": "mostrar menos",
+    "awaitingApproval": "Esperando aprobación"
   },
   "memories": {
     "title": "Memoria del usuario",
@@ -1843,7 +1895,21 @@
     "hintTaskForce": "El moderador crea un plan de tareas, asigna trabajo a los agentes en paralelo, luego verifica y sintetiza los resultados.",
     "hintCustom": "Defina sus propias fases manualmente. Las fases personalizadas se pueden configurar a través de la API después de la creación.",
     "hintRoundTable": "Todos los miembros comparten sus opiniones, luego discuten los puntos de vista de los demás en varias rondas antes de que el moderador sintetice.",
-    "protocolSummary": "Protocolo"
+    "protocolSummary": "Protocolo",
+    "hitlTitle": "Requerir aprobación humana",
+    "hitlDesc": "Pausar la discusión en las fases elegidas y esperar una decisión humana antes de continuar.",
+    "hitlApprovalPoints": "Pausar para aprobación en",
+    "hitlNoPhases": "Este estilo no tiene fases predefinidas para controlar.",
+    "hitlNoApprovalPoints": "Selecciona al menos una fase, o la discusión nunca se pausará.",
+    "hitlTimeoutPolicy": "Si no hay decisión a tiempo",
+    "hitlApprovalTimeout": "Tiempo de espera de aprobación",
+    "hitlTimeoutInvalid": "Introduce una duración ISO-8601 positiva, p. ej. PT15M o PT1H30M.",
+    "hitlTimeoutHint": "Duración ISO-8601, p. ej. PT30S, PT15M, PT2H.",
+    "hitlGranularity": "Granularidad de aprobación",
+    "hitlGranularityHint": "La aprobación por tarea se aplica a la ejecución de TASK_FORCE — aprueba o rechaza cada tarea individualmente.",
+    "hitlOnTaskRejection": "Cuando se rechaza una tarea",
+    "hitlPinNote": "Activar puntos de aprobación fija las fases de discusión de este grupo (granularidad {{granularity}}).",
+    "hitlReviewBadge": "Aprobación humana"
   },
   "groupTemplates": {
     "advisoryBoard": "Comité asesor",
@@ -1953,6 +2019,73 @@
     "triggers": "activadores",
     "type": "Tipo de canal",
     "webhookHint": "Pegue esta URL en el campo Request URL de Event Subscriptions de su aplicación Slack.",
-    "webhookUrl": "URL del webhook"
+    "webhookUrl": "URL del webhook",
+    "hitlSection": "Aprobaciones con intervención humana (opcional)",
+    "hitlApprovalChannel": "ID del canal de aprobación",
+    "hitlApprovalChannelHint": "Canal de Slack que recibe una tarjeta de aprobación cuando una conversación se pausa.",
+    "hitlApproverUserIds": "IDs de usuario aprobadores",
+    "hitlApproverUserIdsHint": "IDs de usuario de Slack separados por comas con permiso para aprobar mediante botones. Sin esta lista, los botones no se muestran (cierre seguro)."
+  },
+  "hitl": {
+    "loadingApprovalDetails": "Cargando detalles de aprobación…",
+    "awaitingHuman": "Esperando humano",
+    "awaitingApproval": "Esperando aprobación",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "cancel": "Cancelar",
+    "approved": "Aprobado",
+    "rejected": "Rechazado",
+    "cancelled": "Cancelado",
+    "pending": "pendiente",
+    "emptyQueue": "Sin aprobaciones pendientes",
+    "emptyQueueDescription": "Todas las conversaciones fluyen — no se necesita intervención humana.",
+    "surface": "Superficie",
+    "regular": "Conversación",
+    "group": "Grupo",
+    "pauseReason": "Razón",
+    "pausedAt": "Pausado",
+    "timeoutPolicy": "Tiempo límite",
+    "timeRemaining": "Restante",
+    "overdue": "Vencido",
+    "phase": "Fase",
+    "granularity": "Granularidad",
+    "taskApprovals": "Aprobaciones de tareas",
+    "approveAll": "Aprobar todo",
+    "note": "Agregar nota (opcional)",
+    "notePlaceholder": "Agregar una nota para la decisión...",
+    "discussionCancelled": "Discusión cancelada",
+    "cancelDiscussion": "Cancelar discusión",
+    "rejectAll": "Rechazar todo",
+    "timeoutWaitIndefinitely": "Esperar indefinidamente",
+    "timeoutAutoApprove": "Auto-aprobar",
+    "timeoutAutoReject": "Auto-rechazar",
+    "timeoutAbort": "Anular",
+    "granularityPhase": "Fase",
+    "granularityTask": "Tarea",
+    "rejectionFail": "Marcar la tarea como fallida",
+    "rejectionRetry": "Reintentar la tarea",
+    "groupsTruncated": "Existen más aprobaciones de grupo de las que se muestran aquí.",
+    "groupsLoadError": "No se pudieron cargar las aprobaciones de grupo.",
+    "toolApprovalRequired": "Se requiere aprobación de herramienta",
+    "toolCallsAwaiting": "Llamadas de herramienta pendientes de aprobación",
+    "executedUngated": "Ya ejecutada (sin control)",
+    "outcomeUnknown": "Una aprobación anterior se interrumpió durante la ejecución — su efecto es desconocido; verifícalo externamente antes de reintentar.",
+    "outcomeUnknownShort": "resultado desconocido",
+    "toolApprovalHint": "Aprobar aplica tus elecciones por llamada (las que no modificaste quedan aprobadas). Rechazar rechaza todo el lote.",
+    "gateReason": "Patrón coincidente",
+    "argsTruncated": "argumentos truncados",
+    "amendArguments": "Modificar argumentos (opcional)",
+    "amendPlaceholder": "Objeto JSON de reemplazo completo, p. ej. {\"to\":\"ops@acme.com\"}. Déjalo en blanco para conservar el original.",
+    "amendTruncated": "No se puede modificar una llamada cuyos argumentos fueron truncados — apruébala o recházala tal cual.",
+    "amendInvalidJson": "Los argumentos modificados deben ser un objeto JSON válido.",
+    "amendTooLarge": "Los argumentos modificados son demasiado grandes.",
+    "review": "Revisar",
+    "tool": "Herramienta",
+    "scopeAll": "Mostrando todas las aprobaciones pendientes del sistema.",
+    "scopeOwn": "Mostrando las aprobaciones pendientes de tus conversaciones.",
+    "chatPaused": "Esta conversación está a la espera de aprobación humana.",
+    "noProgressWaitForHuman": "Esperar a una persona",
+    "noProgressAutoReject": "Rechazo automático",
+    "noProgressAbort": "Abortar"
   }
 }

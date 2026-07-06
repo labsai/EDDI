@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
@@ -20,6 +20,7 @@ import {
   Star,
   AlertTriangle,
   Pencil,
+  HandMetal,
 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +36,15 @@ import {
   type GroupMember,
   type AgentGroupConfiguration,
 } from "@/lib/api/groups";
+import type { GroupHitlConfig } from "@/lib/api/hitl";
+import {
+  getStylePhases,
+  applyApprovalPhases,
+  DEFAULT_GROUP_HITL_CONFIG,
+  isValidIsoDuration,
+  requiresApprovalTimeout,
+} from "@/lib/hitl-config";
+import { granularityLabel } from "@/lib/hitl-labels";
 import { parseResourceUri } from "@/lib/api/agents";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { getGroupTemplates, type GroupTemplate } from "@/lib/group-templates";
@@ -69,6 +79,21 @@ interface WizardState {
   maxRounds: number;
   members: MemberSlot[];
   moderator: MemberSlot | null;
+  /** Human-in-the-loop approval settings. */
+  hitlEnabled: boolean;
+  hitl: GroupHitlConfig;
+  /** Names of the phases that require human approval (the pause trigger). */
+  approvalPhases: string[];
+}
+
+/** Config-step validity gate for the HITL settings. */
+function isHitlConfigValid(state: WizardState): boolean {
+  if (!state.hitlEnabled) return true;
+  if (state.approvalPhases.length === 0) return false;
+  if (requiresApprovalTimeout(state.hitl.timeoutPolicy)) {
+    return !!state.hitl.approvalTimeout && isValidIsoDuration(state.hitl.approvalTimeout);
+  }
+  return true;
 }
 
 function createEmptySlot(index: number, displayName?: string, role?: string | null): MemberSlot {
@@ -112,6 +137,9 @@ const INITIAL_STATE: WizardState = {
   maxRounds: 2,
   members: [],
   moderator: null,
+  hitlEnabled: false,
+  hitl: DEFAULT_GROUP_HITL_CONFIG,
+  approvalPhases: [],
 };
 
 const STEPS = [
@@ -163,6 +191,7 @@ export function GroupWizardPage() {
       maxRounds: tmpl.maxRounds,
       members: tmpl.roles.map((r, i) => createEmptySlot(i, r.displayName, r.role)),
       moderator: tmpl.moderatorSuggested ? createModeratorSlot() : null,
+      approvalPhases: [],
     });
     setCurrentStep(1);
   }
@@ -173,7 +202,7 @@ export function GroupWizardPage() {
       case "template":
         return true;
       case "config":
-        return state.name.trim().length > 0;
+        return state.name.trim().length > 0 && isHitlConfigValid(state);
       case "members": {
         if (state.members.length < 2) return false;
         // Every member must have a displayName + be either assigned or in 'new' mode
@@ -272,13 +301,28 @@ export function GroupWizardPage() {
       moderatorAgentId: updatedModerator?.agentId || null,
       style: state.style,
       maxRounds: state.maxRounds,
-      phases: null,
+      // Materialize phases with per-phase approval flags only when HITL is on;
+      // otherwise leave null so the backend expands the preset at runtime.
+      phases:
+        state.hitlEnabled && state.approvalPhases.length > 0
+          ? applyApprovalPhases(getStylePhases(state.style, state.maxRounds), state.approvalPhases)
+          : null,
       protocol: {
         agentTimeoutSeconds: 60,
         onAgentFailure: "SKIP",
         maxRetries: 2,
         onMemberUnavailable: "SKIP",
       },
+      hitlConfig: state.hitlEnabled
+        ? {
+            approvalTimeout: state.hitl.approvalTimeout?.trim() || null,
+            timeoutPolicy: state.hitl.timeoutPolicy,
+            // TASK granularity only applies to TASK_FORCE (the only style with an
+            // EXECUTE phase); force PHASE elsewhere so it can't be inert-configured.
+            granularity: state.style === "TASK_FORCE" ? state.hitl.granularity : "PHASE",
+            onTaskRejection: state.hitl.onTaskRejection,
+          }
+        : undefined,
     };
 
     createMutation.mutate(config, {
@@ -630,7 +674,7 @@ function ConfigStep({
               return (
                 <button
                   key={s}
-                  onClick={() => onChange({ style: s })}
+                  onClick={() => onChange({ style: s, approvalPhases: [] })}
                   className={cn(
                     "group relative flex flex-col items-start rounded-lg border-2 p-3 text-start transition-all",
                     selected
@@ -669,13 +713,249 @@ function ConfigStep({
               min={1}
               max={10}
               value={state.maxRounds}
-              onChange={(e) => onChange({ maxRounds: parseInt(e.target.value) })}
+              onChange={(e) => {
+                const nr = parseInt(e.target.value);
+                // Keep approval-point selections valid when the phase list changes.
+                const validNames = new Set(getStylePhases(state.style, nr).map((p) => p.name));
+                onChange({
+                  maxRounds: nr,
+                  approvalPhases: state.approvalPhases.filter((n) => validNames.has(n)),
+                });
+              }}
               className="flex-1 accent-primary"
             />
             <span className="w-8 text-center text-sm font-bold text-foreground">{state.maxRounds}</span>
           </div>
         </div>
+
+        {/* Human-in-the-Loop approval */}
+        <HitlWizardSection state={state} onChange={onChange} />
       </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   Human-in-the-Loop configuration (part of Step 2)
+   ================================================================ */
+
+function HitlWizardSection({
+  state,
+  onChange,
+}: {
+  state: WizardState;
+  onChange: (patch: Partial<WizardState>) => void;
+}) {
+  const { t } = useTranslation();
+  const phases = useMemo(
+    () => getStylePhases(state.style, state.maxRounds),
+    [state.style, state.maxRounds],
+  );
+  const hitl = state.hitl;
+  const patchHitl = (u: Partial<GroupHitlConfig>) => onChange({ hitl: { ...hitl, ...u } });
+
+  function toggleEnabled() {
+    if (state.hitlEnabled) {
+      onChange({ hitlEnabled: false, approvalPhases: [] });
+      return;
+    }
+    // Sensible default gate: approve the plan before execution (TASK_FORCE),
+    // else approve the final synthesis.
+    const defaultPhase =
+      state.style === "TASK_FORCE"
+        ? phases.find((p) => p.type === "EXECUTE")?.name
+        : phases.find((p) => p.type === "SYNTHESIS")?.name;
+    onChange({
+      hitlEnabled: true,
+      approvalPhases: defaultPhase ? [defaultPhase] : [],
+    });
+  }
+
+  function togglePhase(name: string) {
+    const set = new Set(state.approvalPhases);
+    if (set.has(name)) set.delete(name);
+    else set.add(name);
+    onChange({ approvalPhases: [...set] });
+  }
+
+  const finiteTimeout = requiresApprovalTimeout(hitl.timeoutPolicy);
+  const timeoutInvalid =
+    finiteTimeout && (!hitl.approvalTimeout || !isValidIsoDuration(hitl.approvalTimeout));
+
+  return (
+    <div className="rounded-xl border border-border bg-secondary/10 p-4">
+      {/* Header + master toggle */}
+      <label className="flex items-start gap-3 cursor-pointer" htmlFor="gw-hitl-enable">
+        <input
+          id="gw-hitl-enable"
+          type="checkbox"
+          checked={state.hitlEnabled}
+          onChange={toggleEnabled}
+          className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+          data-testid="gw-hitl-enable"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+            <HandMetal className="h-4 w-4 text-amber-500" aria-hidden="true" />
+            {t("groupWizard.hitlTitle", "Require human approval")}
+          </span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            {t("groupWizard.hitlDesc", "Pause the discussion at chosen phases and wait for a human decision before continuing.")}
+          </span>
+        </span>
+      </label>
+
+      {state.hitlEnabled && (
+        <div className="mt-4 space-y-4 ps-7">
+          {/* Approval points */}
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-foreground">
+              {t("groupWizard.hitlApprovalPoints", "Pause for approval at")}
+            </p>
+            {phases.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {t("groupWizard.hitlNoPhases", "This style has no preset phases to gate.")}
+              </p>
+            ) : (
+              <div className="space-y-1.5" data-testid="gw-hitl-phases">
+                {phases.map((p, i) => (
+                  <label
+                    key={p.name}
+                    className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={state.approvalPhases.includes(p.name)}
+                      onChange={() => togglePhase(p.name)}
+                      className="h-3.5 w-3.5 rounded border-input accent-primary"
+                      data-testid={`gw-hitl-phase-${i}`}
+                    />
+                    <span className="flex-1 text-foreground">{p.name}</span>
+                    <Badge variant="outline" className="text-[10px]">{p.type}</Badge>
+                  </label>
+                ))}
+              </div>
+            )}
+            {state.approvalPhases.length === 0 && phases.length > 0 && (
+              <p className="mt-1.5 flex items-center gap-1 text-xs text-amber-500">
+                <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                {t("groupWizard.hitlNoApprovalPoints", "Select at least one phase, or the discussion will never pause.")}
+              </p>
+            )}
+          </div>
+
+          {/* Timeout policy */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="gw-hitl-policy" className="mb-1 block text-xs font-medium text-foreground">
+                {t("groupWizard.hitlTimeoutPolicy", "If no decision in time")}
+              </label>
+              <select
+                id="gw-hitl-policy"
+                value={hitl.timeoutPolicy ?? "WAIT_INDEFINITELY"}
+                onChange={(e) => {
+                  const policy = e.target.value as GroupHitlConfig["timeoutPolicy"];
+                  const updates: Partial<GroupHitlConfig> = { timeoutPolicy: policy };
+                  // Seed a valid default when switching to a finite policy (which
+                  // requires a positive timeout) so the config isn't left invalid —
+                  // mirrors the agent-level HITL editor.
+                  if (
+                    requiresApprovalTimeout(policy) &&
+                    !(hitl.approvalTimeout && isValidIsoDuration(hitl.approvalTimeout))
+                  ) {
+                    updates.approvalTimeout = "PT15M";
+                  }
+                  patchHitl(updates);
+                }}
+                className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                data-testid="gw-hitl-policy"
+              >
+                <option value="WAIT_INDEFINITELY">{t("hitl.timeoutWaitIndefinitely", "Wait Indefinitely")}</option>
+                <option value="AUTO_APPROVE">{t("hitl.timeoutAutoApprove", "Auto-Approve")}</option>
+                <option value="AUTO_REJECT">{t("hitl.timeoutAutoReject", "Auto-Reject")}</option>
+                <option value="ABORT">{t("hitl.timeoutAbort", "Abort")}</option>
+              </select>
+            </div>
+
+            {/* Approval timeout (only when a finite policy is chosen) */}
+            {finiteTimeout && (
+              <div>
+                <label htmlFor="gw-hitl-timeout" className="mb-1 block text-xs font-medium text-foreground">
+                  {t("groupWizard.hitlApprovalTimeout", "Approval timeout")}
+                </label>
+                <input
+                  id="gw-hitl-timeout"
+                  type="text"
+                  value={hitl.approvalTimeout ?? ""}
+                  onChange={(e) => patchHitl({ approvalTimeout: e.target.value || null })}
+                  placeholder="PT15M"
+                  className={cn(
+                    "w-full rounded-lg border bg-background px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-ring",
+                    timeoutInvalid ? "border-destructive" : "border-input",
+                  )}
+                  data-testid="gw-hitl-timeout"
+                  aria-invalid={timeoutInvalid}
+                />
+                <p className={cn("mt-1 text-[10px]", timeoutInvalid ? "text-destructive" : "text-muted-foreground")}>
+                  {timeoutInvalid
+                    ? t("groupWizard.hitlTimeoutInvalid", "Enter a positive ISO-8601 duration, e.g. PT15M or PT1H30M.")
+                    : t("groupWizard.hitlTimeoutHint", "ISO-8601 duration, e.g. PT30S, PT15M, PT2H.")}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Granularity + task-rejection — only meaningful for TASK_FORCE, which
+              is the only style with a task-bearing (EXECUTE) phase. */}
+          {state.style === "TASK_FORCE" && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="gw-hitl-granularity" className="mb-1 block text-xs font-medium text-foreground">
+                {t("groupWizard.hitlGranularity", "Approval granularity")}
+              </label>
+              <select
+                id="gw-hitl-granularity"
+                value={hitl.granularity ?? "PHASE"}
+                onChange={(e) => patchHitl({ granularity: e.target.value as GroupHitlConfig["granularity"] })}
+                className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                data-testid="gw-hitl-granularity"
+              >
+                <option value="PHASE">{t("hitl.granularityPhase", "Phase")}</option>
+                <option value="TASK">{t("hitl.granularityTask", "Task")}</option>
+              </select>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {t("groupWizard.hitlGranularityHint", "Task-level approval applies to TASK_FORCE execution — approve or reject each task individually.")}
+              </p>
+            </div>
+
+            {hitl.granularity === "TASK" && (
+              <div>
+                <label htmlFor="gw-hitl-rejection" className="mb-1 block text-xs font-medium text-foreground">
+                  {t("groupWizard.hitlOnTaskRejection", "When a task is rejected")}
+                </label>
+                <select
+                  id="gw-hitl-rejection"
+                  value={hitl.onTaskRejection ?? "FAIL"}
+                  onChange={(e) => patchHitl({ onTaskRejection: e.target.value as GroupHitlConfig["onTaskRejection"] })}
+                  className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  data-testid="gw-hitl-rejection"
+                >
+                  <option value="FAIL">{t("hitl.rejectionFail", "Fail the task")}</option>
+                  <option value="RETRY">{t("hitl.rejectionRetry", "Retry the task")}</option>
+                </select>
+              </div>
+            )}
+          </div>
+          )}
+
+          {/* Pin note */}
+          {state.approvalPhases.length > 0 && (
+            <p className="text-[10px] text-muted-foreground">
+              {t("groupWizard.hitlPinNote", "Enabling approval points fixes this group's discussion phases ({{granularity}} granularity).", { granularity: granularityLabel(t, state.style === "TASK_FORCE" ? hitl.granularity : "PHASE") })}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1349,6 +1629,13 @@ function ReviewStep({
             {state.moderator && (
               <Badge variant="default" className="text-xs">
                 <Star className="me-1 h-3 w-3" /> Moderator
+              </Badge>
+            )}
+            {state.hitlEnabled && (
+              <Badge variant="outline" className="text-xs text-amber-600 dark:text-amber-400">
+                <HandMetal className="me-1 h-3 w-3" />
+                {t("groupWizard.hitlReviewBadge", "Human approval")}
+                {state.approvalPhases.length > 0 && ` · ${state.approvalPhases.length}`}
               </Badge>
             )}
           </div>

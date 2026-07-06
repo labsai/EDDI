@@ -17,13 +17,17 @@ import {
   Trash2,
   AlertTriangle,
   Search,
+  HandMetal,
 } from "lucide-react";
 import { useUpdateAgent } from "@/hooks/use-agents";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
+import { MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
+import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
 import { isApiError } from "@/lib/api-client";
 import { EditorSection } from "./editor-section";
+import { ToolApprovalsEditor } from "./tool-approvals-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
@@ -1051,6 +1055,198 @@ export const MemoryPolicySection = memo(function MemoryPolicySection({
 // ─── Session Management ────────────────────────────────────────────────────
 
 const SNAPSHOT_TRIGGERS = ["before_tool", "before_action"] as const;
+
+export const HitlConfigSection = memo(function HitlConfigSection({
+  agent,
+  agentId,
+  version,
+}: {
+  agent: Agent;
+  agentId: string;
+  version: number;
+}) {
+  const { t } = useTranslation();
+  const updateAgent = useUpdateAgent();
+
+  const hitl: AgentHitlConfig = agent.hitlConfig ?? {};
+  const enabled = !!agent.hitlConfig;
+
+  function patchHitl(updates: Partial<AgentHitlConfig>) {
+    updateAgent.mutate({
+      id: agentId,
+      version,
+      agent: { ...agent, hitlConfig: { ...hitl, ...updates } },
+    });
+  }
+
+  function setEnabled(on: boolean) {
+    if (on) {
+      updateAgent.mutate({
+        id: agentId,
+        version,
+        agent: {
+          ...agent,
+          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", approvalTimeout: null, ...hitl },
+        },
+      });
+    } else {
+      const next = { ...agent };
+      delete next.hitlConfig;
+      updateAgent.mutate({ id: agentId, version, agent: next });
+    }
+  }
+
+  const finite = requiresApprovalTimeout(hitl.timeoutPolicy);
+  // Draft state so the red border / invalid hint reflect what the user is
+  // TYPING — a controlled input bound to the committed value can't, since we
+  // deliberately don't persist an invalid finite-policy timeout.
+  const [timeoutDraft, setTimeoutDraft] = useState(hitl.approvalTimeout ?? "");
+  // Resync to the committed value when it changes OR when the field is
+  // re-shown after a policy toggle, so a stale unsaved draft can't linger.
+  useEffect(() => setTimeoutDraft(hitl.approvalTimeout ?? ""), [hitl.approvalTimeout, finite]);
+  const invalid = finite && (!timeoutDraft.trim() || !isValidIsoDuration(timeoutDraft.trim()));
+
+  return (
+    <EditorSection
+      label={t("agentDetail.hitlConfig", "Human-in-the-Loop")}
+      icon={HandMetal}
+      accent="text-amber-500"
+      variant="card"
+      defaultOpen={enabled}
+    >
+      <div className="space-y-4" data-testid="hitl-config-section">
+        <p className="text-[10px] text-muted-foreground leading-relaxed">
+          {t(
+            "agentDetail.hitlConfigDesc",
+            "When this agent pauses a conversation for human approval, these settings control how long to wait and what happens if no decision is made in time.",
+          )}
+        </p>
+
+        <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={() => setEnabled(!enabled)}
+            disabled={updateAgent.isPending}
+            className="h-3.5 w-3.5 rounded border-input accent-primary"
+            data-testid="hitl-config-enabled"
+          />
+          {t("agentDetail.hitlEnable", "Configure human-approval timeouts")}
+        </label>
+
+        {enabled && (
+          <div className="space-y-3 ps-5">
+            {/* Designer-supplied approval reason — shown to approvers in the
+                pending-approvals queue and approval-status ("what am I approving?"). */}
+            <div>
+              <label className="mb-1 block text-[10px] text-muted-foreground">
+                {t("agentDetail.hitlPauseReason", "Approval reason (shown to approvers)")}
+              </label>
+              <DebouncedInput
+                type="text"
+                value={hitl.pauseReason ?? ""}
+                onCommit={(v) => patchHitl({ pauseReason: v.trim() || null })}
+                maxLength={MAX_PAUSE_REASON_LENGTH}
+                placeholder={t("agentDetail.hitlPauseReasonPlaceholder", "e.g. Deletion requires manager sign-off")}
+                className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                data-testid="hitl-pause-reason"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[10px] text-muted-foreground">
+                {t("agentDetail.hitlTimeoutPolicy", "If no decision in time")}
+              </label>
+              <select
+                value={hitl.timeoutPolicy ?? "WAIT_INDEFINITELY"}
+                onChange={(e) => {
+                  const policy = e.target.value as AgentHitlConfig["timeoutPolicy"];
+                  const updates: Partial<AgentHitlConfig> = { timeoutPolicy: policy };
+                  // A finite policy REQUIRES a positive approvalTimeout or the
+                  // backend rejects the save (400). Seed a sensible default in the
+                  // same patch so switching policy never persists an invalid config.
+                  if (
+                    requiresApprovalTimeout(policy) &&
+                    !(hitl.approvalTimeout && isValidIsoDuration(hitl.approvalTimeout))
+                  ) {
+                    updates.approvalTimeout = "PT15M";
+                  }
+                  patchHitl(updates);
+                }}
+                disabled={updateAgent.isPending}
+                className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                data-testid="hitl-timeout-policy"
+              >
+                <option value="WAIT_INDEFINITELY">{t("hitl.timeoutWaitIndefinitely", "Wait Indefinitely")}</option>
+                <option value="AUTO_APPROVE">{t("hitl.timeoutAutoApprove", "Auto-Approve")}</option>
+                <option value="AUTO_REJECT">{t("hitl.timeoutAutoReject", "Auto-Reject")}</option>
+                <option value="ABORT">{t("hitl.timeoutAbort", "Abort")}</option>
+              </select>
+            </div>
+
+            {finite && (
+              <div>
+                <label className="mb-1 block text-[10px] text-muted-foreground">
+                  {t("agentDetail.hitlApprovalTimeout", "Approval timeout (ISO-8601)")}
+                </label>
+                <input
+                  type="text"
+                  value={timeoutDraft}
+                  onChange={(e) => setTimeoutDraft(e.target.value)}
+                  onBlur={() => {
+                    const next = timeoutDraft.trim() || null;
+                    // Never persist an invalid finite-policy config (backend 400);
+                    // the field shows the typed value + red border via `invalid`.
+                    if (finite && !(next && isValidIsoDuration(next))) return;
+                    if (next !== (hitl.approvalTimeout ?? null)) patchHitl({ approvalTimeout: next });
+                  }}
+                  placeholder="PT15M"
+                  className={`h-8 w-full rounded-md border bg-background px-2 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${invalid ? "border-destructive" : "border-input"}`}
+                  data-testid="hitl-approval-timeout"
+                />
+                <p className={`mt-1 text-[10px] ${invalid ? "text-destructive" : "text-muted-foreground"}`}>
+                  {invalid
+                    ? t("agentDetail.hitlTimeoutInvalid", "A finite policy needs a positive ISO-8601 duration, e.g. PT15M.")
+                    : t("agentDetail.hitlTimeoutHint", "e.g. PT30S, PT15M, PT2H.")}
+                </p>
+              </div>
+            )}
+
+            {/* Tool-level approval gating (surface 3) — pause when the model
+                invokes a matching tool, before it executes. */}
+            <div className="border-t border-border pt-3">
+              <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={!!hitl.toolApprovals}
+                  onChange={(e) => patchHitl({ toolApprovals: e.target.checked ? {} : null })}
+                  disabled={updateAgent.isPending}
+                  className="h-3.5 w-3.5 rounded border-input accent-primary"
+                  data-testid="hitl-tool-enabled"
+                />
+                {t("agentDetail.toolApprovalsEnable", "Gate specific tool calls for approval")}
+              </label>
+              {hitl.toolApprovals && (
+                <div className="mt-3">
+                  <ToolApprovalsEditor
+                    value={hitl.toolApprovals}
+                    disabled={updateAgent.isPending}
+                    agentTimeoutPolicy={hitl.timeoutPolicy}
+                    onChange={(u) =>
+                      patchHitl({
+                        toolApprovals: { ...(hitl.toolApprovals as ToolApprovalsConfig), ...u },
+                      })
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </EditorSection>
+  );
+});
 
 export const SessionManagementSection = memo(function SessionManagementSection({
   agent,

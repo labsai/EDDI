@@ -34,6 +34,7 @@ import { CapabilitiesPage } from "@/pages/capabilities";
 import { SyncPage } from "@/pages/sync-page";
 import { ChannelsPage } from "@/pages/channels";
 import { ChannelDetailPage } from "@/pages/channel-detail";
+import { ApprovalsPage } from "@/pages/approvals";
 
 export function App() {
   const location = useLocation();
@@ -69,6 +70,7 @@ export function App() {
         <Route path="/manage/sync" element={<SyncPage />} />
         <Route path="/manage/channels" element={<ChannelsPage />} />
         <Route path="/manage/channels/:id" element={<ChannelDetailPage />} />
+        <Route path="/manage/approvals" element={<ApprovalsPage />} />
         {/* Redirects from old standalone user-data pages */}
         <Route path="/manage/memories" element={<Navigate to="/manage/userdata?tab=memories" replace />} />
         <Route path="/manage/properties" element={<Navigate to="/manage/userdata?tab=properties" replace />} />

@@ -51,6 +51,7 @@ export type GroupConversationState =
   | "SYNTHESIZING"
   | "COMPLETED"
   | "FAILED"
+  | "CANCELLED"
   | "AWAITING_APPROVAL";
 
 export type TranscriptEntryType =
@@ -172,6 +173,8 @@ export interface AgentGroupConfiguration {
   tasks?: TaskDefinition[];
   /** Dynamic agent creation and recruitment configuration */
   dynamicAgents?: DynamicAgentConfig;
+  /** Human-in-the-loop approval configuration */
+  hitlConfig?: import("./hitl").GroupHitlConfig;
 }
 
 export interface TranscriptEntry {
@@ -208,6 +211,15 @@ export interface GroupConversation {
   retainedAgentIds: string[];
   created: string;
   lastModified: string;
+  // HITL pause fields (set when state === "AWAITING_APPROVAL")
+  pausedAtPhaseIndex?: number;
+  pausedTurnCount?: number;
+  pausedPhaseName?: string;
+  pausedAt?: string;
+  hitlPauseType?: import("./hitl").HitlGranularity;
+  hitlPauseReason?: string;
+  hitlTimeoutPolicy?: import("./hitl").HitlTimeoutPolicy;
+  hitlApprovalTimeout?: string;
 }
 
 // Re-export descriptor type for group descriptors (same shape as agent descriptors)
@@ -341,9 +353,19 @@ export type GroupSSEEventType =
   | "phase_complete"
   | "synthesis_start"
   | "group_complete"
+  // Generic terminal failure. Also carries expected approve/stream resume
+  // rejections (e.g. 409 concurrent decision, 400 invalid taskApprovals) — the
+  // backend emits these as "group_error", never a bare "error", which would
+  // collide with the browser EventSource transport-error event (EDDI issue #36).
   | "group_error"
   | "task_plan_created"
-  | "task_verified";
+  | "task_verified"
+  | "awaiting_approval"
+  | "hitl_resume"
+  | "cancelled"
+  // A member agent's own conversation paused mid-turn (unsupported in a group);
+  // its turn is recorded SKIPPED with a reason.
+  | "member_pause_skipped";
 
 export interface GroupSSEEvent {
   type: GroupSSEEventType;
@@ -410,7 +432,9 @@ export interface GroupErrorPayload {
 }
 
 export interface TaskPlanCreatedPayload {
-  tasks: { id: string; subject: string; assignedTo: string; assignedAgentId?: string; priority: number }[];
+  // Matches the backend TaskSummary record: { id, subject, assignedTo, priority }.
+  // (assignedTo is the assignee's display name.)
+  tasks: { id: string; subject: string; assignedTo: string; priority: number }[];
   preConfigured: boolean;
 }
 
@@ -422,29 +446,10 @@ export interface TaskVerifiedPayload {
 }
 
 /**
- * Start a group discussion via SSE streaming.
- * Returns an async generator yielding SSE events as they arrive.
- * Same pattern as chat's `sendMessageStreaming()`.
+ * Read a Server-Sent Events response body as a stream of parsed group events.
+ * Shared by the initial-discussion and approve/resume streaming endpoints.
  */
-export async function* streamGroupDiscussion(
-  groupId: string,
-  question: string,
-  userId?: string,
-  signal?: AbortSignal,
-): AsyncGenerator<GroupSSEEvent> {
-  const response = await fetch(
-    `${api.getBaseUrl()}/groups/${groupId}/conversations/stream`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...api.getAuthHeader(),
-      },
-      body: JSON.stringify({ question, userId: userId || "manager-user" }),
-      signal,
-    }
-  );
-
+async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> {
   if (!response.ok) {
     // M5 fix: throw a proper Error, not a plain object
     throw new Error(`Group streaming failed: ${response.status} ${response.statusText}`);
@@ -491,6 +496,57 @@ export async function* streamGroupDiscussion(
   } finally {
     reader.releaseLock();
   }
+}
+
+/** POST a JSON body to an SSE endpoint (shared auth/header scaffolding). */
+function postSSE(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+  return fetch(`${api.getBaseUrl()}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...api.getAuthHeader(),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+/**
+ * Start a group discussion via SSE streaming.
+ * Returns an async generator yielding SSE events as they arrive.
+ * Same pattern as chat's `sendMessageStreaming()`.
+ */
+export async function* streamGroupDiscussion(
+  groupId: string,
+  question: string,
+  userId?: string,
+  signal?: AbortSignal,
+): AsyncGenerator<GroupSSEEvent> {
+  const response = await postSSE(
+    `/groups/${groupId}/conversations/stream`,
+    { question, userId: userId || "manager-user" },
+    signal,
+  );
+  yield* readGroupSSE(response);
+}
+
+/**
+ * Resume a paused group discussion via the approve/stream SSE endpoint.
+ * Submits the human decision AND streams the resumed discussion progress
+ * (hitl_resume, phase_start, speaker_*, group_complete, …) over one connection.
+ */
+export async function* streamGroupApproval(
+  groupId: string,
+  gcId: string,
+  request: import("./hitl").GroupApprovalRequest,
+  signal?: AbortSignal,
+): AsyncGenerator<GroupSSEEvent> {
+  const response = await postSSE(
+    `/groups/${groupId}/conversations/${gcId}/approve/stream`,
+    request,
+    signal,
+  );
+  yield* readGroupSSE(response);
 }
 
 

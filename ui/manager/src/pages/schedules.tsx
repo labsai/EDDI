@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Zap,
   Pause,
+  HandMetal,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -32,6 +33,13 @@ import type {
   ScheduleFireLog,
   TriggerType,
 } from "@/lib/api/schedules";
+
+/** HITL approval-timeout schedules are system-managed: the backend refuses a
+ *  manual fire (409) and restricts mutation to admins. Detect them so the UI
+ *  doesn't offer a Fire action the backend will reject. */
+function isHitlTimeoutSchedule(s: ScheduleConfiguration): boolean {
+  return s.metadata?.hitlType === "hitl_timeout";
+}
 
 // ==================== Status Badge ====================
 
@@ -726,6 +734,15 @@ export function SchedulesPage() {
                         <span className="font-medium text-foreground">
                           {s.name}
                         </span>
+                        {isHitlTimeoutSchedule(s) && (
+                          <span
+                            className="ms-2 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600"
+                            title={t("schedules.hitlTimeoutHint", "System-managed HITL approval timeout — resolve it via the conversation's approval, not here.")}
+                            data-testid={`hitl-schedule-badge-${s.id}`}
+                          >
+                            <HandMetal className="h-3 w-3" /> {t("schedules.hitlTimeout", "HITL timeout")}
+                          </span>
+                        )}
                       </td>
                       <td className="px-5 py-3">
                         <TypeBadge type={s.triggerType} />
@@ -786,16 +803,19 @@ export function SchedulesPage() {
                             )}
                           </button>
 
-                          {/* Fire Now */}
-                          <button
-                            onClick={() => handleFire(s.id!)}
-                            disabled={fireMutation.isPending}
-                            title={t("schedules.fireNow", "Fire Now")}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
-                            data-testid={`fire-${s.id}`}
-                          >
-                            <Play className="h-4 w-4" />
-                          </button>
+                          {/* Fire Now — hidden for HITL-timeout schedules, which
+                              the backend refuses to fire manually (409). */}
+                          {!isHitlTimeoutSchedule(s) && (
+                            <button
+                              onClick={() => handleFire(s.id!)}
+                              disabled={fireMutation.isPending}
+                              title={t("schedules.fireNow", "Fire Now")}
+                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+                              data-testid={`fire-${s.id}`}
+                            >
+                              <Play className="h-4 w-4" />
+                            </button>
+                          )}
 
                           {/* Retry (only for dead-lettered) */}
                           {s.fireStatus === "DEAD_LETTERED" && (

@@ -36,6 +36,7 @@
     "capabilities": "Capabilities",
     "sync": "Sync",
     "channels": "Channels",
+    "approvals": "Approvals",
     "userConversations": "User Conversations",
     "userData": "User Data",
     "sectionCore": "Core",
@@ -106,7 +107,9 @@
     "channels": {
       "title": "Channels",
       "subtitle": "Connect agents and groups to messaging platforms like Slack"
-    }
+    },
+    "approvals": "Pending Approvals",
+    "approvalsSubtitle": "Review and decide on conversations awaiting human input"
   },
   "common": {
     "loading": "Loading...",
@@ -134,7 +137,11 @@
     "saving": "Saving...",
     "showMore": "Show more",
     "showLess": "Show less",
-    "copyFailed": "Failed to copy to clipboard"
+    "copyFailed": "Failed to copy to clipboard",
+    "loadError": "Failed to load data",
+    "actions": "Actions",
+    "view": "View",
+    "refresh": "Refresh"
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -259,7 +266,32 @@
     "slackStep2": "Copy the Bot Token (xoxb-…) and Signing Secret into the EDDI vault and configure channels below.",
     "slackStep3": "Then enable Event Subscriptions in your Slack App, paste the Webhook URL above, and subscribe to:",
     "slackSetupNote": "Important: Configure the channel below before enabling Event Subscriptions — Slack sends a URL verification challenge that requires the signing secret to be configured in EDDI.",
-    "slackRequiredScopes": "Required Bot Token Scopes"
+    "slackRequiredScopes": "Required Bot Token Scopes",
+    "hitlConfig": "Human-in-the-Loop",
+    "hitlConfigDesc": "When this agent pauses a conversation for human approval, these settings control how long to wait and what happens if no decision is made in time.",
+    "hitlEnable": "Configure human-approval timeouts",
+    "hitlTimeoutPolicy": "If no decision in time",
+    "hitlApprovalTimeout": "Approval timeout (ISO-8601)",
+    "hitlTimeoutInvalid": "A finite policy needs a positive ISO-8601 duration, e.g. PT15M.",
+    "hitlTimeoutHint": "e.g. PT30S, PT15M, PT2H.",
+    "hitlPauseReason": "Approval reason (shown to approvers)",
+    "hitlPauseReasonPlaceholder": "e.g. Deletion requires manager sign-off",
+    "toolApprovalsEnable": "Gate specific tool calls for approval",
+    "toolApprovalsDesc": "Pause when the model invokes a matching tool, before it runs. An empty \"require approval\" list disables tool gating.",
+    "toolRequireApproval": "Require approval (glob patterns, one per line)",
+    "toolPatternHint": "'*' is the only wildcard. Optional source prefix:",
+    "toolExempt": "Exempt (always allowed, one per line)",
+    "toolMaxPauses": "Max pauses / turn (1–10)",
+    "toolMaxAuto": "Max auto-approvals / turn (0–10)",
+    "toolOnNoProgress": "On no-progress re-pause",
+    "toolTimeoutPolicy": "Tool-pause timeout policy",
+    "toolTimeoutInherit": "Inherit from agent",
+    "toolAutoApproveDemotion": "Agent-level AUTO_APPROVE does not apply to tool approvals — tool pauses will wait indefinitely unless you set a tool-pause timeout policy above.",
+    "toolPauseReason": "Approver reason ({toolNames} allowed)",
+    "toolPauseReasonPlaceholder": "e.g. Approval required for {toolNames}",
+    "toolPendingMessage": "End-user message while paused ({toolNames} allowed)",
+    "toolPendingMessagePlaceholder": "e.g. Waiting for a human to approve {toolNames}…",
+    "toolInGroupTurns": "Inside a group turn, a member's gated tool call is auto-rejected (REJECT)."
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -787,7 +819,10 @@
     "toolCount": "{{selected}} of {{total}} selected",
     "toolSources": "Workflow Tool Sources",
     "toolSourcesInfo": "Both sources are enabled by default — all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it.",
-    "included": "Included"
+    "included": "Included",
+    "toolApprovals": "Tool Approval Gating (per-task)",
+    "toolApprovalsEnable": "Override tool approvals for this task",
+    "toolApprovalsDesc": "Overrides the agent-level tool approvals for THIS task only — a full replace, not a merge."
   },
   "outputEditor": {
     "language": "Language",
@@ -1088,7 +1123,9 @@
     "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
-    "allSigned": "All signed"
+    "allSigned": "All signed",
+    "decidedBy": "by",
+    "automated": "automated"
   },
   "schedules": {
     "title": "Schedules",
@@ -1137,7 +1174,9 @@
     "retryError": "Failed to retry schedule",
     "deleteSuccess": "Schedule deleted",
     "deleteError": "Failed to delete schedule",
-    "fireHistory": "Fire History"
+    "fireHistory": "Fire History",
+    "hitlTimeout": "HITL timeout",
+    "hitlTimeoutHint": "System-managed HITL approval timeout — resolve it via the conversation's approval, not here."
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -1487,6 +1526,7 @@
     }
   },
   "groups": {
+    "hitlSelectPhase": "Select at least one phase to require approval.",
     "empty": "No groups yet",
     "emptyDescription": "Groups let multiple agents collaborate on structured discussions.",
     "createGroup": "Create Group",
@@ -1502,6 +1542,7 @@
     "maxRounds": "Max Rounds",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "Awaiting Approval",
+    "stateCancelled": "Cancelled",
     "phasePlan": "Plan",
     "phaseExecute": "Execute",
     "phaseVerify": "Verify",
@@ -1605,7 +1646,17 @@
     "hideDiscussions": "Hide discussions panel",
     "showDiscussions": "Show discussions panel",
     "hideConfig": "Hide config panel",
-    "showConfig": "Show config panel"
+    "showConfig": "Show config panel",
+    "hitlSection": "Human Approval",
+    "hitlApprovalPoints": "Approval at",
+    "hitlOnTaskRejection": "On rejection",
+    "hitlEdit": "Edit",
+    "hitlSaved": "Approval settings saved",
+    "hitlEnable": "Require human approval",
+    "hitlApprovalPhases": "Phases requiring approval",
+    "hitlNotConfigured": "No approval gates configured — click Edit to require human approval.",
+    "driftTitle": "Group configuration changed while paused",
+    "driftRecovery": "The resume was aborted because the group's phases changed. The discussion is still awaiting approval — fix the configuration (Edit, in the Configuration panel) and approve again, or cancel it."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -1624,7 +1675,8 @@
     "verificationPassed": "Passed",
     "verificationFailed": "Failed",
     "showMore": "show more",
-    "showLess": "show less"
+    "showLess": "show less",
+    "awaitingApproval": "Awaiting Approval"
   },
   "groupWizard": {
     "title": "Group Setup Wizard",
@@ -1701,7 +1753,21 @@
     "hintTaskForce": "The moderator creates a task plan, assigns work to agents in parallel, then verifies and synthesizes the results.",
     "hintCustom": "Define your own phases manually. Custom phases can be configured via the API after creation.",
     "hintRoundTable": "All members share their opinions, then discuss each other's views across multiple rounds before the moderator synthesizes.",
-    "protocolSummary": "Protocol"
+    "protocolSummary": "Protocol",
+    "hitlTitle": "Require human approval",
+    "hitlDesc": "Pause the discussion at chosen phases and wait for a human decision before continuing.",
+    "hitlApprovalPoints": "Pause for approval at",
+    "hitlNoPhases": "This style has no preset phases to gate.",
+    "hitlNoApprovalPoints": "Select at least one phase, or the discussion will never pause.",
+    "hitlTimeoutPolicy": "If no decision in time",
+    "hitlApprovalTimeout": "Approval timeout",
+    "hitlTimeoutInvalid": "Enter a positive ISO-8601 duration, e.g. PT15M or PT1H30M.",
+    "hitlTimeoutHint": "ISO-8601 duration, e.g. PT30S, PT15M, PT2H.",
+    "hitlGranularity": "Approval granularity",
+    "hitlGranularityHint": "Task-level approval applies to TASK_FORCE execution — approve or reject each task individually.",
+    "hitlOnTaskRejection": "When a task is rejected",
+    "hitlPinNote": "Enabling approval points fixes this group's discussion phases ({{granularity}} granularity).",
+    "hitlReviewBadge": "Human approval"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -1982,6 +2048,73 @@
     "triggers": "triggers",
     "type": "Channel Type",
     "webhookHint": "Paste this URL into your Slack App’s Event Subscriptions → Request URL field.",
-    "webhookUrl": "Webhook URL"
+    "webhookUrl": "Webhook URL",
+    "hitlSection": "Human-in-the-Loop Approvals (optional)",
+    "hitlApprovalChannel": "Approval Channel ID",
+    "hitlApprovalChannelHint": "Slack channel that receives an approval card when a conversation pauses.",
+    "hitlApproverUserIds": "Approver User IDs",
+    "hitlApproverUserIdsHint": "Comma-separated Slack user IDs allowed to approve via buttons. Without this list, buttons are not rendered (fail-closed)."
+  },
+  "hitl": {
+    "loadingApprovalDetails": "Loading approval details…",
+    "awaitingHuman": "Awaiting Human",
+    "awaitingApproval": "Awaiting Approval",
+    "approve": "Approve",
+    "reject": "Reject",
+    "cancel": "Cancel",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "cancelled": "Cancelled",
+    "pending": "pending",
+    "emptyQueue": "No pending approvals",
+    "emptyQueueDescription": "All conversations are flowing — no human input needed right now.",
+    "surface": "Surface",
+    "regular": "Conversation",
+    "group": "Group",
+    "pauseReason": "Reason",
+    "pausedAt": "Paused",
+    "timeoutPolicy": "Timeout",
+    "timeRemaining": "Remaining",
+    "overdue": "Overdue",
+    "phase": "Phase",
+    "granularity": "Granularity",
+    "taskApprovals": "Task Approvals",
+    "approveAll": "Approve All",
+    "note": "Add note (optional)",
+    "notePlaceholder": "Add a note for the decision...",
+    "discussionCancelled": "Discussion cancelled",
+    "cancelDiscussion": "Cancel discussion",
+    "rejectAll": "Reject All",
+    "timeoutWaitIndefinitely": "Wait Indefinitely",
+    "timeoutAutoApprove": "Auto-Approve",
+    "timeoutAutoReject": "Auto-Reject",
+    "timeoutAbort": "Abort",
+    "granularityPhase": "Phase",
+    "granularityTask": "Task",
+    "rejectionFail": "Fail the task",
+    "rejectionRetry": "Retry the task",
+    "groupsTruncated": "More group approvals exist than are shown here.",
+    "groupsLoadError": "Group approvals could not be loaded.",
+    "toolApprovalRequired": "Tool Approval Required",
+    "toolCallsAwaiting": "Tool calls awaiting approval",
+    "executedUngated": "Already executed (ungated)",
+    "outcomeUnknown": "A previous approval was interrupted mid-execution — its effect is unknown; verify externally before retrying.",
+    "outcomeUnknownShort": "outcome unknown",
+    "toolApprovalHint": "Approve applies your per-call choices (calls you didn't change are approved). Reject rejects the whole batch.",
+    "gateReason": "Matched pattern",
+    "argsTruncated": "arguments truncated",
+    "amendArguments": "Amend arguments (optional)",
+    "amendPlaceholder": "Full replacement JSON object, e.g. {\"to\":\"ops@acme.com\"}. Leave blank to keep original.",
+    "amendTruncated": "Cannot amend a call whose arguments were truncated — approve or reject it as-is.",
+    "amendInvalidJson": "Amended arguments must be a valid JSON object.",
+    "amendTooLarge": "Amended arguments are too large.",
+    "review": "Review",
+    "tool": "Tool",
+    "scopeAll": "Showing all pending approvals across the system.",
+    "scopeOwn": "Showing pending approvals for your conversations.",
+    "chatPaused": "This conversation is awaiting human approval.",
+    "noProgressWaitForHuman": "Wait for a human",
+    "noProgressAutoReject": "Auto-reject",
+    "noProgressAbort": "Abort"
   }
 }

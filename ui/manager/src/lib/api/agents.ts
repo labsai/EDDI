@@ -30,6 +30,8 @@ export interface Agent {
   memoryPolicy?: MemoryPolicy;
   // Wave 6 — Session Management
   sessionManagement?: SessionManagement;
+  // HITL — Human-in-the-Loop approval configuration
+  hitlConfig?: import("./hitl").AgentHitlConfig;
 }
 
 export interface ChannelConnector {
