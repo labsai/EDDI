@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listPendingApprovals,
   listAllGroupPendingApprovals,
+  getApprovalStatus,
   resumeConversation,
   cancelConversation,
   cancelGroupDiscussion,
@@ -38,6 +39,20 @@ export function useAllGroupPendingApprovals(limit = 200) {
   };
 }
 
+/**
+ * Structured approval status of a paused 1:1 conversation — the only source of
+ * `pauseDetails` (per-call tool name + redacted arguments for a TOOL_CALL pause,
+ * or the rule reason/actions for a RULE pause). Enable only while the
+ * conversation is actually AWAITING_HUMAN.
+ */
+export function useApprovalStatus(conversationId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["approval-status", conversationId],
+    queryFn: () => getApprovalStatus(conversationId!),
+    enabled: enabled && !!conversationId,
+  });
+}
+
 // ── Mutations ────────────────────────────────────────────────────
 
 /** Resume a paused 1:1 conversation with an APPROVED/REJECTED decision. */
@@ -46,9 +61,10 @@ export function useResumeConversation() {
   return useMutation({
     mutationFn: ({ conversationId, decision }: { conversationId: string; decision: HitlDecision }) =>
       resumeConversation(conversationId, decision),
-    onSuccess: () => {
+    onSuccess: (_data, { conversationId }) => {
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["pending-approvals"] });
+      qc.invalidateQueries({ queryKey: ["approval-status", conversationId] });
     },
   });
 }
@@ -58,9 +74,10 @@ export function useCancelConversation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (conversationId: string) => cancelConversation(conversationId),
-    onSuccess: () => {
+    onSuccess: (_data, conversationId) => {
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["pending-approvals"] });
+      qc.invalidateQueries({ queryKey: ["approval-status", conversationId] });
     },
   });
 }

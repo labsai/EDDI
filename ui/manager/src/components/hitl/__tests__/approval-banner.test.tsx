@@ -2,6 +2,21 @@ import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen, act } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import type { ToolCallPauseDetails } from "@/lib/api/hitl";
+
+/** A two-call TOOL_CALL pause fixture. */
+function toolPause(overrides: Partial<ToolCallPauseDetails> = {}): ToolCallPauseDetails {
+  return {
+    type: "TOOL_CALL",
+    calls: [
+      { callId: "c1", toolName: "sendEmail", source: "mcp", arguments: '{"to":"[REDACTED]"}', argsTruncated: false, gateReason: "mcp:*" },
+      { callId: "c2", toolName: "transfer_funds", source: "builtin", arguments: '{"amount":100}', argsTruncated: false, gateReason: "transfer_*" },
+    ],
+    executedUngatedCalls: [],
+    outcomeUnknown: [],
+    ...overrides,
+  };
+}
 
 describe("ApprovalBanner", () => {
   it("submits an APPROVED decision (no note, no task approvals) on the regular surface", () => {
@@ -114,5 +129,131 @@ describe("ApprovalBanner", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("disables Approve (not Reject/Cancel) while pause details are still loading", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner surface="regular" pauseDetailsPending onDecide={onDecide} onCancel={vi.fn()} />,
+    );
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+    expect(screen.getByTestId("reject-button")).not.toBeDisabled();
+    expect(screen.getByTestId("cancel-button")).not.toBeDisabled();
+    expect(screen.getByTestId("approval-details-pending")).toBeInTheDocument();
+    // Reject stays safe with details unknown (it rejects everything).
+    fireEvent.click(screen.getByTestId("reject-button"));
+    expect(onDecide).toHaveBeenCalledWith("REJECTED", undefined, undefined);
+  });
+
+  describe("TOOL_CALL pause", () => {
+    it("renders each gated call's tool name, source, gate reason and redacted arguments", () => {
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} />,
+      );
+      expect(screen.getByTestId("approval-banner")).toHaveAttribute("data-pause-type", "TOOL_CALL");
+      expect(screen.getByText("sendEmail")).toBeInTheDocument();
+      expect(screen.getByText("transfer_funds")).toBeInTheDocument();
+      expect(screen.getByText("mcp:*")).toBeInTheDocument();
+      expect(screen.getByTestId("tool-args-c1")).toHaveTextContent('"to":"[REDACTED]"');
+    });
+
+    it("approving with no per-call changes sends no toolDecisions (calls inherit APPROVED)", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} />,
+      );
+      fireEvent.click(screen.getByTestId("approve-button"));
+      expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, undefined);
+    });
+
+    it("rejecting one call then approving the batch sends a per-call REJECTED override", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} />,
+      );
+      fireEvent.click(screen.getByTestId("tool-reject-c2"));
+      fireEvent.click(screen.getByTestId("approve-button"));
+      expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, {
+        c2: { verdict: "REJECTED" },
+      });
+    });
+
+    it("rejecting the batch is all-or-nothing (no contradictory per-call approvals sent)", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} />,
+      );
+      // Even if a call was individually toggled APPROVED, Reject rejects the batch.
+      fireEvent.click(screen.getByTestId("tool-approve-c1"));
+      fireEvent.click(screen.getByTestId("reject-button"));
+      expect(onDecide).toHaveBeenCalledWith("REJECTED", undefined, undefined, undefined);
+    });
+
+    it("sends amendedArguments for an approved call when valid JSON is entered", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} />,
+      );
+      fireEvent.click(screen.getByTestId("tool-amend-toggle-c1"));
+      fireEvent.change(screen.getByTestId("tool-amend-c1"), {
+        target: { value: '{"to":"ops@acme.com"}' },
+      });
+      fireEvent.click(screen.getByTestId("approve-button"));
+      expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, {
+        c1: { verdict: "APPROVED", amendedArguments: '{"to":"ops@acme.com"}' },
+      });
+    });
+
+    it("blocks submission and shows an error when amended arguments are not a JSON object", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} />,
+      );
+      fireEvent.click(screen.getByTestId("tool-amend-toggle-c1"));
+      fireEvent.change(screen.getByTestId("tool-amend-c1"), { target: { value: "not json" } });
+      fireEvent.click(screen.getByTestId("approve-button"));
+      expect(onDecide).not.toHaveBeenCalled();
+      expect(screen.getByTestId("approval-submit-error")).toBeInTheDocument();
+    });
+
+    it("does not offer amendment for a call whose arguments were truncated", () => {
+      const details = toolPause({
+        calls: [
+          { callId: "c1", toolName: "bulkUpdate", source: "http", arguments: "{…}", argsTruncated: true, gateReason: "http:*" },
+        ],
+      });
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={details} onDecide={vi.fn()} />,
+      );
+      expect(screen.queryByTestId("tool-amend-toggle-c1")).not.toBeInTheDocument();
+      expect(screen.getByText("arguments truncated")).toBeInTheDocument();
+    });
+
+    it("surfaces executedUngatedCalls and the outcome-unknown warning", () => {
+      const details = toolPause({
+        calls: [
+          { callId: "c1", toolName: "sendEmail", source: "mcp", arguments: "{}", argsTruncated: false, gateReason: "mcp:*" },
+        ],
+        executedUngatedCalls: ["getCurrentDateTime"],
+        outcomeUnknown: ["c1"],
+      });
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={details} onDecide={vi.fn()} />,
+      );
+      expect(screen.getByTestId("executed-ungated")).toHaveTextContent("getCurrentDateTime");
+      expect(screen.getByTestId("outcome-unknown")).toBeInTheDocument();
+    });
+
+    it("does not render the tool UI for a RULE pause", () => {
+      renderWithProviders(
+        <ApprovalBanner
+          surface="regular"
+          pauseDetails={{ type: "RULE", reason: "Deletion needs sign-off", actions: ["PAUSE_CONVERSATION"] }}
+          onDecide={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId("tool-call-approvals")).not.toBeInTheDocument();
+      expect(screen.getByTestId("approval-banner")).toHaveAttribute("data-pause-type", "RULE");
+    });
   });
 });
