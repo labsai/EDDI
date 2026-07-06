@@ -7,6 +7,7 @@ import {
   PanelRightOpen, PanelRightClose,
   PanelLeftOpen, PanelLeftClose,
   Maximize2, Minimize2, History, X,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -463,6 +464,24 @@ export function GroupDetailPage() {
 
         {/* CENTER: Transcript + Input */}
         <div className="flex-1 min-w-0 rounded-xl border border-border bg-card overflow-hidden flex flex-col">
+          {/* Config-drift recovery guidance — the resume was aborted but the
+              discussion is still awaiting approval; the pause is recoverable. */}
+          {streamState.state === "FAILED" && streamState.errorKind === "config_drift" && (
+            <div
+              className="flex items-start gap-2 border-b border-amber-500/30 bg-amber-500/5 px-4 py-2.5"
+              data-testid="group-drift-banner"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+              <div className="text-xs">
+                <p className="font-medium text-amber-600 dark:text-amber-400">
+                  {t("groups.driftTitle", "Group configuration changed while paused")}
+                </p>
+                <p className="mt-0.5 text-muted-foreground">
+                  {t("groups.driftRecovery", "The resume was aborted because the group's phases changed. The discussion is still awaiting approval — fix the configuration (Edit, in the Configuration panel) and approve again, or cancel it.")}
+                </p>
+              </div>
+            </div>
+          )}
           <div className="flex-1 min-h-0 overflow-hidden">
             <DiscussionTranscript
               conversation={isStreamActive ? null : (selectedConversation ?? null)}
@@ -500,7 +519,7 @@ export function GroupDetailPage() {
                 <PanelRightClose className="h-3.5 w-3.5" />
               </button>
             </div>
-            <GroupConfigPanel config={safeConfig} groupId={groupId} groupVersion={version} className="flex-1 min-h-0" />
+            <GroupConfigPanel key={groupId} config={safeConfig} groupId={groupId} groupVersion={version} className="flex-1 min-h-0" />
           </div>
         )}
       </div>

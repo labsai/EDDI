@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, HandMetal } from "lucide-react";
+import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, HandMetal, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hashColor, getInitials } from "@/lib/utils";
@@ -10,6 +10,7 @@ import { timeoutPolicyLabel, granularityLabel, rejectionPolicyLabel } from "@/li
 import { formatIsoDuration } from "@/lib/hitl-config";
 import { toast } from "sonner";
 import { useDeleteGroup, useDeleteGroupWithMembers } from "@/hooks/use-groups";
+import { GroupHitlEditor } from "./group-hitl-editor";
 import { useNavigate } from "react-router-dom";
 
 interface GroupConfigPanelProps {
@@ -47,6 +48,8 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
   const styleInfo = STYLE_INFO[config.style] || STYLE_INFO.ROUND_TABLE;
   const styleColors = PANEL_STYLE_COLORS[config.style as DiscussionStyle] || PANEL_STYLE_COLORS.ROUND_TABLE;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<"group" | "all" | null>(null);
+  const [editingHitl, setEditingHitl] = useState(false);
+  const canEditHitl = !!groupId && groupVersion != null;
   const deleteGroupMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
 
@@ -191,42 +194,66 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
         </div>
       )}
 
-      {/* Human-in-the-Loop approval */}
-      {hasHitl && (
+      {/* Human-in-the-Loop approval — read-only summary + inline editor */}
+      {(hasHitl || canEditHitl) && (
         <div>
-          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+          <h4 className="mb-1.5 flex items-center text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             <HandMetal className="inline h-3 w-3 me-1" />
             {t("groups.hitlSection", "Human Approval")}
+            {canEditHitl && !editingHitl && (
+              <button
+                type="button"
+                onClick={() => setEditingHitl(true)}
+                className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10"
+                data-testid="group-hitl-edit"
+              >
+                <Pencil className="h-2.5 w-2.5" />
+                {t("groups.hitlEdit", "Edit")}
+              </button>
+            )}
           </h4>
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-1">
-            {approvalPhaseNames.length > 0 && (
-              <InfoRow
-                label={t("groups.hitlApprovalPoints", "Approval at")}
-                value={approvalPhaseNames.join(", ")}
-              />
-            )}
-            {hitl?.timeoutPolicy && (
-              <InfoRow
-                label={t("hitl.timeoutPolicy", "Timeout")}
-                value={
-                  timeoutPolicyLabel(t, hitl.timeoutPolicy) +
-                  (hitl.approvalTimeout ? ` (${formatIsoDuration(hitl.approvalTimeout)})` : "")
-                }
-              />
-            )}
-            {hitl?.granularity && (
-              <InfoRow
-                label={t("hitl.granularity", "Granularity")}
-                value={granularityLabel(t, hitl.granularity)}
-              />
-            )}
-            {hitl?.granularity === "TASK" && hitl?.onTaskRejection && (
-              <InfoRow
-                label={t("groups.hitlOnTaskRejection", "On rejection")}
-                value={rejectionPolicyLabel(t, hitl.onTaskRejection)}
-              />
-            )}
-          </div>
+          {editingHitl && groupId && groupVersion != null ? (
+            <GroupHitlEditor
+              config={config}
+              groupId={groupId}
+              groupVersion={groupVersion}
+              onDone={() => setEditingHitl(false)}
+            />
+          ) : hasHitl ? (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-1">
+              {approvalPhaseNames.length > 0 && (
+                <InfoRow
+                  label={t("groups.hitlApprovalPoints", "Approval at")}
+                  value={approvalPhaseNames.join(", ")}
+                />
+              )}
+              {hitl?.timeoutPolicy && (
+                <InfoRow
+                  label={t("hitl.timeoutPolicy", "Timeout")}
+                  value={
+                    timeoutPolicyLabel(t, hitl.timeoutPolicy) +
+                    (hitl.approvalTimeout ? ` (${formatIsoDuration(hitl.approvalTimeout)})` : "")
+                  }
+                />
+              )}
+              {hitl?.granularity && (
+                <InfoRow
+                  label={t("hitl.granularity", "Granularity")}
+                  value={granularityLabel(t, hitl.granularity)}
+                />
+              )}
+              {hitl?.granularity === "TASK" && hitl?.onTaskRejection && (
+                <InfoRow
+                  label={t("groups.hitlOnTaskRejection", "On rejection")}
+                  value={rejectionPolicyLabel(t, hitl.onTaskRejection)}
+                />
+              )}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-border bg-secondary/20 p-2.5 text-[10px] text-muted-foreground">
+              {t("groups.hitlNotConfigured", "No approval gates configured — click Edit to require human approval.")}
+            </p>
+          )}
         </div>
       )}
 
