@@ -40,6 +40,7 @@ import { BoardroomLayout } from "@/components/boardroom/boardroom-layout";
 import { BoardroomDashboard } from "@/pages/boardroom/boardroom-dashboard";
 import { BoardroomWizard } from "@/pages/boardroom/boardroom-wizard";
 import { BoardroomBoard } from "@/pages/boardroom/boardroom-board";
+import { BoardroomThread } from "@/pages/boardroom/boardroom-thread";
 
 export function App() {
   const location = useLocation();
@@ -54,7 +55,7 @@ export function App() {
         <Route index element={<BoardroomDashboard />} />
         <Route path="new" element={<BoardroomWizard />} />
         <Route path=":boardId" element={<BoardroomBoard />} />
-        {/* Phase 1d: <Route path=":boardId/thread/:memberId" element={<BoardroomThread />} /> */}
+        <Route path=":boardId/thread/:memberId" element={<BoardroomThread />} />
       </Route>
 
       <Route element={<AppLayout />}>
