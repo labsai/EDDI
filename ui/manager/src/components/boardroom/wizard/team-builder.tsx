@@ -69,17 +69,21 @@ function MemberCard({
 
         <div className="flex flex-1 flex-col gap-2 sm:flex-row">
           <input
+            id={`name-${member.id}`}
             type="text"
             value={member.displayName}
             onChange={(e) => update({ displayName: e.target.value })}
             placeholder={t("boardroom.wizard.advisorName", "Advisor name")}
+            aria-label={t("boardroom.wizard.advisorName", "Advisor name")}
             className="h-8 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <input
+            id={`role-${member.id}`}
             type="text"
             value={member.role}
             onChange={(e) => update({ role: e.target.value })}
             placeholder={t("boardroom.wizard.role", "Role")}
+            aria-label={t("boardroom.wizard.role", "Role")}
             className="h-8 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring sm:w-36"
           />
         </div>
@@ -88,7 +92,8 @@ function MemberCard({
           <button
             type="button"
             onClick={() => setExpanded((p) => !p)}
-            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            aria-expanded={expanded}
+            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
             aria-label={
               expanded
                 ? t("boardroom.wizard.collapse", "Collapse")
@@ -106,7 +111,7 @@ function MemberCard({
             <button
               type="button"
               onClick={onRemove}
-              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
               aria-label={t("boardroom.wizard.removeAdvisor", "Remove advisor")}
             >
               <X className="h-4 w-4" />
@@ -122,9 +127,11 @@ function MemberCard({
           <div className="flex gap-2">
             <button
               type="button"
+              aria-pressed={member.mode === "existing"}
               onClick={() => update({ mode: "existing" })}
               className={cn(
                 "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
                 member.mode === "existing"
                   ? "bg-indigo-500 text-white"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700",
@@ -134,9 +141,11 @@ function MemberCard({
             </button>
             <button
               type="button"
+              aria-pressed={member.mode === "new"}
               onClick={() => update({ mode: "new" })}
               className={cn(
                 "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
                 member.mode === "new"
                   ? "bg-indigo-500 text-white"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700",
@@ -148,7 +157,7 @@ function MemberCard({
 
           {member.mode === "existing" ? (
             <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              <label htmlFor={`agent-${member.id}`} className="mb-1.5 block text-xs font-medium text-muted-foreground">
                 {t("boardroom.wizard.selectAgent", "Select agent")}
               </label>
               <AgentPicker
@@ -160,10 +169,11 @@ function MemberCard({
             <div className="space-y-3">
               {/* Provider */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                <label htmlFor={`provider-${member.id}`} className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   {t("boardroom.wizard.provider", "LLM Provider")}
                 </label>
                 <select
+                  id={`provider-${member.id}`}
                   value={member.provider}
                   onChange={(e) => {
                     const prov = LLM_PROVIDERS.find(
@@ -189,10 +199,11 @@ function MemberCard({
 
               {/* Model */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                <label htmlFor={`model-${member.id}`} className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   {t("boardroom.wizard.model", "Model")}
                 </label>
                 <input
+                  id={`model-${member.id}`}
                   type="text"
                   value={member.model}
                   onChange={(e) => update({ model: e.target.value })}
@@ -206,7 +217,7 @@ function MemberCard({
 
               {/* API Key */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                <label htmlFor={`apikey-${member.id}`} className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   {t("boardroom.wizard.apiKey", "API Key")}
                 </label>
                 <SecretKeyPicker
@@ -217,13 +228,14 @@ function MemberCard({
 
               {/* System prompt */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                <label htmlFor={`prompt-${member.id}`} className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   {t(
                     "boardroom.wizard.personality",
                     "Personality & expertise",
                   )}
                 </label>
                 <textarea
+                  id={`prompt-${member.id}`}
                   value={member.systemPrompt}
                   onChange={(e) => update({ systemPrompt: e.target.value })}
                   rows={4}
@@ -291,10 +303,11 @@ function TeamBuilder({
     <div className="space-y-6">
       {/* Board name */}
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-foreground">
+        <label htmlFor="board-name" className="mb-1.5 block text-sm font-medium text-foreground">
           {t("boardroom.wizard.boardName", "Boardroom name")}
         </label>
         <input
+          id="board-name"
           type="text"
           value={boardName}
           onChange={(e) => onBoardNameChange(e.target.value)}
@@ -308,10 +321,11 @@ function TeamBuilder({
 
       {/* Board description */}
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-foreground">
+        <label htmlFor="board-description" className="mb-1.5 block text-sm font-medium text-foreground">
           {t("boardroom.wizard.boardDescription", "Description (optional)")}
         </label>
         <textarea
+          id="board-description"
           value={boardDescription}
           onChange={(e) => onBoardDescriptionChange(e.target.value)}
           rows={2}

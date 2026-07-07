@@ -34,6 +34,7 @@ function AdvisorAvatar({
   return (
     <div className={cn("flex flex-col items-center gap-1", className)}>
       <div
+        role="img"
         className={cn(
           "flex items-center justify-center rounded-full font-medium text-white",
           bgColor,
@@ -44,7 +45,7 @@ function AdvisorAvatar({
           name,
         })}
       >
-        {initials}
+        {initials || "?"}
       </div>
       {showRole && role && (
         <Badge

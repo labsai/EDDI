@@ -2090,6 +2090,21 @@
   },
   "boardroom": {
     "title": "Boardroom",
+    "back": "Retour",
+    "openMenu": "Ouvrir le menu",
+    "closeSidebar": "Fermer la barre latérale",
+    "toggleSidebar": "Basculer la barre latérale",
+    "newBoard": "Nouveau Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Board sans titre",
+    "toggleTheme": "Changer de thème",
+    "themeSystem": "Système",
+    "themeDark": "Sombre",
+    "themeLight": "Clair",
+    "tabHome": "Accueil",
+    "tabThreads": "Fils de discussion",
+    "sidebarDrawer": "Navigation de la barre latérale",
+    "boardList": "Liste des salons",
     "dashboard": {
       "title": "Vos Boardrooms",
       "subtitle": "Créez et gérez vos comités consultatifs IA",
@@ -2102,7 +2117,17 @@
       "noActivity": "Aucune activité pour le moment",
       "deleteBoardroom": "Supprimer le Boardroom",
       "deleteConfirm": "Êtes-vous sûr de vouloir supprimer ce boardroom ? Cette action est irréversible.",
-      "duplicateBoardroom": "Dupliquer le Boardroom"
+      "duplicateBoardroom": "Dupliquer le Boardroom",
+      "error": "Échec du chargement des boardrooms",
+      "retry": "Réessayer"
+    },
+    "card": {
+      "untitled": "Sans titre",
+      "noMembers": "Aucun membre",
+      "advisorCount": "{{count}} conseillers"
+    },
+    "advisor": {
+      "avatarLabel": "Avatar de {{name}}"
     },
     "wizard": {
       "step1Title": "Choisissez un style",
@@ -2135,7 +2160,23 @@
       "apiKey": "Clé API",
       "systemPrompt": "Prompt système",
       "displayName": "Nom d'affichage",
-      "role": "Rôle"
+      "role": "Rôle",
+      "progress": "Progression de l'assistant",
+      "advisorName": "Nom du conseiller",
+      "stepIndicatorLabel": "Progression de l'assistant",
+      "creationFailed": "Échec de la création",
+      "creationFailedDesc": "Une erreur s'est produite. Vous pouvez réessayer et la création reprendra là où elle s'est arrêtée.",
+      "tryAgain": "Réessayer",
+      "agentError": "Échec de la création de {{name}}",
+      "existing": "Existant",
+      "groupError": "Échec de la création du salon",
+      "selectProvider": "Sélectionner un fournisseur",
+      "settingUpBoard": "Configuration du salon",
+      "stepReview": "Vérification",
+      "stepTeam": "Équipe",
+      "stepTemplate": "Modèle",
+      "team": "Équipe",
+      "yourAdvisors": "Vos Conseillers"
     },
     "board": {
       "askYourBoard": "Posez une question à votre boardroom...",
@@ -2152,14 +2193,36 @@
       "completed": "Terminé",
       "failed": "Échoué",
       "cancelled": "Annulé",
-      "awaitingApproval": "En attente d'approbation"
+      "awaitingApproval": "En attente d'approbation",
+      "phase": "Phase",
+      "moderator": "Modérateur",
+      "chatOneOnOne": "Chat 1:1",
+      "loadingResponse": "Chargement de la réponse...",
+      "membersPanel": "Panneau des membres",
+      "sessionsPanel": "Panneau des sessions",
+      "stop": "Arrêter",
+      "viewHistory": "Voir l'historique"
     },
     "thread": {
       "context": "De la session {{boardName}}",
       "followUp": "Suite à votre réponse...",
       "typeMessage": "Saisissez un message...",
       "backToBoard": "Retour au Board",
-      "startingConversation": "Démarrage de la conversation..."
+      "startingConversation": "Démarrage de la conversation...",
+      "placeholder": "Message à {{name}}...",
+      "sendError": "Échec de l'envoi du message. Veuillez réessayer.",
+      "starting": "Démarrage de la conversation...",
+      "removeAttachment": "Supprimer la pièce jointe",
+      "attachFile": "Joindre un fichier",
+      "send": "Envoyer le message",
+      "emptyTitle": "Commencer une conversation",
+      "emptySubtitle": "Envoyez un message pour commencer à discuter avec {{name}}",
+      "toggleContext": "Basculer le contexte",
+      "fromSession": "De la session {{boardName}}",
+      "questionLabel": "Question",
+      "responseLabel": "Réponse",
+      "fileTooLarge": "Le fichier est trop volumineux. La taille maximale est de 10 Mo.",
+      "unsupportedFile": "Ce type de fichier n'est pas pris en charge."
     },
     "sidebar": {
       "boards": "Boardrooms",

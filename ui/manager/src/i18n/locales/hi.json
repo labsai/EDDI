@@ -2090,6 +2090,9 @@
   },
   "boardroom": {
     "title": "बोर्डरूम",
+    "tabThreads": "थ्रेड",
+    "sidebarDrawer": "साइडबार नेविगेशन",
+    "boardList": "बोर्डरूम सूची",
     "dashboard": {
       "title": "आपके बोर्डरूम",
       "subtitle": "अपनी AI सलाहकार परिषदें बनाएं और प्रबंधित करें",
@@ -2135,7 +2138,21 @@
       "apiKey": "API कुंजी",
       "systemPrompt": "सिस्टम प्रॉम्प्ट",
       "displayName": "प्रदर्शन नाम",
-      "role": "भूमिका"
+      "role": "भूमिका",
+      "stepIndicatorLabel": "विज़ार्ड प्रगति",
+      "creationFailed": "निर्माण विफल",
+      "creationFailedDesc": "कुछ गलत हो गया। आप पुनः प्रयास कर सकते हैं और यह वहीं से जारी रहेगा जहाँ रुका था।",
+      "tryAgain": "पुनः प्रयास करें",
+      "agentError": "{{name}} बनाने में विफल",
+      "existing": "मौजूदा",
+      "groupError": "बोर्डरूम बनाने में विफल",
+      "selectProvider": "प्रदाता चुनें",
+      "settingUpBoard": "बोर्डरूम सेट किया जा रहा है",
+      "stepReview": "समीक्षा",
+      "stepTeam": "टीम",
+      "stepTemplate": "टेम्पलेट",
+      "team": "टीम",
+      "yourAdvisors": "आपके सलाहकार"
     },
     "board": {
       "askYourBoard": "अपने बोर्डरूम से पूछें...",
@@ -2152,7 +2169,15 @@
       "completed": "पूर्ण",
       "failed": "विफल",
       "cancelled": "रद्द किया गया",
-      "awaitingApproval": "अनुमोदन की प्रतीक्षा में"
+      "awaitingApproval": "अनुमोदन की प्रतीक्षा में",
+      "phase": "चरण",
+      "moderator": "मॉडरेटर",
+      "chatOneOnOne": "1:1 चैट",
+      "loadingResponse": "प्रतिक्रिया लोड हो रही है...",
+      "membersPanel": "सदस्य पैनल",
+      "sessionsPanel": "सत्र पैनल",
+      "stop": "रोकें",
+      "viewHistory": "इतिहास देखें"
     },
     "thread": {
       "context": "{{boardName}} सत्र से",

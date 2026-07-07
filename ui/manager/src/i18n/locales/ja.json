@@ -2135,7 +2135,21 @@
       "apiKey": "APIキー",
       "systemPrompt": "システムプロンプト",
       "displayName": "表示名",
-      "role": "役割"
+      "role": "役割",
+      "stepIndicatorLabel": "ウィザードの進行状況",
+      "creationFailed": "作成に失敗しました",
+      "creationFailedDesc": "問題が発生しました。再試行すると、中断したところから再開されます。",
+      "tryAgain": "再試行",
+      "agentError": "{{name}} の作成に失敗しました",
+      "existing": "既存",
+      "groupError": "ボードルームの作成に失敗しました",
+      "selectProvider": "プロバイダーを選択",
+      "settingUpBoard": "ボードルームを設定中",
+      "stepReview": "確認",
+      "stepTeam": "チーム",
+      "stepTemplate": "テンプレート",
+      "team": "チーム",
+      "yourAdvisors": "あなたのアドバイザー"
     },
     "board": {
       "askYourBoard": "ボードルームに質問...",
@@ -2152,7 +2166,14 @@
       "completed": "完了",
       "failed": "失敗",
       "cancelled": "キャンセル済み",
-      "awaitingApproval": "承認待ち"
+      "awaitingApproval": "承認待ち",
+      "moderator": "モデレーター",
+      "chatOneOnOne": "1:1 チャット",
+      "loadingResponse": "応答を読み込み中...",
+      "membersPanel": "メンバーパネル",
+      "sessionsPanel": "セッションパネル",
+      "stop": "停止",
+      "viewHistory": "履歴を表示"
     },
     "thread": {
       "context": "{{boardName}} セッションより",
@@ -2174,6 +2195,8 @@
       "home": "ホーム",
       "threads": "スレッド"
     },
+    "sidebarDrawer": "サイドバーナビゲーション",
+    "boardList": "ボードルーム一覧",
     "common": {
       "delete": "削除",
       "cancel": "キャンセル",

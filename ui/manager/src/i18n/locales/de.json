@@ -2090,6 +2090,21 @@
   },
   "boardroom": {
     "title": "Boardroom",
+    "back": "Zurück",
+    "openMenu": "Menü öffnen",
+    "closeSidebar": "Seitenleiste schließen",
+    "toggleSidebar": "Seitenleiste umschalten",
+    "newBoard": "Neuer Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Unbenanntes Board",
+    "toggleTheme": "Design umschalten",
+    "themeSystem": "System",
+    "themeDark": "Dunkel",
+    "themeLight": "Hell",
+    "tabHome": "Startseite",
+    "tabThreads": "Threads",
+    "sidebarDrawer": "Seitenleisten-Navigation",
+    "boardList": "Boardroom-Liste",
     "dashboard": {
       "title": "Ihre Boardrooms",
       "subtitle": "Erstellen und verwalten Sie Ihre KI-Beratungsgremien",
@@ -2102,7 +2117,17 @@
       "noActivity": "Noch keine Aktivität",
       "deleteBoardroom": "Boardroom löschen",
       "deleteConfirm": "Sind Sie sicher, dass Sie diesen Boardroom löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.",
-      "duplicateBoardroom": "Boardroom duplizieren"
+      "duplicateBoardroom": "Boardroom duplizieren",
+      "error": "Boardrooms konnten nicht geladen werden",
+      "retry": "Erneut versuchen"
+    },
+    "card": {
+      "untitled": "Unbenannt",
+      "noMembers": "Keine Mitglieder",
+      "advisorCount": "{{count}} Berater"
+    },
+    "advisor": {
+      "avatarLabel": "{{name}} Avatar"
     },
     "wizard": {
       "step1Title": "Wählen Sie einen Stil",
@@ -2135,7 +2160,23 @@
       "apiKey": "API-Schlüssel",
       "systemPrompt": "System-Prompt",
       "displayName": "Anzeigename",
-      "role": "Rolle"
+      "role": "Rolle",
+      "progress": "Assistent-Fortschritt",
+      "advisorName": "Beratername",
+      "stepIndicatorLabel": "Assistenten-Fortschritt",
+      "creationFailed": "Erstellung fehlgeschlagen",
+      "creationFailedDesc": "Etwas ist schiefgelaufen. Sie können es erneut versuchen und es wird dort fortgesetzt, wo es aufgehört hat.",
+      "tryAgain": "Erneut versuchen",
+      "agentError": "{{name}} konnte nicht erstellt werden",
+      "existing": "Vorhandene",
+      "groupError": "Boardroom konnte nicht erstellt werden",
+      "selectProvider": "Anbieter auswählen",
+      "settingUpBoard": "Boardroom wird eingerichtet",
+      "stepReview": "Überprüfung",
+      "stepTeam": "Team",
+      "stepTemplate": "Vorlage",
+      "team": "Team",
+      "yourAdvisors": "Ihre Berater"
     },
     "board": {
       "askYourBoard": "Fragen Sie Ihren Boardroom...",
@@ -2152,14 +2193,36 @@
       "completed": "Abgeschlossen",
       "failed": "Fehlgeschlagen",
       "cancelled": "Abgebrochen",
-      "awaitingApproval": "Wartet auf Genehmigung"
+      "awaitingApproval": "Wartet auf Genehmigung",
+      "phase": "Phase",
+      "moderator": "Moderator",
+      "chatOneOnOne": "Chat 1:1",
+      "loadingResponse": "Antwort wird geladen...",
+      "membersPanel": "Mitglieder-Panel",
+      "sessionsPanel": "Sitzungs-Panel",
+      "stop": "Stopp",
+      "viewHistory": "Verlauf anzeigen"
     },
     "thread": {
       "context": "Aus {{boardName}}-Sitzung",
       "followUp": "Anknüpfung an Ihre Antwort...",
       "typeMessage": "Nachricht eingeben...",
       "backToBoard": "Zurück zum Board",
-      "startingConversation": "Gespräch wird gestartet..."
+      "startingConversation": "Gespräch wird gestartet...",
+      "placeholder": "Nachricht an {{name}}...",
+      "sendError": "Nachricht konnte nicht gesendet werden. Bitte versuchen Sie es erneut.",
+      "starting": "Gespräch wird gestartet...",
+      "removeAttachment": "Anhang entfernen",
+      "attachFile": "Datei anhängen",
+      "send": "Nachricht senden",
+      "emptyTitle": "Gespräch starten",
+      "emptySubtitle": "Senden Sie eine Nachricht, um mit {{name}} zu chatten",
+      "toggleContext": "Kontext umschalten",
+      "fromSession": "Aus {{boardName}}-Sitzung",
+      "questionLabel": "Frage",
+      "responseLabel": "Antwort",
+      "fileTooLarge": "Die Datei ist zu groß. Maximale Größe ist 10 MB.",
+      "unsupportedFile": "Dieser Dateityp wird nicht unterstützt."
     },
     "sidebar": {
       "boards": "Boardrooms",

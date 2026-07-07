@@ -5,7 +5,7 @@ import {
   useCallback,
   type KeyboardEvent,
 } from "react";
-import { useParams, useLocation } from "react-router-dom";
+import { useParams, useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Paperclip, X } from "lucide-react";
 import { useGroup } from "@/hooks/use-groups";
@@ -42,6 +42,24 @@ interface AttachmentInfo {
   fileName: string;
   file: File;
 }
+
+const ALLOWED_FILE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+  "application/pdf",
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+  "application/json",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -82,7 +100,11 @@ function parseConversationSteps(
 
       if (typeof entry.value === "string") {
         outputTexts.push(entry.value);
-      } else if (entry.value && typeof entry.value === "object") {
+      } else if (
+        typeof entry.value === "object" &&
+        entry.value !== null &&
+        !Array.isArray(entry.value)
+      ) {
         const obj = entry.value as Record<string, unknown>;
         // Could be { input: "...", actions?: [...] } or { text: "..." }
         const text = (obj.text ?? obj.input ?? "") as string;
@@ -200,14 +222,27 @@ function ThreadInput({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
-        setAttachment({ fileName: file.name, file });
+        if (file.size > MAX_FILE_SIZE) {
+          alert(
+            t("boardroom.thread.fileTooLarge", "File must be under 10MB"),
+          );
+        } else if (!ALLOWED_FILE_TYPES.has(file.type)) {
+          alert(
+            t(
+              "boardroom.thread.fileTypeNotAllowed",
+              "This file type is not supported",
+            ),
+          );
+        } else {
+          setAttachment({ fileName: file.name, file });
+        }
       }
       // Reset input so the same file can be re-selected
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
     },
-    [],
+    [t],
   );
 
   const removeAttachment = useCallback(() => {
@@ -260,6 +295,7 @@ function ThreadInput({
           ref={fileInputRef}
           type="file"
           onChange={handleFileChange}
+          accept="image/*,.pdf,.txt,.csv,.md,.json,.doc,.docx,.xls,.xlsx"
           className="hidden"
           aria-hidden="true"
         />
@@ -301,7 +337,7 @@ function ThreadInput({
             "text-sm text-slate-900 dark:text-slate-100",
             "placeholder:text-slate-400 dark:placeholder:text-slate-500",
             "border-none outline-none",
-            "focus:ring-2 ring-indigo-500/30",
+            "focus:ring-2 focus:ring-indigo-500/30",
             "transition-shadow",
           )}
         />
@@ -325,6 +361,18 @@ function ThreadInput({
   );
 }
 
+// ─── Type Guard ──────────────────────────────────────────────────
+
+function isGroupContext(state: unknown): state is GroupContext {
+  if (typeof state !== "object" || state === null) return false;
+  const s = state as Record<string, unknown>;
+  return (
+    s.fromGroup === true &&
+    typeof s.question === "string" &&
+    typeof s.response === "string"
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────
 
 function BoardroomThread() {
@@ -334,13 +382,15 @@ function BoardroomThread() {
     memberId: string;
   }>();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const version = Number(searchParams.get("version")) || 1;
 
   // Group context from router state (passed by advisor-response-card)
-  const groupContext = (location.state as GroupContext | null) ?? null;
+  const groupContext = isGroupContext(location.state) ? location.state : null;
   const hasGroupContext = groupContext?.fromGroup === true;
 
   // Fetch board config to resolve member display name & role
-  const { data: groupConfig } = useGroup(boardId);
+  const { data: groupConfig } = useGroup(boardId, version);
   const member = groupConfig?.members.find((m) => m.agentId === memberId);
   const memberName = member?.displayName ?? memberId;
   const memberRole = member?.role ?? null;
@@ -349,6 +399,16 @@ function BoardroomThread() {
   const { getThread, registerThread, updateActivity } =
     useBoardroomThreads();
 
+  // Stable refs for init effect (avoid stale closures)
+  const getThreadRef = useRef(getThread);
+  getThreadRef.current = getThread;
+  const registerThreadRef = useRef(registerThread);
+  registerThreadRef.current = registerThread;
+  const updateActivityRef = useRef(updateActivity);
+  updateActivityRef.current = updateActivity;
+  const memberNameRef = useRef(memberName);
+  memberNameRef.current = memberName;
+
   // Local state
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
@@ -356,9 +416,10 @@ function BoardroomThread() {
   const [isStarting, setIsStarting] = useState(true);
   const [inputPrefill, setInputPrefill] = useState("");
 
-  // Auto-scroll ref
+  // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initRef = useRef(false);
+  const sendingRef = useRef(false);
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
@@ -372,7 +433,7 @@ function BoardroomThread() {
 
     async function init() {
       try {
-        const existingThread = getThread(boardId, memberId);
+        const existingThread = getThreadRef.current(boardId, memberId);
 
         if (existingThread) {
           // Resume existing conversation
@@ -386,14 +447,14 @@ function BoardroomThread() {
             snapshot.conversationSteps ?? [],
           );
           setMessages(parsed);
-          updateActivity(boardId, memberId);
+          updateActivityRef.current(boardId, memberId);
         } else {
           // Start a new conversation
           const newConvId = await startConversation("production", memberId);
           setConversationId(newConvId);
-          registerThread({
+          registerThreadRef.current({
             memberId,
-            memberName,
+            memberName: memberNameRef.current,
             conversationId: newConvId,
             boardId,
           });
@@ -415,16 +476,6 @@ function BoardroomThread() {
             // No welcome message — that's fine
           }
         }
-
-        // Pre-fill input if arriving from group context
-        if (hasGroupContext) {
-          setInputPrefill(
-            t(
-              "boardroom.thread.followUp",
-              "Following up on your response...",
-            ),
-          );
-        }
       } catch (err) {
         console.error("Failed to initialize thread:", err);
       } finally {
@@ -433,13 +484,26 @@ function BoardroomThread() {
     }
 
     init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId, memberId]);
+
+  // ─── Prefill input when group context is available ────────────
+  useEffect(() => {
+    if (hasGroupContext && !isStarting) {
+      setInputPrefill(
+        t(
+          "boardroom.thread.followUp",
+          "Following up on your response...",
+        ),
+      );
+    }
+  }, [hasGroupContext, isStarting, t]);
 
   // ─── Send a message ──────────────────────────────────────────
   const handleSend = useCallback(
     async (text: string, attachment?: AttachmentInfo) => {
       if (!conversationId || (!text.trim() && !attachment) || isLoading) return;
+      if (sendingRef.current) return;
+      sendingRef.current = true;
 
       // Clear prefill after first send
       if (inputPrefill) setInputPrefill("");
@@ -474,6 +538,7 @@ function BoardroomThread() {
                   fileName: attachment.fileName,
                   mimeType: attachment.file.type || "application/octet-stream",
                   sizeBytes: attachment.file.size,
+                  note: "metadata-only: file content is not uploaded",
                 },
               },
             },
@@ -514,6 +579,7 @@ function BoardroomThread() {
           },
         ]);
       } finally {
+        sendingRef.current = false;
         setIsLoading(false);
       }
     },
@@ -527,7 +593,7 @@ function BoardroomThread() {
         <Skeleton className="h-12 w-12 rounded-full" />
         <Skeleton className="h-4 w-48" />
         <p className="text-sm text-muted-foreground">
-          {t("boardroom.thread.starting", "Starting conversation...")}
+          {t("boardroom.thread.startingConversation", "Starting conversation...")}
         </p>
       </div>
     );

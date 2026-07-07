@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -57,6 +57,7 @@ function BoardroomWizard() {
   const navigate = useNavigate();
   const setupAgent = useSetupAgent();
   const createGroup = useCreateGroup();
+  const creatingRef = useRef(false);
 
   // ─── State ──────────────────────────────────────────────────────────────
 
@@ -116,7 +117,7 @@ function BoardroomWizard() {
         return;
       }
 
-      const tpl = templates.find((t) => t.key === key);
+      const tpl = templates.find((tmpl) => tmpl.key === key);
       if (!tpl) return;
 
       setBoardName(tpl.name);
@@ -142,6 +143,8 @@ function BoardroomWizard() {
   );
 
   const handleCreate = useCallback(async () => {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setIsCreating(true);
 
     // Initialize progress entries
@@ -165,6 +168,9 @@ function BoardroomWizard() {
     // Create new agents sequentially
     for (let i = 0; i < resolvedMembers.length; i++) {
       const member = resolvedMembers[i]!;
+
+      // Skip members already completed in a previous attempt
+      if (creationProgress[i]?.status === "done") continue;
 
       if (member.mode === "existing") {
         // Already has an agentId — mark as done immediately
@@ -197,6 +203,7 @@ function BoardroomWizard() {
           }),
         );
         setIsCreating(false);
+        creatingRef.current = false;
         return; // Stop on error
       }
     }
@@ -250,6 +257,8 @@ function BoardroomWizard() {
       toast.success(
         t("boardroom.wizard.success", "Boardroom created successfully!"),
       );
+      setIsCreating(false);
+      creatingRef.current = false;
 
       navigate(`/boardroom/${newGroupId}?version=1`);
     } catch (err) {
@@ -264,11 +273,13 @@ function BoardroomWizard() {
         }),
       );
       setIsCreating(false);
+      creatingRef.current = false;
     }
   }, [
     members,
     t,
     updateProgress,
+    creationProgress,
     setupAgent,
     selectedTemplateObj,
     boardName,
@@ -285,7 +296,7 @@ function BoardroomWizard() {
       <StepIndicator steps={steps} currentStep={currentStep} />
 
       {/* Step content with transition */}
-      <div className="mt-8">
+      <div className="mt-8 relative">
         {/* Step 0: Template picker */}
         <div
           className={cn(

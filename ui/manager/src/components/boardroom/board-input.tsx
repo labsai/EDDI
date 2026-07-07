@@ -92,6 +92,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
             placeholder ??
             t("boardroom.board.askYourBoard", "Ask your boardroom...")
           }
+          aria-label={placeholder ?? t("boardroom.board.askYourBoard", "Ask your boardroom...")}
           disabled={disabled}
           rows={1}
           className={cn(
@@ -100,7 +101,8 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
             "text-sm text-slate-900 dark:text-slate-100",
             "placeholder:text-slate-400 dark:placeholder:text-slate-500",
             "border-none outline-none",
-            "focus:ring-2 ring-indigo-500/30",
+            "focus:ring-2 focus:ring-indigo-500/30",
+            "focus-visible:ring-indigo-500",
             "transition-shadow",
           )}
         />
@@ -114,7 +116,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
             "h-10 w-10 shrink-0 rounded-full",
             "bg-indigo-500 text-white hover:bg-indigo-600",
             "disabled:bg-indigo-500/50 disabled:text-white/60",
-            disabled && canSend && "animate-pulse",
+
           )}
           aria-label={t("boardroom.board.send", "Send")}
         >

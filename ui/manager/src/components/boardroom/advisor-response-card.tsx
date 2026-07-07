@@ -14,15 +14,16 @@ interface AdvisorResponseCardProps {
   content: string | null;
   phaseType?: string;
   boardId: string;
-  memberId?: string;
+
   className?: string;
 }
 
 // ─── Typing Indicator ────────────────────────────────────────────
 
 function TypingIndicator() {
+  const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-1 py-1">
+    <div className="flex items-center gap-1 py-1" role="status" aria-label={t("boardroom.board.loadingResponse", "Loading response")}>
       <span
         className="inline-block h-2 w-2 rounded-full bg-slate-400 animate-bounce"
         style={{ animationDelay: "0ms" }}

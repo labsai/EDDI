@@ -2090,6 +2090,9 @@
   },
   "boardroom": {
     "title": "Boardroom",
+    "tabThreads": "Tópicos",
+    "sidebarDrawer": "Navegação da barra lateral",
+    "boardList": "Lista de boardrooms",
     "dashboard": {
       "title": "Seus Boardrooms",
       "subtitle": "Crie e gerencie seus conselhos consultivos de IA",
@@ -2135,7 +2138,21 @@
       "apiKey": "Chave API",
       "systemPrompt": "Prompt do sistema",
       "displayName": "Nome de exibição",
-      "role": "Função"
+      "role": "Função",
+      "stepIndicatorLabel": "Progresso do assistente",
+      "creationFailed": "Falha na criação",
+      "creationFailedDesc": "Algo deu errado. Você pode tentar novamente e a criação continuará de onde parou.",
+      "tryAgain": "Tentar novamente",
+      "agentError": "Falha ao criar {{name}}",
+      "existing": "Existente",
+      "groupError": "Falha ao criar boardroom",
+      "selectProvider": "Selecionar provedor",
+      "settingUpBoard": "Configurando boardroom",
+      "stepReview": "Revisão",
+      "stepTeam": "Equipe",
+      "stepTemplate": "Modelo",
+      "team": "Equipe",
+      "yourAdvisors": "Seus Consultores"
     },
     "board": {
       "askYourBoard": "Pergunte ao seu boardroom...",
@@ -2152,7 +2169,15 @@
       "completed": "Concluído",
       "failed": "Falhou",
       "cancelled": "Cancelado",
-      "awaitingApproval": "Aguardando aprovação"
+      "awaitingApproval": "Aguardando aprovação",
+      "phase": "Fase",
+      "moderator": "Moderador",
+      "chatOneOnOne": "Chat 1:1",
+      "loadingResponse": "Carregando resposta...",
+      "membersPanel": "Painel de membros",
+      "sessionsPanel": "Painel de sessões",
+      "stop": "Parar",
+      "viewHistory": "Ver histórico"
     },
     "thread": {
       "context": "Da sessão de {{boardName}}",

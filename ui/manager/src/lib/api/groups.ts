@@ -617,7 +617,7 @@ export type EnrichedGroupDescriptor = GroupDescriptor & {
   version: number;
   memberCount: number;
   style?: DiscussionStyle;
-  members: { displayName: string; memberType?: MemberType }[];
+  members: { agentId: string; displayName: string; memberType?: MemberType }[];
 };
 
 /**
@@ -646,6 +646,7 @@ export async function getEnrichedGroupDescriptors(
           memberCount: config.members?.length ?? 0,
           style: config.style,
           members: (config.members ?? []).map((m) => ({
+            agentId: m.agentId,
             displayName: m.displayName,
             memberType: m.memberType,
           })),

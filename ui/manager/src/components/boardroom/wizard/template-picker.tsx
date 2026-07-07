@@ -13,16 +13,18 @@ function TemplatePicker({ selected, onSelect }: TemplatePickerProps) {
   const templates = getGroupTemplates(t);
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div role="group" aria-label={t("boardroom.wizard.templates", "Discussion templates")} className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {templates.map((tpl) => {
         const isSelected = selected === tpl.key;
         return (
           <button
             key={tpl.key}
             type="button"
+            aria-pressed={isSelected}
             onClick={() => onSelect(tpl.key)}
             className={cn(
               "relative rounded-xl border p-5 text-start transition-all duration-150",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
               isSelected
                 ? "scale-[1.02] border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500/30 dark:bg-indigo-500/10"
                 : "border-slate-200 hover:border-indigo-300 dark:border-slate-700 dark:hover:border-indigo-600",
@@ -54,9 +56,11 @@ function TemplatePicker({ selected, onSelect }: TemplatePickerProps) {
       {/* Custom card */}
       <button
         type="button"
+        aria-pressed={selected === "custom"}
         onClick={() => onSelect("custom")}
         className={cn(
           "relative rounded-xl border p-5 text-start transition-all duration-150",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
           selected === "custom"
             ? "scale-[1.02] border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500/30 dark:bg-indigo-500/10"
             : "border-dashed border-slate-300 hover:border-indigo-300 dark:border-slate-600 dark:hover:border-indigo-600",

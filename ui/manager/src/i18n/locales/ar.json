@@ -2090,6 +2090,8 @@
   },
   "boardroom": {
     "title": "قاعة الاجتماعات",
+    "sidebarDrawer": "تنقل الشريط الجانبي",
+    "boardList": "قائمة قاعات الاجتماعات",
     "dashboard": {
       "title": "قاعات اجتماعاتك",
       "subtitle": "أنشئ وأدر مجالس استشارية للذكاء الاصطناعي",
@@ -2135,7 +2137,21 @@
       "apiKey": "مفتاح API",
       "systemPrompt": "موجه النظام",
       "displayName": "اسم العرض",
-      "role": "الدور"
+      "role": "الدور",
+      "stepIndicatorLabel": "تقدم المعالج",
+      "creationFailed": "فشل الإنشاء",
+      "creationFailedDesc": "حدث خطأ ما. يمكنك إعادة المحاولة وسيتم الاستئناف من حيث توقف.",
+      "tryAgain": "إعادة المحاولة",
+      "agentError": "فشل إنشاء {{name}}",
+      "existing": "موجود",
+      "groupError": "فشل إنشاء قاعة الاجتماعات",
+      "selectProvider": "اختر مزودًا",
+      "settingUpBoard": "جارٍ إعداد قاعة الاجتماعات",
+      "stepReview": "مراجعة",
+      "stepTeam": "الفريق",
+      "stepTemplate": "قالب",
+      "team": "الفريق",
+      "yourAdvisors": "مستشاروك"
     },
     "board": {
       "askYourBoard": "اسأل قاعة اجتماعاتك...",
@@ -2152,7 +2168,13 @@
       "completed": "مكتمل",
       "failed": "فشل",
       "cancelled": "ملغى",
-      "awaitingApproval": "بانتظار الموافقة"
+      "awaitingApproval": "بانتظار الموافقة",
+      "chatOneOnOne": "محادثة 1:1",
+      "loadingResponse": "جارٍ تحميل الرد...",
+      "membersPanel": "لوحة الأعضاء",
+      "sessionsPanel": "لوحة الجلسات",
+      "stop": "إيقاف",
+      "viewHistory": "عرض السجل"
     },
     "thread": {
       "context": "من جلسة {{boardName}}",

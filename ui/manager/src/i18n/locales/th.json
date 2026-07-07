@@ -2090,6 +2090,8 @@
   },
   "boardroom": {
     "title": "ห้องประชุม",
+    "sidebarDrawer": "นำทางแถบด้านข้าง",
+    "boardList": "รายการห้องประชุม",
     "dashboard": {
       "title": "ห้องประชุมของคุณ",
       "subtitle": "สร้างและจัดการคณะที่ปรึกษา AI ของคุณ",
@@ -2135,7 +2137,21 @@
       "apiKey": "คีย์ API",
       "systemPrompt": "พรอมต์ระบบ",
       "displayName": "ชื่อที่แสดง",
-      "role": "บทบาท"
+      "role": "บทบาท",
+      "stepIndicatorLabel": "ความคืบหน้าตัวช่วย",
+      "creationFailed": "การสร้างล้มเหลว",
+      "creationFailedDesc": "เกิดข้อผิดพลาด คุณสามารถลองอีกครั้งและระบบจะดำเนินการต่อจากจุดที่หยุดไว้",
+      "tryAgain": "ลองอีกครั้ง",
+      "agentError": "ไม่สามารถสร้าง {{name}}",
+      "existing": "ที่มีอยู่",
+      "groupError": "ไม่สามารถสร้างห้องประชุม",
+      "selectProvider": "เลือกผู้ให้บริการ",
+      "settingUpBoard": "กำลังตั้งค่าห้องประชุม",
+      "stepReview": "ตรวจสอบ",
+      "stepTeam": "ทีม",
+      "stepTemplate": "เทมเพลต",
+      "team": "ทีม",
+      "yourAdvisors": "ที่ปรึกษาของคุณ"
     },
     "board": {
       "askYourBoard": "ถามห้องประชุมของคุณ...",
@@ -2152,7 +2168,13 @@
       "completed": "เสร็จสิ้น",
       "failed": "ล้มเหลว",
       "cancelled": "ยกเลิกแล้ว",
-      "awaitingApproval": "รอการอนุมัติ"
+      "awaitingApproval": "รอการอนุมัติ",
+      "chatOneOnOne": "แชท 1:1",
+      "loadingResponse": "กำลังโหลดคำตอบ...",
+      "membersPanel": "แผงสมาชิก",
+      "sessionsPanel": "แผงเซสชัน",
+      "stop": "หยุด",
+      "viewHistory": "ดูประวัติ"
     },
     "thread": {
       "context": "จากเซสชัน {{boardName}}",

@@ -90,6 +90,15 @@
   }
 }
 
+@keyframes br-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
 @keyframes br-fab-in {
   from {
     transform: scale(0);
@@ -120,13 +129,4 @@
   background: var(--br-surface);
   border: 1px solid var(--br-border);
   border-radius: 0.75rem;
-}
-
-.br-card-hover {
-  transition: transform 150ms ease, box-shadow 150ms ease;
-}
-
-.br-card-hover:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--br-shadow-lg);
 }

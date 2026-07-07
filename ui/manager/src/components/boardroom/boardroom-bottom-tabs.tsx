@@ -26,14 +26,16 @@ export function BoardroomBottomTabs() {
       label: t("boardroom.tabThreads", "Threads"),
       icon: MessageSquare,
       active: isThreads,
-      to: location.pathname.includes("/boardroom/")
-        ? location.pathname.replace(/\/thread\/.*$/, "") + "/thread/"
+      to: location.pathname.match(/\/boardroom\/[^/]+/)?.[0]
+        ? `${location.pathname.match(/\/boardroom\/[^/]+/)![0]}/thread/`
         : "/boardroom",
     },
   ] as const;
 
   return (
     <nav
+      role="tablist"
+      aria-label={t("boardroom.bottomNav", "Bottom navigation")}
       className={cn(
         "fixed inset-x-0 bottom-0 z-40 flex h-16 border-t",
         "border-slate-200 bg-white/90 backdrop-blur-md",
@@ -47,9 +49,12 @@ export function BoardroomBottomTabs() {
           <button
             key={tab.key}
             type="button"
+            role="tab"
+            aria-selected={tab.active}
             onClick={() => navigate(tab.to)}
             className={cn(
               "flex flex-1 flex-col items-center justify-center gap-1 text-xs transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-inset",
               tab.active
                 ? "font-medium text-indigo-500 dark:text-indigo-400"
                 : "text-slate-400 dark:text-slate-500",

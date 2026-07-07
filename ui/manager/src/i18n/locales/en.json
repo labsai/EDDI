@@ -2119,6 +2119,21 @@
   },
   "boardroom": {
     "title": "Boardroom",
+    "back": "Back",
+    "openMenu": "Open menu",
+    "closeSidebar": "Close sidebar",
+    "toggleSidebar": "Toggle sidebar",
+    "newBoard": "New Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Untitled Board",
+    "toggleTheme": "Toggle theme",
+    "themeSystem": "System",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "tabHome": "Home",
+    "tabThreads": "Threads",
+    "sidebarDrawer": "Sidebar navigation",
+    "boardList": "Boardrooms list",
     "dashboard": {
       "title": "Your Boardrooms",
       "subtitle": "Create and manage your AI advisory boards",
@@ -2131,7 +2146,17 @@
       "noActivity": "No activity yet",
       "deleteBoardroom": "Delete Boardroom",
       "deleteConfirm": "Are you sure you want to delete this boardroom? This action cannot be undone.",
-      "duplicateBoardroom": "Duplicate Boardroom"
+      "duplicateBoardroom": "Duplicate Boardroom",
+      "error": "Failed to load boardrooms",
+      "retry": "Retry"
+    },
+    "card": {
+      "untitled": "Untitled",
+      "noMembers": "No members",
+      "advisorCount": "{{count}} advisors"
+    },
+    "advisor": {
+      "avatarLabel": "{{name}} avatar"
     },
     "wizard": {
       "step1Title": "Choose a Style",
@@ -2164,7 +2189,23 @@
       "apiKey": "API Key",
       "systemPrompt": "System Prompt",
       "displayName": "Display Name",
-      "role": "Role"
+      "role": "Role",
+      "progress": "Wizard progress",
+      "advisorName": "Advisor name",
+      "stepIndicatorLabel": "Wizard progress",
+      "creationFailed": "Creation failed",
+      "creationFailedDesc": "Something went wrong. You can retry and it will pick up where it left off.",
+      "tryAgain": "Try Again",
+      "agentError": "Failed to create {{name}}",
+      "existing": "Existing",
+      "groupError": "Failed to create boardroom",
+      "selectProvider": "Select provider",
+      "settingUpBoard": "Setting up boardroom",
+      "stepReview": "Review",
+      "stepTeam": "Team",
+      "stepTemplate": "Template",
+      "team": "Team",
+      "yourAdvisors": "Your Advisors"
     },
     "board": {
       "askYourBoard": "Ask your boardroom...",
@@ -2181,14 +2222,36 @@
       "completed": "Completed",
       "failed": "Failed",
       "cancelled": "Cancelled",
-      "awaitingApproval": "Awaiting Approval"
+      "awaitingApproval": "Awaiting Approval",
+      "phase": "Phase",
+      "moderator": "Moderator",
+      "chatOneOnOne": "Chat 1:1",
+      "loadingResponse": "Loading response...",
+      "membersPanel": "Members panel",
+      "sessionsPanel": "Sessions panel",
+      "stop": "Stop",
+      "viewHistory": "View history"
     },
     "thread": {
       "context": "From {{boardName}} session",
       "followUp": "Following up on your response...",
       "typeMessage": "Type a message...",
       "backToBoard": "Back to Board",
-      "startingConversation": "Starting conversation..."
+      "startingConversation": "Starting conversation...",
+      "placeholder": "Message {{name}}...",
+      "sendError": "Failed to send message. Please try again.",
+      "starting": "Starting conversation...",
+      "removeAttachment": "Remove attachment",
+      "attachFile": "Attach file",
+      "send": "Send message",
+      "emptyTitle": "Start a conversation",
+      "emptySubtitle": "Send a message to begin chatting with {{name}}",
+      "toggleContext": "Toggle context",
+      "fromSession": "From {{boardName}} session",
+      "questionLabel": "Question",
+      "responseLabel": "Response",
+      "fileTooLarge": "File is too large. Maximum size is 10MB.",
+      "unsupportedFile": "This file type is not supported."
     },
     "sidebar": {
       "boards": "Boardrooms",

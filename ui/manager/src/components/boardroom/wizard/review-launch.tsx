@@ -42,6 +42,10 @@ function StatusIcon({
       return <Check className="h-4 w-4 text-emerald-500" />;
     case "error":
       return <X className="h-4 w-4 text-red-500" />;
+    default: {
+      const _exhaustive: never = status;
+      return _exhaustive;
+    }
   }
 }
 
@@ -79,6 +83,10 @@ function StatusLabel({
           {error || t("boardroom.wizard.error", "Failed")}
         </span>
       );
+    default: {
+      const _exhaustive: never = status;
+      return _exhaustive;
+    }
   }
 }
 
@@ -96,22 +104,31 @@ function ReviewLaunch({
   const { t } = useTranslation();
 
   // ─── Creation progress view ─────────────────────────────────────────────
-  if (isCreating) {
+  const hasError = creationProgress.some((p) => p.status === "error");
+
+  if (isCreating || (creationProgress.length > 0 && hasError)) {
     return (
       <div className="space-y-6">
         <div className="br-surface rounded-xl p-6">
           <h2 className="text-lg font-semibold text-foreground">
-            {t("boardroom.wizard.settingUp", "Setting up your boardroom…")}
+            {hasError && !isCreating
+              ? t("boardroom.wizard.creationFailed", "Creation failed")
+              : t("boardroom.wizard.settingUp", "Setting up your boardroom…")}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t(
-              "boardroom.wizard.settingUpDesc",
-              "Creating advisors and configuring the board. This may take a moment.",
-            )}
+            {hasError && !isCreating
+              ? t(
+                  "boardroom.wizard.creationFailedDesc",
+                  "Something went wrong. You can retry and it will pick up where it left off.",
+                )
+              : t(
+                  "boardroom.wizard.settingUpDesc",
+                  "Creating advisors and configuring the board. This may take a moment.",
+                )}
           </p>
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-2" aria-live="polite">
           {creationProgress.map((item) => (
             <div
               key={item.id}
@@ -135,6 +152,16 @@ function ReviewLaunch({
             </div>
           ))}
         </div>
+
+        {hasError && !isCreating && (
+          <Button
+            className="w-full bg-indigo-500 text-white hover:bg-indigo-600"
+            size="lg"
+            onClick={onCreateClick}
+          >
+            {t("boardroom.wizard.tryAgain", "Try Again")}
+          </Button>
+        )}
       </div>
     );
   }

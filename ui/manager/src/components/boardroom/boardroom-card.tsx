@@ -83,7 +83,7 @@ function BoardroomCard({
   style,
   members = [],
   lastModified,
-  conversationCount: _conversationCount,
+  // conversationCount reserved for future use
   version,
   className,
 }: BoardroomCardProps) {
@@ -111,7 +111,7 @@ function BoardroomCard({
             {styleInfo.icon}
           </span>
         )}
-        <h3 className="min-w-0 flex-1 truncate text-base font-semibold text-foreground line-clamp-1">
+        <h3 className="min-w-0 flex-1 text-base font-semibold text-foreground line-clamp-1">
           {name || t("boardroom.card.untitled", "Untitled Board")}
         </h3>
         {/* Placeholder for future context menu */}
@@ -139,7 +139,7 @@ function BoardroomCard({
 
       {/* Footer */}
       <div className="mt-4 flex items-center justify-between">
-        {/* Left — stacked avatars */}
+        {/* Start — stacked avatars */}
         <div className="flex items-center gap-2">
           {members.length > 0 ? (
             <StackedAvatarsInline members={members} />
@@ -150,7 +150,7 @@ function BoardroomCard({
           )}
         </div>
 
-        {/* Right — meta */}
+        {/* End — meta */}
         <div className="flex items-center gap-3 text-xs text-slate-400">
           <span>
             {t("boardroom.card.advisorCount", "{{count}} advisors", {

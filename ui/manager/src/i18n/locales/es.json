@@ -2090,6 +2090,8 @@
   },
   "boardroom": {
     "title": "Boardroom",
+    "sidebarDrawer": "Navegación lateral",
+    "boardList": "Lista de salas de juntas",
     "dashboard": {
       "title": "Sus Boardrooms",
       "subtitle": "Cree y gestione sus juntas consultivas de IA",
@@ -2135,7 +2137,21 @@
       "apiKey": "Clave API",
       "systemPrompt": "Prompt del sistema",
       "displayName": "Nombre para mostrar",
-      "role": "Rol"
+      "role": "Rol",
+      "stepIndicatorLabel": "Progreso del asistente",
+      "creationFailed": "Error en la creación",
+      "creationFailedDesc": "Algo salió mal. Puedes reintentar y continuará donde se quedó.",
+      "tryAgain": "Reintentar",
+      "agentError": "Error al crear {{name}}",
+      "existing": "Existente",
+      "groupError": "Error al crear la sala de juntas",
+      "selectProvider": "Seleccionar proveedor",
+      "settingUpBoard": "Configurando sala de juntas",
+      "stepReview": "Revisión",
+      "stepTeam": "Equipo",
+      "stepTemplate": "Plantilla",
+      "team": "Equipo",
+      "yourAdvisors": "Sus Asesores"
     },
     "board": {
       "askYourBoard": "Pregunte a su boardroom...",
@@ -2152,7 +2168,13 @@
       "completed": "Completado",
       "failed": "Fallido",
       "cancelled": "Cancelado",
-      "awaitingApproval": "Esperando aprobación"
+      "awaitingApproval": "Esperando aprobación",
+      "chatOneOnOne": "Chat 1:1",
+      "loadingResponse": "Cargando respuesta...",
+      "membersPanel": "Panel de miembros",
+      "sessionsPanel": "Panel de sesiones",
+      "stop": "Detener",
+      "viewHistory": "Ver historial"
     },
     "thread": {
       "context": "De la sesión de {{boardName}}",

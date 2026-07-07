@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
@@ -80,6 +80,9 @@ function BoardroomBoard() {
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const membersRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
+  const panelTriggerRef = useRef<HTMLElement | null>(null);
 
   // ─── Data ──────────────────────────────────────────────────────
   const { data: groupConfig, isLoading: configLoading } = useGroup(boardId ?? "", version);
@@ -96,6 +99,50 @@ function BoardroomBoard() {
       setSelectedConvId(streamState.conversationId);
     }
   }, [streamState.state, streamState.conversationId]);
+
+  // Close slide-over panels on Escape + restore focus
+  useEffect(() => {
+    if (!showMembers && !showHistory) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (showMembers) setShowMembers(false);
+        else if (showHistory) setShowHistory(false);
+        requestAnimationFrame(() => panelTriggerRef.current?.focus());
+      }
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [showMembers, showHistory]);
+
+  // Auto-focus first element in slide-over panels
+  useEffect(() => {
+    const ref = showMembers ? membersRef : showHistory ? historyRef : null;
+    if (!ref) return;
+    requestAnimationFrame(() => {
+      const first = ref.current?.querySelector<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      first?.focus();
+    });
+  }, [showMembers, showHistory]);
+
+  // Focus trap handler for slide-over panels
+  const handlePanelKeyDown = useCallback((e: React.KeyboardEvent, ref: React.RefObject<HTMLDivElement | null>) => {
+    if (e.key !== 'Tab') return;
+    const focusable = ref.current?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusable?.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
 
   // ─── Handlers ──────────────────────────────────────────────────
   const handleSend = useCallback(
@@ -184,18 +231,26 @@ function BoardroomBoard() {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setShowMembers((v) => !v)}
+            onClick={() => {
+              if (!showMembers) panelTriggerRef.current = document.activeElement as HTMLElement;
+              setShowMembers((v) => !v);
+            }}
             className={cn("h-8 w-8", showMembers && "bg-indigo-50 dark:bg-indigo-500/10")}
             aria-label={t("boardroom.board.members", "Members")}
+            aria-expanded={showMembers}
           >
             <UsersIcon />
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setShowHistory((v) => !v)}
+            onClick={() => {
+              if (!showHistory) panelTriggerRef.current = document.activeElement as HTMLElement;
+              setShowHistory((v) => !v);
+            }}
             className={cn("h-8 w-8", showHistory && "bg-indigo-50 dark:bg-indigo-500/10")}
             aria-label={t("boardroom.board.sessions", "Sessions")}
+            aria-expanded={showHistory}
           >
             <ClockIcon />
           </Button>
@@ -209,7 +264,6 @@ function BoardroomBoard() {
             transcript={displayTranscript}
             boardId={boardId}
             synthesizedAnswer={displaySynthesis}
-            activeSpeakers={streamState.activeSpeakers}
           />
         ) : (
           <div className="flex h-full items-center justify-center">
@@ -253,10 +307,18 @@ function BoardroomBoard() {
         <>
           <div
             className="fixed inset-0 z-30 bg-black/30"
-            onClick={() => setShowMembers(false)}
-            aria-hidden
+            onClick={() => {
+              setShowMembers(false);
+              requestAnimationFrame(() => panelTriggerRef.current?.focus());
+            }}
+            aria-hidden="true"
           />
           <div
+            ref={membersRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("boardroom.board.membersPanel", "Members panel")}
+            onKeyDown={(e) => handlePanelKeyDown(e, membersRef)}
             className={cn(
               "fixed inset-y-0 end-0 z-40 w-80",
               "bg-white dark:bg-slate-900",
@@ -269,7 +331,10 @@ function BoardroomBoard() {
               members={members}
               boardId={boardId}
               moderatorId={groupConfig?.moderatorAgentId}
-              onClose={() => setShowMembers(false)}
+              onClose={() => {
+                setShowMembers(false);
+                requestAnimationFrame(() => panelTriggerRef.current?.focus());
+              }}
             />
           </div>
         </>
@@ -280,10 +345,18 @@ function BoardroomBoard() {
         <>
           <div
             className="fixed inset-0 z-30 bg-black/30"
-            onClick={() => setShowHistory(false)}
-            aria-hidden
+            onClick={() => {
+              setShowHistory(false);
+              requestAnimationFrame(() => panelTriggerRef.current?.focus());
+            }}
+            aria-hidden="true"
           />
           <div
+            ref={historyRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("boardroom.board.sessionsPanel", "Sessions panel")}
+            onKeyDown={(e) => handlePanelKeyDown(e, historyRef)}
             className={cn(
               "fixed inset-y-0 end-0 z-40 w-80",
               "bg-white dark:bg-slate-900",
@@ -296,7 +369,10 @@ function BoardroomBoard() {
               groupId={boardId}
               selectedId={selectedConvId}
               onSelect={handleSelectConversation}
-              onClose={() => setShowHistory(false)}
+              onClose={() => {
+                setShowHistory(false);
+                requestAnimationFrame(() => panelTriggerRef.current?.focus());
+              }}
             />
           </div>
         </>

@@ -48,6 +48,21 @@ function CloseIcon() {
   );
 }
 
+// ─── State i18n Key Mapping ──────────────────────────────────────
+
+function getStateI18nKey(state: GroupConversationState): string {
+  switch (state) {
+    case "COMPLETED": return "boardroom.board.completed";
+    case "IN_PROGRESS": return "boardroom.board.inProgress";
+    case "SYNTHESIZING": return "boardroom.board.synthesizing";
+    case "CREATED": return "boardroom.board.created";
+    case "FAILED": return "boardroom.board.failed";
+    case "CANCELLED": return "boardroom.board.cancelled";
+    case "AWAITING_APPROVAL": return "boardroom.board.awaitingApproval";
+    default: return "boardroom.board.created";
+  }
+}
+
 // ─── Component ───────────────────────────────────────────────────
 
 function SessionHistory({
@@ -68,7 +83,7 @@ function SessionHistory({
           {t("boardroom.board.sessions", "Sessions")}
         </h3>
         {onClose && (
-          <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
+          <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8" aria-label={t("boardroom.board.close", "Close")}>
             <CloseIcon />
           </Button>
         )}
@@ -109,11 +124,13 @@ function SessionHistory({
               <button
                 key={conv.id}
                 type="button"
+                aria-current={isSelected ? "true" : undefined}
                 onClick={() => onSelect(conv.id)}
                 className={cn(
                   "w-full text-start px-4 py-3 transition-colors",
                   "hover:bg-slate-50 dark:hover:bg-slate-800/50",
                   "border-b border-slate-100 dark:border-slate-800/50",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500",
                   isSelected && "bg-indigo-50 dark:bg-indigo-500/10 border-s-2 border-s-indigo-500",
                 )}
               >
@@ -125,7 +142,7 @@ function SessionHistory({
                 {/* Bottom row: badge + timestamp */}
                 <div className="flex items-center gap-2 mt-1.5">
                   <Badge variant={badgeConfig.variant} className="text-[10px]">
-                    {t(`boardroom.board.state.${conv.state}`, badgeConfig.label)}
+                    {t(getStateI18nKey(conv.state), badgeConfig.label)}
                   </Badge>
                   {timestamp > 0 && (
                     <span className="text-xs text-slate-400 dark:text-slate-500">

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -7,14 +8,20 @@ interface StepIndicatorProps {
 }
 
 function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
+  const { t } = useTranslation();
+
   return (
-    <div className="flex items-center justify-center gap-0">
+    <div
+      className="flex items-center justify-center gap-0"
+      role="list"
+      aria-label={t("boardroom.wizard.stepIndicatorLabel", "Wizard progress")}
+    >
       {steps.map((step, index) => {
         const isCompleted = index < currentStep;
         const isActive = index === currentStep;
 
         return (
-          <div key={index} className="flex items-center gap-0">
+          <div key={index} className="flex items-center gap-0" role="listitem">
             {/* Step circle + label */}
             <div className="flex flex-col items-center">
               <div
@@ -27,6 +34,7 @@ function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
                     !isActive &&
                     "bg-slate-200 text-slate-500 dark:bg-slate-700",
                 )}
+                {...(isActive ? { "aria-current": "step" as const } : {})}
               >
                 {isCompleted ? (
                   <Check className="h-4 w-4" />
@@ -39,7 +47,7 @@ function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
                   "mt-1.5 hidden text-xs sm:block",
                   isActive
                     ? "font-medium text-foreground"
-                    : "text-muted-foreground",
+                    : "text-muted-foreground dark:text-slate-400",
                 )}
               >
                 {step.label}

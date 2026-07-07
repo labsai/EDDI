@@ -7,14 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BoardroomCard } from "@/components/boardroom/boardroom-card";
 
-// ─── FAB keyframe (mount animation) ─────────────────────────────
 
-const fabStyle = `
-@keyframes br-fab-in {
-  0% { opacity: 0; transform: scale(0.5) translateY(1rem); }
-  100% { opacity: 1; transform: scale(1) translateY(0); }
-}
-`;
 
 // ─── Loading Skeleton ────────────────────────────────────────────
 
@@ -118,26 +111,25 @@ function NewBoardCard() {
 // ─── Mobile FAB ──────────────────────────────────────────────────
 
 function MobileFab() {
+  const { t } = useTranslation();
+
   return (
-    <>
-      <style>{fabStyle}</style>
-      <Link
-        to="/boardroom/new"
-        className={cn(
-          "fixed bottom-24 z-40",
-          "end-5",
-          "flex h-14 w-14 items-center justify-center rounded-full",
-          "bg-indigo-500 text-white shadow-lg",
-          "hover:bg-indigo-600 active:scale-95",
-          "transition-colors duration-150",
-          "@[32rem]/br-dash:hidden",
-        )}
-        style={{ animation: "br-fab-in 0.3s ease-out both" }}
-        aria-label="New Boardroom"
-      >
-        <Plus className="h-6 w-6" />
-      </Link>
-    </>
+    <Link
+      to="/boardroom/new"
+      className={cn(
+        "fixed bottom-24 z-40",
+        "end-5",
+        "flex h-14 w-14 items-center justify-center rounded-full",
+        "bg-indigo-500 text-white shadow-lg",
+        "hover:bg-indigo-600 active:scale-95",
+        "transition-colors duration-150",
+        "sm:hidden",
+      )}
+      style={{ animation: 'br-fab-in 200ms cubic-bezier(0.34,1.56,0.64,1) both' }}
+      aria-label={t("boardroom.dashboard.newBoardroom", "New Boardroom")}
+    >
+      <Plus className="h-6 w-6" />
+    </Link>
   );
 }
 
@@ -206,7 +198,7 @@ function BoardroomDashboard() {
               description={board.description}
               style={board.style}
               members={board.members?.map((m) => ({
-                agentId: m.displayName, // enriched descriptor doesn't include agentId
+                agentId: m.agentId,
                 displayName: m.displayName,
                 speakingOrder: null,
                 role: null,

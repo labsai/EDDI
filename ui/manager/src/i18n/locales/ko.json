@@ -2135,7 +2135,21 @@
       "apiKey": "API 키",
       "systemPrompt": "시스템 프롬프트",
       "displayName": "표시 이름",
-      "role": "역할"
+      "role": "역할",
+      "stepIndicatorLabel": "마법사 진행 상황",
+      "creationFailed": "생성 실패",
+      "creationFailedDesc": "문제가 발생했습니다. 다시 시도하면 중단된 부분부터 계속됩니다.",
+      "tryAgain": "다시 시도",
+      "agentError": "{{name}} 생성에 실패했습니다",
+      "existing": "기존",
+      "groupError": "보드룸 생성에 실패했습니다",
+      "selectProvider": "제공자 선택",
+      "settingUpBoard": "보드룸 설정 중",
+      "stepReview": "검토",
+      "stepTeam": "팀",
+      "stepTemplate": "템플릿",
+      "team": "팀",
+      "yourAdvisors": "나의 자문위원"
     },
     "board": {
       "askYourBoard": "보드룸에 질문하세요...",
@@ -2152,7 +2166,14 @@
       "completed": "완료됨",
       "failed": "실패",
       "cancelled": "취소됨",
-      "awaitingApproval": "승인 대기 중"
+      "awaitingApproval": "승인 대기 중",
+      "moderator": "사회자",
+      "chatOneOnOne": "1:1 채팅",
+      "loadingResponse": "응답 로딩 중...",
+      "membersPanel": "멤버 패널",
+      "sessionsPanel": "세션 패널",
+      "stop": "중지",
+      "viewHistory": "기록 보기"
     },
     "thread": {
       "context": "{{boardName}} 세션에서",
@@ -2174,6 +2195,8 @@
       "home": "홈",
       "threads": "스레드"
     },
+    "sidebarDrawer": "사이드바 내비게이션",
+    "boardList": "보드룸 목록",
     "common": {
       "delete": "삭제",
       "cancel": "취소",

@@ -2090,6 +2090,8 @@
   },
   "boardroom": {
     "title": "会议室",
+    "sidebarDrawer": "侧边栏导航",
+    "boardList": "会议室列表",
     "dashboard": {
       "title": "您的会议室",
       "subtitle": "创建和管理您的AI顾问委员会",
@@ -2135,7 +2137,21 @@
       "apiKey": "API 密钥",
       "systemPrompt": "系统提示词",
       "displayName": "显示名称",
-      "role": "角色"
+      "role": "角色",
+      "stepIndicatorLabel": "向导进度",
+      "creationFailed": "创建失败",
+      "creationFailedDesc": "出现了问题。您可以重试，它将从上次中断的地方继续。",
+      "tryAgain": "重试",
+      "agentError": "创建 {{name}} 失败",
+      "existing": "现有",
+      "groupError": "创建会议室失败",
+      "selectProvider": "选择提供商",
+      "settingUpBoard": "正在设置会议室",
+      "stepReview": "审查",
+      "stepTeam": "团队",
+      "stepTemplate": "模板",
+      "team": "团队",
+      "yourAdvisors": "您的顾问"
     },
     "board": {
       "askYourBoard": "向您的会议室提问...",
@@ -2152,7 +2168,13 @@
       "completed": "已完成",
       "failed": "失败",
       "cancelled": "已取消",
-      "awaitingApproval": "等待审批"
+      "awaitingApproval": "等待审批",
+      "chatOneOnOne": "1:1 聊天",
+      "loadingResponse": "正在加载回复...",
+      "membersPanel": "成员面板",
+      "sessionsPanel": "会话面板",
+      "stop": "停止",
+      "viewHistory": "查看历史"
     },
     "thread": {
       "context": "来自 {{boardName}} 会话",

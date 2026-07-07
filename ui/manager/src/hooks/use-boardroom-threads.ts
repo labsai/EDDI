@@ -31,7 +31,16 @@ function loadThreads(): ThreadInfo[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed as ThreadInfo[];
+    return parsed.filter((item): item is ThreadInfo => {
+      if (typeof item !== "object" || item === null) return false;
+      const obj = item as Record<string, unknown>;
+      return (
+        typeof obj.memberId === "string" &&
+        typeof obj.conversationId === "string" &&
+        typeof obj.boardId === "string" &&
+        typeof obj.memberName === "string"
+      );
+    });
   } catch {
     return [];
   }

@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { AdvisorResponseCard } from "@/components/boardroom/advisor-response-card";
@@ -10,7 +10,7 @@ interface BoardTranscriptProps {
   transcript: TranscriptEntry[];
   boardId: string;
   synthesizedAnswer?: string | null;
-  activeSpeakers?: Set<string>;
+
   className?: string;
 }
 
@@ -79,10 +79,13 @@ function PhaseHeader({
   phaseType?: string;
   delay: number;
 }) {
+  const { t } = useTranslation();
   const icon = getPhaseIcon(phaseType);
 
   return (
     <div
+      role="separator"
+      aria-label={phaseName ?? phaseType ?? t("boardroom.board.phase", "Phase")}
       className="flex justify-center my-3"
       style={{ animation: "br-message-in 250ms ease-out both", animationDelay: `${delay}ms` }}
     >
@@ -95,7 +98,7 @@ function PhaseHeader({
         )}
       >
         <span>{icon}</span>
-        <span>{phaseName ?? phaseType ?? "Phase"}</span>
+        <span>{phaseName ?? phaseType ?? t("boardroom.board.phase", "Phase")}</span>
       </div>
     </div>
   );
@@ -107,6 +110,8 @@ function SynthesisCard({ content, delay }: { content: string; delay: number }) {
 
   return (
     <div
+      role="status"
+      aria-label={t("boardroom.board.synthesisResult", "Synthesis result")}
       className={cn(
         "border-s-4 border-indigo-500 rounded-xl p-4",
         "bg-indigo-50 dark:bg-indigo-500/10",
@@ -164,11 +169,20 @@ function BoardTranscript({
   className,
 }: BoardTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const threshold = 100;
+    isNearBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  }, []);
 
   // Auto-scroll to bottom on new entries
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) {
+    if (el && isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
   }, [transcript.length, synthesizedAnswer]);
@@ -176,31 +190,35 @@ function BoardTranscript({
   // Check if transcript already contains a SYNTHESIS entry
   const hasSynthesisEntry = transcript.some((e) => e.type === "SYNTHESIS");
 
-  // Track which phases we've already rendered headers for
-  let lastPhaseIndex = -1;
+  const processedEntries = useMemo(() => {
+    let lastPhase = -1;
+    return transcript.map((entry) => {
+      let showPhaseHeader = false;
+      if (
+        entry.phaseIndex >= 0 &&
+        entry.phaseIndex !== lastPhase &&
+        entry.type !== "QUESTION"
+      ) {
+        lastPhase = entry.phaseIndex;
+        showPhaseHeader = true;
+      }
+      return { entry, showPhaseHeader };
+    });
+  }, [transcript]);
 
   return (
-    <div ref={scrollRef} className={cn("flex flex-col gap-3 overflow-y-auto", className)}>
-      {transcript.map((entry, idx) => {
-        const delay = idx * 60;
+    <div ref={scrollRef} onScroll={handleScroll} aria-live="polite" aria-relevant="additions" className={cn("flex flex-col gap-3 overflow-y-auto", className)}>
+      {processedEntries.map(({ entry, showPhaseHeader }, idx) => {
+        const delay = Math.min(idx * 60, 600);
 
-        // Render phase header when phase changes
-        let phaseHeader: React.ReactNode = null;
-        if (
-          entry.phaseIndex >= 0 &&
-          entry.phaseIndex !== lastPhaseIndex &&
-          entry.type !== "QUESTION"
-        ) {
-          lastPhaseIndex = entry.phaseIndex;
-          phaseHeader = (
-            <PhaseHeader
-              key={`phase-${entry.phaseIndex}`}
-              phaseName={entry.phaseName}
-              phaseType={inferPhaseType(entry)}
-              delay={delay}
-            />
-          );
-        }
+        const phaseHeader = showPhaseHeader ? (
+          <PhaseHeader
+            key={`phase-${entry.phaseIndex}`}
+            phaseName={entry.phaseName}
+            phaseType={inferPhaseType(entry)}
+            delay={delay}
+          />
+        ) : null;
 
         switch (entry.type) {
           case "QUESTION":
@@ -251,7 +269,7 @@ function BoardTranscript({
 
       {/* Trailing synthesis from synthesizedAnswer prop */}
       {synthesizedAnswer && !hasSynthesisEntry && (
-        <SynthesisCard content={synthesizedAnswer} delay={transcript.length * 60} />
+        <SynthesisCard content={synthesizedAnswer} delay={Math.min(transcript.length * 60, 600)} />
       )}
     </div>
   );

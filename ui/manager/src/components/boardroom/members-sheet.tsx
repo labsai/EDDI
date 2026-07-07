@@ -59,7 +59,7 @@ function MembersSheet({
           </Badge>
         </div>
         {onClose && (
-          <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
+          <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8" aria-label={t("boardroom.board.close", "Close")}>
             <CloseIcon />
           </Button>
         )}
@@ -97,6 +97,8 @@ function MembersSheet({
                     <span
                       className="text-xs"
                       title={t("boardroom.board.moderator", "Moderator")}
+                      role="img"
+                      aria-label={t("boardroom.board.moderator", "Moderator")}
                     >
                       ⭐
                     </span>
