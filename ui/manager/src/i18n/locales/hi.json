@@ -2087,5 +2087,99 @@
     "noProgressWaitForHuman": "मानव की प्रतीक्षा करें",
     "noProgressAutoReject": "स्वतः-अस्वीकार",
     "noProgressAbort": "निरस्त करें"
+  },
+  "boardroom": {
+    "title": "बोर्डरूम",
+    "dashboard": {
+      "title": "आपके बोर्डरूम",
+      "subtitle": "अपनी AI सलाहकार परिषदें बनाएं और प्रबंधित करें",
+      "createFirst": "अपना पहला बोर्डरूम बनाएं",
+      "createFirstDesc": "बेहतर निर्णय लेने में मदद के लिए विशेषज्ञ सलाहकारों के साथ एक AI सलाहकार परिषद स्थापित करें।",
+      "newBoardroom": "नया बोर्डरूम",
+      "sessions": "सत्र",
+      "advisors": "सलाहकार",
+      "lastActive": "अंतिम सक्रिय",
+      "noActivity": "अभी तक कोई गतिविधि नहीं",
+      "deleteBoardroom": "बोर्डरूम हटाएं",
+      "deleteConfirm": "क्या आप वाकई इस बोर्डरूम को हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",
+      "duplicateBoardroom": "बोर्डरूम की प्रतिलिपि बनाएं"
+    },
+    "wizard": {
+      "step1Title": "एक शैली चुनें",
+      "step1Subtitle": "शुरू करने के लिए एक टेम्पलेट चुनें, या शुरू से बनाएं",
+      "step2Title": "अपनी टीम बनाएं",
+      "step2Subtitle": "अपने सलाहकारों को कॉन्फ़िगर करें",
+      "step3Title": "समीक्षा करें और लॉन्च करें",
+      "step3Subtitle": "सब कुछ ठीक लग रहा है?",
+      "boardName": "बोर्डरूम का नाम",
+      "boardDescription": "विवरण (वैकल्पिक)",
+      "addAdvisor": "सलाहकार जोड़ें",
+      "removeAdvisor": "सलाहकार हटाएं",
+      "configureAI": "AI कॉन्फ़िगर करें",
+      "useExisting": "मौजूदा एजेंट का उपयोग करें",
+      "createNew": "नया सलाहकार बनाएं",
+      "personality": "व्यक्तित्व और विशेषज्ञता",
+      "createBoardroom": "बोर्डरूम बनाएं",
+      "creating": "बनाया जा रहा है...",
+      "creatingAdvisor": "{{name}} बनाया जा रहा है...",
+      "advisorReady": "{{name}} तैयार है",
+      "settingUp": "बोर्डरूम सेट किया जा रहा है...",
+      "success": "आपका बोर्डरूम तैयार है!",
+      "enterBoardroom": "अपने बोर्डरूम में प्रवेश करें",
+      "back": "वापस",
+      "next": "आगे",
+      "customTemplate": "कस्टम",
+      "customTemplateDesc": "अपनी खुद की कॉन्फ़िगरेशन के साथ शुरू से शुरू करें",
+      "provider": "AI प्रदाता",
+      "model": "मॉडल",
+      "apiKey": "API कुंजी",
+      "systemPrompt": "सिस्टम प्रॉम्प्ट",
+      "displayName": "प्रदर्शन नाम",
+      "role": "भूमिका"
+    },
+    "board": {
+      "askYourBoard": "अपने बोर्डरूम से पूछें...",
+      "askMore": "{{name}} से और पूछें",
+      "newSession": "नया सत्र",
+      "sessions": "सत्र",
+      "members": "सदस्य",
+      "synthesis": "संश्लेषण",
+      "typing": "सोच रहा है...",
+      "chat1on1": "1:1 चैट",
+      "noSessions": "अभी तक कोई सत्र नहीं",
+      "noSessionsDesc": "चर्चा शुरू करने के लिए अपने बोर्डरूम से एक प्रश्न पूछें",
+      "streaming": "स्ट्रीमिंग...",
+      "completed": "पूर्ण",
+      "failed": "विफल",
+      "cancelled": "रद्द किया गया",
+      "awaitingApproval": "अनुमोदन की प्रतीक्षा में"
+    },
+    "thread": {
+      "context": "{{boardName}} सत्र से",
+      "followUp": "आपके उत्तर पर अनुवर्ती...",
+      "typeMessage": "संदेश टाइप करें...",
+      "backToBoard": "बोर्ड पर वापस",
+      "startingConversation": "बातचीत शुरू हो रही है..."
+    },
+    "sidebar": {
+      "boards": "बोर्डरूम",
+      "threads": "थ्रेड",
+      "sessions": "सत्र",
+      "threadWith": "{{name}} के साथ",
+      "newBoardroom": "नया बोर्डरूम",
+      "collapse": "साइडबार छोटा करें",
+      "expand": "साइडबार बड़ा करें"
+    },
+    "tabs": {
+      "home": "होम",
+      "threads": "थ्रेड"
+    },
+    "common": {
+      "delete": "हटाएं",
+      "cancel": "रद्द करें",
+      "confirm": "पुष्टि करें",
+      "settings": "सेटिंग्स",
+      "themeToggle": "थीम बदलें"
+    }
   }
 }

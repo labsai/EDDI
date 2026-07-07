@@ -1,0 +1,132 @@
+/* ─── Boardroom Design Tokens ─────────────────────────────────────
+ * Scoped under .boardroom so they don't leak into the rest of the app.
+ * ────────────────────────────────────────────────────────────────── */
+
+.boardroom {
+  /* Surface & background */
+  --br-bg: #f8fafc;
+  --br-surface: #ffffff;
+  --br-surface-hover: #f1f5f9;
+  --br-border: #e2e8f0;
+
+  /* Typography */
+  --br-text: #0f172a;
+  --br-text-secondary: #64748b;
+
+  /* Accent — indigo palette */
+  --br-accent: #6366f1;
+  --br-accent-hover: #4f46e5;
+  --br-accent-subtle: #eef2ff;
+
+  /* Glass effect (light mode doesn't need heavy glass) */
+  --br-glass-bg: rgba(255, 255, 255, 0.8);
+  --br-glass-blur: blur(16px);
+  --br-glass-border: rgba(0, 0, 0, 0.06);
+
+  /* Shadows */
+  --br-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --br-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07),
+    0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --br-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08),
+    0 4px 6px -4px rgba(0, 0, 0, 0.05);
+}
+
+/* ─── Dark Mode Overrides ─────────────────────────────────────── */
+
+.dark .boardroom {
+  --br-bg: #020617;
+  --br-surface: #0f172a;
+  --br-surface-hover: #1e293b;
+  --br-border: #1e293b;
+
+  --br-text: #f8fafc;
+  --br-text-secondary: #94a3b8;
+
+  --br-accent: #818cf8;
+  --br-accent-hover: #6366f1;
+  --br-accent-subtle: rgba(99, 102, 241, 0.1);
+
+  --br-glass-bg: rgba(15, 23, 42, 0.8);
+  --br-glass-blur: blur(16px);
+  --br-glass-border: rgba(255, 255, 255, 0.06);
+
+  --br-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --br-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4),
+    0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --br-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5),
+    0 4px 6px -4px rgba(0, 0, 0, 0.3);
+}
+
+/* ─── Keyframe Animations ─────────────────────────────────────── */
+
+@keyframes br-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes br-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes br-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes br-fab-in {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Stagger utility — set --stagger-delay on each child */
+.br-stagger {
+  animation: br-fade-in 300ms ease-out both;
+  animation-delay: var(--stagger-delay, 0ms);
+}
+
+/* ─── Utility Classes ─────────────────────────────────────────── */
+
+.br-glass {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  background: var(--br-glass-bg);
+  border: 1px solid var(--br-glass-border);
+}
+
+.br-surface {
+  background: var(--br-surface);
+  border: 1px solid var(--br-border);
+  border-radius: 0.75rem;
+}
+
+.br-card-hover {
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.br-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--br-shadow-lg);
+}

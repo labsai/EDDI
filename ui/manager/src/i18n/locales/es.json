@@ -2087,5 +2087,99 @@
     "noProgressWaitForHuman": "Esperar a una persona",
     "noProgressAutoReject": "Rechazo automático",
     "noProgressAbort": "Abortar"
+  },
+  "boardroom": {
+    "title": "Boardroom",
+    "dashboard": {
+      "title": "Sus Boardrooms",
+      "subtitle": "Cree y gestione sus juntas consultivas de IA",
+      "createFirst": "Cree su primer boardroom",
+      "createFirstDesc": "Configure una junta consultiva de IA con asesores expertos para ayudarle a tomar mejores decisiones.",
+      "newBoardroom": "Nuevo Boardroom",
+      "sessions": "sesiones",
+      "advisors": "asesores",
+      "lastActive": "Última actividad",
+      "noActivity": "Sin actividad aún",
+      "deleteBoardroom": "Eliminar Boardroom",
+      "deleteConfirm": "¿Está seguro de que desea eliminar este boardroom? Esta acción no se puede deshacer.",
+      "duplicateBoardroom": "Duplicar Boardroom"
+    },
+    "wizard": {
+      "step1Title": "Elija un estilo",
+      "step1Subtitle": "Seleccione una plantilla para empezar o comience desde cero",
+      "step2Title": "Forme su equipo",
+      "step2Subtitle": "Configure sus asesores",
+      "step3Title": "Revisar y Lanzar",
+      "step3Subtitle": "¿Todo se ve bien?",
+      "boardName": "Nombre del boardroom",
+      "boardDescription": "Descripción (opcional)",
+      "addAdvisor": "Añadir asesor",
+      "removeAdvisor": "Eliminar asesor",
+      "configureAI": "Configurar IA",
+      "useExisting": "Usar agente existente",
+      "createNew": "Crear nuevo asesor",
+      "personality": "Personalidad y experiencia",
+      "createBoardroom": "Crear Boardroom",
+      "creating": "Creando...",
+      "creatingAdvisor": "Creando {{name}}...",
+      "advisorReady": "{{name}} está listo",
+      "settingUp": "Configurando boardroom...",
+      "success": "¡Su boardroom está listo!",
+      "enterBoardroom": "Entrar a su Boardroom",
+      "back": "Atrás",
+      "next": "Siguiente",
+      "customTemplate": "Personalizado",
+      "customTemplateDesc": "Comience desde cero con su propia configuración",
+      "provider": "Proveedor de IA",
+      "model": "Modelo",
+      "apiKey": "Clave API",
+      "systemPrompt": "Prompt del sistema",
+      "displayName": "Nombre para mostrar",
+      "role": "Rol"
+    },
+    "board": {
+      "askYourBoard": "Pregunte a su boardroom...",
+      "askMore": "Preguntar más a {{name}}",
+      "newSession": "Nueva sesión",
+      "sessions": "Sesiones",
+      "members": "Miembros",
+      "synthesis": "Síntesis",
+      "typing": "Pensando...",
+      "chat1on1": "Chat 1:1",
+      "noSessions": "Aún no hay sesiones",
+      "noSessionsDesc": "Haga una pregunta a su boardroom para iniciar una discusión",
+      "streaming": "Transmitiendo...",
+      "completed": "Completado",
+      "failed": "Fallido",
+      "cancelled": "Cancelado",
+      "awaitingApproval": "Esperando aprobación"
+    },
+    "thread": {
+      "context": "De la sesión de {{boardName}}",
+      "followUp": "Continuando con su respuesta...",
+      "typeMessage": "Escriba un mensaje...",
+      "backToBoard": "Volver al Board",
+      "startingConversation": "Iniciando conversación..."
+    },
+    "sidebar": {
+      "boards": "Boardrooms",
+      "threads": "Hilos",
+      "sessions": "Sesiones",
+      "threadWith": "con {{name}}",
+      "newBoardroom": "Nuevo Boardroom",
+      "collapse": "Contraer barra lateral",
+      "expand": "Expandir barra lateral"
+    },
+    "tabs": {
+      "home": "Inicio",
+      "threads": "Hilos"
+    },
+    "common": {
+      "delete": "Eliminar",
+      "cancel": "Cancelar",
+      "confirm": "Confirmar",
+      "settings": "Configuración",
+      "themeToggle": "Cambiar tema"
+    }
   }
 }

@@ -2087,5 +2087,99 @@
     "noProgressWaitForHuman": "人間を待つ",
     "noProgressAutoReject": "自動拒否",
     "noProgressAbort": "中止"
+  },
+  "boardroom": {
+    "title": "ボードルーム",
+    "dashboard": {
+      "title": "あなたのボードルーム",
+      "subtitle": "AI諮問委員会を作成・管理",
+      "createFirst": "最初のボードルームを作成",
+      "createFirstDesc": "専門アドバイザーを備えたAI諮問委員会を設置し、より良い意思決定を支援します。",
+      "newBoardroom": "新規ボードルーム",
+      "sessions": "セッション",
+      "advisors": "アドバイザー",
+      "lastActive": "最終アクティブ",
+      "noActivity": "まだアクティビティがありません",
+      "deleteBoardroom": "ボードルームを削除",
+      "deleteConfirm": "このボードルームを削除してもよろしいですか？この操作は元に戻せません。",
+      "duplicateBoardroom": "ボードルームを複製"
+    },
+    "wizard": {
+      "step1Title": "スタイルを選択",
+      "step1Subtitle": "テンプレートを選択するか、ゼロから構築",
+      "step2Title": "チームを構成",
+      "step2Subtitle": "アドバイザーを設定",
+      "step3Title": "確認して開始",
+      "step3Subtitle": "準備はできましたか？",
+      "boardName": "ボードルーム名",
+      "boardDescription": "説明（任意）",
+      "addAdvisor": "アドバイザーを追加",
+      "removeAdvisor": "アドバイザーを削除",
+      "configureAI": "AIを設定",
+      "useExisting": "既存のエージェントを使用",
+      "createNew": "新しいアドバイザーを作成",
+      "personality": "人格と専門知識",
+      "createBoardroom": "ボードルームを作成",
+      "creating": "作成中...",
+      "creatingAdvisor": "{{name}} を作成中...",
+      "advisorReady": "{{name}} の準備完了",
+      "settingUp": "ボードルームを設定中...",
+      "success": "ボードルームの準備ができました！",
+      "enterBoardroom": "ボードルームに入る",
+      "back": "戻る",
+      "next": "次へ",
+      "customTemplate": "カスタム",
+      "customTemplateDesc": "独自の設定でゼロから始める",
+      "provider": "AIプロバイダー",
+      "model": "モデル",
+      "apiKey": "APIキー",
+      "systemPrompt": "システムプロンプト",
+      "displayName": "表示名",
+      "role": "役割"
+    },
+    "board": {
+      "askYourBoard": "ボードルームに質問...",
+      "askMore": "{{name}} にさらに質問",
+      "newSession": "新規セッション",
+      "sessions": "セッション",
+      "members": "メンバー",
+      "synthesis": "統合",
+      "typing": "考え中...",
+      "chat1on1": "1:1 チャット",
+      "noSessions": "まだセッションがありません",
+      "noSessionsDesc": "ボードルームに質問して議論を開始しましょう",
+      "streaming": "ストリーミング中...",
+      "completed": "完了",
+      "failed": "失敗",
+      "cancelled": "キャンセル済み",
+      "awaitingApproval": "承認待ち"
+    },
+    "thread": {
+      "context": "{{boardName}} セッションより",
+      "followUp": "あなたの回答へのフォローアップ...",
+      "typeMessage": "メッセージを入力...",
+      "backToBoard": "ボードに戻る",
+      "startingConversation": "会話を開始中..."
+    },
+    "sidebar": {
+      "boards": "ボードルーム",
+      "threads": "スレッド",
+      "sessions": "セッション",
+      "threadWith": "{{name}} とのスレッド",
+      "newBoardroom": "新規ボードルーム",
+      "collapse": "サイドバーを折りたたむ",
+      "expand": "サイドバーを展開"
+    },
+    "tabs": {
+      "home": "ホーム",
+      "threads": "スレッド"
+    },
+    "common": {
+      "delete": "削除",
+      "cancel": "キャンセル",
+      "confirm": "確認",
+      "settings": "設定",
+      "themeToggle": "テーマ切替"
+    }
   }
 }

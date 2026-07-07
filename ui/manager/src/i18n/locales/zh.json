@@ -2087,5 +2087,99 @@
     "noProgressWaitForHuman": "等待人工处理",
     "noProgressAutoReject": "自动拒绝",
     "noProgressAbort": "中止"
+  },
+  "boardroom": {
+    "title": "会议室",
+    "dashboard": {
+      "title": "您的会议室",
+      "subtitle": "创建和管理您的AI顾问委员会",
+      "createFirst": "创建您的第一个会议室",
+      "createFirstDesc": "建立一个拥有专家顾问的AI顾问委员会，帮助您做出更好的决策。",
+      "newBoardroom": "新建会议室",
+      "sessions": "会话",
+      "advisors": "顾问",
+      "lastActive": "上次活跃",
+      "noActivity": "暂无活动",
+      "deleteBoardroom": "删除会议室",
+      "deleteConfirm": "您确定要删除此会议室吗？此操作无法撤销。",
+      "duplicateBoardroom": "复制会议室"
+    },
+    "wizard": {
+      "step1Title": "选择风格",
+      "step1Subtitle": "选择一个模板开始，或从头构建",
+      "step2Title": "组建团队",
+      "step2Subtitle": "配置您的顾问",
+      "step3Title": "审查并启动",
+      "step3Subtitle": "一切就绪？",
+      "boardName": "会议室名称",
+      "boardDescription": "描述（可选）",
+      "addAdvisor": "添加顾问",
+      "removeAdvisor": "移除顾问",
+      "configureAI": "配置AI",
+      "useExisting": "使用现有代理",
+      "createNew": "创建新顾问",
+      "personality": "个性与专长",
+      "createBoardroom": "创建会议室",
+      "creating": "正在创建...",
+      "creatingAdvisor": "正在创建 {{name}}...",
+      "advisorReady": "{{name}} 已就绪",
+      "settingUp": "正在设置会议室...",
+      "success": "您的会议室已就绪！",
+      "enterBoardroom": "进入您的会议室",
+      "back": "返回",
+      "next": "下一步",
+      "customTemplate": "自定义",
+      "customTemplateDesc": "从头开始使用您自己的配置",
+      "provider": "AI 提供商",
+      "model": "模型",
+      "apiKey": "API 密钥",
+      "systemPrompt": "系统提示词",
+      "displayName": "显示名称",
+      "role": "角色"
+    },
+    "board": {
+      "askYourBoard": "向您的会议室提问...",
+      "askMore": "继续询问 {{name}}",
+      "newSession": "新建会话",
+      "sessions": "会话",
+      "members": "成员",
+      "synthesis": "综合",
+      "typing": "正在思考...",
+      "chat1on1": "1:1 聊天",
+      "noSessions": "暂无会话",
+      "noSessionsDesc": "向您的会议室提问以开始讨论",
+      "streaming": "正在传输...",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "awaitingApproval": "等待审批"
+    },
+    "thread": {
+      "context": "来自 {{boardName}} 会话",
+      "followUp": "跟进您的回复...",
+      "typeMessage": "输入消息...",
+      "backToBoard": "返回会议室",
+      "startingConversation": "正在开始对话..."
+    },
+    "sidebar": {
+      "boards": "会议室",
+      "threads": "话题",
+      "sessions": "会话",
+      "threadWith": "与 {{name}}",
+      "newBoardroom": "新建会议室",
+      "collapse": "收起侧边栏",
+      "expand": "展开侧边栏"
+    },
+    "tabs": {
+      "home": "首页",
+      "threads": "话题"
+    },
+    "common": {
+      "delete": "删除",
+      "cancel": "取消",
+      "confirm": "确认",
+      "settings": "设置",
+      "themeToggle": "切换主题"
+    }
   }
 }

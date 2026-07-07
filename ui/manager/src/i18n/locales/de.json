@@ -2087,5 +2087,99 @@
     "noProgressWaitForHuman": "Auf einen Menschen warten",
     "noProgressAutoReject": "Automatisch ablehnen",
     "noProgressAbort": "Abbrechen"
+  },
+  "boardroom": {
+    "title": "Boardroom",
+    "dashboard": {
+      "title": "Ihre Boardrooms",
+      "subtitle": "Erstellen und verwalten Sie Ihre KI-Beratungsgremien",
+      "createFirst": "Erstellen Sie Ihren ersten Boardroom",
+      "createFirstDesc": "Richten Sie ein KI-Beratungsgremium mit Fachberatern ein, um bessere Entscheidungen zu treffen.",
+      "newBoardroom": "Neuer Boardroom",
+      "sessions": "Sitzungen",
+      "advisors": "Berater",
+      "lastActive": "Zuletzt aktiv",
+      "noActivity": "Noch keine Aktivität",
+      "deleteBoardroom": "Boardroom löschen",
+      "deleteConfirm": "Sind Sie sicher, dass Sie diesen Boardroom löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.",
+      "duplicateBoardroom": "Boardroom duplizieren"
+    },
+    "wizard": {
+      "step1Title": "Wählen Sie einen Stil",
+      "step1Subtitle": "Wählen Sie eine Vorlage oder beginnen Sie von Grund auf",
+      "step2Title": "Stellen Sie Ihr Team zusammen",
+      "step2Subtitle": "Konfigurieren Sie Ihre Berater",
+      "step3Title": "Überprüfen & Starten",
+      "step3Subtitle": "Alles in Ordnung?",
+      "boardName": "Boardroom-Name",
+      "boardDescription": "Beschreibung (optional)",
+      "addAdvisor": "Berater hinzufügen",
+      "removeAdvisor": "Berater entfernen",
+      "configureAI": "KI konfigurieren",
+      "useExisting": "Bestehenden Agenten verwenden",
+      "createNew": "Neuen Berater erstellen",
+      "personality": "Persönlichkeit & Fachwissen",
+      "createBoardroom": "Boardroom erstellen",
+      "creating": "Wird erstellt...",
+      "creatingAdvisor": "{{name}} wird erstellt...",
+      "advisorReady": "{{name}} ist bereit",
+      "settingUp": "Boardroom wird eingerichtet...",
+      "success": "Ihr Boardroom ist bereit!",
+      "enterBoardroom": "Boardroom betreten",
+      "back": "Zurück",
+      "next": "Weiter",
+      "customTemplate": "Benutzerdefiniert",
+      "customTemplateDesc": "Beginnen Sie von Grund auf mit Ihrer eigenen Konfiguration",
+      "provider": "KI-Anbieter",
+      "model": "Modell",
+      "apiKey": "API-Schlüssel",
+      "systemPrompt": "System-Prompt",
+      "displayName": "Anzeigename",
+      "role": "Rolle"
+    },
+    "board": {
+      "askYourBoard": "Fragen Sie Ihren Boardroom...",
+      "askMore": "{{name}} weiter fragen",
+      "newSession": "Neue Sitzung",
+      "sessions": "Sitzungen",
+      "members": "Mitglieder",
+      "synthesis": "Synthese",
+      "typing": "Denkt nach...",
+      "chat1on1": "1:1 Chat",
+      "noSessions": "Noch keine Sitzungen",
+      "noSessionsDesc": "Stellen Sie Ihrem Boardroom eine Frage, um eine Diskussion zu starten",
+      "streaming": "Wird gestreamt...",
+      "completed": "Abgeschlossen",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen",
+      "awaitingApproval": "Wartet auf Genehmigung"
+    },
+    "thread": {
+      "context": "Aus {{boardName}}-Sitzung",
+      "followUp": "Anknüpfung an Ihre Antwort...",
+      "typeMessage": "Nachricht eingeben...",
+      "backToBoard": "Zurück zum Board",
+      "startingConversation": "Gespräch wird gestartet..."
+    },
+    "sidebar": {
+      "boards": "Boardrooms",
+      "threads": "Threads",
+      "sessions": "Sitzungen",
+      "threadWith": "mit {{name}}",
+      "newBoardroom": "Neuer Boardroom",
+      "collapse": "Seitenleiste einklappen",
+      "expand": "Seitenleiste ausklappen"
+    },
+    "tabs": {
+      "home": "Startseite",
+      "threads": "Threads"
+    },
+    "common": {
+      "delete": "Löschen",
+      "cancel": "Abbrechen",
+      "confirm": "Bestätigen",
+      "settings": "Einstellungen",
+      "themeToggle": "Design umschalten"
+    }
   }
 }

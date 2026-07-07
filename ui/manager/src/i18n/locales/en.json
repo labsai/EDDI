@@ -2116,5 +2116,99 @@
     "noProgressWaitForHuman": "Wait for a human",
     "noProgressAutoReject": "Auto-reject",
     "noProgressAbort": "Abort"
+  },
+  "boardroom": {
+    "title": "Boardroom",
+    "dashboard": {
+      "title": "Your Boardrooms",
+      "subtitle": "Create and manage your AI advisory boards",
+      "createFirst": "Create your first boardroom",
+      "createFirstDesc": "Set up an AI advisory board with expert advisors to help you make better decisions.",
+      "newBoardroom": "New Boardroom",
+      "sessions": "sessions",
+      "advisors": "advisors",
+      "lastActive": "Last active",
+      "noActivity": "No activity yet",
+      "deleteBoardroom": "Delete Boardroom",
+      "deleteConfirm": "Are you sure you want to delete this boardroom? This action cannot be undone.",
+      "duplicateBoardroom": "Duplicate Boardroom"
+    },
+    "wizard": {
+      "step1Title": "Choose a Style",
+      "step1Subtitle": "Pick a template to get started, or build from scratch",
+      "step2Title": "Build Your Team",
+      "step2Subtitle": "Configure your advisors",
+      "step3Title": "Review & Launch",
+      "step3Subtitle": "Everything looks good?",
+      "boardName": "Boardroom name",
+      "boardDescription": "Description (optional)",
+      "addAdvisor": "Add Advisor",
+      "removeAdvisor": "Remove Advisor",
+      "configureAI": "Configure AI",
+      "useExisting": "Use existing agent",
+      "createNew": "Create new advisor",
+      "personality": "Personality & expertise",
+      "createBoardroom": "Create Boardroom",
+      "creating": "Creating...",
+      "creatingAdvisor": "Creating {{name}}...",
+      "advisorReady": "{{name}} is ready",
+      "settingUp": "Setting up boardroom...",
+      "success": "Your boardroom is ready!",
+      "enterBoardroom": "Enter Your Boardroom",
+      "back": "Back",
+      "next": "Next",
+      "customTemplate": "Custom",
+      "customTemplateDesc": "Start from scratch with your own configuration",
+      "provider": "AI Provider",
+      "model": "Model",
+      "apiKey": "API Key",
+      "systemPrompt": "System Prompt",
+      "displayName": "Display Name",
+      "role": "Role"
+    },
+    "board": {
+      "askYourBoard": "Ask your boardroom...",
+      "askMore": "Ask {{name}} more",
+      "newSession": "New Session",
+      "sessions": "Sessions",
+      "members": "Members",
+      "synthesis": "Synthesis",
+      "typing": "Thinking...",
+      "chat1on1": "Chat 1:1",
+      "noSessions": "No sessions yet",
+      "noSessionsDesc": "Ask your boardroom a question to start a discussion",
+      "streaming": "Streaming...",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "awaitingApproval": "Awaiting Approval"
+    },
+    "thread": {
+      "context": "From {{boardName}} session",
+      "followUp": "Following up on your response...",
+      "typeMessage": "Type a message...",
+      "backToBoard": "Back to Board",
+      "startingConversation": "Starting conversation..."
+    },
+    "sidebar": {
+      "boards": "Boardrooms",
+      "threads": "Threads",
+      "sessions": "Sessions",
+      "threadWith": "with {{name}}",
+      "newBoardroom": "New Boardroom",
+      "collapse": "Collapse sidebar",
+      "expand": "Expand sidebar"
+    },
+    "tabs": {
+      "home": "Home",
+      "threads": "Threads"
+    },
+    "common": {
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "confirm": "Confirm",
+      "settings": "Settings",
+      "themeToggle": "Toggle theme"
+    }
   }
 }

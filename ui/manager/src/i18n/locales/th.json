@@ -2087,5 +2087,99 @@
     "noProgressWaitForHuman": "รอมนุษย์",
     "noProgressAutoReject": "ปฏิเสธอัตโนมัติ",
     "noProgressAbort": "ยกเลิก"
+  },
+  "boardroom": {
+    "title": "ห้องประชุม",
+    "dashboard": {
+      "title": "ห้องประชุมของคุณ",
+      "subtitle": "สร้างและจัดการคณะที่ปรึกษา AI ของคุณ",
+      "createFirst": "สร้างห้องประชุมแรกของคุณ",
+      "createFirstDesc": "ตั้งค่าคณะที่ปรึกษา AI พร้อมที่ปรึกษาผู้เชี่ยวชาญเพื่อช่วยคุณตัดสินใจได้ดียิ่งขึ้น",
+      "newBoardroom": "ห้องประชุมใหม่",
+      "sessions": "เซสชัน",
+      "advisors": "ที่ปรึกษา",
+      "lastActive": "ใช้งานล่าสุด",
+      "noActivity": "ยังไม่มีกิจกรรม",
+      "deleteBoardroom": "ลบห้องประชุม",
+      "deleteConfirm": "คุณแน่ใจหรือไม่ว่าต้องการลบห้องประชุมนี้? การกระทำนี้ไม่สามารถย้อนกลับได้",
+      "duplicateBoardroom": "ทำสำเนาห้องประชุม"
+    },
+    "wizard": {
+      "step1Title": "เลือกรูปแบบ",
+      "step1Subtitle": "เลือกเทมเพลตเพื่อเริ่มต้น หรือสร้างตั้งแต่เริ่มต้น",
+      "step2Title": "สร้างทีมของคุณ",
+      "step2Subtitle": "กำหนดค่าที่ปรึกษาของคุณ",
+      "step3Title": "ตรวจสอบและเปิดตัว",
+      "step3Subtitle": "ทุกอย่างเรียบร้อยดี?",
+      "boardName": "ชื่อห้องประชุม",
+      "boardDescription": "คำอธิบาย (ไม่บังคับ)",
+      "addAdvisor": "เพิ่มที่ปรึกษา",
+      "removeAdvisor": "ลบที่ปรึกษา",
+      "configureAI": "กำหนดค่า AI",
+      "useExisting": "ใช้เอเจนต์ที่มีอยู่",
+      "createNew": "สร้างที่ปรึกษาใหม่",
+      "personality": "บุคลิกภาพและความเชี่ยวชาญ",
+      "createBoardroom": "สร้างห้องประชุม",
+      "creating": "กำลังสร้าง...",
+      "creatingAdvisor": "กำลังสร้าง {{name}}...",
+      "advisorReady": "{{name}} พร้อมแล้ว",
+      "settingUp": "กำลังตั้งค่าห้องประชุม...",
+      "success": "ห้องประชุมของคุณพร้อมแล้ว!",
+      "enterBoardroom": "เข้าสู่ห้องประชุมของคุณ",
+      "back": "ย้อนกลับ",
+      "next": "ถัดไป",
+      "customTemplate": "กำหนดเอง",
+      "customTemplateDesc": "เริ่มต้นจากศูนย์ด้วยการกำหนดค่าของคุณเอง",
+      "provider": "ผู้ให้บริการ AI",
+      "model": "โมเดล",
+      "apiKey": "คีย์ API",
+      "systemPrompt": "พรอมต์ระบบ",
+      "displayName": "ชื่อที่แสดง",
+      "role": "บทบาท"
+    },
+    "board": {
+      "askYourBoard": "ถามห้องประชุมของคุณ...",
+      "askMore": "ถาม {{name}} เพิ่มเติม",
+      "newSession": "เซสชันใหม่",
+      "sessions": "เซสชัน",
+      "members": "สมาชิก",
+      "synthesis": "การสังเคราะห์",
+      "typing": "กำลังคิด...",
+      "chat1on1": "แชท 1:1",
+      "noSessions": "ยังไม่มีเซสชัน",
+      "noSessionsDesc": "ถามคำถามห้องประชุมของคุณเพื่อเริ่มการสนทนา",
+      "streaming": "กำลังสตรีม...",
+      "completed": "เสร็จสิ้น",
+      "failed": "ล้มเหลว",
+      "cancelled": "ยกเลิกแล้ว",
+      "awaitingApproval": "รอการอนุมัติ"
+    },
+    "thread": {
+      "context": "จากเซสชัน {{boardName}}",
+      "followUp": "ติดตามคำตอบของคุณ...",
+      "typeMessage": "พิมพ์ข้อความ...",
+      "backToBoard": "กลับไปที่บอร์ด",
+      "startingConversation": "กำลังเริ่มการสนทนา..."
+    },
+    "sidebar": {
+      "boards": "ห้องประชุม",
+      "threads": "เธรด",
+      "sessions": "เซสชัน",
+      "threadWith": "กับ {{name}}",
+      "newBoardroom": "ห้องประชุมใหม่",
+      "collapse": "ยุบแถบด้านข้าง",
+      "expand": "ขยายแถบด้านข้าง"
+    },
+    "tabs": {
+      "home": "หน้าหลัก",
+      "threads": "เธรด"
+    },
+    "common": {
+      "delete": "ลบ",
+      "cancel": "ยกเลิก",
+      "confirm": "ยืนยัน",
+      "settings": "การตั้งค่า",
+      "themeToggle": "สลับธีม"
+    }
   }
 }

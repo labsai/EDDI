@@ -2087,5 +2087,99 @@
     "noProgressWaitForHuman": "Attendre un humain",
     "noProgressAutoReject": "Rejet automatique",
     "noProgressAbort": "Interrompre"
+  },
+  "boardroom": {
+    "title": "Boardroom",
+    "dashboard": {
+      "title": "Vos Boardrooms",
+      "subtitle": "Créez et gérez vos comités consultatifs IA",
+      "createFirst": "Créez votre premier boardroom",
+      "createFirstDesc": "Mettez en place un comité consultatif IA avec des conseillers experts pour vous aider à prendre de meilleures décisions.",
+      "newBoardroom": "Nouveau Boardroom",
+      "sessions": "sessions",
+      "advisors": "conseillers",
+      "lastActive": "Dernière activité",
+      "noActivity": "Aucune activité pour le moment",
+      "deleteBoardroom": "Supprimer le Boardroom",
+      "deleteConfirm": "Êtes-vous sûr de vouloir supprimer ce boardroom ? Cette action est irréversible.",
+      "duplicateBoardroom": "Dupliquer le Boardroom"
+    },
+    "wizard": {
+      "step1Title": "Choisissez un style",
+      "step1Subtitle": "Sélectionnez un modèle pour commencer ou partez de zéro",
+      "step2Title": "Composez votre équipe",
+      "step2Subtitle": "Configurez vos conseillers",
+      "step3Title": "Vérifier & Lancer",
+      "step3Subtitle": "Tout semble bon ?",
+      "boardName": "Nom du boardroom",
+      "boardDescription": "Description (facultatif)",
+      "addAdvisor": "Ajouter un conseiller",
+      "removeAdvisor": "Retirer le conseiller",
+      "configureAI": "Configurer l'IA",
+      "useExisting": "Utiliser un agent existant",
+      "createNew": "Créer un nouveau conseiller",
+      "personality": "Personnalité & expertise",
+      "createBoardroom": "Créer le Boardroom",
+      "creating": "Création en cours...",
+      "creatingAdvisor": "Création de {{name}}...",
+      "advisorReady": "{{name}} est prêt",
+      "settingUp": "Configuration du boardroom...",
+      "success": "Votre boardroom est prêt !",
+      "enterBoardroom": "Entrer dans votre Boardroom",
+      "back": "Retour",
+      "next": "Suivant",
+      "customTemplate": "Personnalisé",
+      "customTemplateDesc": "Partez de zéro avec votre propre configuration",
+      "provider": "Fournisseur d'IA",
+      "model": "Modèle",
+      "apiKey": "Clé API",
+      "systemPrompt": "Prompt système",
+      "displayName": "Nom d'affichage",
+      "role": "Rôle"
+    },
+    "board": {
+      "askYourBoard": "Posez une question à votre boardroom...",
+      "askMore": "Poser plus de questions à {{name}}",
+      "newSession": "Nouvelle session",
+      "sessions": "Sessions",
+      "members": "Membres",
+      "synthesis": "Synthèse",
+      "typing": "Réflexion en cours...",
+      "chat1on1": "Chat 1:1",
+      "noSessions": "Aucune session pour le moment",
+      "noSessionsDesc": "Posez une question à votre boardroom pour lancer une discussion",
+      "streaming": "Diffusion en cours...",
+      "completed": "Terminé",
+      "failed": "Échoué",
+      "cancelled": "Annulé",
+      "awaitingApproval": "En attente d'approbation"
+    },
+    "thread": {
+      "context": "De la session {{boardName}}",
+      "followUp": "Suite à votre réponse...",
+      "typeMessage": "Saisissez un message...",
+      "backToBoard": "Retour au Board",
+      "startingConversation": "Démarrage de la conversation..."
+    },
+    "sidebar": {
+      "boards": "Boardrooms",
+      "threads": "Fils de discussion",
+      "sessions": "Sessions",
+      "threadWith": "avec {{name}}",
+      "newBoardroom": "Nouveau Boardroom",
+      "collapse": "Réduire la barre latérale",
+      "expand": "Développer la barre latérale"
+    },
+    "tabs": {
+      "home": "Accueil",
+      "threads": "Fils de discussion"
+    },
+    "common": {
+      "delete": "Supprimer",
+      "cancel": "Annuler",
+      "confirm": "Confirmer",
+      "settings": "Paramètres",
+      "themeToggle": "Changer de thème"
+    }
   }
 }

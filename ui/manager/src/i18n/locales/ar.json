@@ -2087,5 +2087,99 @@
     "noProgressWaitForHuman": "انتظار موافقة بشرية",
     "noProgressAutoReject": "الرفض التلقائي",
     "noProgressAbort": "إلغاء"
+  },
+  "boardroom": {
+    "title": "قاعة الاجتماعات",
+    "dashboard": {
+      "title": "قاعات اجتماعاتك",
+      "subtitle": "أنشئ وأدر مجالس استشارية للذكاء الاصطناعي",
+      "createFirst": "أنشئ قاعة اجتماعاتك الأولى",
+      "createFirstDesc": "أنشئ مجلسًا استشاريًا للذكاء الاصطناعي مع مستشارين خبراء لمساعدتك في اتخاذ قرارات أفضل.",
+      "newBoardroom": "قاعة اجتماعات جديدة",
+      "sessions": "جلسات",
+      "advisors": "مستشارون",
+      "lastActive": "آخر نشاط",
+      "noActivity": "لا يوجد نشاط بعد",
+      "deleteBoardroom": "حذف قاعة الاجتماعات",
+      "deleteConfirm": "هل أنت متأكد أنك تريد حذف قاعة الاجتماعات هذه؟ لا يمكن التراجع عن هذا الإجراء.",
+      "duplicateBoardroom": "تكرار قاعة الاجتماعات"
+    },
+    "wizard": {
+      "step1Title": "اختر نمطًا",
+      "step1Subtitle": "اختر قالبًا للبدء أو ابدأ من الصفر",
+      "step2Title": "كوّن فريقك",
+      "step2Subtitle": "قم بتهيئة مستشاريك",
+      "step3Title": "مراجعة وإطلاق",
+      "step3Subtitle": "هل كل شيء يبدو جيدًا؟",
+      "boardName": "اسم قاعة الاجتماعات",
+      "boardDescription": "الوصف (اختياري)",
+      "addAdvisor": "إضافة مستشار",
+      "removeAdvisor": "إزالة المستشار",
+      "configureAI": "تهيئة الذكاء الاصطناعي",
+      "useExisting": "استخدام وكيل موجود",
+      "createNew": "إنشاء مستشار جديد",
+      "personality": "الشخصية والخبرة",
+      "createBoardroom": "إنشاء قاعة الاجتماعات",
+      "creating": "جارٍ الإنشاء...",
+      "creatingAdvisor": "جارٍ إنشاء {{name}}...",
+      "advisorReady": "{{name}} جاهز",
+      "settingUp": "جارٍ إعداد قاعة الاجتماعات...",
+      "success": "قاعة اجتماعاتك جاهزة!",
+      "enterBoardroom": "ادخل قاعة اجتماعاتك",
+      "back": "رجوع",
+      "next": "التالي",
+      "customTemplate": "مخصص",
+      "customTemplateDesc": "ابدأ من الصفر بتهيئتك الخاصة",
+      "provider": "مزود الذكاء الاصطناعي",
+      "model": "النموذج",
+      "apiKey": "مفتاح API",
+      "systemPrompt": "موجه النظام",
+      "displayName": "اسم العرض",
+      "role": "الدور"
+    },
+    "board": {
+      "askYourBoard": "اسأل قاعة اجتماعاتك...",
+      "askMore": "اسأل {{name}} المزيد",
+      "newSession": "جلسة جديدة",
+      "sessions": "الجلسات",
+      "members": "الأعضاء",
+      "synthesis": "التوليف",
+      "typing": "يفكر...",
+      "chat1on1": "محادثة 1:1",
+      "noSessions": "لا توجد جلسات بعد",
+      "noSessionsDesc": "اطرح سؤالاً على قاعة اجتماعاتك لبدء نقاش",
+      "streaming": "جارٍ البث...",
+      "completed": "مكتمل",
+      "failed": "فشل",
+      "cancelled": "ملغى",
+      "awaitingApproval": "بانتظار الموافقة"
+    },
+    "thread": {
+      "context": "من جلسة {{boardName}}",
+      "followUp": "متابعة لردك...",
+      "typeMessage": "اكتب رسالة...",
+      "backToBoard": "العودة إلى المجلس",
+      "startingConversation": "جارٍ بدء المحادثة..."
+    },
+    "sidebar": {
+      "boards": "قاعات الاجتماعات",
+      "threads": "المواضيع",
+      "sessions": "الجلسات",
+      "threadWith": "مع {{name}}",
+      "newBoardroom": "قاعة اجتماعات جديدة",
+      "collapse": "طي الشريط الجانبي",
+      "expand": "توسيع الشريط الجانبي"
+    },
+    "tabs": {
+      "home": "الرئيسية",
+      "threads": "المواضيع"
+    },
+    "common": {
+      "delete": "حذف",
+      "cancel": "إلغاء",
+      "confirm": "تأكيد",
+      "settings": "الإعدادات",
+      "themeToggle": "تبديل المظهر"
+    }
   }
 }

@@ -36,6 +36,9 @@ import { ChannelsPage } from "@/pages/channels";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 import { ApprovalsPage } from "@/pages/approvals";
 
+import { BoardroomLayout } from "@/components/boardroom/boardroom-layout";
+import { BoardroomDashboard } from "@/pages/boardroom/boardroom-dashboard";
+
 export function App() {
   const location = useLocation();
   return (
@@ -43,6 +46,14 @@ export function App() {
     <Routes>
       {/* Studio — full-screen breakout, no sidebar/topbar chrome */}
       <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />
+
+      {/* Boardroom — standalone app, no Manager chrome */}
+      <Route path="/boardroom" element={<BoardroomLayout />}>
+        <Route index element={<BoardroomDashboard />} />
+        {/* Phase 1b: <Route path="new" element={<BoardroomWizard />} /> */}
+        {/* Phase 1c: <Route path=":boardId" element={<BoardroomBoard />} /> */}
+        {/* Phase 1d: <Route path=":boardId/thread/:memberId" element={<BoardroomThread />} /> */}
+      </Route>
 
       <Route element={<AppLayout />}>
         <Route path="/manage" element={<DashboardPage />} />

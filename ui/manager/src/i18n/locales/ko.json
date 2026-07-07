@@ -2087,5 +2087,99 @@
     "noProgressWaitForHuman": "사람 대기",
     "noProgressAutoReject": "자동 거부",
     "noProgressAbort": "중단"
+  },
+  "boardroom": {
+    "title": "보드룸",
+    "dashboard": {
+      "title": "내 보드룸",
+      "subtitle": "AI 자문위원회를 생성하고 관리하세요",
+      "createFirst": "첫 번째 보드룸 만들기",
+      "createFirstDesc": "전문 자문위원이 있는 AI 자문위원회를 구성하여 더 나은 의사결정을 내리세요.",
+      "newBoardroom": "새 보드룸",
+      "sessions": "세션",
+      "advisors": "자문위원",
+      "lastActive": "마지막 활동",
+      "noActivity": "아직 활동 없음",
+      "deleteBoardroom": "보드룸 삭제",
+      "deleteConfirm": "이 보드룸을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+      "duplicateBoardroom": "보드룸 복제"
+    },
+    "wizard": {
+      "step1Title": "스타일 선택",
+      "step1Subtitle": "시작할 템플릿을 선택하거나 처음부터 만드세요",
+      "step2Title": "팀 구성",
+      "step2Subtitle": "자문위원을 설정하세요",
+      "step3Title": "검토 및 시작",
+      "step3Subtitle": "모든 것이 괜찮아 보이나요?",
+      "boardName": "보드룸 이름",
+      "boardDescription": "설명 (선택 사항)",
+      "addAdvisor": "자문위원 추가",
+      "removeAdvisor": "자문위원 제거",
+      "configureAI": "AI 설정",
+      "useExisting": "기존 에이전트 사용",
+      "createNew": "새 자문위원 만들기",
+      "personality": "성격 및 전문성",
+      "createBoardroom": "보드룸 만들기",
+      "creating": "생성 중...",
+      "creatingAdvisor": "{{name}} 생성 중...",
+      "advisorReady": "{{name}} 준비 완료",
+      "settingUp": "보드룸 설정 중...",
+      "success": "보드룸이 준비되었습니다!",
+      "enterBoardroom": "보드룸 입장",
+      "back": "뒤로",
+      "next": "다음",
+      "customTemplate": "사용자 정의",
+      "customTemplateDesc": "자신만의 설정으로 처음부터 시작",
+      "provider": "AI 제공자",
+      "model": "모델",
+      "apiKey": "API 키",
+      "systemPrompt": "시스템 프롬프트",
+      "displayName": "표시 이름",
+      "role": "역할"
+    },
+    "board": {
+      "askYourBoard": "보드룸에 질문하세요...",
+      "askMore": "{{name}}에게 더 질문하기",
+      "newSession": "새 세션",
+      "sessions": "세션",
+      "members": "멤버",
+      "synthesis": "종합",
+      "typing": "생각 중...",
+      "chat1on1": "1:1 채팅",
+      "noSessions": "아직 세션이 없습니다",
+      "noSessionsDesc": "보드룸에 질문하여 토론을 시작하세요",
+      "streaming": "스트리밍 중...",
+      "completed": "완료됨",
+      "failed": "실패",
+      "cancelled": "취소됨",
+      "awaitingApproval": "승인 대기 중"
+    },
+    "thread": {
+      "context": "{{boardName}} 세션에서",
+      "followUp": "귀하의 응답에 대한 후속...",
+      "typeMessage": "메시지를 입력하세요...",
+      "backToBoard": "보드로 돌아가기",
+      "startingConversation": "대화 시작 중..."
+    },
+    "sidebar": {
+      "boards": "보드룸",
+      "threads": "스레드",
+      "sessions": "세션",
+      "threadWith": "{{name}}와(과)",
+      "newBoardroom": "새 보드룸",
+      "collapse": "사이드바 접기",
+      "expand": "사이드바 펼치기"
+    },
+    "tabs": {
+      "home": "홈",
+      "threads": "스레드"
+    },
+    "common": {
+      "delete": "삭제",
+      "cancel": "취소",
+      "confirm": "확인",
+      "settings": "설정",
+      "themeToggle": "테마 전환"
+    }
   }
 }
