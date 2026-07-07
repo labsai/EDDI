@@ -38,6 +38,8 @@ import { ApprovalsPage } from "@/pages/approvals";
 
 import { BoardroomLayout } from "@/components/boardroom/boardroom-layout";
 import { BoardroomDashboard } from "@/pages/boardroom/boardroom-dashboard";
+import { BoardroomWizard } from "@/pages/boardroom/boardroom-wizard";
+import { BoardroomBoard } from "@/pages/boardroom/boardroom-board";
 
 export function App() {
   const location = useLocation();
@@ -50,8 +52,8 @@ export function App() {
       {/* Boardroom — standalone app, no Manager chrome */}
       <Route path="/boardroom" element={<BoardroomLayout />}>
         <Route index element={<BoardroomDashboard />} />
-        {/* Phase 1b: <Route path="new" element={<BoardroomWizard />} /> */}
-        {/* Phase 1c: <Route path=":boardId" element={<BoardroomBoard />} /> */}
+        <Route path="new" element={<BoardroomWizard />} />
+        <Route path=":boardId" element={<BoardroomBoard />} />
         {/* Phase 1d: <Route path=":boardId/thread/:memberId" element={<BoardroomThread />} /> */}
       </Route>
 

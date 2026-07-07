@@ -1,0 +1,308 @@
+import { useState, useCallback, useEffect } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
+import { useGroup, useGroupConversations, useGroupConversation } from "@/hooks/use-groups";
+import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
+import { BoardTranscript } from "@/components/boardroom/board-transcript";
+import { BoardInput } from "@/components/boardroom/board-input";
+import { SessionHistory } from "@/components/boardroom/session-history";
+import { MembersSheet } from "@/components/boardroom/members-sheet";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+
+// ─── Icons ───────────────────────────────────────────────────────
+
+function UsersIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+    >
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+    >
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+
+// ─── Component ───────────────────────────────────────────────────
+
+function BoardroomBoard() {
+  const { t } = useTranslation();
+  const { boardId } = useParams<{ boardId: string }>();
+  const [searchParams] = useSearchParams();
+  const version = Number(searchParams.get("version")) || 1;
+
+  // ─── State ─────────────────────────────────────────────────────
+  const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
+  const [showMembers, setShowMembers] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // ─── Data ──────────────────────────────────────────────────────
+  const { data: groupConfig, isLoading: configLoading } = useGroup(boardId ?? "", version);
+  const { data: conversations } = useGroupConversations(boardId ?? "");
+  const { data: selectedConversation } = useGroupConversation(
+    boardId ?? "",
+    selectedConvId ?? "",
+  );
+  const { streamState, startStream, abortStream } = useGroupDiscussionStream();
+
+  // ─── Auto-select conversation when stream completes ────────────
+  useEffect(() => {
+    if (streamState.state === "COMPLETED" && streamState.conversationId) {
+      setSelectedConvId(streamState.conversationId);
+    }
+  }, [streamState.state, streamState.conversationId]);
+
+  // ─── Handlers ──────────────────────────────────────────────────
+  const handleSend = useCallback(
+    (question: string) => {
+      if (!boardId) return;
+      startStream(boardId, question);
+    },
+    [boardId, startStream],
+  );
+
+  const handleSelectConversation = useCallback((convId: string) => {
+    setSelectedConvId(convId);
+    setShowHistory(false);
+  }, []);
+
+  // ─── Derived state ─────────────────────────────────────────────
+  const isStreaming = streamState.isStreaming;
+  const hasStreamTranscript = streamState.transcript.length > 0;
+
+  // Use stream transcript when available, otherwise fall back to selected conversation
+  const displayTranscript = hasStreamTranscript
+    ? streamState.transcript
+    : selectedConversation?.transcript ?? [];
+
+  const displaySynthesis = hasStreamTranscript
+    ? streamState.synthesizedAnswer
+    : selectedConversation?.synthesizedAnswer ?? null;
+
+  const members = groupConfig?.members ?? [];
+
+  // ─── Loading state ─────────────────────────────────────────────
+  if (configLoading || !boardId) {
+    return (
+      <div className="flex h-full items-center justify-center p-8">
+        <div className="w-full max-w-md space-y-4">
+          <Skeleton className="h-8 w-3/4 mx-auto" />
+          <Skeleton className="h-40 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-xl" />
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Error state ───────────────────────────────────────────────
+  if (streamState.error && !hasStreamTranscript) {
+    return (
+      <div className="flex h-full items-center justify-center p-8">
+        <div className="text-center max-w-md">
+          <p className="text-sm text-red-500 dark:text-red-400 mb-2">
+            {t("boardroom.board.error", "Something went wrong")}
+          </p>
+          <p className="text-xs text-slate-400">{streamState.error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col relative">
+      {/* Action bar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+            {groupConfig?.name ?? t("boardroom.board.title", "Board")}
+          </h2>
+          {isStreaming && (
+            <span className="flex items-center gap-1 text-xs text-amber-500">
+              <span className="inline-block h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+              {t("boardroom.board.live", "Live")}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1">
+          {isStreaming && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={abortStream}
+              className="text-red-500 gap-1"
+            >
+              <StopIcon />
+              {t("boardroom.board.stop", "Stop")}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setShowMembers((v) => !v)}
+            className={cn("h-8 w-8", showMembers && "bg-indigo-50 dark:bg-indigo-500/10")}
+            aria-label={t("boardroom.board.members", "Members")}
+          >
+            <UsersIcon />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setShowHistory((v) => !v)}
+            className={cn("h-8 w-8", showHistory && "bg-indigo-50 dark:bg-indigo-500/10")}
+            aria-label={t("boardroom.board.sessions", "Sessions")}
+          >
+            <ClockIcon />
+          </Button>
+        </div>
+      </div>
+
+      {/* Transcript area */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {displayTranscript.length > 0 ? (
+          <BoardTranscript
+            transcript={displayTranscript}
+            boardId={boardId}
+            synthesizedAnswer={displaySynthesis}
+            activeSpeakers={streamState.activeSpeakers}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <div className="text-center max-w-sm">
+              <p className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-1">
+                {t("boardroom.board.emptyTitle", "Ready for discussion")}
+              </p>
+              <p className="text-sm text-slate-400 dark:text-slate-500">
+                {t(
+                  "boardroom.board.emptyDescription",
+                  "Ask a question and your advisory board will discuss it.",
+                )}
+              </p>
+              {conversations && conversations.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-3 text-indigo-500"
+                  onClick={() => setShowHistory(true)}
+                >
+                  {t("boardroom.board.viewHistory", "View past sessions")}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Streaming error banner (inline, when transcript is visible) */}
+        {streamState.error && hasStreamTranscript && (
+          <div className="mt-3 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-3">
+            <p className="text-xs text-red-600 dark:text-red-400">{streamState.error}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Input bar */}
+      <BoardInput onSend={handleSend} disabled={isStreaming} />
+
+      {/* Members sheet slide-over */}
+      {showMembers && (
+        <>
+          <div
+            className="fixed inset-0 z-30 bg-black/30"
+            onClick={() => setShowMembers(false)}
+            aria-hidden
+          />
+          <div
+            className={cn(
+              "fixed inset-y-0 end-0 z-40 w-80",
+              "bg-white dark:bg-slate-900",
+              "border-s border-slate-200 dark:border-slate-800",
+              "shadow-xl",
+              "animate-[br-fade-in_200ms_ease-out]",
+            )}
+          >
+            <MembersSheet
+              members={members}
+              boardId={boardId}
+              moderatorId={groupConfig?.moderatorAgentId}
+              onClose={() => setShowMembers(false)}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Session history slide-over */}
+      {showHistory && (
+        <>
+          <div
+            className="fixed inset-0 z-30 bg-black/30"
+            onClick={() => setShowHistory(false)}
+            aria-hidden
+          />
+          <div
+            className={cn(
+              "fixed inset-y-0 end-0 z-40 w-80",
+              "bg-white dark:bg-slate-900",
+              "border-s border-slate-200 dark:border-slate-800",
+              "shadow-xl",
+              "animate-[br-fade-in_200ms_ease-out]",
+            )}
+          >
+            <SessionHistory
+              groupId={boardId}
+              selectedId={selectedConvId}
+              onSelect={handleSelectConversation}
+              onClose={() => setShowHistory(false)}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export { BoardroomBoard };
