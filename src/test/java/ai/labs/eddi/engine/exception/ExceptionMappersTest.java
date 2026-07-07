@@ -44,7 +44,8 @@ class ExceptionMappersTest {
     class IllegalArgMapper {
 
         @Test
-        @DisplayName("should return 400 with exception message")
+        @DisplayName("should return 400 with JSON body")
+        @SuppressWarnings("unchecked")
         void returns400() {
             var mapper = new IllegalArgumentExceptionMapper();
             var ex = new IllegalArgumentException("Invalid parameter");
@@ -52,7 +53,8 @@ class ExceptionMappersTest {
             Response response = mapper.toResponse(ex);
 
             assertEquals(400, response.getStatus());
-            assertEquals("Invalid parameter", response.getEntity());
+            var entity = (Map<String, String>) response.getEntity();
+            assertEquals("Invalid parameter", entity.get("message"));
         }
     }
 
