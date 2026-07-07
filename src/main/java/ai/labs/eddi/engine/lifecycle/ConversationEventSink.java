@@ -94,6 +94,14 @@ public interface ConversationEventSink {
     }
 
     /**
+     * Called when a pipeline task fails during execution. Provides structured error
+     * information for admin monitoring.
+     */
+    default void onTaskFailed(TaskId taskId, String taskType, long durationMs,
+                              String errorType, String errorSummary) {
+    }
+
+    /**
      * Called when the entire conversation step has completed successfully. The SSE
      * endpoint should send the final snapshot and close the stream.
      */

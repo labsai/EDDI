@@ -5,6 +5,32 @@
 
 ---
 
+## ⚡ Feat: Holistic Error Handling and Recovery Infrastructure (2026-07-07)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+Complete overhaul of error handling across LLM, HTTP, and MCP call subsystems plus cross-cutting infrastructure for admin visibility, recovery, and monitoring. 19 source files changed, 7 test files added (83+ new tests). Code-reviewed and all review findings addressed before commit.
+
+### Key Changes
+
+- **Shared RetryConfiguration**: Extracted reusable retry logic with exponential backoff, retryable error classification, configurable per subsystem.
+- **LifecycleManager**: Error classification, failure audit entries, SSE `task_failed` events, Micrometer counters tagged by `error.type`.
+- **Admin state reset**: `PATCH /{conversationId}/state` endpoint to recover stuck conversations.
+- **HTTP error body storage**: 4xx/5xx response bodies stored in memory; JSON parse softened.
+- **MCP continueOnError + retry + circuit breaker**: Config-driven error resilience per MCP call.
+- **LLM ResponseValidation**: Config-driven policies for empty/truncated/filtered responses.
+- **Streaming retry**: Zero-token failures retried; partial responses returned with metadata.
+
+### Design Decisions
+
+- Retry at call site (not pipeline level) per user directive.
+- Strict-write default kept as `false` (opt-in) to avoid breaking existing agents.
+- No `"retry"` validation action — retry handled by RetryConfiguration at call level.
+
+---
+
 ## 🐛 Fix: PostgreSQL group conversations broken — JDBC `?|` operator escape (2026-07-02)
 
 **Repo:** EDDI (`fix/postgres-group-conversation-jdbc-escape`)

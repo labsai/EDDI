@@ -177,4 +177,18 @@ public interface IRestAgentEngine {
     @Operation(summary = "Redo last undone step", description = "Re-applies a previously undone conversation step.")
     @APIResponse(responseCode = "200", description = "Redo successful.")
     Response redo(@PathParam("conversationId") String conversationId);
+
+    // --- Admin: state reset ---
+
+    @PATCH
+    @Path("/{conversationId}/state")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed("eddi-admin")
+    @Operation(summary = "Reset conversation state",
+               description = "Resets a stuck conversation (ERROR or EXECUTION_INTERRUPTED) to READY. Admin-only.")
+    @APIResponse(responseCode = "200", description = "State reset successful.")
+    @APIResponse(responseCode = "409", description = "Cannot reset from current state.")
+    Response resetState(@PathParam("conversationId") String conversationId,
+                        @QueryParam("state")
+                        @DefaultValue("READY") String targetState);
 }

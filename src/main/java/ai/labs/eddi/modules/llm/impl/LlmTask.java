@@ -30,6 +30,7 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
@@ -447,7 +448,9 @@ public class LlmTask implements ILifecycleTask {
                 // Legacy mode with streaming — try to get a streaming model
                 var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
                 if (streamingModel != null) {
-                    responseContent = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink);
+                    var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task);
+                    responseContent = streamingResult.response();
+                    responseMetadata.putAll(streamingResult.metadata());
                 } else {
                     // Streaming not supported by this builder — fall back to sync, emit as single
                     // chunk
@@ -465,6 +468,9 @@ public class LlmTask implements ILifecycleTask {
                 responseMetadata = chatResult.responseMetadata();
             }
         }
+
+        // === Response Validation (Phase D) ===
+        responseContent = applyResponseValidation(responseContent, responseMetadata, task, currentStep);
 
         // Store metadata if configured
         var responseMetadataObjectName = task.getResponseMetadataObjectName();
@@ -559,6 +565,104 @@ public class LlmTask implements ILifecycleTask {
                 // Non-fatal — conversation continues, summary will catch up next turn
             }
         }
+    }
+
+    /**
+     * Applies config-driven response validation policies. Inspects the LLM response
+     * and metadata for anomalies (empty, truncated, filtered, refused, streaming
+     * timeout) and applies the configured action.
+     *
+     * @return the (possibly modified) response content
+     */
+    private String applyResponseValidation(String responseContent, Map<String, Object> responseMetadata,
+                                           Task task, IWritableConversationStep currentStep)
+            throws LifecycleException {
+
+        ResponseValidation validation = task.getResponseValidation();
+        if (validation == null || !validation.isEnabled()) {
+            return responseContent;
+        }
+
+        String warning = responseMetadata != null ? (String) responseMetadata.get("warning") : null;
+        boolean streamingTimeout = responseMetadata != null && Boolean.TRUE.equals(responseMetadata.get("streamingTimeout"));
+
+        // 1. Empty response check
+        if (isNullOrEmpty(responseContent)) {
+            responseContent = applyValidationAction(validation.getOnEmpty(), "empty_response",
+                    "LLM returned empty response", responseContent, task, currentStep);
+        }
+
+        // 2. Truncation check (finishReason=LENGTH)
+        if ("truncated".equals(warning)) {
+            responseContent = applyValidationAction(validation.getOnTruncation(), "truncated_response",
+                    "LLM response was truncated (finishReason=LENGTH)", responseContent, task, currentStep);
+        }
+
+        // 3. Content filter check
+        if ("content_filter".equals(warning)) {
+            responseContent = applyValidationAction(validation.getOnContentFilter(), "content_filter",
+                    "LLM response was blocked by content filter", responseContent, task, currentStep);
+        }
+
+        // 4. Streaming timeout check
+        if (streamingTimeout) {
+            responseContent = applyValidationAction(validation.getOnStreamingTimeout(), "streaming_timeout",
+                    "Streaming response timed out", responseContent, task, currentStep);
+        }
+
+        // 5. Refusal heuristic — simple check for common refusal patterns
+        if (!isNullOrEmpty(responseContent)) {
+            String lower = responseContent.trim().toLowerCase();
+            if (lower.startsWith("i'm sorry, i can't") || lower.startsWith("i cannot")
+                    || lower.startsWith("i'm not able to") || lower.startsWith("as an ai")) {
+                responseContent = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
+                        "LLM response appears to be a refusal", responseContent, task, currentStep);
+            }
+        }
+
+        return responseContent;
+    }
+
+    /**
+     * Applies a single validation action.
+     *
+     * @return the (possibly modified) response content
+     */
+    private String applyValidationAction(String action, String validationType, String message,
+                                         String responseContent, Task task, IWritableConversationStep currentStep)
+            throws LifecycleException {
+
+        if (action == null || "ignore".equalsIgnoreCase(action)) {
+            return responseContent;
+        }
+
+        switch (action.toLowerCase()) {
+            case "warn" :
+                LOGGER.warnf("[ResponseValidation] %s (task=%s): %s", validationType, task.getId(), message);
+                var warnData = dataFactory.createData("llm:validation:" + validationType + ":" + task.getId(), message);
+                currentStep.storeData(warnData);
+                break;
+
+            case "fallback" :
+                String fallbackMsg = "I'm sorry, I wasn't able to generate a complete response. Please try again.";
+                LOGGER.warnf("[ResponseValidation] %s — substituting fallback (task=%s)", validationType, task.getId());
+                var fallbackData = dataFactory.createData("llm:validation:" + validationType + ":" + task.getId(),
+                        Map.of("action", "fallback", "original", responseContent != null ? responseContent : ""));
+                currentStep.storeData(fallbackData);
+                return fallbackMsg;
+
+            case "error" :
+                LOGGER.errorf("[ResponseValidation] %s — throwing error (task=%s): %s", validationType, task.getId(), message);
+                throw new LifecycleException("Response validation failed [" + validationType + "]: " + message);
+
+            default :
+                LOGGER.warnf("[ResponseValidation] Unknown action '%s' for %s, treating as 'warn'", action, validationType);
+                var unknownData = dataFactory.createData("llm:validation:" + validationType + ":" + task.getId(), message);
+                currentStep.storeData(unknownData);
+                break;
+        }
+
+        return responseContent;
     }
 
     /**

@@ -290,15 +290,51 @@ public class LifecycleManager implements ILifecycleManager {
                 taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
                 taskSpan.recordException(e);
 
-                // Record error counter for dashboards & alerting
+                // Classify error for metrics, audit, and admin dashboards
+                String errorType = classifyError(e);
+                String errorSummary = summarizeForAudit(e);
+                long failDurationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+
+                // Record error counter for dashboards & alerting (tagged by error.type)
                 String errTaskId = task.getId().name();
                 String errTaskType = task.getType() != null ? task.getType() : "unknown";
-                String errMeterKey = errTaskId + "|" + errTaskType;
+                String errMeterKey = errTaskId + "|" + errTaskType + "|" + errorType;
                 TASK_ERROR_COUNTERS.computeIfAbsent(errMeterKey, k -> Counter.builder("eddi.pipeline.task.errors")
                         .tag("task.id", errTaskId)
                         .tag("task.type", errTaskType)
+                        .tag("error.type", errorType)
                         .description("Pipeline task execution errors")
                         .register(Metrics.globalRegistry)).increment();
+
+                // Emit SSE task_failed event for real-time admin monitoring
+                var eventSinkRef = conversationMemory.getEventSink();
+                if (eventSinkRef != null) {
+                    try {
+                        eventSinkRef.onTaskFailed(task.getId(), task.getType(),
+                                failDurationMs, errorType, errorSummary);
+                    } catch (Exception sseEx) {
+                        LOGGER.debugf("SSE task_failed emission failed: %s", sseEx.getMessage());
+                    }
+                }
+
+                // Collect failure audit entry
+                var auditCollector = conversationMemory.getAuditCollector();
+                if (auditCollector != null) {
+                    var failureOutput = new LinkedHashMap<String, Object>();
+                    failureOutput.put("status", "TASK_FAILED");
+                    failureOutput.put("errorType", errorType);
+                    failureOutput.put("errorMessage", errorSummary);
+                    failureOutput.put("strictWriteApplied", strictWriteEnabled);
+
+                    AuditEntry failureEntry = new AuditEntry(
+                            UUID.randomUUID().toString(), conversationMemory.getConversationId(),
+                            conversationMemory.getAgentId(), conversationMemory.getAgentVersion(),
+                            conversationMemory.getUserId(), null, conversationMemory.size() - 1,
+                            errTaskId, errTaskType, index, failDurationMs,
+                            null, failureOutput, null, null, null, 0.0,
+                            Instant.now(), null, null);
+                    auditCollector.collect(failureEntry);
+                }
 
                 if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                     // === Strict Write Discipline: handle task failure ===
@@ -664,5 +700,55 @@ public class LifecycleManager implements ILifecycleManager {
             tracer = GlobalOpenTelemetry.getTracer("eddi.pipeline");
         }
         return tracer;
+    }
+
+    // ========================== Error Classification ==========================
+
+    /**
+     * Classifies the root cause of an error for metrics, audit, and dashboards.
+     * Walks the exception cause chain to find the most specific classification.
+     *
+     * @return one of: "timeout", "transport", "rate_limit", "content_filter",
+     *         "unknown"
+     */
+    static String classifyError(Throwable e) {
+        Throwable current = e;
+        while (current != null) {
+            if (current instanceof java.net.SocketTimeoutException
+                    || current instanceof java.util.concurrent.TimeoutException) {
+                return "timeout";
+            }
+            if (current instanceof java.net.ConnectException
+                    || current instanceof java.net.UnknownHostException) {
+                return "transport";
+            }
+            String msg = current.getMessage();
+            if (msg != null) {
+                String lower = msg.toLowerCase();
+                if (lower.contains("rate limit") || lower.contains("429") || lower.contains("too many")) {
+                    return "rate_limit";
+                }
+                if (lower.contains("content_filter") || lower.contains("content filter")) {
+                    return "content_filter";
+                }
+            }
+            current = current.getCause();
+        }
+        return "unknown";
+    }
+
+    /**
+     * Creates a truncated, safe summary of an exception for audit and SSE events.
+     * Unlike {@link #summarizeException(Exception)} (which sanitizes for LLM
+     * consumption at 200 chars), this preserves full detail at 500 chars for admin
+     * visibility.
+     */
+    static String summarizeForAudit(Throwable e) {
+        String msg = e.getMessage();
+        if (msg == null || msg.isBlank()) {
+            msg = e.getClass().getSimpleName();
+        }
+        // Truncate to 500 chars for safe embedding in JSON/SSE payloads
+        return msg.length() > 500 ? msg.substring(0, 500) + "..." : msg;
     }
 }

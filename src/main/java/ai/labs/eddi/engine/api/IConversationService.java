@@ -47,6 +47,13 @@ public interface IConversationService {
     void endConversation(String conversationId);
 
     /**
+     * Reset the state of a stuck conversation (ERROR or EXECUTION_INTERRUPTED) to
+     * READY. Updates both persistent storage and the in-memory cache atomically.
+     * Admin-only operation.
+     */
+    void resetConversationState(String conversationId, ConversationState targetState);
+
+    /**
      * Get the current state of a conversation (from cache or DB).
      *
      * @throws ConversationNotFoundException
@@ -115,6 +122,10 @@ public interface IConversationService {
         void onComplete(SimpleConversationMemorySnapshot snapshot);
 
         void onError(Throwable error);
+
+        default void onTaskFailed(TaskId taskId, String taskType, long durationMs,
+                                  String errorType, String errorSummary) {
+        }
     }
 
     /**

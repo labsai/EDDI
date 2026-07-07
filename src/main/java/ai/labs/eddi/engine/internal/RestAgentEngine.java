@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -51,6 +52,7 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 public class RestAgentEngine implements IRestAgentEngine {
 
     private final IConversationService conversationService;
+    private final IConversationMemoryStore conversationMemoryStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
@@ -60,11 +62,13 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Inject
     public RestAgentEngine(IConversationService conversationService,
+            IConversationMemoryStore conversationMemoryStore,
             IConversationDescriptorStore conversationDescriptorStore,
             SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.conversationService = conversationService;
+        this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
@@ -266,6 +270,40 @@ public class RestAgentEngine implements IRestAgentEngine {
             // Fail-closed: cannot verify ownership → deny access
             LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));
             throw new ForbiddenException("Access denied: unable to verify conversation ownership");
+        }
+    }
+
+    @Override
+    public Response resetState(String conversationId, String targetState) {
+        if (!"READY".equalsIgnoreCase(targetState)) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Only READY is supported as target state"))
+                    .build();
+        }
+        try {
+            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var currentState = snapshot.getConversationState();
+            if (currentState == ConversationState.IN_PROGRESS) {
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(Map.of("error", "Cannot reset while conversation is IN_PROGRESS"))
+                        .build();
+            }
+            if (currentState == ConversationState.ENDED) {
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(Map.of("error", "Cannot reset an ENDED conversation"))
+                        .build();
+            }
+            if (currentState == ConversationState.READY) {
+                return Response.ok(Map.of("message", "Conversation already in READY state")).build();
+            }
+            conversationService.resetConversationState(conversationId, ConversationState.READY);
+            LOGGER.infof("Admin reset conversation %s from %s to READY", conversationId, currentState);
+            return Response.ok(Map.of("message", "State reset from " + currentState + " to READY")).build();
+        } catch (ResourceStoreException e) {
+            LOGGER.errorf(e, "Failed to reset conversation state for %s", conversationId);
+            throw new InternalServerErrorException("Failed to reset state");
+        } catch (ResourceNotFoundException e) {
+            throw new NotFoundException("Conversation not found: " + conversationId);
         }
     }
 }
