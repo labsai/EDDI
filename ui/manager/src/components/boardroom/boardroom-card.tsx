@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { MoreVertical, Settings, History, Copy, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { cn, hashColor, getInitials, formatRelativeTime } from "@/lib/utils";
+import { cn, getInitials, formatRelativeTime } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -23,12 +23,12 @@ import {
 // ─── Style color map ─────────────────────────────────────────────
 
 const STYLE_COLORS: Record<string, string> = {
-  ROUND_TABLE: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  DEBATE: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
-  TASK_FORCE: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  DEVIL_ADVOCATE: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
-  PEER_REVIEW: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
-  DELPHI: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  ROUND_TABLE: "bg-muted text-muted-foreground",
+  DEBATE: "bg-muted text-muted-foreground",
+  TASK_FORCE: "bg-muted text-muted-foreground",
+  DEVIL_ADVOCATE: "bg-muted text-muted-foreground",
+  PEER_REVIEW: "bg-muted text-muted-foreground",
+  DELPHI: "bg-muted text-muted-foreground",
   CUSTOM: "bg-muted text-muted-foreground",
 };
 
@@ -65,8 +65,7 @@ function StackedAvatarsInline({
         <div
           key={member.agentId}
           className={cn(
-            "flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-medium text-white ring-2 ring-card dark:ring-background",
-            hashColor(member.agentId),
+            "flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-medium bg-muted text-muted-foreground ring-2 ring-card dark:ring-background",
             i > 0 && "-ms-2",
           )}
           title={member.displayName}
@@ -155,8 +154,8 @@ function BoardroomCard({
       <Link
         to={`/boardroom/${id}?version=${currentVersion}`}
         className={cn(
-          "block rounded-xl border p-5 transition-all duration-150",
-          "bg-card border-border hover:shadow-md hover:-translate-y-0.5",
+          "block rounded-xl border p-5 transition-all duration-200 br-card-premium",
+          "bg-card border-border hover:shadow-lg hover:-translate-y-1",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           isList && "flex items-center gap-4",
           className,

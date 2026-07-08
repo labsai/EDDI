@@ -105,12 +105,16 @@ export function KnowledgeHealthCard({ className }: KnowledgeHealthCardProps) {
 
   return (
     <div
-      className={cn("rounded-xl border border-border bg-card p-5", className)}
+      className={cn(
+        "rounded-xl border border-border bg-card p-5 br-card-premium br-section-enter",
+        className,
+      )}
+      style={{ '--enter-delay': '60ms' } as React.CSSProperties}
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-          📊{" "}
+          <Activity className="h-4 w-4 text-muted-foreground" />
           {t("knowledgeHealth.title", "Knowledge Health")}
         </h3>
         <span

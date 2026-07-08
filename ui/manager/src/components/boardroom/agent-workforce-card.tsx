@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { cn, getInitials } from "@/lib/utils";
-import { Bot } from "lucide-react";
+import { Sparkles, Plus } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -32,17 +32,17 @@ export function AgentWorkforceCard({
       onClick={onClick}
       className={cn(
         "flex flex-col items-center gap-2 rounded-xl border border-border p-4 min-w-[140px]",
-        "bg-card hover:bg-muted/50 transition-all duration-150",
-        "hover:shadow-md hover:-translate-y-0.5",
+        "bg-card hover:bg-muted/40 transition-all duration-200",
+        "hover:shadow-lg hover:-translate-y-1 br-card-premium",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        "text-center",
+        "text-center group",
         className,
       )}
       title={description ?? name}
     >
       {/* Avatar */}
       <div
-        className="flex h-12 w-12 items-center justify-center rounded-full text-sm font-semibold bg-muted text-muted-foreground"
+        className="flex h-12 w-12 items-center justify-center rounded-full text-sm font-semibold bg-muted text-muted-foreground transition-transform duration-200 group-hover:scale-105"
         aria-hidden
       >
         {getInitials(name)}
@@ -57,7 +57,7 @@ export function AgentWorkforceCard({
           </p>
         ) : (
           <p className="text-xs text-muted-foreground/50 mt-0.5 flex items-center justify-center gap-1">
-            <Bot className="h-3 w-3" />
+            <Sparkles className="h-3 w-3" />
             {t("workforce.agent", "Digital Expert")}
           </p>
         )}
@@ -88,14 +88,14 @@ export function AddAgentCard({ onClick, className }: AddAgentCardProps) {
       onClick={onClick}
       className={cn(
         "flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-4 min-w-[140px]",
-        "text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-primary/5",
-        "transition-all duration-150",
+        "text-muted-foreground hover:text-foreground hover:border-muted-foreground/50 hover:bg-muted/30",
+        "transition-all duration-200",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-dashed border-current">
-        <span className="text-xl">+</span>
+      <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-dashed border-current transition-transform duration-200 hover:scale-105">
+        <Plus className="h-5 w-5" />
       </div>
       <p className="text-xs font-medium">
         {t("workforce.addAgent", "Deploy Agent")}

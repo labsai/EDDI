@@ -7,8 +7,7 @@ import {
   RefreshCw,
   LayoutGrid,
   List,
-  Crosshair,
-  Building2,
+  UsersRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
@@ -105,7 +104,12 @@ function DashboardEmpty() {
       <div className="text-center max-w-lg space-y-6">
         {/* Decorative icon */}
         <div className="flex items-center justify-center gap-3 mb-2">
-          <Building2 className="h-12 w-12 text-primary/60" />
+          <img
+            src="/eddi-icon.svg"
+            alt=""
+            aria-hidden="true"
+            className="h-14 w-14 rounded-xl"
+          />
         </div>
 
         <h2 className="text-2xl font-bold text-foreground">
@@ -129,7 +133,7 @@ function DashboardEmpty() {
             onClick={() => navigate("/boardroom/new")}
             className="w-full sm:w-auto"
           >
-            <Crosshair className="h-5 w-5" />
+            <UsersRound className="h-5 w-5" />
             {t(
               "boardroom.dashboard.assembleTaskForce",
               "Assemble Task Force",
@@ -154,8 +158,8 @@ function DashboardEmpty() {
                 key={tpl.key}
                 to={`/boardroom/new?template=${tpl.key}`}
                 className={cn(
-                  "rounded-xl border p-4 text-start transition-all duration-150",
-                  "border-border hover:border-primary/70 hover:shadow-md hover:-translate-y-0.5",
+                  "rounded-xl border p-4 text-start transition-all duration-200 br-card-premium",
+                  "border-border hover:shadow-lg hover:-translate-y-1",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 )}
               >
@@ -291,7 +295,11 @@ function WorkforceSection() {
   if (!agents.length) return null;
 
   return (
-    <section aria-label={t("workforce.title", "Your Digital Workforce")}>
+    <section
+      aria-label={t("workforce.title", "Your Digital Workforce")}
+      className="br-section-enter"
+      style={{ '--enter-delay': '0ms' } as React.CSSProperties}
+    >
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold text-foreground">
           {t("workforce.title", "Your Digital Workforce")}
@@ -380,7 +388,11 @@ function BoardroomDashboard() {
       <KnowledgeHealthCard />
 
       {/* ─── Pillar 2: Active Task Forces ────────────────────── */}
-      <section aria-label={t("boardroom.dashboard.taskForcesLabel", "Active Task Forces")}>
+      <section
+        aria-label={t("boardroom.dashboard.taskForcesLabel", "Active Task Forces")}
+        className="br-section-enter"
+        style={{ '--enter-delay': '100ms' } as React.CSSProperties}
+      >
         <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">
@@ -398,7 +410,7 @@ function BoardroomDashboard() {
             <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
             <Button asChild variant="primary" size="sm" className="hidden sm:inline-flex">
               <Link to="/boardroom/new">
-                <Crosshair className="h-4 w-4" />
+                <UsersRound className="h-4 w-4" />
                 {t("boardroom.dashboard.assembleTaskForce", "Assemble Task Force")}
               </Link>
             </Button>
@@ -409,8 +421,12 @@ function BoardroomDashboard() {
         <div className="@container/br-dash">
           {viewMode === "grid" ? (
             <div className="grid grid-cols-1 @[32rem]/br-dash:grid-cols-2 @[56rem]/br-dash:grid-cols-3 gap-5">
-              {boards.map((board) => (
-                <div key={board.id} className="group">
+              {boards.map((board, index) => (
+                <div
+                  key={board.id}
+                  className="group br-card-enter"
+                  style={{ '--enter-delay': `${index * 60}ms` } as React.CSSProperties}
+                >
                   <BoardroomCard
                     id={board.id}
                     name={board.name}
@@ -460,7 +476,11 @@ function BoardroomDashboard() {
       </section>
 
       {/* ─── Pillar 3: Quick Actions ─────────────────────────── */}
-      <section aria-label={t("quickActions.title", "Quick Actions")}>
+      <section
+        aria-label={t("quickActions.title", "Quick Actions")}
+        className="br-section-enter"
+        style={{ '--enter-delay': '200ms' } as React.CSSProperties}
+      >
         <h2 className="text-lg font-semibold text-foreground mb-3">
           {t("quickActions.title", "Quick Actions")}
         </h2>

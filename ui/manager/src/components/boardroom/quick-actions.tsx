@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Users, MessageCircle, BarChart3, Bot } from "lucide-react";
+import { UsersRound, MessageSquareText, TrendingUp, Cog } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ export function QuickActions({ className }: QuickActionsProps) {
 
   const actions: QuickAction[] = [
     {
-      icon: Users,
+      icon: UsersRound,
       label: t("quickActions.assembleTaskForce", "Assemble Task Force"),
       description: t(
         "quickActions.assembleTaskForceDesc",
@@ -32,7 +32,7 @@ export function QuickActions({ className }: QuickActionsProps) {
       to: "/boardroom/new",
     },
     {
-      icon: MessageCircle,
+      icon: MessageSquareText,
       label: t("quickActions.chatWithAgent", "Chat with Agent"),
       description: t(
         "quickActions.chatWithAgentDesc",
@@ -41,7 +41,7 @@ export function QuickActions({ className }: QuickActionsProps) {
       to: "/manage/agents",
     },
     {
-      icon: BarChart3,
+      icon: TrendingUp,
       label: t("quickActions.viewInsights", "View Insights"),
       description: t(
         "quickActions.viewInsightsDesc",
@@ -50,7 +50,7 @@ export function QuickActions({ className }: QuickActionsProps) {
       to: "/boardroom/history",
     },
     {
-      icon: Bot,
+      icon: Cog,
       label: t("quickActions.manageWorkforce", "Manage Workforce"),
       description: t(
         "quickActions.manageWorkforceDesc",
@@ -62,25 +62,29 @@ export function QuickActions({ className }: QuickActionsProps) {
 
   return (
     <div className={cn("grid grid-cols-2 sm:grid-cols-4 gap-3", className)}>
-      {actions.map((action) => (
+      {actions.map((action, index) => (
         <Link
           key={action.label}
           to={action.to}
           className={cn(
-            "group flex flex-col items-start gap-2 rounded-xl border border-border p-4",
-            "bg-card hover:bg-muted/50 transition-all duration-150",
-            "hover:shadow-md hover:-translate-y-0.5",
+            "group relative flex flex-col items-start gap-3 rounded-xl border border-border p-4",
+            "bg-card transition-all duration-200",
+            "hover:bg-muted/40 hover:shadow-lg hover:-translate-y-1",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "br-card-enter br-card-premium",
           )}
+          style={
+            { "--enter-delay": `${index * 60}ms` } as React.CSSProperties
+          }
         >
-          <action.icon
-            className="h-5 w-5 text-muted-foreground transition-transform group-hover:scale-110 group-hover:text-foreground"
-          />
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted/60">
+            <action.icon className="h-[18px] w-[18px] text-muted-foreground transition-all duration-200 group-hover:text-foreground group-hover:scale-110" />
+          </div>
           <div>
             <p className="text-sm font-medium text-foreground">
               {action.label}
             </p>
-            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+            <p className="text-xs text-muted-foreground/70 mt-0.5 line-clamp-2">
               {action.description}
             </p>
           </div>
