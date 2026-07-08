@@ -127,14 +127,16 @@
 
 @media (prefers-reduced-motion: reduce) {
   @keyframes br-message-in {
-    from {
-      opacity: 1;
-      transform: none;
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
+    from { opacity: 1; transform: none; }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes br-fade-in {
+    from { opacity: 1; }
+    to { opacity: 1; }
+  }
+  @keyframes confetti-fall {
+    from { opacity: 0; transform: none; }
+    to { opacity: 0; transform: none; }
   }
 }
 

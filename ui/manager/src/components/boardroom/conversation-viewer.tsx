@@ -480,7 +480,9 @@ function ConversationViewer({
     const a = document.createElement("a");
     a.href = url;
     a.download = `boardroom-discussion-${conversationId}.md`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, [conversation, conversationId]);
 
@@ -514,7 +516,7 @@ function ConversationViewer({
     return (
       <div className={cn("flex items-center justify-center h-full", className)}>
         <div className="text-center space-y-2">
-          <AlertCircle className="h-8 w-8 text-red-400 mx-auto" />
+          <AlertCircle className="h-8 w-8 text-red-400" />
           <p className="text-sm text-red-500 dark:text-red-400">
             {t("boardroom.history.loadError", "Failed to load conversation")}
           </p>

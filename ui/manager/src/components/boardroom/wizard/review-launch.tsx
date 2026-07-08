@@ -157,7 +157,7 @@ function ReviewLaunch({
     creationProgress.length > 0 &&
     creationProgress.every((p) => p.status === "done");
 
-  if (isCreating || (creationProgress.length > 0 && hasError)) {
+  if (isCreating || allDone || (creationProgress.length > 0 && hasError)) {
     return (
       <div className="space-y-6">
         {allDone && <Confetti />}

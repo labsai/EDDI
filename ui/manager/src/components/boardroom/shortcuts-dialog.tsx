@@ -1,25 +1,69 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 export function ShortcutsDialog() {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<Element | null>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handler = () => setOpen(true);
+    const handler = () => {
+      triggerRef.current = document.activeElement;
+      setOpen(true);
+    };
     window.addEventListener("boardroom:show-shortcuts", handler);
     return () => window.removeEventListener("boardroom:show-shortcuts", handler);
   }, []);
 
+  // Focus close button on open, restore focus on close
+  useEffect(() => {
+    if (open) {
+      closeRef.current?.focus();
+    } else if (triggerRef.current instanceof HTMLElement) {
+      triggerRef.current.focus();
+      triggerRef.current = null;
+    }
+  }, [open]);
+
+  // Escape to close
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [open]);
+
+  // Focus trap within dialog
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key !== "Tab" || !dialogRef.current) return;
+
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    },
+    [],
+  );
 
   if (!open) return null;
 
@@ -48,9 +92,11 @@ export function ShortcutsDialog() {
       />
       <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
         <div
+          ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-label={t("boardroom.shortcuts.title", "Keyboard Shortcuts")}
+          onKeyDown={handleKeyDown}
           className={cn(
             "pointer-events-auto w-full max-w-sm",
             "bg-card rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700",
@@ -62,6 +108,7 @@ export function ShortcutsDialog() {
               {t("boardroom.shortcuts.title", "Keyboard Shortcuts")}
             </h2>
             <button
+              ref={closeRef}
               onClick={() => setOpen(false)}
               className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
               aria-label={t("boardroom.board.close", "Close")}

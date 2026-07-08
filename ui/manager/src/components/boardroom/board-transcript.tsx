@@ -259,7 +259,6 @@ function BoardTranscript({
                   agentId={entry.speakerAgentId}
                   role={null}
                   content={entry.content}
-                  phaseType={entry.type}
                   boardId={boardId}
                 />
               </div>

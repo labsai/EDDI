@@ -197,12 +197,12 @@ function ViewToggle({
   const { t } = useTranslation();
 
   return (
-    <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700" role="group">
+    <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700" role="toolbar" aria-label={t("boardroom.dashboard.viewToggle", "View mode")}>
       <button
         type="button"
         onClick={() => onViewModeChange("grid")}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-s-lg px-3 py-1.5 text-sm font-medium transition-colors",
+          "inline-flex items-center gap-1.5 rounded-s-lg ps-3 pe-3 py-1.5 text-sm font-medium transition-colors",
           viewMode === "grid"
             ? "bg-slate-100 text-foreground dark:bg-slate-800"
             : "text-muted-foreground hover:bg-slate-50 dark:hover:bg-slate-800/50",
@@ -216,7 +216,7 @@ function ViewToggle({
         type="button"
         onClick={() => onViewModeChange("list")}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-e-lg px-3 py-1.5 text-sm font-medium transition-colors",
+          "inline-flex items-center gap-1.5 rounded-e-lg ps-3 pe-3 py-1.5 text-sm font-medium transition-colors",
           viewMode === "list"
             ? "bg-slate-100 text-foreground dark:bg-slate-800"
             : "text-muted-foreground hover:bg-slate-50 dark:hover:bg-slate-800/50",

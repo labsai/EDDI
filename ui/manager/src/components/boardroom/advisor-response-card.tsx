@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Check, Clipboard, Star } from "lucide-react";
@@ -22,19 +22,12 @@ function usePinnedResponses(boardId: string) {
 
   const [pins, setPins] = useState<PinnedResponse[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem(key) || "[]");
+      const raw = JSON.parse(localStorage.getItem(key) || "[]");
+      return Array.isArray(raw) ? raw : [];
     } catch {
       return [];
     }
   });
-
-  const persist = useCallback(
-    (next: PinnedResponse[]) => {
-      setPins(next);
-      localStorage.setItem(key, JSON.stringify(next));
-    },
-    [key],
-  );
 
   const isResponsePinned = useCallback(
     (content: string, speaker: string) =>
@@ -44,18 +37,25 @@ function usePinnedResponses(boardId: string) {
 
   const togglePin = useCallback(
     (pin: PinnedResponse) => {
-      if (isResponsePinned(pin.content, pin.speakerName)) {
-        persist(
-          pins.filter(
-            (p) =>
-              !(p.content === pin.content && p.speakerName === pin.speakerName),
-          ),
+      setPins((current) => {
+        const exists = current.some(
+          (p) => p.content === pin.content && p.speakerName === pin.speakerName,
         );
-      } else {
-        persist([...pins, pin]);
-      }
+        const next = exists
+          ? current.filter(
+              (p) =>
+                !(p.content === pin.content && p.speakerName === pin.speakerName),
+            )
+          : [...current, pin];
+        try {
+          localStorage.setItem(key, JSON.stringify(next));
+        } catch {
+          /* quota exceeded or private browsing */
+        }
+        return next;
+      });
     },
-    [pins, persist, isResponsePinned],
+    [key],
   );
 
   return { pins, togglePin, isResponsePinned };
@@ -68,7 +68,7 @@ interface AdvisorResponseCardProps {
   agentId: string;
   role?: string | null;
   content: string | null;
-  phaseType?: string;
+
   boardId: string;
   /** Optional session ID for pin storage */
   sessionId?: string;
@@ -113,11 +113,18 @@ function AdvisorResponseCard({
 
   // ── Copy to clipboard ────────────────────────────────────────
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(copyTimerRef.current), []);
+
   const handleCopy = async () => {
     if (!content) return;
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* non-secure context or permission denied */
+    }
   };
 
   // ── Pin / bookmark ───────────────────────────────────────────
