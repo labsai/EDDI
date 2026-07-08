@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit;
 @ApplicationScoped
 public class RestLogAdmin implements IRestLogAdmin {
 
-    private static final Logger log = Logger.getLogger(RestLogAdmin.class);
+    private static final Logger LOGGER = Logger.getLogger(RestLogAdmin.class);
 
     private final BoundedLogStore boundedLogStore;
     private final IDatabaseLogs databaseLogs;
@@ -95,7 +95,7 @@ public class RestLogAdmin implements IRestLogAdmin {
                     if (!eventSink.isClosed()) {
                         eventSink.close();
                     }
-                    log.debugv("SSE log listener {0} removed (client disconnected or max lifetime reached)", listenerId);
+                    LOGGER.debugv("SSE log listener {0} removed (client disconnected or max lifetime reached)", listenerId);
                 } catch (Exception e) {
                     // CDI container may already be shut down (e.g. during test teardown) —
                     // swallow to avoid noisy "ArC container not initialized" stacktraces
@@ -103,7 +103,7 @@ public class RestLogAdmin implements IRestLogAdmin {
             }
         });
 
-        log.debugv("SSE log stream started (listenerId={0}, agentId={1}, level={2})", listenerId, agentId, level);
+        LOGGER.debugv("SSE log stream started (listenerId={0}, agentId={1}, level={2})", listenerId, agentId, level);
     }
 
     @Override
@@ -115,11 +115,11 @@ public class RestLogAdmin implements IRestLogAdmin {
         try {
             OutboundSseEvent event = sse.newEventBuilder().name("log").data(entry).build();
             eventSink.send(event).exceptionally(t -> {
-                log.debugv("Failed to send SSE log event: {0}", t.getMessage());
+                LOGGER.debugv("Failed to send SSE log event: {0}", t.getMessage());
                 return null;
             });
         } catch (Exception e) {
-            log.debugv("Error sending SSE log event: {0}", e.getMessage());
+            LOGGER.debugv("Error sending SSE log event: {0}", e.getMessage());
         }
     }
 }

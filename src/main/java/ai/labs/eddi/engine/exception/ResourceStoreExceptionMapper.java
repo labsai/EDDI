@@ -13,11 +13,11 @@ import org.jboss.logging.Logger;
 
 @Provider
 public class ResourceStoreExceptionMapper implements ExceptionMapper<IResourceStore.ResourceStoreException> {
-    private static final Logger log = Logger.getLogger(ResourceStoreExceptionMapper.class);
+    private static final Logger LOGGER = Logger.getLogger(ResourceStoreExceptionMapper.class);
 
     @Override
     public Response toResponse(IResourceStore.ResourceStoreException exception) {
-        log.error(exception.getLocalizedMessage(), exception);
+        LOGGER.error(exception.getLocalizedMessage(), exception);
         return Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(MediaType.TEXT_PLAIN).entity(exception.getLocalizedMessage()).build();
     }
 }

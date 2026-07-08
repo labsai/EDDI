@@ -41,7 +41,7 @@ import java.util.concurrent.TimeUnit;
 @ApplicationScoped
 public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
 
-    private static final Logger log = Logger.getLogger(RestCoordinatorAdmin.class);
+    private static final Logger LOGGER = Logger.getLogger(RestCoordinatorAdmin.class);
 
     private final IConversationCoordinator coordinator;
 
@@ -76,7 +76,7 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
         if (!replayed) {
             throw new NotFoundException("Dead-letter entry not found: " + sanitize(entryId));
         }
-        log.infof("Dead-letter %s replayed via REST", sanitize(entryId));
+        LOGGER.infof("Dead-letter %s replayed via REST", sanitize(entryId));
     }
 
     @Override
@@ -85,13 +85,13 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
         if (!discarded) {
             throw new NotFoundException("Dead-letter entry not found: " + sanitize(entryId));
         }
-        log.infof("Dead-letter %s discarded via REST", sanitize(entryId));
+        LOGGER.infof("Dead-letter %s discarded via REST", sanitize(entryId));
     }
 
     @Override
     public int purgeDeadLetters() {
         int count = coordinator.purgeDeadLetters();
-        log.infof("Purged %d dead-letter entries via REST", count);
+        LOGGER.infof("Purged %d dead-letter entries via REST", count);
         return count;
     }
 
@@ -106,7 +106,7 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
             OutboundSseEvent event = sse.newEventBuilder().name("status").data(status).build();
             eventSink.send(event);
         } catch (Exception e) {
-            log.warnf(e, "Failed to send initial status to SSE client");
+            LOGGER.warnf(e, "Failed to send initial status to SSE client");
         }
     }
 
@@ -140,7 +140,7 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
                     }
                 }
             } catch (Exception e) {
-                log.debugf(e, "Error broadcasting SSE status");
+                LOGGER.debugf(e, "Error broadcasting SSE status");
             }
         }, 2, 2, TimeUnit.SECONDS);
     }

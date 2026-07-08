@@ -48,7 +48,7 @@ public class RestAgentManagement implements IRestAgentManagement {
     @Inject
     SecurityIdentity identity;
 
-    private static final Logger log = Logger.getLogger(RestAgentManagement.class);
+    private static final Logger LOGGER = Logger.getLogger(RestAgentManagement.class);
 
     @Inject
     public RestAgentManagement(IRestAgentEngine restAgentEngine, IUserConversationStore userConversationStore,
@@ -82,7 +82,7 @@ public class RestAgentManagement implements IRestAgentManagement {
                 asyncResponse.resume(memorySnapshot);
             }
         } catch (CannotCreateConversationException e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
@@ -104,7 +104,7 @@ public class RestAgentManagement implements IRestAgentManagement {
                     response);
 
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             Response.ResponseBuilder responseStatus;
             if (e instanceof WebApplicationException) {
                 Response exResponse = ((WebApplicationException) e).getResponse();
