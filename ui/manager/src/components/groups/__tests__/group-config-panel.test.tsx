@@ -50,10 +50,8 @@ describe("GroupConfigPanel", () => {
 
     expect(screen.getByText("Product Design Council")).toBeInTheDocument();
     expect(screen.getByText("Discusses product design and user experience aspects.")).toBeInTheDocument();
-    expect(screen.getByText("Round Table")).toBeInTheDocument();
-    expect(screen.getByText("Opinion")).toBeInTheDocument();
-    expect(screen.getByText("Discussion")).toBeInTheDocument();
-    expect(screen.getByText("Synthesis")).toBeInTheDocument();
+    expect(screen.getByText("Collaborative Council")).toBeInTheDocument();
+    expect(screen.getByText("All experts contribute perspectives in structured rounds")).toBeInTheDocument();
   });
 
   it("renders members list with initials, role badges, and moderator highlight", () => {

@@ -82,8 +82,8 @@ describe("useDiscussionStyles", () => {
     server.use(
       http.get("*/groupstore/groups/styles", () => {
         return HttpResponse.json([
-          { name: "ROUND_TABLE", label: "Round Table" },
-          { name: "DEBATE", label: "Debate" },
+          { name: "ROUND_TABLE", label: "Collaborative Council" },
+          { name: "DEBATE", label: "Structured Deliberation" },
         ]);
       }),
     );

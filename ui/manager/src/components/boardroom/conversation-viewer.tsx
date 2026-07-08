@@ -415,7 +415,7 @@ function ConversationViewer({
     if (!conversation) return;
 
     const lines: string[] = [];
-    lines.push("# Boardroom Discussion");
+    lines.push("# Task Force Discussion");
     lines.push("");
     lines.push(`**Question:** ${conversation.originalQuestion || "—"}`);
     lines.push(`**Date:** ${conversation.created ? new Date(conversation.created).toLocaleString() : "—"}`);
@@ -476,7 +476,7 @@ function ConversationViewer({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `boardroom-discussion-${conversationId}.md`;
+    a.download = `task-force-discussion-${conversationId}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

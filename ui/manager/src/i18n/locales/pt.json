@@ -2089,12 +2089,12 @@
     "noProgressAbort": "Abortar"
   },
   "boardroom": {
-    "title": "Boardroom",
+    "title": "EDDI",
     "tabThreads": "Tópicos",
     "sidebarDrawer": "Navegação da barra lateral",
-    "boardList": "Lista de boardrooms",
+    "boardList": "Lista de forças-tarefa",
     "dashboard": {
-      "title": "Seus Boardrooms",
+      "title": "Forças-tarefa ativas",
       "subtitle": "Crie e gerencie seus conselhos consultivos de IA",
       "createFirst": "Crie seu primeiro boardroom",
       "createFirstDesc": "Configure um conselho consultivo de IA com consultores especializados para ajudá-lo a tomar melhores decisões.",
@@ -2115,7 +2115,13 @@
       "deleteSuccess": "Boardroom excluído",
       "deleteError": "Falha ao excluir o boardroom",
       "gridView": "Visualização em grade",
-      "listView": "Visualização em lista"
+      "listView": "Visualização em lista",
+      "assembleTaskForce": "Montar força-tarefa",
+      "deployAgent": "Implantar agente",
+      "pillars": "Continuidade dos negócios · Planejamento de sucessão · Resolução colaborativa",
+      "taskForcesLabel": "Forças-tarefa ativas",
+      "loadError": "Não foi possível carregar seu espaço de trabalho. Tente novamente.",
+      "viewToggle": "Modo de visualização"
     },
     "wizard": {
       "step1Title": "Escolha um estilo",
@@ -2240,11 +2246,11 @@
       "emptyTitle": "Start a conversation"
     },
     "sidebar": {
-      "boards": "Boardrooms",
+      "boards": "Forças-tarefa",
       "threads": "Tópicos",
       "sessions": "Sessões",
       "threadWith": "com {{name}}",
-      "newBoardroom": "Novo Boardroom",
+      "newBoardroom": "Montar força-tarefa",
       "collapse": "Recolher barra lateral",
       "expand": "Expandir barra lateral"
     },
@@ -2263,9 +2269,9 @@
     "openMenu": "Open menu",
     "closeSidebar": "Close sidebar",
     "toggleSidebar": "Toggle sidebar",
-    "newBoard": "New Boardroom",
-    "boardsLabel": "Boardrooms",
-    "untitled": "Untitled Board",
+    "newBoard": "Montar força-tarefa",
+    "boardsLabel": "Forças-tarefa",
+    "untitled": "Força-tarefa sem título",
     "toggleTheme": "Toggle theme",
     "themeSystem": "System",
     "themeDark": "Dark",
@@ -2321,5 +2327,42 @@
     "refCopied": "Copied: {{ref}}",
     "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
     "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead."
+  },
+  "workforce": {
+    "title": "Sua força de trabalho digital",
+    "count": "{{count}} especialistas",
+    "agent": "Especialista digital",
+    "ready": "Pronto",
+    "addAgent": "Implantar agente",
+    "unnamed": "Agente sem nome",
+    "sectionLabel": "Força de trabalho"
+  },
+  "knowledgeHealth": {
+    "title": "Saúde do conhecimento",
+    "workforceSize": "Tamanho da equipe",
+    "workforceSizeDesc": "Total de especialistas digitais implantados",
+    "activeRate": "Taxa de atividade",
+    "activeRateDesc": "Agentes ativos nos últimos 30 dias",
+    "taskForces": "Forças-tarefa",
+    "taskForcesDesc": "Grupos de agentes colaborativos",
+    "dormantAgents": "Inativos",
+    "dormantAgentsDesc": "Agentes não usados há mais de 30 dias",
+    "statusHealthy": "Saudável",
+    "statusModerate": "Moderado",
+    "statusAtRisk": "Em risco",
+    "msgHealthy": "{{rate}}% da sua força de trabalho digital esteve ativa nos últimos 30 dias",
+    "msgModerate": "Alguns especialistas digitais não foram consultados recentemente",
+    "msgAtRisk": "A maior parte da sua força de trabalho está inativa — considere ativá-la"
+  },
+  "quickActions": {
+    "title": "Ações rápidas",
+    "assembleTaskForce": "Montar força-tarefa",
+    "assembleTaskForceDesc": "Reunir especialistas para resolver desafios complexos",
+    "chatWithAgent": "Conversar com agente",
+    "chatWithAgentDesc": "Ter uma conversa privada com um especialista digital",
+    "viewInsights": "Ver insights",
+    "viewInsightsDesc": "Acompanhar a cobertura de conhecimento da equipe",
+    "manageWorkforce": "Gerenciar força de trabalho",
+    "manageWorkforceDesc": "Configurar e implantar especialistas digitais"
   }
 }

@@ -120,11 +120,11 @@ function BoardroomCard({
       {
         onSuccess: () =>
           toast.success(
-            t("boardroom.dashboard.duplicateSuccess", "Boardroom duplicated"),
+            t("boardroom.dashboard.duplicateSuccess", "Task Force duplicated"),
           ),
         onError: () =>
           toast.error(
-            t("boardroom.dashboard.duplicateError", "Failed to duplicate boardroom"),
+            t("boardroom.dashboard.duplicateError", "Failed to duplicate task force"),
           ),
       },
     );
@@ -136,13 +136,13 @@ function BoardroomCard({
       {
         onSuccess: () => {
           toast.success(
-            t("boardroom.dashboard.deleteSuccess", "Boardroom deleted"),
+            t("boardroom.dashboard.deleteSuccess", "Task Force deleted"),
           );
           setDeleteOpen(false);
         },
         onError: () =>
           toast.error(
-            t("boardroom.dashboard.deleteError", "Failed to delete boardroom"),
+            t("boardroom.dashboard.deleteError", "Failed to delete task force"),
           ),
       },
     );
@@ -173,7 +173,7 @@ function BoardroomCard({
                 </span>
               )}
               <h3 className="min-w-0 flex-1 text-base font-semibold text-foreground line-clamp-1">
-                {name || t("boardroom.card.untitled", "Untitled Board")}
+                {name || t("boardroom.card.untitled", "Untitled Task Force")}
               </h3>
               {/* Quick actions dropdown */}
               <DropdownMenu>
@@ -263,7 +263,7 @@ function BoardroomCard({
                   <StackedAvatarsInline members={members} />
                 ) : (
                   <span className="text-xs text-muted-foreground">
-                    {t("boardroom.card.noMembers", "No advisors")}
+                    {t("boardroom.card.noMembers", "No experts")}
                   </span>
                 )}
               </div>
@@ -271,7 +271,7 @@ function BoardroomCard({
               {/* End — meta */}
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 <span>
-                  {t("boardroom.card.advisorCount", "{{count}} advisors", {
+                  {t("boardroom.card.advisorCount", "{{count}} experts", {
                     count: members.length,
                   })}
                 </span>
@@ -293,7 +293,7 @@ function BoardroomCard({
             )}
             <div className="min-w-0 flex-1">
               <h3 className="text-sm font-semibold text-foreground line-clamp-1">
-                {name || t("boardroom.card.untitled", "Untitled Board")}
+                {name || t("boardroom.card.untitled", "Untitled Task Force")}
               </h3>
               {description && (
                 <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">
@@ -318,7 +318,7 @@ function BoardroomCard({
                 <StackedAvatarsInline members={members} />
               ) : (
                 <span className="text-xs text-muted-foreground">
-                  {t("boardroom.card.noMembers", "No advisors")}
+                  {t("boardroom.card.noMembers", "No experts")}
                 </span>
               )}
             </div>
@@ -326,7 +326,7 @@ function BoardroomCard({
             {/* Meta */}
             <div className="hidden md:flex items-center gap-3 text-xs text-muted-foreground shrink-0">
               <span>
-                {t("boardroom.card.advisorCount", "{{count}} advisors", {
+                {t("boardroom.card.advisorCount", "{{count}} experts", {
                   count: members.length,
                 })}
               </span>
@@ -402,10 +402,10 @@ function BoardroomCard({
       <AlertDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        title={t("boardroom.dashboard.deleteBoardroom", "Delete Boardroom")}
+        title={t("boardroom.dashboard.deleteBoardroom", "Dissolve Task Force")}
         description={t(
           "boardroom.dashboard.deleteConfirm",
-          "Are you sure you want to delete this boardroom? This action cannot be undone.",
+          "Are you sure you want to dissolve this task force? This action cannot be undone.",
         )}
         confirmLabel={t("common.delete", "Delete")}
         cancelLabel={t("common.cancel", "Cancel")}

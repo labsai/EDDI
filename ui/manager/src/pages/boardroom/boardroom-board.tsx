@@ -226,7 +226,7 @@ function BoardroomBoard() {
       <div className="flex items-center justify-between ps-4 pe-4 py-2 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
-            {groupConfig?.name ?? t("boardroom.board.title", "Board")}
+            {groupConfig?.name ?? t("boardroom.board.title", "Task Force")}
           </h2>
           {isStreaming && (
             <span className="flex items-center gap-1 text-xs text-amber-500">
@@ -255,8 +255,8 @@ function BoardroomBoard() {
               if (!showMembers) panelTriggerRef.current = document.activeElement as HTMLElement;
               setShowMembers((v) => !v);
             }}
-            className={cn("h-8 w-8", showMembers && "bg-indigo-50 dark:bg-indigo-500/10")}
-            aria-label={t("boardroom.board.members", "Members")}
+            className={cn("h-8 w-8", showMembers && "bg-primary/10")}
+            aria-label={t("boardroom.board.members", "Team")}
             aria-expanded={showMembers}
           >
             <UsersIcon />
@@ -268,7 +268,7 @@ function BoardroomBoard() {
               if (!showHistory) panelTriggerRef.current = document.activeElement as HTMLElement;
               setShowHistory((v) => !v);
             }}
-            className={cn("h-8 w-8", showHistory && "bg-indigo-50 dark:bg-indigo-500/10")}
+            className={cn("h-8 w-8", showHistory && "bg-primary/10")}
             aria-label={t("boardroom.board.sessions", "Sessions")}
             aria-expanded={showHistory}
           >
@@ -278,8 +278,8 @@ function BoardroomBoard() {
             to={`/boardroom/${boardId}/history`}
             className={cn(
               "inline-flex items-center justify-center rounded-md h-8 w-8 transition-colors",
-              "hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              "hover:bg-muted text-muted-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             )}
             aria-label={t("boardroom.board.viewHistory", "View history")}
           >
@@ -289,8 +289,8 @@ function BoardroomBoard() {
             to={`/boardroom/${boardId}/settings?version=${version}`}
             className={cn(
               "inline-flex items-center justify-center rounded-md h-8 w-8 transition-colors",
-              "hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              "hover:bg-muted text-muted-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             )}
             aria-label={t("boardroom.settings.title", "Settings")}
           >
@@ -316,7 +316,7 @@ function BoardroomBoard() {
               <p className="text-sm text-slate-400 dark:text-slate-500">
                 {t(
                   "boardroom.board.emptyDescription",
-                  "Ask a question and your advisory board will discuss it.",
+                  "Ask a question and your task force will discuss it.",
                 )}
               </p>
               {conversations && conversations.length > 0 && (
@@ -359,7 +359,7 @@ function BoardroomBoard() {
             ref={membersRef}
             role="dialog"
             aria-modal="true"
-            aria-label={t("boardroom.board.membersPanel", "Members panel")}
+            aria-label={t("boardroom.board.membersPanel", "Team panel")}
             onKeyDown={(e) => handlePanelKeyDown(e, membersRef)}
             className={cn(
               "fixed inset-y-0 end-0 z-40 w-80",

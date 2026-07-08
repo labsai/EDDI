@@ -56,7 +56,7 @@ describe("GroupDetailPage", () => {
     renderGroupDetail();
 
     await waitFor(() => {
-      const matches = screen.getAllByText(/Peer Review/);
+      const matches = screen.getAllByText(/Quality Review/);
       expect(matches.length).toBeGreaterThanOrEqual(1);
     });
   });

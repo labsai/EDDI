@@ -670,38 +670,38 @@ export const STYLE_INFO: Record<
   { label: string; flow: string; icon: string }
 > = {
   ROUND_TABLE: {
-    label: "Round Table",
-    flow: "Opinion → Discussion → Synthesis",
+    label: "Collaborative Council",
+    flow: "All experts contribute perspectives in structured rounds",
     icon: "🗣️",
   },
   PEER_REVIEW: {
-    label: "Peer Review",
-    flow: "Opinion → Critique → Revision → Synthesis",
+    label: "Quality Review",
+    flow: "Specialists review and refine each other's analysis",
     icon: "🔍",
   },
   DEVIL_ADVOCATE: {
-    label: "Devil's Advocate",
-    flow: "Opinion → Challenge → Defense → Synthesis",
+    label: "Stress Test",
+    flow: "A challenger rigorously questions every assumption",
     icon: "😈",
   },
   DELPHI: {
-    label: "Delphi",
-    flow: "Independent → Anonymous Sharing → Revised → Synthesis",
+    label: "Expert Forecast",
+    flow: "Independent analysts converge on predictions through rounds",
     icon: "🔮",
   },
   DEBATE: {
-    label: "Debate",
-    flow: "Pro Opening → Con Opening → Rebuttals → Judgment",
+    label: "Structured Deliberation",
+    flow: "Balanced pro/con arguments before critical decisions",
     icon: "⚖️",
   },
   TASK_FORCE: {
-    label: "Task Force",
-    flow: "Plan → Execute → Verify → Synthesize",
+    label: "Operational Task Force",
+    flow: "Agents plan, execute, and verify together",
     icon: "🎯",
   },
   CUSTOM: {
-    label: "Custom",
-    flow: "User-defined phases",
+    label: "Custom Framework",
+    flow: "Define your own discussion phases",
     icon: "🛠️",
   },
 };

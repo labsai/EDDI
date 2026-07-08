@@ -1,9 +1,10 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, memo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Check, Clipboard, Star } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { AdvisorAvatar } from "@/components/boardroom/advisor-avatar";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Check, Clipboard, Star, MessageCircle } from "lucide-react";
+import { cn, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -67,11 +68,15 @@ interface AdvisorResponseCardProps {
   displayName: string;
   agentId: string;
   role?: string | null;
+  /** Badge variant for the role label (matches manager group chat style) */
+  roleBadgeVariant?: "default" | "secondary" | "success" | "warning" | "destructive" | "outline";
   content: string | null;
 
   boardId: string;
   /** Optional session ID for pin storage */
   sessionId?: string;
+  /** Optional timestamp string to display */
+  timestamp?: string;
 
   className?: string;
 }
@@ -81,32 +86,47 @@ interface AdvisorResponseCardProps {
 function TypingIndicator() {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-1 py-1" role="status" aria-label={t("boardroom.board.loadingResponse", "Loading response")}>
+    <div className="flex items-center gap-1.5 py-1" role="status" aria-label={t("boardroom.board.loadingResponse", "Loading response")}>
       <span
-        className="inline-block h-2 w-2 rounded-full bg-muted-foreground animate-bounce"
+        className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
         style={{ animationDelay: "0ms" }}
       />
       <span
-        className="inline-block h-2 w-2 rounded-full bg-muted-foreground animate-bounce"
+        className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
         style={{ animationDelay: "160ms" }}
       />
       <span
-        className="inline-block h-2 w-2 rounded-full bg-muted-foreground animate-bounce"
+        className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
         style={{ animationDelay: "320ms" }}
       />
     </div>
   );
 }
 
+// ─── Avatar ──────────────────────────────────────────────────────
+
+function ResponseAvatar({ name }: { name: string; agentId: string }) {
+  return (
+    <div
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold bg-muted text-muted-foreground"
+      aria-hidden
+    >
+      {getInitials(name)}
+    </div>
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────
 
-function AdvisorResponseCard({
+const AdvisorResponseCard = memo(function AdvisorResponseCard({
   displayName,
   agentId,
   role,
+  roleBadgeVariant = "secondary",
   content,
   boardId,
   sessionId = "",
+  timestamp,
   className,
 }: AdvisorResponseCardProps) {
   const { t } = useTranslation();
@@ -142,105 +162,131 @@ function AdvisorResponseCard({
     });
   };
 
+  const isStreaming = content === null;
+
   return (
     <div
       className={cn(
-        "group relative rounded-xl border p-4",
-        "bg-card border-border",
+        "group relative flex gap-3 py-3",
         className,
       )}
-      style={{ animation: "br-message-in 250ms ease-out both" }}
+      style={{ animation: "br-message-in 300ms ease-out both" }}
     >
-      {/* ── Action buttons (top-end, hover-reveal) ──────────── */}
-      {content !== null && (
+      {/* Avatar */}
+      <ResponseAvatar name={displayName} agentId={agentId} />
+
+      {/* Content column */}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        {/* Name + role + actions row */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-foreground">
+            {displayName}
+          </span>
+          {role && (
+            <Badge
+              variant={roleBadgeVariant}
+              className="text-[10px] px-1.5 py-0 h-4 font-normal"
+            >
+              {role}
+            </Badge>
+          )}
+          {timestamp && (
+            <span className="text-[10px] text-muted-foreground/60 select-none">
+              {timestamp}
+            </span>
+          )}
+
+          {/* Hover actions */}
+          {content !== null && (
+            <div
+              className={cn(
+                "ms-auto flex items-center gap-0.5",
+                "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+                "transition-opacity duration-150",
+              )}
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground/80"
+                onClick={handleCopy}
+                aria-label={
+                  copied
+                    ? t("boardroom.board.copied", "Copied!")
+                    : t("boardroom.board.copyResponse", "Copy response")
+                }
+              >
+                {copied ? (
+                  <Check className="h-3 w-3 text-emerald-500" />
+                ) : (
+                  <Clipboard className="h-3 w-3" />
+                )}
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground hover:text-amber-500 dark:hover:text-amber-400"
+                onClick={handleTogglePin}
+                aria-label={
+                  pinned
+                    ? t("boardroom.board.unpin", "Unpin response")
+                    : t("boardroom.board.pin", "Pin response")
+                }
+              >
+                <Star
+                  className={cn(
+                    "h-3 w-3",
+                    pinned && "fill-amber-400 text-amber-400",
+                  )}
+                />
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Message bubble */}
         <div
           className={cn(
-            "absolute top-2 end-2 flex items-center gap-0.5",
-            "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
-            "transition-opacity duration-150",
+            "rounded-2xl rounded-ss-md px-4 py-2.5 text-sm leading-relaxed",
+            "bg-card border border-border text-card-foreground",
+            isStreaming && "min-w-[80px]",
           )}
         >
-          {/* Copy button */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground/80"
-            onClick={handleCopy}
-            aria-label={
-              copied
-                ? t("boardroom.board.copied", "Copied!")
-                : t("boardroom.board.copyResponse", "Copy response")
-            }
-          >
-            {copied ? (
-              <Check className="h-3.5 w-3.5 text-emerald-500" />
-            ) : (
-              <Clipboard className="h-3.5 w-3.5" />
-            )}
-          </Button>
-
-          {/* Pin / bookmark button */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-amber-500 dark:hover:text-amber-400"
-            onClick={handleTogglePin}
-            aria-label={
-              pinned
-                ? t("boardroom.board.unpin", "Unpin response")
-                : t("boardroom.board.pin", "Pin response")
-            }
-          >
-            <Star
-              className={cn(
-                "h-3.5 w-3.5",
-                pinned && "fill-amber-400 text-amber-400",
-              )}
-            />
-          </Button>
+          {isStreaming ? (
+            <TypingIndicator />
+          ) : (
+            <div className="prose prose-sm dark:prose-invert max-w-none [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {content}
+              </ReactMarkdown>
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Header row */}
-      <div className="flex items-center gap-2 mb-2">
-        <AdvisorAvatar name={displayName} agentId={agentId} size="sm" />
-        <span className="font-medium text-sm text-foreground">
-          {displayName}
-        </span>
-        {role && (
-          <Badge variant="secondary" className="text-xs">
-            {role}
-          </Badge>
-        )}
-      </div>
-
-      {/* Content */}
-      <div className="ps-10">
-        {content === null ? (
-          <TypingIndicator />
-        ) : (
-          <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
-            {content}
-          </p>
-        )}
-      </div>
-
-      {/* Footer — follow-up link */}
-      {content !== null && (
-        <div className="ps-10 mt-3">
-          <Button variant="ghost" size="sm" className="text-primary p-0 h-auto" asChild>
-            <Link
-              to={`/boardroom/${boardId}/thread/${agentId}`}
-              state={{ fromGroup: true, question: "", response: content }}
+        {/* Footer — follow-up link */}
+        {content !== null && (
+          <div className="flex items-center gap-2 ps-1 mt-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-primary hover:text-primary/80 p-0 h-auto text-xs gap-1"
+              asChild
             >
-              {t("boardroom.board.askMore", "Ask {{name}} more →", { name: displayName })}
-            </Link>
-          </Button>
-        </div>
-      )}
+              <Link
+                to={`/boardroom/${boardId}/thread/${agentId}`}
+                state={{ fromGroup: true, question: "", response: content }}
+              >
+                <MessageCircle className="h-3 w-3" />
+                {t("boardroom.board.askMore", "Ask {{name}} more →", { name: displayName })}
+              </Link>
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
-}
+});
 
 export { AdvisorResponseCard };
 export type { AdvisorResponseCardProps, PinnedResponse };

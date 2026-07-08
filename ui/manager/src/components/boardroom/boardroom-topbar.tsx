@@ -61,7 +61,7 @@ export function BoardroomTopbar({
         {title || (
           <span className="flex items-center gap-1.5">
             <span className="text-primary" aria-hidden="true">✦</span>
-            {t("boardroom.title", "Boardroom")}
+            {t("boardroom.title", "EDDI")}
           </span>
         )}
       </div>

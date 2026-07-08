@@ -2089,9 +2089,9 @@
     "noProgressAbort": "中止"
   },
   "boardroom": {
-    "title": "ボードルーム",
+    "title": "EDDI",
     "dashboard": {
-      "title": "あなたのボードルーム",
+      "title": "アクティブなタスクフォース",
       "subtitle": "AI諮問委員会を作成・管理",
       "createFirst": "最初のボードルームを作成",
       "createFirstDesc": "専門アドバイザーを備えたAI諮問委員会を設置し、より良い意思決定を支援します。",
@@ -2112,7 +2112,13 @@
       "deleteSuccess": "ボードルームを削除しました",
       "deleteError": "ボードルームの削除に失敗しました",
       "gridView": "グリッド表示",
-      "listView": "リスト表示"
+      "listView": "リスト表示",
+      "assembleTaskForce": "タスクフォースを編成",
+      "deployAgent": "エージェントをデプロイ",
+      "pillars": "事業継続 · 後継者計画 · 協働的問題解決",
+      "taskForcesLabel": "アクティブなタスクフォース",
+      "loadError": "ワークスペースを読み込めませんでした。再試行してください。",
+      "viewToggle": "表示モード"
     },
     "wizard": {
       "step1Title": "スタイルを選択",
@@ -2237,11 +2243,11 @@
       "emptyTitle": "Start a conversation"
     },
     "sidebar": {
-      "boards": "ボードルーム",
+      "boards": "タスクフォース",
       "threads": "スレッド",
       "sessions": "セッション",
       "threadWith": "{{name}} とのスレッド",
-      "newBoardroom": "新規ボードルーム",
+      "newBoardroom": "タスクフォースを編成",
       "collapse": "サイドバーを折りたたむ",
       "expand": "サイドバーを展開"
     },
@@ -2250,7 +2256,7 @@
       "threads": "スレッド"
     },
     "sidebarDrawer": "サイドバーナビゲーション",
-    "boardList": "ボードルーム一覧",
+    "boardList": "タスクフォース一覧",
     "common": {
       "delete": "削除",
       "cancel": "キャンセル",
@@ -2262,9 +2268,9 @@
     "openMenu": "Open menu",
     "closeSidebar": "Close sidebar",
     "toggleSidebar": "Toggle sidebar",
-    "newBoard": "New Boardroom",
-    "boardsLabel": "Boardrooms",
-    "untitled": "Untitled Board",
+    "newBoard": "タスクフォースを編成",
+    "boardsLabel": "タスクフォース",
+    "untitled": "無題のタスクフォース",
     "toggleTheme": "Toggle theme",
     "themeSystem": "System",
     "themeDark": "Dark",
@@ -2321,5 +2327,42 @@
     "refCopied": "Copied: {{ref}}",
     "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
     "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead."
+  },
+  "workforce": {
+    "title": "デジタルワークフォース",
+    "count": "{{count}}名のエキスパート",
+    "agent": "デジタルエキスパート",
+    "ready": "準備完了",
+    "addAgent": "エージェントをデプロイ",
+    "unnamed": "名前のないエージェント",
+    "sectionLabel": "ワークフォース"
+  },
+  "knowledgeHealth": {
+    "title": "ナレッジヘルス",
+    "workforceSize": "ワークフォース規模",
+    "workforceSizeDesc": "デプロイ済みデジタルエキスパートの合計",
+    "activeRate": "稼働率",
+    "activeRateDesc": "過去30日間にアクティブなエージェント",
+    "taskForces": "タスクフォース",
+    "taskForcesDesc": "協働エージェントグループ",
+    "dormantAgents": "休止中",
+    "dormantAgentsDesc": "30日以上未使用のエージェント",
+    "statusHealthy": "良好",
+    "statusModerate": "注意",
+    "statusAtRisk": "要対応",
+    "msgHealthy": "デジタルワークフォースの{{rate}}%が過去30日間アクティブでした",
+    "msgModerate": "一部のデジタルエキスパートが最近相談されていません",
+    "msgAtRisk": "ワークフォースの大部分が休止中です—活用を検討してください"
+  },
+  "quickActions": {
+    "title": "クイックアクション",
+    "assembleTaskForce": "タスクフォースを編成",
+    "assembleTaskForceDesc": "エキスパートを集めて複雑な課題を解決",
+    "chatWithAgent": "エージェントとチャット",
+    "chatWithAgentDesc": "デジタルエキスパートと1対1の会話",
+    "viewInsights": "インサイトを表示",
+    "viewInsightsDesc": "チームの知識カバレッジを追跡",
+    "manageWorkforce": "ワークフォースを管理",
+    "manageWorkforceDesc": "デジタルエキスパートを設定・デプロイ"
   }
 }

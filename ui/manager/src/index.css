@@ -62,6 +62,49 @@
     border-color: var(--color-border);
   }
 
+  /* ── Custom scrollbars ────────────────────────────────────── */
+
+  /* Standard property (Firefox, modern Chrome 121+) */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+
+  .dark * {
+    scrollbar-color: #3f3f46 transparent;
+  }
+
+  /* WebKit (Chrome, Edge, Safari) */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted-foreground);
+  }
+
+  .dark ::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: #52525b;
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
   /* Ensure all interactive elements show pointer cursor */
   button,
   [role="button"],

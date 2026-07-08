@@ -2089,12 +2089,12 @@
     "noProgressAbort": "निरस्त करें"
   },
   "boardroom": {
-    "title": "बोर्डरूम",
+    "title": "EDDI",
     "tabThreads": "थ्रेड",
     "sidebarDrawer": "साइडबार नेविगेशन",
-    "boardList": "बोर्डरूम सूची",
+    "boardList": "कार्य दल सूची",
     "dashboard": {
-      "title": "आपके बोर्डरूम",
+      "title": "सक्रिय कार्य दल",
       "subtitle": "अपनी AI सलाहकार परिषदें बनाएं और प्रबंधित करें",
       "createFirst": "अपना पहला बोर्डरूम बनाएं",
       "createFirstDesc": "बेहतर निर्णय लेने में मदद के लिए विशेषज्ञ सलाहकारों के साथ एक AI सलाहकार परिषद स्थापित करें।",
@@ -2115,7 +2115,13 @@
       "deleteSuccess": "बोर्डरूम हटाया गया",
       "deleteError": "बोर्डरूम हटाने में विफल",
       "gridView": "ग्रिड दृश्य",
-      "listView": "सूची दृश्य"
+      "listView": "सूची दृश्य",
+      "assembleTaskForce": "कार्य दल बनाएं",
+      "deployAgent": "एजेंट तैनात करें",
+      "pillars": "व्यापार निरंतरता · उत्तराधिकार योजना · सहयोगी समस्या समाधान",
+      "taskForcesLabel": "सक्रिय कार्य दल",
+      "loadError": "आपका कार्यक्षेत्र लोड नहीं हो सका। कृपया पुनः प्रयास करें।",
+      "viewToggle": "दृश्य मोड"
     },
     "wizard": {
       "step1Title": "एक शैली चुनें",
@@ -2240,11 +2246,11 @@
       "emptyTitle": "Start a conversation"
     },
     "sidebar": {
-      "boards": "बोर्डरूम",
+      "boards": "कार्य दल",
       "threads": "थ्रेड",
       "sessions": "सत्र",
       "threadWith": "{{name}} के साथ",
-      "newBoardroom": "नया बोर्डरूम",
+      "newBoardroom": "कार्य दल बनाएं",
       "collapse": "साइडबार छोटा करें",
       "expand": "साइडबार बड़ा करें"
     },
@@ -2263,9 +2269,9 @@
     "openMenu": "Open menu",
     "closeSidebar": "Close sidebar",
     "toggleSidebar": "Toggle sidebar",
-    "newBoard": "New Boardroom",
-    "boardsLabel": "Boardrooms",
-    "untitled": "Untitled Board",
+    "newBoard": "कार्य दल बनाएं",
+    "boardsLabel": "कार्य दल",
+    "untitled": "शीर्षकहीन कार्य दल",
     "toggleTheme": "Toggle theme",
     "themeSystem": "System",
     "themeDark": "Dark",
@@ -2321,5 +2327,42 @@
     "refCopied": "Copied: {{ref}}",
     "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
     "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead."
+  },
+  "workforce": {
+    "title": "आपका डिजिटल कार्यबल",
+    "count": "{{count}} विशेषज्ञ",
+    "agent": "डिजिटल विशेषज्ञ",
+    "ready": "तैयार",
+    "addAgent": "एजेंट तैनात करें",
+    "unnamed": "अनाम एजेंट",
+    "sectionLabel": "कार्यबल"
+  },
+  "knowledgeHealth": {
+    "title": "ज्ञान स्वास्थ्य",
+    "workforceSize": "कार्यबल आकार",
+    "workforceSizeDesc": "कुल तैनात डिजिटल विशेषज्ञ",
+    "activeRate": "सक्रियता दर",
+    "activeRateDesc": "पिछले 30 दिनों में सक्रिय एजेंट",
+    "taskForces": "कार्य दल",
+    "taskForcesDesc": "सहयोगी एजेंट समूह",
+    "dormantAgents": "निष्क्रिय",
+    "dormantAgentsDesc": "30+ दिनों से अप्रयुक्त एजेंट",
+    "statusHealthy": "स्वस्थ",
+    "statusModerate": "मध्यम",
+    "statusAtRisk": "जोखिम में",
+    "msgHealthy": "आपके डिजिटल कार्यबल का {{rate}}% पिछले 30 दिनों में सक्रिय था",
+    "msgModerate": "कुछ डिजिटल विशेषज्ञों से हाल ही में परामर्श नहीं किया गया",
+    "msgAtRisk": "आपके अधिकांश कार्यबल निष्क्रिय हैं — उन्हें सक्रिय करने पर विचार करें"
+  },
+  "quickActions": {
+    "title": "त्वरित कार्य",
+    "assembleTaskForce": "कार्य दल बनाएं",
+    "assembleTaskForceDesc": "जटिल चुनौतियों को हल करने के लिए विशेषज्ञों को इकट्ठा करें",
+    "chatWithAgent": "एजेंट से चैट करें",
+    "chatWithAgentDesc": "किसी डिजिटल विशेषज्ञ से निजी बातचीत करें",
+    "viewInsights": "अंतर्दृष्टि देखें",
+    "viewInsightsDesc": "अपनी टीम के ज्ञान कवरेज को ट्रैक करें",
+    "manageWorkforce": "कार्यबल प्रबंधित करें",
+    "manageWorkforceDesc": "डिजिटल विशेषज्ञों को कॉन्फ़िगर और तैनात करें"
   }
 }

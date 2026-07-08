@@ -356,7 +356,7 @@ function BoardroomHistory() {
         >
           <Link to={`/boardroom/${boardId}`}>
             <ArrowLeft className="h-4 w-4" />
-            {t("boardroom.history.backToBoard", "Back to Board")}
+            {t("boardroom.history.backToBoard", "Back to Task Force")}
           </Link>
         </Button>
         <div className="flex-1" />

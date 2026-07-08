@@ -2089,9 +2089,9 @@
     "noProgressAbort": "중단"
   },
   "boardroom": {
-    "title": "보드룸",
+    "title": "EDDI",
     "dashboard": {
-      "title": "내 보드룸",
+      "title": "활성 태스크 포스",
       "subtitle": "AI 자문위원회를 생성하고 관리하세요",
       "createFirst": "첫 번째 보드룸 만들기",
       "createFirstDesc": "전문 자문위원이 있는 AI 자문위원회를 구성하여 더 나은 의사결정을 내리세요.",
@@ -2112,7 +2112,13 @@
       "deleteSuccess": "보드룸이 삭제되었습니다",
       "deleteError": "보드룸 삭제에 실패했습니다",
       "gridView": "그리드 보기",
-      "listView": "목록 보기"
+      "listView": "목록 보기",
+      "assembleTaskForce": "태스크 포스 구성",
+      "deployAgent": "에이전트 배치",
+      "pillars": "사업 연속성 · 승계 계획 · 협력적 문제 해결",
+      "taskForcesLabel": "활성 태스크 포스",
+      "loadError": "워크스페이스를 로드할 수 없습니다. 다시 시도하세요.",
+      "viewToggle": "보기 모드"
     },
     "wizard": {
       "step1Title": "스타일 선택",
@@ -2237,11 +2243,11 @@
       "emptyTitle": "Start a conversation"
     },
     "sidebar": {
-      "boards": "보드룸",
+      "boards": "태스크 포스",
       "threads": "스레드",
       "sessions": "세션",
       "threadWith": "{{name}}와(과)",
-      "newBoardroom": "새 보드룸",
+      "newBoardroom": "태스크 포스 구성",
       "collapse": "사이드바 접기",
       "expand": "사이드바 펼치기"
     },
@@ -2250,7 +2256,7 @@
       "threads": "스레드"
     },
     "sidebarDrawer": "사이드바 내비게이션",
-    "boardList": "보드룸 목록",
+    "boardList": "태스크 포스 목록",
     "common": {
       "delete": "삭제",
       "cancel": "취소",
@@ -2262,9 +2268,9 @@
     "openMenu": "Open menu",
     "closeSidebar": "Close sidebar",
     "toggleSidebar": "Toggle sidebar",
-    "newBoard": "New Boardroom",
-    "boardsLabel": "Boardrooms",
-    "untitled": "Untitled Board",
+    "newBoard": "태스크 포스 구성",
+    "boardsLabel": "태스크 포스",
+    "untitled": "제목 없는 태스크 포스",
     "toggleTheme": "Toggle theme",
     "themeSystem": "System",
     "themeDark": "Dark",
@@ -2321,5 +2327,42 @@
     "refCopied": "Copied: {{ref}}",
     "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
     "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead."
+  },
+  "workforce": {
+    "title": "디지털 인력",
+    "count": "전문가 {{count}}명",
+    "agent": "디지털 전문가",
+    "ready": "준비 완료",
+    "addAgent": "에이전트 배치",
+    "unnamed": "이름 없는 에이전트",
+    "sectionLabel": "인력"
+  },
+  "knowledgeHealth": {
+    "title": "지식 건강도",
+    "workforceSize": "인력 규모",
+    "workforceSizeDesc": "배치된 디지털 전문가 수",
+    "activeRate": "활성 비율",
+    "activeRateDesc": "최근 30일 내 활성 에이전트",
+    "taskForces": "태스크 포스",
+    "taskForcesDesc": "협업 에이전트 그룹",
+    "dormantAgents": "비활성",
+    "dormantAgentsDesc": "30일 이상 미사용 에이전트",
+    "statusHealthy": "건강",
+    "statusModerate": "보통",
+    "statusAtRisk": "주의 필요",
+    "msgHealthy": "디지털 인력의 {{rate}}%가 지난 30일간 활성 상태였습니다",
+    "msgModerate": "일부 디지털 전문가가 최근 상담되지 않았습니다",
+    "msgAtRisk": "인력 대부분이 비활성 상태입니다 — 활용을 검토하세요"
+  },
+  "quickActions": {
+    "title": "빠른 작업",
+    "assembleTaskForce": "태스크 포스 구성",
+    "assembleTaskForceDesc": "전문가를 모아 복잡한 과제 해결",
+    "chatWithAgent": "에이전트와 채팅",
+    "chatWithAgentDesc": "디지털 전문가와 1:1 대화",
+    "viewInsights": "인사이트 보기",
+    "viewInsightsDesc": "팀의 지식 커버리지 추적",
+    "manageWorkforce": "인력 관리",
+    "manageWorkforceDesc": "디지털 전문가 구성 및 배치"
   }
 }

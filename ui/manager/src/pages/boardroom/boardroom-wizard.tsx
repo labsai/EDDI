@@ -163,7 +163,7 @@ function BoardroomWizard() {
       })),
       {
         id: BOARDROOM_PROGRESS_ID,
-        name: t("boardroom.wizard.settingUpBoard", "Setting up boardroom…"),
+        name: t("boardroom.wizard.settingUpBoard", "Assembling task force…"),
         status: "pending" as const,
       },
     ];
@@ -262,7 +262,7 @@ function BoardroomWizard() {
       );
 
       toast.success(
-        t("boardroom.wizard.success", "Boardroom created successfully!"),
+        t("boardroom.wizard.success", "Task Force assembled successfully!"),
       );
       setIsCreating(false);
       creatingRef.current = false;
@@ -275,7 +275,7 @@ function BoardroomWizard() {
         error: message,
       });
       toast.error(
-        t("boardroom.wizard.groupError", "Failed to create boardroom: {{error}}", {
+        t("boardroom.wizard.groupError", "Failed to assemble task force: {{error}}", {
           error: message,
         }),
       );

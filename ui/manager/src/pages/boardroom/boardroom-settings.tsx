@@ -247,7 +247,7 @@ function BoardroomSettings() {
   const handleSave = useCallback(async () => {
     if (!boardId || !config) return;
     if (!name.trim()) {
-      toast.error(t("boardroom.settings.nameRequired", "Board name is required"));
+      toast.error(t("boardroom.settings.nameRequired", "Task force name is required"));
       return;
     }
     const updatedConfig = {
@@ -264,7 +264,7 @@ function BoardroomSettings() {
         { id: boardId, version, config: updatedConfig },
       );
       toast.success(
-        t("boardroom.settings.saveSuccess", "Board settings saved")
+        t("boardroom.settings.saveSuccess", "Task force settings saved")
       );
     } catch {
       toast.error(
@@ -297,7 +297,7 @@ function BoardroomSettings() {
             toast.success(
               t(
                 "boardroom.settings.deleteAllSuccess",
-                "Board and all agents deleted"
+                "Task force and all agents deleted"
               )
             );
             navigate("/boardroom");
@@ -315,7 +315,7 @@ function BoardroomSettings() {
         {
           onSuccess: () => {
             toast.success(
-              t("boardroom.settings.deleteSuccess", "Board deleted")
+              t("boardroom.settings.deleteSuccess", "Task force deleted")
             );
             navigate("/boardroom");
           },
@@ -406,18 +406,18 @@ function BoardroomSettings() {
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group"
       >
         <ArrowLeft className="h-4 w-4" />
-        {t("boardroom.settings.backToBoard", "Back to Board")}
+        {t("boardroom.settings.backToBoard", "Back to Task Force")}
       </Link>
 
       {/* ── Page header ─────────────────────────────────────────── */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-foreground tracking-tight">
-          {name || t("boardroom.settings.untitled", "Untitled Board")}
+          {name || t("boardroom.settings.untitled", "Untitled Task Force")}
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
           {t(
             "boardroom.settings.subtitle",
-            "Configure your board's settings and team members"
+            "Configure your task force settings and workforce"
           )}
         </p>
       </div>
@@ -432,14 +432,14 @@ function BoardroomSettings() {
           id="section-general"
           description={t(
             "boardroom.settings.generalDesc",
-            "Basic configuration for your advisory board"
+            "Basic configuration for your task force"
           )}
         />
 
         <div className="space-y-5 rounded-xl border border-border bg-card p-5 shadow-sm">
           {/* Board Name */}
           <FormField
-            label={t("boardroom.settings.boardName", "Board Name")}
+            label={t("boardroom.settings.boardName", "Task Force Name")}
             htmlFor="settings-name"
           >
             <input
@@ -449,7 +449,7 @@ function BoardroomSettings() {
               onChange={(e) => setName(e.target.value)}
               placeholder={t(
                 "boardroom.settings.boardNameHint",
-                "Enter board name…"
+                "Enter task force name…"
               )}
               className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             />
@@ -467,7 +467,7 @@ function BoardroomSettings() {
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t(
                 "boardroom.settings.descriptionHint",
-                "What is this board about?"
+                "What is this task force about?"
               )}
               className="w-full rounded-lg border border-input bg-background ps-3 pe-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow resize-none"
             />
@@ -475,7 +475,7 @@ function BoardroomSettings() {
 
           {/* Discussion Style */}
           <FormField
-            label={t("boardroom.settings.discussionStyle", "Discussion Style")}
+            label={t("boardroom.settings.discussionStyle", "Collaboration Framework")}
             htmlFor="settings-style"
           >
             <select
@@ -567,11 +567,11 @@ function BoardroomSettings() {
               <path d="M16 3.13a4 4 0 0 1 0 7.75" />
             </svg>
           }
-          title={t("boardroom.settings.team", "Team Members")}
+          title={t("boardroom.settings.team", "Workforce")}
           id="section-team"
           description={t(
             "boardroom.settings.teamDesc",
-            "Manage the agents participating in your board"
+            "Manage the agents participating in your task force"
           )}
         />
 
@@ -722,12 +722,12 @@ function BoardroomSettings() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-foreground">
-                {t("boardroom.settings.deleteBoard", "Delete Boardroom")}
+                {t("boardroom.settings.deleteBoard", "Dissolve Task Force")}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {t(
                   "boardroom.settings.deleteBoardDesc",
-                  "Remove this board configuration. Agents will remain."
+                  "Remove this task force configuration. Agents will remain."
                 )}
               </p>
             </div>
@@ -741,7 +741,7 @@ function BoardroomSettings() {
               className="shrink-0"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              {t("boardroom.settings.deleteBoard", "Delete Boardroom")}
+              {t("boardroom.settings.deleteBoard", "Dissolve Task Force")}
             </Button>
           </div>
 
@@ -752,13 +752,13 @@ function BoardroomSettings() {
               <p className="text-sm font-medium text-foreground">
                 {t(
                   "boardroom.settings.deleteBoardAll",
-                  "Delete Boardroom + All Agents"
+                  "Dissolve Task Force + All Agents"
                 )}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {t(
                   "boardroom.settings.deleteBoardAllDesc",
-                  "Remove this board and all member agents permanently."
+                  "Remove this task force and all member agents permanently."
                 )}
               </p>
             </div>
@@ -774,7 +774,7 @@ function BoardroomSettings() {
               <Trash2 className="h-3.5 w-3.5" />
               {t(
                 "boardroom.settings.deleteBoardAll",
-                "Delete Boardroom + All Agents"
+                "Dissolve Task Force + All Agents"
               )}
             </Button>
           </div>
@@ -819,19 +819,19 @@ function BoardroomSettings() {
           deleteMode === "all"
             ? t(
                 "boardroom.settings.deleteAllTitle",
-                "Delete Board & All Agents?"
+                "Dissolve Task Force & All Agents?"
               )
-            : t("boardroom.settings.deleteTitle", "Delete Board?")
+            : t("boardroom.settings.deleteTitle", "Dissolve Task Force?")
         }
         description={
           deleteMode === "all"
             ? t(
                 "boardroom.settings.deleteAllConfirm",
-                "This will permanently delete this boardroom and all its member agents. This action cannot be undone."
+                "This will permanently dissolve this task force and remove all its member agents. This action cannot be undone."
               )
             : t(
                 "boardroom.settings.deleteConfirm",
-                "This will permanently delete this boardroom configuration. Member agents will not be affected."
+                "This will permanently dissolve this task force configuration. Member agents will not be affected."
               )
         }
         confirmLabel={t("common.delete", "Delete")}

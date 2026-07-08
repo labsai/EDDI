@@ -1953,13 +1953,13 @@ export const handlers = [
 
   http.get("*/groupstore/groups/styles", () => {
     return HttpResponse.json({
-      ROUND_TABLE: { label: "Round Table", phases: ["OPINION", "SYNTHESIS"] },
-      PEER_REVIEW: { label: "Peer Review", phases: ["OPINION", "CRITIQUE", "REVISION", "SYNTHESIS"] },
-      DEVIL_ADVOCATE: { label: "Devil's Advocate", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
-      DELPHI: { label: "Delphi", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
-      DEBATE: { label: "Debate", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
-      TASK_FORCE: { label: "Task Force", phases: ["PLAN", "EXECUTE", "VERIFY", "SYNTHESIS"] },
-      CUSTOM: { label: "Custom", phases: [] },
+      ROUND_TABLE: { label: "Collaborative Council", phases: ["OPINION", "SYNTHESIS"] },
+      PEER_REVIEW: { label: "Quality Review", phases: ["OPINION", "CRITIQUE", "REVISION", "SYNTHESIS"] },
+      DEVIL_ADVOCATE: { label: "Stress Test", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
+      DELPHI: { label: "Expert Forecast", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
+      DEBATE: { label: "Structured Deliberation", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
+      TASK_FORCE: { label: "Operational Task Force", phases: ["PLAN", "EXECUTE", "VERIFY", "SYNTHESIS"] },
+      CUSTOM: { label: "Custom Framework", phases: [] },
     });
   }),
 

@@ -254,8 +254,7 @@ function ThreadInput({
     <div
       className={cn(
         "sticky bottom-0 ps-4 pe-4 py-3",
-        "border-t bg-white border-slate-200",
-        "dark:bg-slate-900 dark:border-slate-800",
+        "border-t bg-card border-border",
         className,
       )}
     >
@@ -265,8 +264,7 @@ function ThreadInput({
           <span
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full ps-3 pe-3 py-1 text-xs font-medium",
-              "bg-indigo-100 text-indigo-700",
-              "dark:bg-indigo-500/20 dark:text-indigo-300",
+              "bg-muted text-muted-foreground",
             )}
           >
             <Paperclip className="h-3 w-3" />
@@ -276,7 +274,7 @@ function ThreadInput({
               onClick={removeAttachment}
               className={cn(
                 "ms-0.5 rounded-full p-0.5",
-                "hover:bg-indigo-200 dark:hover:bg-indigo-500/30",
+                "hover:bg-muted-foreground/20",
                 "transition-colors",
               )}
               aria-label={t(
@@ -310,8 +308,7 @@ function ThreadInput({
           disabled={disabled}
           className={cn(
             "h-10 w-10 shrink-0 rounded-full",
-            "text-slate-500 hover:text-slate-700",
-            "dark:text-slate-400 dark:hover:text-slate-200",
+            "text-muted-foreground hover:text-foreground",
           )}
           aria-label={t("boardroom.thread.attachFile", "Attach file")}
         >
@@ -334,11 +331,11 @@ function ThreadInput({
           rows={1}
           className={cn(
             "flex-1 min-h-10 max-h-32 resize-none rounded-xl ps-4 pe-4 py-2.5",
-            "bg-slate-100 dark:bg-slate-800",
-            "text-sm text-slate-900 dark:text-slate-100",
-            "placeholder:text-slate-400 dark:placeholder:text-slate-500",
+            "bg-muted",
+            "text-sm text-foreground",
+            "placeholder:text-muted-foreground",
             "border-none outline-none",
-            "focus:ring-2 focus:ring-indigo-500/30",
+            "focus:ring-2 focus:ring-ring/30",
             "transition-shadow",
           )}
         />
@@ -350,8 +347,8 @@ function ThreadInput({
           disabled={!canSend}
           className={cn(
             "h-10 w-10 shrink-0 rounded-full",
-            "bg-indigo-500 text-white hover:bg-indigo-600",
-            "disabled:bg-indigo-500/50 disabled:text-white/60",
+            "bg-primary text-primary-foreground hover:bg-primary/90",
+            "disabled:bg-primary/50 disabled:text-primary-foreground/60",
           )}
           aria-label={t("boardroom.thread.send", "Send")}
         >
@@ -634,7 +631,7 @@ function BoardroomThread() {
               <p className="mt-1 text-sm text-muted-foreground">
                 {t(
                   "boardroom.thread.emptySubtitle",
-                  "Start a private conversation with this advisor.",
+                  "Start a private conversation with this expert.",
                 )}
               </p>
             </div>

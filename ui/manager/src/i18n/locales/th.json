@@ -2089,11 +2089,11 @@
     "noProgressAbort": "ยกเลิก"
   },
   "boardroom": {
-    "title": "ห้องประชุม",
+    "title": "EDDI",
     "sidebarDrawer": "นำทางแถบด้านข้าง",
-    "boardList": "รายการห้องประชุม",
+    "boardList": "รายการทีมงาน",
     "dashboard": {
-      "title": "ห้องประชุมของคุณ",
+      "title": "ทีมงานที่ใช้งานอยู่",
       "subtitle": "สร้างและจัดการคณะที่ปรึกษา AI ของคุณ",
       "createFirst": "สร้างห้องประชุมแรกของคุณ",
       "createFirstDesc": "ตั้งค่าคณะที่ปรึกษา AI พร้อมที่ปรึกษาผู้เชี่ยวชาญเพื่อช่วยคุณตัดสินใจได้ดียิ่งขึ้น",
@@ -2114,7 +2114,13 @@
       "deleteSuccess": "ลบห้องประชุมแล้ว",
       "deleteError": "ไม่สามารถลบห้องประชุมได้",
       "gridView": "มุมมองตาราง",
-      "listView": "มุมมองรายการ"
+      "listView": "มุมมองรายการ",
+      "assembleTaskForce": "จัดตั้งทีมงาน",
+      "deployAgent": "ปรับใช้เอเจนต์",
+      "pillars": "ความต่อเนื่องทางธุรกิจ · การวางแผนสืบทอด · การแก้ปัญหาร่วมกัน",
+      "taskForcesLabel": "ทีมงานที่ใช้งานอยู่",
+      "loadError": "ไม่สามารถโหลดพื้นที่ทำงานของคุณ กรุณาลองอีกครั้ง",
+      "viewToggle": "โหมดมุมมอง"
     },
     "wizard": {
       "step1Title": "เลือกรูปแบบ",
@@ -2239,11 +2245,11 @@
       "emptyTitle": "Start a conversation"
     },
     "sidebar": {
-      "boards": "ห้องประชุม",
+      "boards": "ทีมงาน",
       "threads": "เธรด",
       "sessions": "เซสชัน",
       "threadWith": "กับ {{name}}",
-      "newBoardroom": "ห้องประชุมใหม่",
+      "newBoardroom": "จัดตั้งทีมงาน",
       "collapse": "ยุบแถบด้านข้าง",
       "expand": "ขยายแถบด้านข้าง"
     },
@@ -2262,9 +2268,9 @@
     "openMenu": "Open menu",
     "closeSidebar": "Close sidebar",
     "toggleSidebar": "Toggle sidebar",
-    "newBoard": "New Boardroom",
-    "boardsLabel": "Boardrooms",
-    "untitled": "Untitled Board",
+    "newBoard": "จัดตั้งทีมงาน",
+    "boardsLabel": "ทีมงาน",
+    "untitled": "ทีมงานไม่มีชื่อ",
     "toggleTheme": "Toggle theme",
     "themeSystem": "System",
     "themeDark": "Dark",
@@ -2321,5 +2327,42 @@
     "refCopied": "Copied: {{ref}}",
     "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
     "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead."
+  },
+  "workforce": {
+    "title": "กำลังคนดิจิทัลของคุณ",
+    "count": "ผู้เชี่ยวชาญ {{count}} คน",
+    "agent": "ผู้เชี่ยวชาญดิจิทัล",
+    "ready": "พร้อม",
+    "addAgent": "ปรับใช้เอเจนต์",
+    "unnamed": "เอเจนต์ไม่มีชื่อ",
+    "sectionLabel": "กำลังคน"
+  },
+  "knowledgeHealth": {
+    "title": "สุขภาพความรู้",
+    "workforceSize": "ขนาดกำลังคน",
+    "workforceSizeDesc": "ผู้เชี่ยวชาญดิจิทัลที่ปรับใช้ทั้งหมด",
+    "activeRate": "อัตราการใช้งาน",
+    "activeRateDesc": "เอเจนต์ที่ใช้งานใน 30 วันที่ผ่านมา",
+    "taskForces": "ทีมงาน",
+    "taskForcesDesc": "กลุ่มเอเจนต์ที่ทำงานร่วมกัน",
+    "dormantAgents": "ไม่ได้ใช้งาน",
+    "dormantAgentsDesc": "เอเจนต์ที่ไม่ได้ใช้มากกว่า 30 วัน",
+    "statusHealthy": "สมบูรณ์",
+    "statusModerate": "ปานกลาง",
+    "statusAtRisk": "มีความเสี่ยง",
+    "msgHealthy": "{{rate}}% ของกำลังคนดิจิทัลของคุณมีการใช้งานใน 30 วันที่ผ่านมา",
+    "msgModerate": "ผู้เชี่ยวชาญดิจิทัลบางส่วนไม่ได้รับการปรึกษาเมื่อเร็วๆ นี้",
+    "msgAtRisk": "กำลังคนส่วนใหญ่ของคุณไม่ได้ใช้งาน — ลองใช้งานพวกเขา"
+  },
+  "quickActions": {
+    "title": "ดำเนินการด่วน",
+    "assembleTaskForce": "จัดตั้งทีมงาน",
+    "assembleTaskForceDesc": "รวมผู้เชี่ยวชาญเพื่อแก้ปัญหาที่ซับซ้อน",
+    "chatWithAgent": "สนทนากับเอเจนต์",
+    "chatWithAgentDesc": "สนทนาแบบตัวต่อตัวกับผู้เชี่ยวชาญดิจิทัล",
+    "viewInsights": "ดูข้อมูลเชิงลึก",
+    "viewInsightsDesc": "ติดตามการครอบคลุมความรู้ของทีม",
+    "manageWorkforce": "จัดการกำลังคน",
+    "manageWorkforceDesc": "กำหนดค่าและปรับใช้ผู้เชี่ยวชาญดิจิทัล"
   }
 }

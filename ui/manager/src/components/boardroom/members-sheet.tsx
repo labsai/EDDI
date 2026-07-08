@@ -52,7 +52,7 @@ function MembersSheet({
       <div className="flex items-center justify-between ps-4 pe-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-foreground">
-            {t("boardroom.board.members", "Members")}
+            {t("boardroom.board.members", "Team")}
           </h3>
           <Badge variant="secondary" className="text-[10px]">
             {members.length}
@@ -131,7 +131,7 @@ function MembersSheet({
         {members.length === 0 && (
           <div className="p-8 text-center">
             <p className="text-sm text-muted-foreground">
-              {t("boardroom.board.noMembers", "No members")}
+              {t("boardroom.board.noMembers", "No team members")}
             </p>
           </div>
         )}

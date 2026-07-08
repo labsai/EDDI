@@ -70,7 +70,7 @@ export function ShortcutsDialog() {
   const shortcuts = [
     {
       key: "N",
-      label: t("boardroom.shortcuts.newBoard", "New Boardroom"),
+      label: t("boardroom.shortcuts.newBoard", "Assemble Task Force"),
       context: t("boardroom.shortcuts.fromDashboard", "From dashboard"),
     },
     {

@@ -1,12 +1,39 @@
 import { useState, useRef, useCallback, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { Paperclip, X } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
+// ─── Constants ───────────────────────────────────────────────────
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+const ALLOWED_FILE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+  "application/json",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+
 // ─── Types ───────────────────────────────────────────────────────
 
+export interface AttachmentInfo {
+  fileName: string;
+  file: File;
+}
+
 interface BoardInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, attachment?: AttachmentInfo) => void;
   disabled?: boolean;
   placeholder?: string;
   className?: string;
@@ -37,20 +64,23 @@ function SendIcon() {
 function BoardInput({ onSend, disabled = false, placeholder, className }: BoardInputProps) {
   const { t } = useTranslation();
   const [message, setMessage] = useState("");
+  const [attachment, setAttachment] = useState<AttachmentInfo | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const trimmed = message.trim();
-  const canSend = trimmed.length > 0 && !disabled;
+  const canSend = (trimmed.length > 0 || !!attachment) && !disabled;
 
   const handleSend = useCallback(() => {
     if (!canSend) return;
-    onSend(trimmed);
+    onSend(trimmed, attachment ?? undefined);
     setMessage("");
+    setAttachment(null);
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [canSend, onSend, trimmed]);
+  }, [canSend, onSend, trimmed, attachment]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -70,6 +100,37 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
     el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
   }, []);
 
+  const handleFileSelect = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        if (file.size > MAX_FILE_SIZE) {
+          toast.error(
+            t("boardroom.board.fileTooLarge", "File must be under 10MB"),
+          );
+        } else if (!ALLOWED_FILE_TYPES.has(file.type)) {
+          toast.error(
+            t("boardroom.board.fileTypeNotAllowed", "This file type is not supported"),
+          );
+        } else {
+          setAttachment({ fileName: file.name, file });
+        }
+      }
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    },
+    [t],
+  );
+
+  const removeAttachment = useCallback(() => {
+    setAttachment(null);
+  }, []);
+
   return (
     <div
       className={cn(
@@ -78,7 +139,50 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
         className,
       )}
     >
+      {/* Attachment chip */}
+      {attachment && (
+        <div className="mb-2 flex items-center gap-1">
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full ps-3 pe-3 py-1 text-xs font-medium bg-muted text-muted-foreground"
+          >
+            <Paperclip className="h-3 w-3" />
+            <span className="max-w-48 truncate">{attachment.fileName}</span>
+            <button
+              type="button"
+              onClick={removeAttachment}
+              className="ms-0.5 rounded-full p-0.5 hover:bg-muted-foreground/20 transition-colors"
+              aria-label={t("boardroom.board.removeAttachment", "Remove attachment")}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        </div>
+      )}
+
       <div className="flex items-end gap-2">
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          onChange={handleFileChange}
+          accept="image/*,.pdf,.txt,.csv,.md,.json,.doc,.docx,.xls,.xlsx"
+          className="hidden"
+          aria-hidden="true"
+        />
+
+        {/* Attachment button */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={handleFileSelect}
+          disabled={disabled}
+          className="h-10 w-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+          aria-label={t("boardroom.board.attachFile", "Attach file")}
+        >
+          <Paperclip className="h-5 w-5" />
+        </Button>
+
         <textarea
           ref={textareaRef}
           value={message}
@@ -89,9 +193,9 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
           onKeyDown={handleKeyDown}
           placeholder={
             placeholder ??
-            t("boardroom.board.askYourBoard", "Ask your boardroom...")
+            t("boardroom.board.askYourBoard", "Ask your task force...")
           }
-          aria-label={placeholder ?? t("boardroom.board.askYourBoard", "Ask your boardroom...")}
+          aria-label={placeholder ?? t("boardroom.board.askYourBoard", "Ask your task force...")}
           disabled={disabled}
           rows={1}
           className={cn(

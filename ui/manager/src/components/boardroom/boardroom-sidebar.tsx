@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
+import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { useTheme } from "@/components/layout/theme-provider";
 import { STYLE_INFO, type DiscussionStyle } from "@/lib/api/groups";
 
@@ -61,7 +62,7 @@ export function BoardroomSidebar({
         {!collapsed && (
           <span className="flex-1 truncate text-lg font-semibold text-foreground">
             <span className="text-primary">✦</span>{" "}
-            {t("boardroom.title", "Boardroom")}
+            {t("boardroom.title", "EDDI")}
           </span>
         )}
 
@@ -105,21 +106,24 @@ export function BoardroomSidebar({
           <Link to="/boardroom/new">
             <Plus className="h-4 w-4" />
             {!collapsed && (
-              <span>{t("boardroom.newBoard", "New Boardroom")}</span>
+              <span>{t("boardroom.newBoard", "Assemble Task Force")}</span>
             )}
           </Link>
         </Button>
       </div>
 
+      {/* ── Workforce ──────────────────────────────────────────── */}
+      <WorkforceSection collapsed={collapsed} boardId={boardId} />
+
       {/* ── Boards List ───────────────────────────────────────── */}
-      <nav aria-label={t("boardroom.boardList", "Boardroom list")} className="flex-1 overflow-y-auto ps-2 pe-2 pb-2">
+      <nav aria-label={t("boardroom.boardList", "Task Force list")} className="flex-1 overflow-y-auto ps-2 pe-2 pb-2">
         {!collapsed && (
           <p className="ps-2 pe-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            {t("boardroom.boardsLabel", "Boardrooms")}
+            {t("boardroom.boardsLabel", "Task Forces")}
           </p>
         )}
 
-        <ul className="flex flex-col gap-0.5" aria-label={t("boardroom.boardList", "Boardroom list")}>
+        <ul className="flex flex-col gap-0.5" aria-label={t("boardroom.boardList", "Task Force list")}>
           {boards?.map((board) => {
             const isActive = board.id === boardId;
             const styleKey = (board.style ?? "ROUND_TABLE") as DiscussionStyle;
@@ -191,5 +195,64 @@ export function BoardroomSidebar({
         </Button>
       </div>
     </aside>
+  );
+}
+
+// ─── Workforce Sub-Component ─────────────────────────────────────
+
+function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?: string }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { data: rawAgents } = useAgentDescriptors(50);
+
+  const agents = rawAgents ? groupAgentsByName(rawAgents).slice(0, 10) : [];
+
+  if (agents.length === 0) return null;
+
+  return (
+    <div className="shrink-0 border-b border-border ps-2 pe-2 pb-2">
+      {!collapsed && (
+        <p className="ps-2 pe-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          {t("boardroom.workforce", "Workforce")}
+        </p>
+      )}
+      <ul className="flex max-h-48 flex-col gap-0.5 overflow-y-auto">
+        {agents.map((agent) => {
+          const agentId = agent.resource.match(
+            /\/agentstore\/agents\/([^?]+)/,
+          )?.[1] ?? agent.id;
+
+          return (
+            <li key={agent.id}>
+              <button
+                type="button"
+                onClick={() =>
+                  boardId
+                    ? navigate(`/boardroom/${boardId}/thread/${agentId}`)
+                    : navigate("/boardroom/new")
+                }
+                title={collapsed ? agent.name : undefined}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-1.5 text-start text-sm transition-colors",
+                  "text-foreground/80 hover:bg-muted",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  collapsed && "justify-center ps-0 pe-0",
+                )}
+              >
+                <span
+                  className="inline-block h-2 w-2 shrink-0 rounded-full bg-muted-foreground/40"
+                  aria-hidden
+                />
+                {!collapsed && (
+                  <span className="min-w-0 flex-1 truncate">
+                    {agent.name || agentId}
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

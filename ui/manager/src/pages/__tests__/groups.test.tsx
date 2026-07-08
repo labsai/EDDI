@@ -521,7 +521,7 @@ describe("GroupsPage", () => {
       // Style badges have data-testid="group-style-{id}"
       const styleBadges = screen.getAllByTestId(/^group-style-/);
       expect(styleBadges.length).toBeGreaterThanOrEqual(1);
-      // Each badge should have an aria-label like "Style: Round Table"
+      // Each badge should have an aria-label like "Style: Collaborative Council"
       expect(styleBadges[0]!).toHaveAttribute("aria-label", expect.stringContaining("Style"));
     });
   });
