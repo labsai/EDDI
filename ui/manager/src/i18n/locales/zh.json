@@ -2104,7 +2104,9 @@
       "noActivity": "暂无活动",
       "deleteBoardroom": "删除会议室",
       "deleteConfirm": "您确定要删除此会议室吗？此操作无法撤销。",
-      "duplicateBoardroom": "复制会议室"
+      "duplicateBoardroom": "复制会议室",
+      "error": "Failed to load boardrooms",
+      "retry": "Retry"
     },
     "wizard": {
       "step1Title": "选择风格",
@@ -2151,7 +2153,9 @@
       "stepTeam": "团队",
       "stepTemplate": "模板",
       "team": "团队",
-      "yourAdvisors": "您的顾问"
+      "yourAdvisors": "您的顾问",
+      "progress": "Wizard progress",
+      "advisorName": "Advisor name"
     },
     "board": {
       "askYourBoard": "向您的会议室提问...",
@@ -2174,14 +2178,30 @@
       "membersPanel": "成员面板",
       "sessionsPanel": "会话面板",
       "stop": "停止",
-      "viewHistory": "查看历史"
+      "viewHistory": "查看历史",
+      "phase": "Phase",
+      "moderator": "Moderator"
     },
     "thread": {
       "context": "来自 {{boardName}} 会话",
       "followUp": "跟进您的回复...",
       "typeMessage": "输入消息...",
       "backToBoard": "返回会议室",
-      "startingConversation": "正在开始对话..."
+      "startingConversation": "正在开始对话...",
+      "emptySubtitle": "发送消息开始与{{name}}聊天",
+      "toggleContext": "切换上下文",
+      "fromSession": "来自{{boardName}}会话",
+      "questionLabel": "问题",
+      "responseLabel": "回答",
+      "fileTooLarge": "文件太大。最大大小为10MB。",
+      "unsupportedFile": "不支持此文件类型。",
+      "placeholder": "Message {{name}}...",
+      "sendError": "Failed to send message. Please try again.",
+      "starting": "Starting conversation...",
+      "removeAttachment": "Remove attachment",
+      "attachFile": "Attach file",
+      "send": "Send message",
+      "emptyTitle": "Start a conversation"
     },
     "sidebar": {
       "boards": "会议室",
@@ -2202,6 +2222,27 @@
       "confirm": "确认",
       "settings": "设置",
       "themeToggle": "切换主题"
+    },
+    "back": "Back",
+    "openMenu": "Open menu",
+    "closeSidebar": "Close sidebar",
+    "toggleSidebar": "Toggle sidebar",
+    "newBoard": "New Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Untitled Board",
+    "toggleTheme": "Toggle theme",
+    "themeSystem": "System",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "tabHome": "Home",
+    "tabThreads": "Threads",
+    "card": {
+      "untitled": "Untitled",
+      "noMembers": "No members",
+      "advisorCount": "{{count}} advisors"
+    },
+    "advisor": {
+      "avatarLabel": "{{name}} avatar"
     }
   }
 }

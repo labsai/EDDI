@@ -2104,7 +2104,9 @@
       "noActivity": "Sin actividad aún",
       "deleteBoardroom": "Eliminar Boardroom",
       "deleteConfirm": "¿Está seguro de que desea eliminar este boardroom? Esta acción no se puede deshacer.",
-      "duplicateBoardroom": "Duplicar Boardroom"
+      "duplicateBoardroom": "Duplicar Boardroom",
+      "error": "Failed to load boardrooms",
+      "retry": "Retry"
     },
     "wizard": {
       "step1Title": "Elija un estilo",
@@ -2151,7 +2153,9 @@
       "stepTeam": "Equipo",
       "stepTemplate": "Plantilla",
       "team": "Equipo",
-      "yourAdvisors": "Sus Asesores"
+      "yourAdvisors": "Sus Asesores",
+      "progress": "Wizard progress",
+      "advisorName": "Advisor name"
     },
     "board": {
       "askYourBoard": "Pregunte a su boardroom...",
@@ -2174,14 +2178,30 @@
       "membersPanel": "Panel de miembros",
       "sessionsPanel": "Panel de sesiones",
       "stop": "Detener",
-      "viewHistory": "Ver historial"
+      "viewHistory": "Ver historial",
+      "phase": "Phase",
+      "moderator": "Moderator"
     },
     "thread": {
       "context": "De la sesión de {{boardName}}",
       "followUp": "Continuando con su respuesta...",
       "typeMessage": "Escriba un mensaje...",
       "backToBoard": "Volver al Board",
-      "startingConversation": "Iniciando conversación..."
+      "startingConversation": "Iniciando conversación...",
+      "emptySubtitle": "Envía un mensaje para comenzar a chatear con {{name}}",
+      "toggleContext": "Alternar contexto",
+      "fromSession": "De la sesión de {{boardName}}",
+      "questionLabel": "Pregunta",
+      "responseLabel": "Respuesta",
+      "fileTooLarge": "El archivo es demasiado grande. El tamaño máximo es 10MB.",
+      "unsupportedFile": "Este tipo de archivo no es compatible.",
+      "placeholder": "Message {{name}}...",
+      "sendError": "Failed to send message. Please try again.",
+      "starting": "Starting conversation...",
+      "removeAttachment": "Remove attachment",
+      "attachFile": "Attach file",
+      "send": "Send message",
+      "emptyTitle": "Start a conversation"
     },
     "sidebar": {
       "boards": "Boardrooms",
@@ -2202,6 +2222,27 @@
       "confirm": "Confirmar",
       "settings": "Configuración",
       "themeToggle": "Cambiar tema"
+    },
+    "back": "Back",
+    "openMenu": "Open menu",
+    "closeSidebar": "Close sidebar",
+    "toggleSidebar": "Toggle sidebar",
+    "newBoard": "New Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Untitled Board",
+    "toggleTheme": "Toggle theme",
+    "themeSystem": "System",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "tabHome": "Home",
+    "tabThreads": "Threads",
+    "card": {
+      "untitled": "Untitled",
+      "noMembers": "No members",
+      "advisorCount": "{{count}} advisors"
+    },
+    "advisor": {
+      "avatarLabel": "{{name}} avatar"
     }
   }
 }

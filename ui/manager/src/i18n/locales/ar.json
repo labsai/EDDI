@@ -2104,7 +2104,9 @@
       "noActivity": "لا يوجد نشاط بعد",
       "deleteBoardroom": "حذف قاعة الاجتماعات",
       "deleteConfirm": "هل أنت متأكد أنك تريد حذف قاعة الاجتماعات هذه؟ لا يمكن التراجع عن هذا الإجراء.",
-      "duplicateBoardroom": "تكرار قاعة الاجتماعات"
+      "duplicateBoardroom": "تكرار قاعة الاجتماعات",
+      "error": "Failed to load boardrooms",
+      "retry": "Retry"
     },
     "wizard": {
       "step1Title": "اختر نمطًا",
@@ -2151,7 +2153,9 @@
       "stepTeam": "الفريق",
       "stepTemplate": "قالب",
       "team": "الفريق",
-      "yourAdvisors": "مستشاروك"
+      "yourAdvisors": "مستشاروك",
+      "progress": "Wizard progress",
+      "advisorName": "Advisor name"
     },
     "board": {
       "askYourBoard": "اسأل قاعة اجتماعاتك...",
@@ -2174,14 +2178,30 @@
       "membersPanel": "لوحة الأعضاء",
       "sessionsPanel": "لوحة الجلسات",
       "stop": "إيقاف",
-      "viewHistory": "عرض السجل"
+      "viewHistory": "عرض السجل",
+      "phase": "Phase",
+      "moderator": "Moderator"
     },
     "thread": {
       "context": "من جلسة {{boardName}}",
       "followUp": "متابعة لردك...",
       "typeMessage": "اكتب رسالة...",
       "backToBoard": "العودة إلى المجلس",
-      "startingConversation": "جارٍ بدء المحادثة..."
+      "startingConversation": "جارٍ بدء المحادثة...",
+      "emptySubtitle": "أرسل رسالة لبدء الدردشة مع {{name}}",
+      "toggleContext": "تبديل السياق",
+      "fromSession": "من جلسة {{boardName}}",
+      "questionLabel": "السؤال",
+      "responseLabel": "الإجابة",
+      "fileTooLarge": "الملف كبير جداً. الحد الأقصى للحجم هو 10 ميجابايت.",
+      "unsupportedFile": "نوع الملف هذا غير مدعوم.",
+      "placeholder": "Message {{name}}...",
+      "sendError": "Failed to send message. Please try again.",
+      "starting": "Starting conversation...",
+      "removeAttachment": "Remove attachment",
+      "attachFile": "Attach file",
+      "send": "Send message",
+      "emptyTitle": "Start a conversation"
     },
     "sidebar": {
       "boards": "قاعات الاجتماعات",
@@ -2202,6 +2222,27 @@
       "confirm": "تأكيد",
       "settings": "الإعدادات",
       "themeToggle": "تبديل المظهر"
+    },
+    "back": "Back",
+    "openMenu": "Open menu",
+    "closeSidebar": "Close sidebar",
+    "toggleSidebar": "Toggle sidebar",
+    "newBoard": "New Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Untitled Board",
+    "toggleTheme": "Toggle theme",
+    "themeSystem": "System",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "tabHome": "Home",
+    "tabThreads": "Threads",
+    "card": {
+      "untitled": "Untitled",
+      "noMembers": "No members",
+      "advisorCount": "{{count}} advisors"
+    },
+    "advisor": {
+      "avatarLabel": "{{name}} avatar"
     }
   }
 }

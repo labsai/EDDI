@@ -2102,7 +2102,9 @@
       "noActivity": "まだアクティビティがありません",
       "deleteBoardroom": "ボードルームを削除",
       "deleteConfirm": "このボードルームを削除してもよろしいですか？この操作は元に戻せません。",
-      "duplicateBoardroom": "ボードルームを複製"
+      "duplicateBoardroom": "ボードルームを複製",
+      "error": "Failed to load boardrooms",
+      "retry": "Retry"
     },
     "wizard": {
       "step1Title": "スタイルを選択",
@@ -2149,7 +2151,9 @@
       "stepTeam": "チーム",
       "stepTemplate": "テンプレート",
       "team": "チーム",
-      "yourAdvisors": "あなたのアドバイザー"
+      "yourAdvisors": "あなたのアドバイザー",
+      "progress": "Wizard progress",
+      "advisorName": "Advisor name"
     },
     "board": {
       "askYourBoard": "ボードルームに質問...",
@@ -2173,14 +2177,29 @@
       "membersPanel": "メンバーパネル",
       "sessionsPanel": "セッションパネル",
       "stop": "停止",
-      "viewHistory": "履歴を表示"
+      "viewHistory": "履歴を表示",
+      "phase": "Phase"
     },
     "thread": {
       "context": "{{boardName}} セッションより",
       "followUp": "あなたの回答へのフォローアップ...",
       "typeMessage": "メッセージを入力...",
       "backToBoard": "ボードに戻る",
-      "startingConversation": "会話を開始中..."
+      "startingConversation": "会話を開始中...",
+      "emptySubtitle": "{{name}}とチャットを始めるにはメッセージを送信してください",
+      "toggleContext": "コンテキストを切り替え",
+      "fromSession": "{{boardName}}セッションから",
+      "questionLabel": "質問",
+      "responseLabel": "回答",
+      "fileTooLarge": "ファイルが大きすぎます。最大サイズは10MBです。",
+      "unsupportedFile": "このファイル形式はサポートされていません。",
+      "placeholder": "Message {{name}}...",
+      "sendError": "Failed to send message. Please try again.",
+      "starting": "Starting conversation...",
+      "removeAttachment": "Remove attachment",
+      "attachFile": "Attach file",
+      "send": "Send message",
+      "emptyTitle": "Start a conversation"
     },
     "sidebar": {
       "boards": "ボードルーム",
@@ -2203,6 +2222,27 @@
       "confirm": "確認",
       "settings": "設定",
       "themeToggle": "テーマ切替"
+    },
+    "back": "Back",
+    "openMenu": "Open menu",
+    "closeSidebar": "Close sidebar",
+    "toggleSidebar": "Toggle sidebar",
+    "newBoard": "New Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Untitled Board",
+    "toggleTheme": "Toggle theme",
+    "themeSystem": "System",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "tabHome": "Home",
+    "tabThreads": "Threads",
+    "card": {
+      "untitled": "Untitled",
+      "noMembers": "No members",
+      "advisorCount": "{{count}} advisors"
+    },
+    "advisor": {
+      "avatarLabel": "{{name}} avatar"
     }
   }
 }

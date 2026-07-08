@@ -2104,7 +2104,9 @@
       "noActivity": "ยังไม่มีกิจกรรม",
       "deleteBoardroom": "ลบห้องประชุม",
       "deleteConfirm": "คุณแน่ใจหรือไม่ว่าต้องการลบห้องประชุมนี้? การกระทำนี้ไม่สามารถย้อนกลับได้",
-      "duplicateBoardroom": "ทำสำเนาห้องประชุม"
+      "duplicateBoardroom": "ทำสำเนาห้องประชุม",
+      "error": "Failed to load boardrooms",
+      "retry": "Retry"
     },
     "wizard": {
       "step1Title": "เลือกรูปแบบ",
@@ -2151,7 +2153,9 @@
       "stepTeam": "ทีม",
       "stepTemplate": "เทมเพลต",
       "team": "ทีม",
-      "yourAdvisors": "ที่ปรึกษาของคุณ"
+      "yourAdvisors": "ที่ปรึกษาของคุณ",
+      "progress": "Wizard progress",
+      "advisorName": "Advisor name"
     },
     "board": {
       "askYourBoard": "ถามห้องประชุมของคุณ...",
@@ -2174,14 +2178,30 @@
       "membersPanel": "แผงสมาชิก",
       "sessionsPanel": "แผงเซสชัน",
       "stop": "หยุด",
-      "viewHistory": "ดูประวัติ"
+      "viewHistory": "ดูประวัติ",
+      "phase": "Phase",
+      "moderator": "Moderator"
     },
     "thread": {
       "context": "จากเซสชัน {{boardName}}",
       "followUp": "ติดตามคำตอบของคุณ...",
       "typeMessage": "พิมพ์ข้อความ...",
       "backToBoard": "กลับไปที่บอร์ด",
-      "startingConversation": "กำลังเริ่มการสนทนา..."
+      "startingConversation": "กำลังเริ่มการสนทนา...",
+      "emptySubtitle": "ส่งข้อความเพื่อเริ่มสนทนากับ {{name}}",
+      "toggleContext": "สลับบริบท",
+      "fromSession": "จากเซสชัน {{boardName}}",
+      "questionLabel": "คำถาม",
+      "responseLabel": "คำตอบ",
+      "fileTooLarge": "ไฟล์มีขนาดใหญ่เกินไป ขนาดสูงสุดคือ 10MB",
+      "unsupportedFile": "ไม่รองรับประเภทไฟล์นี้",
+      "placeholder": "Message {{name}}...",
+      "sendError": "Failed to send message. Please try again.",
+      "starting": "Starting conversation...",
+      "removeAttachment": "Remove attachment",
+      "attachFile": "Attach file",
+      "send": "Send message",
+      "emptyTitle": "Start a conversation"
     },
     "sidebar": {
       "boards": "ห้องประชุม",
@@ -2202,6 +2222,27 @@
       "confirm": "ยืนยัน",
       "settings": "การตั้งค่า",
       "themeToggle": "สลับธีม"
+    },
+    "back": "Back",
+    "openMenu": "Open menu",
+    "closeSidebar": "Close sidebar",
+    "toggleSidebar": "Toggle sidebar",
+    "newBoard": "New Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Untitled Board",
+    "toggleTheme": "Toggle theme",
+    "themeSystem": "System",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "tabHome": "Home",
+    "tabThreads": "Threads",
+    "card": {
+      "untitled": "Untitled",
+      "noMembers": "No members",
+      "advisorCount": "{{count}} advisors"
+    },
+    "advisor": {
+      "avatarLabel": "{{name}} avatar"
     }
   }
 }

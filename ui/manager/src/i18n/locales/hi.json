@@ -2105,7 +2105,9 @@
       "noActivity": "अभी तक कोई गतिविधि नहीं",
       "deleteBoardroom": "बोर्डरूम हटाएं",
       "deleteConfirm": "क्या आप वाकई इस बोर्डरूम को हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",
-      "duplicateBoardroom": "बोर्डरूम की प्रतिलिपि बनाएं"
+      "duplicateBoardroom": "बोर्डरूम की प्रतिलिपि बनाएं",
+      "error": "Failed to load boardrooms",
+      "retry": "Retry"
     },
     "wizard": {
       "step1Title": "एक शैली चुनें",
@@ -2152,7 +2154,9 @@
       "stepTeam": "टीम",
       "stepTemplate": "टेम्पलेट",
       "team": "टीम",
-      "yourAdvisors": "आपके सलाहकार"
+      "yourAdvisors": "आपके सलाहकार",
+      "progress": "Wizard progress",
+      "advisorName": "Advisor name"
     },
     "board": {
       "askYourBoard": "अपने बोर्डरूम से पूछें...",
@@ -2184,7 +2188,21 @@
       "followUp": "आपके उत्तर पर अनुवर्ती...",
       "typeMessage": "संदेश टाइप करें...",
       "backToBoard": "बोर्ड पर वापस",
-      "startingConversation": "बातचीत शुरू हो रही है..."
+      "startingConversation": "बातचीत शुरू हो रही है...",
+      "emptySubtitle": "{{name}} के साथ चैट शुरू करने के लिए संदेश भेजें",
+      "toggleContext": "संदर्भ टॉगल करें",
+      "fromSession": "{{boardName}} सत्र से",
+      "questionLabel": "प्रश्न",
+      "responseLabel": "प्रतिक्रिया",
+      "fileTooLarge": "फ़ाइल बहुत बड़ी है। अधिकतम आकार 10MB है।",
+      "unsupportedFile": "यह फ़ाइल प्रकार समर्थित नहीं है।",
+      "placeholder": "Message {{name}}...",
+      "sendError": "Failed to send message. Please try again.",
+      "starting": "Starting conversation...",
+      "removeAttachment": "Remove attachment",
+      "attachFile": "Attach file",
+      "send": "Send message",
+      "emptyTitle": "Start a conversation"
     },
     "sidebar": {
       "boards": "बोर्डरूम",
@@ -2205,6 +2223,26 @@
       "confirm": "पुष्टि करें",
       "settings": "सेटिंग्स",
       "themeToggle": "थीम बदलें"
+    },
+    "back": "Back",
+    "openMenu": "Open menu",
+    "closeSidebar": "Close sidebar",
+    "toggleSidebar": "Toggle sidebar",
+    "newBoard": "New Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Untitled Board",
+    "toggleTheme": "Toggle theme",
+    "themeSystem": "System",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "tabHome": "Home",
+    "card": {
+      "untitled": "Untitled",
+      "noMembers": "No members",
+      "advisorCount": "{{count}} advisors"
+    },
+    "advisor": {
+      "avatarLabel": "{{name}} avatar"
     }
   }
 }

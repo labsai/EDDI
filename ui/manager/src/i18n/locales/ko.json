@@ -2102,7 +2102,9 @@
       "noActivity": "아직 활동 없음",
       "deleteBoardroom": "보드룸 삭제",
       "deleteConfirm": "이 보드룸을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
-      "duplicateBoardroom": "보드룸 복제"
+      "duplicateBoardroom": "보드룸 복제",
+      "error": "Failed to load boardrooms",
+      "retry": "Retry"
     },
     "wizard": {
       "step1Title": "스타일 선택",
@@ -2149,7 +2151,9 @@
       "stepTeam": "팀",
       "stepTemplate": "템플릿",
       "team": "팀",
-      "yourAdvisors": "나의 자문위원"
+      "yourAdvisors": "나의 자문위원",
+      "progress": "Wizard progress",
+      "advisorName": "Advisor name"
     },
     "board": {
       "askYourBoard": "보드룸에 질문하세요...",
@@ -2173,14 +2177,29 @@
       "membersPanel": "멤버 패널",
       "sessionsPanel": "세션 패널",
       "stop": "중지",
-      "viewHistory": "기록 보기"
+      "viewHistory": "기록 보기",
+      "phase": "Phase"
     },
     "thread": {
       "context": "{{boardName}} 세션에서",
       "followUp": "귀하의 응답에 대한 후속...",
       "typeMessage": "메시지를 입력하세요...",
       "backToBoard": "보드로 돌아가기",
-      "startingConversation": "대화 시작 중..."
+      "startingConversation": "대화 시작 중...",
+      "emptySubtitle": "{{name}}과(와) 대화를 시작하려면 메시지를 보내세요",
+      "toggleContext": "컨텍스트 전환",
+      "fromSession": "{{boardName}} 세션에서",
+      "questionLabel": "질문",
+      "responseLabel": "응답",
+      "fileTooLarge": "파일이 너무 큽니다. 최대 크기는 10MB입니다.",
+      "unsupportedFile": "지원되지 않는 파일 형식입니다.",
+      "placeholder": "Message {{name}}...",
+      "sendError": "Failed to send message. Please try again.",
+      "starting": "Starting conversation...",
+      "removeAttachment": "Remove attachment",
+      "attachFile": "Attach file",
+      "send": "Send message",
+      "emptyTitle": "Start a conversation"
     },
     "sidebar": {
       "boards": "보드룸",
@@ -2203,6 +2222,27 @@
       "confirm": "확인",
       "settings": "설정",
       "themeToggle": "테마 전환"
+    },
+    "back": "Back",
+    "openMenu": "Open menu",
+    "closeSidebar": "Close sidebar",
+    "toggleSidebar": "Toggle sidebar",
+    "newBoard": "New Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Untitled Board",
+    "toggleTheme": "Toggle theme",
+    "themeSystem": "System",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "tabHome": "Home",
+    "tabThreads": "Threads",
+    "card": {
+      "untitled": "Untitled",
+      "noMembers": "No members",
+      "advisorCount": "{{count}} advisors"
+    },
+    "advisor": {
+      "avatarLabel": "{{name}} avatar"
     }
   }
 }

@@ -2105,7 +2105,9 @@
       "noActivity": "Nenhuma atividade ainda",
       "deleteBoardroom": "Excluir Boardroom",
       "deleteConfirm": "Tem certeza de que deseja excluir este boardroom? Esta ação não pode ser desfeita.",
-      "duplicateBoardroom": "Duplicar Boardroom"
+      "duplicateBoardroom": "Duplicar Boardroom",
+      "error": "Failed to load boardrooms",
+      "retry": "Retry"
     },
     "wizard": {
       "step1Title": "Escolha um estilo",
@@ -2152,7 +2154,9 @@
       "stepTeam": "Equipe",
       "stepTemplate": "Modelo",
       "team": "Equipe",
-      "yourAdvisors": "Seus Consultores"
+      "yourAdvisors": "Seus Consultores",
+      "progress": "Wizard progress",
+      "advisorName": "Advisor name"
     },
     "board": {
       "askYourBoard": "Pergunte ao seu boardroom...",
@@ -2184,7 +2188,21 @@
       "followUp": "Dando continuidade à sua resposta...",
       "typeMessage": "Digite uma mensagem...",
       "backToBoard": "Voltar ao Board",
-      "startingConversation": "Iniciando conversa..."
+      "startingConversation": "Iniciando conversa...",
+      "emptySubtitle": "Envie uma mensagem para começar a conversar com {{name}}",
+      "toggleContext": "Alternar contexto",
+      "fromSession": "Da sessão de {{boardName}}",
+      "questionLabel": "Pergunta",
+      "responseLabel": "Resposta",
+      "fileTooLarge": "O arquivo é muito grande. O tamanho máximo é 10MB.",
+      "unsupportedFile": "Este tipo de arquivo não é suportado.",
+      "placeholder": "Message {{name}}...",
+      "sendError": "Failed to send message. Please try again.",
+      "starting": "Starting conversation...",
+      "removeAttachment": "Remove attachment",
+      "attachFile": "Attach file",
+      "send": "Send message",
+      "emptyTitle": "Start a conversation"
     },
     "sidebar": {
       "boards": "Boardrooms",
@@ -2205,6 +2223,26 @@
       "confirm": "Confirmar",
       "settings": "Configurações",
       "themeToggle": "Alternar tema"
+    },
+    "back": "Back",
+    "openMenu": "Open menu",
+    "closeSidebar": "Close sidebar",
+    "toggleSidebar": "Toggle sidebar",
+    "newBoard": "New Boardroom",
+    "boardsLabel": "Boardrooms",
+    "untitled": "Untitled Board",
+    "toggleTheme": "Toggle theme",
+    "themeSystem": "System",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "tabHome": "Home",
+    "card": {
+      "untitled": "Untitled",
+      "noMembers": "No members",
+      "advisorCount": "{{count}} advisors"
+    },
+    "advisor": {
+      "avatarLabel": "{{name}} avatar"
     }
   }
 }
