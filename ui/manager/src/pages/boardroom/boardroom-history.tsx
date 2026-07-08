@@ -1,0 +1,498 @@
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import {
+  ArrowLeft,
+  Search,
+  Trash2,
+  MessageSquare,
+  ChevronDown,
+} from "lucide-react";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import {
+  useGroupConversations,
+  useDeleteGroupConversation,
+} from "@/hooks/use-groups";
+import { ConversationViewer } from "@/components/boardroom/conversation-viewer";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { GroupConversation, GroupConversationState } from "@/lib/api/groups";
+
+// ─── State Badge Config ──────────────────────────────────────────
+
+const STATE_BADGE: Record<
+  GroupConversationState,
+  { label: string; variant: "success" | "warning" | "destructive" | "secondary" }
+> = {
+  COMPLETED: { label: "Completed", variant: "success" },
+  IN_PROGRESS: { label: "In Progress", variant: "warning" },
+  SYNTHESIZING: { label: "Synthesizing", variant: "warning" },
+  CREATED: { label: "Created", variant: "secondary" },
+  FAILED: { label: "Failed", variant: "destructive" },
+  CANCELLED: { label: "Cancelled", variant: "secondary" },
+  AWAITING_APPROVAL: { label: "Awaiting Approval", variant: "warning" },
+};
+
+function stateI18nKey(state: GroupConversationState): string {
+  const map: Record<string, string> = {
+    COMPLETED: "boardroom.history.completed",
+    IN_PROGRESS: "boardroom.history.inProgress",
+    SYNTHESIZING: "boardroom.history.synthesizing",
+    CREATED: "boardroom.history.created",
+    FAILED: "boardroom.history.failed",
+    CANCELLED: "boardroom.history.cancelled",
+    AWAITING_APPROVAL: "boardroom.history.awaitingApproval",
+  };
+  return map[state] ?? "boardroom.history.created";
+}
+
+// ─── Page Size ───────────────────────────────────────────────────
+
+const PAGE_SIZE = 20;
+
+// ─── Conversation List Item ──────────────────────────────────────
+
+function ConversationItem({
+  conversation,
+  isSelected,
+  onSelect,
+  onDelete,
+}: {
+  conversation: GroupConversation;
+  isSelected: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useTranslation();
+  const badgeConfig = STATE_BADGE[conversation.state] ?? STATE_BADGE.CREATED;
+  const timestamp = conversation.lastModified
+    ? new Date(conversation.lastModified).getTime()
+    : conversation.created
+      ? new Date(conversation.created).getTime()
+      : 0;
+
+  return (
+    <div
+      role="option"
+      aria-selected={isSelected}
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={cn(
+        "group relative w-full text-start px-4 py-3 cursor-pointer transition-colors",
+        "hover:bg-slate-50 dark:hover:bg-slate-800/50",
+        "border-b border-slate-100 dark:border-slate-800/50",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500",
+        isSelected &&
+          "bg-indigo-50 dark:bg-indigo-500/10 border-s-2 border-s-indigo-500",
+      )}
+    >
+      {/* Question */}
+      <p className="text-sm text-slate-700 dark:text-slate-300 line-clamp-2 pe-8">
+        {conversation.originalQuestion ||
+          t("boardroom.history.untitled", "Untitled Conversation")}
+      </p>
+
+      {/* Meta row */}
+      <div className="flex items-center gap-2 mt-1.5">
+        <Badge variant={badgeConfig.variant} className="text-[10px]">
+          {t(stateI18nKey(conversation.state), badgeConfig.label)}
+        </Badge>
+        {timestamp > 0 && (
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            {formatRelativeTime(timestamp)}
+          </span>
+        )}
+      </div>
+
+      {/* Delete button */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn(
+          "absolute inset-e-2 top-1/2 -translate-y-1/2 h-7 w-7",
+          "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+          "text-slate-400 hover:text-red-500 dark:hover:text-red-400",
+          "transition-opacity",
+        )}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        aria-label={t("boardroom.history.delete", "Delete conversation")}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+// ─── List Skeleton ───────────────────────────────────────────────
+
+function ListSkeleton() {
+  return (
+    <div className="p-4 space-y-4">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="space-y-2">
+          <Skeleton className="h-4 w-3/4" />
+          <div className="flex gap-2">
+            <Skeleton className="h-4 w-16 rounded-full" />
+            <Skeleton className="h-3 w-12" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Empty States ────────────────────────────────────────────────
+
+function EmptyList({ hasFilter }: { hasFilter: boolean }) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex flex-col items-center justify-center py-16 px-4">
+      <div
+        className={cn(
+          "h-12 w-12 rounded-full flex items-center justify-center mb-4",
+          "bg-slate-100 dark:bg-slate-800",
+        )}
+      >
+        <MessageSquare className="h-6 w-6 text-slate-400" />
+      </div>
+      <p className="text-sm font-medium text-slate-500 dark:text-slate-400 text-center">
+        {hasFilter
+          ? t("boardroom.history.noResults", "No conversations match your search")
+          : t("boardroom.history.noConversations", "No conversations yet")}
+      </p>
+      {hasFilter && (
+        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+          {t("boardroom.history.tryDifferent", "Try a different search term")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function EmptyViewer() {
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full px-4">
+      <div
+        className={cn(
+          "h-16 w-16 rounded-full flex items-center justify-center mb-4",
+          "bg-slate-100 dark:bg-slate-800",
+        )}
+      >
+        <MessageSquare className="h-8 w-8 text-slate-400" />
+      </div>
+      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+        {t(
+          "boardroom.history.selectConversation",
+          "Select a conversation to view",
+        )}
+      </p>
+      <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+        {t(
+          "boardroom.history.selectHint",
+          "Choose from the list on the left",
+        )}
+      </p>
+    </div>
+  );
+}
+
+// ─── Main Page Component ─────────────────────────────────────────
+
+function BoardroomHistory() {
+  const { t } = useTranslation();
+  const { boardId } = useParams<{ boardId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // State
+  const [selectedId, setSelectedId] = useState<string | null>(
+    searchParams.get("conversation") ?? null,
+  );
+  const [showViewer, setShowViewer] = useState(false);
+  const [filterText, setFilterText] = useState("");
+  const [pageIndex, setPageIndex] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<GroupConversation | null>(
+    null,
+  );
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Data
+  const { data: conversations, isLoading } = useGroupConversations(
+    boardId ?? "",
+    PAGE_SIZE,
+    pageIndex,
+  );
+  const deleteMutation = useDeleteGroupConversation();
+
+  // Sync selected ID to URL search params
+  useEffect(() => {
+    if (selectedId) {
+      setSearchParams({ conversation: selectedId }, { replace: true });
+    } else {
+      setSearchParams({}, { replace: true });
+    }
+  }, [selectedId, setSearchParams]);
+
+  // Filter + sort conversations (newest first)
+  const filteredConversations = useMemo(() => {
+    if (!conversations) return [];
+    const lower = filterText.toLowerCase().trim();
+    const filtered = lower
+      ? conversations.filter((c) =>
+          c.originalQuestion?.toLowerCase().includes(lower),
+        )
+      : conversations;
+
+    return [...filtered].sort((a, b) => {
+      const aTime = a.lastModified
+        ? new Date(a.lastModified).getTime()
+        : a.created
+          ? new Date(a.created).getTime()
+          : 0;
+      const bTime = b.lastModified
+        ? new Date(b.lastModified).getTime()
+        : b.created
+          ? new Date(b.created).getTime()
+          : 0;
+      return bTime - aTime;
+    });
+  }, [conversations, filterText]);
+
+  // Keyboard navigation
+  const handleListKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!filteredConversations.length) return;
+      const currentIdx = filteredConversations.findIndex(
+        (c) => c.id === selectedId,
+      );
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        const nextIdx = Math.min(
+          currentIdx + 1,
+          filteredConversations.length - 1,
+        );
+        setSelectedId(filteredConversations[nextIdx]!.id);
+        setShowViewer(true);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        const prevIdx = Math.max(currentIdx - 1, 0);
+        setSelectedId(filteredConversations[prevIdx]!.id);
+        setShowViewer(true);
+      }
+    },
+    [filteredConversations, selectedId],
+  );
+
+  const handleSelect = useCallback(
+    (convId: string) => {
+      setSelectedId(convId);
+      setShowViewer(true);
+    },
+    [],
+  );
+
+  const handleDelete = useCallback(() => {
+    if (!deleteTarget || !boardId) return;
+    deleteMutation.mutate(
+      { groupId: boardId, conversationId: deleteTarget.id },
+      {
+        onSuccess: () => {
+          if (selectedId === deleteTarget.id) {
+            setSelectedId(null);
+            setShowViewer(false);
+          }
+          setDeleteTarget(null);
+        },
+      },
+    );
+  }, [deleteTarget, boardId, deleteMutation, selectedId]);
+
+  const handleLoadMore = useCallback(() => {
+    setPageIndex((prev) => prev + 1);
+  }, []);
+
+  if (!boardId) return null;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* ── Top Bar ──────────────────────────────────────────── */}
+      <div
+        className={cn(
+          "flex items-center gap-3 px-4 py-3",
+          "border-b border-slate-200 dark:border-slate-800",
+          "bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm",
+        )}
+      >
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5 text-slate-600 dark:text-slate-400"
+          asChild
+        >
+          <Link to={`/boardroom/${boardId}`}>
+            <ArrowLeft className="h-4 w-4" />
+            {t("boardroom.history.backToBoard", "Back to Board")}
+          </Link>
+        </Button>
+        <div className="flex-1" />
+        <h1 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+          {t("boardroom.history.title", "Conversation History")}
+        </h1>
+      </div>
+
+      {/* ── Split View ───────────────────────────────────────── */}
+      <div className="flex-1 min-h-0 lg:grid lg:grid-cols-[320px_1fr]">
+        {/* ── Left Panel: Conversation List ─────────────────── */}
+        <div
+          ref={listRef}
+          onKeyDown={handleListKeyDown}
+          className={cn(
+            "flex flex-col h-full border-e border-slate-200 dark:border-slate-800",
+            "bg-white dark:bg-slate-950",
+            // On mobile, hide list when viewer is shown
+            showViewer && "hidden lg:flex",
+          )}
+        >
+          {/* Search input */}
+          <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800/50">
+            <div
+              className={cn(
+                "flex items-center gap-2 px-3 py-1.5 rounded-lg",
+                "bg-slate-100 dark:bg-slate-800",
+              )}
+            >
+              <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <input
+                type="text"
+                placeholder={t(
+                  "boardroom.history.searchPlaceholder",
+                  "Search conversations…",
+                )}
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+                className={cn(
+                  "flex-1 bg-transparent text-sm outline-none",
+                  "text-slate-700 dark:text-slate-300",
+                  "placeholder:text-slate-400 dark:placeholder:text-slate-500",
+                )}
+              />
+            </div>
+          </div>
+
+          {/* Conversation list */}
+          <div className="flex-1 overflow-y-auto" role="listbox">
+            {isLoading && <ListSkeleton />}
+
+            {!isLoading && filteredConversations.length === 0 && (
+              <EmptyList hasFilter={filterText.trim().length > 0} />
+            )}
+
+            {!isLoading &&
+              filteredConversations.map((conv) => (
+                <ConversationItem
+                  key={conv.id}
+                  conversation={conv}
+                  isSelected={conv.id === selectedId}
+                  onSelect={() => handleSelect(conv.id)}
+                  onDelete={() => setDeleteTarget(conv)}
+                />
+              ))}
+
+            {/* Load more */}
+            {!isLoading &&
+              conversations &&
+              conversations.length >= PAGE_SIZE && (
+                <div className="p-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full gap-1.5"
+                    onClick={handleLoadMore}
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                    {t("boardroom.history.loadMore", "Load more")}
+                  </Button>
+                </div>
+              )}
+          </div>
+        </div>
+
+        {/* ── Right Panel: Conversation Viewer ──────────────── */}
+        <div
+          className={cn(
+            "flex flex-col h-full",
+            "bg-slate-50 dark:bg-slate-900",
+            // On mobile, hide viewer when list is shown
+            !showViewer && "hidden lg:flex",
+          )}
+        >
+          {/* Mobile back button */}
+          {showViewer && (
+            <div className="lg:hidden px-3 py-2 border-b border-slate-200 dark:border-slate-800">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 text-slate-600 dark:text-slate-400"
+                onClick={() => setShowViewer(false)}
+              >
+                <ArrowLeft className="h-4 w-4" />
+                {t("boardroom.history.backToList", "Back to list")}
+              </Button>
+            </div>
+          )}
+
+          {selectedId ? (
+            <ConversationViewer
+              groupId={boardId}
+              conversationId={selectedId}
+              onClose={() => {
+                setSelectedId(null);
+                setShowViewer(false);
+              }}
+              className="flex-1 min-h-0"
+            />
+          ) : (
+            <EmptyViewer />
+          )}
+        </div>
+      </div>
+
+      {/* ── Delete Confirmation Dialog ───────────────────────── */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={t(
+          "boardroom.history.deleteTitle",
+          "Delete Conversation",
+        )}
+        description={t(
+          "boardroom.history.deleteDescription",
+          "Are you sure you want to delete this conversation? This action cannot be undone.",
+        )}
+        confirmLabel={t("boardroom.history.confirmDelete", "Delete")}
+        cancelLabel={t("boardroom.history.cancel", "Cancel")}
+        onConfirm={handleDelete}
+        variant="destructive"
+        isPending={deleteMutation.isPending}
+      />
+    </div>
+  );
+}
+
+export { BoardroomHistory };

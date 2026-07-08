@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useGroup, useGroupConversations, useGroupConversation } from "@/hooks/use-groups";
@@ -29,6 +29,25 @@ function UsersIcon() {
       <circle cx="9" cy="7" r="4" />
       <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M12 7v5l4 2" />
     </svg>
   );
 }
@@ -254,6 +273,28 @@ function BoardroomBoard() {
           >
             <ClockIcon />
           </Button>
+          <Link
+            to={`/boardroom/${boardId}/history`}
+            className={cn(
+              "inline-flex items-center justify-center rounded-md h-8 w-8 transition-colors",
+              "hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            )}
+            aria-label={t("boardroom.board.viewHistory", "View history")}
+          >
+            <HistoryIcon />
+          </Link>
+          <Link
+            to={`/boardroom/${boardId}/settings?version=${version}`}
+            className={cn(
+              "inline-flex items-center justify-center rounded-md h-8 w-8 transition-colors",
+              "hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            )}
+            aria-label={t("boardroom.settings.title", "Settings")}
+          >
+            <SettingsIcon />
+          </Link>
         </div>
       </div>
 
