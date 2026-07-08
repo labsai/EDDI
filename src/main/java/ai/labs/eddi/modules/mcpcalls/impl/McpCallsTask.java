@@ -235,7 +235,12 @@ public class McpCallsTask implements ILifecycleTask {
                     : errorCallName + "Response") + "Error";
             prePostUtils.createMemoryEntry(currentStep, truncated, errorObjName, KEY_MCP_CALLS);
             if (mcpCall.getPostResponse() != null) {
-                prePostUtils.runPostResponse(memory, mcpCall.getPostResponse(), templateDataObjects, 500, true);
+                try {
+                    prePostUtils.runPostResponse(memory, mcpCall.getPostResponse(), templateDataObjects, 500, true);
+                } catch (Exception postEx) {
+                    LOGGER.warnf("Post-response processing failed during error handling for '%s': %s",
+                            errorCallName, postEx.getMessage());
+                }
             }
             if (!Boolean.TRUE.equals(mcpCall.getContinueOnError())) {
                 throw e;
