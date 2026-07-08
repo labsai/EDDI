@@ -2117,7 +2117,7 @@
       "listView": "عرض القائمة",
       "assembleTaskForce": "تشكيل فريق عمل",
       "deployAgent": "نشر وكيل",
-      "pillars": "استمرارية الأعمال \u00b7 تخطيط التعاقب \u00b7 حل المشكلات التعاوني",
+      "pillars": "استمرارية الأعمال · تخطيط التعاقب · حل المشكلات التعاوني",
       "taskForcesLabel": "فرق العمل النشطة",
       "loadError": "تعذر تحميل مساحة العمل الخاصة بك. يرجى المحاولة مرة أخرى.",
       "viewToggle": "وضع العرض"
@@ -2314,7 +2314,7 @@
       "statusAtRisk": "في خطر",
       "msgHealthy": "{{rate}}% من قوتك العاملة الرقمية كانت نشطة في آخر 30 يوماً",
       "msgModerate": "بعض الخبراء الرقميين لم تتم استشارتهم مؤخراً",
-      "msgAtRisk": "معظم قوتك العاملة خاملة \u2014 فكر في إشراكهم"
+      "msgAtRisk": "معظم قوتك العاملة خاملة — فكر في إشراكهم"
     },
     "quickActions": {
       "title": "إجراءات سريعة",
@@ -2364,5 +2364,42 @@
     "refCopied": "Copied: {{ref}}",
     "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
     "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead."
+  },
+  "knowledgeHealth": {
+    "title": "Knowledge Health",
+    "workforceSize": "Workforce Size",
+    "workforceSizeDesc": "Total deployed digital experts",
+    "activeRate": "Active Rate",
+    "activeRateDesc": "Agents active in the last 30 days",
+    "taskForces": "Task Forces",
+    "taskForcesDesc": "Collaborative agent groups",
+    "dormantAgents": "Dormant",
+    "dormantAgentsDesc": "Agents not used in 30+ days",
+    "statusHealthy": "Healthy",
+    "statusModerate": "Moderate",
+    "statusAtRisk": "At Risk",
+    "msgHealthy": "{{rate}}% of your digital workforce was active in the last 30 days",
+    "msgModerate": "Some digital experts haven't been consulted recently",
+    "msgAtRisk": "Most of your workforce is dormant — consider engaging them"
+  },
+  "quickActions": {
+    "title": "Quick Actions",
+    "assembleTaskForce": "Assemble Task Force",
+    "assembleTaskForceDesc": "Bring experts together to solve complex challenges",
+    "chatWithAgent": "Chat with Agent",
+    "chatWithAgentDesc": "Have a 1:1 conversation with any digital expert",
+    "viewInsights": "View Insights",
+    "viewInsightsDesc": "Track your workforce's knowledge coverage",
+    "manageWorkforce": "Manage Workforce",
+    "manageWorkforceDesc": "Configure and deploy digital experts"
+  },
+  "workforce": {
+    "title": "Your Digital Workforce",
+    "count": "{{count}} experts",
+    "agent": "Digital Expert",
+    "ready": "Ready",
+    "addAgent": "Deploy Agent",
+    "unnamed": "Unnamed Agent",
+    "sectionLabel": "Workforce"
   }
 }

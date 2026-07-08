@@ -59,8 +59,13 @@ export function BoardroomTopbar({
       {/* Title */}
       <div className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">
         {title || (
-          <span className="flex items-center gap-1.5">
-            <span className="text-primary" aria-hidden="true">✦</span>
+          <span className="flex items-center gap-2">
+            <img
+              src="/eddi-icon.svg"
+              alt=""
+              aria-hidden="true"
+              className="h-6 w-6 rounded-md"
+            />
             {t("boardroom.title", "EDDI")}
           </span>
         )}

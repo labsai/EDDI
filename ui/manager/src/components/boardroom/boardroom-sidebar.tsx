@@ -60,9 +60,21 @@ export function BoardroomSidebar({
       {/* ── Header ────────────────────────────────────────────── */}
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border ps-3 pe-3">
         {!collapsed && (
-          <span className="flex-1 truncate text-lg font-semibold text-foreground">
-            <span className="text-primary">✦</span>{" "}
-            {t("boardroom.title", "EDDI")}
+          <span className="flex flex-1 items-center gap-2 truncate">
+            <img
+              src="/logo_eddi.png"
+              alt="EDDI"
+              className="h-6 w-auto"
+            />
+          </span>
+        )}
+        {collapsed && (
+          <span className="flex items-center justify-center mx-auto" aria-label="EDDI">
+            <img
+              src="/eddi-icon.svg"
+              alt="EDDI"
+              className="h-7 w-7 rounded-md"
+            />
           </span>
         )}
 

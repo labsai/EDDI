@@ -138,7 +138,7 @@ function DashboardEmpty() {
           <Button
             variant="outline"
             size="lg"
-            onClick={() => navigate("/boardroom/new")}
+            onClick={() => navigate("/manage/agents/wizard")}
             className="w-full sm:w-auto"
           >
             <Plus className="h-5 w-5" />
@@ -320,7 +320,7 @@ function WorkforceSection() {
             />
           );
         })}
-        <AddAgentCard onClick={() => navigate("/boardroom/new")} />
+        <AddAgentCard onClick={() => navigate("/manage/agents/wizard")} />
       </div>
     </section>
   );

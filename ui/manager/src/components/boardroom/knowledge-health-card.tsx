@@ -14,19 +14,19 @@ const STATUS_CONFIG: Record<
   { color: string; barColor: string; icon: string }
 > = {
   healthy: {
-    color: "text-emerald-600 dark:text-emerald-400",
-    barColor: "bg-emerald-500",
-    icon: "🟢",
+    color: "text-foreground",
+    barColor: "bg-foreground/70",
+    icon: "●",
   },
   moderate: {
-    color: "text-amber-600 dark:text-amber-400",
-    barColor: "bg-amber-500",
-    icon: "🟡",
+    color: "text-muted-foreground",
+    barColor: "bg-muted-foreground",
+    icon: "●",
   },
   "at-risk": {
-    color: "text-red-600 dark:text-red-400",
-    barColor: "bg-red-500",
-    icon: "🔴",
+    color: "text-destructive",
+    barColor: "bg-destructive/70",
+    icon: "●",
   },
 };
 
@@ -151,7 +151,7 @@ export function KnowledgeHealthCard({ className }: KnowledgeHealthCardProps) {
                 className={cn(
                   "h-4 w-4",
                   "highlight" in metric && metric.highlight
-                    ? "text-amber-500"
+                    ? "text-muted-foreground"
                     : "text-muted-foreground",
                 )}
               />
@@ -160,7 +160,7 @@ export function KnowledgeHealthCard({ className }: KnowledgeHealthCardProps) {
               className={cn(
                 "text-2xl font-bold",
                 "highlight" in metric && metric.highlight
-                  ? "text-amber-500"
+                  ? "text-muted-foreground"
                   : "text-foreground",
               )}
             >

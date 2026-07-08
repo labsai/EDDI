@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Crosshair, MessageCircle, BarChart3, Settings } from "lucide-react";
+import { Users, MessageCircle, BarChart3, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -10,7 +10,6 @@ interface QuickAction {
   label: string;
   description: string;
   to: string;
-  accent: string;
 }
 
 // ─── Component ───────────────────────────────────────────────────
@@ -24,14 +23,13 @@ export function QuickActions({ className }: QuickActionsProps) {
 
   const actions: QuickAction[] = [
     {
-      icon: Crosshair,
+      icon: Users,
       label: t("quickActions.assembleTaskForce", "Assemble Task Force"),
       description: t(
         "quickActions.assembleTaskForceDesc",
         "Bring experts together to solve complex challenges",
       ),
       to: "/boardroom/new",
-      accent: "text-primary",
     },
     {
       icon: MessageCircle,
@@ -40,8 +38,7 @@ export function QuickActions({ className }: QuickActionsProps) {
         "quickActions.chatWithAgentDesc",
         "Have a 1:1 conversation with any digital expert",
       ),
-      to: "/boardroom/new",
-      accent: "text-emerald-500",
+      to: "/manage/agents",
     },
     {
       icon: BarChart3,
@@ -50,18 +47,16 @@ export function QuickActions({ className }: QuickActionsProps) {
         "quickActions.viewInsightsDesc",
         "Track your workforce's knowledge coverage",
       ),
-      to: "/boardroom",
-      accent: "text-blue-500",
+      to: "/boardroom/history",
     },
     {
-      icon: Settings,
+      icon: Bot,
       label: t("quickActions.manageWorkforce", "Manage Workforce"),
       description: t(
         "quickActions.manageWorkforceDesc",
         "Configure and deploy digital experts",
       ),
-      to: "/boardroom/new",
-      accent: "text-violet-500",
+      to: "/manage/agents",
     },
   ];
 
@@ -79,7 +74,7 @@ export function QuickActions({ className }: QuickActionsProps) {
           )}
         >
           <action.icon
-            className={cn("h-5 w-5 transition-transform group-hover:scale-110", action.accent)}
+            className="h-5 w-5 text-muted-foreground transition-transform group-hover:scale-110 group-hover:text-foreground"
           />
           <div>
             <p className="text-sm font-medium text-foreground">

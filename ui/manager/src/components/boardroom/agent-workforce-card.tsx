@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
-import { hashColor, getInitials } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
 import { Bot } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -21,7 +20,6 @@ export interface AgentWorkforceCardProps {
 
 export function AgentWorkforceCard({
   name,
-  agentId,
   description,
   onClick,
   className,
@@ -44,10 +42,7 @@ export function AgentWorkforceCard({
     >
       {/* Avatar */}
       <div
-        className={cn(
-          "flex h-12 w-12 items-center justify-center rounded-full text-sm font-semibold text-white",
-          hashColor(agentId),
-        )}
+        className="flex h-12 w-12 items-center justify-center rounded-full text-sm font-semibold bg-muted text-muted-foreground"
         aria-hidden
       >
         {getInitials(name)}
@@ -69,8 +64,8 @@ export function AgentWorkforceCard({
       </div>
 
       {/* Status dot */}
-      <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
         {t("workforce.ready", "Ready")}
       </span>
     </button>
