@@ -1,0 +1,214 @@
+name: Auto-approve (Copilot-reviewed)
+
+# Converts a clean GitHub Copilot code review into an actual PR approval once CI is
+# green, so PRs from trusted authors can satisfy a required-review gate without a
+# human reviewer. This ONLY submits an approval; branch protection (required status
+# checks, up-to-date, linear history, etc.) still governs whether the PR can merge —
+# a bug here cannot merge a red PR, it can at most add a review.
+#
+# One-time setup by a repo admin (BOTH are required together):
+#   1. A separate "bot" GitHub account with write access to this repo. GitHub forbids
+#      approving your own PRs and the built-in GITHUB_TOKEN cannot submit approvals,
+#      so the approving identity MUST differ from the PR author.
+#   2. A FINE-GRAINED PAT owned by that bot, scoped to THIS repository only, with
+#      Repository permissions:
+#        - Pull requests: Read and write   (list reviews, submit the approval)
+#        - Checks:        Read-only         (read CI check-run conclusions)
+#        - Metadata:      Read-only         (mandatory baseline)
+#      Store it as the repo secret AUTO_APPROVE_BOT_TOKEN. Do NOT use a classic
+#      `repo`-scoped PAT — keep the blast radius to one repo.
+#   3. Set the repo variable AUTO_APPROVE_BOT_LOGIN to that bot's username.
+#   If either is missing the workflow is inert (the step is skipped) — no red check.
+#
+# Note: the `workflow_run` trigger only fires once this file is on the default branch
+# (main). It will not run against its own introducing PR — expected for workflow_run.
+
+on:
+  # Fires when Copilot (or a human) submits a review.
+  pull_request_review:
+    types: [submitted]
+  # Fires when the CI/CD workflow finishes — the "CI just turned green" re-trigger.
+  # (check_suite/check_run are NOT used: GitHub suppresses those events for check
+  # suites produced by GitHub Actions, so they would never fire for our own CI.)
+  workflow_run:
+    workflows: ["CI/CD"]
+    types: [completed]
+
+# GITHUB_TOKEN is essentially unused (all API calls below use the bot PAT); keep it
+# least-privilege regardless.
+permissions:
+  contents: read
+
+concurrency:
+  # Key on the head commit so a review event and a CI-completion event for the SAME
+  # commit serialize, preventing a duplicate-approval race.
+  group: auto-approve-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  auto-approve:
+    # ⚠️ If you rename this, also update SELF_CHECK_NAME in the script below.
+    name: auto-approve
+    runs-on: ubuntu-latest
+    # Inert unless a bot login is configured (forks/clones stay quiet).
+    if: ${{ vars.AUTO_APPROVE_BOT_LOGIN != '' }}
+    env:
+      # Surfaced as env so the step below can be skipped when the secret is absent —
+      # secrets cannot be referenced from an `if:` directly, but env can.
+      BOT_TOKEN: ${{ secrets.AUTO_APPROVE_BOT_TOKEN }}
+      BOT_LOGIN: ${{ vars.AUTO_APPROVE_BOT_LOGIN }}
+    steps:
+      - name: Approve if Copilot-clean and CI green
+        # Skip gracefully (no misleading red check) when the bot PAT is not configured.
+        if: ${{ env.BOT_TOKEN != '' }}
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          # Every API call in this step — reads and the approval — uses the bot PAT, so
+          # the approval is attributed to the bot. The PAT is fine-grained to one repo.
+          github-token: ${{ env.BOT_TOKEN }}
+          script: |
+            // Copilot code review posts as this bot and ALWAYS leaves a "Comment"
+            // review (never an approval) — so it never counts as an approval on its
+            // own. This workflow converts a *clean* Copilot review into one.
+            const COPILOT_LOGIN = 'copilot-pull-request-reviewer[bot]';
+            const BOT_LOGIN = process.env.BOT_LOGIN;
+            const BASE_BRANCH = 'main';
+            // This job's own check-run name — excluded from the CI gate (it is itself
+            // "in_progress" on the head commit while this code runs).
+            const SELF_CHECK_NAME = 'auto-approve';
+            // Only auto-approve PRs from authors already trusted with the repo — this
+            // is a PUBLIC repo, so external contributors must never be auto-approved.
+            const TRUSTED_ASSOCIATION = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+            // Require Copilot's latest review to carry no INLINE (line) comments — i.e.
+            // it found nothing to flag. A summary-only review body is treated as clean
+            // by design; set false to approve regardless of Copilot's comments.
+            const REQUIRE_CLEAN_COPILOT = true;
+
+            if (!BOT_LOGIN) { core.info('AUTO_APPROVE_BOT_LOGIN not set; skipping.'); return; }
+            const { owner, repo } = context.repo;
+
+            // 1) Candidate PR numbers from the triggering event.
+            const prNumbers = new Set();
+            if (context.eventName === 'pull_request_review') {
+              // Skip the event caused by our own approval to avoid a re-trigger loop.
+              if (context.payload.review?.user?.login === BOT_LOGIN) {
+                core.info('Triggered by our own approval; skipping.');
+                return;
+              }
+              if (context.payload.pull_request?.number) {
+                prNumbers.add(context.payload.pull_request.number);
+              }
+            } else if (context.eventName === 'workflow_run') {
+              // CI just finished — resolve the PR(s) at that head commit. Works for
+              // same-repo and fork PRs (unlike check_suite.pull_requests).
+              const headSha = context.payload.workflow_run?.head_sha;
+              if (headSha) {
+                const assoc = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+                  owner, repo, commit_sha: headSha, per_page: 100,
+                });
+                // Filter early: the API returns closed/merged PRs too; skip them to
+                // avoid unnecessary pulls.get calls in the loop below.
+                for (const pr of assoc) {
+                  if (pr.state === 'open') prNumbers.add(pr.number);
+                }
+              }
+            }
+            if (prNumbers.size === 0) { core.info('No candidate PRs.'); return; }
+
+            for (const number of prNumbers) {
+              try {
+                const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+
+                if (pr.state !== 'open') { core.info(`PR #${number}: not open.`); continue; }
+                if (pr.draft) { core.info(`PR #${number}: draft.`); continue; }
+                if (pr.base.ref !== BASE_BRANCH) {
+                  core.info(`PR #${number}: base '${pr.base.ref}' != '${BASE_BRANCH}'.`);
+                  continue;
+                }
+                if (!TRUSTED_ASSOCIATION.has(pr.author_association)) {
+                  core.info(`PR #${number}: author_association '${pr.author_association}' not trusted.`);
+                  continue;
+                }
+                const headSha = pr.head.sha;
+
+                const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                  owner, repo, pull_number: number, per_page: 100,
+                });
+
+                // Idempotent: already approved by our bot at this exact head commit.
+                if (reviews.some(r => r.user?.login === BOT_LOGIN && r.state === 'APPROVED' && r.commit_id === headSha)) {
+                  core.info(`PR #${number}: already approved by ${BOT_LOGIN} at head.`);
+                  continue;
+                }
+
+                // Any outstanding CHANGES_REQUESTED (latest actionable review per author) blocks.
+                const latestStateByAuthor = new Map();
+                for (const r of reviews) {
+                  if (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) {
+                    latestStateByAuthor.set(r.user?.login, r.state);
+                  }
+                }
+                if ([...latestStateByAuthor.values()].includes('CHANGES_REQUESTED')) {
+                  core.info(`PR #${number}: an outstanding CHANGES_REQUESTED blocks approval.`);
+                  continue;
+                }
+
+                // Copilot must have reviewed the CURRENT head commit.
+                const copilotReviews = reviews.filter(r => r.user?.login === COPILOT_LOGIN);
+                if (copilotReviews.length === 0) {
+                  // Surface a probable Copilot bot-slug change so drift doesn't silently
+                  // disable all auto-approval.
+                  const lookalike = reviews.find(r => (r.user?.login || '').toLowerCase().includes('copilot'));
+                  if (lookalike) {
+                    core.warning(`PR #${number}: a review by '${lookalike.user.login}' looks like Copilot but does not `
+                      + `match COPILOT_LOGIN ('${COPILOT_LOGIN}'); the reviewer slug may have changed — update COPILOT_LOGIN.`);
+                  } else {
+                    core.info(`PR #${number}: Copilot has not reviewed.`);
+                  }
+                  continue;
+                }
+                const latestCopilot = copilotReviews[copilotReviews.length - 1];
+                if (latestCopilot.commit_id !== headSha) {
+                  core.info(`PR #${number}: Copilot's latest review is for an older commit; awaiting re-review.`);
+                  continue;
+                }
+                if (REQUIRE_CLEAN_COPILOT) {
+                  const reviewComments = await github.paginate(github.rest.pulls.listCommentsForReview, {
+                    owner, repo, pull_number: number, review_id: latestCopilot.id, per_page: 100,
+                  });
+                  if (reviewComments.length > 0) {
+                    core.info(`PR #${number}: Copilot left ${reviewComments.length} inline comment(s); not auto-approving.`);
+                    continue;
+                  }
+                }
+
+                // CI: every check-run on the head commit (except this job) must be
+                // completed and successful. Only check-runs are gated (EDDI's CI emits
+                // check-runs); any status-based required checks remain enforced by
+                // branch protection, which is the actual merge gate.
+                const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+                  owner, repo, ref: headSha, per_page: 100,
+                });
+                const relevant = checkRuns.filter(c => c.name !== SELF_CHECK_NAME);
+                if (relevant.length === 0) { core.info(`PR #${number}: no CI check-runs yet.`); continue; }
+                const stillRunning = relevant.filter(c => c.status !== 'completed');
+                if (stillRunning.length > 0) {
+                  core.info(`PR #${number}: ${stillRunning.length} check-run(s) still running.`);
+                  continue;
+                }
+                const failing = relevant.filter(c => !['success', 'neutral', 'skipped'].includes(c.conclusion));
+                if (failing.length > 0) {
+                  core.info(`PR #${number}: failing check-run(s): ${failing.map(c => c.name).join(', ')}.`);
+                  continue;
+                }
+
+                await github.rest.pulls.createReview({
+                  owner, repo, pull_number: number, event: 'APPROVE',
+                  body: 'Auto-approved: GitHub Copilot reviewed with no unresolved comments and all CI checks passed.\n\n'
+                    + '_This approval satisfies the review requirement only; branch protection still governs merge._',
+                });
+                core.notice(`PR #${number}: approved (Copilot clean + CI green).`);
+              } catch (err) {
+                core.warning(`PR #${number}: evaluation failed: ${err.message}`);
+              }
+            }
