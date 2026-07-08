@@ -46,8 +46,7 @@ function ContextCard({ boardName, question, response, className }: ContextCardPr
     <div
       className={cn(
         "rounded-xl border",
-        "bg-indigo-50 border-indigo-200",
-        "dark:bg-indigo-500/10 dark:border-indigo-500/20",
+        "bg-primary/10 border-primary/30",
         className,
       )}
     >
@@ -58,8 +57,8 @@ function ContextCard({ boardName, question, response, className }: ContextCardPr
         className={cn(
           "flex w-full items-center justify-between px-4 py-3",
           "text-start text-sm font-medium",
-          "text-indigo-600 dark:text-indigo-400",
-          "hover:bg-indigo-100/50 dark:hover:bg-indigo-500/5",
+          "text-primary",
+          "hover:bg-primary/10",
           "rounded-xl transition-colors",
         )}
         aria-expanded={expanded}
@@ -86,10 +85,10 @@ function ContextCard({ boardName, question, response, className }: ContextCardPr
             {/* Question */}
             {question && (
               <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t("boardroom.thread.questionLabel", "Question")}
                 </p>
-                <p className="mt-1 text-sm text-slate-700 dark:text-slate-300">
+                <p className="mt-1 text-sm text-foreground/80">
                   {question}
                 </p>
               </div>
@@ -98,10 +97,10 @@ function ContextCard({ boardName, question, response, className }: ContextCardPr
             {/* Response */}
             {response && (
               <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t("boardroom.thread.responseLabel", "Response")}
                 </p>
-                <p className="mt-1 max-h-32 overflow-y-auto text-sm text-slate-700 dark:text-slate-300">
+                <p className="mt-1 max-h-32 overflow-y-auto text-sm text-foreground/80">
                   {response}
                 </p>
               </div>

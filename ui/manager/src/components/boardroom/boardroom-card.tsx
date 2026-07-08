@@ -29,7 +29,7 @@ const STYLE_COLORS: Record<string, string> = {
   DEVIL_ADVOCATE: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
   PEER_REVIEW: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
   DELPHI: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-  CUSTOM: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
+  CUSTOM: "bg-muted text-muted-foreground",
 };
 
 // ─── Props ───────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ function StackedAvatarsInline({
         <div
           key={member.agentId}
           className={cn(
-            "flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-medium text-white ring-2 ring-white dark:ring-slate-900",
+            "flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-medium text-white ring-2 ring-card dark:ring-background",
             hashColor(member.agentId),
             i > 0 && "-ms-2",
           )}
@@ -77,7 +77,7 @@ function StackedAvatarsInline({
       {overflow > 0 && (
         <div
           className={cn(
-            "-ms-2 flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-[10px] font-medium text-slate-600 ring-2 ring-white dark:bg-slate-700 dark:text-slate-300 dark:ring-slate-900",
+            "-ms-2 flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-card dark:ring-background",
           )}
         >
           +{overflow}
@@ -156,8 +156,7 @@ function BoardroomCard({
         to={`/boardroom/${id}?version=${currentVersion}`}
         className={cn(
           "block rounded-xl border p-5 transition-all duration-150",
-          "bg-white border-slate-200 hover:shadow-md hover:-translate-y-0.5",
-          "dark:bg-slate-900 dark:border-slate-800 dark:hover:border-slate-700 dark:hover:shadow-lg",
+          "bg-card border-border hover:shadow-md hover:-translate-y-0.5",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           isList && "flex items-center gap-4",
           className,
@@ -239,7 +238,7 @@ function BoardroomCard({
 
             {/* Description */}
             {description && (
-              <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400 line-clamp-2">
+              <p className="mt-1.5 text-sm text-muted-foreground line-clamp-2">
                 {description}
               </p>
             )}
@@ -263,14 +262,14 @@ function BoardroomCard({
                 {members.length > 0 ? (
                   <StackedAvatarsInline members={members} />
                 ) : (
-                  <span className="text-xs text-slate-400">
+                  <span className="text-xs text-muted-foreground">
                     {t("boardroom.card.noMembers", "No advisors")}
                   </span>
                 )}
               </div>
 
               {/* End — meta */}
-              <div className="flex items-center gap-3 text-xs text-slate-400">
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 <span>
                   {t("boardroom.card.advisorCount", "{{count}} advisors", {
                     count: members.length,
@@ -297,7 +296,7 @@ function BoardroomCard({
                 {name || t("boardroom.card.untitled", "Untitled Board")}
               </h3>
               {description && (
-                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 line-clamp-1">
+                <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">
                   {description}
                 </p>
               )}
@@ -318,14 +317,14 @@ function BoardroomCard({
               {members.length > 0 ? (
                 <StackedAvatarsInline members={members} />
               ) : (
-                <span className="text-xs text-slate-400">
+                <span className="text-xs text-muted-foreground">
                   {t("boardroom.card.noMembers", "No advisors")}
                 </span>
               )}
             </div>
 
             {/* Meta */}
-            <div className="hidden md:flex items-center gap-3 text-xs text-slate-400 shrink-0">
+            <div className="hidden md:flex items-center gap-3 text-xs text-muted-foreground shrink-0">
               <span>
                 {t("boardroom.card.advisorCount", "{{count}} advisors", {
                   count: members.length,

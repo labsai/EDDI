@@ -11,7 +11,6 @@ import {
   buildGroupFromTemplate,
 } from "@/lib/group-templates";
 import {
-  STYLE_INFO,
   parseGroupResourceUri,
   type DiscussionStyle,
   type GroupMember,
@@ -293,6 +292,7 @@ function BoardroomWizard() {
     boardDescription,
     createGroup,
     navigate,
+    creationProgress,
   ]);
 
   // ─── Render ─────────────────────────────────────────────────────────────

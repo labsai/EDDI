@@ -70,7 +70,7 @@ const BG_TO_BORDER: Record<string, string> = {
 
 function agentBorderClass(agentId: string): string {
   const bg = hashColor(agentId);
-  return BG_TO_BORDER[bg] ?? "border-s-slate-400";
+  return BG_TO_BORDER[bg] ?? "border-s-muted-foreground";
 }
 
 // ─── Phase icons ─────────────────────────────────────────────────
@@ -114,13 +114,12 @@ function PhaseSeparator({
         animationDelay: `${Math.min(index * 40, 400)}ms`,
       }}
     >
-      <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+      <div className="flex-1 h-px bg-muted" />
       <div
         className={cn(
           "flex items-center gap-1.5 ps-3 pe-3 py-1 rounded-full",
           "text-xs uppercase tracking-wider font-medium",
-          "bg-slate-100 text-slate-600",
-          "dark:bg-slate-800 dark:text-slate-400",
+          "bg-muted text-muted-foreground",
         )}
       >
         <span>{icon}</span>
@@ -133,7 +132,7 @@ function PhaseSeparator({
           </Badge>
         )}
       </div>
-      <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+      <div className="flex-1 h-px bg-muted" />
     </div>
   );
 }
@@ -151,7 +150,7 @@ function QuestionBubble({ content, index }: { content: string | null; index: num
     >
       <div
         className={cn(
-          "bg-indigo-500 text-white rounded-2xl rounded-ee-md ps-4 pe-4 py-3 max-w-lg",
+          "bg-primary text-primary-foreground rounded-2xl rounded-ee-md ps-4 pe-4 py-3 max-w-lg",
           "shadow-sm",
         )}
       >
@@ -178,8 +177,7 @@ function AgentEntryCard({
     <div
       className={cn(
         "rounded-xl border border-s-4 p-4",
-        "bg-white border-slate-200",
-        "dark:bg-slate-900/50 dark:border-slate-800",
+        "bg-card border-border",
         borderClass,
       )}
       style={{
@@ -194,7 +192,7 @@ function AgentEntryCard({
           agentId={entry.speakerAgentId}
           size="sm"
         />
-        <span className="font-medium text-sm text-slate-900 dark:text-slate-100">
+        <span className="font-medium text-sm text-foreground">
           {entry.speakerDisplayName}
         </span>
         {typeInfo && (
@@ -203,7 +201,7 @@ function AgentEntryCard({
           </Badge>
         )}
         {entry.targetAgentId && (
-          <span className="text-xs text-slate-400 dark:text-slate-500">
+          <span className="text-xs text-muted-foreground">
             → {entry.targetAgentId}
           </span>
         )}
@@ -212,11 +210,11 @@ function AgentEntryCard({
       {/* Content */}
       <div className="ps-10">
         {entry.content ? (
-          <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+          <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
             {entry.content}
           </p>
         ) : (
-          <p className="text-sm text-slate-400 italic">
+          <p className="text-sm text-muted-foreground italic">
             {t("boardroom.history.noContent", "No content")}
           </p>
         )}
@@ -225,7 +223,7 @@ function AgentEntryCard({
       {/* Timestamp */}
       {entry.timestamp && (
         <div className="ps-10 mt-2">
-          <span className="text-[10px] text-slate-400 dark:text-slate-500">
+          <span className="text-[10px] text-muted-foreground">
             {new Date(entry.timestamp).toLocaleTimeString()}
           </span>
         </div>
@@ -266,7 +264,7 @@ function SynthesisEntryCard({
           </span>
         )}
       </div>
-      <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed ps-6">
+      <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed ps-6">
         {entry.content ?? ""}
       </p>
     </div>
@@ -330,15 +328,14 @@ function SkippedEntryCard({
     <div
       className={cn(
         "rounded-xl border p-3 opacity-60",
-        "bg-slate-50 border-slate-200",
-        "dark:bg-slate-900/30 dark:border-slate-800",
+        "bg-muted/50 border-border",
       )}
       style={{
         animation: "br-message-in 250ms ease-out both",
         animationDelay: `${Math.min(index * 40, 400)}ms`,
       }}
     >
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-muted-foreground">
         {t("boardroom.history.skipped", "{{name}} — Skipped", {
           name: entry.speakerDisplayName,
         })}
@@ -365,7 +362,7 @@ function SynthesizedAnswerFooter({ content }: { content: string }) {
           {t("boardroom.history.finalAnswer", "Final Synthesized Answer")}
         </h3>
       </div>
-      <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+      <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
         {content}
       </p>
     </div>
@@ -379,7 +376,7 @@ function ViewerSkeleton() {
     <div className="flex flex-col gap-4 p-6">
       <Skeleton className="h-6 w-3/4" />
       <Skeleton className="h-4 w-1/4" />
-      <div className="h-px bg-slate-200 dark:bg-slate-700 my-2" />
+      <div className="h-px bg-muted my-2" />
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className="space-y-2">
           <div className="flex items-center gap-2">
@@ -528,7 +525,7 @@ function ConversationViewer({
   if (!conversation) {
     return (
       <div className={cn("flex items-center justify-center h-full", className)}>
-        <p className="text-sm text-slate-400 dark:text-slate-500">
+        <p className="text-sm text-muted-foreground">
           {t("boardroom.history.notFound", "Conversation not found")}
         </p>
       </div>
@@ -551,12 +548,12 @@ function ConversationViewer({
       <div
         className={cn(
           "flex items-start gap-3 ps-5 pe-5 py-4",
-          "border-b border-slate-200 dark:border-slate-800",
-          "bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm",
+          "border-b border-border",
+          "bg-card/50 backdrop-blur-sm",
         )}
       >
         <div className="flex-1 min-w-0">
-          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 line-clamp-2">
+          <h2 className="text-base font-semibold text-foreground line-clamp-2">
             {conversation.originalQuestion ||
               t("boardroom.history.untitled", "Untitled Conversation")}
           </h2>
@@ -565,7 +562,7 @@ function ConversationViewer({
               {t(stateI18nKey(conversation.state), stateConfig.label)}
             </Badge>
             {timestamp > 0 && (
-              <span className="text-xs text-slate-400 dark:text-slate-500">
+              <span className="text-xs text-muted-foreground">
                 {formatRelativeTime(timestamp)}
               </span>
             )}
@@ -671,7 +668,7 @@ function ConversationViewer({
         {/* Empty transcript */}
         {conversation.transcript.length === 0 && (
           <div className="flex items-center justify-center py-12">
-            <p className="text-sm text-slate-400 dark:text-slate-500">
+            <p className="text-sm text-muted-foreground">
               {t(
                 "boardroom.history.emptyTranscript",
                 "No transcript entries yet",

@@ -78,8 +78,8 @@ function SessionHistory({
   return (
     <div className={cn("flex flex-col h-full", className)}>
       {/* Header */}
-      <div className="flex items-center justify-between ps-4 pe-4 py-3 border-b border-slate-200 dark:border-slate-800">
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+      <div className="flex items-center justify-between ps-4 pe-4 py-3 border-b border-border">
+        <h3 className="text-sm font-semibold text-foreground">
           {t("boardroom.board.sessions", "Sessions")}
         </h3>
         {onClose && (
@@ -104,7 +104,7 @@ function SessionHistory({
 
         {!isLoading && (!conversations || conversations.length === 0) && (
           <div className="p-8 text-center">
-            <p className="text-sm text-slate-400 dark:text-slate-500">
+            <p className="text-sm text-muted-foreground">
               {t("boardroom.board.noSessions", "No sessions yet")}
             </p>
           </div>
@@ -128,14 +128,14 @@ function SessionHistory({
                 onClick={() => onSelect(conv.id)}
                 className={cn(
                   "w-full text-start ps-4 pe-4 py-3 transition-colors",
-                  "hover:bg-slate-50 dark:hover:bg-slate-800/50",
-                  "border-b border-slate-100 dark:border-slate-800/50",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500",
-                  isSelected && "bg-indigo-50 dark:bg-indigo-500/10 border-s-2 border-s-indigo-500",
+                  "hover:bg-muted/50",
+                  "border-b border-border/50",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                  isSelected && "bg-primary/10 border-s-2 border-s-primary",
                 )}
               >
                 {/* Question text */}
-                <p className="text-sm text-slate-700 dark:text-slate-300 line-clamp-1">
+                <p className="text-sm text-foreground/80 line-clamp-1">
                   {conv.originalQuestion || t("boardroom.board.untitled", "Untitled")}
                 </p>
 
@@ -145,7 +145,7 @@ function SessionHistory({
                     {t(getStateI18nKey(conv.state), badgeConfig.label)}
                   </Badge>
                   {timestamp > 0 && (
-                    <span className="text-xs text-slate-400 dark:text-slate-500">
+                    <span className="text-xs text-muted-foreground">
                       {formatRelativeTime(timestamp)}
                     </span>
                   )}

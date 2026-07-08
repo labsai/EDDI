@@ -28,8 +28,7 @@ export function BoardroomTopbar({
     <header
       className={cn(
         "sticky top-0 z-30 flex h-14 items-center gap-2 ps-4 pe-4",
-        "border-b border-slate-200 bg-white/80 backdrop-blur-sm",
-        "dark:border-slate-800 dark:bg-slate-900/80",
+        "border-b border-border bg-card/80 backdrop-blur-sm",
       )}
     >
       {/* Left side: back arrow or hamburger */}
@@ -58,10 +57,10 @@ export function BoardroomTopbar({
       )}
 
       {/* Title */}
-      <div className="min-w-0 flex-1 truncate text-lg font-semibold text-slate-900 dark:text-slate-50">
+      <div className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">
         {title || (
           <span className="flex items-center gap-1.5">
-            <span className="text-indigo-500 dark:text-indigo-400" aria-hidden="true">✦</span>
+            <span className="text-primary" aria-hidden="true">✦</span>
             {t("boardroom.title", "Boardroom")}
           </span>
         )}

@@ -62,7 +62,7 @@ function QuestionBubble({ content, delay }: { content: string | null; delay: num
       className="flex justify-end"
       style={{ animation: "br-message-in 250ms ease-out both", animationDelay: `${delay}ms` }}
     >
-      <div className="bg-indigo-500 text-white rounded-2xl rounded-ee-md ps-4 pe-4 py-3 max-w-lg">
+      <div className="bg-primary text-primary-foreground rounded-2xl rounded-ee-md ps-4 pe-4 py-3 max-w-lg">
         <p className="text-sm whitespace-pre-wrap">{content ?? ""}</p>
       </div>
     </div>
@@ -93,8 +93,7 @@ function PhaseHeader({
         className={cn(
           "flex items-center gap-1.5 ps-3 pe-3 py-1 rounded-full",
           "text-xs uppercase tracking-wider font-medium",
-          "bg-slate-100 text-slate-600",
-          "dark:bg-slate-800 dark:text-slate-400",
+          "bg-muted text-muted-foreground",
         )}
       >
         <span>{icon}</span>
@@ -113,18 +112,18 @@ function SynthesisCard({ content, delay }: { content: string; delay: number }) {
       role="status"
       aria-label={t("boardroom.board.synthesisResult", "Synthesis result")}
       className={cn(
-        "border-s-4 border-indigo-500 rounded-xl p-4",
-        "bg-indigo-50 dark:bg-indigo-500/10",
+        "border-s-4 border-primary rounded-xl p-4",
+        "bg-primary/10",
       )}
       style={{ animation: "br-message-in 250ms ease-out both", animationDelay: `${delay}ms` }}
     >
       <div className="flex items-center gap-2 mb-2">
         <span>✨</span>
-        <span className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">
+        <span className="text-sm font-semibold text-primary">
           {t("boardroom.board.synthesis", "Synthesis")}
         </span>
       </div>
-      <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+      <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
         {content}
       </p>
     </div>
@@ -147,12 +146,11 @@ function SkippedCard({
     <div
       className={cn(
         "rounded-xl border p-3 opacity-60",
-        "bg-slate-50 border-slate-200",
-        "dark:bg-slate-900/30 dark:border-slate-800",
+        "bg-muted/50 border-border",
       )}
       style={{ animation: "br-message-in 250ms ease-out both", animationDelay: `${delay}ms` }}
     >
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-muted-foreground">
         {t("boardroom.board.skipped", "{{name}} — Skipped", { name: displayName })}
         {reason && <span className="ms-1">({reason})</span>}
       </p>

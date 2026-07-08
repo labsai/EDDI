@@ -58,7 +58,7 @@ function MemberCard({
   );
 
   return (
-    <div className="rounded-xl border border-slate-200 p-4 transition-all dark:border-slate-700">
+    <div className="rounded-xl border border-border p-4 transition-all">
       {/* Header row */}
       <div className="flex items-center gap-3">
         <AdvisorAvatar
@@ -93,7 +93,7 @@ function MemberCard({
             type="button"
             onClick={() => setExpanded((p) => !p)}
             aria-expanded={expanded}
-            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={
               expanded
                 ? t("boardroom.wizard.collapse", "Collapse")
@@ -122,7 +122,7 @@ function MemberCard({
 
       {/* Expandable config */}
       {expanded && (
-        <div className="mt-4 space-y-4 border-t border-slate-100 pt-4 dark:border-slate-800">
+        <div className="mt-4 space-y-4 border-t border-border/50 pt-4">
           {/* Mode toggle */}
           <div className="flex gap-2">
             <button
@@ -131,10 +131,10 @@ function MemberCard({
               onClick={() => update({ mode: "existing" })}
               className={cn(
                 "rounded-lg ps-3 pe-3 py-1.5 text-xs font-medium transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 member.mode === "existing"
-                  ? "bg-indigo-500 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700",
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80",
               )}
             >
               {t("boardroom.wizard.useExisting", "Use existing agent")}
@@ -145,10 +145,10 @@ function MemberCard({
               onClick={() => update({ mode: "new" })}
               className={cn(
                 "rounded-lg ps-3 pe-3 py-1.5 text-xs font-medium transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 member.mode === "new"
-                  ? "bg-indigo-500 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700",
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80",
               )}
             >
               {t("boardroom.wizard.createNew", "Create new advisor")}
@@ -372,4 +372,4 @@ function TeamBuilder({
 }
 
 export { TeamBuilder };
-export type { TeamBuilderProps, MemberSlot };
+export type { TeamBuilderProps };

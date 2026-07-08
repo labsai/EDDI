@@ -36,9 +36,9 @@ function StatusIcon({
 }) {
   switch (status) {
     case "pending":
-      return <Clock className="h-4 w-4 text-slate-400" />;
+      return <Clock className="h-4 w-4 text-muted-foreground" />;
     case "creating":
-      return <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />;
+      return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
     case "done":
       return <Check className="h-4 w-4 text-emerald-500" />;
     case "error":
@@ -62,13 +62,13 @@ function StatusLabel({
   switch (status) {
     case "pending":
       return (
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-muted-foreground">
           {t("boardroom.wizard.pending", "Waiting…")}
         </span>
       );
     case "creating":
       return (
-        <span className="text-xs text-indigo-500">
+        <span className="text-xs text-primary">
           {t("boardroom.wizard.creatingAgent", "Creating…")}
         </span>
       );
@@ -187,13 +187,13 @@ function ReviewLaunch({
               className={cn(
                 "flex items-center gap-3 rounded-lg border p-3 transition-all",
                 item.status === "creating" &&
-                  "border-indigo-200 bg-indigo-50/50 dark:border-indigo-800 dark:bg-indigo-500/5",
+                  "border-primary/30 bg-primary/10",
                 item.status === "done" &&
                   "border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-500/5",
                 item.status === "error" &&
                   "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-500/5",
                 item.status === "pending" &&
-                  "border-slate-200 dark:border-slate-700",
+                  "border-border",
               )}
             >
               <StatusIcon status={item.status} />
@@ -207,7 +207,7 @@ function ReviewLaunch({
 
         {hasError && !isCreating && (
           <Button
-            className="w-full bg-indigo-500 text-white hover:bg-indigo-600"
+            className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
             size="lg"
             onClick={onCreateClick}
           >
@@ -227,7 +227,7 @@ function ReviewLaunch({
           {boardName || t("boardroom.wizard.untitled", "Untitled Board")}
         </h2>
         {boardDescription && (
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-muted-foreground">
             {boardDescription}
           </p>
         )}
@@ -250,7 +250,7 @@ function ReviewLaunch({
           {members.map((member) => (
             <div
               key={member.id}
-              className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700"
+              className="flex items-center gap-3 rounded-lg border border-border p-3"
             >
               <AdvisorAvatar
                 name={member.displayName || "?"}
@@ -285,7 +285,7 @@ function ReviewLaunch({
 
       {/* Create button */}
       <Button
-        className="w-full bg-indigo-500 text-white hover:bg-indigo-600"
+        className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
         size="lg"
         disabled={isCreating}
         onClick={onCreateClick}

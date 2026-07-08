@@ -37,8 +37,7 @@ export function BoardroomBottomTabs() {
       aria-label={t("boardroom.bottomNav", "Bottom navigation")}
       className={cn(
         "fixed inset-x-0 bottom-0 z-40 flex h-16 border-t",
-        "border-slate-200 bg-white/90 backdrop-blur-md",
-        "dark:border-slate-800 dark:bg-slate-900/90",
+        "border-border bg-card/90 backdrop-blur-md",
         "pb-[env(safe-area-inset-bottom)]",
       )}
     >
@@ -52,16 +51,16 @@ export function BoardroomBottomTabs() {
             onClick={() => navigate(tab.to)}
             className={cn(
               "flex flex-1 flex-col items-center justify-center gap-1 text-xs transition-colors",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-inset",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
               tab.active
-                ? "font-medium text-indigo-500 dark:text-indigo-400"
-                : "text-slate-400 dark:text-slate-500",
+                ? "font-medium text-primary"
+                : "text-muted-foreground",
             )}
           >
             <Icon className="h-5 w-5" />
             <span>{tab.label}</span>
             {tab.active && (
-              <span className="h-1 w-1 rounded-full bg-indigo-500" />
+              <span className="h-1 w-1 rounded-full bg-primary" />
             )}
           </button>
         );

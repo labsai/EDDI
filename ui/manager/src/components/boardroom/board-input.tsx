@@ -74,8 +74,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
     <div
       className={cn(
         "sticky bottom-0 ps-4 pe-4 py-3",
-        "border-t bg-white border-slate-200",
-        "dark:bg-slate-900 dark:border-slate-800",
+        "border-t bg-card border-border",
         className,
       )}
     >
@@ -97,12 +96,12 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
           rows={1}
           className={cn(
             "flex-1 min-h-10 max-h-32 resize-none rounded-xl ps-4 pe-4 py-2.5",
-            "bg-slate-100 dark:bg-slate-800",
-            "text-sm text-slate-900 dark:text-slate-100",
-            "placeholder:text-slate-400 dark:placeholder:text-slate-500",
+            "bg-muted",
+            "text-sm text-foreground",
+            "placeholder:text-muted-foreground",
             "border-none outline-none",
-            "focus:ring-2 focus:ring-indigo-500/30",
-            "focus-visible:ring-indigo-500",
+            "focus:ring-2 focus:ring-ring/30",
+            "focus-visible:ring-ring",
             "transition-shadow",
           )}
         />
@@ -114,8 +113,8 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
           disabled={!canSend}
           className={cn(
             "h-10 w-10 shrink-0 rounded-full",
-            "bg-indigo-500 text-white hover:bg-indigo-600",
-            "disabled:bg-indigo-500/50 disabled:text-white/60",
+            "bg-primary text-primary-foreground hover:bg-primary/90",
+            "disabled:bg-primary/50 disabled:text-primary-foreground/60",
 
           )}
           aria-label={t("boardroom.board.send", "Send")}

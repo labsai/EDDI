@@ -49,9 +49,9 @@ function MembersSheet({
   return (
     <div className={cn("flex flex-col h-full", className)}>
       {/* Header */}
-      <div className="flex items-center justify-between ps-4 pe-4 py-3 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex items-center justify-between ps-4 pe-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+          <h3 className="text-sm font-semibold text-foreground">
             {t("boardroom.board.members", "Members")}
           </h3>
           <Badge variant="secondary" className="text-[10px]">
@@ -76,8 +76,8 @@ function MembersSheet({
               key={member.agentId}
               className={cn(
                 "flex items-center gap-3 ps-4 pe-4 py-3",
-                "border-b border-slate-100 dark:border-slate-800/50",
-                "hover:bg-slate-50 dark:hover:bg-slate-800/30",
+                "border-b border-border/50",
+                "hover:bg-muted/50",
                 "transition-colors",
               )}
             >
@@ -91,7 +91,7 @@ function MembersSheet({
               {/* Info */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-sm text-slate-900 dark:text-slate-100 truncate">
+                  <span className="font-medium text-sm text-foreground truncate">
                     {member.displayName}
                   </span>
                   {isModerator && (
@@ -116,7 +116,7 @@ function MembersSheet({
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-indigo-500 shrink-0"
+                className="text-primary shrink-0"
                 asChild
               >
                 <Link to={`/boardroom/${boardId}/thread/${member.agentId}`}>
@@ -130,7 +130,7 @@ function MembersSheet({
 
         {members.length === 0 && (
           <div className="p-8 text-center">
-            <p className="text-sm text-slate-400 dark:text-slate-500">
+            <p className="text-sm text-muted-foreground">
               {t("boardroom.board.noMembers", "No members")}
             </p>
           </div>

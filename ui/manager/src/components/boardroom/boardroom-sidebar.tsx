@@ -52,15 +52,15 @@ export function BoardroomSidebar({
       aria-label={t("boardroom.sidebar.boards", "Board navigation")}
       className={cn(
         "flex h-full flex-col border-e transition-all duration-250 ease-in-out",
-        "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900",
+        "border-border bg-card",
         collapsed ? "w-16" : "w-70",
       )}
     >
       {/* ── Header ────────────────────────────────────────────── */}
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 ps-3 pe-3 dark:border-slate-800">
+      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border ps-3 pe-3">
         {!collapsed && (
-          <span className="flex-1 truncate text-lg font-semibold text-slate-900 dark:text-slate-50">
-            <span className="text-indigo-500 dark:text-indigo-400">✦</span>{" "}
+          <span className="flex-1 truncate text-lg font-semibold text-foreground">
+            <span className="text-primary">✦</span>{" "}
             {t("boardroom.title", "Boardroom")}
           </span>
         )}
@@ -97,7 +97,7 @@ export function BoardroomSidebar({
         <Button
           asChild
           className={cn(
-            "w-full bg-indigo-500 text-white hover:bg-indigo-600",
+            "w-full bg-primary text-primary-foreground hover:bg-primary/90",
             collapsed && "ps-0 pe-0",
           )}
           size={collapsed ? "icon" : "md"}
@@ -114,7 +114,7 @@ export function BoardroomSidebar({
       {/* ── Boards List ───────────────────────────────────────── */}
       <nav aria-label={t("boardroom.boardList", "Boardroom list")} className="flex-1 overflow-y-auto ps-2 pe-2 pb-2">
         {!collapsed && (
-          <p className="ps-2 pe-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          <p className="ps-2 pe-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             {t("boardroom.boardsLabel", "Boardrooms")}
           </p>
         )}
@@ -136,10 +136,10 @@ export function BoardroomSidebar({
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-start text-sm transition-colors",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     isActive
-                      ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300"
-                      : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800",
+                      ? "bg-primary/10 text-primary"
+                      : "text-foreground/80 hover:bg-muted",
                     collapsed && "justify-center ps-0 pe-0",
                   )}
                 >
@@ -152,7 +152,7 @@ export function BoardroomSidebar({
                       <span className="min-w-0 flex-1 truncate">
                         {board.name || t("boardroom.untitled", "Untitled")}
                       </span>
-                      <span className="flex shrink-0 items-center gap-0.5 text-xs text-slate-400 dark:text-slate-500">
+                      <span className="flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground">
                         <Users className="h-3 w-3" />
                         {board.memberCount}
                       </span>
@@ -166,7 +166,7 @@ export function BoardroomSidebar({
       </nav>
 
       {/* ── Footer: Theme Toggle ──────────────────────────────── */}
-      <div className="shrink-0 border-t border-slate-200 ps-3 pe-3 py-2 dark:border-slate-800">
+      <div className="shrink-0 border-t border-border ps-3 pe-3 py-2">
         <Button
           variant="ghost"
           size={collapsed ? "icon" : "sm"}

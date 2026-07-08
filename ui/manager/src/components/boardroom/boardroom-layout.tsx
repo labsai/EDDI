@@ -85,6 +85,7 @@ export function BoardroomLayout() {
     if (!focusable?.length) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
     if (e.shiftKey && document.activeElement === first) {
       e.preventDefault();
       last.focus();
@@ -123,7 +124,7 @@ export function BoardroomLayout() {
         <ShortcutsDialog />
         <a
           href="#boardroom-main"
-          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
         >
           {t("boardroom.skipToContent", "Skip to content")}
         </a>
@@ -148,7 +149,7 @@ export function BoardroomLayout() {
         <ShortcutsDialog />
         <a
           href="#boardroom-main"
-          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
         >
           {t("boardroom.skipToContent", "Skip to content")}
         </a>
@@ -205,7 +206,7 @@ export function BoardroomLayout() {
       <ShortcutsDialog />
       <a
         href="#boardroom-main"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
       >
         {t("boardroom.skipToContent", "Skip to content")}
       </a>

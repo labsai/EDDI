@@ -83,15 +83,15 @@ function TypingIndicator() {
   return (
     <div className="flex items-center gap-1 py-1" role="status" aria-label={t("boardroom.board.loadingResponse", "Loading response")}>
       <span
-        className="inline-block h-2 w-2 rounded-full bg-slate-400 animate-bounce"
+        className="inline-block h-2 w-2 rounded-full bg-muted-foreground animate-bounce"
         style={{ animationDelay: "0ms" }}
       />
       <span
-        className="inline-block h-2 w-2 rounded-full bg-slate-400 animate-bounce"
+        className="inline-block h-2 w-2 rounded-full bg-muted-foreground animate-bounce"
         style={{ animationDelay: "160ms" }}
       />
       <span
-        className="inline-block h-2 w-2 rounded-full bg-slate-400 animate-bounce"
+        className="inline-block h-2 w-2 rounded-full bg-muted-foreground animate-bounce"
         style={{ animationDelay: "320ms" }}
       />
     </div>
@@ -113,7 +113,7 @@ function AdvisorResponseCard({
 
   // ── Copy to clipboard ────────────────────────────────────────
   const [copied, setCopied] = useState(false);
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(copyTimerRef.current), []);
 
   const handleCopy = async () => {
@@ -146,8 +146,7 @@ function AdvisorResponseCard({
     <div
       className={cn(
         "group relative rounded-xl border p-4",
-        "bg-white border-slate-200",
-        "dark:bg-slate-900/50 dark:border-slate-800",
+        "bg-card border-border",
         className,
       )}
       style={{ animation: "br-message-in 250ms ease-out both" }}
@@ -165,7 +164,7 @@ function AdvisorResponseCard({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground/80"
             onClick={handleCopy}
             aria-label={
               copied
@@ -184,7 +183,7 @@ function AdvisorResponseCard({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-slate-400 hover:text-amber-500 dark:hover:text-amber-400"
+            className="h-7 w-7 text-muted-foreground hover:text-amber-500 dark:hover:text-amber-400"
             onClick={handleTogglePin}
             aria-label={
               pinned
@@ -205,7 +204,7 @@ function AdvisorResponseCard({
       {/* Header row */}
       <div className="flex items-center gap-2 mb-2">
         <AdvisorAvatar name={displayName} agentId={agentId} size="sm" />
-        <span className="font-medium text-sm text-slate-900 dark:text-slate-100">
+        <span className="font-medium text-sm text-foreground">
           {displayName}
         </span>
         {role && (
@@ -220,7 +219,7 @@ function AdvisorResponseCard({
         {content === null ? (
           <TypingIndicator />
         ) : (
-          <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+          <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
             {content}
           </p>
         )}
@@ -229,7 +228,7 @@ function AdvisorResponseCard({
       {/* Footer — follow-up link */}
       {content !== null && (
         <div className="ps-10 mt-3">
-          <Button variant="ghost" size="sm" className="text-indigo-500 p-0 h-auto" asChild>
+          <Button variant="ghost" size="sm" className="text-primary p-0 h-auto" asChild>
             <Link
               to={`/boardroom/${boardId}/thread/${agentId}`}
               state={{ fromGroup: true, question: "", response: content }}
@@ -243,5 +242,5 @@ function AdvisorResponseCard({
   );
 }
 
-export { AdvisorResponseCard, usePinnedResponses };
+export { AdvisorResponseCard };
 export type { AdvisorResponseCardProps, PinnedResponse };

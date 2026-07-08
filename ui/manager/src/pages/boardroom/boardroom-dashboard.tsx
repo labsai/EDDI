@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Users, Plus, AlertCircle, RefreshCw, LayoutGrid, List } from "lucide-react";
+import { Plus, AlertCircle, RefreshCw, LayoutGrid, List } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { Button } from "@/components/ui/button";
@@ -104,8 +104,7 @@ function DashboardEmpty() {
                 to={`/boardroom/new?template=${tpl.key}`}
                 className={cn(
                   "rounded-xl border p-4 text-start transition-all duration-150",
-                  "border-slate-200 hover:border-indigo-400 hover:shadow-md hover:-translate-y-0.5",
-                  "dark:border-slate-700 dark:hover:border-indigo-500",
+                  "border-border hover:border-primary/70 hover:shadow-md hover:-translate-y-0.5",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 )}
               >
@@ -146,8 +145,7 @@ function NewBoardCard() {
       className={cn(
         "hidden @[32rem]/br-dash:flex",
         "flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-5 transition-all duration-150",
-        "border-slate-300 text-slate-400 hover:border-indigo-400 hover:text-indigo-500 hover:bg-indigo-500/5",
-        "dark:border-slate-700 dark:text-slate-500 dark:hover:border-indigo-500 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/5",
+        "border-border text-muted-foreground hover:border-primary/70 hover:text-primary hover:bg-primary/5",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         "min-h-48",
       )}
@@ -172,8 +170,8 @@ function MobileFab() {
         "fixed bottom-24 z-40",
         "end-5",
         "flex h-14 w-14 items-center justify-center rounded-full",
-        "bg-indigo-500 text-white shadow-lg",
-        "hover:bg-indigo-600 active:scale-95",
+        "bg-primary text-primary-foreground shadow-lg",
+        "hover:bg-primary/90 active:scale-95",
         "transition-colors duration-150",
         "sm:hidden",
       )}
@@ -197,15 +195,15 @@ function ViewToggle({
   const { t } = useTranslation();
 
   return (
-    <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700" role="toolbar" aria-label={t("boardroom.dashboard.viewToggle", "View mode")}>
+    <div className="inline-flex rounded-lg border border-border" role="toolbar" aria-label={t("boardroom.dashboard.viewToggle", "View mode")}>
       <button
         type="button"
         onClick={() => onViewModeChange("grid")}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-s-lg ps-3 pe-3 py-1.5 text-sm font-medium transition-colors",
           viewMode === "grid"
-            ? "bg-slate-100 text-foreground dark:bg-slate-800"
-            : "text-muted-foreground hover:bg-slate-50 dark:hover:bg-slate-800/50",
+            ? "bg-muted text-foreground"
+            : "text-muted-foreground hover:bg-muted/50",
         )}
         aria-label={t("boardroom.dashboard.gridView", "Grid view")}
         aria-pressed={viewMode === "grid"}
@@ -218,8 +216,8 @@ function ViewToggle({
         className={cn(
           "inline-flex items-center gap-1.5 rounded-e-lg ps-3 pe-3 py-1.5 text-sm font-medium transition-colors",
           viewMode === "list"
-            ? "bg-slate-100 text-foreground dark:bg-slate-800"
-            : "text-muted-foreground hover:bg-slate-50 dark:hover:bg-slate-800/50",
+            ? "bg-muted text-foreground"
+            : "text-muted-foreground hover:bg-muted/50",
         )}
         aria-label={t("boardroom.dashboard.listView", "List view")}
         aria-pressed={viewMode === "list"}

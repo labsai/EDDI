@@ -59,10 +59,7 @@ function saveThreads(threads: ThreadInfo[]): void {
 function useBoardroomThreads(): UseBoardroomThreadsReturn {
   const [threads, setThreads] = useState<ThreadInfo[]>(loadThreads);
 
-  const persist = useCallback((next: ThreadInfo[]) => {
-    setThreads(next);
-    saveThreads(next);
-  }, []);
+
 
   const getThread = useCallback(
     (boardId: string, memberId: string): ThreadInfo | undefined => {

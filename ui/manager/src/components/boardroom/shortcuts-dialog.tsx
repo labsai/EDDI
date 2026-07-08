@@ -99,18 +99,18 @@ export function ShortcutsDialog() {
           onKeyDown={handleKeyDown}
           className={cn(
             "pointer-events-auto w-full max-w-sm",
-            "bg-card rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700",
+            "bg-card rounded-xl shadow-2xl border border-border",
             "animate-[br-message-in_200ms_ease-out]"
           )}
         >
-          <div className="flex items-center justify-between ps-5 pe-5 pt-4 pb-3 border-b border-slate-200 dark:border-slate-700">
+          <div className="flex items-center justify-between ps-5 pe-5 pt-4 pb-3 border-b border-border">
             <h2 className="text-lg font-semibold">
               {t("boardroom.shortcuts.title", "Keyboard Shortcuts")}
             </h2>
             <button
               ref={closeRef}
               onClick={() => setOpen(false)}
-              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={t("boardroom.board.close", "Close")}
             >
               ✕
@@ -130,9 +130,9 @@ export function ShortcutsDialog() {
                 <kbd
                   className={cn(
                     "inline-flex items-center justify-center min-w-[2rem] h-7",
-                    "ps-2 pe-2 rounded-md border border-slate-300 dark:border-slate-600",
-                    "bg-slate-50 dark:bg-slate-800",
-                    "text-xs font-mono font-semibold text-slate-600 dark:text-slate-300"
+                    "ps-2 pe-2 rounded-md border border-border",
+                    "bg-muted",
+                    "text-xs font-mono font-semibold text-muted-foreground"
                   )}
                 >
                   {s.key}

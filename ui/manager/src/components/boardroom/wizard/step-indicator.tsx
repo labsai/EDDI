@@ -27,12 +27,12 @@ function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
               <div
                 className={cn(
                   "flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-all duration-300",
-                  isCompleted && "bg-indigo-500 text-white",
+                  isCompleted && "bg-primary text-primary-foreground",
                   isActive &&
-                    "bg-indigo-500 text-white ring-4 ring-indigo-500/20",
+                    "bg-primary text-primary-foreground ring-4 ring-ring/20",
                   !isCompleted &&
                     !isActive &&
-                    "bg-slate-200 text-slate-500 dark:bg-slate-700",
+                    "bg-muted text-muted-foreground",
                 )}
                 {...(isActive ? { "aria-current": "step" as const } : {})}
               >
@@ -47,7 +47,7 @@ function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
                   "mt-1.5 hidden text-xs sm:block",
                   isActive
                     ? "font-medium text-foreground"
-                    : "text-muted-foreground dark:text-slate-400",
+                    : "text-muted-foreground",
                 )}
               >
                 {step.label}
@@ -60,8 +60,8 @@ function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
                 className={cn(
                   "ms-1 me-1 h-0.5 min-w-8 max-w-20 flex-1 transition-colors duration-300",
                   index < currentStep
-                    ? "bg-indigo-500"
-                    : "bg-slate-200 dark:bg-slate-700",
+                    ? "bg-primary"
+                    : "bg-muted",
                 )}
               />
             )}

@@ -1,29 +1,31 @@
 /* ─── Boardroom Design Tokens ─────────────────────────────────────
  * Scoped under .boardroom so they don't leak into the rest of the app.
+ * All tokens reference the EDDI global design system (gold/black CI).
  * ────────────────────────────────────────────────────────────────── */
 
 .boardroom {
-  /* Surface & background */
-  --br-bg: #f8fafc;
-  --br-surface: #ffffff;
-  --br-surface-hover: #f1f5f9;
-  --br-border: #e2e8f0;
+  /* Surface & background — inherit from EDDI theme */
+  --br-bg: var(--color-background);
+  --br-surface: var(--color-card);
+  --br-surface-hover: var(--color-muted);
+  --br-border: var(--color-border);
 
-  /* Typography */
-  --br-text: #0f172a;
-  --br-text-secondary: #64748b;
+  /* Typography — inherit from EDDI theme */
+  --br-text: var(--color-foreground);
+  --br-text-secondary: var(--color-muted-foreground);
 
-  /* Accent — indigo palette */
-  --br-accent: #6366f1;
-  --br-accent-hover: #4f46e5;
-  --br-accent-subtle: #eef2ff;
+  /* Accent — EDDI gold */
+  --br-accent: var(--color-primary);
+  --br-accent-hover: var(--color-accent);
+  --br-accent-fg: var(--color-primary-foreground);
+  --br-accent-subtle: color-mix(in srgb, var(--color-primary) 10%, transparent);
 
-  /* Glass effect (light mode doesn't need heavy glass) */
-  --br-glass-bg: rgba(255, 255, 255, 0.8);
+  /* Glass effect */
+  --br-glass-bg: color-mix(in srgb, var(--color-card) 80%, transparent);
   --br-glass-blur: blur(16px);
-  --br-glass-border: rgba(0, 0, 0, 0.06);
+  --br-glass-border: color-mix(in srgb, var(--color-border) 40%, transparent);
 
-  /* Shadows */
+  /* Shadows — subtle on light, deeper on dark (handled by theme naturally) */
   --br-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --br-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07),
     0 2px 4px -2px rgba(0, 0, 0, 0.05);
@@ -34,22 +36,6 @@
 /* ─── Dark Mode Overrides ─────────────────────────────────────── */
 
 .dark .boardroom {
-  --br-bg: #020617;
-  --br-surface: #0f172a;
-  --br-surface-hover: #1e293b;
-  --br-border: #1e293b;
-
-  --br-text: #f8fafc;
-  --br-text-secondary: #94a3b8;
-
-  --br-accent: #818cf8;
-  --br-accent-hover: #6366f1;
-  --br-accent-subtle: rgba(99, 102, 241, 0.1);
-
-  --br-glass-bg: rgba(15, 23, 42, 0.8);
-  --br-glass-blur: blur(16px);
-  --br-glass-border: rgba(255, 255, 255, 0.06);
-
   --br-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --br-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4),
     0 2px 4px -2px rgba(0, 0, 0, 0.3);

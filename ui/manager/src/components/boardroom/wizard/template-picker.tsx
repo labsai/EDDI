@@ -24,15 +24,15 @@ function TemplatePicker({ selected, onSelect }: TemplatePickerProps) {
             onClick={() => onSelect(tpl.key)}
             className={cn(
               "relative rounded-xl border p-5 text-start transition-all duration-150",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               isSelected
-                ? "scale-[1.02] border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500/30 dark:bg-indigo-500/10"
-                : "border-slate-200 hover:border-indigo-300 dark:border-slate-700 dark:hover:border-indigo-600",
+                ? "scale-[1.02] border-primary bg-primary/10 ring-2 ring-ring/30"
+                : "border-border hover:border-primary/50",
             )}
           >
             {/* Selected checkmark */}
             {isSelected && (
-              <div className="absolute end-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-white">
+              <div className="absolute end-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
                 <Check className="h-3 w-3" />
               </div>
             )}
@@ -41,10 +41,10 @@ function TemplatePicker({ selected, onSelect }: TemplatePickerProps) {
             <h3 className="mt-2 text-base font-semibold text-foreground">
               {tpl.name}
             </h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-muted-foreground">
               {tpl.description}
             </p>
-            <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+            <p className="mt-2 text-xs text-muted-foreground">
               {t("boardroom.wizard.advisorCount", "{{count}} advisors", {
                 count: tpl.roles.length,
               })}
@@ -60,14 +60,14 @@ function TemplatePicker({ selected, onSelect }: TemplatePickerProps) {
         onClick={() => onSelect("custom")}
         className={cn(
           "relative rounded-xl border p-5 text-start transition-all duration-150",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           selected === "custom"
-            ? "scale-[1.02] border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500/30 dark:bg-indigo-500/10"
-            : "border-dashed border-slate-300 hover:border-indigo-300 dark:border-slate-600 dark:hover:border-indigo-600",
+            ? "scale-[1.02] border-primary bg-primary/10 ring-2 ring-ring/30"
+            : "border-dashed border-border hover:border-primary/50",
         )}
       >
         {selected === "custom" && (
-          <div className="absolute end-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-white">
+          <div className="absolute end-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
             <Check className="h-3 w-3" />
           </div>
         )}
@@ -76,7 +76,7 @@ function TemplatePicker({ selected, onSelect }: TemplatePickerProps) {
         <h3 className="mt-2 text-base font-semibold text-foreground">
           {t("boardroom.wizard.customTemplate", "Custom")}
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           {t(
             "boardroom.wizard.customTemplateDesc",
             "Start from scratch with your own configuration",
