@@ -2119,12 +2119,25 @@
       "deleteConfirm": "Sind Sie sicher, dass Sie diesen Boardroom löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.",
       "duplicateBoardroom": "Boardroom duplizieren",
       "error": "Boardrooms konnten nicht geladen werden",
-      "retry": "Erneut versuchen"
+      "retry": "Erneut versuchen",
+      "welcomeTitle": "Ihr KI-Beratungsgremium wartet",
+      "welcomeDesc": "Stellen Sie ein Team von KI-Beratern zusammen, die Ihnen beim Brainstorming, bei Debatten und bei besseren Entscheidungen helfen.",
+      "duplicateSuccess": "Boardroom dupliziert",
+      "duplicateError": "Boardroom konnte nicht dupliziert werden",
+      "deleteSuccess": "Boardroom gelöscht",
+      "deleteError": "Boardroom konnte nicht gelöscht werden",
+      "gridView": "Rasteransicht",
+      "listView": "Listenansicht"
     },
     "card": {
       "untitled": "Unbenannt",
       "noMembers": "Keine Mitglieder",
-      "advisorCount": "{{count}} Berater"
+      "advisorCount": "{{count}} Berater",
+      "moreActions": "Weitere Aktionen",
+      "settings": "Einstellungen",
+      "history": "Verlauf",
+      "duplicate": "Duplizieren",
+      "delete": "Löschen"
     },
     "advisor": {
       "avatarLabel": "{{name}} Avatar"
@@ -2201,7 +2214,34 @@
       "membersPanel": "Mitglieder-Panel",
       "sessionsPanel": "Sitzungs-Panel",
       "stop": "Stopp",
-      "viewHistory": "Verlauf anzeigen"
+      "viewHistory": "Verlauf anzeigen",
+      "copyResponse": "Antwort kopieren",
+      "copied": "Kopiert!",
+      "pin": "Antwort anheften",
+      "unpin": "Antwort lösen"
+    },
+    "history": {
+      "export": "Exportieren",
+      "close": "Schließen",
+      "transcript": "Gesprächstranskript",
+      "loadError": "Gespräch konnte nicht geladen werden",
+      "notFound": "Gespräch nicht gefunden",
+      "untitled": "Unbenanntes Gespräch",
+      "completed": "Abgeschlossen",
+      "inProgress": "In Bearbeitung",
+      "synthesizing": "Wird zusammengefasst",
+      "created": "Erstellt",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen",
+      "awaitingApproval": "Wartet auf Genehmigung",
+      "phase": "Phase",
+      "synthesis": "Synthese",
+      "finalAnswer": "Abschließende synthetisierte Antwort",
+      "noContent": "Kein Inhalt",
+      "error": "Fehler",
+      "skipped": "{{name}} — Übersprungen",
+      "entryCount": "{{count}} Einträge",
+      "emptyTranscript": "Noch keine Transkripteinträge"
     },
     "thread": {
       "context": "Aus {{boardName}}-Sitzung",

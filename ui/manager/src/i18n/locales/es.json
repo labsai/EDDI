@@ -2106,7 +2106,15 @@
       "deleteConfirm": "¿Está seguro de que desea eliminar este boardroom? Esta acción no se puede deshacer.",
       "duplicateBoardroom": "Duplicar Boardroom",
       "error": "Failed to load boardrooms",
-      "retry": "Retry"
+      "retry": "Retry",
+      "welcomeTitle": "Su junta consultiva de IA le espera",
+      "welcomeDesc": "Reúna un equipo de asesores de IA para ayudarle a hacer lluvia de ideas, debatir y tomar mejores decisiones.",
+      "duplicateSuccess": "Boardroom duplicado",
+      "duplicateError": "Error al duplicar el boardroom",
+      "deleteSuccess": "Boardroom eliminado",
+      "deleteError": "Error al eliminar el boardroom",
+      "gridView": "Vista de cuadrícula",
+      "listView": "Vista de lista"
     },
     "wizard": {
       "step1Title": "Elija un estilo",
@@ -2179,8 +2187,35 @@
       "sessionsPanel": "Panel de sesiones",
       "stop": "Detener",
       "viewHistory": "Ver historial",
-      "phase": "Phase",
-      "moderator": "Moderator"
+      "phase": "Fase",
+      "moderator": "Moderador",
+      "copyResponse": "Copiar respuesta",
+      "copied": "¡Copiado!",
+      "pin": "Fijar respuesta",
+      "unpin": "Desfijar respuesta"
+    },
+    "history": {
+      "export": "Exportar",
+      "close": "Cerrar",
+      "transcript": "Transcripción de la conversación",
+      "loadError": "Error al cargar la conversación",
+      "notFound": "Conversación no encontrada",
+      "untitled": "Conversación sin título",
+      "completed": "Completado",
+      "inProgress": "En progreso",
+      "synthesizing": "Sintetizando",
+      "created": "Creado",
+      "failed": "Fallido",
+      "cancelled": "Cancelado",
+      "awaitingApproval": "Esperando aprobación",
+      "phase": "Fase",
+      "synthesis": "Síntesis",
+      "finalAnswer": "Respuesta sintetizada final",
+      "noContent": "Sin contenido",
+      "error": "Error",
+      "skipped": "{{name}} — Omitido",
+      "entryCount": "{{count}} entradas",
+      "emptyTranscript": "Aún no hay entradas de transcripción"
     },
     "thread": {
       "context": "De la sesión de {{boardName}}",
@@ -2239,7 +2274,12 @@
     "card": {
       "untitled": "Untitled",
       "noMembers": "No members",
-      "advisorCount": "{{count}} advisors"
+      "advisorCount": "{{count}} advisors",
+      "moreActions": "Más acciones",
+      "settings": "Configuración",
+      "history": "Historial",
+      "duplicate": "Duplicar",
+      "delete": "Eliminar"
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"

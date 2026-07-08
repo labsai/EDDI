@@ -2107,7 +2107,15 @@
       "deleteConfirm": "क्या आप वाकई इस बोर्डरूम को हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",
       "duplicateBoardroom": "बोर्डरूम की प्रतिलिपि बनाएं",
       "error": "Failed to load boardrooms",
-      "retry": "Retry"
+      "retry": "Retry",
+      "welcomeTitle": "आपका AI सलाहकार बोर्ड इंतज़ार कर रहा है",
+      "welcomeDesc": "बेहतर निर्णय लेने में मदद के लिए AI सलाहकारों की एक टीम बनाएं, विचार-मंथन करें और बहस करें।",
+      "duplicateSuccess": "बोर्डरूम डुप्लिकेट किया गया",
+      "duplicateError": "बोर्डरूम डुप्लिकेट करने में विफल",
+      "deleteSuccess": "बोर्डरूम हटाया गया",
+      "deleteError": "बोर्डरूम हटाने में विफल",
+      "gridView": "ग्रिड दृश्य",
+      "listView": "सूची दृश्य"
     },
     "wizard": {
       "step1Title": "एक शैली चुनें",
@@ -2181,7 +2189,34 @@
       "membersPanel": "सदस्य पैनल",
       "sessionsPanel": "सत्र पैनल",
       "stop": "रोकें",
-      "viewHistory": "इतिहास देखें"
+      "viewHistory": "इतिहास देखें",
+      "copyResponse": "उत्तर कॉपी करें",
+      "copied": "कॉपी हो गया!",
+      "pin": "उत्तर पिन करें",
+      "unpin": "उत्तर अनपिन करें"
+    },
+    "history": {
+      "export": "निर्यात करें",
+      "close": "बंद करें",
+      "transcript": "वार्तालाप प्रतिलेख",
+      "loadError": "वार्तालाप लोड करने में विफल",
+      "notFound": "वार्तालाप नहीं मिला",
+      "untitled": "शीर्षकहीन वार्तालाप",
+      "completed": "पूर्ण",
+      "inProgress": "प्रगति में",
+      "synthesizing": "संश्लेषित हो रहा है",
+      "created": "बनाया गया",
+      "failed": "विफल",
+      "cancelled": "रद्द",
+      "awaitingApproval": "अनुमोदन की प्रतीक्षा में",
+      "phase": "चरण",
+      "synthesis": "संश्लेषण",
+      "finalAnswer": "अंतिम संश्लेषित उत्तर",
+      "noContent": "कोई सामग्री नहीं",
+      "error": "त्रुटि",
+      "skipped": "{{name}} — छोड़ा गया",
+      "entryCount": "{{count}} प्रविष्टियाँ",
+      "emptyTranscript": "अभी तक कोई प्रतिलेख प्रविष्टियाँ नहीं"
     },
     "thread": {
       "context": "{{boardName}} सत्र से",
@@ -2239,7 +2274,12 @@
     "card": {
       "untitled": "Untitled",
       "noMembers": "No members",
-      "advisorCount": "{{count}} advisors"
+      "advisorCount": "{{count}} advisors",
+      "moreActions": "और कार्रवाइयाँ",
+      "settings": "सेटिंग्स",
+      "history": "इतिहास",
+      "duplicate": "डुप्लिकेट",
+      "delete": "हटाएं"
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"

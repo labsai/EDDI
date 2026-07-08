@@ -2148,12 +2148,25 @@
       "deleteConfirm": "Are you sure you want to delete this boardroom? This action cannot be undone.",
       "duplicateBoardroom": "Duplicate Boardroom",
       "error": "Failed to load boardrooms",
-      "retry": "Retry"
+      "retry": "Retry",
+      "welcomeTitle": "Your AI Advisory Board Awaits",
+      "welcomeDesc": "Assemble a team of AI advisors to help you brainstorm, debate, and make better decisions.",
+      "duplicateSuccess": "Boardroom duplicated",
+      "duplicateError": "Failed to duplicate boardroom",
+      "deleteSuccess": "Boardroom deleted",
+      "deleteError": "Failed to delete boardroom",
+      "gridView": "Grid view",
+      "listView": "List view"
     },
     "card": {
       "untitled": "Untitled",
       "noMembers": "No members",
-      "advisorCount": "{{count}} advisors"
+      "advisorCount": "{{count}} advisors",
+      "moreActions": "More actions",
+      "settings": "Settings",
+      "history": "History",
+      "duplicate": "Duplicate",
+      "delete": "Delete"
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"
@@ -2230,7 +2243,34 @@
       "membersPanel": "Members panel",
       "sessionsPanel": "Sessions panel",
       "stop": "Stop",
-      "viewHistory": "View history"
+      "viewHistory": "View history",
+      "copyResponse": "Copy response",
+      "copied": "Copied!",
+      "pin": "Pin response",
+      "unpin": "Unpin response"
+    },
+    "history": {
+      "export": "Export",
+      "close": "Close",
+      "transcript": "Conversation transcript",
+      "loadError": "Failed to load conversation",
+      "notFound": "Conversation not found",
+      "untitled": "Untitled Conversation",
+      "completed": "Completed",
+      "inProgress": "In Progress",
+      "synthesizing": "Synthesizing",
+      "created": "Created",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "awaitingApproval": "Awaiting Approval",
+      "phase": "Phase",
+      "synthesis": "Synthesis",
+      "finalAnswer": "Final Synthesized Answer",
+      "noContent": "No content",
+      "error": "Error",
+      "skipped": "{{name}} — Skipped",
+      "entryCount": "{{count}} entries",
+      "emptyTranscript": "No transcript entries yet"
     },
     "thread": {
       "context": "From {{boardName}} session",

@@ -2106,7 +2106,15 @@
       "deleteConfirm": "هل أنت متأكد أنك تريد حذف قاعة الاجتماعات هذه؟ لا يمكن التراجع عن هذا الإجراء.",
       "duplicateBoardroom": "تكرار قاعة الاجتماعات",
       "error": "Failed to load boardrooms",
-      "retry": "Retry"
+      "retry": "Retry",
+      "welcomeTitle": "مجلسك الاستشاري للذكاء الاصطناعي ينتظرك",
+      "welcomeDesc": "قم بتجميع فريق من مستشاري الذكاء الاصطناعي لمساعدتك في العصف الذهني والمناقشة واتخاذ قرارات أفضل.",
+      "duplicateSuccess": "تم تكرار غرفة الاجتماعات",
+      "duplicateError": "فشل في تكرار غرفة الاجتماعات",
+      "deleteSuccess": "تم حذف غرفة الاجتماعات",
+      "deleteError": "فشل في حذف غرفة الاجتماعات",
+      "gridView": "عرض الشبكة",
+      "listView": "عرض القائمة"
     },
     "wizard": {
       "step1Title": "اختر نمطًا",
@@ -2179,8 +2187,35 @@
       "sessionsPanel": "لوحة الجلسات",
       "stop": "إيقاف",
       "viewHistory": "عرض السجل",
-      "phase": "Phase",
-      "moderator": "Moderator"
+      "phase": "المرحلة",
+      "moderator": "المدير",
+      "copyResponse": "نسخ الرد",
+      "copied": "تم النسخ!",
+      "pin": "تثبيت الرد",
+      "unpin": "إلغاء تثبيت الرد"
+    },
+    "history": {
+      "export": "تصدير",
+      "close": "إغلاق",
+      "transcript": "نص المحادثة",
+      "loadError": "فشل تحميل المحادثة",
+      "notFound": "المحادثة غير موجودة",
+      "untitled": "محادثة بدون عنوان",
+      "completed": "مكتمل",
+      "inProgress": "قيد التنفيذ",
+      "synthesizing": "جارٍ التوليف",
+      "created": "تم الإنشاء",
+      "failed": "فشل",
+      "cancelled": "ملغى",
+      "awaitingApproval": "في انتظار الموافقة",
+      "phase": "مرحلة",
+      "synthesis": "التوليف",
+      "finalAnswer": "الإجابة المولفة النهائية",
+      "noContent": "لا يوجد محتوى",
+      "error": "خطأ",
+      "skipped": "{{name}} — تم التخطي",
+      "entryCount": "{{count}} إدخالات",
+      "emptyTranscript": "لا توجد إدخالات نصية بعد"
     },
     "thread": {
       "context": "من جلسة {{boardName}}",
@@ -2239,7 +2274,12 @@
     "card": {
       "untitled": "Untitled",
       "noMembers": "No members",
-      "advisorCount": "{{count}} advisors"
+      "advisorCount": "{{count}} advisors",
+      "moreActions": "المزيد من الإجراءات",
+      "settings": "الإعدادات",
+      "history": "السجل",
+      "duplicate": "تكرار",
+      "delete": "حذف"
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"

@@ -1,9 +1,65 @@
+import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Check, Clipboard, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdvisorAvatar } from "@/components/boardroom/advisor-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+
+// ─── Pin Types & Hook ────────────────────────────────────────────
+
+interface PinnedResponse {
+  speakerName: string;
+  content: string;
+  timestamp: number;
+  boardId: string;
+  sessionId: string;
+}
+
+function usePinnedResponses(boardId: string) {
+  const key = `boardroom-pins-${boardId}`;
+
+  const [pins, setPins] = useState<PinnedResponse[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(key) || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  const persist = useCallback(
+    (next: PinnedResponse[]) => {
+      setPins(next);
+      localStorage.setItem(key, JSON.stringify(next));
+    },
+    [key],
+  );
+
+  const isResponsePinned = useCallback(
+    (content: string, speaker: string) =>
+      pins.some((p) => p.content === content && p.speakerName === speaker),
+    [pins],
+  );
+
+  const togglePin = useCallback(
+    (pin: PinnedResponse) => {
+      if (isResponsePinned(pin.content, pin.speakerName)) {
+        persist(
+          pins.filter(
+            (p) =>
+              !(p.content === pin.content && p.speakerName === pin.speakerName),
+          ),
+        );
+      } else {
+        persist([...pins, pin]);
+      }
+    },
+    [pins, persist, isResponsePinned],
+  );
+
+  return { pins, togglePin, isResponsePinned };
+}
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -14,6 +70,8 @@ interface AdvisorResponseCardProps {
   content: string | null;
   phaseType?: string;
   boardId: string;
+  /** Optional session ID for pin storage */
+  sessionId?: string;
 
   className?: string;
 }
@@ -48,20 +106,95 @@ function AdvisorResponseCard({
   role,
   content,
   boardId,
+  sessionId = "",
   className,
 }: AdvisorResponseCardProps) {
   const { t } = useTranslation();
 
+  // ── Copy to clipboard ────────────────────────────────────────
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    if (!content) return;
+    await navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // ── Pin / bookmark ───────────────────────────────────────────
+  const { togglePin, isResponsePinned } = usePinnedResponses(boardId);
+  const pinned = content ? isResponsePinned(content, displayName) : false;
+
+  const handleTogglePin = () => {
+    if (!content) return;
+    togglePin({
+      speakerName: displayName,
+      content,
+      timestamp: Date.now(),
+      boardId,
+      sessionId,
+    });
+  };
+
   return (
     <div
       className={cn(
-        "rounded-xl border p-4",
+        "group relative rounded-xl border p-4",
         "bg-white border-slate-200",
         "dark:bg-slate-900/50 dark:border-slate-800",
         className,
       )}
       style={{ animation: "br-message-in 250ms ease-out both" }}
     >
+      {/* ── Action buttons (top-end, hover-reveal) ──────────── */}
+      {content !== null && (
+        <div
+          className={cn(
+            "absolute top-2 end-2 flex items-center gap-0.5",
+            "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+            "transition-opacity duration-150",
+          )}
+        >
+          {/* Copy button */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            onClick={handleCopy}
+            aria-label={
+              copied
+                ? t("boardroom.board.copied", "Copied!")
+                : t("boardroom.board.copyResponse", "Copy response")
+            }
+          >
+            {copied ? (
+              <Check className="h-3.5 w-3.5 text-emerald-500" />
+            ) : (
+              <Clipboard className="h-3.5 w-3.5" />
+            )}
+          </Button>
+
+          {/* Pin / bookmark button */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-slate-400 hover:text-amber-500 dark:hover:text-amber-400"
+            onClick={handleTogglePin}
+            aria-label={
+              pinned
+                ? t("boardroom.board.unpin", "Unpin response")
+                : t("boardroom.board.pin", "Pin response")
+            }
+          >
+            <Star
+              className={cn(
+                "h-3.5 w-3.5",
+                pinned && "fill-amber-400 text-amber-400",
+              )}
+            />
+          </Button>
+        </div>
+      )}
+
       {/* Header row */}
       <div className="flex items-center gap-2 mb-2">
         <AdvisorAvatar name={displayName} agentId={agentId} size="sm" />
@@ -103,5 +236,5 @@ function AdvisorResponseCard({
   );
 }
 
-export { AdvisorResponseCard };
-export type { AdvisorResponseCardProps };
+export { AdvisorResponseCard, usePinnedResponses };
+export type { AdvisorResponseCardProps, PinnedResponse };

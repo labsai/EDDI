@@ -2119,12 +2119,25 @@
       "deleteConfirm": "Êtes-vous sûr de vouloir supprimer ce boardroom ? Cette action est irréversible.",
       "duplicateBoardroom": "Dupliquer le Boardroom",
       "error": "Échec du chargement des boardrooms",
-      "retry": "Réessayer"
+      "retry": "Réessayer",
+      "welcomeTitle": "Votre comité consultatif IA vous attend",
+      "welcomeDesc": "Constituez une équipe de conseillers IA pour vous aider à brainstormer, débattre et prendre de meilleures décisions.",
+      "duplicateSuccess": "Boardroom dupliqué",
+      "duplicateError": "Échec de la duplication du boardroom",
+      "deleteSuccess": "Boardroom supprimé",
+      "deleteError": "Échec de la suppression du boardroom",
+      "gridView": "Vue grille",
+      "listView": "Vue liste"
     },
     "card": {
       "untitled": "Sans titre",
       "noMembers": "Aucun membre",
-      "advisorCount": "{{count}} conseillers"
+      "advisorCount": "{{count}} conseillers",
+      "moreActions": "Plus d'actions",
+      "settings": "Paramètres",
+      "history": "Historique",
+      "duplicate": "Dupliquer",
+      "delete": "Supprimer"
     },
     "advisor": {
       "avatarLabel": "Avatar de {{name}}"
@@ -2201,7 +2214,34 @@
       "membersPanel": "Panneau des membres",
       "sessionsPanel": "Panneau des sessions",
       "stop": "Arrêter",
-      "viewHistory": "Voir l'historique"
+      "viewHistory": "Voir l'historique",
+      "copyResponse": "Copier la réponse",
+      "copied": "Copié !",
+      "pin": "Épingler la réponse",
+      "unpin": "Désépingler la réponse"
+    },
+    "history": {
+      "export": "Exporter",
+      "close": "Fermer",
+      "transcript": "Transcription de la conversation",
+      "loadError": "Échec du chargement de la conversation",
+      "notFound": "Conversation introuvable",
+      "untitled": "Conversation sans titre",
+      "completed": "Terminé",
+      "inProgress": "En cours",
+      "synthesizing": "Synthèse en cours",
+      "created": "Créé",
+      "failed": "Échoué",
+      "cancelled": "Annulé",
+      "awaitingApproval": "En attente d'approbation",
+      "phase": "Phase",
+      "synthesis": "Synthèse",
+      "finalAnswer": "Réponse synthétisée finale",
+      "noContent": "Aucun contenu",
+      "error": "Erreur",
+      "skipped": "{{name}} — Ignoré",
+      "entryCount": "{{count}} entrées",
+      "emptyTranscript": "Aucune entrée de transcription pour le moment"
     },
     "thread": {
       "context": "De la session {{boardName}}",

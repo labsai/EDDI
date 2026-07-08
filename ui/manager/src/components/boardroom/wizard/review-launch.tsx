@@ -1,3 +1,4 @@
+import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Clock, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,53 @@ function StatusLabel({
     }
   }
 }
+// ─── Confetti (internal) ────────────────────────────────────────────────────
+
+function Confetti() {
+  const [visible, setVisible] = useState(true);
+
+  const pieces = useMemo(
+    () =>
+      Array.from({ length: 30 }, (_, i) => ({
+        id: i,
+        x: Math.random() * 100,
+        delay: Math.random() * 500,
+        duration: 1000 + Math.random() * 1000,
+        color: ["#6366f1", "#f59e0b", "#10b981", "#ec4899", "#8b5cf6"][i % 5],
+        size: 6 + Math.random() * 6,
+      })),
+    [],
+  );
+
+  useEffect(() => {
+    const timer = setTimeout(() => setVisible(false), 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <div
+      className="fixed inset-0 pointer-events-none z-50 overflow-hidden"
+      aria-hidden="true"
+    >
+      {pieces.map((p) => (
+        <div
+          key={p.id}
+          className="absolute rounded-sm"
+          style={{
+            insetInlineStart: `${p.x}%`,
+            top: "-10px",
+            width: p.size,
+            height: p.size,
+            backgroundColor: p.color,
+            animation: `confetti-fall ${p.duration}ms ${p.delay}ms ease-in forwards`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 
 // ─── ReviewLaunch (exported) ────────────────────────────────────────────────
 
@@ -105,10 +153,14 @@ function ReviewLaunch({
 
   // ─── Creation progress view ─────────────────────────────────────────────
   const hasError = creationProgress.some((p) => p.status === "error");
+  const allDone =
+    creationProgress.length > 0 &&
+    creationProgress.every((p) => p.status === "done");
 
   if (isCreating || (creationProgress.length > 0 && hasError)) {
     return (
       <div className="space-y-6">
+        {allDone && <Confetti />}
         <div className="br-surface rounded-xl p-6">
           <h2 className="text-lg font-semibold text-foreground">
             {hasError && !isCreating

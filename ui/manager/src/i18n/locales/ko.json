@@ -2104,7 +2104,15 @@
       "deleteConfirm": "이 보드룸을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
       "duplicateBoardroom": "보드룸 복제",
       "error": "Failed to load boardrooms",
-      "retry": "Retry"
+      "retry": "Retry",
+      "welcomeTitle": "AI 자문위원회가 기다리고 있습니다",
+      "welcomeDesc": "AI 자문위원 팀을 구성하여 브레인스토밍, 토론 및 더 나은 의사결정을 도와드립니다.",
+      "duplicateSuccess": "보드룸이 복제되었습니다",
+      "duplicateError": "보드룸 복제에 실패했습니다",
+      "deleteSuccess": "보드룸이 삭제되었습니다",
+      "deleteError": "보드룸 삭제에 실패했습니다",
+      "gridView": "그리드 보기",
+      "listView": "목록 보기"
     },
     "wizard": {
       "step1Title": "스타일 선택",
@@ -2178,7 +2186,34 @@
       "sessionsPanel": "세션 패널",
       "stop": "중지",
       "viewHistory": "기록 보기",
-      "phase": "Phase"
+      "phase": "단계",
+      "copyResponse": "답변 복사",
+      "copied": "복사됨!",
+      "pin": "답변 고정",
+      "unpin": "답변 고정 해제"
+    },
+    "history": {
+      "export": "내보내기",
+      "close": "닫기",
+      "transcript": "대화 기록",
+      "loadError": "대화를 불러오지 못했습니다",
+      "notFound": "대화를 찾을 수 없습니다",
+      "untitled": "제목 없는 대화",
+      "completed": "완료됨",
+      "inProgress": "진행 중",
+      "synthesizing": "합성 중",
+      "created": "생성됨",
+      "failed": "실패",
+      "cancelled": "취소됨",
+      "awaitingApproval": "승인 대기 중",
+      "phase": "단계",
+      "synthesis": "합성",
+      "finalAnswer": "최종 합성 답변",
+      "noContent": "내용 없음",
+      "error": "오류",
+      "skipped": "{{name}} — 건너뜀",
+      "entryCount": "{{count}}개 항목",
+      "emptyTranscript": "아직 기록 항목이 없습니다"
     },
     "thread": {
       "context": "{{boardName}} 세션에서",
@@ -2239,7 +2274,12 @@
     "card": {
       "untitled": "Untitled",
       "noMembers": "No members",
-      "advisorCount": "{{count}} advisors"
+      "advisorCount": "{{count}} advisors",
+      "moreActions": "더 많은 작업",
+      "settings": "설정",
+      "history": "기록",
+      "duplicate": "복제",
+      "delete": "삭제"
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"

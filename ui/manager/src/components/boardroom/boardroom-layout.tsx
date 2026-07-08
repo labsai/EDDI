@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { BoardroomSidebar } from "./boardroom-sidebar";
 import { BoardroomTopbar } from "./boardroom-topbar";
 import { BoardroomBottomTabs } from "./boardroom-bottom-tabs";
+import { BoardroomShortcuts } from "./boardroom-shortcuts";
+import { ShortcutsDialog } from "./shortcuts-dialog";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -117,6 +119,8 @@ export function BoardroomLayout() {
   if (viewport === "mobile") {
     return (
       <div className="boardroom flex h-screen flex-col overflow-hidden">
+        <BoardroomShortcuts />
+        <ShortcutsDialog />
         <a
           href="#boardroom-main"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
@@ -140,6 +144,8 @@ export function BoardroomLayout() {
   if (viewport === "tablet") {
     return (
       <div className="boardroom flex h-screen flex-col overflow-hidden">
+        <BoardroomShortcuts />
+        <ShortcutsDialog />
         <a
           href="#boardroom-main"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
@@ -195,6 +201,8 @@ export function BoardroomLayout() {
   // ─── Desktop ─────────────────────────────────────────────────
   return (
     <div className="boardroom flex h-screen overflow-hidden">
+      <BoardroomShortcuts />
+      <ShortcutsDialog />
       <a
         href="#boardroom-main"
         className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"

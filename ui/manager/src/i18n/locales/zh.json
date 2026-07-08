@@ -2106,7 +2106,15 @@
       "deleteConfirm": "您确定要删除此会议室吗？此操作无法撤销。",
       "duplicateBoardroom": "复制会议室",
       "error": "Failed to load boardrooms",
-      "retry": "Retry"
+      "retry": "Retry",
+      "welcomeTitle": "您的AI顾问委员会已就绪",
+      "welcomeDesc": "组建一支AI顾问团队，帮助您进行头脑风暴、辩论和做出更好的决策。",
+      "duplicateSuccess": "会议室已复制",
+      "duplicateError": "复制会议室失败",
+      "deleteSuccess": "会议室已删除",
+      "deleteError": "删除会议室失败",
+      "gridView": "网格视图",
+      "listView": "列表视图"
     },
     "wizard": {
       "step1Title": "选择风格",
@@ -2179,8 +2187,35 @@
       "sessionsPanel": "会话面板",
       "stop": "停止",
       "viewHistory": "查看历史",
-      "phase": "Phase",
-      "moderator": "Moderator"
+      "phase": "阶段",
+      "moderator": "主持人",
+      "copyResponse": "复制回复",
+      "copied": "已复制！",
+      "pin": "固定回复",
+      "unpin": "取消固定回复"
+    },
+    "history": {
+      "export": "导出",
+      "close": "关闭",
+      "transcript": "对话记录",
+      "loadError": "加载对话失败",
+      "notFound": "对话未找到",
+      "untitled": "无标题对话",
+      "completed": "已完成",
+      "inProgress": "进行中",
+      "synthesizing": "正在综合",
+      "created": "已创建",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "awaitingApproval": "等待审批",
+      "phase": "阶段",
+      "synthesis": "综合",
+      "finalAnswer": "最终综合回答",
+      "noContent": "无内容",
+      "error": "错误",
+      "skipped": "{{name}} — 已跳过",
+      "entryCount": "{{count}} 条记录",
+      "emptyTranscript": "暂无记录条目"
     },
     "thread": {
       "context": "来自 {{boardName}} 会话",
@@ -2239,7 +2274,12 @@
     "card": {
       "untitled": "Untitled",
       "noMembers": "No members",
-      "advisorCount": "{{count}} advisors"
+      "advisorCount": "{{count}} advisors",
+      "moreActions": "更多操作",
+      "settings": "设置",
+      "history": "历史记录",
+      "duplicate": "复制",
+      "delete": "删除"
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"

@@ -2107,7 +2107,15 @@
       "deleteConfirm": "Tem certeza de que deseja excluir este boardroom? Esta ação não pode ser desfeita.",
       "duplicateBoardroom": "Duplicar Boardroom",
       "error": "Failed to load boardrooms",
-      "retry": "Retry"
+      "retry": "Retry",
+      "welcomeTitle": "Seu conselho consultivo de IA o aguarda",
+      "welcomeDesc": "Monte uma equipe de consultores de IA para ajudá-lo a fazer brainstorming, debater e tomar melhores decisões.",
+      "duplicateSuccess": "Boardroom duplicado",
+      "duplicateError": "Falha ao duplicar o boardroom",
+      "deleteSuccess": "Boardroom excluído",
+      "deleteError": "Falha ao excluir o boardroom",
+      "gridView": "Visualização em grade",
+      "listView": "Visualização em lista"
     },
     "wizard": {
       "step1Title": "Escolha um estilo",
@@ -2181,7 +2189,34 @@
       "membersPanel": "Painel de membros",
       "sessionsPanel": "Painel de sessões",
       "stop": "Parar",
-      "viewHistory": "Ver histórico"
+      "viewHistory": "Ver histórico",
+      "copyResponse": "Copiar resposta",
+      "copied": "Copiado!",
+      "pin": "Fixar resposta",
+      "unpin": "Desafixar resposta"
+    },
+    "history": {
+      "export": "Exportar",
+      "close": "Fechar",
+      "transcript": "Transcrição da conversa",
+      "loadError": "Falha ao carregar a conversa",
+      "notFound": "Conversa não encontrada",
+      "untitled": "Conversa sem título",
+      "completed": "Concluído",
+      "inProgress": "Em andamento",
+      "synthesizing": "Sintetizando",
+      "created": "Criado",
+      "failed": "Falhou",
+      "cancelled": "Cancelado",
+      "awaitingApproval": "Aguardando aprovação",
+      "phase": "Fase",
+      "synthesis": "Síntese",
+      "finalAnswer": "Resposta sintetizada final",
+      "noContent": "Sem conteúdo",
+      "error": "Erro",
+      "skipped": "{{name}} — Ignorado",
+      "entryCount": "{{count}} entradas",
+      "emptyTranscript": "Nenhuma entrada de transcrição ainda"
     },
     "thread": {
       "context": "Da sessão de {{boardName}}",
@@ -2239,7 +2274,12 @@
     "card": {
       "untitled": "Untitled",
       "noMembers": "No members",
-      "advisorCount": "{{count}} advisors"
+      "advisorCount": "{{count}} advisors",
+      "moreActions": "Mais ações",
+      "settings": "Configurações",
+      "history": "Histórico",
+      "duplicate": "Duplicar",
+      "delete": "Excluir"
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"

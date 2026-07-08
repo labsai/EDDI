@@ -1,6 +1,6 @@
-import { useMemo, useRef, useEffect } from "react";
+import { useMemo, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { X, AlertCircle, Sparkles } from "lucide-react";
+import { X, AlertCircle, Sparkles, Download } from "lucide-react";
 import { cn, hashColor, formatRelativeTime } from "@/lib/utils";
 import { useGroupConversation } from "@/hooks/use-groups";
 import { AdvisorAvatar } from "@/components/boardroom/advisor-avatar";
@@ -413,6 +413,77 @@ function ConversationViewer({
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }, [conversationId]);
 
+  // ── Export conversation as Markdown ────────────────────────
+  const handleExport = useCallback(() => {
+    if (!conversation) return;
+
+    const lines: string[] = [];
+    lines.push("# Boardroom Discussion");
+    lines.push("");
+    lines.push(`**Question:** ${conversation.originalQuestion || "—"}`);
+    lines.push(`**Date:** ${conversation.created ? new Date(conversation.created).toLocaleString() : "—"}`);
+    lines.push(`**Status:** ${conversation.state}`);
+    lines.push("");
+    lines.push("---");
+    lines.push("");
+
+    let lastPhaseIndex = -1;
+    for (const entry of conversation.transcript) {
+      // Phase separator
+      if (
+        entry.phaseIndex >= 0 &&
+        entry.phaseIndex !== lastPhaseIndex &&
+        entry.type !== "QUESTION"
+      ) {
+        lastPhaseIndex = entry.phaseIndex;
+        lines.push(`## Phase ${entry.phaseIndex + 1}: ${entry.phaseName ?? entry.type}`);
+        lines.push("");
+      }
+
+      if (entry.type === "QUESTION") {
+        lines.push(`> **Question:** ${entry.content ?? ""}`);
+        lines.push("");
+      } else if (entry.type === "SYNTHESIS") {
+        lines.push("## Synthesis");
+        lines.push("");
+        lines.push(entry.content ?? "");
+        lines.push("");
+      } else if (entry.type === "ERROR") {
+        lines.push(`### ⚠️ ${entry.speakerDisplayName} (Error)`);
+        if (entry.errorReason) lines.push(`> ${entry.errorReason}`);
+        if (entry.content) lines.push(entry.content);
+        lines.push("");
+      } else if (entry.type !== "SKIPPED") {
+        lines.push(`### ${entry.speakerDisplayName} (${entry.type})`);
+        lines.push("");
+        lines.push(entry.content ?? "");
+        lines.push("");
+      }
+    }
+
+    // Final synthesized answer (if present and not already in transcript)
+    if (
+      conversation.synthesizedAnswer?.trim() &&
+      !conversation.transcript.some((e) => e.type === "SYNTHESIS")
+    ) {
+      lines.push("---");
+      lines.push("");
+      lines.push("## Final Synthesized Answer");
+      lines.push("");
+      lines.push(conversation.synthesizedAnswer);
+      lines.push("");
+    }
+
+    const markdown = lines.join("\n");
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `boardroom-discussion-${conversationId}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [conversation, conversationId]);
+
   // Process transcript to insert phase separators
   const processedEntries = useMemo(() => {
     if (!conversation?.transcript) return [];
@@ -504,17 +575,29 @@ function ConversationViewer({
             </span>
           </div>
         </div>
-        {onClose && (
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Export as Markdown */}
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 shrink-0"
-            onClick={onClose}
-            aria-label={t("boardroom.history.close", "Close")}
+            className="h-8 w-8"
+            onClick={handleExport}
+            aria-label={t("boardroom.history.export", "Export")}
           >
-            <X className="h-4 w-4" />
+            <Download className="h-4 w-4" />
           </Button>
-        )}
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={onClose}
+              aria-label={t("boardroom.history.close", "Close")}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* ── Transcript Body ────────────────────────────────────── */}

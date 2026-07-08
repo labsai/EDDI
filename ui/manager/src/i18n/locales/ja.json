@@ -2104,7 +2104,15 @@
       "deleteConfirm": "このボードルームを削除してもよろしいですか？この操作は元に戻せません。",
       "duplicateBoardroom": "ボードルームを複製",
       "error": "Failed to load boardrooms",
-      "retry": "Retry"
+      "retry": "Retry",
+      "welcomeTitle": "AIアドバイザリーボードがお待ちしています",
+      "welcomeDesc": "AIアドバイザーのチームを編成して、ブレインストーミング、議論、より良い意思決定をサポートします。",
+      "duplicateSuccess": "ボードルームを複製しました",
+      "duplicateError": "ボードルームの複製に失敗しました",
+      "deleteSuccess": "ボードルームを削除しました",
+      "deleteError": "ボードルームの削除に失敗しました",
+      "gridView": "グリッド表示",
+      "listView": "リスト表示"
     },
     "wizard": {
       "step1Title": "スタイルを選択",
@@ -2178,7 +2186,34 @@
       "sessionsPanel": "セッションパネル",
       "stop": "停止",
       "viewHistory": "履歴を表示",
-      "phase": "Phase"
+      "phase": "フェーズ",
+      "copyResponse": "回答をコピー",
+      "copied": "コピーしました！",
+      "pin": "回答をピン留め",
+      "unpin": "ピン留めを解除"
+    },
+    "history": {
+      "export": "エクスポート",
+      "close": "閉じる",
+      "transcript": "会話の記録",
+      "loadError": "会話の読み込みに失敗しました",
+      "notFound": "会話が見つかりません",
+      "untitled": "無題の会話",
+      "completed": "完了",
+      "inProgress": "進行中",
+      "synthesizing": "合成中",
+      "created": "作成済み",
+      "failed": "失敗",
+      "cancelled": "キャンセル",
+      "awaitingApproval": "承認待ち",
+      "phase": "フェーズ",
+      "synthesis": "合成",
+      "finalAnswer": "最終合成回答",
+      "noContent": "コンテンツなし",
+      "error": "エラー",
+      "skipped": "{{name}} — スキップ",
+      "entryCount": "{{count}} 件のエントリ",
+      "emptyTranscript": "まだ記録エントリがありません"
     },
     "thread": {
       "context": "{{boardName}} セッションより",
@@ -2239,7 +2274,12 @@
     "card": {
       "untitled": "Untitled",
       "noMembers": "No members",
-      "advisorCount": "{{count}} advisors"
+      "advisorCount": "{{count}} advisors",
+      "moreActions": "その他の操作",
+      "settings": "設定",
+      "history": "履歴",
+      "duplicate": "複製",
+      "delete": "削除"
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"

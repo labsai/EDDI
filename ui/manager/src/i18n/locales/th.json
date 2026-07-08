@@ -2106,7 +2106,15 @@
       "deleteConfirm": "คุณแน่ใจหรือไม่ว่าต้องการลบห้องประชุมนี้? การกระทำนี้ไม่สามารถย้อนกลับได้",
       "duplicateBoardroom": "ทำสำเนาห้องประชุม",
       "error": "Failed to load boardrooms",
-      "retry": "Retry"
+      "retry": "Retry",
+      "welcomeTitle": "คณะที่ปรึกษา AI ของคุณรอคุณอยู่",
+      "welcomeDesc": "รวบรวมทีมที่ปรึกษา AI เพื่อช่วยคุณระดมความคิด ถกเถียง และตัดสินใจได้ดีขึ้น",
+      "duplicateSuccess": "ทำสำเนาห้องประชุมแล้ว",
+      "duplicateError": "ไม่สามารถทำสำเนาห้องประชุมได้",
+      "deleteSuccess": "ลบห้องประชุมแล้ว",
+      "deleteError": "ไม่สามารถลบห้องประชุมได้",
+      "gridView": "มุมมองตาราง",
+      "listView": "มุมมองรายการ"
     },
     "wizard": {
       "step1Title": "เลือกรูปแบบ",
@@ -2179,8 +2187,35 @@
       "sessionsPanel": "แผงเซสชัน",
       "stop": "หยุด",
       "viewHistory": "ดูประวัติ",
-      "phase": "Phase",
-      "moderator": "Moderator"
+      "phase": "เฟส",
+      "moderator": "ผู้ดำเนินรายการ",
+      "copyResponse": "คัดลอกคำตอบ",
+      "copied": "คัดลอกแล้ว!",
+      "pin": "ปักหมุดคำตอบ",
+      "unpin": "เลิกปักหมุดคำตอบ"
+    },
+    "history": {
+      "export": "ส่งออก",
+      "close": "ปิด",
+      "transcript": "บันทึกการสนทนา",
+      "loadError": "ไม่สามารถโหลดการสนทนาได้",
+      "notFound": "ไม่พบการสนทนา",
+      "untitled": "การสนทนาไม่มีชื่อ",
+      "completed": "เสร็จสมบูรณ์",
+      "inProgress": "กำลังดำเนินการ",
+      "synthesizing": "กำลังสังเคราะห์",
+      "created": "สร้างแล้ว",
+      "failed": "ล้มเหลว",
+      "cancelled": "ยกเลิกแล้ว",
+      "awaitingApproval": "รอการอนุมัติ",
+      "phase": "เฟส",
+      "synthesis": "การสังเคราะห์",
+      "finalAnswer": "คำตอบสังเคราะห์สุดท้าย",
+      "noContent": "ไม่มีเนื้อหา",
+      "error": "ข้อผิดพลาด",
+      "skipped": "{{name}} — ข้ามไป",
+      "entryCount": "{{count}} รายการ",
+      "emptyTranscript": "ยังไม่มีรายการบันทึก"
     },
     "thread": {
       "context": "จากเซสชัน {{boardName}}",
@@ -2239,7 +2274,12 @@
     "card": {
       "untitled": "Untitled",
       "noMembers": "No members",
-      "advisorCount": "{{count}} advisors"
+      "advisorCount": "{{count}} advisors",
+      "moreActions": "การดำเนินการเพิ่มเติม",
+      "settings": "การตั้งค่า",
+      "history": "ประวัติ",
+      "duplicate": "ทำสำเนา",
+      "delete": "ลบ"
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"
