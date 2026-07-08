@@ -99,6 +99,7 @@ function BoardroomWizard() {
     if (currentStep === 1)
       return (
         boardName.trim().length > 0 &&
+        members.length > 0 &&
         members.every((m) => m.displayName.trim().length > 0)
       );
     return false; // Step 2 uses CreateButton inside ReviewLaunch
@@ -147,6 +148,13 @@ function BoardroomWizard() {
     creatingRef.current = true;
     setIsCreating(true);
 
+    // Snapshot completed IDs before overwriting progress state
+    const completedIds = new Set(
+      creationProgress
+        .filter((p) => p.status === "done")
+        .map((_, i) => i),
+    );
+
     // Initialize progress entries
     const progressItems: CreationProgressItem[] = [
       ...members.map((m) => ({
@@ -170,7 +178,7 @@ function BoardroomWizard() {
       const member = resolvedMembers[i]!;
 
       // Skip members already completed in a previous attempt
-      if (creationProgress[i]?.status === "done") continue;
+      if (completedIds.has(i)) continue;
 
       if (member.mode === "existing") {
         // Already has an agentId — mark as done immediately
@@ -279,7 +287,6 @@ function BoardroomWizard() {
     members,
     t,
     updateProgress,
-    creationProgress,
     setupAgent,
     selectedTemplateObj,
     boardName,
@@ -291,7 +298,7 @@ function BoardroomWizard() {
   // ─── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="mx-auto max-w-3xl p-5 sm:p-8">
+    <div className="ms-auto me-auto max-w-3xl p-5 sm:p-8">
       {/* Step indicator */}
       <StepIndicator steps={steps} currentStep={currentStep} />
 

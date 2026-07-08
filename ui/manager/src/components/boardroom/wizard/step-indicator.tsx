@@ -21,7 +21,7 @@ function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
         const isActive = index === currentStep;
 
         return (
-          <div key={index} className="flex items-center gap-0" role="listitem">
+          <div key={step.label} className="flex items-center gap-0" role="listitem">
             {/* Step circle + label */}
             <div className="flex flex-col items-center">
               <div
@@ -58,7 +58,7 @@ function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
             {index < steps.length - 1 && (
               <div
                 className={cn(
-                  "mx-1 h-0.5 min-w-8 max-w-20 flex-1 transition-colors duration-300",
+                  "ms-1 me-1 h-0.5 min-w-8 max-w-20 flex-1 transition-colors duration-300",
                   index < currentStep
                     ? "bg-indigo-500"
                     : "bg-slate-200 dark:bg-slate-700",

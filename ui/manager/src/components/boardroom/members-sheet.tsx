@@ -49,7 +49,7 @@ function MembersSheet({
   return (
     <div className={cn("flex flex-col h-full", className)}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex items-center justify-between ps-4 pe-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
             {t("boardroom.board.members", "Members")}
@@ -67,14 +67,15 @@ function MembersSheet({
 
       {/* Member list */}
       <div className="flex-1 overflow-y-auto">
+        <ul role="list">
         {members.map((member) => {
           const isModerator = member.agentId === moderatorId;
 
           return (
-            <div
+            <li
               key={member.agentId}
               className={cn(
-                "flex items-center gap-3 px-4 py-3",
+                "flex items-center gap-3 ps-4 pe-4 py-3",
                 "border-b border-slate-100 dark:border-slate-800/50",
                 "hover:bg-slate-50 dark:hover:bg-slate-800/30",
                 "transition-colors",
@@ -122,9 +123,10 @@ function MembersSheet({
                   {t("boardroom.board.chatOneOnOne", "Chat 1:1")}
                 </Link>
               </Button>
-            </div>
+            </li>
           );
         })}
+        </ul>
 
         {members.length === 0 && (
           <div className="p-8 text-center">

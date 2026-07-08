@@ -62,7 +62,7 @@ function QuestionBubble({ content, delay }: { content: string | null; delay: num
       className="flex justify-end"
       style={{ animation: "br-message-in 250ms ease-out both", animationDelay: `${delay}ms` }}
     >
-      <div className="bg-indigo-500 text-white rounded-2xl rounded-ee-md px-4 py-3 max-w-lg">
+      <div className="bg-indigo-500 text-white rounded-2xl rounded-ee-md ps-4 pe-4 py-3 max-w-lg">
         <p className="text-sm whitespace-pre-wrap">{content ?? ""}</p>
       </div>
     </div>
@@ -91,7 +91,7 @@ function PhaseHeader({
     >
       <div
         className={cn(
-          "flex items-center gap-1.5 px-3 py-1 rounded-full",
+          "flex items-center gap-1.5 ps-3 pe-3 py-1 rounded-full",
           "text-xs uppercase tracking-wider font-medium",
           "bg-slate-100 text-slate-600",
           "dark:bg-slate-800 dark:text-slate-400",

@@ -36,10 +36,12 @@ function SectionHeader({
   icon,
   title,
   description,
+  id,
 }: {
   icon: React.ReactNode;
   title: string;
   description: string;
+  id?: string;
 }) {
   return (
     <div className="mb-5">
@@ -47,7 +49,7 @@ function SectionHeader({
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
           {icon}
         </div>
-        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <h2 id={id} className="text-base font-semibold text-foreground">{title}</h2>
       </div>
       <p className="text-sm text-muted-foreground ps-[42px]">{description}</p>
     </div>
@@ -107,13 +109,19 @@ function AddMemberForm({
   }, [agentId, displayName, role, onAdd]);
 
   return (
-    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3 animate-in fade-in-0 slide-in-from-top-2 duration-200">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleSubmit();
+      }}
+      className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3 animate-in fade-in-0 slide-in-from-top-2 duration-200"
+    >
       <p className="text-sm font-medium text-foreground">
         {t("boardroom.settings.addMemberTitle", "Add Team Member")}
       </p>
 
       <div className="space-y-1.5">
-        <label className="block text-xs font-medium text-muted-foreground">
+        <label htmlFor="add-member-agent" className="block text-xs font-medium text-muted-foreground">
           {t("boardroom.settings.selectAgent", "Agent")}
         </label>
         <AgentPicker
@@ -128,46 +136,48 @@ function AddMemberForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-muted-foreground">
+          <label htmlFor="add-member-name" className="block text-xs font-medium text-muted-foreground">
             {t("boardroom.settings.displayName", "Display Name")}
           </label>
           <input
+            id="add-member-name"
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder={t("boardroom.settings.displayNameHint", "e.g. Analyst")}
-            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+            className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
           />
         </div>
         <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-muted-foreground">
+          <label htmlFor="add-member-role" className="block text-xs font-medium text-muted-foreground">
             {t("boardroom.settings.role", "Role")}
           </label>
           <input
+            id="add-member-role"
             type="text"
             value={role}
             onChange={(e) => setRole(e.target.value)}
             placeholder={t("boardroom.settings.roleHint", "e.g. Reviewer")}
-            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+            className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
           />
         </div>
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
+        <Button variant="ghost" size="sm" type="button" onClick={onCancel}>
           {t("common.cancel", "Cancel")}
         </Button>
         <Button
           variant="primary"
           size="sm"
-          onClick={handleSubmit}
+          type="submit"
           disabled={!agentId.trim()}
         >
           <Plus className="h-3.5 w-3.5" />
           {t("boardroom.settings.addMember", "Add Member")}
         </Button>
       </div>
-    </div>
+    </form>
   );
 }
 
@@ -181,8 +191,8 @@ function BoardroomSettings() {
   const version = Number(searchParams.get("version")) || 1;
 
   // ─── Data hooks ──────────────────────────────────────────────────
-  const { data: config, isLoading } = useGroup(boardId ?? "", version);
-  const updateMutation = useUpdateGroup();
+  const { data: config, isLoading, isError } = useGroup(boardId ?? "", version);
+  const { mutateAsync: updateGroupAsync, isPending: isUpdatePending } = useUpdateGroup();
   const deleteMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
 
@@ -223,9 +233,23 @@ function BoardroomSettings() {
     return false;
   }, [config, name, description, style, maxRounds, moderatorAgentId, members]);
 
+  // ─── Beforeunload guard ─────────────────────────────────────────
+  useEffect(() => {
+    if (!isDirty) return;
+    const h = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [isDirty]);
+
   // ─── Save handler ───────────────────────────────────────────────
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!boardId || !config) return;
+    if (!name.trim()) {
+      toast.error(t("boardroom.settings.nameRequired", "Board name is required"));
+      return;
+    }
     const updatedConfig = {
       ...config,
       name,
@@ -235,21 +259,18 @@ function BoardroomSettings() {
       moderatorAgentId,
       members,
     };
-    updateMutation.mutate(
-      { id: boardId, version, config: updatedConfig },
-      {
-        onSuccess: () => {
-          toast.success(
-            t("boardroom.settings.saveSuccess", "Board settings saved")
-          );
-        },
-        onError: () => {
-          toast.error(
-            t("boardroom.settings.saveError", "Failed to save settings")
-          );
-        },
-      }
-    );
+    try {
+      await updateGroupAsync(
+        { id: boardId, version, config: updatedConfig },
+      );
+      toast.success(
+        t("boardroom.settings.saveSuccess", "Board settings saved")
+      );
+    } catch {
+      toast.error(
+        t("boardroom.settings.saveError", "Failed to save settings")
+      );
+    }
   }, [
     boardId,
     config,
@@ -260,7 +281,7 @@ function BoardroomSettings() {
     moderatorAgentId,
     members,
     version,
-    updateMutation,
+    updateGroupAsync,
     t,
   ]);
 
@@ -333,16 +354,22 @@ function BoardroomSettings() {
 
   const addMember = useCallback(
     (member: GroupMember) => {
+      if (members.some((m) => m.agentId === member.agentId)) {
+        toast.warning(
+          t("boardroom.settings.duplicateMember", "This agent is already a member")
+        );
+        return;
+      }
       setMembers((prev) => [...prev, member]);
       setShowAddMember(false);
     },
-    []
+    [members, t]
   );
 
   // ─── Loading state ──────────────────────────────────────────────
   if (isLoading || !boardId) {
     return (
-      <div className="max-w-3xl mx-auto p-5 sm:p-8 space-y-6">
+      <div className="max-w-3xl ms-auto me-auto p-5 sm:p-8 space-y-6">
         <Skeleton className="h-6 w-32" />
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-4 w-1/2" />
@@ -356,17 +383,29 @@ function BoardroomSettings() {
     );
   }
 
+  // ─── Error state ───────────────────────────────────────────────
+  if (isError || (!isLoading && !config)) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
+        <p>{t("boardroom.settings.loadError", "Failed to load settings")}</p>
+        <Button onClick={() => navigate('/boardroom')}>
+          {t('boardroom.back', 'Back')}
+        </Button>
+      </div>
+    );
+  }
+
   const isDeleting =
     deleteMutation.isPending || deleteWithMembersMutation.isPending;
 
   return (
-    <div className="max-w-3xl mx-auto p-5 sm:p-8 pb-24">
+    <div className="max-w-3xl ms-auto me-auto p-5 sm:p-8 pb-24">
       {/* ── Back link ───────────────────────────────────────────── */}
       <Link
         to={`/boardroom/${boardId}?version=${version}`}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group"
       >
-        <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
+        <ArrowLeft className="h-4 w-4" />
         {t("boardroom.settings.backToBoard", "Back to Board")}
       </Link>
 
@@ -386,10 +425,11 @@ function BoardroomSettings() {
       {/* ═══════════════════════════════════════════════════════════
           SECTION 1: General Settings
           ═══════════════════════════════════════════════════════════ */}
-      <section className="mb-10">
+      <section className="mb-10" aria-labelledby="section-general">
         <SectionHeader
           icon={<Settings className="h-4 w-4" />}
           title={t("boardroom.settings.general", "General Settings")}
+          id="section-general"
           description={t(
             "boardroom.settings.generalDesc",
             "Basic configuration for your advisory board"
@@ -411,7 +451,7 @@ function BoardroomSettings() {
                 "boardroom.settings.boardNameHint",
                 "Enter board name…"
               )}
-              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+              className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             />
           </FormField>
 
@@ -429,7 +469,7 @@ function BoardroomSettings() {
                 "boardroom.settings.descriptionHint",
                 "What is this board about?"
               )}
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow resize-none"
+              className="w-full rounded-lg border border-input bg-background ps-3 pe-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow resize-none"
             />
           </FormField>
 
@@ -442,7 +482,7 @@ function BoardroomSettings() {
               id="settings-style"
               value={style}
               onChange={(e) => setStyle(e.target.value as DiscussionStyle)}
-              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer"
+              className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer"
             >
               {DISCUSSION_STYLES.map((s) => (
                 <option key={s} value={s}>
@@ -468,12 +508,14 @@ function BoardroomSettings() {
                 max={20}
                 step={1}
                 value={maxRounds}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  if (isNaN(val)) return;
                   setMaxRounds(
-                    Math.max(1, Math.min(20, Number(e.target.value)))
-                  )
-                }
-                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                    Math.max(1, Math.min(20, val))
+                  );
+                }}
+                className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
               />
             </FormField>
 
@@ -487,7 +529,7 @@ function BoardroomSettings() {
                 onChange={(e) =>
                   setModeratorAgentId(e.target.value || null)
                 }
-                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer"
+                className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer"
               >
                 <option value="">
                   {t("boardroom.settings.noModerator", "None")}
@@ -506,7 +548,7 @@ function BoardroomSettings() {
       {/* ═══════════════════════════════════════════════════════════
           SECTION 2: Team Management
           ═══════════════════════════════════════════════════════════ */}
-      <section className="mb-10">
+      <section className="mb-10" aria-labelledby="section-team">
         <SectionHeader
           icon={
             <svg
@@ -526,6 +568,7 @@ function BoardroomSettings() {
             </svg>
           }
           title={t("boardroom.settings.team", "Team Members")}
+          id="section-team"
           description={t(
             "boardroom.settings.teamDesc",
             "Manage the agents participating in your board"
@@ -554,23 +597,25 @@ function BoardroomSettings() {
               <div className="flex-1 min-w-0 space-y-2">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                    <label htmlFor={`member-name-${index}`} className="block text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
                       {t("boardroom.settings.displayName", "Display Name")}
                     </label>
                     <input
+                      id={`member-name-${index}`}
                       type="text"
                       value={member.displayName}
                       onChange={(e) =>
                         updateMember(index, { displayName: e.target.value })
                       }
-                      className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-shadow"
+                      className="h-8 w-full rounded-md border border-input bg-background ps-2.5 pe-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-shadow"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                    <label htmlFor={`member-role-${index}`} className="block text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
                       {t("boardroom.settings.role", "Role")}
                     </label>
                     <input
+                      id={`member-role-${index}`}
                       type="text"
                       value={member.role ?? ""}
                       onChange={(e) =>
@@ -582,7 +627,7 @@ function BoardroomSettings() {
                         "boardroom.settings.roleOptional",
                         "Optional"
                       )}
-                      className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-shadow"
+                      className="h-8 w-full rounded-md border border-input bg-background ps-2.5 pe-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-shadow"
                     />
                   </div>
                 </div>
@@ -617,10 +662,10 @@ function BoardroomSettings() {
                 onClick={() => removeMember(index)}
                 disabled={members.length <= 2}
                 className={cn(
-                  "shrink-0 rounded-md p-1.5 transition-all",
+                  "shrink-0 rounded-md p-1.5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   members.length <= 2
                     ? "text-muted-foreground/30 cursor-not-allowed"
-                    : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                    : "text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive"
                 )}
                 aria-label={t(
                   "boardroom.settings.removeMember",
@@ -650,7 +695,7 @@ function BoardroomSettings() {
             <button
               type="button"
               onClick={() => setShowAddMember(true)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border py-3 text-sm font-medium text-muted-foreground transition-all hover:border-primary/40 hover:text-primary hover:bg-primary/5"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border py-3 text-sm font-medium text-muted-foreground transition-all hover:border-primary/40 hover:text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Plus className="h-4 w-4" />
               {t("boardroom.settings.addMember", "Add Member")}
@@ -662,10 +707,11 @@ function BoardroomSettings() {
       {/* ═══════════════════════════════════════════════════════════
           SECTION 3: Danger Zone
           ═══════════════════════════════════════════════════════════ */}
-      <section className="mb-10">
+      <section className="mb-10" aria-labelledby="section-danger">
         <SectionHeader
           icon={<Trash2 className="h-4 w-4" />}
           title={t("boardroom.settings.dangerZone", "Danger Zone")}
+          id="section-danger"
           description={t(
             "boardroom.settings.dangerDesc",
             "Irreversible actions — proceed with caution"
@@ -739,7 +785,7 @@ function BoardroomSettings() {
           Save Button — sticky bottom
           ═══════════════════════════════════════════════════════════ */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/80 backdrop-blur-lg">
-        <div className="max-w-3xl mx-auto flex items-center justify-between px-5 sm:px-8 py-3">
+        <div className="max-w-3xl ms-auto me-auto flex items-center justify-between ps-5 pe-5 sm:ps-8 sm:pe-8 py-3">
           <p
             className={cn(
               "text-xs transition-opacity duration-200",
@@ -754,9 +800,9 @@ function BoardroomSettings() {
             variant="primary"
             size="md"
             onClick={handleSave}
-            disabled={!isDirty || updateMutation.isPending}
+            disabled={!isDirty || isUpdatePending}
           >
-            {updateMutation.isPending
+            {isUpdatePending
               ? t("boardroom.settings.saving", "Saving…")
               : t("boardroom.settings.saveChanges", "Save Changes")}
           </Button>

@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useParams, useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Paperclip, X } from "lucide-react";
 import { useGroup } from "@/hooks/use-groups";
 import {
@@ -128,7 +129,7 @@ function parseConversationSteps(
 
 function TypingDots() {
   return (
-    <div className="flex items-center gap-1 px-3 py-2">
+    <div className="flex items-center gap-1 ps-3 pe-3 py-2">
       {[0, 1, 2].map((i) => (
         <span
           key={i}
@@ -223,11 +224,11 @@ function ThreadInput({
       const file = e.target.files?.[0];
       if (file) {
         if (file.size > MAX_FILE_SIZE) {
-          alert(
+          toast.error(
             t("boardroom.thread.fileTooLarge", "File must be under 10MB"),
           );
         } else if (!ALLOWED_FILE_TYPES.has(file.type)) {
-          alert(
+          toast.error(
             t(
               "boardroom.thread.fileTypeNotAllowed",
               "This file type is not supported",
@@ -252,7 +253,7 @@ function ThreadInput({
   return (
     <div
       className={cn(
-        "sticky bottom-0 px-4 py-3",
+        "sticky bottom-0 ps-4 pe-4 py-3",
         "border-t bg-white border-slate-200",
         "dark:bg-slate-900 dark:border-slate-800",
         className,
@@ -263,7 +264,7 @@ function ThreadInput({
         <div className="mb-2 flex items-center gap-1">
           <span
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium",
+              "inline-flex items-center gap-1.5 rounded-full ps-3 pe-3 py-1 text-xs font-medium",
               "bg-indigo-100 text-indigo-700",
               "dark:bg-indigo-500/20 dark:text-indigo-300",
             )}
@@ -332,7 +333,7 @@ function ThreadInput({
           disabled={disabled}
           rows={1}
           className={cn(
-            "flex-1 min-h-10 max-h-32 resize-none rounded-xl px-4 py-2.5",
+            "flex-1 min-h-10 max-h-32 resize-none rounded-xl ps-4 pe-4 py-2.5",
             "bg-slate-100 dark:bg-slate-800",
             "text-sm text-slate-900 dark:text-slate-100",
             "placeholder:text-slate-400 dark:placeholder:text-slate-500",
@@ -563,7 +564,7 @@ function BoardroomThread() {
           setMessages((prev) => [...prev, ...agentMessages]);
         }
 
-        updateActivity(boardId, memberId);
+        updateActivityRef.current(boardId, memberId);
       } catch (err) {
         console.error("Failed to send message:", err);
         // Add an error message from the agent
@@ -583,7 +584,7 @@ function BoardroomThread() {
         setIsLoading(false);
       }
     },
-    [conversationId, isLoading, inputPrefill, memberId, boardId, updateActivity, t],
+    [conversationId, isLoading, inputPrefill, memberId, boardId, t],
   );
 
   // ─── Starting state ──────────────────────────────────────────
@@ -604,7 +605,7 @@ function BoardroomThread() {
     <div className="flex h-full flex-col">
       {/* Context card — shown when navigating from a group discussion */}
       {hasGroupContext && groupContext && (
-        <div className="shrink-0 px-4 pt-4">
+        <div className="shrink-0 ps-4 pe-4 pt-4">
           <ContextCard
             boardName={groupConfig?.name ?? boardId}
             question={groupContext.question}
@@ -614,8 +615,8 @@ function BoardroomThread() {
       )}
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="mx-auto max-w-3xl space-y-4">
+      <div className="flex-1 overflow-y-auto ps-4 pe-4 pt-4 pb-4">
+        <div className="ms-auto me-auto max-w-3xl space-y-4">
           {messages.length === 0 && !isLoading && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <AdvisorAvatar
@@ -659,7 +660,7 @@ function BoardroomThread() {
 
               <div
                 className={cn(
-                  "max-w-lg rounded-2xl px-4 py-2.5 text-sm",
+                  "max-w-lg rounded-2xl ps-4 pe-4 py-2.5 text-sm",
                   msg.role === "user"
                     ? "rounded-ee-md bg-indigo-500 text-white"
                     : cn(
@@ -680,7 +681,7 @@ function BoardroomThread() {
                 {msg.attachment && (
                   <span
                     className={cn(
-                      "mb-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs",
+                      "mb-1 inline-flex items-center gap-1 rounded-full ps-2 pe-2 py-0.5 text-xs",
                       msg.role === "user"
                         ? "bg-white/20 text-white"
                         : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",

@@ -222,7 +222,7 @@ function BoardroomBoard() {
   return (
     <div className="flex h-full flex-col relative">
       {/* Action bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex items-center justify-between ps-4 pe-4 py-2 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
             {groupConfig?.name ?? t("boardroom.board.title", "Board")}
@@ -299,7 +299,7 @@ function BoardroomBoard() {
       </div>
 
       {/* Transcript area */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto ps-4 pe-4 pt-4 pb-4">
         {displayTranscript.length > 0 ? (
           <BoardTranscript
             transcript={displayTranscript}
@@ -325,7 +325,7 @@ function BoardroomBoard() {
                   className="mt-3 text-indigo-500"
                   onClick={() => setShowHistory(true)}
                 >
-                  {t("boardroom.board.viewHistory", "View past sessions")}
+                  {t("boardroom.board.viewHistory", "View history")}
                 </Button>
               )}
             </div>
@@ -362,7 +362,7 @@ function BoardroomBoard() {
             onKeyDown={(e) => handlePanelKeyDown(e, membersRef)}
             className={cn(
               "fixed inset-y-0 end-0 z-40 w-80",
-              "bg-white dark:bg-slate-900",
+              "bg-card",
               "border-s border-slate-200 dark:border-slate-800",
               "shadow-xl",
               "animate-[br-fade-in_200ms_ease-out]",
@@ -400,7 +400,7 @@ function BoardroomBoard() {
             onKeyDown={(e) => handlePanelKeyDown(e, historyRef)}
             className={cn(
               "fixed inset-y-0 end-0 z-40 w-80",
-              "bg-white dark:bg-slate-900",
+              "bg-card",
               "border-s border-slate-200 dark:border-slate-800",
               "shadow-xl",
               "animate-[br-fade-in_200ms_ease-out]",

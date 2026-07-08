@@ -119,7 +119,7 @@ export function BoardroomLayout() {
       <div className="boardroom flex h-screen flex-col overflow-hidden">
         <a
           href="#boardroom-main"
-          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:px-4 focus:py-2 focus:rounded-lg"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
         >
           {t("boardroom.skipToContent", "Skip to content")}
         </a>
@@ -142,7 +142,7 @@ export function BoardroomLayout() {
       <div className="boardroom flex h-screen flex-col overflow-hidden">
         <a
           href="#boardroom-main"
-          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:px-4 focus:py-2 focus:rounded-lg"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
         >
           {t("boardroom.skipToContent", "Skip to content")}
         </a>
@@ -175,8 +175,10 @@ export function BoardroomLayout() {
               onKeyDown={handleDrawerKeyDown}
               className={cn(
                 "fixed inset-y-0 start-0 z-50 w-72",
-                "animate-[br-drawer-in_300ms_ease-out]",
               )}
+              style={{
+                animation: `${document.documentElement.dir === 'rtl' ? 'br-drawer-in-rtl' : 'br-drawer-in'} 300ms ease-out`,
+              }}
             >
               <BoardroomSidebar
                 collapsed={false}
@@ -195,7 +197,7 @@ export function BoardroomLayout() {
     <div className="boardroom flex h-screen overflow-hidden">
       <a
         href="#boardroom-main"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:px-4 focus:py-2 focus:rounded-lg"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-indigo-500 focus:text-white focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
       >
         {t("boardroom.skipToContent", "Skip to content")}
       </a>

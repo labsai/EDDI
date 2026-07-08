@@ -34,7 +34,6 @@ export function BoardroomBottomTabs() {
 
   return (
     <nav
-      role="tablist"
       aria-label={t("boardroom.bottomNav", "Bottom navigation")}
       className={cn(
         "fixed inset-x-0 bottom-0 z-40 flex h-16 border-t",
@@ -49,8 +48,7 @@ export function BoardroomBottomTabs() {
           <button
             key={tab.key}
             type="button"
-            role="tab"
-            aria-selected={tab.active}
+            {...(tab.active ? { "aria-current": "page" as const } : {})}
             onClick={() => navigate(tab.to)}
             className={cn(
               "flex flex-1 flex-col items-center justify-center gap-1 text-xs transition-colors",

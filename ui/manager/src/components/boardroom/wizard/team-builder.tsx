@@ -75,7 +75,7 @@ function MemberCard({
             onChange={(e) => update({ displayName: e.target.value })}
             placeholder={t("boardroom.wizard.advisorName", "Advisor name")}
             aria-label={t("boardroom.wizard.advisorName", "Advisor name")}
-            className="h-8 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-8 flex-1 rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <input
             id={`role-${member.id}`}
@@ -84,7 +84,7 @@ function MemberCard({
             onChange={(e) => update({ role: e.target.value })}
             placeholder={t("boardroom.wizard.role", "Role")}
             aria-label={t("boardroom.wizard.role", "Role")}
-            className="h-8 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring sm:w-36"
+            className="h-8 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring sm:w-36"
           />
         </div>
 
@@ -130,7 +130,7 @@ function MemberCard({
               aria-pressed={member.mode === "existing"}
               onClick={() => update({ mode: "existing" })}
               className={cn(
-                "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                "rounded-lg ps-3 pe-3 py-1.5 text-xs font-medium transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
                 member.mode === "existing"
                   ? "bg-indigo-500 text-white"
@@ -144,7 +144,7 @@ function MemberCard({
               aria-pressed={member.mode === "new"}
               onClick={() => update({ mode: "new" })}
               className={cn(
-                "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                "rounded-lg ps-3 pe-3 py-1.5 text-xs font-medium transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
                 member.mode === "new"
                   ? "bg-indigo-500 text-white"
@@ -184,7 +184,7 @@ function MemberCard({
                       model: prov?.defaultModel ?? member.model,
                     });
                   }}
-                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 >
                   <option value="">
                     {t("boardroom.wizard.selectProvider", "Select provider…")}
@@ -211,7 +211,7 @@ function MemberCard({
                     "boardroom.wizard.modelPlaceholder",
                     "e.g. claude-sonnet-4-6",
                   )}
-                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
 
@@ -315,7 +315,7 @@ function TeamBuilder({
             "boardroom.wizard.boardNamePlaceholder",
             "e.g. Product Strategy Board",
           )}
-          className="h-11 w-full rounded-lg border border-input bg-background px-4 text-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          className="h-11 w-full rounded-lg border border-input bg-background ps-4 pe-4 text-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>
 

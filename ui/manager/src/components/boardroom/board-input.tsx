@@ -73,7 +73,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
   return (
     <div
       className={cn(
-        "sticky bottom-0 px-4 py-3",
+        "sticky bottom-0 ps-4 pe-4 py-3",
         "border-t bg-white border-slate-200",
         "dark:bg-slate-900 dark:border-slate-800",
         className,
@@ -96,7 +96,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
           disabled={disabled}
           rows={1}
           className={cn(
-            "flex-1 min-h-10 max-h-32 resize-none rounded-xl px-4 py-2.5",
+            "flex-1 min-h-10 max-h-32 resize-none rounded-xl ps-4 pe-4 py-2.5",
             "bg-slate-100 dark:bg-slate-800",
             "text-sm text-slate-900 dark:text-slate-100",
             "placeholder:text-slate-400 dark:placeholder:text-slate-500",

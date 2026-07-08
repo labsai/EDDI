@@ -84,7 +84,7 @@ const PHASE_ICONS: Record<string, string> = {
   SYNTHESIS: "💡",
   CHALLENGE: "⚔️",
   DEFENSE: "🛡️",
-  ARGUE: "📢",
+  ARGUMENT: "📢",
   REBUTTAL: "↩️",
   PLAN: "📝",
   TASK_RESULT: "📦",
@@ -117,7 +117,7 @@ function PhaseSeparator({
       <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
       <div
         className={cn(
-          "flex items-center gap-1.5 px-3 py-1 rounded-full",
+          "flex items-center gap-1.5 ps-3 pe-3 py-1 rounded-full",
           "text-xs uppercase tracking-wider font-medium",
           "bg-slate-100 text-slate-600",
           "dark:bg-slate-800 dark:text-slate-400",
@@ -139,6 +139,8 @@ function PhaseSeparator({
 }
 
 function QuestionBubble({ content, index }: { content: string | null; index: number }) {
+  const { t } = useTranslation();
+
   return (
     <div
       className="flex justify-end"
@@ -149,11 +151,13 @@ function QuestionBubble({ content, index }: { content: string | null; index: num
     >
       <div
         className={cn(
-          "bg-indigo-500 text-white rounded-2xl rounded-ee-md px-4 py-3 max-w-lg",
+          "bg-indigo-500 text-white rounded-2xl rounded-ee-md ps-4 pe-4 py-3 max-w-lg",
           "shadow-sm",
         )}
       >
-        <p className="text-sm whitespace-pre-wrap leading-relaxed">{content ?? ""}</p>
+        <p className="text-sm whitespace-pre-wrap leading-relaxed">
+          {content || t("boardroom.history.noContent", "No content")}
+        </p>
       </div>
     </div>
   );
@@ -398,7 +402,7 @@ function ConversationViewer({
   className,
 }: ConversationViewerProps) {
   const { t } = useTranslation();
-  const { data: conversation, isLoading } = useGroupConversation(
+  const { data: conversation, isLoading, isError } = useGroupConversation(
     groupId,
     conversationId,
   );
@@ -435,6 +439,19 @@ function ConversationViewer({
     );
   }
 
+  if (isError) {
+    return (
+      <div className={cn("flex items-center justify-center h-full", className)}>
+        <div className="text-center space-y-2">
+          <AlertCircle className="h-8 w-8 text-red-400 mx-auto" />
+          <p className="text-sm text-red-500 dark:text-red-400">
+            {t("boardroom.history.loadError", "Failed to load conversation")}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!conversation) {
     return (
       <div className={cn("flex items-center justify-center h-full", className)}>
@@ -460,7 +477,7 @@ function ConversationViewer({
       {/* ── Header ─────────────────────────────────────────────── */}
       <div
         className={cn(
-          "flex items-start gap-3 px-5 py-4",
+          "flex items-start gap-3 ps-5 pe-5 py-4",
           "border-b border-slate-200 dark:border-slate-800",
           "bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm",
         )}
@@ -503,7 +520,9 @@ function ConversationViewer({
       {/* ── Transcript Body ────────────────────────────────────── */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-5 py-4 space-y-3"
+        role="log"
+        aria-label={t("boardroom.history.transcript", "Conversation transcript")}
+        className="flex-1 overflow-y-auto ps-5 pe-5 py-4 space-y-3"
       >
         {processedEntries.map(({ entry, showPhaseHeader }, idx) => {
           const phaseHeader = showPhaseHeader ? (
@@ -560,7 +579,7 @@ function ConversationViewer({
         })}
 
         {/* ── Footer: Synthesized Answer ──────────────────────── */}
-        {conversation.synthesizedAnswer && !hasSynthesisEntry && (
+        {conversation.synthesizedAnswer?.trim() && !hasSynthesisEntry && (
           <SynthesizedAnswerFooter content={conversation.synthesizedAnswer} />
         )}
 

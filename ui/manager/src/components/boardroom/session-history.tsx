@@ -78,7 +78,7 @@ function SessionHistory({
   return (
     <div className={cn("flex flex-col h-full", className)}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex items-center justify-between ps-4 pe-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
           {t("boardroom.board.sessions", "Sessions")}
         </h3>
@@ -127,7 +127,7 @@ function SessionHistory({
                 aria-current={isSelected ? "true" : undefined}
                 onClick={() => onSelect(conv.id)}
                 className={cn(
-                  "w-full text-start px-4 py-3 transition-colors",
+                  "w-full text-start ps-4 pe-4 py-3 transition-colors",
                   "hover:bg-slate-50 dark:hover:bg-slate-800/50",
                   "border-b border-slate-100 dark:border-slate-800/50",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500",
