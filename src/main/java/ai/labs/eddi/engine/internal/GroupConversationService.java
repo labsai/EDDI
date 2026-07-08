@@ -239,14 +239,28 @@ public class GroupConversationService implements IGroupConversationService {
         // AgentOrchestrator to enforce group-level guardrails on dynamic tools.
         gc.setDynamicAgentConfig(config.getDynamicAgents());
 
+        // Populate member display name map (idempotent — safe on continuation rounds)
+        if (gc.getMemberDisplayNames().isEmpty() && config.getMembers() != null) {
+            for (var member : config.getMembers()) {
+                if (member.displayName() != null) {
+                    gc.getMemberDisplayNames().put(member.agentId(), member.displayName());
+                }
+            }
+        }
+
         // AtomicInteger: shared across the phase loop; parallel phases increment
         // from virtual threads. Mutable counter avoids passing & returning counts.
         var turnCounter = new java.util.concurrent.atomic.AtomicInteger(0);
 
         if (listener != null) {
-            listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), gc.getGroupId(), question,
-                    config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phases.size(),
-                    config.getMembers().stream().map(GroupMember::agentId).toList()));
+            if (gc.getRound() <= 1) {
+                listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), gc.getGroupId(), question,
+                        config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phases.size(),
+                        config.getMembers().stream().map(GroupMember::agentId).toList()));
+            } else {
+                listener.onRoundStart(new GroupConversationEventSink.RoundStartEvent(
+                        gc.getId(), gc.getRound(), question, phases.size()));
+            }
         }
 
         try {
@@ -343,9 +357,12 @@ public class GroupConversationService implements IGroupConversationService {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
             // Clean up incremental verification cursor — conversation is done
             lastVerifiedIndex.remove(gc.getId());
-            // Ephemeral agent cleanup — undeploy/delete agents created during this
-            // discussion
-            cleanupEphemeralAgents(gc, config);
+            // Defer ephemeral cleanup to closeGroupConversation() for successful rounds
+            // so follow-ups can reuse dynamically-created agents. Only clean up
+            // immediately on failure (no follow-ups possible on failed discussions).
+            if (gc.getState() == GroupConversationState.FAILED) {
+                cleanupEphemeralAgents(gc, config);
+            }
         }
     }
 
@@ -375,6 +392,214 @@ public class GroupConversationService implements IGroupConversationService {
     @Override
     public List<GroupConversation> listGroupConversations(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException {
         return conversationStore.listByGroupId(groupId, index, limit);
+    }
+
+    @Override
+    public GroupConversation followUpWithMember(String groupConversationId, String targetAgentId,
+                                                String question, String userId)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        GroupConversation gc = conversationStore.read(groupConversationId);
+
+        // Atomic state transition: COMPLETED → IN_PROGRESS
+        if (!conversationStore.compareAndSetState(groupConversationId, GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)) {
+            throw new GroupDiscussionException(
+                    "Cannot follow up: conversation is not in COMPLETED state (current: %s)".formatted(gc.getState()));
+        }
+
+        boolean success = false;
+        try {
+            // Re-read after CAS to get the freshest transcript
+            gc = conversationStore.read(groupConversationId);
+
+            // Resolve targetAgentId — accept either agent ID or display name
+            String resolvedAgentId = targetAgentId;
+            String privateConvId = gc.getMemberConversationIds().get(targetAgentId);
+            if (privateConvId == null) {
+                // Try resolving as display name
+                for (var entry : gc.getMemberDisplayNames().entrySet()) {
+                    if (targetAgentId.equalsIgnoreCase(entry.getValue())) {
+                        resolvedAgentId = entry.getKey();
+                        privateConvId = gc.getMemberConversationIds().get(resolvedAgentId);
+                        break;
+                    }
+                }
+            }
+            if (privateConvId == null) {
+                throw new GroupDiscussionException(
+                        "Agent '%s' is not a member of this group conversation. Available members: %s"
+                                .formatted(targetAgentId, gc.getMemberDisplayNames()));
+            }
+
+            // Resolve display name
+            String displayName = gc.getMemberDisplayNames().getOrDefault(resolvedAgentId, resolvedAgentId);
+
+            // Record the user's follow-up question on the transcript
+            gc.getTranscript().add(new TranscriptEntry(
+                    "user", "User", question, -1, "Follow-up",
+                    TranscriptEntryType.FOLLOW_UP, Instant.now(), null, resolvedAgentId));
+
+            // Call the agent's private conversation
+            InputData inputData = new InputData();
+            inputData.setInput(question);
+            Map<String, Context> context = new LinkedHashMap<>();
+            context.put("groupTranscript", new Context(Context.ContextType.object, gc.getTranscript()));
+            context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
+            context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
+            inputData.setContext(context);
+
+            CompletableFuture<String> responseFuture = new CompletableFuture<>();
+            try {
+                conversationService.say(DEFAULT_ENV, resolvedAgentId, privateConvId, true, true, null, inputData, false, snapshot -> {
+                    String response = extractResponse(snapshot);
+                    if ((response == null || response.isEmpty()) && snapshot != null
+                            && snapshot.getConversationState() == ConversationState.ERROR) {
+                        response = "[Agent failed to produce output — conversation entered ERROR state]";
+                    }
+                    responseFuture.complete(response);
+                });
+            } catch (Exception e) {
+                throw new GroupDiscussionException("Failed to call agent '%s': %s".formatted(resolvedAgentId, e.getMessage()), e);
+            }
+
+            String response;
+            try {
+                response = responseFuture.get(120, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                throw new GroupDiscussionException("Follow-up timed out for agent '%s'".formatted(resolvedAgentId), e);
+            } catch (ExecutionException | InterruptedException e) {
+                throw new GroupDiscussionException("Follow-up failed for agent '%s': %s".formatted(resolvedAgentId, e.getMessage()), e);
+            }
+
+            // Record the agent's response on the transcript
+            gc.getTranscript().add(new TranscriptEntry(
+                    resolvedAgentId, displayName, response, -1, "Follow-up",
+                    TranscriptEntryType.FOLLOW_UP, Instant.now(), null, null));
+
+            // Transition back to COMPLETED
+            gc.setState(GroupConversationState.COMPLETED);
+            gc.setLastModified(Instant.now());
+            conversationStore.update(gc);
+
+            success = true;
+            return gc;
+
+        } finally {
+            if (!success) {
+                // Restore COMPLETED state so the conversation remains usable.
+                // Wrap in try-catch to avoid masking the original exception.
+                try {
+                    conversationStore.compareAndSetState(groupConversationId,
+                            GroupConversationState.IN_PROGRESS, GroupConversationState.COMPLETED);
+                } catch (Exception recoveryEx) {
+                    LOGGER.warnf("Failed to restore COMPLETED state after follow-up error for %s: %s",
+                            groupConversationId, recoveryEx.getMessage());
+                }
+            }
+        }
+    }
+
+    @Override
+    public GroupConversation continueDiscussion(String groupConversationId, String question,
+                                                String userId, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        GroupConversation gc = conversationStore.read(groupConversationId);
+
+        // Atomic state transition: COMPLETED → IN_PROGRESS
+        if (!conversationStore.compareAndSetState(groupConversationId, GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)) {
+            throw new GroupDiscussionException(
+                    "Cannot continue: conversation is not in COMPLETED state (current: %s)".formatted(gc.getState()));
+        }
+
+        // Re-read after CAS
+        gc = conversationStore.read(groupConversationId);
+
+        // Increment round and append the new question
+        gc.setRound(gc.getRound() + 1);
+        gc.getTranscript().add(new TranscriptEntry(
+                "user", "User", question, 0, "Question",
+                TranscriptEntryType.QUESTION, Instant.now(), null, null));
+        conversationStore.update(gc);
+
+        // Load the group config and re-execute — wrapped in try-catch so that
+        // failures before executeDiscussion() (which has its own failConversation
+        // logic) still set the GC to FAILED rather than leaving it IN_PROGRESS.
+        try {
+            IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (currentGroupId == null) {
+                throw new IResourceStore.ResourceNotFoundException("Group not found: " + gc.getGroupId());
+            }
+            AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
+
+            // Resolve phases and re-execute
+            List<DiscussionPhase> phases = resolvePhases(config);
+            if (phases.isEmpty()) {
+                throw new GroupDiscussionException("No phases defined for group: " + gc.getGroupId());
+            }
+
+            return executeDiscussion(gc, config, phases, question, listener);
+        } catch (Exception e) {
+            // executeDiscussion handles its own failures, so this only catches
+            // errors from config loading / phase resolution above.
+            if (gc.getState() == GroupConversationState.IN_PROGRESS) {
+                failConversation(gc);
+            }
+            if (e instanceof GroupDiscussionException gde) {
+                throw gde;
+            }
+            if (e instanceof IResourceStore.ResourceNotFoundException rnfe) {
+                throw rnfe;
+            }
+            if (e instanceof IResourceStore.ResourceStoreException rse) {
+                throw rse;
+            }
+            throw new GroupDiscussionException("Continue discussion failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public GroupConversation closeGroupConversation(String groupConversationId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        GroupConversation gc = conversationStore.read(groupConversationId);
+
+        // Atomic state transition: try COMPLETED → CLOSED, then FAILED → CLOSED
+        boolean transitioned = conversationStore.compareAndSetState(
+                groupConversationId, GroupConversationState.COMPLETED, GroupConversationState.CLOSED);
+        if (!transitioned) {
+            transitioned = conversationStore.compareAndSetState(
+                    groupConversationId, GroupConversationState.FAILED, GroupConversationState.CLOSED);
+        }
+        if (!transitioned) {
+            throw new IResourceStore.ResourceStoreException(
+                    "Cannot close: conversation is in %s state (expected COMPLETED or FAILED)".formatted(gc.getState()));
+        }
+
+        // End all member conversations
+        for (String privateConvId : gc.getMemberConversationIds().values()) {
+            try {
+                conversationService.endConversation(privateConvId);
+            } catch (Exception e) {
+                LOGGER.warnf("Failed to end private conversation %s during close: %s", privateConvId, e.getMessage());
+            }
+        }
+
+        // Ephemeral agent cleanup (deferred from executeDiscussion)
+        try {
+            IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (currentGroupId != null) {
+                AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
+                cleanupEphemeralAgents(gc, config);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Ephemeral agent cleanup during close failed: %s", e.getMessage());
+        }
+
+        LOGGER.infof("Group conversation %s closed — member conversations ended, ephemeral agents cleaned up", groupConversationId);
+
+        // Re-read to return the final CLOSED state
+        return conversationStore.read(groupConversationId);
     }
 
     // =================================================================

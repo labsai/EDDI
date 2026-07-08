@@ -5,6 +5,52 @@
 
 ---
 
+## ✨ Group Conversation Follow-Ups — member follow-up, continuation rounds, explicit close (2026-07-08)
+
+**Repo:** EDDI (`feat/group-conversation-followups`)
+
+### Summary
+
+Adds three new interaction patterns for completed group conversations:
+1. **Follow up with any member** — ask a specific agent (including the moderator) a question; both the question and response are appended to the group transcript as `FOLLOW_UP` entries
+2. **Continue the full group** — re-run all discussion phases with a new question; agents retain conversation memory from prior rounds via reused private conversations; round counter increments
+3. **Explicit close** — end member conversations, run ephemeral agent cleanup, lock the conversation permanently (`CLOSED` state)
+
+### Changes
+
+**Model layer:**
+- `GroupConversation.java`: Added `round` field (1-based counter), `CLOSED` to `GroupConversationState`, `FOLLOW_UP` to `TranscriptEntryType`
+- `IGroupConversationStore.java`: Added `compareAndSetState()` for optimistic concurrency control
+- `GroupConversationStore.java`: Implemented `compareAndSetState()` (read-check-update pattern)
+
+**Service layer:**
+- `IGroupConversationService.java`: Added `followUpWithMember()`, `continueDiscussion()`, `closeGroupConversation()` + `onRoundStart()` listener method
+- `GroupConversationService.java`: Implemented all three methods; modified `executeDiscussion()` to emit `round_start` SSE event (instead of `group_start`) for continuation rounds; deferred ephemeral agent cleanup to `closeGroupConversation()` for successful rounds (only immediate cleanup on failure)
+- `GroupConversationEventSink.java`: Added `EVENT_ROUND_START` constant and `RoundStartEvent` record
+
+**REST + MCP layer:**
+- `IRestGroupConversation.java`: Added 4 endpoints (`POST /{gcId}/followup`, `POST /{gcId}/continue`, `POST /{gcId}/continue/stream`, `POST /{gcId}/close`) + `FollowUpRequest` record
+- `RestGroupConversation.java`: Implemented all 4 endpoints with ownership validation and SSE streaming support for continuation
+- `McpGroupTools.java`: Added `followup_with_member`, `continue_group_discussion`, `close_group_conversation` tools
+
+### Design decisions
+
+- **Concurrency**: `compareAndSetState(COMPLETED → IN_PROGRESS)` prevents two parallel follow-ups from overlapping; state restored to `COMPLETED` on error
+- **Deferred cleanup**: Ephemeral agents survive until explicit close so follow-ups can use dynamically-created agents; immediate cleanup only on failure
+- **No TranscriptEntry.round field**: Round boundaries are inferred from `QUESTION` entries in the transcript — avoids churn on the 13-field record with 4 constructors
+- **Plain text follow-up input**: The agent's private conversation already has full context from prior group turns; no need to re-inject the transcript into the input
+
+### Client experience improvements (follow-up commit)
+
+- **Consistent response shapes**: All endpoints (`followup`, `continue`, `close`) now return the full `GroupConversation` — same shape as the initial `discuss` endpoint
+- **Display name resolution**: `followUpWithMember` accepts either an agent ID or a display name (case-insensitive). Error messages list available members if target not found
+- **`memberDisplayNames` map**: New field on `GroupConversation` maps agentId → displayName, populated at discussion start from group config. Eliminates client-side transcript scanning
+- **`availableActions` computed property**: JSON response includes `["followup", "continue", "close"]` when COMPLETED, `["close"]` when FAILED, `[]` otherwise. Clients can discover available operations without reading docs
+- **Close returns body**: `/close` now returns the closed `GroupConversation` with `state: CLOSED` and `availableActions: []`
+- **Lifecycle documented in OpenAPI**: Close endpoint description includes `discuss → COMPLETED → [followup|continue]* → close → CLOSED (terminal)`
+
+---
+
 ## 🐛 Fix: PostgreSQL group conversations broken — JDBC `?|` operator escape (2026-07-02)
 
 **Repo:** EDDI (`fix/postgres-group-conversation-jdbc-escape`)

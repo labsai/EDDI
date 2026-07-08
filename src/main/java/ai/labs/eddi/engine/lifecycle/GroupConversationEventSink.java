@@ -34,6 +34,7 @@ public final class GroupConversationEventSink {
     public static final String EVENT_GROUP_ERROR = "group_error";
     public static final String EVENT_TASK_PLAN_CREATED = "task_plan_created";
     public static final String EVENT_TASK_VERIFIED = "task_verified";
+    public static final String EVENT_ROUND_START = "round_start";
 
     // --- Event payloads ---
 
@@ -78,5 +79,8 @@ public final class GroupConversationEventSink {
     }
 
     public record TaskSummary(String id, String subject, String assignedTo, int priority) {
+    }
+
+    public record RoundStartEvent(String groupConversationId, int round, String question, int phaseCount) {
     }
 }

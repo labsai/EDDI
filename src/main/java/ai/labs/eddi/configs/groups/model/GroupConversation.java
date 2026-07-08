@@ -5,10 +5,12 @@
 package ai.labs.eddi.configs.groups.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,10 +30,17 @@ public class GroupConversation {
     private String originalQuestion;
     private List<TranscriptEntry> transcript = Collections.synchronizedList(new ArrayList<>());
     private Map<String, String> memberConversationIds = new ConcurrentHashMap<>();
+    /**
+     * Maps agentId → displayName for all group members. Populated at discussion
+     * start.
+     */
+    private Map<String, String> memberDisplayNames = new LinkedHashMap<>();
     private int currentPhaseIndex;
     private String currentPhaseName;
     private String synthesizedAnswer;
     private int depth;
+    /** Current discussion round (1-based). Incremented by continueDiscussion(). */
+    private int round = 1;
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
     private List<AgentGroupConfiguration.GroupMember> dynamicMembers = Collections.synchronizedList(new ArrayList<>());
@@ -121,13 +130,20 @@ public class GroupConversation {
         /** Task execution result from the EXECUTE phase. */
         TASK_RESULT,
         /** Verification assessment from the VERIFY phase. */
-        VERIFICATION
+        VERIFICATION,
+        /** User-to-member or member-to-user follow-up exchange between rounds. */
+        FOLLOW_UP
     }
 
     public enum GroupConversationState {
         CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED,
         /** Paused for human approval — HITL foundation (Phase 9b). */
-        AWAITING_APPROVAL
+        AWAITING_APPROVAL,
+        /**
+         * Terminal — member conversations ended, ephemeral agents cleaned up, no
+         * further follow-ups.
+         */
+        CLOSED
     }
 
     // --- Getters/Setters ---
@@ -224,6 +240,14 @@ public class GroupConversation {
         this.depth = depth;
     }
 
+    public int getRound() {
+        return round;
+    }
+
+    public void setRound(int round) {
+        this.round = round;
+    }
+
     public Instant getCreated() {
         return created;
     }
@@ -295,5 +319,30 @@ public class GroupConversation {
 
     public void setDynamicAgentConfig(AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig) {
         this.dynamicAgentConfig = dynamicAgentConfig;
+    }
+
+    public Map<String, String> getMemberDisplayNames() {
+        return memberDisplayNames;
+    }
+
+    public void setMemberDisplayNames(Map<String, String> memberDisplayNames) {
+        this.memberDisplayNames = memberDisplayNames != null ? memberDisplayNames : new LinkedHashMap<>();
+    }
+
+    /**
+     * Computed property — not persisted. Tells clients which operations are
+     * available based on the current conversation state.
+     */
+    @JsonProperty(value = "availableActions", access = JsonProperty.Access.READ_ONLY)
+    public List<String> getAvailableActions() {
+        if (state == null) {
+            return List.of();
+        }
+        return switch (state) {
+            case COMPLETED -> List.of("followup", "continue", "close");
+            case FAILED -> List.of("close");
+            case IN_PROGRESS, SYNTHESIZING, CREATED, AWAITING_APPROVAL -> List.of();
+            case CLOSED -> List.of();
+        };
     }
 }

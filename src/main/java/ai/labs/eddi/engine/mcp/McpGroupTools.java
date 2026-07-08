@@ -377,4 +377,66 @@ public class McpGroupTools {
             return errorJson(e.getMessage());
         }
     }
+
+    // --- Follow-up Operations ---
+
+    @Blocking
+    @Tool(description = "Ask a follow-up question to a specific member agent in a "
+            + "completed group conversation. The agent retains full context from "
+            + "the discussion. Both the question and response are recorded on the "
+            + "group transcript. Works for any member including the moderator. "
+            + "The targetAgentId accepts either an agent ID or a member's display name.")
+    public String followup_with_member(
+                                       @ToolArg(description = "Group conversation ID") String groupConversationId,
+                                       @ToolArg(description = "Agent ID or display name of the member to address") String targetAgentId,
+                                       @ToolArg(description = "The follow-up question") String question,
+                                       @ToolArg(description = "User ID (optional, defaults to 'mcp-client')") String userId) {
+        requireRole(identity, authEnabled, "eddi-viewer");
+        try {
+            String user = userId != null && !userId.isBlank() ? userId : "mcp-client";
+            GroupConversation gc = groupConversationService.followUpWithMember(
+                    groupConversationId, targetAgentId, question, user);
+            return jsonSerialization.serialize(gc);
+        } catch (Exception e) {
+            LOGGER.errorf("followup_with_member failed: %s", e.getMessage());
+            return errorJson(e.getMessage());
+        }
+    }
+
+    @Blocking
+    @Tool(description = "Continue a completed group conversation with a new question. "
+            + "All agents re-run through the full discussion phases, retaining memory "
+            + "of prior rounds. The round counter increments. Returns the updated "
+            + "GroupConversation with new synthesis.")
+    public String continue_group_discussion(
+                                            @ToolArg(description = "Group conversation ID") String groupConversationId,
+                                            @ToolArg(description = "The follow-up question for the group") String question,
+                                            @ToolArg(description = "User ID (optional, defaults to 'mcp-client')") String userId) {
+        requireRole(identity, authEnabled, "eddi-viewer");
+        try {
+            String user = userId != null && !userId.isBlank() ? userId : "mcp-client";
+            GroupConversation gc = groupConversationService.continueDiscussion(
+                    groupConversationId, question, user, null);
+            return jsonSerialization.serialize(gc);
+        } catch (Exception e) {
+            LOGGER.errorf("continue_group_discussion failed: %s", e.getMessage());
+            return errorJson(e.getMessage());
+        }
+    }
+
+    @Tool(description = "Close a group conversation permanently. Ends all member "
+            + "conversations and cleans up dynamically-created agents. No further "
+            + "follow-ups or continuations are possible after closing. "
+            + "Returns the closed GroupConversation.")
+    public String close_group_conversation(
+                                           @ToolArg(description = "Group conversation ID") String groupConversationId) {
+        requireRole(identity, authEnabled, "eddi-editor");
+        try {
+            GroupConversation gc = groupConversationService.closeGroupConversation(groupConversationId);
+            return jsonSerialization.serialize(gc);
+        } catch (Exception e) {
+            LOGGER.errorf("close_group_conversation failed: %s", e.getMessage());
+            return errorJson(e.getMessage());
+        }
+    }
 }

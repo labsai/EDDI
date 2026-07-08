@@ -111,4 +111,18 @@ public class GroupConversationStore implements IGroupConversationStore {
         }
         return results;
     }
+
+    @Override
+    public boolean compareAndSetState(String id, GroupConversation.GroupConversationState expectedState,
+                                      GroupConversation.GroupConversationState newState)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        GroupConversation gc = read(id);
+        if (gc.getState() != expectedState) {
+            return false;
+        }
+        gc.setState(newState);
+        gc.setLastModified(java.time.Instant.now());
+        update(gc);
+        return true;
+    }
 }

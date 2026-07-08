@@ -66,6 +66,43 @@ public interface IGroupConversationService {
      */
     List<GroupConversation> listGroupConversations(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Send a follow-up question to a specific member agent within a completed group
+     * conversation. The exchange (user question + agent response) is appended to
+     * the group transcript. The agent retains full context from its participation
+     * in prior rounds via its reused private conversation.
+     *
+     * <p>
+     * The {@code targetAgentId} can be either an agent ID or a display name.
+     * Display names are resolved against
+     * {@link GroupConversation#getMemberDisplayNames()}.
+     *
+     * @return the updated group conversation with the follow-up appended to the
+     *         transcript
+     */
+    GroupConversation followUpWithMember(String groupConversationId, String targetAgentId,
+                                         String question, String userId)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    /**
+     * Continue a completed group conversation with a new question. All phases
+     * re-execute with the new question; agents retain conversation memory from
+     * prior rounds via their reused private conversations. The round counter
+     * increments.
+     */
+    GroupConversation continueDiscussion(String groupConversationId, String question,
+                                         String userId, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    /**
+     * Explicitly close a group conversation. Ends all member conversations,
+     * triggers ephemeral agent cleanup, and sets state to CLOSED. Irreversible.
+     *
+     * @return the closed group conversation
+     */
+    GroupConversation closeGroupConversation(String groupConversationId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
     // --- Event listener for SSE streaming ---
 
     interface GroupDiscussionEventListener {
@@ -88,6 +125,8 @@ public interface IGroupConversationService {
         default void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
         }
         default void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
+        }
+        default void onRoundStart(GroupConversationEventSink.RoundStartEvent event) {
         }
     }
 

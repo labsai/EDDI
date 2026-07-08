@@ -73,9 +73,72 @@ public interface IRestGroupConversation {
                                                    @QueryParam("limit")
                                                    @DefaultValue("20") Integer limit);
 
+    @POST
+    @Path("/{groupConversationId}/followup")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Follow up with a group member",
+               description = "Send a follow-up question to a specific member agent in a completed "
+                       + "group conversation. The agent retains full context from the discussion. "
+                       + "Both the question and response are recorded on the group transcript. "
+                       + "The targetAgentId field accepts either an agent ID or a display name. "
+                       + "Returns the full updated GroupConversation including the new transcript entries.")
+    @APIResponse(responseCode = "200", description = "Updated group conversation with follow-up on transcript.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state.")
+    Response followUpWithMember(@PathParam("groupId") String groupId,
+                                @PathParam("groupConversationId") String gcId,
+                                FollowUpRequest request);
+
+    @POST
+    @Path("/{groupConversationId}/continue")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Continue a group discussion",
+               description = "Re-run all discussion phases with a new question. All agents retain "
+                       + "memory of prior rounds. The round counter increments.")
+    @APIResponse(responseCode = "200", description = "Updated group conversation with new round.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state.")
+    Response continueDiscussion(@PathParam("groupId") String groupId,
+                                @PathParam("groupConversationId") String gcId,
+                                DiscussRequest request);
+
+    @POST
+    @Path("/{groupConversationId}/continue/stream")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.SERVER_SENT_EVENTS)
+    @Operation(summary = "Continue a group discussion with SSE streaming",
+               description = "Re-run all discussion phases with SSE event streaming for progress.")
+    void continueDiscussionStreaming(@PathParam("groupId") String groupId,
+                                     @PathParam("groupConversationId") String gcId,
+                                     DiscussRequest request,
+                                     @Context SseEventSink eventSink, @Context Sse sse);
+
+    @POST
+    @Path("/{groupConversationId}/close")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Close a group conversation",
+               description = "Permanently close a group conversation. Ends all member conversations "
+                       + "and cleans up ephemeral agents. No further follow-ups or continuations "
+                       + "are accepted after closing. "
+                       + "Lifecycle: discuss → COMPLETED → [followup|continue]* → close → CLOSED (terminal).")
+    @APIResponse(responseCode = "200", description = "Closed group conversation.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED or FAILED state.")
+    Response closeGroupConversation(@PathParam("groupId") String groupId,
+                                    @PathParam("groupConversationId") String gcId);
+
+    // --- Request Bodies ---
+
     /**
      * Request body for starting a group discussion.
      */
     record DiscussRequest(String question, String userId) {
+    }
+
+    /**
+     * Request body for following up with a specific group member.
+     * {@code targetAgentId} accepts either a raw agent ID or a display name.
+     */
+    record FollowUpRequest(String question, String targetAgentId, String userId) {
     }
 }

@@ -23,6 +23,8 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
@@ -40,6 +42,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
+    private final ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
 
     @Inject
     public RestGroupConversation(IGroupConversationService groupConversationService,
@@ -187,6 +190,160 @@ public class RestGroupConversation implements IRestGroupConversation {
             }
             return conversations;
         } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public Response followUpWithMember(String groupId, String gcId, FollowUpRequest request) {
+        try {
+            GroupConversation gc = groupConversationService.readGroupConversation(gcId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
+            if (userId == null || userId.isBlank())
+                userId = gc.getUserId();
+            GroupConversation result = groupConversationService.followUpWithMember(gcId, request.targetAgentId(), request.question(), userId);
+            return Response.ok(result).build();
+        } catch (ForbiddenException e) {
+            throw e;
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+        } catch (Exception e) {
+            LOGGER.errorf("Follow-up with member failed: %s", e.getMessage());
+            throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public Response continueDiscussion(String groupId, String gcId, DiscussRequest request) {
+        try {
+            GroupConversation gc = groupConversationService.readGroupConversation(gcId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
+            if (userId == null || userId.isBlank())
+                userId = gc.getUserId();
+            GroupConversation result = groupConversationService.continueDiscussion(gcId, request.question(), userId, null);
+            return Response.ok(result).build();
+        } catch (ForbiddenException e) {
+            throw e;
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+        } catch (Exception e) {
+            LOGGER.errorf("Continue discussion failed: %s", e.getMessage());
+            throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public void continueDiscussionStreaming(String groupId, String gcId, DiscussRequest request,
+                                            SseEventSink eventSink, Sse sse) {
+        try {
+            GroupConversation gc = groupConversationService.readGroupConversation(gcId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
+            if (userId == null || userId.isBlank())
+                userId = gc.getUserId();
+
+            GroupDiscussionEventListener listener = new GroupDiscussionEventListener() {
+                @Override
+                public void onRoundStart(GroupConversationEventSink.RoundStartEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ROUND_START, toJson(event));
+                }
+
+                @Override
+                public void onGroupStart(GroupConversationEventSink.GroupStartEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_START, toJson(event));
+                }
+
+                @Override
+                public void onPhaseStart(GroupConversationEventSink.PhaseStartEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_PHASE_START, toJson(event));
+                }
+
+                @Override
+                public void onSpeakerStart(GroupConversationEventSink.SpeakerStartEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SPEAKER_START, toJson(event));
+                }
+
+                @Override
+                public void onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SPEAKER_COMPLETE, toJson(event));
+                }
+
+                @Override
+                public void onPhaseComplete(GroupConversationEventSink.PhaseCompleteEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_PHASE_COMPLETE, toJson(event));
+                }
+
+                @Override
+                public void onSynthesisStart(GroupConversationEventSink.SynthesisStartEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SYNTHESIS_START, toJson(event));
+                }
+
+                @Override
+                public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE, toJson(event));
+                    closeQuietly(eventSink);
+                }
+
+                @Override
+                public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
+                    closeQuietly(eventSink);
+                }
+
+                @Override
+                public void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_PLAN_CREATED, toJson(event));
+                }
+
+                @Override
+                public void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_VERIFIED, toJson(event));
+                }
+            };
+
+            final String resolvedUserId = userId;
+            executorService.submit(() -> {
+                try {
+                    groupConversationService.continueDiscussion(gcId, request.question(), resolvedUserId, listener);
+                } catch (Exception e) {
+                    LOGGER.errorf("Continue discussion streaming failed: %s", e.getMessage());
+                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+                }
+            });
+
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
+            closeQuietly(eventSink);
+        } catch (Exception e) {
+            LOGGER.errorf("Continue discussion streaming setup failed: %s", e.getMessage());
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
+            closeQuietly(eventSink);
+        }
+    }
+
+    @Override
+    public Response closeGroupConversation(String groupId, String gcId) {
+        try {
+            GroupConversation gc = groupConversationService.readGroupConversation(gcId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            GroupConversation result = groupConversationService.closeGroupConversation(gcId);
+            return Response.ok(result).build();
+        } catch (ForbiddenException e) {
+            throw e;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+        } catch (IResourceStore.ResourceStoreException e) {
+            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+        } catch (Exception e) {
+            LOGGER.errorf("Close group conversation failed: %s", e.getMessage());
             throw sneakyThrow(e);
         }
     }

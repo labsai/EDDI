@@ -26,4 +26,13 @@ public interface IGroupConversationStore {
     void delete(String id) throws IResourceStore.ResourceStoreException;
 
     List<GroupConversation> listByGroupId(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Atomically transition a group conversation from expectedState to newState.
+     * Returns true if the transition succeeded (state matched), false if the state
+     * had already changed (concurrent modification).
+     */
+    boolean compareAndSetState(String id, GroupConversation.GroupConversationState expectedState,
+                               GroupConversation.GroupConversationState newState)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 }
