@@ -239,13 +239,18 @@ function BoardroomAnalytics() {
 
       {/* Filter bar */}
       <AnalyticsFilterBar
-        filters={activeFilters}
         outcome={filters.outcome}
         style={filters.style}
+        outcomeCounts={analytics.outcomeCounts}
+        styleCounts={analytics.styleCounts}
+        dateFilters={activeFilters.filter((f) => f.type === "date")}
         onOutcomeChange={setOutcome}
         onStyleChange={setStyle}
-        onRemove={removeFilter}
+        onRemoveDateFilter={removeFilter}
         onClearAll={clearAll}
+        hasActiveFilters={hasActiveFilters}
+        totalResults={analytics.totalDiscussions}
+        unfilteredTotal={analytics.unfilteredTotal}
       />
 
       {/* KPI row */}

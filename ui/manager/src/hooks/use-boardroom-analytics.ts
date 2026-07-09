@@ -81,6 +81,10 @@ export interface BoardroomAnalytics {
   hasError: boolean;
   groupCount: number;
   isFiltered: boolean;
+
+  // Unfiltered counts for filter dropdowns
+  outcomeCounts: Partial<Record<GroupConversationState, number>>;
+  styleCounts: Partial<Record<DiscussionStyle, number>>;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -175,6 +179,8 @@ export function useBoardroomAnalytics(
         hasError,
         groupCount: 0,
         isFiltered: false,
+        outcomeCounts: {},
+        styleCounts: {},
       };
     }
 
@@ -204,6 +210,19 @@ export function useBoardroomAnalytics(
 
     const unfilteredTotal = allConversations.length;
     const hasFilters = fOutcome !== null || fStyle !== null || fDate !== null;
+
+    // ── Unfiltered counts for filter dropdowns ────────────────────
+    const outcomeCounts: Partial<Record<GroupConversationState, number>> = {};
+    for (const conv of allConversations) {
+      outcomeCounts[conv.state] = (outcomeCounts[conv.state] ?? 0) + 1;
+    }
+
+    const styleCounts: Partial<Record<DiscussionStyle, number>> = {};
+    for (const conv of allConversations) {
+      if (conv._style) {
+        styleCounts[conv._style] = (styleCounts[conv._style] ?? 0) + 1;
+      }
+    }
 
     // ── Apply filters ───────────────────────────────────────────
     let filtered = allConversations;
@@ -406,6 +425,8 @@ export function useBoardroomAnalytics(
       hasError,
       groupCount: groups.length,
       isFiltered: hasFilters,
+      outcomeCounts,
+      styleCounts,
     };
   }, [isLoading, hasError, groups, agents, conversationData, fOutcome, fStyle, fDate]);
 }

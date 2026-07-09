@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { X, ChevronDown, Filter } from "lucide-react";
+import { X, ChevronDown, Filter, SearchX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   DISCUSSION_STYLES,
@@ -15,6 +15,7 @@ import type { ActiveFilter } from "./filter-utils";
 interface DropdownOption<T extends string> {
   value: T | null;
   label: string;
+  count?: number;
 }
 
 interface FilterDropdownProps<T extends string> {
@@ -47,8 +48,11 @@ function FilterDropdown<T extends string>({
     }
   }, [open, handleClickOutside]);
 
-  const selectedLabel = value
-    ? options.find((o) => o.value === value)?.label ?? value
+  const selected = value
+    ? options.find((o) => o.value === value)
+    : null;
+  const buttonLabel = selected
+    ? `${selected.label}${selected.count !== undefined ? ` (${selected.count})` : ""}`
     : label;
 
   return (
@@ -64,7 +68,7 @@ function FilterDropdown<T extends string>({
             : "border-border bg-card text-muted-foreground hover:text-foreground hover:border-foreground/20",
         )}
       >
-        {selectedLabel}
+        {buttonLabel}
         <ChevronDown
           className={cn(
             "h-3 w-3 transition-transform",
@@ -76,30 +80,50 @@ function FilterDropdown<T extends string>({
       {open && (
         <div
           className={cn(
-            "absolute top-full mt-1 z-50 min-w-[160px] rounded-lg border border-border bg-card shadow-lg",
+            "absolute top-full mt-1 z-50 min-w-[180px] rounded-lg border border-border bg-card shadow-lg",
             "animate-in fade-in-0 zoom-in-95 duration-100",
           )}
         >
           <div className="p-1">
-            {options.map((opt) => (
-              <button
-                key={opt.value ?? "__all__"}
-                type="button"
-                onClick={() => {
-                  onChange(opt.value);
-                  setOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center rounded-md ps-2.5 pe-2.5 py-1.5 text-xs transition-colors cursor-pointer",
-                  "hover:bg-muted",
-                  opt.value === value
-                    ? "bg-primary/10 text-primary font-medium"
-                    : "text-foreground",
-                )}
-              >
-                {opt.label}
-              </button>
-            ))}
+            {options.map((opt) => {
+              const isDisabled = opt.value !== null && opt.count === 0;
+              return (
+                <button
+                  key={opt.value ?? "__all__"}
+                  type="button"
+                  disabled={isDisabled}
+                  onClick={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-md ps-2.5 pe-2.5 py-1.5 text-xs transition-colors",
+                    isDisabled
+                      ? "text-muted-foreground/40 cursor-not-allowed"
+                      : "cursor-pointer hover:bg-muted",
+                    opt.value === value
+                      ? "bg-primary/10 text-primary font-medium"
+                      : !isDisabled && "text-foreground",
+                  )}
+                >
+                  <span>{opt.label}</span>
+                  {opt.count !== undefined && (
+                    <span
+                      className={cn(
+                        "tabular-nums text-[10px] rounded-full min-w-[20px] text-center py-px ps-1.5 pe-1.5",
+                        opt.value === value
+                          ? "bg-primary/20 text-primary"
+                          : opt.count === 0
+                            ? "text-muted-foreground/30"
+                            : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {opt.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -109,47 +133,75 @@ function FilterDropdown<T extends string>({
 
 // ─── Main component ──────────────────────────────────────────────
 
-const OUTCOME_OPTIONS: DropdownOption<GroupConversationState>[] = [
-  { value: null, label: "All outcomes" },
-  { value: "COMPLETED", label: "Completed" },
-  { value: "FAILED", label: "Failed" },
-  { value: "IN_PROGRESS", label: "In Progress" },
-  { value: "SYNTHESIZING", label: "Synthesizing" },
-  { value: "CREATED", label: "Created" },
-  { value: "CANCELLED", label: "Cancelled" },
-  { value: "AWAITING_APPROVAL", label: "Pending" },
+const ALL_OUTCOMES: GroupConversationState[] = [
+  "COMPLETED",
+  "FAILED",
+  "IN_PROGRESS",
+  "SYNTHESIZING",
+  "CREATED",
+  "CANCELLED",
+  "AWAITING_APPROVAL",
 ];
 
-const STYLE_OPTIONS: DropdownOption<DiscussionStyle>[] = [
-  { value: null, label: "All styles" },
-  ...DISCUSSION_STYLES.map((s) => ({
-    value: s,
-    label: STYLE_INFO[s]?.label ?? s,
-  })),
-];
+const OUTCOME_LABELS: Record<GroupConversationState, string> = {
+  COMPLETED: "Completed",
+  FAILED: "Failed",
+  IN_PROGRESS: "In Progress",
+  SYNTHESIZING: "Synthesizing",
+  CREATED: "Created",
+  CANCELLED: "Cancelled",
+  AWAITING_APPROVAL: "Pending",
+};
 
 interface AnalyticsFilterBarProps {
-  filters: ActiveFilter[];
   outcome: GroupConversationState | null;
   style: DiscussionStyle | null;
+  outcomeCounts: Partial<Record<GroupConversationState, number>>;
+  styleCounts: Partial<Record<DiscussionStyle, number>>;
+  dateFilters: ActiveFilter[];
   onOutcomeChange: (v: GroupConversationState | null) => void;
   onStyleChange: (v: DiscussionStyle | null) => void;
-  onRemove: (filter: ActiveFilter) => void;
+  onRemoveDateFilter: (filter: ActiveFilter) => void;
   onClearAll: () => void;
+  hasActiveFilters: boolean;
+  totalResults: number;
+  unfilteredTotal: number;
 }
 
 function AnalyticsFilterBar({
-  filters,
   outcome,
   style,
+  outcomeCounts,
+  styleCounts,
+  dateFilters,
   onOutcomeChange,
   onStyleChange,
-  onRemove,
+  onRemoveDateFilter,
   onClearAll,
+  hasActiveFilters,
+  totalResults,
+  unfilteredTotal,
 }: AnalyticsFilterBarProps) {
   const { t } = useTranslation();
 
-  const hasActiveFilters = filters.length > 0;
+  // Build options with counts
+  const outcomeOptions: DropdownOption<GroupConversationState>[] = [
+    { value: null, label: t("analyticsPage.allOutcomes", "All outcomes") },
+    ...ALL_OUTCOMES.map((s) => ({
+      value: s,
+      label: OUTCOME_LABELS[s],
+      count: outcomeCounts[s] ?? 0,
+    })),
+  ];
+
+  const styleOptions: DropdownOption<DiscussionStyle>[] = [
+    { value: null, label: t("analyticsPage.allStyles", "All styles") },
+    ...DISCUSSION_STYLES.map((s) => ({
+      value: s,
+      label: STYLE_INFO[s]?.label ?? s,
+      count: styleCounts[s] ?? 0,
+    })),
+  ];
 
   return (
     <div className="space-y-2">
@@ -160,59 +212,82 @@ function AnalyticsFilterBar({
         <FilterDropdown<GroupConversationState>
           label={t("analyticsPage.allOutcomes", "All outcomes")}
           value={outcome}
-          options={OUTCOME_OPTIONS}
+          options={outcomeOptions}
           onChange={onOutcomeChange}
         />
 
         <FilterDropdown<DiscussionStyle>
           label={t("analyticsPage.allStyles", "All styles")}
           value={style}
-          options={STYLE_OPTIONS}
+          options={styleOptions}
           onChange={onStyleChange}
         />
 
-        {hasActiveFilters && (
+        {/* Date filter chips */}
+        {dateFilters.map((f) => (
           <button
+            key={`${f.type}-${f.value}`}
             type="button"
-            onClick={onClearAll}
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer ms-1"
+            onClick={() => onRemoveDateFilter(f)}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md ps-2 pe-1 py-0.5",
+              "bg-primary/10 text-primary text-xs font-medium",
+              "hover:bg-primary/20 transition-colors cursor-pointer",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+            aria-label={t(
+              "analyticsPage.removeFilter",
+              "Remove filter: {{label}}",
+              { label: f.label },
+            )}
           >
+            📅 {f.label}
             <X className="h-3 w-3" />
-            {t("analyticsPage.clearAll", "Clear all")}
           </button>
+        ))}
+
+        {hasActiveFilters && (
+          <>
+            <span className="text-xs text-muted-foreground ms-1">
+              {t("analyticsPage.showingResults", "{{count}} of {{total}}", {
+                count: totalResults,
+                total: unfilteredTotal,
+              })}
+            </span>
+            <button
+              type="button"
+              onClick={onClearAll}
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <X className="h-3 w-3" />
+              {t("analyticsPage.clearAll", "Clear all")}
+            </button>
+          </>
         )}
       </div>
 
-      {/* Active filter chips from chart clicks (date, etc.) */}
-      {filters.filter((f) => f.type === "date").length > 0 && (
-        <div
-          className="flex flex-wrap items-center gap-2"
-          role="status"
-          aria-live="polite"
-        >
-          {filters
-            .filter((f) => f.type === "date")
-            .map((f) => (
-              <button
-                key={`${f.type}-${f.value}`}
-                type="button"
-                onClick={() => onRemove(f)}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-md ps-2 pe-1 py-0.5",
-                  "bg-primary/10 text-primary text-xs font-medium",
-                  "hover:bg-primary/20 transition-colors cursor-pointer",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                )}
-                aria-label={t(
-                  "analyticsPage.removeFilter",
-                  "Remove filter: {{label}}",
-                  { label: f.label },
-                )}
-              >
-                📅 {f.label}
-                <X className="h-3 w-3" />
-              </button>
-            ))}
+      {/* Empty results banner */}
+      {hasActiveFilters && totalResults === 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 p-4">
+          <SearchX className="h-5 w-5 text-muted-foreground shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-foreground">
+              {t("analyticsPage.noResults", "No matching discussions")}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "analyticsPage.noResultsHint",
+                "Try adjusting your filters or clear them to see all data.",
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClearAll}
+            className="shrink-0 rounded-md bg-primary ps-3 pe-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+          >
+            {t("analyticsPage.clearFilters", "Clear filters")}
+          </button>
         </div>
       )}
     </div>

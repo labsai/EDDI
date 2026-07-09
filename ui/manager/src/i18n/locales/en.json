@@ -2409,6 +2409,10 @@
     "uncoveredSkills": "{{count}} uncovered skills",
     "allOutcomes": "All outcomes",
     "allStyles": "All styles",
-    "filteredOf": "{{filtered}} of {{total}} total"
+    "filteredOf": "{{filtered}} of {{total}} total",
+    "showingResults": "{{count}} of {{total}}",
+    "noResults": "No matching discussions",
+    "noResultsHint": "Try adjusting your filters or clear them to see all data.",
+    "clearFilters": "Clear filters"
   }
 }
