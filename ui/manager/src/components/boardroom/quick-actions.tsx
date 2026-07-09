@@ -47,7 +47,7 @@ export function QuickActions({ className }: QuickActionsProps) {
         "quickActions.viewInsightsDesc",
         "Track your workforce's knowledge coverage",
       ),
-      to: "/boardroom/history",
+      to: "/boardroom",
     },
     {
       icon: Cog,

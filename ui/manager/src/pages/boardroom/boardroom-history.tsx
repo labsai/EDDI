@@ -87,15 +87,15 @@ function ConversationItem({
       }}
       className={cn(
         "group relative w-full text-start ps-4 pe-4 py-3 cursor-pointer transition-colors",
-        "hover:bg-slate-50 dark:hover:bg-slate-800/50",
-        "border-b border-slate-100 dark:border-slate-800/50",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500",
+        "hover:bg-muted",
+        "border-b border-border",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         isSelected &&
-          "bg-indigo-50 dark:bg-indigo-500/10 border-s-2 border-s-indigo-500",
+          "bg-primary/10 border-s-2 border-s-primary",
       )}
     >
       {/* Question */}
-      <p className="text-sm text-slate-700 dark:text-slate-300 line-clamp-2 pe-8">
+      <p className="text-sm text-foreground line-clamp-2 pe-8">
         {conversation.originalQuestion ||
           t("boardroom.history.untitled", "Untitled Conversation")}
       </p>
@@ -106,7 +106,7 @@ function ConversationItem({
           {t(stateI18nKey(conversation.state), badgeConfig.label)}
         </Badge>
         {timestamp > 0 && (
-          <span className="text-xs text-slate-400 dark:text-slate-500">
+          <span className="text-xs text-muted-foreground">
             {formatRelativeTime(timestamp)}
           </span>
         )}
@@ -119,7 +119,7 @@ function ConversationItem({
         className={cn(
           "absolute inset-e-2 top-1/2 -translate-y-1/2 h-7 w-7",
           "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
-          "text-slate-400 hover:text-red-500 dark:hover:text-red-400",
+          "text-muted-foreground hover:text-destructive",
           "transition-opacity",
         )}
         onClick={(e) => {
@@ -162,18 +162,18 @@ function EmptyList({ hasFilter }: { hasFilter: boolean }) {
       <div
         className={cn(
           "h-12 w-12 rounded-full flex items-center justify-center mb-4",
-          "bg-slate-100 dark:bg-slate-800",
+          "bg-muted",
         )}
       >
-        <MessageSquare className="h-6 w-6 text-slate-400" />
+        <MessageSquare className="h-6 w-6 text-muted-foreground" />
       </div>
-      <p className="text-sm font-medium text-slate-500 dark:text-slate-400 text-center">
+      <p className="text-sm font-medium text-muted-foreground text-center">
         {hasFilter
           ? t("boardroom.history.noResults", "No conversations match your search")
           : t("boardroom.history.noConversations", "No conversations yet")}
       </p>
       {hasFilter && (
-        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+        <p className="text-xs text-muted-foreground mt-1">
           {t("boardroom.history.tryDifferent", "Try a different search term")}
         </p>
       )}
@@ -189,18 +189,18 @@ function EmptyViewer() {
       <div
         className={cn(
           "h-16 w-16 rounded-full flex items-center justify-center mb-4",
-          "bg-slate-100 dark:bg-slate-800",
+          "bg-muted",
         )}
       >
-        <MessageSquare className="h-8 w-8 text-slate-400" />
+        <MessageSquare className="h-8 w-8 text-muted-foreground" />
       </div>
-      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+      <p className="text-sm font-medium text-muted-foreground">
         {t(
           "boardroom.history.selectConversation",
           "Select a conversation to view",
         )}
       </p>
-      <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+      <p className="text-xs text-muted-foreground mt-1">
         {t(
           "boardroom.history.selectHint",
           "Choose a conversation from the list",
@@ -344,14 +344,14 @@ function BoardroomHistory() {
       <div
         className={cn(
           "flex items-center gap-3 ps-4 pe-4 py-3",
-          "border-b border-slate-200 dark:border-slate-800",
-          "bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm",
+          "border-b border-border",
+          "bg-card/80 backdrop-blur-sm",
         )}
       >
         <Button
           variant="ghost"
           size="sm"
-          className="gap-1.5 text-slate-600 dark:text-slate-400"
+          className="gap-1.5 text-muted-foreground"
           asChild
         >
           <Link to={`/boardroom/${boardId}`}>
@@ -360,7 +360,7 @@ function BoardroomHistory() {
           </Link>
         </Button>
         <div className="flex-1" />
-        <h1 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+        <h1 className="text-sm font-semibold text-foreground">
           {t("boardroom.history.title", "Conversation History")}
         </h1>
       </div>
@@ -372,21 +372,21 @@ function BoardroomHistory() {
           ref={listRef}
           onKeyDown={handleListKeyDown}
           className={cn(
-            "flex flex-col h-full border-e border-slate-200 dark:border-slate-800",
-            "bg-white dark:bg-slate-950",
+            "flex flex-col h-full border-e border-border",
+            "bg-card",
             // On mobile, hide list when viewer is shown
             showViewer && "hidden lg:flex",
           )}
         >
           {/* Search input */}
-          <div className="ps-3 pe-3 py-2 border-b border-slate-100 dark:border-slate-800/50">
+          <div className="ps-3 pe-3 py-2 border-b border-border">
             <div
               className={cn(
                 "flex items-center gap-2 ps-3 pe-3 py-1.5 rounded-lg",
-                "bg-slate-100 dark:bg-slate-800",
+                "bg-muted",
               )}
             >
-              <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <input
                 type="text"
                 placeholder={t(
@@ -401,8 +401,8 @@ function BoardroomHistory() {
                 }}
                 className={cn(
                   "flex-1 bg-transparent text-sm outline-none",
-                  "text-slate-700 dark:text-slate-300",
-                  "placeholder:text-slate-400 dark:placeholder:text-slate-500",
+                  "text-foreground",
+                  "placeholder:text-muted-foreground",
                 )}
               />
             </div>
@@ -414,7 +414,7 @@ function BoardroomHistory() {
 
             {!isLoading && isError && (
               <div className="flex flex-col items-center justify-center py-12 ps-4 pe-4">
-                <p className="text-sm text-red-500 dark:text-red-400">
+                <p className="text-sm text-destructive">
                   {t("boardroom.history.loadError", "Failed to load conversations")}
                 </p>
               </div>
@@ -458,18 +458,18 @@ function BoardroomHistory() {
         <div
           className={cn(
             "flex flex-col h-full",
-            "bg-slate-50 dark:bg-slate-900",
+            "bg-card",
             // On mobile, hide viewer when list is shown
             !showViewer && "hidden lg:flex",
           )}
         >
           {/* Mobile back button */}
           {showViewer && (
-            <div className="lg:hidden ps-3 pe-3 py-2 border-b border-slate-200 dark:border-slate-800">
+            <div className="lg:hidden ps-3 pe-3 py-2 border-b border-border">
               <Button
                 variant="ghost"
                 size="sm"
-                className="gap-1.5 text-slate-600 dark:text-slate-400"
+                className="gap-1.5 text-muted-foreground"
                 onClick={() => setShowViewer(false)}
               >
                 <ArrowLeft className="h-4 w-4" />

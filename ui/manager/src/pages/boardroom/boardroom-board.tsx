@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGroup, useGroupConversations, useGroupConversation } from "@/hooks/use-groups";
 import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
@@ -211,10 +212,10 @@ function BoardroomBoard() {
     return (
       <div className="flex h-full items-center justify-center p-8">
         <div className="text-center max-w-md">
-          <p className="text-sm text-red-500 dark:text-red-400 mb-2">
+          <p className="text-sm text-destructive mb-2">
             {t("boardroom.board.error", "Something went wrong")}
           </p>
-          <p className="text-xs text-slate-400">{streamState.error}</p>
+          <p className="text-xs text-muted-foreground">{streamState.error}</p>
         </div>
       </div>
     );
@@ -223,14 +224,21 @@ function BoardroomBoard() {
   return (
     <div className="flex h-full flex-col relative">
       {/* Action bar */}
-      <div className="flex items-center justify-between ps-4 pe-4 py-2 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex items-center justify-between ps-4 pe-4 py-2 border-b border-border">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+          <Link
+            to="/boardroom"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            aria-label={t("boardroom.back", "Back")}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Link>
+          <h2 className="text-sm font-semibold text-foreground truncate">
             {groupConfig?.name ?? t("boardroom.board.title", "Task Force")}
           </h2>
           {isStreaming && (
-            <span className="flex items-center gap-1 text-xs text-amber-500">
-              <span className="inline-block h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span className="inline-block h-2 w-2 rounded-full bg-primary animate-pulse" />
               {t("boardroom.board.live", "Live")}
             </span>
           )}
@@ -242,7 +250,7 @@ function BoardroomBoard() {
               variant="ghost"
               size="sm"
               onClick={abortStream}
-              className="text-red-500 gap-1"
+              className="text-destructive gap-1"
             >
               <StopIcon />
               {t("boardroom.board.stop", "Stop")}
@@ -310,10 +318,10 @@ function BoardroomBoard() {
         ) : (
           <div className="flex h-full items-center justify-center">
             <div className="text-center max-w-sm">
-              <p className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-1">
+              <p className="text-lg font-medium text-foreground mb-1">
                 {t("boardroom.board.emptyTitle", "Ready for discussion")}
               </p>
-              <p className="text-sm text-slate-400 dark:text-slate-500">
+              <p className="text-sm text-muted-foreground">
                 {t(
                   "boardroom.board.emptyDescription",
                   "Ask a question and your task force will discuss it.",
@@ -323,7 +331,7 @@ function BoardroomBoard() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="mt-3 text-indigo-500"
+                  className="mt-3 text-primary"
                   onClick={() => setShowHistory(true)}
                 >
                   {t("boardroom.board.viewHistory", "View history")}
@@ -335,8 +343,8 @@ function BoardroomBoard() {
 
         {/* Streaming error banner (inline, when transcript is visible) */}
         {streamState.error && hasStreamTranscript && (
-          <div className="mt-3 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-3">
-            <p className="text-xs text-red-600 dark:text-red-400">{streamState.error}</p>
+          <div className="mt-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3">
+            <p className="text-xs text-destructive">{streamState.error}</p>
           </div>
         )}
       </div>
@@ -364,7 +372,7 @@ function BoardroomBoard() {
             className={cn(
               "fixed inset-y-0 end-0 z-40 w-80",
               "bg-card",
-              "border-s border-slate-200 dark:border-slate-800",
+              "border-s border-border",
               "shadow-xl",
               "animate-[br-fade-in_200ms_ease-out]",
             )}
@@ -402,7 +410,7 @@ function BoardroomBoard() {
             className={cn(
               "fixed inset-y-0 end-0 z-40 w-80",
               "bg-card",
-              "border-s border-slate-200 dark:border-slate-800",
+              "border-s border-border",
               "shadow-xl",
               "animate-[br-fade-in_200ms_ease-out]",
             )}

@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -59,7 +59,7 @@ export function BoardroomTopbar({
       {/* Title */}
       <div className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">
         {title || (
-          <span className="flex items-center gap-2">
+          <Link to="/boardroom" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <img
               src="/eddi-icon.svg"
               alt=""
@@ -67,7 +67,7 @@ export function BoardroomTopbar({
               className="h-6 w-6 rounded-md"
             />
             {t("boardroom.title", "EDDI")}
-          </span>
+          </Link>
         )}
       </div>
 

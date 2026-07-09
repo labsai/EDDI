@@ -1,7 +1,8 @@
 import { useState, useCallback, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent } from "@/hooks/use-agent-setup";
@@ -299,6 +300,17 @@ function BoardroomWizard() {
 
   return (
     <div className="ms-auto me-auto max-w-3xl p-5 sm:p-8">
+      {/* Close / cancel wizard — back to dashboard */}
+      <div className="flex items-center justify-end mb-4">
+        <Link
+          to="/boardroom"
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          aria-label={t("boardroom.wizard.cancel", "Cancel")}
+        >
+          <X className="h-5 w-5" />
+        </Link>
+      </div>
+
       {/* Step indicator */}
       <StepIndicator steps={steps} currentStep={currentStep} />
 
@@ -370,8 +382,11 @@ function BoardroomWizard() {
         <div className="mt-8 flex justify-between">
           <Button
             variant="outline"
-            onClick={() => setCurrentStep((s) => s - 1)}
-            className={cn(currentStep === 0 && "invisible")}
+            onClick={() =>
+              currentStep === 0
+                ? navigate("/boardroom")
+                : setCurrentStep((s) => s - 1)
+            }
           >
             {t("boardroom.wizard.back", "Back")}
           </Button>

@@ -324,7 +324,7 @@ function WorkforceSection() {
               name={agent.name || t("workforce.unnamed", "Unnamed Agent")}
               agentId={agentId}
               description={agent.description}
-              onClick={() => navigate("/boardroom/new")}
+              onClick={() => navigate(`/manage/agentview/${agentId}`)}
             />
           );
         })}

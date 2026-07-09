@@ -5,10 +5,10 @@ import {
   useCallback,
   type KeyboardEvent,
 } from "react";
-import { useParams, useLocation, useSearchParams } from "react-router-dom";
+import { useParams, useLocation, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Paperclip, X } from "lucide-react";
+import { Paperclip, X, ChevronLeft } from "lucide-react";
 import { useGroup } from "@/hooks/use-groups";
 import {
   startConversation,
@@ -134,7 +134,7 @@ function TypingDots() {
         <span
           key={i}
           className={cn(
-            "inline-block h-2 w-2 rounded-full bg-indigo-400 dark:bg-indigo-500",
+            "inline-block h-2 w-2 rounded-full bg-muted-foreground",
             "animate-bounce",
           )}
           style={{ animationDelay: `${i * 150}ms` }}
@@ -600,6 +600,27 @@ function BoardroomThread() {
   // ─── Render ──────────────────────────────────────────────────
   return (
     <div className="flex h-full flex-col">
+      {/* Back header */}
+      <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card/80 backdrop-blur-sm ps-2 pe-4">
+        <Link
+          to={`/boardroom/${boardId}?version=${version}`}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          aria-label={t("boardroom.back", "Back")}
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </Link>
+        <div className="flex items-center gap-2 min-w-0">
+          <AdvisorAvatar name={memberName} agentId={memberId} size="sm" />
+          <span className="text-sm font-medium text-foreground truncate">
+            {memberName}
+          </span>
+          {memberRole && (
+            <span className="text-xs text-muted-foreground truncate hidden sm:inline">
+              — {memberRole}
+            </span>
+          )}
+        </div>
+      </div>
       {/* Context card — shown when navigating from a group discussion */}
       {hasGroupContext && groupContext && (
         <div className="shrink-0 ps-4 pe-4 pt-4">
@@ -659,17 +680,17 @@ function BoardroomThread() {
                 className={cn(
                   "max-w-lg rounded-2xl ps-4 pe-4 py-2.5 text-sm",
                   msg.role === "user"
-                    ? "rounded-ee-md bg-indigo-500 text-white"
+                    ? "rounded-ee-md bg-primary text-primary-foreground"
                     : cn(
                         "rounded-es-md border",
-                        "bg-white dark:bg-slate-900",
-                        "border-slate-200 dark:border-slate-700",
-                        "text-slate-900 dark:text-slate-100",
+                        "bg-card dark:bg-card",
+                        "border-border",
+                        "text-foreground",
                       ),
                 )}
               >
                 {msg.role === "agent" && (
-                  <p className="mb-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">
+                  <p className="mb-1 text-xs font-medium text-muted-foreground">
                     {memberName}
                   </p>
                 )}
@@ -680,8 +701,8 @@ function BoardroomThread() {
                     className={cn(
                       "mb-1 inline-flex items-center gap-1 rounded-full ps-2 pe-2 py-0.5 text-xs",
                       msg.role === "user"
-                        ? "bg-white/20 text-white"
-                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+                        ? "bg-white/20 text-primary-foreground"
+                        : "bg-muted text-muted-foreground",
                     )}
                   >
                     <Paperclip className="h-3 w-3" />
@@ -709,8 +730,8 @@ function BoardroomThread() {
               <div
                 className={cn(
                   "rounded-2xl rounded-es-md border",
-                  "bg-white dark:bg-slate-900",
-                  "border-slate-200 dark:border-slate-700",
+                  "bg-card",
+                  "border-border",
                 )}
               >
                 <TypingDots />
