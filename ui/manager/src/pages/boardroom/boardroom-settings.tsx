@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Settings,
   Trash2,
+  Bookmark,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,7 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useTemplates } from "@/hooks/use-templates";
 
 // ─── Section Header ──────────────────────────────────────────────
 
@@ -195,6 +197,7 @@ function BoardroomSettings() {
   const { mutateAsync: updateGroupAsync, isPending: isUpdatePending } = useUpdateGroup();
   const deleteMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
+  const { saveTemplate } = useTemplates();
 
   // ─── Form state ──────────────────────────────────────────────────
   const [name, setName] = useState("");
@@ -796,6 +799,27 @@ function BoardroomSettings() {
           >
             {t("boardroom.settings.unsavedChanges", "You have unsaved changes")}
           </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              saveTemplate({
+                name,
+                description,
+                style,
+                members: members.map((m) => ({
+                  displayName: m.displayName,
+                  role: m.role ?? "",
+                  agentId: m.agentId,
+                })),
+                maxRounds,
+              });
+              toast.success(t("boardroom.settings.templateSaved", "Saved as template"));
+            }}
+          >
+            <Bookmark className="h-4 w-4" />
+            {t("boardroom.settings.saveAsTemplate", "Save as Template")}
+          </Button>
           <Button
             variant="primary"
             size="md"

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { MoreVertical, Settings, History, Copy, Trash2 } from "lucide-react";
+import { MoreVertical, Settings, History, Copy, Trash2, Star } from "lucide-react";
 import { toast } from "sonner";
 import { cn, getInitials, formatRelativeTime } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +45,9 @@ interface BoardroomCardProps {
   version?: number;
   viewMode?: "grid" | "list";
   className?: string;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
+  lastConversationState?: string;
 }
 
 // ─── Stacked Avatars (inline, not exported) ──────────────────────
@@ -99,6 +102,9 @@ function BoardroomCard({
   version,
   viewMode = "grid",
   className,
+  isPinned,
+  onTogglePin,
+  lastConversationState,
 }: BoardroomCardProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -117,10 +123,25 @@ function BoardroomCard({
     duplicateGroup.mutate(
       { id, version: currentVersion },
       {
-        onSuccess: () =>
-          toast.success(
-            t("boardroom.dashboard.duplicateSuccess", "Task Force duplicated"),
-          ),
+        onSuccess: (data) => {
+          // Extract new group ID from the location header (e.g. "/groupstore/groups/{newId}")
+          const newId = data.location?.split("/").pop();
+          if (newId) {
+            toast.success(
+              t("boardroom.card.duplicated", "Task Force duplicated"),
+              {
+                action: {
+                  label: t("boardroom.card.openSettings", "Open Settings"),
+                  onClick: () => navigate(`/boardroom/${newId}/settings`),
+                },
+              },
+            );
+          } else {
+            toast.success(
+              t("boardroom.card.duplicated", "Task Force duplicated"),
+            );
+          }
+        },
         onError: () =>
           toast.error(
             t("boardroom.dashboard.duplicateError", "Failed to duplicate task force"),
@@ -174,7 +195,21 @@ function BoardroomCard({
               <h3 className="min-w-0 flex-1 text-base font-semibold text-foreground line-clamp-1">
                 {name || t("boardroom.card.untitled", "Untitled Task Force")}
               </h3>
-              {/* Quick actions dropdown */}
+              {/* Pin toggle + Quick actions dropdown */}
+              <div className="flex items-center gap-1 shrink-0">
+              {onTogglePin && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTogglePin(); }}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors",
+                    isPinned ? "text-primary" : "text-muted-foreground hover:text-foreground",
+                  )}
+                  aria-label={isPinned ? t("boardroom.card.unpin", "Unpin") : t("boardroom.card.pin", "Pin")}
+                >
+                  <Star className={cn("h-4 w-4", isPinned && "fill-primary")} />
+                </button>
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -233,6 +268,7 @@ function BoardroomCard({
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              </div>
             </div>
 
             {/* Description */}
@@ -242,17 +278,23 @@ function BoardroomCard({
               </p>
             )}
 
-            {/* Style badge */}
-            {styleInfo && (
-              <div className="mt-3">
+            {/* Style badge + Live status */}
+            <div className="mt-3 flex items-center gap-2">
+              {styleInfo && (
                 <Badge
                   variant="secondary"
                   className={cn("border-transparent", styleColor)}
                 >
                   {styleInfo.label}
                 </Badge>
-              </div>
-            )}
+              )}
+              {lastConversationState === "IN_PROGRESS" && (
+                <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-500 gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                  {t("boardroom.card.live", "Live")}
+                </Badge>
+              )}
+            </div>
 
             {/* Footer */}
             <div className="mt-4 flex items-center justify-between">
@@ -301,13 +343,19 @@ function BoardroomCard({
               )}
             </div>
 
-            {/* Style badge */}
+            {/* Style badge + Live status */}
             {styleInfo && (
               <Badge
                 variant="secondary"
                 className={cn("border-transparent shrink-0", styleColor)}
               >
                 {styleInfo.label}
+              </Badge>
+            )}
+            {lastConversationState === "IN_PROGRESS" && (
+              <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-500 gap-1 shrink-0">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                {t("boardroom.card.live", "Live")}
               </Badge>
             )}
 
@@ -334,7 +382,20 @@ function BoardroomCard({
               )}
             </div>
 
-            {/* Actions */}
+            {/* Pin toggle + Actions */}
+            {onTogglePin && (
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTogglePin(); }}
+                className={cn(
+                  "h-8 w-8 rounded-lg flex items-center justify-center transition-colors shrink-0",
+                  isPinned ? "text-primary" : "text-muted-foreground hover:text-foreground",
+                )}
+                aria-label={isPinned ? t("boardroom.card.unpin", "Unpin") : t("boardroom.card.pin", "Pin")}
+              >
+                <Star className={cn("h-4 w-4", isPinned && "fill-primary")} />
+              </button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button

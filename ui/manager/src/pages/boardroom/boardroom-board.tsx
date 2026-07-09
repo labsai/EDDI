@@ -9,6 +9,7 @@ import { BoardTranscript } from "@/components/boardroom/board-transcript";
 import { BoardInput } from "@/components/boardroom/board-input";
 import { SessionHistory } from "@/components/boardroom/session-history";
 import { MembersSheet } from "@/components/boardroom/members-sheet";
+import { ExportMenu } from "@/components/boardroom/export-menu";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -293,18 +294,22 @@ function BoardroomBoard() {
           >
             <HistoryIcon />
           </Link>
-          <Link
-            to={`/boardroom/${boardId}/settings?version=${version}`}
-            className={cn(
-              "inline-flex items-center justify-center rounded-md h-8 w-8 transition-colors",
-              "hover:bg-muted text-muted-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            )}
-            aria-label={t("boardroom.settings.title", "Settings")}
-          >
-            <SettingsIcon />
-          </Link>
-        </div>
+          <ExportMenu
+              conversation={selectedConversation ?? null}
+              groupName={groupConfig?.name}
+            />
+            <Link
+              to={`/boardroom/${boardId}/settings?version=${version}`}
+              className={cn(
+                "inline-flex items-center justify-center rounded-md h-8 w-8 transition-colors",
+                "hover:bg-muted text-muted-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              )}
+              aria-label={t("boardroom.settings.title", "Settings")}
+            >
+              <SettingsIcon />
+            </Link>
+          </div>
       </div>
 
       {/* Transcript area */}

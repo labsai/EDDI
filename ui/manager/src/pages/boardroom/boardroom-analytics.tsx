@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
+import type { AgentStat } from "@/hooks/use-boardroom-analytics";
 import { useTranslation } from "react-i18next";
 import {
   MessageSquare,
@@ -20,12 +21,15 @@ import { SkillCoverage } from "@/components/boardroom/analytics/skill-coverage";
 import {
   AnalyticsFilterBar,
 } from "@/components/boardroom/analytics/filter-bar";
+import { AgentPerformanceSheet } from "@/components/boardroom/agent-performance-sheet";
+import { AgentEditorSheet } from "@/components/boardroom/agent-editor-sheet";
+import { AgentComparisonSheet } from "@/components/boardroom/agent-comparison-sheet";
 import {
   stateLabel,
   styleLabel,
   type ActiveFilter,
 } from "@/components/boardroom/analytics/filter-utils";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import type { GroupConversationState, DiscussionStyle } from "@/lib/api/groups";
 
@@ -55,7 +59,7 @@ const INITIAL_FILTERS: FilterState = {
 
 function BoardroomAnalytics() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const analytics = useBoardroomAnalytics(filters);
 
@@ -81,12 +85,17 @@ function BoardroomAnalytics() {
     setFilters((prev) => ({ ...prev, [f.type]: null }));
   }, []);
 
+  // ── Agent sheets ───────────────────────────────────────────────
+  const [selectedAgent, setSelectedAgent] = useState<AgentStat | null>(null);
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [comparisonPair, setComparisonPair] = useState<[AgentStat, AgentStat] | null>(null);
+
   const handleAgentClick = useCallback(
     (agentId: string) => {
-      // Navigate to the agent's thread in the boardroom
-      void navigate(`/manage/agents?id=${agentId}`);
+      const agent = analytics.agentStats.find((a) => a.agentId === agentId);
+      if (agent) setSelectedAgent(agent);
     },
-    [navigate],
+    [analytics.agentStats],
   );
 
   // ── Build active filter chips ─────────────────────────────────
@@ -213,6 +222,7 @@ function BoardroomAnalytics() {
 
   // ── Main render ─────────────────────────────────────────────────
   return (
+    <>
     <main
       className="p-6 space-y-6 max-w-7xl ms-auto me-auto"
       aria-label={t("analyticsPage.title", "Insights")}
@@ -382,6 +392,29 @@ function BoardroomAnalytics() {
         </div>
       </div>
     </main>
+
+      {/* Agent Performance Sheet */}
+      <AgentPerformanceSheet
+        agent={selectedAgent}
+        onClose={() => setSelectedAgent(null)}
+        onEditAgent={(id) => {
+          setSelectedAgent(null);
+          setEditingAgentId(id);
+        }}
+      />
+
+      {/* Agent Editor Sheet */}
+      <AgentEditorSheet
+        agentId={editingAgentId}
+        onClose={() => setEditingAgentId(null)}
+      />
+
+      {/* Agent Comparison Sheet */}
+      <AgentComparisonSheet
+        agents={comparisonPair}
+        onClose={() => setComparisonPair(null)}
+      />
+    </>
   );
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -8,9 +8,13 @@ import {
   LayoutGrid,
   List,
   UsersRound,
+  Star,
+  CheckSquare,
+  Square,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
+import { useEnrichedGroupDescriptors, useDeleteGroup } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,6 +23,11 @@ import { AgentWorkforceCard, AddAgentCard } from "@/components/boardroom/agent-w
 import { KnowledgeHealthCard } from "@/components/boardroom/knowledge-health-card";
 import { QuickActions } from "@/components/boardroom/quick-actions";
 import { getGroupTemplates } from "@/lib/group-templates";
+import { usePinnedGroups } from "@/hooks/use-pinned-groups";
+import { TemplatesPanel } from "@/components/boardroom/templates-panel";
+import type { DiscussionTemplate } from "@/hooks/use-templates";
+import { AgentEditorSheet } from "@/components/boardroom/agent-editor-sheet";
+import { toast } from "sonner";
 
 // ─── View mode persistence ───────────────────────────────────────
 
@@ -286,6 +295,7 @@ function WorkforceSection() {
   const { t } = useTranslation();
   const { data: agentsRaw } = useAgentDescriptors(50);
   const navigate = useNavigate();
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
 
   const agents = useMemo(
     () => (agentsRaw ? groupAgentsByName(agentsRaw).slice(0, 10) : []),
@@ -324,12 +334,13 @@ function WorkforceSection() {
               name={agent.name || t("workforce.unnamed", "Unnamed Agent")}
               agentId={agentId}
               description={agent.description}
-              onClick={() => navigate(`/manage/agentview/${agentId}`)}
+              onClick={() => setEditingAgentId(agentId)}
             />
           );
         })}
         <AddAgentCard onClick={() => navigate("/manage/agents/wizard")} />
       </div>
+      <AgentEditorSheet agentId={editingAgentId} onClose={() => setEditingAgentId(null)} />
     </section>
   );
 }
@@ -340,8 +351,48 @@ function BoardroomDashboard() {
   const { t } = useTranslation();
   const { data: boards, isLoading, isError, refetch } =
     useEnrichedGroupDescriptors();
+  const { pinned, togglePin, isPinned } = usePinnedGroups();
+  const deleteGroup = useDeleteGroup();
+  const navigate = useNavigate();
 
   const [viewMode, setViewMode] = useState<"grid" | "list">(getStoredViewMode);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const pinnedBoards = useMemo(
+    () => boards?.filter((b) => pinned.has(b.id)) ?? [],
+    [boards, pinned],
+  );
+  const unpinnedBoards = useMemo(
+    () => boards?.filter((b) => !pinned.has(b.id)) ?? [],
+    [boards, pinned],
+  );
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleBulkDelete = useCallback(async () => {
+    const count = selectedIds.size;
+    for (const id of selectedIds) {
+      const board = boards?.find((b) => b.id === id);
+      if (board) {
+        await deleteGroup.mutateAsync({ id, version: board.version ?? 1 });
+      }
+    }
+    setSelectedIds(new Set());
+    setBulkMode(false);
+    toast.success(
+      t("boardroom.dashboard.deletedCount", "Deleted {{count}} task forces", {
+        count,
+      }),
+    );
+  }, [selectedIds, boards, deleteGroup, t]);
 
   useEffect(() => {
     try {
@@ -387,6 +438,72 @@ function BoardroomDashboard() {
       {/* ─── Knowledge Health ────────────────────────────────── */}
       <KnowledgeHealthCard />
 
+      {/* ─── Templates ────────────────────────────────────────── */}
+      <TemplatesPanel
+        onUseTemplate={(template: DiscussionTemplate) => {
+          navigate(`/boardroom/new?template=${template.id}`);
+        }}
+      />
+
+      {/* ─── Pinned Task Forces ───────────────────────────────── */}
+      {pinnedBoards.length > 0 && (
+        <section
+          aria-label={t("boardroom.dashboard.pinned", "Pinned")}
+          className="br-section-enter"
+          style={{ '--enter-delay': '50ms' } as React.CSSProperties}
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Star className="h-4 w-4 text-primary fill-primary" />
+            <h2 className="text-lg font-semibold text-foreground">
+              {t("boardroom.dashboard.pinned", "Pinned")}
+            </h2>
+          </div>
+          <div className="@container/br-dash">
+            <div className="grid grid-cols-1 @[32rem]/br-dash:grid-cols-2 @[56rem]/br-dash:grid-cols-3 gap-5">
+              {pinnedBoards.map((board) => (
+                <div key={board.id} className="group relative">
+                  {bulkMode && (
+                    <button
+                      type="button"
+                      className="absolute top-2 start-2 z-10"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        toggleSelect(board.id);
+                      }}
+                    >
+                      {selectedIds.has(board.id) ? (
+                        <CheckSquare className="h-5 w-5 text-primary" />
+                      ) : (
+                        <Square className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </button>
+                  )}
+                  <BoardroomCard
+                    id={board.id}
+                    name={board.name}
+                    description={board.description}
+                    style={board.style}
+                    members={board.members?.map((m) => ({
+                      agentId: m.agentId,
+                      displayName: m.displayName,
+                      speakingOrder: null,
+                      role: null,
+                      memberType: m.memberType,
+                    }))}
+                    lastModified={board.lastModifiedOn ?? board.createdOn}
+                    version={board.version}
+                    viewMode="grid"
+                    isPinned={true}
+                    onTogglePin={() => togglePin(board.id)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* ─── Pillar 2: Active Task Forces ────────────────────── */}
       <section
         aria-label={t("boardroom.dashboard.taskForcesLabel", "Active Task Forces")}
@@ -407,6 +524,19 @@ function BoardroomDashboard() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setBulkMode(!bulkMode);
+                setSelectedIds(new Set());
+              }}
+            >
+              <CheckSquare className="h-4 w-4" />
+              {bulkMode
+                ? t("boardroom.dashboard.cancel", "Cancel")
+                : t("boardroom.dashboard.select", "Select")}
+            </Button>
             <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
             <Button asChild variant="primary" size="sm" className="hidden sm:inline-flex">
               <Link to="/boardroom/new">
@@ -421,12 +551,29 @@ function BoardroomDashboard() {
         <div className="@container/br-dash">
           {viewMode === "grid" ? (
             <div className="grid grid-cols-1 @[32rem]/br-dash:grid-cols-2 @[56rem]/br-dash:grid-cols-3 gap-5">
-              {boards.map((board, index) => (
+              {unpinnedBoards.map((board, index) => (
                 <div
                   key={board.id}
-                  className="group br-card-enter"
+                  className="group relative br-card-enter"
                   style={{ '--enter-delay': `${index * 60}ms` } as React.CSSProperties}
                 >
+                  {bulkMode && (
+                    <button
+                      type="button"
+                      className="absolute top-2 start-2 z-10"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        toggleSelect(board.id);
+                      }}
+                    >
+                      {selectedIds.has(board.id) ? (
+                        <CheckSquare className="h-5 w-5 text-primary" />
+                      ) : (
+                        <Square className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </button>
+                  )}
                   <BoardroomCard
                     id={board.id}
                     name={board.name}
@@ -442,6 +589,8 @@ function BoardroomDashboard() {
                     lastModified={board.lastModifiedOn ?? board.createdOn}
                     version={board.version}
                     viewMode="grid"
+                    isPinned={isPinned(board.id)}
+                    onTogglePin={() => togglePin(board.id)}
                   />
                 </div>
               ))}
@@ -451,29 +600,64 @@ function BoardroomDashboard() {
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {boards.map((board) => (
-                <BoardroomCard
-                  key={board.id}
-                  id={board.id}
-                  name={board.name}
-                  description={board.description}
-                  style={board.style}
-                  members={board.members?.map((m) => ({
-                    agentId: m.agentId,
-                    displayName: m.displayName,
-                    speakingOrder: null,
-                    role: null,
-                    memberType: m.memberType,
-                  }))}
-                  lastModified={board.lastModifiedOn ?? board.createdOn}
-                  version={board.version}
-                  viewMode="list"
-                />
+              {unpinnedBoards.map((board) => (
+                <div key={board.id} className="relative">
+                  {bulkMode && (
+                    <button
+                      type="button"
+                      className="absolute top-2 start-2 z-10"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        toggleSelect(board.id);
+                      }}
+                    >
+                      {selectedIds.has(board.id) ? (
+                        <CheckSquare className="h-5 w-5 text-primary" />
+                      ) : (
+                        <Square className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </button>
+                  )}
+                  <BoardroomCard
+                    id={board.id}
+                    name={board.name}
+                    description={board.description}
+                    style={board.style}
+                    members={board.members?.map((m) => ({
+                      agentId: m.agentId,
+                      displayName: m.displayName,
+                      speakingOrder: null,
+                      role: null,
+                      memberType: m.memberType,
+                    }))}
+                    lastModified={board.lastModifiedOn ?? board.createdOn}
+                    version={board.version}
+                    viewMode="list"
+                    isPinned={isPinned(board.id)}
+                    onTogglePin={() => togglePin(board.id)}
+                  />
+                </div>
               ))}
             </div>
           )}
         </div>
       </section>
+
+      {/* ─── Bulk action floating bar ─────────────────────────── */}
+      {bulkMode && selectedIds.size > 0 && (
+        <div className="fixed bottom-6 start-1/2 -translate-x-1/2 z-40 bg-card border border-border rounded-full shadow-lg ps-4 pe-2 py-2 flex items-center gap-3 animate-in slide-in-from-bottom-4">
+          <span className="text-sm font-medium">
+            {t("boardroom.dashboard.selected", "{{count}} selected", {
+              count: selectedIds.size,
+            })}
+          </span>
+          <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+            <Trash2 className="h-4 w-4" />
+            {t("boardroom.dashboard.deleteSelected", "Delete")}
+          </Button>
+        </div>
+      )}
 
       {/* ─── Pillar 3: Quick Actions ─────────────────────────── */}
       <section
