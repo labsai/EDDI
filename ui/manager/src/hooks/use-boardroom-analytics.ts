@@ -52,9 +52,16 @@ export interface RecentDiscussion {
   durationMs: number | null;
 }
 
+export interface AnalyticsFilters {
+  outcome?: GroupConversationState | null;
+  style?: DiscussionStyle | null;
+  date?: string | null;
+}
+
 export interface BoardroomAnalytics {
   // KPIs
   totalDiscussions: number;
+  unfilteredTotal: number; // total before filters, for comparison
   completionRate: number; // 0–100
   activeExperts: number;
   totalExperts: number;
@@ -73,6 +80,7 @@ export interface BoardroomAnalytics {
   isLoading: boolean;
   hasError: boolean;
   groupCount: number;
+  isFiltered: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -103,9 +111,19 @@ function getLast30Days(): string[] {
   return days;
 }
 
+// ─── Enriched conversation type ──────────────────────────────────
+
+interface EnrichedConversation extends GroupConversation {
+  _groupName: string;
+  _memberCount: number;
+  _style: DiscussionStyle | undefined;
+}
+
 // ─── Hook ────────────────────────────────────────────────────────
 
-export function useBoardroomAnalytics(): BoardroomAnalytics {
+export function useBoardroomAnalytics(
+  filters?: AnalyticsFilters,
+): BoardroomAnalytics {
   const { data: groups, isLoading: groupsLoading } =
     useEnrichedGroupDescriptors(200);
   const { data: agents, isLoading: agentsLoading } = useAgentDescriptors(200);
@@ -132,10 +150,16 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
 
   const isLoading = groupsLoading || agentsLoading || conversationsLoading;
 
+  // Stabilize filter values so useMemo doesn't recompute on every render
+  const fOutcome = filters?.outcome ?? null;
+  const fStyle = filters?.style ?? null;
+  const fDate = filters?.date ?? null;
+
   return useMemo(() => {
     if (isLoading || !groups || !agents) {
       return {
         totalDiscussions: 0,
+        unfilteredTotal: 0,
         completionRate: 0,
         activeExperts: 0,
         totalExperts: 0,
@@ -150,14 +174,20 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
         isLoading: true,
         hasError,
         groupCount: 0,
+        isFiltered: false,
       };
     }
 
-    // Flatten all conversations
-    const allConversations: (GroupConversation & {
-      _groupName: string;
-      _memberCount: number;
-    })[] = [];
+    // Build group style lookup
+    const groupStyleMap = new Map<string, DiscussionStyle>();
+    for (const group of groups) {
+      if (group.style) {
+        groupStyleMap.set(group.id, group.style);
+      }
+    }
+
+    // Flatten all conversations with enrichment
+    const allConversations: EnrichedConversation[] = [];
 
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i];
@@ -167,13 +197,32 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
           ...conv,
           _groupName: group.name || "Untitled",
           _memberCount: group.memberCount,
+          _style: group.style,
         });
       }
     }
 
+    const unfilteredTotal = allConversations.length;
+    const hasFilters = fOutcome !== null || fStyle !== null || fDate !== null;
+
+    // ── Apply filters ───────────────────────────────────────────
+    let filtered = allConversations;
+
+    if (fOutcome) {
+      filtered = filtered.filter((c) => c.state === fOutcome);
+    }
+    if (fStyle) {
+      filtered = filtered.filter((c) => c._style === fStyle);
+    }
+    if (fDate) {
+      filtered = filtered.filter(
+        (c) => c.created && toDateKey(c.created) === fDate,
+      );
+    }
+
     // ── KPIs ──────────────────────────────────────────────────────
-    const totalDiscussions = allConversations.length;
-    const completedCount = allConversations.filter(
+    const totalDiscussions = filtered.length;
+    const completedCount = filtered.filter(
       (c) => c.state === "COMPLETED",
     ).length;
     const completionRate =
@@ -182,7 +231,7 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
         : 0;
 
     // Duration
-    const durations = allConversations
+    const durations = filtered
       .map(durationMs)
       .filter((d): d is number => d !== null && d > 0);
     const avgDurationMs =
@@ -190,7 +239,7 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
         ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
         : 0;
 
-    // Team size
+    // Team size (always from all groups, not filtered)
     const teamSizes = groups.map((g) => g.memberCount).filter((n) => n > 0);
     const avgTeamSize =
       teamSizes.length > 0
@@ -213,7 +262,7 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
 
     const activeAgentIds = new Set<string>();
 
-    for (const conv of allConversations) {
+    for (const conv of filtered) {
       const seenInConv = new Set<string>();
       for (const entry of conv.transcript ?? []) {
         if (!entry.speakerAgentId) continue;
@@ -268,7 +317,7 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
     const dayCounts = new Map<string, number>();
     for (const day of last30) dayCounts.set(day, 0);
 
-    for (const conv of allConversations) {
+    for (const conv of filtered) {
       if (conv.created) {
         const key = toDateKey(conv.created);
         if (dayCounts.has(key)) {
@@ -283,9 +332,11 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
     }));
 
     // ── Style distribution ────────────────────────────────────────
+    // Count styles based on filtered conversations' groups (deduplicated)
+    const filteredGroupIds = new Set(filtered.map((c) => c.groupId));
     const styleCounts = new Map<DiscussionStyle, number>();
     for (const group of groups) {
-      if (group.style) {
+      if (group.style && filteredGroupIds.has(group.id)) {
         styleCounts.set(group.style, (styleCounts.get(group.style) ?? 0) + 1);
       }
     }
@@ -297,7 +348,7 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
 
     // ── Outcome distribution ──────────────────────────────────────
     const outcomeCounts = new Map<GroupConversationState, number>();
-    for (const conv of allConversations) {
+    for (const conv of filtered) {
       outcomeCounts.set(conv.state, (outcomeCounts.get(conv.state) ?? 0) + 1);
     }
     const outcomeDistribution: OutcomeCount[] = Array.from(
@@ -308,7 +359,7 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
 
     // ── Phase distribution ────────────────────────────────────────
     const phaseCounts = new Map<TranscriptEntryType, number>();
-    for (const conv of allConversations) {
+    for (const conv of filtered) {
       for (const entry of conv.transcript ?? []) {
         phaseCounts.set(entry.type, (phaseCounts.get(entry.type) ?? 0) + 1);
       }
@@ -319,19 +370,18 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
       .map(([type, count]) => ({ type, count }))
       .sort((a, b) => b.count - a.count);
 
-    // ── Recent discussions (last 10) ──────────────────────────────
-    const recentDiscussions: RecentDiscussion[] = allConversations
+    // ── Recent discussions (last 20 to allow filtering headroom) ──
+    const recentDiscussions: RecentDiscussion[] = filtered
       .sort(
         (a, b) =>
           new Date(b.created).getTime() - new Date(a.created).getTime(),
       )
-      .slice(0, 10)
+      .slice(0, 20)
       .map((conv) => ({
         id: conv.id,
         groupId: conv.groupId,
         groupName: conv._groupName,
-        question:
-          conv.originalQuestion || "Untitled",
+        question: conv.originalQuestion || "Untitled",
         state: conv.state,
         memberCount: conv._memberCount,
         created: conv.created,
@@ -340,6 +390,7 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
 
     return {
       totalDiscussions,
+      unfilteredTotal,
       completionRate,
       activeExperts: activeAgentIds.size,
       totalExperts: agents.length,
@@ -354,6 +405,7 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
       isLoading: false,
       hasError,
       groupCount: groups.length,
+      isFiltered: hasFilters,
     };
-  }, [isLoading, hasError, groups, agents, conversationData]);
+  }, [isLoading, hasError, groups, agents, conversationData, fOutcome, fStyle, fDate]);
 }

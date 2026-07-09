@@ -56,8 +56,8 @@ const INITIAL_FILTERS: FilterState = {
 function BoardroomAnalytics() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const analytics = useBoardroomAnalytics();
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
+  const analytics = useBoardroomAnalytics(filters);
 
   // ── Filter callbacks ──────────────────────────────────────────
   const setOutcome = useCallback(
@@ -115,30 +115,6 @@ function BoardroomAnalytics() {
     }
     return list;
   }, [filters]);
-
-  // ── Apply filters to discussions list ─────────────────────────
-  const filteredDiscussions = useMemo(() => {
-    let list = analytics.recentDiscussions;
-    if (filters.outcome) {
-      list = list.filter((d) => d.state === filters.outcome);
-    }
-    if (filters.date) {
-      list = list.filter((d) => {
-        const dayKey = d.created
-          ? new Date(d.created).toISOString().slice(0, 10)
-          : "";
-        return dayKey === filters.date;
-      });
-    }
-    return list;
-  }, [analytics.recentDiscussions, filters.outcome, filters.date]);
-
-  // ── Apply filters to agent stats ──────────────────────────────
-  const filteredAgents = useMemo(() => {
-    // Agent stats don't have direct outcome/style/date correlation,
-    // so we show all agents but could filter in future with conversation-level data
-    return analytics.agentStats;
-  }, [analytics.agentStats]);
 
   const hasActiveFilters = activeFilters.length > 0;
 
@@ -278,9 +254,16 @@ function BoardroomAnalytics() {
           icon={MessageSquare}
           label={t("analyticsPage.totalDiscussions", "Discussions")}
           value={analytics.totalDiscussions}
-          subtitle={t("analyticsPage.acrossGroups", "across {{count}} task forces", {
-            count: analytics.groupCount,
-          })}
+          subtitle={
+            analytics.isFiltered
+              ? t("analyticsPage.filteredOf", "{{filtered}} of {{total}} total", {
+                  filtered: analytics.totalDiscussions,
+                  total: analytics.unfilteredTotal,
+                })
+              : t("analyticsPage.acrossGroups", "across {{count}} task forces", {
+                  count: analytics.groupCount,
+                })
+          }
           delay={0}
         />
         <StatCard
@@ -363,7 +346,7 @@ function BoardroomAnalytics() {
         style={{ "--enter-delay": "300ms" } as React.CSSProperties}
       >
         <AgentLeaderboard
-          agents={filteredAgents}
+          agents={analytics.agentStats}
           onAgentClick={handleAgentClick}
         />
       </div>
@@ -381,7 +364,7 @@ function BoardroomAnalytics() {
           style={{ "--enter-delay": "350ms" } as React.CSSProperties}
         >
           <TopDiscussions
-            discussions={filteredDiscussions}
+            discussions={analytics.recentDiscussions}
             emptyMessage={
               hasActiveFilters
                 ? t(

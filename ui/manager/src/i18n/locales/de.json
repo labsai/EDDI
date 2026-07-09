@@ -2416,6 +2416,7 @@
     "noSkills": "No capabilities registered. Define skills on your agents to track coverage.",
     "uncoveredSkills": "{{count}} uncovered skills",
     "allOutcomes": "All outcomes",
-    "allStyles": "All styles"
+    "allStyles": "All styles",
+    "filteredOf": "{{filtered}} of {{total}} total"
   }
 }
