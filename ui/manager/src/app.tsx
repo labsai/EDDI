@@ -43,6 +43,7 @@ import { BoardroomBoard } from "@/pages/boardroom/boardroom-board";
 import { BoardroomThread } from "@/pages/boardroom/boardroom-thread";
 import { BoardroomSettings } from "@/pages/boardroom/boardroom-settings";
 import { BoardroomHistory } from "@/pages/boardroom/boardroom-history";
+import { BoardroomAnalytics } from "@/pages/boardroom/boardroom-analytics";
 
 export function App() {
   const location = useLocation();
@@ -60,6 +61,7 @@ export function App() {
         <Route path=":boardId/thread/:memberId" element={<BoardroomThread />} />
         <Route path=":boardId/settings" element={<BoardroomSettings />} />
         <Route path=":boardId/history" element={<BoardroomHistory />} />
+        <Route path="analytics" element={<BoardroomAnalytics />} />
       </Route>
 
       <Route element={<AppLayout />}>

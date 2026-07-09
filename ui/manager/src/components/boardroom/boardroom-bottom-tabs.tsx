@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Home, MessageSquare } from "lucide-react";
+import { Home, MessageSquare, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Component ───────────────────────────────────────────────────
@@ -29,6 +29,13 @@ export function BoardroomBottomTabs() {
       to: location.pathname.match(/\/boardroom\/[^/]+/)?.[0]
         ? `${location.pathname.match(/\/boardroom\/[^/]+/)![0]}/thread/`
         : "/boardroom",
+    },
+    {
+      key: "insights" as const,
+      label: t("boardroom.tabInsights", "Insights"),
+      icon: BarChart3,
+      active: location.pathname === "/boardroom/analytics",
+      to: "/boardroom/analytics",
     },
   ] as const;
 

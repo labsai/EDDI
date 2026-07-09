@@ -8,6 +8,7 @@ import {
   Moon,
   X,
   Users,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -122,6 +123,25 @@ export function BoardroomSidebar({
             )}
           </Link>
         </Button>
+      </div>
+
+      {/* ── Insights Link ─────────────────────────────────────── */}
+      <div className="shrink-0 ps-3 pe-3 pb-1">
+        <Link
+          to="/boardroom/analytics"
+          className={cn(
+            "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-sm transition-colors",
+            "text-muted-foreground hover:bg-muted hover:text-foreground",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            collapsed && "justify-center ps-0 pe-0",
+          )}
+          title={collapsed ? t("boardroom.insights", "Insights") : undefined}
+        >
+          <BarChart3 className="h-4 w-4 shrink-0" />
+          {!collapsed && (
+            <span>{t("boardroom.insights", "Insights")}</span>
+          )}
+        </Link>
       </div>
 
       {/* ── Workforce ──────────────────────────────────────────── */}
