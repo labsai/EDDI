@@ -197,6 +197,7 @@ export function useBoardroomAnalytics(
 
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i];
+      if (!group) continue;
       const convs = conversationData[i] ?? [];
       for (const conv of convs) {
         allConversations.push({
