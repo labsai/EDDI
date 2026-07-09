@@ -7,6 +7,8 @@ import type { GroupConversationState } from "@/lib/api/groups";
 interface OutcomeRingProps {
   data: OutcomeCount[];
   total: number;
+  selected?: GroupConversationState | null;
+  onSelect?: (state: GroupConversationState | null) => void;
 }
 
 const OUTCOME_COLORS: Record<GroupConversationState, string> = {
@@ -29,7 +31,17 @@ const OUTCOME_DOT_CLASSES: Record<GroupConversationState, string> = {
   AWAITING_APPROVAL: "bg-primary/25",
 };
 
-function OutcomeRing({ data, total }: OutcomeRingProps) {
+const STATE_LABELS: Record<GroupConversationState, string> = {
+  COMPLETED: "Completed",
+  FAILED: "Failed",
+  IN_PROGRESS: "In Progress",
+  SYNTHESIZING: "Synthesizing",
+  CREATED: "Created",
+  CANCELLED: "Cancelled",
+  AWAITING_APPROVAL: "Pending",
+};
+
+function OutcomeRing({ data, total, selected, onSelect }: OutcomeRingProps) {
   const { t } = useTranslation();
 
   const gradient = useMemo(() => {
@@ -60,6 +72,8 @@ function OutcomeRing({ data, total }: OutcomeRingProps) {
           <div
             className="h-40 w-40 rounded-full"
             style={{ background: gradient }}
+            role="img"
+            aria-label={t("analyticsPage.outcomeChart", "Outcome distribution: {{total}} total", { total })}
           />
           {/* Inner hole */}
           <div className="absolute inset-3 flex items-center justify-center rounded-full bg-card">
@@ -74,19 +88,32 @@ function OutcomeRing({ data, total }: OutcomeRingProps) {
 
         {/* Legend */}
         <div className="flex flex-wrap justify-center gap-x-4 gap-y-1">
-          {data.map((item) => (
-            <div key={item.state} className="flex items-center gap-1.5">
-              <div
+          {data.map((item) => {
+            const isSelected = selected === item.state;
+            const dimmed = selected != null && !isSelected;
+            return (
+              <button
+                key={item.state}
+                type="button"
                 className={cn(
-                  "h-2.5 w-2.5 rounded-full",
-                  OUTCOME_DOT_CLASSES[item.state] ?? "bg-muted",
+                  "flex cursor-pointer items-center gap-1.5 transition-opacity",
+                  isSelected && "ring-2 ring-primary rounded-md ps-1.5 pe-1.5 py-0.5 bg-primary/5",
+                  dimmed && "opacity-50",
                 )}
-              />
-              <span className="text-xs text-muted-foreground">
-                {item.state} ({item.count})
-              </span>
-            </div>
-          ))}
+                onClick={() => onSelect?.(isSelected ? null : item.state)}
+              >
+                <div
+                  className={cn(
+                    "h-2.5 w-2.5 rounded-full",
+                    OUTCOME_DOT_CLASSES[item.state] ?? "bg-muted",
+                  )}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {STATE_LABELS[item.state] ?? item.state} ({item.count})
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

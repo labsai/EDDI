@@ -71,6 +71,7 @@ export interface BoardroomAnalytics {
 
   // Meta
   isLoading: boolean;
+  hasError: boolean;
   groupCount: number;
 }
 
@@ -115,16 +116,20 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
     [groups],
   );
 
-  const conversationQueries = useQueries({
+  const { conversationData, conversationsLoading, hasError } = useQueries({
     queries: groupIds.map((groupId) => ({
       queryKey: ["boardroom-analytics", "conversations", groupId],
       queryFn: () => listGroupConversations(groupId, CONVERSATIONS_PER_GROUP),
       staleTime: STALE_TIME,
       enabled: !groupsLoading && groupIds.length > 0,
     })),
+    combine: (results) => ({
+      conversationData: results.map((r) => r.data ?? []),
+      conversationsLoading: results.some((r) => r.isLoading),
+      hasError: results.some((r) => r.isError),
+    }),
   });
 
-  const conversationsLoading = conversationQueries.some((q) => q.isLoading);
   const isLoading = groupsLoading || agentsLoading || conversationsLoading;
 
   return useMemo(() => {
@@ -143,6 +148,7 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
         phaseDistribution: [],
         recentDiscussions: [],
         isLoading: true,
+        hasError,
         groupCount: 0,
       };
     }
@@ -155,7 +161,7 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
 
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i];
-      const convs = conversationQueries[i]?.data ?? [];
+      const convs = conversationData[i] ?? [];
       for (const conv of convs) {
         allConversations.push({
           ...conv,
@@ -346,7 +352,8 @@ export function useBoardroomAnalytics(): BoardroomAnalytics {
       phaseDistribution,
       recentDiscussions,
       isLoading: false,
+      hasError,
       groupCount: groups.length,
     };
-  }, [isLoading, groups, agents, conversationQueries]);
+  }, [isLoading, hasError, groups, agents, conversationData]);
 }

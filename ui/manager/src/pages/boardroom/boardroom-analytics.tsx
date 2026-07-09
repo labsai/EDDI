@@ -1,9 +1,11 @@
+import { useState, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
   MessageSquare,
   CheckCircle2,
   Users,
   Clock,
+  AlertCircle,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBoardroomAnalytics } from "@/hooks/use-boardroom-analytics";
@@ -14,8 +16,18 @@ import { StyleBreakdown } from "@/components/boardroom/analytics/style-breakdown
 import { OutcomeRing } from "@/components/boardroom/analytics/outcome-ring";
 import { PhaseBar } from "@/components/boardroom/analytics/phase-bar";
 import { TopDiscussions } from "@/components/boardroom/analytics/top-discussions";
-import { Link } from "react-router-dom";
+import { SkillCoverage } from "@/components/boardroom/analytics/skill-coverage";
+import {
+  AnalyticsFilterBar,
+} from "@/components/boardroom/analytics/filter-bar";
+import {
+  stateLabel,
+  styleLabel,
+  type ActiveFilter,
+} from "@/components/boardroom/analytics/filter-utils";
+import { Link, useNavigate } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
+import type { GroupConversationState, DiscussionStyle } from "@/lib/api/groups";
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -25,32 +37,128 @@ function formatDuration(ms: number): string {
   return `${(ms / 3_600_000).toFixed(1)}h`;
 }
 
+// ─── Filter state ────────────────────────────────────────────────
+
+interface FilterState {
+  outcome: GroupConversationState | null;
+  style: DiscussionStyle | null;
+  date: string | null;
+}
+
+const INITIAL_FILTERS: FilterState = {
+  outcome: null,
+  style: null,
+  date: null,
+};
+
 // ─── Component ───────────────────────────────────────────────────
 
 function BoardroomAnalytics() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const analytics = useBoardroomAnalytics();
+  const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
+
+  // ── Filter callbacks ──────────────────────────────────────────
+  const setOutcome = useCallback(
+    (state: GroupConversationState | null) =>
+      setFilters((prev) => ({ ...prev, outcome: state })),
+    [],
+  );
+  const setStyle = useCallback(
+    (style: DiscussionStyle | null) =>
+      setFilters((prev) => ({ ...prev, style: style })),
+    [],
+  );
+  const setDate = useCallback(
+    (date: string | null) =>
+      setFilters((prev) => ({ ...prev, date: date })),
+    [],
+  );
+  const clearAll = useCallback(() => setFilters(INITIAL_FILTERS), []);
+
+  const removeFilter = useCallback((f: ActiveFilter) => {
+    setFilters((prev) => ({ ...prev, [f.type]: null }));
+  }, []);
+
+  const handleAgentClick = useCallback(
+    (agentId: string) => {
+      // Navigate to the agent's thread in the boardroom
+      void navigate(`/manage/agents?id=${agentId}`);
+    },
+    [navigate],
+  );
+
+  // ── Build active filter chips ─────────────────────────────────
+  const activeFilters = useMemo<ActiveFilter[]>(() => {
+    const list: ActiveFilter[] = [];
+    if (filters.outcome) {
+      list.push({
+        type: "outcome",
+        label: stateLabel(filters.outcome),
+        value: filters.outcome,
+      });
+    }
+    if (filters.style) {
+      list.push({
+        type: "style",
+        label: styleLabel(filters.style),
+        value: filters.style,
+      });
+    }
+    if (filters.date) {
+      list.push({
+        type: "date",
+        label: filters.date,
+        value: filters.date,
+      });
+    }
+    return list;
+  }, [filters]);
+
+  // ── Apply filters to discussions list ─────────────────────────
+  const filteredDiscussions = useMemo(() => {
+    let list = analytics.recentDiscussions;
+    if (filters.outcome) {
+      list = list.filter((d) => d.state === filters.outcome);
+    }
+    if (filters.date) {
+      list = list.filter((d) => {
+        const dayKey = d.created
+          ? new Date(d.created).toISOString().slice(0, 10)
+          : "";
+        return dayKey === filters.date;
+      });
+    }
+    return list;
+  }, [analytics.recentDiscussions, filters.outcome, filters.date]);
+
+  // ── Apply filters to agent stats ──────────────────────────────
+  const filteredAgents = useMemo(() => {
+    // Agent stats don't have direct outcome/style/date correlation,
+    // so we show all agents but could filter in future with conversation-level data
+    return analytics.agentStats;
+  }, [analytics.agentStats]);
+
+  const hasActiveFilters = activeFilters.length > 0;
 
   // ── Loading skeleton ────────────────────────────────────────────
   if (analytics.isLoading) {
     return (
       <div className="p-6 space-y-6 max-w-7xl ms-auto me-auto">
         {/* Header skeleton */}
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-8 w-8 rounded-lg" />
-          <Skeleton className="h-7 w-48" />
-        </div>
+        <Skeleton className="h-8 w-48" />
 
-        {/* KPI row */}
+        {/* KPI skeleton */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="rounded-xl border border-border bg-card p-5 space-y-3"
+              className="rounded-xl border border-border bg-card p-5 space-y-2"
             >
               <Skeleton className="h-10 w-10 rounded-lg" />
-              <Skeleton className="h-8 w-20" />
-              <Skeleton className="h-3 w-32" />
+              <Skeleton className="h-6 w-20" />
+              <Skeleton className="h-4 w-32" />
             </div>
           ))}
         </div>
@@ -65,26 +173,60 @@ function BoardroomAnalytics() {
     );
   }
 
-  // ── Empty state ─────────────────────────────────────────────────
-  if (analytics.totalDiscussions === 0 && analytics.groupCount === 0) {
+  // ── Error state ─────────────────────────────────────────────────
+  if (analytics.hasError && !analytics.isLoading) {
     return (
       <div className="flex h-full items-center justify-center p-8">
         <div className="text-center max-w-sm br-section-enter">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+          <div className="ms-auto me-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-destructive/10">
+            <AlertCircle className="h-8 w-8 text-destructive" />
+          </div>
+          <p className="text-lg font-medium text-foreground mb-1">
+            {t("analyticsPage.errorTitle", "Unable to load insights")}
+          </p>
+          <p className="text-sm text-muted-foreground mb-4">
+            {t(
+              "analyticsPage.errorDescription",
+              "Some data could not be fetched. Please try again.",
+            )}
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary ps-4 pe-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            {t("analyticsPage.retry", "Retry")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Empty state ─────────────────────────────────────────────────
+  if (analytics.totalDiscussions === 0) {
+    return (
+      <div className="flex h-full items-center justify-center p-8">
+        <div className="text-center max-w-sm br-section-enter">
+          <div className="ms-auto me-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
             <MessageSquare className="h-8 w-8 text-muted-foreground" />
           </div>
           <p className="text-lg font-medium text-foreground mb-1">
             {t("analyticsPage.emptyTitle", "No insights yet")}
           </p>
           <p className="text-sm text-muted-foreground mb-4">
-            {t(
-              "analyticsPage.emptyDescription",
-              "Start a task force discussion to see analytics here.",
-            )}
+            {analytics.groupCount > 0
+              ? t(
+                  "analyticsPage.emptyHaveGroups",
+                  "You have {{count}} task forces but no discussions yet. Start a discussion to see insights.",
+                  { count: analytics.groupCount },
+                )
+              : t(
+                  "analyticsPage.emptyDescription",
+                  "Start a task force discussion to see analytics here.",
+                )}
           </p>
           <Link
             to="/boardroom/new"
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary ps-4 pe-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           >
             {t("analyticsPage.createFirst", "Assemble Task Force")}
           </Link>
@@ -95,7 +237,10 @@ function BoardroomAnalytics() {
 
   // ── Main render ─────────────────────────────────────────────────
   return (
-    <div className="p-6 space-y-6 max-w-7xl ms-auto me-auto">
+    <main
+      className="p-6 space-y-6 max-w-7xl ms-auto me-auto"
+      aria-label={t("analyticsPage.title", "Insights")}
+    >
       {/* Header */}
       <div
         className="flex items-center gap-3 br-section-enter"
@@ -115,6 +260,13 @@ function BoardroomAnalytics() {
           {t("analyticsPage.subtitle", "Last 30 days")}
         </span>
       </div>
+
+      {/* Filter bar */}
+      <AnalyticsFilterBar
+        filters={activeFilters}
+        onRemove={removeFilter}
+        onClearAll={clearAll}
+      />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -154,15 +306,19 @@ function BoardroomAnalytics() {
         />
       </div>
 
-      {/* Activity heatmap */}
+      {/* Activity heatmap — clickable days */}
       <div
         className="br-section-enter"
         style={{ "--enter-delay": "100ms" } as React.CSSProperties}
       >
-        <ActivityHeatmap data={analytics.dailyActivity} />
+        <ActivityHeatmap
+          data={analytics.dailyActivity}
+          selectedDate={filters.date}
+          onSelectDate={setDate}
+        />
       </div>
 
-      {/* Two-column charts */}
+      {/* Two-column charts — clickable segments */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div
           className="br-section-enter"
@@ -171,13 +327,19 @@ function BoardroomAnalytics() {
           <OutcomeRing
             data={analytics.outcomeDistribution}
             total={analytics.totalDiscussions}
+            selected={filters.outcome}
+            onSelect={setOutcome}
           />
         </div>
         <div
           className="br-section-enter"
           style={{ "--enter-delay": "200ms" } as React.CSSProperties}
         >
-          <StyleBreakdown data={analytics.styleDistribution} />
+          <StyleBreakdown
+            data={analytics.styleDistribution}
+            selected={filters.style}
+            onSelect={setStyle}
+          />
         </div>
       </div>
 
@@ -191,22 +353,43 @@ function BoardroomAnalytics() {
         </div>
       )}
 
-      {/* Agent leaderboard */}
+      {/* Agent leaderboard — clickable rows */}
       <div
         className="br-section-enter"
         style={{ "--enter-delay": "300ms" } as React.CSSProperties}
       >
-        <AgentLeaderboard agents={analytics.agentStats} />
+        <AgentLeaderboard
+          agents={filteredAgents}
+          onAgentClick={handleAgentClick}
+        />
       </div>
 
-      {/* Recent discussions */}
-      <div
-        className="br-section-enter"
-        style={{ "--enter-delay": "350ms" } as React.CSSProperties}
-      >
-        <TopDiscussions discussions={analytics.recentDiscussions} />
+      {/* Skill coverage & filtered discussions */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div
+          className="br-section-enter"
+          style={{ "--enter-delay": "300ms" } as React.CSSProperties}
+        >
+          <SkillCoverage />
+        </div>
+        <div
+          className="br-section-enter"
+          style={{ "--enter-delay": "350ms" } as React.CSSProperties}
+        >
+          <TopDiscussions
+            discussions={filteredDiscussions}
+            emptyMessage={
+              hasActiveFilters
+                ? t(
+                    "analyticsPage.noMatchingDiscussions",
+                    "No discussions match the active filters.",
+                  )
+                : undefined
+            }
+          />
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
 

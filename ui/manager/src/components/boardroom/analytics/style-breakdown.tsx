@@ -1,12 +1,16 @@
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 import type { StyleCount } from "@/hooks/use-boardroom-analytics";
 import { STYLE_INFO } from "@/lib/api/groups";
+import type { DiscussionStyle } from "@/lib/api/groups";
 
 interface StyleBreakdownProps {
   data: StyleCount[];
+  selected?: DiscussionStyle | null;
+  onSelect?: (style: DiscussionStyle | null) => void;
 }
 
-function StyleBreakdown({ data }: StyleBreakdownProps) {
+function StyleBreakdown({ data, selected, onSelect }: StyleBreakdownProps) {
   const { t } = useTranslation();
   const max = Math.max(...data.map((d) => d.count), 1);
 
@@ -26,7 +30,16 @@ function StyleBreakdown({ data }: StyleBreakdownProps) {
             const info = STYLE_INFO[item.style];
             const pct = Math.round((item.count / max) * 100);
             return (
-              <div key={item.style} className="flex items-center gap-3">
+              <button
+                key={item.style}
+                type="button"
+                className={cn(
+                  "flex w-full cursor-pointer items-center gap-3 transition-all hover:bg-muted/50",
+                  selected === item.style && "bg-primary/5 rounded-lg",
+                  selected != null && selected !== item.style && "opacity-50",
+                )}
+                onClick={() => onSelect?.(selected === item.style ? null : item.style)}
+              >
                 <span className="w-6 text-center text-base" aria-hidden="true">
                   {info?.icon ?? "📋"}
                 </span>
@@ -42,7 +55,7 @@ function StyleBreakdown({ data }: StyleBreakdownProps) {
                 <span className="w-8 text-end text-xs tabular-nums text-muted-foreground">
                   {item.count}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>

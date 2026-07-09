@@ -6,6 +6,7 @@ import type { GroupConversationState } from "@/lib/api/groups";
 
 interface TopDiscussionsProps {
   discussions: RecentDiscussion[];
+  emptyMessage?: string;
 }
 
 const BADGE_CLASSES: Record<GroupConversationState, string> = {
@@ -18,7 +19,17 @@ const BADGE_CLASSES: Record<GroupConversationState, string> = {
   AWAITING_APPROVAL: "bg-muted text-muted-foreground",
 };
 
-function formatRelative(dateStr: string): string {
+const STATE_LABELS: Record<GroupConversationState, string> = {
+  COMPLETED: "Completed",
+  FAILED: "Failed",
+  IN_PROGRESS: "In Progress",
+  SYNTHESIZING: "Synthesizing",
+  CREATED: "Created",
+  CANCELLED: "Cancelled",
+  AWAITING_APPROVAL: "Pending",
+};
+
+function formatRelative(dateStr: string, t: (key: string, fallback: string, opts?: Record<string, unknown>) => string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
   const diff = now - then;
@@ -28,13 +39,13 @@ function formatRelative(dateStr: string): string {
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
 
-  if (days > 0) return `${days}d ago`;
-  if (hours > 0) return `${hours}h ago`;
-  if (minutes > 0) return `${minutes}m ago`;
-  return "just now";
+  if (days > 0) return t("analyticsPage.daysAgo", "{{count}}d ago", { count: days });
+  if (hours > 0) return t("analyticsPage.hoursAgo", "{{count}}h ago", { count: hours });
+  if (minutes > 0) return t("analyticsPage.minutesAgo", "{{count}}m ago", { count: minutes });
+  return t("analyticsPage.justNow", "just now");
 }
 
-function TopDiscussions({ discussions }: TopDiscussionsProps) {
+function TopDiscussions({ discussions, emptyMessage }: TopDiscussionsProps) {
   const { t } = useTranslation();
 
   return (
@@ -45,7 +56,7 @@ function TopDiscussions({ discussions }: TopDiscussionsProps) {
 
       {discussions.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {t("analyticsPage.noDiscussions", "No discussions yet.")}
+          {emptyMessage ?? t("analyticsPage.noDiscussions", "No discussions yet.")}
         </p>
       ) : (
         <div className="space-y-2">
@@ -63,16 +74,16 @@ function TopDiscussions({ discussions }: TopDiscussionsProps) {
                   {d.question}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {d.groupName} · {formatRelative(d.created)}
+                  {d.groupName} · {formatRelative(d.created, t)}
                 </p>
               </div>
               <span
                 className={cn(
-                  "shrink-0 rounded-md px-2 py-0.5 text-xs font-medium",
+                  "shrink-0 rounded-md ps-2 pe-2 py-0.5 text-xs font-medium",
                   BADGE_CLASSES[d.state] ?? "bg-muted text-muted-foreground",
                 )}
               >
-                {d.state}
+                {STATE_LABELS[d.state] ?? d.state}
               </span>
             </Link>
           ))}

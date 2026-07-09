@@ -1,4 +1,4 @@
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   PanelLeftClose,
@@ -34,6 +34,7 @@ export function BoardroomSidebar({
 }: BoardroomSidebarProps) {
   const { boardId } = useParams<{ boardId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
 
@@ -131,9 +132,11 @@ export function BoardroomSidebar({
           to="/boardroom/analytics"
           className={cn(
             "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-sm transition-colors",
-            "text-muted-foreground hover:bg-muted hover:text-foreground",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             collapsed && "justify-center ps-0 pe-0",
+            location.pathname === "/boardroom/analytics"
+              ? "bg-muted text-foreground font-medium"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
           )}
           title={collapsed ? t("boardroom.insights", "Insights") : undefined}
         >

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { PhaseCount } from "@/hooks/use-boardroom-analytics";
+import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
 import type { TranscriptEntryType } from "@/lib/api/groups";
 
 interface PhaseBarProps {
@@ -47,7 +48,11 @@ function PhaseBar({ data }: PhaseBarProps) {
       ) : (
         <>
           {/* Stacked bar */}
-          <div className="flex h-6 w-full overflow-hidden rounded-full">
+          <div
+            className="flex h-6 w-full overflow-hidden rounded-full"
+            role="img"
+            aria-label={t("analyticsPage.phaseChart", "Phase distribution")}
+          >
             {data.map((item) => {
               const pct = (item.count / total) * 100;
               if (pct < 0.5) return null;
@@ -59,7 +64,7 @@ function PhaseBar({ data }: PhaseBarProps) {
                     PHASE_CLASSES[item.type] ?? "bg-muted",
                   )}
                   style={{ width: `${pct}%` }}
-                  title={`${item.type}: ${item.count}`}
+                  title={`${ENTRY_TYPE_INFO[item.type]?.label ?? item.type}: ${item.count}`}
                 />
               );
             })}
@@ -76,7 +81,7 @@ function PhaseBar({ data }: PhaseBarProps) {
                   )}
                 />
                 <span className="text-xs text-muted-foreground">
-                  {item.type} ({item.count})
+                  {ENTRY_TYPE_INFO[item.type]?.label ?? item.type} ({item.count})
                 </span>
               </div>
             ))}

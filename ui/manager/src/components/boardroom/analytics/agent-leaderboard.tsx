@@ -1,12 +1,14 @@
 import { useTranslation } from "react-i18next";
+import { ChevronRight } from "lucide-react";
 import type { AgentStat } from "@/hooks/use-boardroom-analytics";
 import { AdvisorAvatar } from "@/components/boardroom/advisor-avatar";
 
 interface AgentLeaderboardProps {
   agents: AgentStat[];
+  onAgentClick?: (agentId: string) => void;
 }
 
-function AgentLeaderboard({ agents }: AgentLeaderboardProps) {
+function AgentLeaderboard({ agents, onAgentClick }: AgentLeaderboardProps) {
   const { t } = useTranslation();
   const top = agents.slice(0, 10);
   const maxContributions = Math.max(...top.map((a) => a.contributions), 1);
@@ -24,6 +26,9 @@ function AgentLeaderboard({ agents }: AgentLeaderboardProps) {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
+            <caption className="sr-only">
+              {t("analyticsPage.agentLeaderboard", "Agent Leaderboard")}
+            </caption>
             <thead>
               <tr className="border-b border-border text-xs text-muted-foreground">
                 <th className="pb-2 pe-2 text-start font-medium">#</th>
@@ -39,6 +44,9 @@ function AgentLeaderboard({ agents }: AgentLeaderboardProps) {
                 <th className="pb-2 text-end font-medium">
                   {t("analyticsPage.errors", "Errors")}
                 </th>
+                <th className="pb-2 w-6">
+                  <span className="sr-only">{t("analyticsPage.actions", "Actions")}</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -49,7 +57,8 @@ function AgentLeaderboard({ agents }: AgentLeaderboardProps) {
                 return (
                   <tr
                     key={agent.agentId}
-                    className="border-b border-border/50 last:border-0"
+                    className="cursor-pointer border-b border-border/50 transition-colors last:border-0 hover:bg-muted/50"
+                    onClick={() => onAgentClick?.(agent.agentId)}
                   >
                     <td className="py-2.5 pe-2 text-muted-foreground">
                       {idx + 1}
@@ -84,6 +93,9 @@ function AgentLeaderboard({ agents }: AgentLeaderboardProps) {
                     </td>
                     <td className="py-2.5 text-end tabular-nums">
                       {agent.errors}
+                    </td>
+                    <td className="py-2.5 ps-2">
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     </td>
                   </tr>
                 );
