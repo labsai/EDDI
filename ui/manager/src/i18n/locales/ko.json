@@ -2289,6 +2289,29 @@
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"
+    },
+    "onboarding": {
+      "welcome": "보드룸에 오신 것을 환영합니다",
+      "subtitle": "전문 AI 에이전트를 협업 팀으로 구성하여 함께 토론, 분석, 복잡한 과제를 해결합니다.",
+      "howItWorks": "작동 방식",
+      "step1Title": "에이전트 배치",
+      "step1Desc": "고유한 기술, 지식, 성격을 가진 AI 전문가를 만듭니다.",
+      "step2Title": "태스크 포스 구성",
+      "step2Desc": "템플릿을 선택하고 에이전트에 역할을 할당하고 토론 스타일을 선택합니다.",
+      "step3Title": "질문 & 관찰",
+      "step3Desc": "질문을 던지고 에이전트가 토론, 비평, 답변을 종합하는 과정을 관찰합니다.",
+      "deployFirst": "시작하려면 첫 AI 에이전트를 배치하세요",
+      "deployFirstDesc": "에이전트는 태스크 포스를 구동하는 전문가입니다. 하나를 만들어 시작하세요.",
+      "deployFirst2": "첫 번째 배치 →",
+      "deployAgent": "에이전트 배치",
+      "agentsReady": "{{count}}개 준비 완료",
+      "pickTemplate": "시작할 템플릿 선택",
+      "pickTemplateDesc": "각 템플릿은 토론 스타일, 역할, 규칙을 구성합니다 — 에이전트만 할당하면 됩니다.",
+      "advisorSlots": "{{count}}개 어드바이저 슬롯",
+      "getStarted": "시작하기",
+      "customFromScratch": "처음부터 만들기",
+      "customDesc": "나만의 팀과 규칙 정의",
+      "assembleNow": "첫 태스크 포스 구성"
     }
   },
   "variables": {

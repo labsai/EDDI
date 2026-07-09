@@ -22,7 +22,7 @@ import { BoardroomCard } from "@/components/boardroom/boardroom-card";
 import { AgentWorkforceCard, AddAgentCard } from "@/components/boardroom/agent-workforce-card";
 import { KnowledgeHealthCard } from "@/components/boardroom/knowledge-health-card";
 import { QuickActions } from "@/components/boardroom/quick-actions";
-import { getGroupTemplates } from "@/lib/group-templates";
+import { OnboardingHero } from "@/components/boardroom/onboarding-hero";
 import { usePinnedGroups } from "@/hooks/use-pinned-groups";
 import { TemplatesPanel } from "@/components/boardroom/templates-panel";
 import type { DiscussionTemplate } from "@/hooks/use-templates";
@@ -98,103 +98,7 @@ function DashboardError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-// ─── Welcome Hero (Empty State) ──────────────────────────────────
-
-function DashboardEmpty() {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const templates = getGroupTemplates(t);
-  const heroTemplates = ["advisory-board", "task-force", "risk-assessment"]
-    .map((key) => templates.find((tpl) => tpl.key === key))
-    .filter(Boolean) as typeof templates;
-
-  return (
-    <div className="flex-1 flex items-center justify-center py-16">
-      <div className="text-center max-w-lg space-y-6">
-        {/* Decorative icon */}
-        <div className="flex items-center justify-center gap-3 mb-2">
-          <img
-            src="/eddi-icon.svg"
-            alt=""
-            aria-hidden="true"
-            className="h-14 w-14 rounded-xl"
-          />
-        </div>
-
-        <h2 className="text-2xl font-bold text-foreground">
-          {t(
-            "boardroom.dashboard.welcomeTitle",
-            "Build Your Digital Workforce",
-          )}
-        </h2>
-        <p className="text-muted-foreground text-lg">
-          {t(
-            "boardroom.dashboard.welcomeDesc",
-            "Transform your team's expertise into permanent digital experts that collaborate, debate, and protect your organizational DNA.",
-          )}
-        </p>
-
-        {/* Dual CTA */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4">
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={() => navigate("/boardroom/new")}
-            className="w-full sm:w-auto"
-          >
-            <UsersRound className="h-5 w-5" />
-            {t(
-              "boardroom.dashboard.assembleTaskForce",
-              "Assemble Task Force",
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={() => navigate("/manage/agents/wizard")}
-            className="w-full sm:w-auto"
-          >
-            <Plus className="h-5 w-5" />
-            {t("boardroom.dashboard.deployAgent", "Deploy Agent")}
-          </Button>
-        </div>
-
-        {/* Template quick-start cards */}
-        {heroTemplates.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6">
-            {heroTemplates.map((tpl) => (
-              <Link
-                key={tpl.key}
-                to={`/boardroom/new?template=${tpl.key}`}
-                className={cn(
-                  "rounded-xl border p-4 text-start transition-all duration-200 br-card-premium",
-                  "border-border hover:shadow-lg hover:-translate-y-1",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                )}
-              >
-                <p className="text-2xl mb-1">{tpl.icon}</p>
-                <p className="text-sm font-medium text-foreground">
-                  {tpl.name}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-                  {tpl.description}
-                </p>
-              </Link>
-            ))}
-          </div>
-        )}
-
-        {/* Pitch pillars */}
-        <p className="text-xs text-muted-foreground/60 pt-4">
-          {t(
-            "boardroom.dashboard.pillars",
-            "Business Continuity · Succession Planning · Collaborative Problem Solving",
-          )}
-        </p>
-      </div>
-    </div>
-  );
-}
+// (DashboardEmpty replaced by OnboardingHero component)
 
 // ─── View Toggle ─────────────────────────────────────────────────
 
@@ -436,11 +340,7 @@ function BoardroomDashboard() {
 
   // Empty
   if (!boards || boards.length === 0) {
-    return (
-      <div className="p-5 md:p-8">
-        <DashboardEmpty />
-      </div>
-    );
+    return <OnboardingHero />;
   }
 
   // Populated — 3-pillar Intelligence Dashboard

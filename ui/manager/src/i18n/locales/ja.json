@@ -2289,6 +2289,29 @@
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"
+    },
+    "onboarding": {
+      "welcome": "ボードルームへようこそ",
+      "subtitle": "専門AIエージェントを協力チームに編成し、議論、分析、複雑な課題の解決を行います。",
+      "howItWorks": "使い方",
+      "step1Title": "エージェントをデプロイ",
+      "step1Desc": "独自のスキル、知識、個性を持つAIエキスパートを作成します。",
+      "step2Title": "タスクフォースを編成",
+      "step2Desc": "テンプレートを選び、エージェントに役割を割り当て、議論スタイルを選択します。",
+      "step3Title": "質問して観察",
+      "step3Desc": "質問を投げかけ、エージェントが議論、批評、回答を総合する様子を観察します。",
+      "deployFirst": "最初のAIエージェントをデプロイして始めましょう",
+      "deployFirstDesc": "エージェントはタスクフォースを動かすエキスパートです。1つ作成して始めましょう。",
+      "deployFirst2": "最初をデプロイ →",
+      "deployAgent": "エージェントをデプロイ",
+      "agentsReady": "{{count}}件準備完了",
+      "pickTemplate": "テンプレートを選んで始める",
+      "pickTemplateDesc": "各テンプレートは議論スタイル、役割、ルールを設定します — エージェントを割り当てるだけです。",
+      "advisorSlots": "{{count}}のアドバイザー枠",
+      "getStarted": "始める",
+      "customFromScratch": "ゼロから作成",
+      "customDesc": "独自のチームとルールを定義",
+      "assembleNow": "最初のタスクフォースを編成"
     }
   },
   "variables": {

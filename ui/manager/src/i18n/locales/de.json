@@ -2289,6 +2289,29 @@
       "confirm": "Bestätigen",
       "settings": "Einstellungen",
       "themeToggle": "Design umschalten"
+    },
+    "onboarding": {
+      "welcome": "Willkommen im Boardroom",
+      "subtitle": "Stellen Sie spezialisierte KI-Agenten zu Teams zusammen, die gemeinsam debattieren, analysieren und komplexe Herausforderungen lösen.",
+      "howItWorks": "So funktioniert's",
+      "step1Title": "Agenten bereitstellen",
+      "step1Desc": "Erstellen Sie KI-Experten mit einzigartigen Fähigkeiten, Wissen und Persönlichkeit.",
+      "step2Title": "Task Force zusammenstellen",
+      "step2Desc": "Wählen Sie eine Vorlage, weisen Sie Agenten Rollen zu und wählen Sie einen Diskussionsstil.",
+      "step3Title": "Fragen & Beobachten",
+      "step3Desc": "Stellen Sie eine Frage und beobachten Sie, wie Ihre Agenten debattieren, kritisieren und eine Antwort synthetisieren.",
+      "deployFirst": "Stellen Sie Ihren ersten KI-Agenten bereit",
+      "deployFirstDesc": "Agenten sind die Experten, die Ihre Task Forces antreiben. Erstellen Sie einen, um zu beginnen.",
+      "deployFirst2": "Ersten bereitstellen →",
+      "deployAgent": "Agent bereitstellen",
+      "agentsReady": "{{count}} bereit",
+      "pickTemplate": "Wählen Sie eine Vorlage zum Starten",
+      "pickTemplateDesc": "Jede Vorlage konfiguriert einen Diskussionsstil, Rollen und Regeln — Sie weisen nur die Agenten zu.",
+      "advisorSlots": "{{count}} Berater-Plätze",
+      "getStarted": "Loslegen",
+      "customFromScratch": "Von Grund auf erstellen",
+      "customDesc": "Definieren Sie Ihr eigenes Team und Ihre Regeln",
+      "assembleNow": "Erste Task Force zusammenstellen"
     }
   },
   "workforce": {

@@ -2289,6 +2289,29 @@
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"
+    },
+    "onboarding": {
+      "welcome": "Bem-vindo ao Boardroom",
+      "subtitle": "Monte equipes de agentes de IA especializados que debatem, analisam e resolvem desafios complexos juntos.",
+      "howItWorks": "Como funciona",
+      "step1Title": "Implantar agentes",
+      "step1Desc": "Crie especialistas de IA com habilidades, conhecimentos e personalidade únicos.",
+      "step2Title": "Montar uma força-tarefa",
+      "step2Desc": "Escolha um modelo, atribua agentes a funções e selecione um estilo de discussão.",
+      "step3Title": "Perguntar e observar",
+      "step3Desc": "Faça uma pergunta e observe seus agentes debaterem, criticarem e sintetizarem uma resposta.",
+      "deployFirst": "Implante seu primeiro agente de IA para começar",
+      "deployFirstDesc": "Agentes são os especialistas que impulsionam suas forças-tarefa. Crie um para começar.",
+      "deployFirst2": "Implantar o primeiro →",
+      "deployAgent": "Implantar agente",
+      "agentsReady": "{{count}} prontos",
+      "pickTemplate": "Escolha um modelo para começar",
+      "pickTemplateDesc": "Cada modelo configura um estilo de discussão, funções e regras — você apenas atribui os agentes.",
+      "advisorSlots": "{{count}} vagas de consultor",
+      "getStarted": "Começar",
+      "customFromScratch": "Criar do zero",
+      "customDesc": "Defina sua própria equipe e regras",
+      "assembleNow": "Monte sua primeira força-tarefa"
     }
   },
   "variables": {

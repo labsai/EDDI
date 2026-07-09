@@ -2289,6 +2289,29 @@
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"
+    },
+    "onboarding": {
+      "welcome": "欢迎来到会议室",
+      "subtitle": "将专业AI代理组建成协作团队，共同讨论、分析和解决复杂挑战。",
+      "howItWorks": "工作原理",
+      "step1Title": "部署代理",
+      "step1Desc": "创建具有独特技能、知识和个性的AI专家。",
+      "step2Title": "组建工作组",
+      "step2Desc": "选择模板，为代理分配角色，并选择讨论风格。",
+      "step3Title": "提问与观察",
+      "step3Desc": "提出问题，观看代理辩论、批评并综合出答案。",
+      "deployFirst": "部署您的第一个AI代理以开始",
+      "deployFirstDesc": "代理是驱动工作组的专家。创建一个即可开始。",
+      "deployFirst2": "部署第一个 →",
+      "deployAgent": "部署代理",
+      "agentsReady": "{{count}} 个就绪",
+      "pickTemplate": "选择模板开始",
+      "pickTemplateDesc": "每个模板配置讨论风格、角色和规则——您只需分配代理。",
+      "advisorSlots": "{{count}} 个顾问席位",
+      "getStarted": "开始",
+      "customFromScratch": "从零开始",
+      "customDesc": "定义您自己的团队和规则",
+      "assembleNow": "组建您的第一个工作组"
     }
   },
   "workforce": {

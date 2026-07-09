@@ -2289,6 +2289,29 @@
     },
     "advisor": {
       "avatarLabel": "{{name}} avatar"
+    },
+    "onboarding": {
+      "welcome": "Bienvenido al Boardroom",
+      "subtitle": "Forme equipos de agentes de IA especializados que debaten, analizan y resuelven desafíos complejos juntos.",
+      "howItWorks": "Cómo funciona",
+      "step1Title": "Desplegar agentes",
+      "step1Desc": "Cree expertos de IA con habilidades, conocimientos y personalidad únicos.",
+      "step2Title": "Formar un grupo de trabajo",
+      "step2Desc": "Elija una plantilla, asigne agentes a roles y seleccione un estilo de discusión.",
+      "step3Title": "Preguntar y observar",
+      "step3Desc": "Plantee una pregunta y observe cómo sus agentes debaten, critican y sintetizan una respuesta.",
+      "deployFirst": "Despliegue su primer agente IA para comenzar",
+      "deployFirstDesc": "Los agentes son los expertos que impulsan sus grupos de trabajo. Cree uno para empezar.",
+      "deployFirst2": "Desplegar el primero →",
+      "deployAgent": "Desplegar agente",
+      "agentsReady": "{{count}} listos",
+      "pickTemplate": "Elija una plantilla para comenzar",
+      "pickTemplateDesc": "Cada plantilla configura un estilo de discusión, roles y reglas — usted solo asigna los agentes.",
+      "advisorSlots": "{{count}} puestos de asesor",
+      "getStarted": "Comenzar",
+      "customFromScratch": "Crear desde cero",
+      "customDesc": "Defina su propio equipo y reglas",
+      "assembleNow": "Forme su primer grupo de trabajo"
     }
   },
   "variables": {

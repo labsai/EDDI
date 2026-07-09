@@ -2289,6 +2289,29 @@
       "confirm": "Confirmer",
       "settings": "Paramètres",
       "themeToggle": "Changer de thème"
+    },
+    "onboarding": {
+      "welcome": "Bienvenue dans le Boardroom",
+      "subtitle": "Assemblez des agents IA spécialisés en équipes collaboratives qui débattent, analysent et résolvent des défis complexes ensemble.",
+      "howItWorks": "Comment ça marche",
+      "step1Title": "Déployer des agents",
+      "step1Desc": "Créez des experts IA avec des compétences, connaissances et personnalités uniques.",
+      "step2Title": "Constituer un groupe de travail",
+      "step2Desc": "Choisissez un modèle, attribuez des rôles aux agents et sélectionnez un style de discussion.",
+      "step3Title": "Poser & Observer",
+      "step3Desc": "Posez une question et regardez vos agents débattre, critiquer et synthétiser une réponse.",
+      "deployFirst": "Déployez votre premier agent IA pour commencer",
+      "deployFirstDesc": "Les agents sont les experts qui animent vos groupes de travail. Créez-en un pour débuter.",
+      "deployFirst2": "Déployer le premier →",
+      "deployAgent": "Déployer un agent",
+      "agentsReady": "{{count}} prêts",
+      "pickTemplate": "Choisissez un modèle pour commencer",
+      "pickTemplateDesc": "Chaque modèle configure un style de discussion, des rôles et des règles — vous n'avez qu'à assigner les agents.",
+      "advisorSlots": "{{count}} postes de conseiller",
+      "getStarted": "Commencer",
+      "customFromScratch": "Créer de zéro",
+      "customDesc": "Définissez votre propre équipe et vos règles",
+      "assembleNow": "Constituer votre premier groupe de travail"
     }
   },
   "variables": {
