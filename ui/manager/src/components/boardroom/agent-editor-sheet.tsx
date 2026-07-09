@@ -21,8 +21,7 @@ interface AgentEditorSheetProps {
 
 // ─── Confidence helpers ──────────────────────────────────────────
 
-const CONFIDENCE_OPTIONS = ["low", "medium", "high"] as const;
-type ConfidenceLevel = (typeof CONFIDENCE_OPTIONS)[number];
+type ConfidenceLevel = "low" | "medium" | "high";
 
 function confidenceBadgeVariant(
   confidence: string | undefined
@@ -124,14 +123,25 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
 
   // ── Escape key ──────────────────────────────────────────────
 
+  const handleEscape = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (isDirty) {
+          if (!window.confirm(t("boardroom.agentEditor.discardChanges", "You have unsaved changes. Discard?"))) {
+            return;
+          }
+        }
+        onClose();
+      }
+    },
+    [onClose, isDirty, t],
+  );
+
   useEffect(() => {
     if (!agentId) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [agentId, onClose]);
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [agentId, handleEscape]);
 
   // ── Capability add / remove ─────────────────────────────────
 
@@ -420,11 +430,9 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                           setNewConfidence(e.target.value as ConfidenceLevel)
                         }
                       >
-                        {CONFIDENCE_OPTIONS.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
+                        <option value="low">{t("boardroom.agentEditor.confidenceLow", "Low")}</option>
+                        <option value="medium">{t("boardroom.agentEditor.confidenceMedium", "Medium")}</option>
+                        <option value="high">{t("boardroom.agentEditor.confidenceHigh", "High")}</option>
                       </select>
                     </div>
                     <Button

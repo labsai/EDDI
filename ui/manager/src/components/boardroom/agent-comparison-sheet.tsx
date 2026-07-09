@@ -104,6 +104,7 @@ function AgentComparisonSheet({ agents, onClose }: AgentComparisonSheetProps) {
     else rightWins++;
   }
 
+  const isTie = leftWins === rightWins;
   const winner = leftWins > rightWins ? left : right;
   const winCount = Math.max(leftWins, rightWins);
 
@@ -224,12 +225,18 @@ function AgentComparisonSheet({ agents, onClose }: AgentComparisonSheetProps) {
         {/* Summary */}
         <div className="border-t border-border ps-6 pe-6 py-4">
           <p className="text-sm text-muted-foreground text-center">
-            <span className="font-semibold text-primary">
-              {winner.displayName}
-            </span>{" "}
-            {t("boardroom.comparison.leadsIn", "leads in {{count}} of 5 metrics", {
-              count: winCount,
-            })}
+            {isTie ? (
+              t("boardroom.comparison.evenlyMatched", "Both agents are evenly matched")
+            ) : (
+              <>
+                <span className="font-semibold text-primary">
+                  {winner.displayName}
+                </span>{" "}
+                {t("boardroom.comparison.leadsIn", "leads in {{count}} of 5 metrics", {
+                  count: winCount,
+                })}
+              </>
+            )}
           </p>
         </div>
       </div>

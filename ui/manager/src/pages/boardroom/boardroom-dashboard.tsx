@@ -321,7 +321,7 @@ function WorkforceSection() {
         </span>
       </div>
 
-      <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-thin">
+      <div className="flex gap-3 overflow-x-auto pb-2 -ms-1 -me-1 ps-1 pe-1 scrollbar-thin">
         {agents.map((agent) => {
           const idMatch = agent.resource?.match(
             /\/agentstore\/agents\/([^?]+)/,
@@ -378,20 +378,34 @@ function BoardroomDashboard() {
   }, []);
 
   const handleBulkDelete = useCallback(async () => {
-    const count = selectedIds.size;
+    let successCount = 0;
+    let failCount = 0;
     for (const id of selectedIds) {
       const board = boards?.find((b) => b.id === id);
-      if (board) {
+      if (!board) continue;
+      try {
         await deleteGroup.mutateAsync({ id, version: board.version ?? 1 });
+        successCount++;
+      } catch {
+        failCount++;
       }
     }
     setSelectedIds(new Set());
     setBulkMode(false);
-    toast.success(
-      t("boardroom.dashboard.deletedCount", "Deleted {{count}} task forces", {
-        count,
-      }),
-    );
+    if (failCount === 0) {
+      toast.success(
+        t("boardroom.dashboard.deletedCount", "Deleted {{count}} task forces", {
+          count: successCount,
+        }),
+      );
+    } else {
+      toast.error(
+        t("boardroom.dashboard.deletePartialFail", "{{success}} deleted, {{fail}} failed", {
+          success: successCount,
+          fail: failCount,
+        }),
+      );
+    }
   }, [selectedIds, boards, deleteGroup, t]);
 
   useEffect(() => {
@@ -459,13 +473,14 @@ function BoardroomDashboard() {
             </h2>
           </div>
           <div className="@container/br-dash">
-            <div className="grid grid-cols-1 @[32rem]/br-dash:grid-cols-2 @[56rem]/br-dash:grid-cols-3 gap-5">
+            <div className={viewMode === "grid" ? "grid grid-cols-1 @[32rem]/br-dash:grid-cols-2 @[56rem]/br-dash:grid-cols-3 gap-5" : "flex flex-col gap-2"}>
               {pinnedBoards.map((board) => (
                 <div key={board.id} className="group relative">
                   {bulkMode && (
                     <button
                       type="button"
                       className="absolute top-2 start-2 z-10"
+                      aria-label={selectedIds.has(board.id) ? t("boardroom.dashboard.deselect", "Deselect") : t("boardroom.dashboard.selectItem", "Select")}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -493,7 +508,7 @@ function BoardroomDashboard() {
                     }))}
                     lastModified={board.lastModifiedOn ?? board.createdOn}
                     version={board.version}
-                    viewMode="grid"
+                    viewMode={viewMode}
                     isPinned={true}
                     onTogglePin={() => togglePin(board.id)}
                   />
@@ -561,6 +576,7 @@ function BoardroomDashboard() {
                     <button
                       type="button"
                       className="absolute top-2 start-2 z-10"
+                      aria-label={selectedIds.has(board.id) ? t("boardroom.dashboard.deselect", "Deselect") : t("boardroom.dashboard.selectItem", "Select")}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -606,6 +622,7 @@ function BoardroomDashboard() {
                     <button
                       type="button"
                       className="absolute top-2 start-2 z-10"
+                      aria-label={selectedIds.has(board.id) ? t("boardroom.dashboard.deselect", "Deselect") : t("boardroom.dashboard.selectItem", "Select")}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -646,16 +663,18 @@ function BoardroomDashboard() {
 
       {/* ─── Bulk action floating bar ─────────────────────────── */}
       {bulkMode && selectedIds.size > 0 && (
-        <div className="fixed bottom-6 start-1/2 -translate-x-1/2 z-40 bg-card border border-border rounded-full shadow-lg ps-4 pe-2 py-2 flex items-center gap-3 animate-in slide-in-from-bottom-4">
-          <span className="text-sm font-medium">
-            {t("boardroom.dashboard.selected", "{{count}} selected", {
-              count: selectedIds.size,
-            })}
-          </span>
-          <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
-            <Trash2 className="h-4 w-4" />
-            {t("boardroom.dashboard.deleteSelected", "Delete")}
-          </Button>
+        <div className="fixed bottom-6 inset-x-0 z-40 flex justify-center">
+          <div className="bg-card border border-border rounded-full shadow-lg ps-4 pe-2 py-2 flex items-center gap-3 animate-in slide-in-from-bottom-4">
+            <span className="text-sm font-medium">
+              {t("boardroom.dashboard.selected", "{{count}} selected", {
+                count: selectedIds.size,
+              })}
+            </span>
+            <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+              <Trash2 className="h-4 w-4" />
+              {t("boardroom.dashboard.deleteSelected", "Delete")}
+            </Button>
+          </div>
         </div>
       )}
 

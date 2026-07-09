@@ -104,8 +104,12 @@ function ExportMenu({ conversation, groupName, className }: ExportMenuProps) {
   const handleCopy = useCallback(async () => {
     if (!conversation) return;
     const md = generateMarkdown(conversation, groupName);
-    await navigator.clipboard.writeText(md);
-    toast.success(t("boardroom.export.copied", "Copied to clipboard"));
+    try {
+      await navigator.clipboard.writeText(md);
+      toast.success(t("boardroom.export.copied", "Copied to clipboard"));
+    } catch {
+      toast.error(t("boardroom.export.copyFailed", "Failed to copy to clipboard"));
+    }
   }, [conversation, groupName, t]);
 
   return (

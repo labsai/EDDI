@@ -9,6 +9,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { useBoardroomAnalytics } from "@/hooks/use-boardroom-analytics";
 import { StatCard } from "@/components/boardroom/analytics/stat-card";
 import { ActivityHeatmap } from "@/components/boardroom/analytics/activity-heatmap";
@@ -89,11 +90,33 @@ function BoardroomAnalytics() {
   const [selectedAgent, setSelectedAgent] = useState<AgentStat | null>(null);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [comparisonPair, setComparisonPair] = useState<[AgentStat, AgentStat] | null>(null);
+  const [compareFirstAgent, setCompareFirstAgent] = useState<AgentStat | null>(null);
 
   const handleAgentClick = useCallback(
     (agentId: string) => {
       const agent = analytics.agentStats.find((a) => a.agentId === agentId);
-      if (agent) setSelectedAgent(agent);
+      if (!agent) return;
+
+      // If we're in "pick second agent for comparison" mode
+      if (compareFirstAgent) {
+        if (agent.agentId !== compareFirstAgent.agentId) {
+          setComparisonPair([compareFirstAgent, agent]);
+        }
+        setCompareFirstAgent(null);
+        return;
+      }
+
+      setSelectedAgent(agent);
+    },
+    [analytics.agentStats, compareFirstAgent],
+  );
+
+  const handleCompare = useCallback(
+    (agentId: string) => {
+      const agent = analytics.agentStats.find((a) => a.agentId === agentId);
+      if (!agent) return;
+      setSelectedAgent(null);
+      setCompareFirstAgent(agent);
     },
     [analytics.agentStats],
   );
@@ -360,6 +383,20 @@ function BoardroomAnalytics() {
         className="br-section-enter"
         style={{ "--enter-delay": "300ms" } as React.CSSProperties}
       >
+        {compareFirstAgent && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 ps-4 pe-2 py-2 animate-in fade-in-0 slide-in-from-top-2">
+            <span className="text-sm text-primary font-medium flex-1">
+              {t("analyticsPage.pickSecondAgent", "Click an agent to compare with {{name}}", { name: compareFirstAgent.displayName })}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setCompareFirstAgent(null)}
+            >
+              {t("analyticsPage.cancelCompare", "Cancel")}
+            </Button>
+          </div>
+        )}
         <AgentLeaderboard
           agents={analytics.agentStats}
           onAgentClick={handleAgentClick}
@@ -401,6 +438,7 @@ function BoardroomAnalytics() {
           setSelectedAgent(null);
           setEditingAgentId(id);
         }}
+        onCompare={handleCompare}
       />
 
       {/* Agent Editor Sheet */}

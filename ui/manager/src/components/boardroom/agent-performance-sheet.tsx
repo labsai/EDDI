@@ -8,6 +8,7 @@ import {
   Type,
   ExternalLink,
   Pencil,
+  GitCompareArrows,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdvisorAvatar } from "@/components/boardroom/advisor-avatar";
@@ -20,6 +21,7 @@ interface AgentPerformanceSheetProps {
   agent: AgentStat | null; // null = closed
   onClose: () => void;
   onEditAgent?: (agentId: string) => void;
+  onCompare?: (agentId: string) => void;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -31,9 +33,9 @@ function computeErrorRate(agent: AgentStat): number {
 }
 
 function errorRateColorClass(rate: number): string {
-  if (rate < 5) return "text-green-500";
-  if (rate < 15) return "text-yellow-500";
-  return "text-red-500";
+  if (rate < 5) return "text-primary";
+  if (rate < 15) return "text-muted-foreground";
+  return "text-destructive";
 }
 
 function computeAvgLength(agent: AgentStat): number {
@@ -131,6 +133,7 @@ function AgentPerformanceSheet({
   agent,
   onClose,
   onEditAgent,
+  onCompare,
 }: AgentPerformanceSheetProps) {
   const { t } = useTranslation();
   const isOpen = agent !== null;
@@ -275,6 +278,16 @@ function AgentPerformanceSheet({
             >
               <Pencil className="h-4 w-4" />
               {t("boardroom.analytics.editAgent", "Edit Agent")}
+            </Button>
+          )}
+          {onCompare && (
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => onCompare(agent.agentId)}
+            >
+              <GitCompareArrows className="h-4 w-4" />
+              {t("boardroom.analytics.compareAgent", "Compare with…")}
             </Button>
           )}
           <Button variant="ghost" className="w-full" asChild>

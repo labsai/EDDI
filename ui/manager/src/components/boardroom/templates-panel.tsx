@@ -15,12 +15,6 @@ export function TemplatesPanel({ onUseTemplate }: TemplatesPanelProps) {
   const { t } = useTranslation();
   const { templates, deleteTemplate } = useTemplates();
 
-  function handleDelete(id: string, name: string) {
-    deleteTemplate(id);
-    toast.success(
-      t("boardroom.templateDeleted", "Template \"{{name}}\" deleted", { name })
-    );
-  }
 
   return (
     <section className="space-y-3">
@@ -58,16 +52,22 @@ export function TemplatesPanel({ onUseTemplate }: TemplatesPanelProps) {
                 "hover:border-primary/30 transition-all"
               )}
             >
-              {/* Delete button — visible on hover */}
+              {/* Delete button — visible on hover / focus */}
               <Button
                 variant="ghost"
                 size="icon"
                 className={cn(
                   "absolute top-1 end-1 h-7 w-7 opacity-0",
-                  "group-hover/card:opacity-100 transition-opacity",
+                  "group-hover/card:opacity-100 focus-visible:opacity-100 transition-opacity",
                   "text-muted-foreground hover:text-destructive"
                 )}
-                onClick={() => handleDelete(template.id, template.name)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(t("boardroom.templates.deleteConfirm", "Delete this template?"))) {
+                    deleteTemplate(template.id);
+                    toast.success(t("boardroom.templates.deleted", "Template deleted"));
+                  }
+                }}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>

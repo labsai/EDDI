@@ -126,7 +126,7 @@ function BoardroomCard({
         onSuccess: (data) => {
           // Extract new group ID from the location header (e.g. "/groupstore/groups/{newId}")
           const newId = data.location?.split("/").pop();
-          if (newId) {
+          if (newId && newId.length > 0) {
             toast.success(
               t("boardroom.card.duplicated", "Task Force duplicated"),
               {
@@ -289,8 +289,8 @@ function BoardroomCard({
                 </Badge>
               )}
               {lastConversationState === "IN_PROGRESS" && (
-                <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-500 gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                <Badge variant="outline" className="text-[10px] border-primary/50 text-primary gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
                   {t("boardroom.card.live", "Live")}
                 </Badge>
               )}
@@ -353,8 +353,8 @@ function BoardroomCard({
               </Badge>
             )}
             {lastConversationState === "IN_PROGRESS" && (
-              <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-500 gap-1 shrink-0">
-                <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+              <Badge variant="outline" className="text-[10px] border-primary/50 text-primary gap-1 shrink-0">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
                 {t("boardroom.card.live", "Live")}
               </Badge>
             )}
