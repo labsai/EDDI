@@ -353,25 +353,25 @@ export function useBoardroomAnalytics(
     // ── Style distribution ────────────────────────────────────────
     // Count styles based on filtered conversations' groups (deduplicated)
     const filteredGroupIds = new Set(filtered.map((c) => c.groupId));
-    const styleCounts = new Map<DiscussionStyle, number>();
+    const styleCountMap = new Map<DiscussionStyle, number>();
     for (const group of groups) {
       if (group.style && filteredGroupIds.has(group.id)) {
-        styleCounts.set(group.style, (styleCounts.get(group.style) ?? 0) + 1);
+        styleCountMap.set(group.style, (styleCountMap.get(group.style) ?? 0) + 1);
       }
     }
     const styleDistribution: StyleCount[] = Array.from(
-      styleCounts.entries(),
+      styleCountMap.entries(),
     )
       .map(([style, count]) => ({ style, count }))
       .sort((a, b) => b.count - a.count);
 
     // ── Outcome distribution ──────────────────────────────────────
-    const outcomeCounts = new Map<GroupConversationState, number>();
+    const outcomeCountMap = new Map<GroupConversationState, number>();
     for (const conv of filtered) {
-      outcomeCounts.set(conv.state, (outcomeCounts.get(conv.state) ?? 0) + 1);
+      outcomeCountMap.set(conv.state, (outcomeCountMap.get(conv.state) ?? 0) + 1);
     }
     const outcomeDistribution: OutcomeCount[] = Array.from(
-      outcomeCounts.entries(),
+      outcomeCountMap.entries(),
     )
       .map(([state, count]) => ({ state, count }))
       .sort((a, b) => b.count - a.count);
