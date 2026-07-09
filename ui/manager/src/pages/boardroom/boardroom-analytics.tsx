@@ -264,6 +264,10 @@ function BoardroomAnalytics() {
       {/* Filter bar */}
       <AnalyticsFilterBar
         filters={activeFilters}
+        outcome={filters.outcome}
+        style={filters.style}
+        onOutcomeChange={setOutcome}
+        onStyleChange={setStyle}
         onRemove={removeFilter}
         onClearAll={clearAll}
       />

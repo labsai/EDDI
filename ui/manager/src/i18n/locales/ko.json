@@ -2414,6 +2414,8 @@
     "covered": "Covered",
     "highConfidence": "High Confidence",
     "noSkills": "No capabilities registered. Define skills on your agents to track coverage.",
-    "uncoveredSkills": "{{count}} uncovered skills"
+    "uncoveredSkills": "{{count}} uncovered skills",
+    "allOutcomes": "All outcomes",
+    "allStyles": "All styles"
   }
 }

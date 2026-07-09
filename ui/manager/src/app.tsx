@@ -57,11 +57,11 @@ export function App() {
       <Route path="/boardroom" element={<BoardroomLayout />}>
         <Route index element={<BoardroomDashboard />} />
         <Route path="new" element={<BoardroomWizard />} />
+        <Route path="analytics" element={<BoardroomAnalytics />} />
         <Route path=":boardId" element={<BoardroomBoard />} />
         <Route path=":boardId/thread/:memberId" element={<BoardroomThread />} />
         <Route path=":boardId/settings" element={<BoardroomSettings />} />
         <Route path=":boardId/history" element={<BoardroomHistory />} />
-        <Route path="analytics" element={<BoardroomAnalytics />} />
       </Route>
 
       <Route element={<AppLayout />}>

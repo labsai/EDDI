@@ -2159,7 +2159,7 @@
       "listView": "List view",
       "assembleTaskForce": "Assemble Task Force",
       "deployAgent": "Deploy Agent",
-      "pillars": "Business Continuity \u00b7 Succession Planning \u00b7 Collaborative Problem Solving",
+      "pillars": "Business Continuity · Succession Planning · Collaborative Problem Solving",
       "taskForcesLabel": "Active Task Forces",
       "loadError": "Couldn't load your workspace. Please try again.",
       "viewToggle": "View mode"
@@ -2344,7 +2344,7 @@
     "statusAtRisk": "At Risk",
     "msgHealthy": "{{rate}}% of your digital workforce was active in the last 30 days",
     "msgModerate": "Some digital experts haven't been consulted recently",
-    "msgAtRisk": "Most of your workforce is dormant \u2014 consider engaging them"
+    "msgAtRisk": "Most of your workforce is dormant — consider engaging them"
   },
   "quickActions": {
     "title": "Quick Actions",
@@ -2406,6 +2406,8 @@
     "covered": "Covered",
     "highConfidence": "High Confidence",
     "noSkills": "No capabilities registered. Define skills on your agents to track coverage.",
-    "uncoveredSkills": "{{count}} uncovered skills"
+    "uncoveredSkills": "{{count}} uncovered skills",
+    "allOutcomes": "All outcomes",
+    "allStyles": "All styles"
   }
 }
