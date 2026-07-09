@@ -190,7 +190,7 @@ function AnalyticsFilterBar({
     ...ALL_OUTCOMES.map((s) => ({
       value: s,
       label: OUTCOME_LABELS[s],
-      count: outcomeCounts[s] ?? 0,
+      count: (outcomeCounts ?? {})[s] ?? 0,
     })),
   ];
 
@@ -199,7 +199,7 @@ function AnalyticsFilterBar({
     ...DISCUSSION_STYLES.map((s) => ({
       value: s,
       label: STYLE_INFO[s]?.label ?? s,
-      count: styleCounts[s] ?? 0,
+      count: (styleCounts ?? {})[s] ?? 0,
     })),
   ];
 
