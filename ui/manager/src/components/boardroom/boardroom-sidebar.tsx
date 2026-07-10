@@ -264,7 +264,7 @@ function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?
                 onClick={() =>
                   boardId
                     ? navigate(`/boardroom/${boardId}/thread/${agentId}`)
-                    : navigate("/boardroom/new")
+                    : navigate(`/manage/chat?agentId=${agentId}`)
                 }
                 title={collapsed ? agent.name : undefined}
                 className={cn(

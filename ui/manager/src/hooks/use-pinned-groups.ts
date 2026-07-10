@@ -12,7 +12,11 @@ function readPinned(): Set<string> {
 }
 
 function writePinned(pinned: Set<string>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...pinned]));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...pinned]));
+  } catch {
+    // localStorage may be full or unavailable
+  }
 }
 
 export function usePinnedGroups() {

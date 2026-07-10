@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Bot,
@@ -104,9 +104,10 @@ function TemplateCard({
         "br-card-enter",
         !hasAgents && "pointer-events-none opacity-50",
       )}
-      style={{ "--enter-delay": `${index * 80}ms` } as React.CSSProperties}
+      style={{ "--enter-delay": `${index * 50}ms` } as React.CSSProperties}
       aria-disabled={!hasAgents}
       tabIndex={hasAgents ? 0 : -1}
+      onClick={hasAgents ? undefined : (e) => e.preventDefault()}
     >
       {/* Top accent bar */}
       <div className="h-1 bg-gradient-to-r from-primary/60 via-primary to-primary/60" />
@@ -168,9 +169,10 @@ function CustomCard({ hasAgents }: { hasAgents: boolean }) {
         "br-card-enter min-h-[200px]",
         !hasAgents && "pointer-events-none opacity-50",
       )}
-      style={{ "--enter-delay": "480ms" } as React.CSSProperties}
+      style={{ "--enter-delay": "350ms" } as React.CSSProperties}
       aria-disabled={!hasAgents}
       tabIndex={hasAgents ? 0 : -1}
+      onClick={hasAgents ? undefined : (e) => e.preventDefault()}
     >
       <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted group-hover:bg-primary/10 transition-colors mb-3">
         <Plus className="h-6 w-6" />
@@ -199,7 +201,7 @@ function DeployAgentBanner() {
         "flex flex-col sm:flex-row items-center gap-4 rounded-2xl border border-primary/30 bg-primary/5 p-5",
         "br-section-enter",
       )}
-      style={{ "--enter-delay": "300ms" } as React.CSSProperties}
+      style={{ "--enter-delay": "200ms" } as React.CSSProperties}
       role="alert"
     >
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -233,14 +235,14 @@ function DeployAgentBanner() {
 
 function OnboardingHero() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const { data: agentsRaw } = useAgentDescriptors(50);
+  const { data: agentsRaw, isLoading: agentsLoading } = useAgentDescriptors(50);
 
   const agents = useMemo(
     () => (agentsRaw ? groupAgentsByName(agentsRaw) : []),
     [agentsRaw],
   );
-  const hasAgents = agents.length > 0;
+  // Treat loading as "has agents" to avoid flashing the deploy banner
+  const hasAgents = agentsLoading || agents.length > 0;
   const templates = useMemo(() => getGroupTemplates(t), [t]);
 
   return (
@@ -260,7 +262,7 @@ function OnboardingHero() {
                 className="h-10 w-10 rounded-lg"
               />
             </div>
-            <Sparkles className="absolute -top-1 -end-1 h-4 w-4 text-primary animate-pulse" />
+            <Sparkles className="absolute -top-1 -end-1 h-4 w-4 text-primary/60" />
           </div>
         </div>
 
@@ -295,7 +297,7 @@ function OnboardingHero() {
               "boardroom.onboarding.step1Desc",
               "Create AI experts with unique skills, knowledge, and personality.",
             )}
-            delay="150ms"
+            delay="80ms"
             highlight={!hasAgents}
             action={
               !hasAgents ? (
@@ -333,7 +335,7 @@ function OnboardingHero() {
               "boardroom.onboarding.step2Desc",
               "Pick a template, assign agents to roles, and choose a discussion style.",
             )}
-            delay="200ms"
+            delay="120ms"
           />
           <HowItWorksStep
             step={3}
@@ -346,7 +348,7 @@ function OnboardingHero() {
               "boardroom.onboarding.step3Desc",
               "Pose a question and watch your agents debate, critique, and synthesize an answer.",
             )}
-            delay="250ms"
+            delay="160ms"
           />
         </div>
       </section>
@@ -362,7 +364,7 @@ function OnboardingHero() {
         )}
         className="space-y-4"
       >
-        <div className="text-center br-section-enter" style={{ "--enter-delay": "300ms" } as React.CSSProperties}>
+        <div className="text-center br-section-enter" style={{ "--enter-delay": "200ms" } as React.CSSProperties}>
           <h2 className="text-lg font-semibold text-foreground">
             {t("boardroom.onboarding.pickTemplate", "Pick a template to get started")}
           </h2>
@@ -391,19 +393,21 @@ function OnboardingHero() {
       {hasAgents && (
         <div
           className="flex justify-center br-section-enter"
-          style={{ "--enter-delay": "600ms" } as React.CSSProperties}
+          style={{ "--enter-delay": "350ms" } as React.CSSProperties}
         >
           <Button
+            asChild
             variant="primary"
             size="lg"
             className="gap-2"
-            onClick={() => navigate("/boardroom/new")}
           >
-            <UsersRound className="h-5 w-5" />
-            {t(
-              "boardroom.onboarding.assembleNow",
-              "Assemble Your First Task Force",
-            )}
+            <Link to="/boardroom/new">
+              <UsersRound className="h-5 w-5" />
+              {t(
+                "boardroom.onboarding.assembleNow",
+                "Assemble Your First Task Force",
+              )}
+            </Link>
           </Button>
         </div>
       )}

@@ -22,7 +22,11 @@ function readTemplates(): DiscussionTemplate[] {
 }
 
 function writeTemplates(templates: DiscussionTemplate[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
+  } catch {
+    // localStorage may be full or unavailable (private browsing)
+  }
 }
 
 export function useTemplates() {

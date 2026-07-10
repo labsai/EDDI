@@ -91,14 +91,14 @@ function ExportMenu({ conversation, groupName, className }: ExportMenuProps) {
     if (!conversation) return;
     const md = generateMarkdown(conversation, groupName);
     downloadFile(md, `discussion-${conversation.id.slice(0, 8)}.md`, "text/markdown");
-    toast.success(t("boardroom.export.downloaded", "Downloaded as Markdown"));
+    toast.success(t("boardroom.export.downloadedMd", "Downloaded as Markdown"));
   }, [conversation, groupName, t]);
 
   const handleJson = useCallback(() => {
     if (!conversation) return;
     const json = JSON.stringify(conversation, null, 2);
     downloadFile(json, `discussion-${conversation.id.slice(0, 8)}.json`, "application/json");
-    toast.success(t("boardroom.export.downloaded", "Downloaded as JSON"));
+    toast.success(t("boardroom.export.downloadedJson", "Downloaded as JSON"));
   }, [conversation, t]);
 
   const handleCopy = useCallback(async () => {

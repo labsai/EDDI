@@ -210,7 +210,14 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
       {/* Backdrop overlay */}
       <div
         className="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300"
-        onClick={onClose}
+        onClick={() => {
+          if (isDirty) {
+            if (!window.confirm(t("boardroom.agentEditor.discardChanges", "You have unsaved changes. Discard?"))) {
+              return;
+            }
+          }
+          onClose();
+        }}
         aria-hidden="true"
       />
 
