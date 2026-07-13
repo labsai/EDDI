@@ -448,7 +448,7 @@ class GroupConversationServiceHitlCoverageTest {
         // (pausedAt + timeout) is already in the past must be clamped to now+grace
         // rather than skipped.
         var gc = pausedPhaseGc("gc-past-due");
-        gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT.name());
+        gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         gc.setHitlApprovalTimeout("PT1M");
         gc.setPausedAt(Instant.now().minus(java.time.Duration.ofHours(2))); // long past due
 

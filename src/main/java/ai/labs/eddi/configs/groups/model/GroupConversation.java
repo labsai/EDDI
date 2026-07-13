@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.time.Instant;
@@ -47,7 +48,7 @@ public class GroupConversation {
     /** Human-readable reason for the pause (from HITL gate). */
     private String hitlPauseReason;
     /** Timeout policy copied from config at pause time (Phase 6d). */
-    private String hitlTimeoutPolicy;
+    private HitlTimeoutPolicy hitlTimeoutPolicy;
     /**
      * Approval timeout duration (ISO-8601) copied from config at pause time (Phase
      * 6d).
@@ -378,11 +379,11 @@ public class GroupConversation {
         this.hitlPauseReason = hitlPauseReason;
     }
 
-    public String getHitlTimeoutPolicy() {
+    public HitlTimeoutPolicy getHitlTimeoutPolicy() {
         return hitlTimeoutPolicy;
     }
 
-    public void setHitlTimeoutPolicy(String hitlTimeoutPolicy) {
+    public void setHitlTimeoutPolicy(HitlTimeoutPolicy hitlTimeoutPolicy) {
         this.hitlTimeoutPolicy = hitlTimeoutPolicy;
     }
 

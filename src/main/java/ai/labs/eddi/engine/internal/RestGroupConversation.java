@@ -361,7 +361,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             summary.put("pausedPhaseName", paused && gc.getPausedPhaseName() != null ? gc.getPausedPhaseName() : "");
             summary.put("pauseType", paused && gc.getHitlPauseType() != null ? gc.getHitlPauseType().name() : "");
             summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");
-            summary.put("timeoutPolicy", paused && gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy() : "");
+            summary.put("timeoutPolicy", paused && gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : "");
             summary.put("awaitingApprovalTaskIds", awaitingTaskIds);
             return Response.ok(summary).build();
         } catch (IResourceStore.ResourceNotFoundException e) {

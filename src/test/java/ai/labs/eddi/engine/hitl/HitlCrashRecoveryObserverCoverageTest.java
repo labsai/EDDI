@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.hitl;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -111,7 +112,7 @@ class HitlCrashRecoveryObserverCoverageTest {
         gc.setId(GC_ID);
         gc.setState(GroupConversationState.AWAITING_APPROVAL);
         gc.setPausedAt(pausedAt);
-        gc.setHitlTimeoutPolicy(policy);
+        gc.setHitlTimeoutPolicy(policy == null ? null : HitlTimeoutPolicy.valueOf(policy));
         gc.setHitlApprovalTimeout(timeout);
         return gc;
     }

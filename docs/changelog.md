@@ -5,6 +5,29 @@
 
 ---
 
+## 🎯 GroupConversation — type hitlTimeoutPolicy as the HitlTimeoutPolicy enum (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A PR review comment (@niedch) on `GroupConversation`'s HITL bookmark getters/setters said: *"I would prefer to go with the actual enum type and Duration for this."* Analyzed both halves (4-way investigation + adversarial verify) and **split the decision**: did the enum, deliberately skipped the `Duration`.
+
+**Enum — done.** `hitlTimeoutPolicy` was a raw `String` copied from config at pause time, but the `HitlTimeoutPolicy` enum (`WAIT_INDEFINITELY, AUTO_APPROVE, AUTO_REJECT, ABORT`) already exists and is the *declared* type in all three HITL config POJOs (`AgentConfiguration.HitlConfig`, `AgentGroupConfiguration.HitlConfig`, `ToolApprovalsConfig.timeoutPolicy`) — `GroupConversation` was the lone raw-`String` outlier for the policy. The field is control-flow-relevant (gates/arms `scheduleGroupHitlTimeout`, drives crash re-arm in `HitlCrashRecoveryObserver`), so typing it removes stringly-typed `valueOf`/`.name()`/`parsePolicy` juggling. It is **wire-safe**: Jackson serializes enums by `name()`, so `"AUTO_REJECT"` round-trips identically in Mongo/Postgres JSON, over REST, and to the Manager UI — exactly how the sibling `GroupConversationState state` field already persists. Every set-site only ever wrote a valid `name()` or `null`, so deserializing already-persisted `AWAITING_APPROVAL` transcripts cannot throw.
+
+Files:
+- **`GroupConversation.java`** — field + getter/setter → `HitlTimeoutPolicy` (import added).
+- **`GroupConversationService.java`** — `commitPause` / `restoreGroupPause` pass the enum directly (dropped `.name()`); `restoreGroupPause`'s `fallbackTimeoutPolicy` param + `resumeDiscussion`'s `savedTimeoutPolicy` local retyped to the enum; `scheduleGroupHitlTimeout` compares `== WAIT_INDEFINITELY` and calls `.name()` only when writing the schedule-metadata `Map<String,Object>`; `listGroupPendingApprovals` null-guards `.name()` for the `String`-typed `PendingApprovalSummary`.
+- **`HitlCrashRecoveryObserver.java`** — the group site inlines the `null → WAIT_INDEFINITELY` default instead of routing through the shared `parsePolicy(String)`, which stays intact for its two **regular-surface** callers (`PendingApprovalSummary`, `ConversationMemorySnapshot`).
+- **`RestGroupConversation.java` / `McpHitlTools.java`** — the summary map puts `.name()` (identical wire value, keeps the value a `String`).
+- Tests (`GroupConversationServiceHitlCoverage2Test`, `…CoverageTest`, `HitlCrashRecoveryObserverTest`, `…CoverageTest`) — reflective `restoreGroupPause` signature + args updated to the enum, assertions compare the enum, `gc.` helpers convert.
+
+**Duration — skipped (deliberate).** `hitlApprovalTimeout` stays `String`. Unlike the policy, `approvalTimeout` is uniformly `String` across every carrier (all three configs, the memory bookmark, `PendingApprovalSummary`, the transcript), so the convention favors `String`. And it is **not** wire-safe: the deployment sets `quarkus.jackson.write-dates-as-timestamps=true` with no `WRITE_DURATIONS_AS_TIMESTAMPS` override, so a `java.time.Duration` would serialize to a bare number (`900.0`) instead of `"PT15M"`, breaking the raw-over-REST OpenAPI/Manager-UI contract (the frontend reads it as an ISO-8601 string with a `PT15M` placeholder). A correct migration would need a whole-surface change + a custom ISO-8601 serializer + coordinated frontend work — a separate cross-cutting effort, out of scope for a review nit.
+
+**The `ConversationMemorySnapshot` regular surface keeps `String`** for both fields — it is a separate class with its own `parsePolicy(String)` path; only the group transcript was retyped. (A parallel enum change there is a possible follow-up but was left out to keep this diff scoped.)
+
+Verified: the four affected unit-test classes pass (`Tests run: 149, Failures: 0, Errors: 0`); surefire compiled the entire main + test tree first, so all call-sites type-check. Neither change is a correctness bug and the comment was a *"prefer"*, so this does not block the branch. `IRestAgentEngine.java` (reformatted by `formatter-maven-plugin` during the build, unrelated to this task) was restored and excluded. Nothing pushed.
+
+---
+
 ## 🧹 ChannelTargetRouter — drop dead getPlatformConfig() null-checks + duplicate allocations (2026-07-06)
 
 **Repo:** EDDI (`feat/hitl-framework`)

@@ -327,7 +327,7 @@ class GroupConversationServiceHitlCoverage2Test {
     private Method restoreMethod() throws NoSuchMethodException {
         return method("restoreGroupPause", GroupConversation.class, int.class, String.class,
                 HitlPauseType.class, Instant.class, AgentGroupConfiguration.class,
-                String.class, String.class);
+                HitlTimeoutPolicy.class, String.class);
     }
 
     @Test
@@ -343,12 +343,12 @@ class GroupConversationServiceHitlCoverage2Test {
 
         var pausedAt = Instant.now();
         invoke(restoreMethod(), gc, 1, "Gate", HitlPauseType.PHASE, pausedAt, config,
-                HitlTimeoutPolicy.WAIT_INDEFINITELY.name(), null);
+                HitlTimeoutPolicy.WAIT_INDEFINITELY, null);
 
         assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
         assertEquals(1, gc.getPausedAtPhaseIndex());
         assertEquals(pausedAt, gc.getPausedAt());
-        assertEquals(HitlTimeoutPolicy.AUTO_REJECT.name(), gc.getHitlTimeoutPolicy());
+        assertEquals(HitlTimeoutPolicy.AUTO_REJECT, gc.getHitlTimeoutPolicy());
         verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
         verify(scheduleStore).createSchedule(any());
     }
@@ -361,7 +361,7 @@ class GroupConversationServiceHitlCoverage2Test {
         var config = buildConfig(List.of(phase(PhaseType.OPINION))); // no hitlConfig
 
         invoke(restoreMethod(), gc, 0, "Gate", null, Instant.now(), config,
-                HitlTimeoutPolicy.WAIT_INDEFINITELY.name(), null);
+                HitlTimeoutPolicy.WAIT_INDEFINITELY, null);
 
         assertEquals(HitlPauseType.PHASE, gc.getHitlPauseType(),
                 "null pauseType must default to PHASE");
@@ -389,9 +389,9 @@ class GroupConversationServiceHitlCoverage2Test {
         doReturn(config).when(groupStore).read(GROUP_ID, 1);
 
         invoke(restoreMethod(), gc, 0, "Gate", HitlPauseType.PHASE, Instant.now(), null,
-                "FALLBACK_POLICY", "PT99M");
+                HitlTimeoutPolicy.AUTO_APPROVE, "PT99M");
 
-        assertEquals(HitlTimeoutPolicy.ABORT.name(), gc.getHitlTimeoutPolicy(),
+        assertEquals(HitlTimeoutPolicy.ABORT, gc.getHitlTimeoutPolicy(),
                 "fresh config policy wins over the fallback");
     }
 
@@ -403,9 +403,9 @@ class GroupConversationServiceHitlCoverage2Test {
         doThrow(new RuntimeException("store down")).when(groupStore).getCurrentResourceId(GROUP_ID);
 
         invoke(restoreMethod(), gc, 0, "Gate", HitlPauseType.PHASE, Instant.now(), null,
-                HitlTimeoutPolicy.AUTO_REJECT.name(), "PT20M");
+                HitlTimeoutPolicy.AUTO_REJECT, "PT20M");
 
-        assertEquals(HitlTimeoutPolicy.AUTO_REJECT.name(), gc.getHitlTimeoutPolicy(),
+        assertEquals(HitlTimeoutPolicy.AUTO_REJECT, gc.getHitlTimeoutPolicy(),
                 "captured fallback policy is used when config is unreadable");
         assertEquals("PT20M", gc.getHitlApprovalTimeout());
     }
@@ -418,9 +418,9 @@ class GroupConversationServiceHitlCoverage2Test {
         doReturn(null).when(groupStore).getCurrentResourceId(GROUP_ID);
 
         invoke(restoreMethod(), gc, 0, "Gate", HitlPauseType.PHASE, Instant.now(), null,
-                HitlTimeoutPolicy.ABORT.name(), "PT15M");
+                HitlTimeoutPolicy.ABORT, "PT15M");
 
-        assertEquals(HitlTimeoutPolicy.ABORT.name(), gc.getHitlTimeoutPolicy());
+        assertEquals(HitlTimeoutPolicy.ABORT, gc.getHitlTimeoutPolicy());
     }
 
     @Test
@@ -433,7 +433,7 @@ class GroupConversationServiceHitlCoverage2Test {
                 .when(conversationStore).updateIfState(any(), eq(GroupConversationState.IN_PROGRESS));
 
         assertDoesNotThrow(() -> invoke(restoreMethod(), gc, 0, "Gate", HitlPauseType.PHASE,
-                Instant.now(), config, HitlTimeoutPolicy.WAIT_INDEFINITELY.name(), null));
+                Instant.now(), config, HitlTimeoutPolicy.WAIT_INDEFINITELY, null));
     }
 
     // =================================================================

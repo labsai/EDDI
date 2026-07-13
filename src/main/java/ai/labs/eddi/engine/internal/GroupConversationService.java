@@ -592,11 +592,11 @@ public class GroupConversationService implements IGroupConversationService {
         if (config != null && config.getHitlConfig() != null) {
             var hitlConfig = config.getHitlConfig();
             gc.setHitlTimeoutPolicy(hitlConfig.getTimeoutPolicy() != null
-                    ? hitlConfig.getTimeoutPolicy().name()
-                    : HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+                    ? hitlConfig.getTimeoutPolicy()
+                    : HitlTimeoutPolicy.WAIT_INDEFINITELY);
             gc.setHitlApprovalTimeout(hitlConfig.getApprovalTimeout());
         } else {
-            gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+            gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
         }
         conversationStore.update(gc);
 
@@ -744,10 +744,10 @@ public class GroupConversationService implements IGroupConversationService {
     private void scheduleGroupHitlTimeout(GroupConversation gc) {
         try {
             String timeoutStr = gc.getHitlApprovalTimeout();
-            String policy = gc.getHitlTimeoutPolicy();
+            HitlTimeoutPolicy policy = gc.getHitlTimeoutPolicy();
             if (timeoutStr == null || timeoutStr.isBlank()
                     || policy == null
-                    || HitlTimeoutPolicy.WAIT_INDEFINITELY.name().equals(policy)) {
+                    || policy == HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                 return;
             }
 
@@ -773,7 +773,7 @@ public class GroupConversationService implements IGroupConversationService {
             schedule.setMetadata(java.util.Map.of(
                     ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_KEY,
                     ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_TIMEOUT,
-                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_POLICY_KEY, policy,
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_POLICY_KEY, policy.name(),
                     ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_SURFACE_KEY,
                     ai.labs.eddi.engine.hitl.HitlSchedules.SURFACE_GROUP,
                     ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_CONVERSATION_ID_KEY, gc.getId()));
@@ -834,7 +834,8 @@ public class GroupConversationService implements IGroupConversationService {
                 .map(gc -> {
                     var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
                             gc.getId(), null, gc.getUserId(), gc.getPausedAt(),
-                            gc.getHitlPauseReason(), gc.getHitlTimeoutPolicy());
+                            gc.getHitlPauseReason(),
+                            gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : null);
                     summary.setGroupId(gc.getGroupId());
                     summary.setApprovalTimeout(gc.getHitlApprovalTimeout());
                     return summary;
@@ -2867,7 +2868,7 @@ public class GroupConversationService implements IGroupConversationService {
         // finite policy instead of silently disarming it (persisting null →
         // WAIT_INDEFINITELY). #35: capture the original pausedAt for the same reason
         // — a restore must not shift a re-armed timeout's due time forward.
-        final String savedTimeoutPolicy = gc.getHitlTimeoutPolicy();
+        final HitlTimeoutPolicy savedTimeoutPolicy = gc.getHitlTimeoutPolicy();
         final String savedApprovalTimeout = gc.getHitlApprovalTimeout();
         final Instant originalPausedAt = gc.getPausedAt();
 
@@ -3051,7 +3052,7 @@ public class GroupConversationService implements IGroupConversationService {
     private void restoreGroupPause(GroupConversation gc, int phaseIndex, String phaseName,
                                    GroupConversation.HitlPauseType pauseType, Instant pausedAt,
                                    AgentGroupConfiguration configOrNull,
-                                   String fallbackTimeoutPolicy, String fallbackApprovalTimeout) {
+                                   HitlTimeoutPolicy fallbackTimeoutPolicy, String fallbackApprovalTimeout) {
         try {
             gc.setState(GroupConversationState.AWAITING_APPROVAL);
             gc.setPausedAt(pausedAt);
@@ -3076,8 +3077,8 @@ public class GroupConversationService implements IGroupConversationService {
             }
             if (config != null && config.getHitlConfig() != null) {
                 gc.setHitlTimeoutPolicy(config.getHitlConfig().getTimeoutPolicy() != null
-                        ? config.getHitlConfig().getTimeoutPolicy().name()
-                        : HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+                        ? config.getHitlConfig().getTimeoutPolicy()
+                        : HitlTimeoutPolicy.WAIT_INDEFINITELY);
                 gc.setHitlApprovalTimeout(config.getHitlConfig().getApprovalTimeout());
             } else {
                 // Config unreadable — preserve the original bookmark so a finite
