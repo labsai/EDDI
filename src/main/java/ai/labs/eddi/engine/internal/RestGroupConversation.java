@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -25,6 +26,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
@@ -53,6 +55,33 @@ public class RestGroupConversation implements IRestGroupConversation {
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
+    }
+
+    @PreDestroy
+    void shutdown() {
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Load a group conversation and verify it belongs to the group in the path.
+     * Throws {@link IResourceStore.ResourceNotFoundException} on mismatch so each
+     * caller's existing not-found handling (404 or SSE error) applies uniformly.
+     */
+    private GroupConversation loadInGroup(String groupId, String gcId)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        GroupConversation gc = groupConversationService.readGroupConversation(gcId);
+        if (gc.getGroupId() == null || !gc.getGroupId().equals(groupId)) {
+            throw new IResourceStore.ResourceNotFoundException("Group conversation not found in group: " + groupId);
+        }
+        return gc;
     }
 
     @Override
@@ -197,12 +226,9 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public Response followUpWithMember(String groupId, String gcId, FollowUpRequest request) {
         try {
-            GroupConversation gc = groupConversationService.readGroupConversation(gcId);
+            GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
-            String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
-            if (userId == null || userId.isBlank())
-                userId = gc.getUserId();
-            GroupConversation result = groupConversationService.followUpWithMember(gcId, request.targetAgentId(), request.question(), userId);
+            GroupConversation result = groupConversationService.followUpWithMember(gcId, request.targetAgentId(), request.question());
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
             throw e;
@@ -219,12 +245,9 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public Response continueDiscussion(String groupId, String gcId, DiscussRequest request) {
         try {
-            GroupConversation gc = groupConversationService.readGroupConversation(gcId);
+            GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
-            String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
-            if (userId == null || userId.isBlank())
-                userId = gc.getUserId();
-            GroupConversation result = groupConversationService.continueDiscussion(gcId, request.question(), userId, null);
+            GroupConversation result = groupConversationService.continueDiscussion(gcId, request.question(), null);
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
             throw e;
@@ -242,11 +265,8 @@ public class RestGroupConversation implements IRestGroupConversation {
     public void continueDiscussionStreaming(String groupId, String gcId, DiscussRequest request,
                                             SseEventSink eventSink, Sse sse) {
         try {
-            GroupConversation gc = groupConversationService.readGroupConversation(gcId);
+            GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
-            String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
-            if (userId == null || userId.isBlank())
-                userId = gc.getUserId();
 
             GroupDiscussionEventListener listener = new GroupDiscussionEventListener() {
                 @Override
@@ -307,16 +327,17 @@ public class RestGroupConversation implements IRestGroupConversation {
                 }
             };
 
-            final String resolvedUserId = userId;
             executorService.submit(() -> {
                 try {
-                    groupConversationService.continueDiscussion(gcId, request.question(), resolvedUserId, listener);
+                    groupConversationService.continueDiscussion(gcId, request.question(), listener);
                 } catch (Exception e) {
                     LOGGER.errorf("Continue discussion streaming failed: %s", e.getMessage());
                     listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
                 }
             });
 
+        } catch (ForbiddenException e) {
+            throw e;
         } catch (IResourceStore.ResourceNotFoundException e) {
             sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
                     toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
@@ -332,7 +353,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public Response closeGroupConversation(String groupId, String gcId) {
         try {
-            GroupConversation gc = groupConversationService.readGroupConversation(gcId);
+            GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
             GroupConversation result = groupConversationService.closeGroupConversation(gcId);
             return Response.ok(result).build();

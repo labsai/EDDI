@@ -322,11 +322,22 @@ public class GroupConversation {
     }
 
     public Map<String, String> getMemberDisplayNames() {
-        return memberDisplayNames;
+        return Collections.unmodifiableMap(memberDisplayNames);
     }
 
     public void setMemberDisplayNames(Map<String, String> memberDisplayNames) {
-        this.memberDisplayNames = memberDisplayNames != null ? memberDisplayNames : new LinkedHashMap<>();
+        this.memberDisplayNames = memberDisplayNames != null
+                ? new LinkedHashMap<>(memberDisplayNames)
+                : new LinkedHashMap<>();
+    }
+
+    /**
+     * Register a member's display name (agentId → displayName). Used at discussion
+     * start to populate the map. This is the supported mutation path —
+     * {@link #getMemberDisplayNames()} returns an unmodifiable view.
+     */
+    public void addMemberDisplayName(String agentId, String displayName) {
+        this.memberDisplayNames.put(agentId, displayName);
     }
 
     /**

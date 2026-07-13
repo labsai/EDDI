@@ -81,7 +81,7 @@ public interface IGroupConversationService {
      *         transcript
      */
     GroupConversation followUpWithMember(String groupConversationId, String targetAgentId,
-                                         String question, String userId)
+                                         String question)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     /**
@@ -91,7 +91,7 @@ public interface IGroupConversationService {
      * increments.
      */
     GroupConversation continueDiscussion(String groupConversationId, String question,
-                                         String userId, GroupDiscussionEventListener listener)
+                                         GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     /**

@@ -389,13 +389,11 @@ public class McpGroupTools {
     public String followup_with_member(
                                        @ToolArg(description = "Group conversation ID") String groupConversationId,
                                        @ToolArg(description = "Agent ID or display name of the member to address") String targetAgentId,
-                                       @ToolArg(description = "The follow-up question") String question,
-                                       @ToolArg(description = "User ID (optional, defaults to 'mcp-client')") String userId) {
+                                       @ToolArg(description = "The follow-up question") String question) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
-            String user = userId != null && !userId.isBlank() ? userId : "mcp-client";
             GroupConversation gc = groupConversationService.followUpWithMember(
-                    groupConversationId, targetAgentId, question, user);
+                    groupConversationId, targetAgentId, question);
             return jsonSerialization.serialize(gc);
         } catch (Exception e) {
             LOGGER.errorf("followup_with_member failed: %s", e.getMessage());
@@ -410,13 +408,11 @@ public class McpGroupTools {
             + "GroupConversation with new synthesis.")
     public String continue_group_discussion(
                                             @ToolArg(description = "Group conversation ID") String groupConversationId,
-                                            @ToolArg(description = "The follow-up question for the group") String question,
-                                            @ToolArg(description = "User ID (optional, defaults to 'mcp-client')") String userId) {
+                                            @ToolArg(description = "The follow-up question for the group") String question) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
-            String user = userId != null && !userId.isBlank() ? userId : "mcp-client";
             GroupConversation gc = groupConversationService.continueDiscussion(
-                    groupConversationId, question, user, null);
+                    groupConversationId, question, null);
             return jsonSerialization.serialize(gc);
         } catch (Exception e) {
             LOGGER.errorf("continue_group_discussion failed: %s", e.getMessage());

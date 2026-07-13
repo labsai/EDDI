@@ -5,9 +5,49 @@
 
 ---
 
+## 🔒 Group Conversation Follow-Ups — review-response hardening (2026-07-13)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Addresses static-analysis and code-review findings on [PR #595](https://github.com/labsai/EDDI/pull/595) (CodeQL, Copilot, CodeRabbit, GitHub Code Quality).
+
+### Security & correctness
+
+- **Log injection (CWE-117)**: sanitized user-controlled `groupConversationId` in log statements via `LogSanitizer.sanitize()` (`GroupConversationService` follow-up recovery, close, delete-not-found, and timeout-resolution paths).
+- **Group-path validation**: `followup` / `continue` / `continue/stream` / `close` now verify the conversation belongs to the `{groupId}` in the path — mismatches return `404` (SSE `group_error` for the stream) via a shared `loadInGroup()` helper. Closes a "wrong group path" access gap **and** resolves the unused-`groupId` findings.
+- **403 on streaming continue**: `continueDiscussionStreaming` now rethrows `ForbiddenException` so ownership failures map to HTTP `403` instead of a `200` SSE error event.
+
+### Concurrency
+
+- **Per-conversation operation guard**: `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` acquire a fail-fast in-process guard (`ConcurrentHashMap.newKeySet()`) keyed by conversation ID; a second concurrent operation on the same conversation is rejected (`409`) rather than racing the `compareAndSetState` read-check-update. **NOTE:** single-node only — cluster-wide atomicity would require a conditional update at the storage layer (documented as future hardening, not built here).
+
+### Resource lifecycle
+
+- **`@PreDestroy` on `RestGroupConversation`**: the virtual-thread executor is now shut down on bean destroy.
+- **Ephemeral cleanup on delete**: `deleteGroupConversation` now reclaims dynamically-created agents. Deferred cleanup previously ran only on `close`, so deleting a `COMPLETED` conversation orphaned them — this regression is introduced-and-fixed within the same feature branch. Extracted `cleanupEphemeralAgentsForGroup()` shared by close + delete.
+- **Known limitation**: a `COMPLETED` conversation that is never closed *or* deleted still retains its ephemeral agents. A TTL reaper (built on `ScheduleFireExecutor`) is the planned mitigation — tracked as a separate item.
+
+### API cleanup
+
+- **Removed dead `userId` param** from `followUpWithMember` / `continueDiscussion` (service interface, impl, REST, MCP tools). Ownership is validated via the stored conversation owner; the param was never used downstream.
+- **Configurable follow-up timeout**: the follow-up agent call now uses the group's `protocol.agentTimeoutSeconds()` (default 60, consistent with discussion turns) via `resolveAgentTimeoutSeconds()`, instead of a hardcoded 120s.
+- **Model encapsulation**: `GroupConversation.getMemberDisplayNames()` returns an unmodifiable view; population goes through the new `addMemberDisplayName()` method (the getter can no longer be mutated); the setter defensively copies.
+- **OpenAPI**: added `404` responses to `followup` / `continue`, and `200` / `404` + event listing (incl. `round_start`) to `continue/stream`.
+
+### Deliberately not done
+
+- **SSE listener factory extraction** (CodeRabbit nitpick): skipped — a pure DRY refactor of working, integration-only streaming code with no behavior gain.
+
+### What's next
+
+- TTL reaper for abandoned `COMPLETED` conversations (ephemeral-agent reclamation).
+- Optional cluster-wide atomic state transition at the storage layer if concurrent group operations become a real deployment concern.
+
+---
+
 ## ✨ Group Conversation Follow-Ups — member follow-up, continuation rounds, explicit close (2026-07-08)
 
-**Repo:** EDDI (`feat/group-conversation-followups`)
+**Repo:** EDDI (`feat/group-followups`)
 
 ### Summary
 
@@ -35,10 +75,10 @@ Adds three new interaction patterns for completed group conversations:
 
 ### Design decisions
 
-- **Concurrency**: `compareAndSetState(COMPLETED → IN_PROGRESS)` prevents two parallel follow-ups from overlapping; state restored to `COMPLETED` on error
+- **Concurrency**: `compareAndSetState(COMPLETED → IN_PROGRESS)` is a best-effort guard against overlapping follow-ups; state restored to `COMPLETED` on error. (Hardened on 2026-07-13 with a per-conversation in-process guard — see that entry.)
 - **Deferred cleanup**: Ephemeral agents survive until explicit close so follow-ups can use dynamically-created agents; immediate cleanup only on failure
 - **No TranscriptEntry.round field**: Round boundaries are inferred from `QUESTION` entries in the transcript — avoids churn on the 13-field record with 4 constructors
-- **Plain text follow-up input**: The agent's private conversation already has full context from prior group turns; no need to re-inject the transcript into the input
+- **Plain-text follow-up *input***: The follow-up **input** is the plain question; the full transcript is still provided via the `groupTranscript` **context** variable (not re-injected into the input text), and the agent's private conversation retains prior turns
 
 ### Client experience improvements (follow-up commit)
 

@@ -84,6 +84,7 @@ public interface IRestGroupConversation {
                        + "The targetAgentId field accepts either an agent ID or a display name. "
                        + "Returns the full updated GroupConversation including the new transcript entries.")
     @APIResponse(responseCode = "200", description = "Updated group conversation with follow-up on transcript.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
     @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state.")
     Response followUpWithMember(@PathParam("groupId") String groupId,
                                 @PathParam("groupConversationId") String gcId,
@@ -97,6 +98,7 @@ public interface IRestGroupConversation {
                description = "Re-run all discussion phases with a new question. All agents retain "
                        + "memory of prior rounds. The round counter increments.")
     @APIResponse(responseCode = "200", description = "Updated group conversation with new round.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
     @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state.")
     Response continueDiscussion(@PathParam("groupId") String groupId,
                                 @PathParam("groupConversationId") String gcId,
@@ -107,7 +109,12 @@ public interface IRestGroupConversation {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @Operation(summary = "Continue a group discussion with SSE streaming",
-               description = "Re-run all discussion phases with SSE event streaming for progress.")
+               description = "Re-run all discussion phases with SSE event streaming for progress. "
+                       + "Emits round_start (new round marker) followed by the same events as the "
+                       + "initial stream (phase_start, speaker_start, speaker_complete, phase_complete, "
+                       + "synthesis_start, group_complete, group_error).")
+    @APIResponse(responseCode = "200", description = "SSE event stream of continuation progress.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
     void continueDiscussionStreaming(@PathParam("groupId") String groupId,
                                      @PathParam("groupConversationId") String gcId,
                                      DiscussRequest request,
