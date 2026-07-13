@@ -311,6 +311,40 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     /**
+     * Re-hydrate a group conversation's shared attachments from the durable blob
+     * store. {@link GroupConversation#getAttachments()} is {@code @JsonIgnore}
+     * transient, so a GC reloaded on a HITL resume has lost them; without this, a
+     * member whose first turn lands after the resume gets neither the blob grant
+     * nor the {@code attachment_*} context from {@link #grantAndInjectAttachments}.
+     * <p>
+     * No-op when attachments are already present (fresh discussion — set by
+     * {@link #materializeAttachments}) or when the store holds none. URL-only
+     * attachments are not blob-backed and are intentionally not recovered here.
+     */
+    void rehydrateAttachmentsFromStore(GroupConversation gc) {
+        if (attachmentStore == null || gc.getAttachments() != null && !gc.getAttachments().isEmpty()) {
+            return;
+        }
+        try {
+            var storedAttachments = attachmentStore.listByConversation(gc.getId());
+            if (storedAttachments.isEmpty()) {
+                return;
+            }
+            List<Attachment> rehydrated = new ArrayList<>();
+            for (var stored : storedAttachments) {
+                rehydrated.add(new Attachment(stored.mimeType(), stored.filename(),
+                        stored.sizeBytes(), stored.storageRef()));
+            }
+            gc.setAttachments(rehydrated);
+            LOGGER.infof("Re-hydrated %d shared attachment(s) for group conversation '%s' from the blob store",
+                    rehydrated.size(), gc.getId());
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to re-hydrate shared attachments for group conversation '%s': %s",
+                    gc.getId(), e.getMessage());
+        }
+    }
+
+    /**
      * Grant a member conversation access to the group's stored attachments and
      * inject them as {@code attachment_*} context on the member's first turn. URL
      * references are forwarded as-is (no grant needed).
@@ -374,6 +408,11 @@ public class GroupConversationService implements IGroupConversationService {
         // can pass it to member agents via context variables, allowing
         // AgentOrchestrator to enforce group-level guardrails on dynamic tools.
         gc.setDynamicAgentConfig(config.getDynamicAgents());
+
+        // Re-hydrate shared attachments (transient like dynamicAgentConfig above) from
+        // the durable blob store so a HITL resume doesn't silently drop them for a
+        // member whose first turn lands after the resume. See the method comment.
+        rehydrateAttachmentsFromStore(gc);
 
         // AtomicInteger: shared across the phase loop; parallel phases increment
         // from virtual threads. Seed from pausedTurnCount to preserve budget across

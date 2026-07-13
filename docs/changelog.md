@@ -5,6 +5,20 @@
 
 ---
 
+## 🐛 Multimodal Attachments Completion — Fix: group attachments lost on HITL resume (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Found by a critical adversarial re-review of the `origin/main` merge (10-dimension workflow + per-finding refutation). A **merge-emergent** bug — neither parent could exhibit it alone: our branch added group-shared attachments; `origin/main` added group HITL pause/resume; combined, they interact badly.
+
+**Bug:** `GroupConversation.attachments` is `@JsonIgnore` transient (the durable copy is the blob store). `resumeDiscussion()` reloads a fresh GC from the store, so `getAttachments()` is null; `executeDiscussion()` re-seeded the sibling transient field `dynamicAgentConfig` but **not** `attachments`. Result: a member speaking for the first time *after* a HITL resume got neither the blob-store grant nor the `attachment_*` context — blind to the shared files. Compiles cleanly; runtime-only.
+
+**Fix:** new package-private `rehydrateAttachmentsFromStore(gc)`, called in `executeDiscussion` right after the `dynamicAgentConfig` re-seed (so the two transient fields are handled symmetrically in one place). It rebuilds the metadata list from `IAttachmentStore.listByConversation(gc.getId())` when the in-memory list is empty — keeping the blob store as the single source of truth (no dangling refs after erasure) with **no persistence-schema change**. Guarded by null/empty (not `startPhaseIndex`, since a task-level pause in phase 0 resumes at index 0). **Known limitation:** URL-only attachments are not blob-backed and are not recovered on resume (documented in code; a follow-up can persist those if it becomes a real need).
+
+4 unit tests added (`rehydrate_*`); `GroupConversationServiceTest` + `RestGroupConversationTest` green. The rest of the merge review came back clean — 9/10 dimensions no findings, and the integration sweep confirmed the conflict resolutions themselves are correct (clean unions, no mis-picked sides, consistent call sites).
+
+---
+
 ## 📎 Multimodal Attachments Completion — Human review fixes: FQN → imports (2026-07-13)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)

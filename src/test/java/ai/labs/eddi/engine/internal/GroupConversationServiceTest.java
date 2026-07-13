@@ -216,6 +216,62 @@ class GroupConversationServiceTest {
             service.grantAndInjectAttachments(gc("gc-1"), "m", context);
             assertTrue(context.isEmpty());
         }
+
+        // rehydrateAttachmentsFromStore — recovers the transient attachments list
+        // after a HITL resume reloads the GroupConversation (attachments are
+        // @JsonIgnore transient, so a reloaded GC has none).
+
+        @Test
+        void rehydrate_nullAttachments_rebuildsFromStore() {
+            var store = mock(IAttachmentStore.class);
+            service.attachmentStore = store;
+            when(store.listByConversation("gc-1")).thenReturn(
+                    List.of(new IAttachmentStore.Attachment("ref-1", "doc.pdf", "application/pdf", 10, "gc-1")));
+            var gc = gc("gc-1");
+
+            service.rehydrateAttachmentsFromStore(gc);
+
+            assertEquals(1, gc.getAttachments().size());
+            assertEquals("ref-1", gc.getAttachments().get(0).getStorageRef());
+            assertEquals("doc.pdf", gc.getAttachments().get(0).getFileName());
+            assertEquals("application/pdf", gc.getAttachments().get(0).getMimeType());
+            assertEquals(10L, gc.getAttachments().get(0).getSizeBytes());
+        }
+
+        @Test
+        void rehydrate_attachmentsAlreadyPresent_noop() {
+            var store = mock(IAttachmentStore.class);
+            service.attachmentStore = store;
+            var gc = gc("gc-1");
+            gc.setAttachments(List.of(new Attachment("image/png", "keep.png", 5, "ref-keep")));
+
+            service.rehydrateAttachmentsFromStore(gc);
+
+            // fresh discussion already has its list — the store must not be consulted
+            verifyNoInteractions(store);
+            assertEquals(1, gc.getAttachments().size());
+            assertEquals("ref-keep", gc.getAttachments().get(0).getStorageRef());
+        }
+
+        @Test
+        void rehydrate_emptyStore_leavesAttachmentsNull() {
+            var store = mock(IAttachmentStore.class);
+            service.attachmentStore = store;
+            when(store.listByConversation("gc-1")).thenReturn(List.of());
+
+            var gc = gc("gc-1");
+            service.rehydrateAttachmentsFromStore(gc);
+
+            assertNull(gc.getAttachments());
+        }
+
+        @Test
+        void rehydrate_noStore_noop() {
+            service.attachmentStore = null;
+            var gc = gc("gc-1");
+            service.rehydrateAttachmentsFromStore(gc);
+            assertNull(gc.getAttachments());
+        }
     }
 
     // =================================================================
