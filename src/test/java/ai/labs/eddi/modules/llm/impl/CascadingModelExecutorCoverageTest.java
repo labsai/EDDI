@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -110,7 +111,7 @@ class CascadingModelExecutorCoverageTest {
         when(registry.getOrCreate(anyString(), anyMap())).thenReturn(mock(ChatModel.class));
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
-        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any()))
+        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", List.of(Map.of("type", "tool_call"))));
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null), orchestrator,
@@ -141,7 +142,7 @@ class CascadingModelExecutorCoverageTest {
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
         // Hedging → heuristic ~0.4 < 0.9 → escalate to step 2 (last, accepted).
-        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any()))
+        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("I'm not sure, I don't know.", List.of()));
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null), orchestrator,
@@ -168,13 +169,46 @@ class CascadingModelExecutorCoverageTest {
         when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
-        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any())).thenReturn(null); // no tools
+        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt())).thenReturn(null); // no tools
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null), orchestrator,
                 Map.of(), false, false, false);
 
         assertEquals("legacy answer", result.response());
         assertNull(result.agentResult());
+    }
+
+    @Test
+    @DisplayName("agent-mode step throws ToolApprovalRequiredException — rethrown, never demoted to escalation")
+    void agentMode_toolApprovalRequired_rethrown() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEnableInAgentMode(true);
+        cascade.setEvaluationStrategy("none");
+        // Two steps: a pause on the FIRST must NOT be swallowed into escalation.
+        var step1 = new CascadeStep();
+        step1.setType("openai");
+        step1.setConfidenceThreshold(0.5);
+        var step2 = new CascadeStep();
+        step2.setType("anthropic");
+        cascade.setSteps(List.of(step1, step2));
+
+        var task = task();
+        task.setEnableBuiltInTools(true); // → isAgentMode() == true
+
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(mock(ChatModel.class));
+
+        var pause = new ToolApprovalRequiredException("needs human approval", null);
+        AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
+        doThrow(pause).when(orchestrator)
+                .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt());
+
+        var thrown = assertThrows(ToolApprovalRequiredException.class,
+                () -> executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null),
+                        orchestrator, Map.of(), false, false, false));
+
+        assertSame(pause, thrown, "the exact pause signal must propagate unchanged (not demoted to a failed step)");
     }
 
     // ─── Live streaming of the final step ────────────────────────────

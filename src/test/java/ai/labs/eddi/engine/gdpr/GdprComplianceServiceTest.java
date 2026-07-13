@@ -8,7 +8,8 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -42,9 +43,13 @@ class GdprComplianceServiceTest {
     private IDatabaseLogs databaseLogs;
     private IAuditStore auditStore;
     private AuditLedgerService auditLedgerService;
+    private IHitlToolJournalStore hitlToolJournalStore;
     private GdprComplianceService service;
+    private Instance<IAttachmentStore> attachmentStorageInstance;
+    private IAttachmentStore attachmentStore;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         userMemoryStore = mock(IUserMemoryStore.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
@@ -52,15 +57,16 @@ class GdprComplianceServiceTest {
         databaseLogs = mock(IDatabaseLogs.class);
         auditStore = mock(IAuditStore.class);
         auditLedgerService = mock(AuditLedgerService.class);
+        hitlToolJournalStore = mock(IHitlToolJournalStore.class);
 
-        @SuppressWarnings("unchecked")
-        Instance<IAttachmentStorage> attachmentStorageInstance = mock(Instance.class);
+        attachmentStorageInstance = mock(Instance.class);
+        attachmentStore = mock(IAttachmentStore.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
 
         service = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachmentStorageInstance);
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore);
     }
 
     @Test
@@ -93,6 +99,52 @@ class GdprComplianceServiceTest {
         verify(userConversationStore).deleteAllForUser(USER_ID);
         verify(databaseLogs).pseudonymizeByUserId(eq(USER_ID), anyString());
         verify(auditStore).pseudonymizeByUserId(eq(USER_ID), anyString());
+    }
+
+    @Test
+    void deleteUserData_deletesHitlToolJournalEntries() throws Exception {
+        // Given — user has two conversations, each with journal entries
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-1", "conv-2"));
+        when(hitlToolJournalStore.deleteByConversationId("conv-1")).thenReturn(2L);
+        when(hitlToolJournalStore.deleteByConversationId("conv-2")).thenReturn(3L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(2L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        // When
+        service.deleteUserData(USER_ID);
+
+        // Then — journal deletion runs per conversation, BEFORE conversations are
+        // deleted
+        var inOrder = inOrder(hitlToolJournalStore, conversationMemoryStore);
+        inOrder.verify(hitlToolJournalStore).deleteByConversationId("conv-1");
+        inOrder.verify(hitlToolJournalStore).deleteByConversationId("conv-2");
+        inOrder.verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
+    }
+
+    @Test
+    void deleteUserData_continuesWhenJournalDeleteFails() throws Exception {
+        // Given — journal store throws, but the cascade must continue
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-1"));
+        when(hitlToolJournalStore.deleteByConversationId("conv-1"))
+                .thenThrow(new RuntimeException("Journal store unavailable"));
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(1L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        // When — should not throw
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        // Then — cascade continued past the journal failure
+        assertNotNull(result);
+        assertEquals(1, result.conversationsDeleted());
+        verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
     }
 
     @Test
@@ -154,9 +206,9 @@ class GdprComplianceServiceTest {
     @SuppressWarnings("unchecked")
     void deleteUserData_deletesAttachmentsWhenStorageAvailable() throws Exception {
         // Given — attachment storage is resolvable
-        Instance<IAttachmentStorage> attachInstance = mock(Instance.class);
+        Instance<IAttachmentStore> attachInstance = mock(Instance.class);
         when(attachInstance.isResolvable()).thenReturn(true);
-        var attachmentStorage = mock(IAttachmentStorage.class);
+        var attachmentStorage = mock(IAttachmentStore.class);
         when(attachInstance.get()).thenReturn(attachmentStorage);
         when(attachmentStorage.deleteByConversation("conv-1")).thenReturn(2L);
         when(attachmentStorage.deleteByConversation("conv-2")).thenReturn(3L);
@@ -164,7 +216,7 @@ class GdprComplianceServiceTest {
         var serviceWithAttachments = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachInstance);
+                auditLedgerService, attachInstance, hitlToolJournalStore);
 
         when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
@@ -187,15 +239,15 @@ class GdprComplianceServiceTest {
     @SuppressWarnings("unchecked")
     void deleteUserData_handlesAttachmentFailureGracefully() throws Exception {
         // Given — attachment storage throws
-        Instance<IAttachmentStorage> attachInstance = mock(Instance.class);
+        Instance<IAttachmentStore> attachInstance = mock(Instance.class);
         when(attachInstance.isResolvable()).thenReturn(true);
-        var attachmentStorage = mock(IAttachmentStorage.class);
+        var attachmentStorage = mock(IAttachmentStore.class);
         when(attachInstance.get()).thenReturn(attachmentStorage);
 
         var serviceWithAttachments = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachInstance);
+                auditLedgerService, attachInstance, hitlToolJournalStore);
 
         when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
@@ -249,6 +301,30 @@ class GdprComplianceServiceTest {
         assertEquals("conv-1", convExport.conversationId());
         assertEquals("agent-1", convExport.agentId());
         assertEquals(ConversationState.ENDED, convExport.state());
+    }
+
+    @Test
+    void exportUserData_includesAttachmentMetadata() throws Exception {
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(null);
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt())).thenReturn(List.of());
+
+        when(attachmentStorageInstance.isResolvable()).thenReturn(true);
+        when(attachmentStorageInstance.get()).thenReturn(attachmentStore);
+        when(attachmentStore.listByConversation("conv-1")).thenReturn(List.of(
+                new IAttachmentStore.Attachment("ref-1", "report.pdf", "application/pdf", 2048, "conv-1")));
+
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        assertEquals(1, export.attachments().size());
+        var a = export.attachments().getFirst();
+        assertEquals("conv-1", a.conversationId());
+        assertEquals("ref-1", a.storageRef());
+        assertEquals("report.pdf", a.fileName());
+        assertEquals("application/pdf", a.mimeType());
+        assertEquals(2048, a.sizeBytes());
     }
 
     @Test

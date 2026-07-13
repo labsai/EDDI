@@ -82,15 +82,18 @@ public class SharedTaskList {
     /**
      * Task lifecycle states.
      * <p>
-     * {@code BLOCKED} and {@code AWAITING_APPROVAL} are placeholders for Phase 9b
-     * (HITL — Human-in-the-Loop). They are recognized by {@link #failTask} as
-     * non-terminal but no code transitions into them yet.
+     * {@code AWAITING_APPROVAL} is the HITL (Human-in-the-Loop) approval gate with
+     * full lifecycle support: {@link #submitForApproval} transitions into it, and
+     * {@link #approveTask}, {@link #rejectTask}, and
+     * {@link #resetFromAnyToAssigned} transition out of it. {@code BLOCKED} remains
+     * reserved (recognized by {@link #failTask} as non-terminal) for
+     * dependency/resource blocking.
      */
     public enum TaskStatus {
         PENDING, ASSIGNED, IN_PROGRESS, COMPLETED, VERIFIED, FAILED,
-        /** Phase 9b placeholder — task blocked by unmet dependency or resource. */
+        /** Reserved — task blocked by an unmet dependency or resource. */
         BLOCKED,
-        /** Phase 9b placeholder — task requires human approval before proceeding. */
+        /** HITL gate — task requires human approval before proceeding. */
         AWAITING_APPROVAL
     }
 
@@ -274,6 +277,87 @@ public class SharedTaskList {
                 existing.priority(), existing.createdAt(), Instant.now());
         replaceTask(taskId, updated);
         return updated;
+    }
+
+    // --- HITL task lifecycle ---
+
+    /** IN_PROGRESS → AWAITING_APPROVAL, preserving the agent's answer in result. */
+    public synchronized TaskItem submitForApproval(String taskId, String result) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() != TaskStatus.IN_PROGRESS)
+            throw new IllegalStateException("submitForApproval '%s': expected IN_PROGRESS but was %s".formatted(taskId, t.status()));
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.AWAITING_APPROVAL,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), result,
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt());
+        replaceTask(taskId, u);
+        return u;
+    }
+
+    /** AWAITING_APPROVAL → COMPLETED (result already stored). */
+    public synchronized TaskItem approveTask(String taskId) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() != TaskStatus.AWAITING_APPROVAL)
+            throw new IllegalStateException("approveTask '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.COMPLETED,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now());
+        replaceTask(taskId, u);
+        return u;
+    }
+
+    /** AWAITING_APPROVAL → FAILED. */
+    public synchronized TaskItem rejectTask(String taskId, String rejectionNote) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() != TaskStatus.AWAITING_APPROVAL)
+            throw new IllegalStateException("rejectTask '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.FAILED,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
+                rejectionNote, false, t.priority(), t.createdAt(), Instant.now());
+        replaceTask(taskId, u);
+        return u;
+    }
+
+    /** IN_PROGRESS → ASSIGNED. */
+    public synchronized TaskItem resetToAssigned(String taskId) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() != TaskStatus.IN_PROGRESS)
+            throw new IllegalStateException("resetToAssigned '%s': expected IN_PROGRESS but was %s".formatted(taskId, t.status()));
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt());
+        replaceTask(taskId, u);
+        return u;
+    }
+
+    /**
+     * AWAITING_APPROVAL / IN_PROGRESS / FAILED → ASSIGNED. Used by the RETRY
+     * rejection policy to re-queue tasks for another attempt. Clears the prior
+     * result but stores the reviewer's feedback in {@code verificationNote} so the
+     * re-executing agent knows why the first attempt was rejected. ASSIGNED is a
+     * no-op; any other status (PENDING, COMPLETED, VERIFIED) throws.
+     */
+    public synchronized TaskItem resetFromAnyToAssigned(String taskId, String reviewerFeedback) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() == TaskStatus.ASSIGNED) {
+            return t; // already assignable — no-op
+        }
+        if (t.status() != TaskStatus.AWAITING_APPROVAL
+                && t.status() != TaskStatus.IN_PROGRESS
+                && t.status() != TaskStatus.FAILED) {
+            throw new IllegalStateException(
+                    "resetFromAnyToAssigned '%s': expected AWAITING_APPROVAL/IN_PROGRESS/FAILED but was %s"
+                            .formatted(taskId, t.status()));
+        }
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), null,
+                reviewerFeedback, false, t.priority(), t.createdAt(), null);
+        replaceTask(taskId, u);
+        return u;
+    }
+
+    /** Post-join detection query for the per-task gate (Invariant 4). */
+    public synchronized boolean hasAwaitingApproval() {
+        return all().stream().anyMatch(t -> t.status() == TaskStatus.AWAITING_APPROVAL);
     }
 
     // --- Internal helpers ---

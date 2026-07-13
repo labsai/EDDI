@@ -61,6 +61,12 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
             ((Agent) agent).setMemoryPolicy(agentConfig.getMemoryPolicy());
         }
 
+        // Tool-level HITL: carry the agent-level tool-approval config so the gate is
+        // honored on the CONVERSATION_START (init) turn, not just say/resume turns.
+        if (agentConfig.getHitlConfig() != null) {
+            ((Agent) agent).setToolApprovalsConfig(agentConfig.getHitlConfig().getToolApprovals());
+        }
+
         return agent;
     }
 }

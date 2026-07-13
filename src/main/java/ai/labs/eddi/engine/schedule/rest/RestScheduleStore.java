@@ -15,6 +15,8 @@ import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -27,6 +29,9 @@ import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * JAX-RS implementation of {@link IRestScheduleStore}.
@@ -39,6 +44,16 @@ public class RestScheduleStore implements IRestScheduleStore {
 
     private static final Logger LOGGER = Logger.getLogger(RestScheduleStore.class);
 
+    /**
+     * Metadata marker key/value identifying HITL approval-timeout schedules. Such
+     * schedules are safety timers behind the human-oversight gate — the general
+     * schedule CRUD surface must not let a non-admin fire them (which would
+     * side-step the owner/admin/approver check on {@code /resume}) or disarm them
+     * (defeating an ABORT/AUTO_REJECT deadline).
+     */
+    private static final String HITL_TYPE_KEY = ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_KEY;
+    private static final String HITL_TYPE_TIMEOUT = ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_TIMEOUT;
+
     @Inject
     IScheduleStore scheduleStore;
 
@@ -47,6 +62,12 @@ public class RestScheduleStore implements IRestScheduleStore {
 
     @Inject
     SchedulePollerService pollerService;
+
+    @Inject
+    SecurityIdentity identity;
+
+    @Inject
+    OwnershipValidator ownershipValidator;
 
     @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC")
     String defaultTimeZone;
@@ -62,6 +83,11 @@ public class RestScheduleStore implements IRestScheduleStore {
                 schedules = scheduleStore.readSchedulesByAgentId(agentId);
             } else {
                 schedules = scheduleStore.readAllSchedules(500); // Fix #12
+            }
+            // Redact HITL timeout schedules from non-admins so a plain editor
+            // cannot enumerate hitl-timeout-* entries to locate and fire them.
+            if (!ownershipValidator.isAdmin(identity)) {
+                schedules = schedules.stream().filter(s -> !isHitlSchedule(s)).toList();
             }
             // Enrich with cron descriptions
             schedules.forEach(this::enrichCronDescription);
@@ -89,6 +115,17 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public Response createSchedule(ScheduleConfiguration schedule) {
         try {
+            // G3: HITL timeout schedules are minted ONLY internally (ConversationService,
+            // GroupConversationService, crash recovery — none of which go through REST).
+            // Reject any request body carrying the hitl_timeout marker for EVERYONE
+            // (even admins): a forged timeout schedule would let the poller
+            // force-resume/abort a victim's pending approval with a system actor,
+            // side-stepping the owner/admin/approver check on /resume.
+            Response bodyGuard = rejectHitlTimeoutBody(schedule, "create");
+            if (bodyGuard != null) {
+                return bodyGuard;
+            }
+
             // Validate
             validateSchedule(schedule);
 
@@ -115,6 +152,23 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public Response updateSchedule(String scheduleId, ScheduleConfiguration schedule) {
         try {
+            // G3: reject any request body that would CONVERT a schedule into a HITL
+            // timeout (checked on the incoming body — for EVERYONE, even admins),
+            // closing the create/update forgery path that side-steps the /resume gate.
+            Response bodyGuard = rejectHitlTimeoutBody(schedule, "update");
+            if (bodyGuard != null) {
+                return bodyGuard;
+            }
+
+            // A HITL timeout schedule is a safety timer — a plain editor must not
+            // be able to mutate it (e.g. push its nextFire far out to defeat an
+            // ABORT/AUTO_REJECT deadline). Detect via the STORED schedule so a
+            // request body that omits the metadata cannot bypass the check.
+            Response guard = requireAdminForHitl(scheduleId, "update");
+            if (guard != null) {
+                return guard;
+            }
+
             validateSchedule(schedule);
 
             // Recompute nextFire
@@ -136,6 +190,14 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public Response deleteSchedule(String scheduleId) {
         try {
+            // Deleting a HITL timeout schedule disarms a safety deadline — restrict
+            // to admins so an editor cannot leave a paused conversation with no
+            // ABORT/AUTO_REJECT resolution. The conventional cleanup path is
+            // POST /agents/{conversationId}/resume or .../cancel.
+            Response guard = requireAdminForHitl(scheduleId, "delete");
+            if (guard != null) {
+                return guard;
+            }
             scheduleStore.deleteSchedule(scheduleId);
             return Response.noContent().build();
         } catch (Exception e) {
@@ -146,11 +208,20 @@ public class RestScheduleStore implements IRestScheduleStore {
 
     @Override
     public Response enableSchedule(String scheduleId) {
+        Response guard = requireAdminForHitl(scheduleId, "enable");
+        if (guard != null) {
+            return guard;
+        }
         return setEnabled(scheduleId, true);
     }
 
     @Override
     public Response disableSchedule(String scheduleId) {
+        // Disabling a HITL timeout schedule is equivalent to disarming it.
+        Response guard = requireAdminForHitl(scheduleId, "disable");
+        if (guard != null) {
+            return guard;
+        }
         return setEnabled(scheduleId, false);
     }
 
@@ -158,6 +229,21 @@ public class RestScheduleStore implements IRestScheduleStore {
     public Response fireNow(String scheduleId) {
         try {
             ScheduleConfiguration schedule = scheduleStore.readSchedule(scheduleId);
+            // A HITL timeout schedule fires the configured AUTO_APPROVE/AUTO_REJECT/
+            // ABORT decision with a system actor and NO owner/admin/approver check.
+            // Manually firing it here would side-step the authorization gate on
+            // POST /agents/{conversationId}/resume, so refuse for EVERYONE — the
+            // human decision must go through /resume or /cancel. Internal firing
+            // via SchedulePollerService bypasses this REST surface and is unaffected.
+            if (isHitlSchedule(schedule)) {
+                LOGGER.warnf("Refused manual fire of HITL timeout schedule %s (name=%s) — "
+                        + "human decisions must go through /resume or /cancel", sanitize(scheduleId), sanitize(schedule.getName()));
+                return Response.status(Response.Status.CONFLICT)
+                        .entity("This schedule is a human-in-the-loop approval timeout and cannot be fired manually. "
+                                + "Approve or reject via POST /agents/{conversationId}/resume, "
+                                + "or terminate via POST /agents/{conversationId}/cancel.")
+                        .build();
+            }
             ScheduleFireLog fireLog = fireExecutor.fire(schedule, pollerService.getInstanceId(), 1);
             return Response.ok(fireLog).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -191,6 +277,14 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public Response retryDeadLetter(String scheduleId) {
         try {
+            // A HITL timeout schedule is a safety timer: requeuing it re-arms the
+            // AUTO_REJECT/AUTO_APPROVE/ABORT decision on a system actor. Like every
+            // other HITL mutation (update/delete/enable/disable), restrict it to
+            // admins so an editor cannot manipulate another user's pending approval.
+            Response guard = requireAdminForHitl(scheduleId, "retry");
+            if (guard != null) {
+                return guard;
+            }
             scheduleStore.requeueDeadLetter(scheduleId);
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -205,6 +299,14 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public Response dismissDeadLetter(String scheduleId) {
         try {
+            // Dismissing a one-shot HITL timeout schedule disarms it permanently
+            // (markCompleted with a null nextFire disables it) — exactly the
+            // "editor cannot disarm an ABORT/AUTO_REJECT safety timeout" guarantee the
+            // other mutation paths enforce. Require admin here too.
+            Response guard = requireAdminForHitl(scheduleId, "dismiss");
+            if (guard != null) {
+                return guard;
+            }
             ScheduleConfiguration schedule = scheduleStore.readSchedule(scheduleId);
             Instant nextFire = computeNextFireForSchedule(schedule);
             scheduleStore.markCompleted(scheduleId, nextFire);
@@ -218,6 +320,75 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     // --- Helpers ---
+
+    /** True if the schedule carries the HITL approval-timeout metadata marker. */
+    private static boolean isHitlSchedule(ScheduleConfiguration schedule) {
+        Map<String, Object> md = schedule != null ? schedule.getMetadata() : null;
+        return md != null && HITL_TYPE_TIMEOUT.equals(md.get(HITL_TYPE_KEY));
+    }
+
+    /**
+     * G3: refuses a create/update whose request BODY declares the schedule as a
+     * HITL approval timeout. These schedules are only ever minted internally (they
+     * bypass REST), so no REST caller — admin or editor — has a legitimate reason
+     * to forge one; letting them would hand an attacker a way to force-resume/abort
+     * another user's pending approval with a system actor and no authorization
+     * check.
+     *
+     * @return a 400 {@link Response} to short-circuit the caller when the body is a
+     *         HITL timeout schedule; {@code null} when the operation may proceed
+     */
+    private Response rejectHitlTimeoutBody(ScheduleConfiguration schedule, String operation) {
+        if (isHitlSchedule(schedule)) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares hitlType=%s — "
+                    + "HITL timeout schedules are minted internally only", operation, HITL_TYPE_TIMEOUT);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules marked as human-in-the-loop approval timeouts (metadata hitlType="
+                            + HITL_TYPE_TIMEOUT + ") cannot be created or updated via this API. "
+                            + "They are managed automatically by the HITL framework. "
+                            + "Resolve a pending approval via POST /agents/{conversationId}/resume or .../cancel.")
+                    .build();
+        }
+        return null;
+    }
+
+    /**
+     * For mutating operations on a HITL timeout schedule, require the eddi-admin
+     * role. Reads the STORED schedule so a request body cannot hide the marker. The
+     * guard fails CLOSED: only a genuine not-found falls through (so the downstream
+     * op surfaces its own 404); any other read/verification failure returns 500 and
+     * STOPS the operation, so a transient store error can never let a non-admin
+     * mutate a schedule that might be a HITL safety timeout.
+     *
+     * @return a 403/500 {@link Response} to short-circuit the caller when the
+     *         target is (or cannot be proven not to be) a HITL schedule;
+     *         {@code null} only when the schedule is confirmed non-HITL or
+     *         genuinely absent
+     */
+    private Response requireAdminForHitl(String scheduleId, String operation) {
+        ScheduleConfiguration stored;
+        try {
+            stored = scheduleStore.readSchedule(scheduleId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null; // no schedule to protect — let the downstream op surface its 404
+        } catch (Exception e) {
+            // Fail closed: we could not prove this is NOT a HITL safety timeout, so we
+            // must not let the mutation proceed unauthenticated.
+            LOGGER.error("Failed to verify HITL guard for schedule " + sanitize(scheduleId) + " (" + sanitize(operation) + ")", e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity("Unable to verify schedule authorization; refusing to " + operation + " schedule.")
+                    .build();
+        }
+        if (isHitlSchedule(stored) && !ownershipValidator.isAdmin(identity)) {
+            LOGGER.warnf("Refused %s of HITL timeout schedule %s (name=%s) by non-admin",
+                    sanitize(operation), sanitize(scheduleId), sanitize(stored.getName()));
+            return Response.status(Response.Status.FORBIDDEN)
+                    .entity("This schedule is a human-in-the-loop approval timeout; only an administrator may " + operation
+                            + " it. The pending approval is resolved via POST /agents/{conversationId}/resume or .../cancel.")
+                    .build();
+        }
+        return null;
+    }
 
     // Fix #3: Atomic enable/disable instead of read-then-write race
     private Response setEnabled(String scheduleId, boolean enabled) {

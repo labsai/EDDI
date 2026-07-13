@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -12,6 +13,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.inject.Instance;
@@ -20,6 +22,7 @@ import java.sql.*;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -59,10 +62,20 @@ public class PostgresScheduleStore implements IScheduleStore {
                 fire_id VARCHAR(255),
                 fail_count INTEGER NOT NULL DEFAULT 0,
                 next_retry_at BIGINT,
+                metadata JSONB,
                 created_at BIGINT,
                 updated_at BIGINT
             )
             """;
+
+    /**
+     * Adds the {@code metadata} column to schedule tables created before it
+     * existed. Mongo persists the full document, so HITL timeout metadata
+     * (hitlType/policy/surface/conversationId) has always survived there; this
+     * keeps Postgres at parity — without it the HITL timeout fast-path never
+     * triggers and the manual-fire security guard cannot recognize the schedule.
+     */
+    private static final String ADD_METADATA_COLUMN = "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS metadata JSONB";
 
     private static final String CREATE_FIRE_LOGS_TABLE = """
             CREATE TABLE IF NOT EXISTS eddi_schedule_fire_logs (
@@ -85,16 +98,26 @@ public class PostgresScheduleStore implements IScheduleStore {
             CREATE INDEX IF NOT EXISTS idx_schedules_due ON eddi_schedules (enabled, next_fire, fire_status);
             CREATE INDEX IF NOT EXISTS idx_schedules_agent ON eddi_schedules (agent_id);
             CREATE INDEX IF NOT EXISTS idx_schedules_tenant ON eddi_schedules (tenant_id);
+            CREATE INDEX IF NOT EXISTS idx_schedules_name ON eddi_schedules (name);
             CREATE INDEX IF NOT EXISTS idx_fire_logs_schedule ON eddi_schedule_fire_logs (schedule_id, started_at DESC);
             CREATE INDEX IF NOT EXISTS idx_fire_logs_status ON eddi_schedule_fire_logs (status, started_at DESC);
             """;
 
     private final Instance<DataSource> dataSourceInstance;
+    private final IJsonSerialization jsonSerialization;
+    /**
+     * Max schedules claimed per poll cycle — see MongoScheduleStore for parity
+     * notes.
+     */
+    private final int pollBatchSize;
     private volatile boolean schemaInitialized = false;
 
     @Inject
-    public PostgresScheduleStore(Instance<DataSource> dataSourceInstance) {
+    public PostgresScheduleStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization,
+            @ConfigProperty(name = "eddi.schedule.poll-batch-size", defaultValue = "100") int pollBatchSize) {
         this.dataSourceInstance = dataSourceInstance;
+        this.jsonSerialization = jsonSerialization;
+        this.pollBatchSize = pollBatchSize > 0 ? pollBatchSize : 100;
     }
 
     private synchronized void ensureSchema() {
@@ -102,6 +125,7 @@ public class PostgresScheduleStore implements IScheduleStore {
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_SCHEDULES_TABLE);
+            stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
             stmt.execute(CREATE_FIRE_LOGS_TABLE);
             for (String idx : CREATE_INDEXES.split(";")) {
                 String trimmed = idx.trim();
@@ -130,8 +154,8 @@ public class PostgresScheduleStore implements IScheduleStore {
         String sql = """
                 INSERT INTO eddi_schedules (id, name, agent_id, tenant_id, trigger_type, cron_expression,
                     heartbeat_interval_seconds, conversation_strategy, max_cost_per_fire,
-                    enabled, next_fire, fire_status, fail_count, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                    enabled, next_fire, fire_status, fail_count, metadata, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?::jsonb, ?, ?)
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -146,8 +170,9 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setBoolean(10, schedule.isEnabled());
             setNullableEpoch(ps, 11, schedule.getNextFire());
             ps.setString(12, FireStatus.PENDING.name());
-            setNullableEpoch(ps, 13, now);
+            ps.setString(13, serializeMetadata(schedule.getMetadata()));
             setNullableEpoch(ps, 14, now);
+            setNullableEpoch(ps, 15, now);
             ps.executeUpdate();
             LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
                     schedule.getAgentId());
@@ -185,7 +210,7 @@ public class PostgresScheduleStore implements IScheduleStore {
         String sql = """
                 UPDATE eddi_schedules SET name=?, agent_id=?, tenant_id=?, trigger_type=?, cron_expression=?,
                     heartbeat_interval_seconds=?, conversation_strategy=?, max_cost_per_fire=?,
-                    enabled=?, next_fire=?, fire_status=?, fail_count=?, updated_at=?
+                    enabled=?, next_fire=?, fire_status=?, fail_count=?, metadata=?::jsonb, updated_at=?
                 WHERE id=?
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -201,8 +226,9 @@ public class PostgresScheduleStore implements IScheduleStore {
             setNullableEpoch(ps, 10, schedule.getNextFire());
             ps.setString(11, schedule.getFireStatus() != null ? schedule.getFireStatus().name() : FireStatus.PENDING.name());
             ps.setInt(12, schedule.getFailCount());
-            setNullableEpoch(ps, 13, schedule.getUpdatedAt());
-            ps.setString(14, scheduleId);
+            ps.setString(13, serializeMetadata(schedule.getMetadata()));
+            setNullableEpoch(ps, 14, schedule.getUpdatedAt());
+            ps.setString(15, scheduleId);
             int rows = ps.executeUpdate();
             if (rows == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
@@ -275,6 +301,22 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE name = ?")) {
+            ps.setString(1, name);
+            int count = ps.executeUpdate();
+            if (count > 0) {
+                LOGGER.infof("Deleted %d HITL timeout schedule(s) with name '%s'", count, name);
+            }
+            return count;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete schedules by name: " + name, e);
+        }
+    }
+
+    @Override
     public List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection();
@@ -315,13 +357,14 @@ public class PostgresScheduleStore implements IScheduleStore {
                     OR (fire_status = 'CLAIMED' AND claimed_at <= ?)
                     OR (fire_status = 'FAILED' AND next_retry_at <= ? AND fail_count < ?)
                 )
-                LIMIT 100
+                LIMIT ?
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, nowMs);
             ps.setLong(2, leaseMs);
             ps.setLong(3, nowMs);
             ps.setInt(4, maxRetries);
+            ps.setInt(5, pollBatchSize);
             return readScheduleList(ps);
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to find due schedules", e);
@@ -329,15 +372,21 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public boolean tryClaim(String scheduleId, String instanceId, Instant now) throws IResourceStore.ResourceStoreException {
+    public boolean tryClaim(String scheduleId, String instanceId, Instant now, Instant leaseExpiry) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         long nowMs = now.toEpochMilli();
+        long leaseMs = leaseExpiry.toEpochMilli();
         String fireId = scheduleId + "_" + now;
 
+        // The CLAIMED+lease-expired clause steals a crashed/wedged instance's claim
+        // and MUST mirror findDueSchedules, else expired CLAIMED rows are returned
+        // every poll but never re-fired.
         String sql = """
                 UPDATE eddi_schedules
                 SET fire_status = 'CLAIMED', claimed_by = ?, claimed_at = ?, fire_id = ?, updated_at = ?
-                WHERE id = ? AND (fire_status = 'PENDING' OR (fire_status = 'FAILED' AND next_retry_at <= ?))
+                WHERE id = ? AND (fire_status = 'PENDING'
+                    OR (fire_status = 'FAILED' AND next_retry_at <= ?)
+                    OR (fire_status = 'CLAIMED' AND claimed_at <= ?))
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, instanceId);
@@ -346,6 +395,7 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setLong(4, nowMs);
             ps.setString(5, scheduleId);
             ps.setLong(6, nowMs);
+            ps.setLong(7, leaseMs);
             int rows = ps.executeUpdate();
             if (rows > 0) {
                 LOGGER.debugf("Claimed schedule %s on instance %s", scheduleId, instanceId);
@@ -509,7 +559,7 @@ public class PostgresScheduleStore implements IScheduleStore {
 
     // ========================= Helpers =========================
 
-    private List<ScheduleConfiguration> readScheduleList(PreparedStatement ps) throws SQLException {
+    private List<ScheduleConfiguration> readScheduleList(PreparedStatement ps) throws SQLException, IResourceStore.ResourceStoreException {
         List<ScheduleConfiguration> result = new ArrayList<>();
         try (ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
@@ -519,7 +569,7 @@ public class PostgresScheduleStore implements IScheduleStore {
         return result;
     }
 
-    private ScheduleConfiguration fromResultSet(ResultSet rs) throws SQLException {
+    private ScheduleConfiguration fromResultSet(ResultSet rs) throws SQLException, IResourceStore.ResourceStoreException {
         ScheduleConfiguration config = new ScheduleConfiguration();
         config.setId(rs.getString("id"));
         config.setName(rs.getString("name"));
@@ -556,10 +606,40 @@ public class PostgresScheduleStore implements IScheduleStore {
         config.setFireId(rs.getString("fire_id"));
         config.setFailCount(rs.getInt("fail_count"));
         config.setNextRetryAt(instantFromEpoch(rs, "next_retry_at"));
+        config.setMetadata(deserializeMetadata(rs.getString("metadata")));
         config.setCreatedAt(instantFromEpoch(rs, "created_at"));
         config.setUpdatedAt(instantFromEpoch(rs, "updated_at"));
 
         return config;
+    }
+
+    private String serializeMetadata(Map<String, Object> metadata) throws IResourceStore.ResourceStoreException {
+        if (metadata == null || metadata.isEmpty()) {
+            return null;
+        }
+        try {
+            return jsonSerialization.serialize(metadata);
+        } catch (Exception e) {
+            // Fail closed: the metadata carries the HITL contract (hitlType/policy/
+            // surface/conversationId). Silently storing null would persist a HITL
+            // timeout schedule the poller no longer recognizes and the manual-fire
+            // guard no longer protects — worse than failing the write.
+            throw new IResourceStore.ResourceStoreException("Failed to serialize schedule metadata", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> deserializeMetadata(String json) throws IResourceStore.ResourceStoreException {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return jsonSerialization.deserialize(json, Map.class);
+        } catch (Exception e) {
+            // Fail closed (see serializeMetadata): loading a HITL schedule without its
+            // metadata would make it fire wrong / bypass the manual-fire guard.
+            throw new IResourceStore.ResourceStoreException("Failed to deserialize schedule metadata", e);
+        }
     }
 
     private List<ScheduleFireLog> readFireLogList(PreparedStatement ps) throws SQLException {

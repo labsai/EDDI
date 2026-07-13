@@ -47,6 +47,40 @@ public class OwnershipValidator {
     }
 
     /**
+     * Returns whether the caller holds the admin role. Always returns {@code true}
+     * when authorization is disabled (all callers are effectively admin).
+     */
+    public boolean isAdmin(SecurityIdentity identity) {
+        return !authEnabled || (identity != null && identity.hasRole("eddi-admin"));
+    }
+
+    /**
+     * Returns whether the caller holds the designated HITL approver role. Always
+     * returns {@code true} when authorization is disabled. Approvers may decide
+     * pending approvals they do not own and see them in pending listings.
+     */
+    public boolean isApprover(SecurityIdentity identity) {
+        return !authEnabled || (identity != null && identity.hasRole("eddi-approver"));
+    }
+
+    /**
+     * Returns whether the caller IS the resource owner — a pure identity
+     * comparison, no roles. Always {@code true} when authorization is disabled.
+     * Unowned resources (null/blank owner) return {@code false}; callers decide how
+     * to treat legacy data.
+     */
+    public boolean isOwner(SecurityIdentity identity, String resourceOwnerId) {
+        if (!authEnabled) {
+            return true;
+        }
+        if (identity == null || identity.isAnonymous() || identity.getPrincipal() == null) {
+            return false;
+        }
+        return resourceOwnerId != null && !resourceOwnerId.isBlank()
+                && identity.getPrincipal().getName().equals(resourceOwnerId);
+    }
+
+    /**
      * Asserts that the caller matches the requested {@code userId} or holds the
      * {@code eddi-admin} role.
      *
@@ -159,5 +193,47 @@ public class OwnershipValidator {
                     sanitize(resourceOwnerId));
             throw new ForbiddenException("Access denied: you do not own this " + resourceType);
         }
+    }
+
+    /**
+     * Strict variant of {@link #requireOwnerOrAdmin} that denies access when the
+     * resource has no owner. Use for state-changing operations (approve, cancel,
+     * reject) where fail-closed is safer than allowing anyone to modify unowned
+     * resources.
+     */
+    public void requireOwnerOrAdminStrict(SecurityIdentity identity, String resourceOwnerId, String resourceType) {
+        if (!authEnabled) {
+            return;
+        }
+        if (resourceOwnerId == null || resourceOwnerId.isBlank()) {
+            // MINOR-2: Fail-closed for state-changing ops on unowned resources
+            if (identity != null && identity.hasRole("eddi-admin")) {
+                return; // Admin can still act on unowned resources
+            }
+            LOGGER.warnf("Ownership check failed: %s has no owner — denying access for state-changing operation", resourceType);
+            throw new ForbiddenException("Access denied: " + resourceType + " has no owner");
+        }
+        requireOwnerOrAdmin(identity, resourceOwnerId, resourceType);
+    }
+
+    /**
+     * HITL-specific ownership check: allows the resource owner, eddi-admin,
+     * <strong>or eddi-approver</strong> role to proceed. Use this for
+     * approve/reject/cancel endpoints where a designated human reviewer may not be
+     * the conversation owner.
+     * <p>
+     * Fail-closed: if the resource has no owner and the caller is not admin or
+     * approver, access is denied.
+     */
+    public void requireOwnerAdminOrApprover(SecurityIdentity identity, String resourceOwnerId, String resourceType) {
+        if (!authEnabled) {
+            return;
+        }
+        // Approver role is always allowed for HITL operations
+        if (identity != null && identity.hasRole("eddi-approver")) {
+            return;
+        }
+        // Fall through to the strict owner/admin check
+        requireOwnerOrAdminStrict(identity, resourceOwnerId, resourceType);
     }
 }

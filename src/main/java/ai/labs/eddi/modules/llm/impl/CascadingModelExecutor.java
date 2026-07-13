@@ -4,10 +4,13 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
@@ -151,7 +154,30 @@ class CascadingModelExecutor {
      */
     CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
                           LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator,
+                          Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
+                          ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
+            throws LifecycleException {
+        return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
+                convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
+    }
+
+    /**
+     * Backward-compatible overload without tool-level HITL: no approvals config,
+     * sentinel task index, default transcript cap. An agent-mode step under this
+     * overload never gates a tool call.
+     */
+    CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
+                          LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator,
                           Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming)
+            throws LifecycleException {
+        return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
+                convertToObject, allowLiveStreaming, null, -1, PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT);
+    }
+
+    private CascadeResult doExecute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
+                                    LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator,
+                                    Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
+                                    ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws LifecycleException {
 
         List<CascadeStep> steps = cascade.getSteps();
@@ -265,7 +291,8 @@ class CascadingModelExecutor {
                 }
 
                 StepResult stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
-                        memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, jsonMode, stepTimeout);
+                        memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, jsonMode, stepTimeout,
+                        effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
 
                 long durationMs = System.currentTimeMillis() - stepStart;
                 double stepCost = computeCost(step, cascade, stepResult.tokenUsage);
@@ -352,6 +379,13 @@ class CascadingModelExecutor {
                 }
 
             } catch (Exception e) {
+                // HITL tool pause: the agent-mode step invoked a gated tool. This is
+                // not a cascade failure to escalate/aggregate — rethrow immediately so
+                // the pause signal reaches LifecycleManager (never demoted to
+                // confidence 0 or swallowed into "best so far").
+                if (e instanceof ToolApprovalRequiredException tare) {
+                    throw tare;
+                }
                 long durationMs = System.currentTimeMillis() - stepStart;
                 String errorType = isRetryableError(e) ? "retryable_error" : "error";
                 stepTrace.put("status", errorType);
@@ -434,13 +468,14 @@ class CascadingModelExecutor {
                                               List<ChatMessage> messages, String systemMessage, String evaluationStrategy,
                                               LlmConfiguration.Task task, IConversationMemory memory,
                                               AgentOrchestrator agentOrchestrator, boolean useAgentMode, ChatModel judgeModel,
-                                              HeuristicConfig heuristicConfig, boolean jsonMode, long timeoutMs)
+                                              HeuristicConfig heuristicConfig, boolean jsonMode, long timeoutMs,
+                                              ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws Exception {
 
         Future<StepResult> future = TIMEOUT_EXECUTOR.submit(() -> {
             if (useAgentMode) {
                 return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
-                        heuristicConfig, jsonMode);
+                        heuristicConfig, jsonMode, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
             } else {
                 return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
                         heuristicConfig, jsonMode);
@@ -507,13 +542,15 @@ class CascadingModelExecutor {
      */
     private StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
                                             LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator,
-                                            ChatModel judgeModel, HeuristicConfig heuristicConfig, boolean jsonMode)
+                                            ChatModel judgeModel, HeuristicConfig heuristicConfig, boolean jsonMode,
+                                            ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws LifecycleException {
 
         List<ChatMessage> chatMessagesWithoutSystem = originalMessages.stream().filter(m -> !(m instanceof SystemMessage))
                 .collect(java.util.stream.Collectors.toList());
 
-        var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory);
+        var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
+                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
 
         if (agentResult != null) {
             String responseText = agentResult.response();

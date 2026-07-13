@@ -21,7 +21,7 @@ class PdfReaderToolTest {
 
     @BeforeEach
     void setUp() {
-        pdfReaderTool = new PdfReaderTool(new SafeHttpClient(10000));
+        pdfReaderTool = new PdfReaderTool(new SafeHttpClient(10000), new AttachmentTextExtractor(10000));
     }
 
     // === SSRF Protection Tests ===
@@ -152,7 +152,7 @@ class PdfReaderToolTest {
         @BeforeEach
         void setUpMocked() {
             mockedHttpClient = org.mockito.Mockito.mock(SafeHttpClient.class);
-            mockedTool = new PdfReaderTool(mockedHttpClient);
+            mockedTool = new PdfReaderTool(mockedHttpClient, new AttachmentTextExtractor(10000));
         }
 
         @Test
@@ -267,7 +267,7 @@ class PdfReaderToolTest {
         @BeforeEach
         void setUpMocked() {
             mockedHttpClient = org.mockito.Mockito.mock(SafeHttpClient.class);
-            mockedTool = new PdfReaderTool(mockedHttpClient);
+            mockedTool = new PdfReaderTool(mockedHttpClient, new AttachmentTextExtractor(10000));
         }
 
         private java.nio.file.Path createTinyPdf(String text) throws Exception {

@@ -20,6 +20,40 @@ import static org.junit.jupiter.api.Assertions.*;
 class LlmConfigurationTaskTest {
 
     @Nested
+    @DisplayName("Multimodal override")
+    class MultimodalOverrideTests {
+
+        @Test
+        @DisplayName("defaults to null")
+        void defaultsNull() {
+            assertNull(new LlmConfiguration.Task().getMultimodal());
+        }
+
+        @Test
+        @DisplayName("MultimodalOverride fields default to auto")
+        void overrideDefaultsAuto() {
+            var mm = new LlmConfiguration.MultimodalOverride();
+            assertEquals("auto", mm.getVision());
+            assertEquals("auto", mm.getDocuments());
+            assertEquals("auto", mm.getAudio());
+        }
+
+        @Test
+        @DisplayName("getter/setter round-trip")
+        void setAndGet() {
+            var task = new LlmConfiguration.Task();
+            var mm = new LlmConfiguration.MultimodalOverride();
+            mm.setVision("on");
+            mm.setDocuments("off");
+            mm.setAudio("auto");
+            task.setMultimodal(mm);
+            assertEquals("on", task.getMultimodal().getVision());
+            assertEquals("off", task.getMultimodal().getDocuments());
+            assertEquals("auto", task.getMultimodal().getAudio());
+        }
+    }
+
+    @Nested
     @DisplayName("isAgentMode")
     class IsAgentMode {
 

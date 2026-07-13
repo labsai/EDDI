@@ -46,6 +46,9 @@ public class ScheduleFireExecutor {
     @Inject
     IScheduleStore scheduleStore;
 
+    @Inject
+    ai.labs.eddi.engine.internal.HitlTimeoutHandler hitlTimeoutHandler;
+
     /**
      * Execute a schedule fire. Returns the fire log entry.
      *
@@ -59,6 +62,33 @@ public class ScheduleFireExecutor {
      * @return the completed fire log
      */
     public ScheduleFireLog fire(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Map<String, Object> md = schedule.getMetadata();
+        if (ai.labs.eddi.engine.hitl.HitlSchedules.isHitlTimeout(md)) {
+            // HITL timeout fast-path — isolate exceptions and record a fire log for
+            // parity with the normal path (observability + retry diagnostics).
+            Instant hitlStartedAt = Instant.now();
+            String hitlStatus = ScheduleConfiguration.FireStatus.COMPLETED.name();
+            String hitlError = null;
+            try {
+                hitlTimeoutHandler.handleTimeout(md);
+            } catch (Exception e) {
+                hitlStatus = ScheduleConfiguration.FireStatus.FAILED.name();
+                hitlError = e.getClass().getSimpleName() + ": " + e.getMessage();
+                LOGGER.warnf(e, "[SCHEDULE] HITL timeout handling failed for schedule %s", schedule.getId());
+            }
+            var hitlFireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(),
+                    schedule.getFireId(), schedule.getNextFire(), hitlStartedAt, Instant.now(),
+                    hitlStatus, instanceId,
+                    (String) md.get(ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_CONVERSATION_ID_KEY),
+                    hitlError, attemptNumber, 0.0);
+            try {
+                scheduleStore.logFire(hitlFireLog);
+            } catch (Exception e) {
+                LOGGER.errorf(e, "[SCHEDULE] Failed to log HITL timeout fire for schedule %s", schedule.getId());
+            }
+            return hitlFireLog;
+        }
+
         Instant startedAt = Instant.now();
         String fireLogId = UUID.randomUUID().toString();
         String conversationId = null;

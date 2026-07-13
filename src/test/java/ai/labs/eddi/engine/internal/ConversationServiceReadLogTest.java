@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.ConversationLogResult;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
@@ -20,6 +21,8 @@ import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,7 +65,10 @@ class ConversationServiceReadLogTest {
         AuditLedgerService auditLedgerService = mock(AuditLedgerService.class);
         GdprComplianceService gdprComplianceService = mock(GdprComplianceService.class);
         TenantQuotaService tenantQuotaService = mock(TenantQuotaService.class);
+        IScheduleStore scheduleStore = mock(IScheduleStore.class);
+        IAgentStore agentStore = mock(IAgentStore.class);
         IUserMemoryStore userMemoryStore = mock(IUserMemoryStore.class);
+        IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
 
         when(tenantQuotaService.acquireConversationSlot()).thenReturn(QuotaCheckResult.OK);
         when(tenantQuotaService.acquireApiCallSlot()).thenReturn(QuotaCheckResult.OK);
@@ -74,7 +80,9 @@ class ConversationServiceReadLogTest {
         conversationService = new ConversationService(agentFactory, conversationMemoryStore,
                 conversationDescriptorStore, userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService, gdprComplianceService,
-                tenantQuotaService, new SimpleMeterRegistry(), 60);
+                tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
+                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), 60);
     }
 
     private ConversationMemorySnapshot createEmptySnapshot() {
