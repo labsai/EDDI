@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
@@ -88,7 +89,7 @@ public class ConversationService implements IConversationService {
     // Field-injected so the numerous direct-construction unit tests need no change;
     // used only to resolve stored-attachment metadata at conversation init.
     @Inject
-    ai.labs.eddi.engine.attachments.IAttachmentStore attachmentStore;
+    IAttachmentStore attachmentStore;
 
     @ConfigProperty(name = "eddi.attachments.max-per-turn", defaultValue = "5")
     int maxAttachmentsPerTurn;
@@ -682,7 +683,7 @@ public class ConversationService implements IConversationService {
             }
 
             @Override
-            public ai.labs.eddi.engine.attachments.IAttachmentStore getAttachmentStore() {
+            public IAttachmentStore getAttachmentStore() {
                 return attachmentStore;
             }
 

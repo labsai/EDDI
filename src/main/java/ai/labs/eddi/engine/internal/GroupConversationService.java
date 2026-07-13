@@ -36,6 +36,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Attachment;
@@ -92,8 +93,8 @@ public class GroupConversationService implements IGroupConversationService {
 
     // Field-injected so the direct-construction unit tests stay unchanged; used to
     // materialize and share discussion attachments with member conversations.
-    @jakarta.inject.Inject
-    ai.labs.eddi.engine.attachments.IAttachmentStore attachmentStore;
+    @Inject
+    IAttachmentStore attachmentStore;
 
     // Incremental peer verification: tracks the last verified transcript index
     // per group conversation ID, so we only verify new entries each turn (O(N)

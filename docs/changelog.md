@@ -5,6 +5,21 @@
 
 ---
 
+## 📎 Multimodal Attachments Completion — Human review fixes: FQN → imports (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Addressed @niedch's human review comments on PR #588:
+
+1. **`GroupConversationService`** — the field-injected attachment store used a fully-qualified `@jakarta.inject.Inject` and `ai.labs.eddi.engine.attachments.IAttachmentStore` type. `jakarta.inject.Inject` was already imported, so the annotation is now `@Inject`; added an `IAttachmentStore` import and the field reads `IAttachmentStore attachmentStore;`.
+2. **`ConversationService`** — same FQN smell on the injected field **and** the anonymous `getAttachmentStore()` override (reviewer flagged the override; the field had it too). Added the `IAttachmentStore` import and simplified both usages.
+
+Compile clean (`mvnw compile` → exit 0). No behavior change — pure import hygiene.
+
+**Deferred (tracked separately):** @niedch also suggested a "general solution for the authorization to avoid duplicating it in multiple places" on `PostgresAttachmentStore.authorize`. Verified as a real duplication — the access policy is copy-pasted across **4 sites** (read owner-or-grant + delete owner-only, in both the Postgres and GridFS stores) with an identical denial message, and the **read** path has already drifted for the null-owner edge case (Postgres denies, Mongo allows; the delete path stays consistent). Because the reviewer framed it as future work and unifying the read path is a security-behavior change that deserves its own tested PR, it was **not** folded into this PR — spun off as a dedicated follow-up (extract a shared `AttachmentAccessPolicy`, standardize null-owner reads to deny-by-default, add a two-backend regression test).
+
+---
+
 ## 📎 Multimodal Attachments Completion — Automated review fixes (2026-07-03)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)
