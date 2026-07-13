@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.mongo.codec.JacksonProvider;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
@@ -374,7 +375,7 @@ class MongoConversationMemoryStoreTest {
             var paused = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             paused.setHitlPausedAt(java.time.Instant.now());
             paused.setHitlPauseReason("needs review");
-            paused.setHitlTimeoutPolicy("AUTO_REJECT");
+            paused.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             paused.setHitlApprovalTimeout("PT30M");
             String id = store.storeConversationMemorySnapshot(paused);
             store.storeConversationMemorySnapshot(
@@ -447,7 +448,7 @@ class MongoConversationMemoryStoreTest {
             snapshot.setHitlPauseType("TOOL_CALL");
             snapshot.setHitlPausedAt(java.time.Instant.now());
             snapshot.setHitlPauseReason("gated tool calls awaiting review");
-            snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");
 
             var batch = new PendingToolCallBatch();
@@ -583,7 +584,7 @@ class MongoConversationMemoryStoreTest {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             snapshot.setHitlPausedAt(java.time.Instant.now());
             snapshot.setHitlPauseReason("needs review");
-            snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");
             String id = store.storeConversationMemorySnapshot(snapshot);
 

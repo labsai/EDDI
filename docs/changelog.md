@@ -5,6 +5,20 @@
 
 ---
 
+## 🎯 Regular surface — type hitlTimeoutPolicy as the HitlTimeoutPolicy enum (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Follow-up to the group-surface enum change (below): applied the same `String → HitlTimeoutPolicy` retype to the **regular (agent) conversation surface** so both surfaces are consistent. The `hitlApprovalTimeout` field stays `String` on both, for the same reasons documented in the group entry (uniform convention + `Duration` would serialize as a number under `write-dates-as-timestamps=true`).
+
+**Model layer** (`IConversationMemory` default methods, `ConversationMemory` impl field + accessors, `ConversationMemorySnapshot` field + accessors) now carry the enum. `ConversationMemoryUtilities` copies memory ↔ snapshot unchanged (both enum). **Consumer** (`ConversationService`): the four bookmark set-sites drop `.name()` (the source `AgentConfiguration.HitlConfig.getTimeoutPolicy()` / `ToolApprovalsConfig.getTimeoutPolicy()` / the computed `effectivePolicy` are all already the enum); `scheduleHitlTimeout` compares `== WAIT_INDEFINITELY` and emits `.name()` only into the `Map<String,Object>` schedule metadata. **Read/display sites** call `.name()`: `RestAgentEngine` + `McpHitlTools`-parity summary map, `ConversationMemoryStore.collectPendingSummaries` (feeds the `String`-typed `PendingApprovalSummary`), and `SlackEventHandler.formatTimeoutInfo`. **Crash recovery** (`HitlCrashRecoveryObserver`): the regular `IN_PROGRESS`-recovery site inlines the `null → WAIT_INDEFINITELY` default; `parsePolicy(String)` stays intact for its remaining caller (the `PendingApprovalSummary` projection, still `String`).
+
+**Persistence — verified wire-safe.** `ConversationMemorySnapshot` is stored as a JSONB/BSON blob (Jackson serializes the enum as its `name()`), so already-persisted `AWAITING_HUMAN` bookmarks deserialize unchanged. The Postgres bounded projection (`data->>'hitlTimeoutPolicy' AS timeout_policy` → `rs.getString(...)` → `PendingApprovalSummary`) reads the raw JSON name string and is unaffected by the model type change. The REST `awaitingApproval` summary and Manager UI contract are byte-identical.
+
+Scope: 9 main files + 12 test files (setters/asserts moved to enum constants; `String`-param helpers convert via `valueOf`; store-test call-sites retyped). `SimpleConversationMemorySnapshot` does not carry this field, so it is untouched. Verified: `Tests run: 258, Failures: 0, Errors: 0` across the regular + group HITL unit suites; full main + test tree compiles (the Testcontainer store tests compile and run in CI). `IRestAgentEngine.java` (formatter oscillation) restored/excluded again. Nothing pushed.
+
+---
+
 ## 🎯 GroupConversation — type hitlTimeoutPolicy as the HitlTimeoutPolicy enum (2026-07-13)
 
 **Repo:** EDDI (`feat/hitl-framework`)

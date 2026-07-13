@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
@@ -48,7 +49,7 @@ class ConversationMemoryUtilitiesHitlTest {
             memory.setHitlPausedAbsoluteTaskIndex(3);
             memory.setHitlPausedAt(pausedAt);
             memory.setHitlPauseReason("Needs review");
-            memory.setHitlTimeoutPolicy("AUTO_REJECT");
+            memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             memory.setHitlApprovalTimeout("PT15M");
             memory.setHitlPauseType("TOOL_CALL");
             var batch = new PendingToolCallBatch();
@@ -64,7 +65,7 @@ class ConversationMemoryUtilitiesHitlTest {
             assertEquals(3, snapshot.getHitlPausedAbsoluteTaskIndex());
             assertEquals(pausedAt, snapshot.getHitlPausedAt());
             assertEquals("Needs review", snapshot.getHitlPauseReason());
-            assertEquals("AUTO_REJECT", snapshot.getHitlTimeoutPolicy());
+            assertEquals(HitlTimeoutPolicy.AUTO_REJECT, snapshot.getHitlTimeoutPolicy());
             assertEquals("PT15M", snapshot.getHitlApprovalTimeout());
             assertEquals("TOOL_CALL", snapshot.getHitlPauseType());
             assertNotNull(snapshot.getHitlPendingToolCalls());
@@ -108,7 +109,7 @@ class ConversationMemoryUtilitiesHitlTest {
             snapshot.setHitlPausedAbsoluteTaskIndex(5);
             snapshot.setHitlPausedAt(pausedAt);
             snapshot.setHitlPauseReason("Approval required");
-            snapshot.setHitlTimeoutPolicy("AUTO_APPROVE");
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
             snapshot.setHitlApprovalTimeout("PT1H");
             snapshot.setHitlPauseType("TOOL_CALL");
             var batch = new PendingToolCallBatch();
@@ -121,7 +122,7 @@ class ConversationMemoryUtilitiesHitlTest {
             assertEquals(5, restored.getHitlPausedAbsoluteTaskIndex());
             assertEquals(pausedAt, restored.getHitlPausedAt());
             assertEquals("Approval required", restored.getHitlPauseReason());
-            assertEquals("AUTO_APPROVE", restored.getHitlTimeoutPolicy());
+            assertEquals(HitlTimeoutPolicy.AUTO_APPROVE, restored.getHitlTimeoutPolicy());
             assertEquals("PT1H", restored.getHitlApprovalTimeout());
             assertEquals("TOOL_CALL", restored.getHitlPauseType());
             assertNotNull(restored.getHitlPendingToolCalls());
@@ -165,7 +166,7 @@ class ConversationMemoryUtilitiesHitlTest {
             snapshot.setHitlPausedAbsoluteTaskIndex(9);
             snapshot.setHitlPausedAt(pausedAt);
             snapshot.setHitlPauseReason("Sensitive action");
-            snapshot.setHitlTimeoutPolicy("WAIT_INDEFINITELY");
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
             snapshot.setHitlApprovalTimeout("PT2H");
 
             var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(

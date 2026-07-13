@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.datastore.serialization.Id;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.model.Property;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -27,7 +28,7 @@ public class ConversationMemorySnapshot {
     private int hitlPausedAbsoluteTaskIndex = -1;
     private Instant hitlPausedAt;
     private String hitlPauseReason;
-    private String hitlTimeoutPolicy;
+    private HitlTimeoutPolicy hitlTimeoutPolicy;
     private String hitlApprovalTimeout;
     // Tool-level HITL: null/"RULE" = behavior-rule pause, "TOOL_CALL" = gated tool
     // pause.
@@ -321,11 +322,11 @@ public class ConversationMemorySnapshot {
         this.hitlPauseReason = hitlPauseReason;
     }
 
-    public String getHitlTimeoutPolicy() {
+    public HitlTimeoutPolicy getHitlTimeoutPolicy() {
         return hitlTimeoutPolicy;
     }
 
-    public void setHitlTimeoutPolicy(String hitlTimeoutPolicy) {
+    public void setHitlTimeoutPolicy(HitlTimeoutPolicy hitlTimeoutPolicy) {
         this.hitlTimeoutPolicy = hitlTimeoutPolicy;
     }
 

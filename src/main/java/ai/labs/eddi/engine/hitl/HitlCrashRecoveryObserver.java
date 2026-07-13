@@ -298,7 +298,9 @@ public class HitlCrashRecoveryObserver {
                             LOGGER.warnf("Restored crashed resume to AWAITING_HUMAN: %s (paused at %s)",
                                     conversationId, snapshot.getHitlPausedAt());
                             count++;
-                            HitlTimeoutPolicy policy = parsePolicy(snapshot.getHitlTimeoutPolicy());
+                            HitlTimeoutPolicy policy = snapshot.getHitlTimeoutPolicy() != null
+                                    ? snapshot.getHitlTimeoutPolicy()
+                                    : HitlTimeoutPolicy.WAIT_INDEFINITELY;
                             if (policy != HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                                 Instant scannedPausedAt = snapshot.getHitlPausedAt();
                                 rearmSchedule(HitlSchedules.regularTimeoutScheduleName(conversationId),

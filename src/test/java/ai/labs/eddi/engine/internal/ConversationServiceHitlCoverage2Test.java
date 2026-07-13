@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -245,7 +246,7 @@ class ConversationServiceHitlCoverage2Test {
             snapshot.setConversationState(ConversationState.IN_PROGRESS);
             // Finite policy on the bookmark so restore(rearm=true) actually arms a
             // schedule.
-            snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 
@@ -282,7 +283,7 @@ class ConversationServiceHitlCoverage2Test {
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
             var snapshot = rulePauseSnapshot();
             snapshot.setConversationState(ConversationState.IN_PROGRESS);
-            snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 

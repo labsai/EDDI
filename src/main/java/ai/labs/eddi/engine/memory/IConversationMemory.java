@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -176,13 +177,12 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
-     * Timeout policy — a {@code HitlTimeoutPolicy} enum name: WAIT_INDEFINITELY,
-     * AUTO_APPROVE, AUTO_REJECT, or ABORT.
+     * Timeout policy — WAIT_INDEFINITELY, AUTO_APPROVE, AUTO_REJECT, or ABORT.
      */
-    default String getHitlTimeoutPolicy() {
+    default HitlTimeoutPolicy getHitlTimeoutPolicy() {
         return null;
     }
-    default void setHitlTimeoutPolicy(String policy) {
+    default void setHitlTimeoutPolicy(HitlTimeoutPolicy policy) {
     }
 
     /** Approval timeout duration (ISO-8601, e.g. "PT30M"). */

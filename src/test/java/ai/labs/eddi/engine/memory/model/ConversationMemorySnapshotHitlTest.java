@@ -3,6 +3,7 @@
  */
 package ai.labs.eddi.engine.memory.model;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -103,8 +104,8 @@ class ConversationMemorySnapshotHitlTest {
         @Test
         @DisplayName("hitlTimeoutPolicy round-trip")
         void hitlTimeoutPolicy() {
-            snapshot.setHitlTimeoutPolicy("WAIT_INDEFINITELY");
-            assertEquals("WAIT_INDEFINITELY", snapshot.getHitlTimeoutPolicy());
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
+            assertEquals(HitlTimeoutPolicy.WAIT_INDEFINITELY, snapshot.getHitlTimeoutPolicy());
         }
 
         @Test

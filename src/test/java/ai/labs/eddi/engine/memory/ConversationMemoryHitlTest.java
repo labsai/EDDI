@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -110,8 +111,8 @@ class ConversationMemoryHitlTest {
         @Test
         @DisplayName("hitlTimeoutPolicy round-trip")
         void timeoutPolicy() {
-            memory.setHitlTimeoutPolicy("AUTO_REJECT");
-            assertEquals("AUTO_REJECT", memory.getHitlTimeoutPolicy());
+            memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            assertEquals(HitlTimeoutPolicy.AUTO_REJECT, memory.getHitlTimeoutPolicy());
         }
 
         @Test

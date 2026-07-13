@@ -733,7 +733,7 @@ class ConversationServiceResumeTest {
         snapshot.setHitlPausedAbsoluteTaskIndex(2);
         snapshot.setHitlPausedAt(Instant.now());
         snapshot.setHitlPauseReason("high-risk action");
-        snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+        snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
 
         // One step with one workflow run
         var stepSnapshot = new ConversationStepSnapshot();

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -336,7 +337,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             var pausedSnapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             pausedSnapshot.setHitlPausedAt(java.time.Instant.now());
             pausedSnapshot.setHitlPauseReason("needs review");
-            pausedSnapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            pausedSnapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             pausedSnapshot.setHitlApprovalTimeout("PT30M");
             String id = store.storeConversationMemorySnapshot(pausedSnapshot);
             store.storeConversationMemorySnapshot(
@@ -410,7 +411,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             snapshot.setHitlPauseType("TOOL_CALL");
             snapshot.setHitlPausedAt(java.time.Instant.now());
             snapshot.setHitlPauseReason("gated tool calls awaiting review");
-            snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");
 
             var batch = new PendingToolCallBatch();
@@ -526,7 +527,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             snapshot.setHitlPausedAt(java.time.Instant.now());
             snapshot.setHitlPauseReason("needs review");
-            snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");
             String id = store.storeConversationMemorySnapshot(snapshot);
 

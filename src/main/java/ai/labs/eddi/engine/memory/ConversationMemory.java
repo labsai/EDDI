@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -246,7 +247,7 @@ public class ConversationMemory implements IConversationMemory {
     private transient int hitlPausedAbsoluteTaskIndex = -1;
     private transient Instant hitlPausedAt;
     private transient String hitlPauseReason;
-    private transient String hitlTimeoutPolicy;
+    private transient HitlTimeoutPolicy hitlTimeoutPolicy;
     private transient String hitlApprovalTimeout;
     // Tool-level HITL: discriminator (null/"RULE"/"TOOL_CALL") + the interrupted
     // tool-call batch. Persisted via ConversationMemorySnapshot like the bookmark.
@@ -299,12 +300,12 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public String getHitlTimeoutPolicy() {
+    public HitlTimeoutPolicy getHitlTimeoutPolicy() {
         return hitlTimeoutPolicy;
     }
 
     @Override
-    public void setHitlTimeoutPolicy(String policy) {
+    public void setHitlTimeoutPolicy(HitlTimeoutPolicy policy) {
         this.hitlTimeoutPolicy = policy;
     }
 

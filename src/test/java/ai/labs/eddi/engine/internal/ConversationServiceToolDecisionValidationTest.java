@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -153,7 +154,7 @@ class ConversationServiceToolDecisionValidationTest {
         snapshot.setHitlPausedAbsoluteTaskIndex(2);
         snapshot.setHitlPausedAt(Instant.now());
         snapshot.setHitlPauseReason("gated tool call");
-        snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+        snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         snapshot.setHitlPauseType("TOOL_CALL");
 
         var batch = new PendingToolCallBatch();
@@ -194,7 +195,7 @@ class ConversationServiceToolDecisionValidationTest {
         snapshot.setHitlPausedAbsoluteTaskIndex(2);
         snapshot.setHitlPausedAt(Instant.now());
         snapshot.setHitlPauseReason("high-risk action");
-        snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+        snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         snapshot.setHitlPauseType("RULE");
 
         var stepSnapshot = new ConversationStepSnapshot();

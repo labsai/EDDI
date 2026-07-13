@@ -1765,7 +1765,7 @@ public class ConversationService implements IConversationService {
             default -> {
                 // WAIT_FOR_HUMAN (default): demote the new pause so no finite timeout can
                 // auto-decide it again — a human MUST break the loop.
-                memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+                memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
                 recordGuard("no_progress");
                 auditGuard(conversationId, agentId, agentVersion, memory.getUserId(), environment,
                         "no_progress", newBatch.getFingerprint(), "system:no-progress");
@@ -2114,7 +2114,7 @@ public class ConversationService implements IConversationService {
      */
     private void populateHitlTimeoutBookmark(IConversationMemory memory) {
         try {
-            memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+            memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
             AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
             if (agentConfig == null)
                 return;
@@ -2147,7 +2147,7 @@ public class ConversationService implements IConversationService {
             }
             if (hitlConfig.getTimeoutPolicy() == null)
                 return;
-            memory.setHitlTimeoutPolicy(hitlConfig.getTimeoutPolicy().name());
+            memory.setHitlTimeoutPolicy(hitlConfig.getTimeoutPolicy());
             memory.setHitlApprovalTimeout(hitlConfig.getApprovalTimeout());
         } catch (Exception e) {
             LOGGER.warnf("Could not populate HITL timeout bookmark for %s: %s",
@@ -2201,7 +2201,7 @@ public class ConversationService implements IConversationService {
         if (effectivePolicy == null) {
             effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
         }
-        memory.setHitlTimeoutPolicy(effectivePolicy.name());
+        memory.setHitlTimeoutPolicy(effectivePolicy);
         memory.setHitlApprovalTimeout(effectiveTimeout);
     }
 
@@ -2314,9 +2314,9 @@ public class ConversationService implements IConversationService {
     private void scheduleHitlTimeout(String conversationId, IConversationMemory memory) {
         try {
             String timeoutStr = memory.getHitlApprovalTimeout();
-            String policyName = memory.getHitlTimeoutPolicy();
-            if (timeoutStr == null || timeoutStr.isBlank() || policyName == null
-                    || HitlTimeoutPolicy.WAIT_INDEFINITELY.name().equals(policyName)) {
+            HitlTimeoutPolicy policy = memory.getHitlTimeoutPolicy();
+            if (timeoutStr == null || timeoutStr.isBlank() || policy == null
+                    || policy == HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                 return;
             }
 
@@ -2343,12 +2343,12 @@ public class ConversationService implements IConversationService {
             schedule.setCreatedAt(Instant.now());
             schedule.setMetadata(Map.of(
                     HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT,
-                    HitlSchedules.METADATA_POLICY_KEY, policyName,
+                    HitlSchedules.METADATA_POLICY_KEY, policy.name(),
                     HitlSchedules.METADATA_SURFACE_KEY, HitlSchedules.SURFACE_REGULAR,
                     HitlSchedules.METADATA_CONVERSATION_ID_KEY, conversationId));
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Scheduled HITL timeout for conversation %s at %s (policy: %s)",
-                    sanitize(conversationId), fireAt, policyName);
+                    sanitize(conversationId), fireAt, policy.name());
         } catch (Exception e) {
             LOGGER.warnf("Failed to schedule HITL timeout for conversation %s: %s",
                     sanitize(conversationId), e.getMessage());

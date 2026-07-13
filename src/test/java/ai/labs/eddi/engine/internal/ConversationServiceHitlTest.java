@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -391,7 +392,7 @@ class ConversationServiceHitlTest {
         snapshot.setEnvironment(ENV);
         snapshot.setHitlPausedAt(pausedAt);
         snapshot.setHitlPauseReason(pauseReason);
-        snapshot.setHitlTimeoutPolicy(timeoutPolicy);
+        snapshot.setHitlTimeoutPolicy(timeoutPolicy == null ? null : HitlTimeoutPolicy.valueOf(timeoutPolicy));
 
         // One step with one workflow run
         var stepSnapshot = new ConversationStepSnapshot();

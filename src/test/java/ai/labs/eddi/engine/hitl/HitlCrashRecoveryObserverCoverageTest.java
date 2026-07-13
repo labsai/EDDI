@@ -95,7 +95,7 @@ class HitlCrashRecoveryObserverCoverageTest {
         var snapshot = new ConversationMemorySnapshot();
         snapshot.setAgentId("agent-1");
         snapshot.setHitlPausedAt(pausedAt);
-        snapshot.setHitlTimeoutPolicy(policy);
+        snapshot.setHitlTimeoutPolicy(policy == null ? null : HitlTimeoutPolicy.valueOf(policy));
         snapshot.setHitlApprovalTimeout(timeout);
         return snapshot;
     }

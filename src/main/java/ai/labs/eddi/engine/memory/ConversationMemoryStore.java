@@ -250,7 +250,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
                     snapshot.getConversationId(), snapshot.getAgentId(), snapshot.getUserId(),
                     snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
-                    snapshot.getHitlTimeoutPolicy());
+                    snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null);
             summary.setApprovalTimeout(snapshot.getHitlApprovalTimeout());
             summary.setPauseType(snapshot.getHitlPauseType());
             if (snapshot.getHitlPendingToolCalls() != null && snapshot.getHitlPendingToolCalls().getCalls() != null) {

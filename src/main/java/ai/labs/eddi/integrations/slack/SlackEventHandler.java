@@ -478,7 +478,9 @@ public class SlackEventHandler {
 
         String pauseReason = bookmark != null ? bookmark.getHitlPauseReason() : null;
         String timeoutInfo = bookmark != null
-                ? formatTimeoutInfo(bookmark.getHitlTimeoutPolicy(), bookmark.getHitlApprovalTimeout())
+                ? formatTimeoutInfo(
+                        bookmark.getHitlTimeoutPolicy() != null ? bookmark.getHitlTimeoutPolicy().name() : null,
+                        bookmark.getHitlApprovalTimeout())
                 : null;
 
         // The button value carries the owning integration name so the decision is

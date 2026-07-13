@@ -714,7 +714,7 @@ class ConversationServiceToolTimeoutTest {
         snapshot.setHitlPausedAbsoluteTaskIndex(2);
         snapshot.setHitlPausedAt(Instant.now());
         snapshot.setHitlPauseReason("gated tool call");
-        snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+        snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         snapshot.setHitlPauseType("TOOL_CALL");
 
         var batch = new PendingToolCallBatch();
