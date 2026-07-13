@@ -5,6 +5,16 @@
 
 ---
 
+## 🐛 schedule — correct poll-batch-size comment (at-least-once, not exactly-once) (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Copilot PR review flagged that the `eddi.schedule.poll-batch-size` comment in `application.properties` claimed "cluster-wide CAS still guarantees exactly-once" — which **contradicts `IScheduleStore`'s documented contract**: firing is *at-least-once*, not exactly-once (an expired lease can be stolen, so schedule targets must be idempotent). Corrected the comment to state that per-lease CAS gives a single claimant but delivery is at-least-once, and the HITL timeout handler (resumes/cancels via CAS on conversation state) is idempotent.
+
+Two other Copilot nits were **declined** as inconsistent with established codebase convention: (a) the exact `GroupConversationState.values().length == 7` assertion is a deliberate tripwire matching its sibling `TranscriptEntryType` test — a lower-bound guard would lose the "did you mean to change the state set?" protection; (b) the `// MINOR-2:` label on `OwnershipValidator` is consistent with a pervasive plan-reference convention (9 `MINOR-/MAJOR-` labels plus hundreds of `#NN`/`Hn`/`Task N` markers) — a one-off removal would be inconsistent.
+
+---
+
 ## 📝 HITL enum refactor — documentation audit (2026-07-13)
 
 **Repo:** EDDI (`feat/hitl-framework`)
