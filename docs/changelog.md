@@ -16,6 +16,8 @@ Addressed @niedch's human review comments on PR #588:
 
 Compile clean (`mvnw compile` → exit 0). No behavior change — pure import hygiene.
 
+Also codified the convention in `AGENTS.md` §4.7 (new **Imports** subsection): always import types/annotations and reference them by simple name; the only acceptable inline FQN is disambiguating two same-named classes used in one file. Prevents this review comment from recurring.
+
 **Deferred (tracked separately):** @niedch also suggested a "general solution for the authorization to avoid duplicating it in multiple places" on `PostgresAttachmentStore.authorize`. Verified as a real duplication — the access policy is copy-pasted across **4 sites** (read owner-or-grant + delete owner-only, in both the Postgres and GridFS stores) with an identical denial message, and the **read** path has already drifted for the null-owner edge case (Postgres denies, Mongo allows; the delete path stays consistent). Because the reviewer framed it as future work and unifying the read path is a security-behavior change that deserves its own tested PR, it was **not** folded into this PR — spun off as a dedicated follow-up (extract a shared `AttachmentAccessPolicy`, standardize null-owner reads to deny-by-default, add a two-backend regression test).
 
 ---
