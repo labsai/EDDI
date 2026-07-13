@@ -354,10 +354,11 @@ public class HitlCrashRecoveryObserver {
             int count = 0;
             for (GroupConversation gc : pausedGcs) {
                 try {
-                    // The group transcript stores the policy as a typed enum (nulled
-                    // only while resumed); mirror parsePolicy's null → WAIT_INDEFINITELY
-                    // default without routing through the String overload the regular
-                    // surface shares.
+                    // Both HITL bookmarks now store the policy as a typed enum (nulled
+                    // only while resumed), so mirror parsePolicy's null → WAIT_INDEFINITELY
+                    // default inline. parsePolicy(String) survives only for the
+                    // PendingApprovalSummary projection scan above, whose timeoutPolicy is
+                    // still a String.
                     HitlTimeoutPolicy policy = gc.getHitlTimeoutPolicy() != null
                             ? gc.getHitlTimeoutPolicy()
                             : HitlTimeoutPolicy.WAIT_INDEFINITELY;
