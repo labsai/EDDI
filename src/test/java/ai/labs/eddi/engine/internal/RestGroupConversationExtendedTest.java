@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventLis
 import ai.labs.eddi.engine.api.IRestGroupConversation.DiscussRequest;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
@@ -338,6 +339,80 @@ class RestGroupConversationExtendedTest {
             listener.onGroupComplete(groupCompleteEvent());
 
             verify(eventSink, never()).close();
+        }
+    }
+
+    // ─── continue/stream endpoint ───────────────────────────
+    @Nested
+    @DisplayName("continueDiscussionStreaming")
+    class ContinueDiscussionStreaming {
+
+        private GroupConversation gcInGroup(String groupId) {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId(groupId);
+            gc.setUserId("user-1");
+            return gc;
+        }
+
+        @Test
+        @DisplayName("group mismatch sends group_error, closes, and does not delegate")
+        void groupMismatch_sendsErrorAndCloses() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("other-group"));
+            when(jsonSerialization.serialize(any())).thenReturn("{\"error\":\"not found\"}");
+
+            restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1"), eventSink, sse);
+
+            verify(eventSink).send(any(OutboundSseEvent.class));
+            verify(eventSink).close();
+            verify(groupService, never()).continueDiscussion(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("ForbiddenException is rethrown (maps to 403), not converted to an SSE error")
+        void forbidden_isRethrown() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            doThrow(new ForbiddenException("denied"))
+                    .when(ownershipValidator).requireOwnerOrAdmin(any(), eq("user-1"), anyString());
+
+            assertThrows(ForbiddenException.class,
+                    () -> restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",
+                            new DiscussRequest("q", "user-1"), eventSink, sse));
+
+            verify(eventSink, never()).send(any(OutboundSseEvent.class));
+            verify(eventSink, never()).close();
+            verify(groupService, never()).continueDiscussion(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("happy path delegates continue to the background executor")
+        void success_delegatesToExecutor() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any())).thenReturn(gcInGroup("group-1"));
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+            restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1"), eventSink, sse);
+
+            // continue runs on a background virtual thread — wait for the invocation
+            verify(groupService, timeout(2000)).continueDiscussion(eq("gc-1"), eq("q"), any());
+        }
+
+        @Test
+        @DisplayName("executor task failure routes the error to the SSE sink")
+        void executorTaskFailure_sendsErrorAndCloses() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any()))
+                    .thenThrow(new IGroupConversationService.GroupDiscussionException("boom"));
+            when(jsonSerialization.serialize(any())).thenReturn("{\"error\":\"boom\"}");
+
+            restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1"), eventSink, sse);
+
+            // onGroupError runs on the background thread — wait for the close
+            verify(eventSink, timeout(2000)).close();
+            verify(eventSink, atLeastOnce()).send(any(OutboundSseEvent.class));
         }
     }
 }
