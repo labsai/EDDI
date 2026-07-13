@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import ai.labs.eddi.configs.hitl.HitlGranularity;
+import ai.labs.eddi.configs.hitl.HitlRejectionPolicy;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -270,6 +274,22 @@ public class AgentGroupConfiguration {
         this.dynamicAgents = dynamicAgents;
     }
 
+    /**
+     * Human-in-the-loop (HITL) configuration for group discussions. Controls
+     * approval timeouts, timeout policies, and granularity level.
+     *
+     * @since 6.0.0
+     */
+    private HitlConfig hitlConfig;
+
+    public HitlConfig getHitlConfig() {
+        return hitlConfig;
+    }
+
+    public void setHitlConfig(HitlConfig hitlConfig) {
+        this.hitlConfig = hitlConfig;
+    }
+
     // --- Task Definition ---
 
     /**
@@ -434,4 +454,55 @@ public class AgentGroupConfiguration {
             this.lifecyclePolicy = lifecyclePolicy != null ? lifecyclePolicy : LifecyclePolicy.EPHEMERAL;
         }
     }
+
+    /**
+     * HITL approval timeout configuration for group discussions. Extends the
+     * agent-level config with a {@code granularity} field to control at what level
+     * human approval is required: {@code PHASE} (after each gated phase) or
+     * {@code TASK} (per task inside a gated EXECUTE phase; non-EXECUTE phases fall
+     * back to PHASE behavior).
+     *
+     * @since 6.0.0
+     */
+    public static class HitlConfig {
+        private String approvalTimeout;
+        private HitlTimeoutPolicy timeoutPolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        private HitlGranularity granularity = HitlGranularity.PHASE;
+        private HitlRejectionPolicy onTaskRejection = HitlRejectionPolicy.FAIL;
+
+        public String getApprovalTimeout() {
+            return approvalTimeout;
+        }
+
+        public void setApprovalTimeout(String approvalTimeout) {
+            this.approvalTimeout = approvalTimeout;
+        }
+
+        public HitlTimeoutPolicy getTimeoutPolicy() {
+            return timeoutPolicy;
+        }
+
+        public void setTimeoutPolicy(HitlTimeoutPolicy timeoutPolicy) {
+            // Coalesce null to the default (mirrors setLifecyclePolicy) so an explicit
+            // JSON "timeoutPolicy": null cannot silently disable the default policy.
+            this.timeoutPolicy = timeoutPolicy != null ? timeoutPolicy : HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        }
+
+        public HitlGranularity getGranularity() {
+            return granularity;
+        }
+
+        public void setGranularity(HitlGranularity granularity) {
+            this.granularity = granularity != null ? granularity : HitlGranularity.PHASE;
+        }
+
+        public HitlRejectionPolicy getOnTaskRejection() {
+            return onTaskRejection;
+        }
+
+        public void setOnTaskRejection(HitlRejectionPolicy onTaskRejection) {
+            this.onTaskRejection = onTaskRejection != null ? onTaskRejection : HitlRejectionPolicy.FAIL;
+        }
+    }
+
 }

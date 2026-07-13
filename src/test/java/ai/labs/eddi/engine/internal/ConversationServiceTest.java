@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.AgentMismatchException;
 import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
@@ -39,11 +40,14 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -89,20 +93,32 @@ class ConversationServiceTest {
     @Mock
     private TenantQuotaService tenantQuotaService;
     @Mock
+    private IScheduleStore scheduleStore;
+    @Mock
+    private IAgentStore agentStore;
+    @Mock
+    private IJsonSerialization jsonSerialization;
+    @Mock
     private ICache<String, ConversationState> conversationStateCache;
 
     private ConversationService conversationService;
+    // Held reference (not the shared no-op fixture) so HITL event-firing paths
+    // (G5) can be verified.
+    private jakarta.enterprise.event.Event<ai.labs.eddi.engine.events.HitlResumeCompletedEvent> hitlResumeCompletedEvent;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         MockitoAnnotations.openMocks(this);
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
+        hitlResumeCompletedEvent = mock(jakarta.enterprise.event.Event.class);
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
-                gdprComplianceService, tenantQuotaService,
-                new SimpleMeterRegistry(), AGENT_TIMEOUT);
+                gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
+                new SimpleMeterRegistry(), hitlResumeCompletedEvent, AGENT_TIMEOUT);
     }
 
     // =========================================================================
@@ -241,6 +257,70 @@ class ConversationServiceTest {
 
             verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ENDED);
             verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.ENDED);
+        }
+
+        @Test
+        @DisplayName("G4: ending a READY conversation writes no HITL audit, fires no event, clears no bookmark (timeout disarm is unconditional/idempotent)")
+        void endingReady_noHitlSideEffects() throws Exception {
+            doReturn(ConversationState.READY).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+
+            conversationService.endConversation(CONVERSATION_ID, "alice");
+
+            // Pause-terminating side effects must NOT run on a plain READY end.
+            verify(auditLedgerService, never()).submit(any());
+            verify(hitlResumeCompletedEvent, never()).fireAsync(any());
+            verify(conversationMemoryStore, never()).clearHitlBookmark(anyString());
+            // F4: the timeout disarm is now UNCONDITIONAL (idempotent) — it also covers
+            // the resume-in-flight IN_PROGRESS window — so deleteSchedulesByName IS
+            // called even for a READY end (a no-op when no such schedule exists).
+            verify(scheduleStore).deleteSchedulesByName("hitl-timeout-" + CONVERSATION_ID);
+        }
+
+        @Test
+        @DisplayName("G4/G5: ending an AWAITING_HUMAN conversation audits with the actor, disarms the schedule, clears the bookmark, and fires the terminal event")
+        void endingPaused_auditsAndFiresEvent() throws Exception {
+            doReturn(true).when(auditLedgerService).isEnabled();
+            // previousState is AWAITING_HUMAN → the pause-terminating branch runs.
+            doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(createMinimalSnapshot(AGENT_ID, USER_ID)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            conversationService.endConversation(CONVERSATION_ID, "alice");
+
+            // The armed timeout schedule is disarmed and the bookmark cleared.
+            verify(scheduleStore).deleteSchedulesByName("hitl-timeout-" + CONVERSATION_ID);
+            verify(conversationMemoryStore).clearHitlBookmark(CONVERSATION_ID);
+
+            // G4: an hitl.approval cancellation is audited attributed to the actor.
+            ArgumentCaptor<ai.labs.eddi.engine.audit.model.AuditEntry> auditCaptor = ArgumentCaptor
+                    .forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            verify(auditLedgerService).submit(auditCaptor.capture());
+            var detail = auditCaptor.getValue().output(); // hitl.approval detail is carried in the 'output' map
+            assertEquals("alice", detail.get("decidedBy"));
+            assertEquals("CANCELLED", detail.get("verdict"));
+
+            // G5: the terminal resume-completed event fires with a null verdict and
+            // the actor so channel observers (Slack) can render the outcome.
+            ArgumentCaptor<ai.labs.eddi.engine.events.HitlResumeCompletedEvent> eventCaptor = ArgumentCaptor
+                    .forClass(ai.labs.eddi.engine.events.HitlResumeCompletedEvent.class);
+            verify(hitlResumeCompletedEvent).fireAsync(eventCaptor.capture());
+            assertNull(eventCaptor.getValue().verdict(), "cancel/end fires a null verdict");
+            assertEquals("alice", eventCaptor.getValue().decidedBy());
+            assertNotNull(eventCaptor.getValue().snapshot());
+        }
+
+        @Test
+        @DisplayName("G4: the no-arg overload attributes to system:end")
+        void noArgOverload_attributesSystemEnd() throws Exception {
+            doReturn(true).when(auditLedgerService).isEnabled();
+            doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(createMinimalSnapshot(AGENT_ID, USER_ID)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            conversationService.endConversation(CONVERSATION_ID);
+
+            ArgumentCaptor<ai.labs.eddi.engine.audit.model.AuditEntry> auditCaptor = ArgumentCaptor
+                    .forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            verify(auditLedgerService).submit(auditCaptor.capture());
+            assertEquals("system:end", auditCaptor.getValue().output().get("decidedBy"));
         }
     }
 
@@ -439,12 +519,12 @@ class ConversationServiceTest {
         void undoAvailable_returnsTrue() throws Exception {
             var snapshot = createSnapshotWithMultipleSteps(AGENT_ID);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            doReturn(true).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
 
             boolean result = conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID);
 
             assertTrue(result);
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
         }
 
         @Test
@@ -473,12 +553,12 @@ class ConversationServiceTest {
         void redoAvailable_returnsTrue() throws Exception {
             var snapshot = createSnapshotWithRedoCache(AGENT_ID);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            doReturn(true).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
 
             boolean result = conversationService.redo(ENV, AGENT_ID, CONVERSATION_ID);
 
             assertTrue(result);
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
         }
 
         @Test
@@ -722,12 +802,12 @@ class ConversationServiceTest {
             var snapshot = createSnapshotWithMultipleSteps(AGENT_ID);
             snapshot.setEnvironment(ENV);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            doReturn(true).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
 
             boolean result = conversationService.undo(CONVERSATION_ID);
 
             assertTrue(result);
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
         }
 
         @Test
@@ -753,12 +833,12 @@ class ConversationServiceTest {
             var snapshot = createSnapshotWithRedoCache(AGENT_ID);
             snapshot.setEnvironment(ENV);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            doReturn(true).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
 
             boolean result = conversationService.redo(CONVERSATION_ID);
 
             assertTrue(result);
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
         }
 
         @Test

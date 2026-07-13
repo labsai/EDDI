@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -12,6 +13,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 
 import java.io.Serializable;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -123,6 +125,115 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
+    /**
+     * Mark this conversation as cancelled. Cooperative cancellation flag for HITL
+     * framework — tasks should check {@link #isCancelled()} and abort gracefully.
+     *
+     * @since 6.0.0
+     */
+    default void setCancelled(boolean cancelled) {
+    }
+
+    /**
+     * Check whether this conversation has been cancelled.
+     *
+     * @since 6.0.0
+     */
+    default boolean isCancelled() {
+        return false;
+    }
+
+    // === HITL pause bookmark ===
+
+    /** Workflow ID where the pipeline paused. */
+    default String getHitlPausedWorkflowId() {
+        return null;
+    }
+    default void setHitlPausedWorkflowId(String workflowId) {
+    }
+
+    /**
+     * Absolute task index within the paused workflow (the task that triggered
+     * PAUSE).
+     */
+    default int getHitlPausedAbsoluteTaskIndex() {
+        return -1;
+    }
+    default void setHitlPausedAbsoluteTaskIndex(int index) {
+    }
+
+    /** Timestamp when the conversation was paused. */
+    default Instant getHitlPausedAt() {
+        return null;
+    }
+    default void setHitlPausedAt(Instant pausedAt) {
+    }
+
+    /** Human-readable reason for the pause. */
+    default String getHitlPauseReason() {
+        return null;
+    }
+    default void setHitlPauseReason(String reason) {
+    }
+
+    /**
+     * Timeout policy — WAIT_INDEFINITELY, AUTO_APPROVE, AUTO_REJECT, or ABORT.
+     */
+    default HitlTimeoutPolicy getHitlTimeoutPolicy() {
+        return null;
+    }
+    default void setHitlTimeoutPolicy(HitlTimeoutPolicy policy) {
+    }
+
+    /** Approval timeout duration (ISO-8601, e.g. "PT30M"). */
+    default String getHitlApprovalTimeout() {
+        return null;
+    }
+    default void setHitlApprovalTimeout(String timeout) {
+    }
+
+    // === Tool-level HITL (tool-call pause) ===
+
+    /**
+     * Pause-type discriminator: null/"RULE" = behavior-rule pause, "TOOL_CALL" =
+     * gated tool pause.
+     */
+    default String getHitlPauseType() {
+        return null;
+    }
+    default void setHitlPauseType(String pauseType) {
+    }
+
+    /**
+     * The interrupted tool-call batch (durable); null unless a tool pause is
+     * active.
+     */
+    default ai.labs.eddi.engine.memory.model.PendingToolCallBatch getHitlPendingToolCalls() {
+        return null;
+    }
+    default void setHitlPendingToolCalls(ai.labs.eddi.engine.memory.model.PendingToolCallBatch batch) {
+    }
+
+    /**
+     * Agent-level tool-approval config carried onto memory at conversation start
+     * (NOT persisted).
+     */
+    default ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig getAgentToolApprovalsConfig() {
+        return null;
+    }
+    default void setAgentToolApprovalsConfig(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig config) {
+    }
+
+    /**
+     * The human decision being applied during an in-JVM tool-pause resume (NOT
+     * persisted).
+     */
+    default ai.labs.eddi.engine.lifecycle.model.HitlDecision getHitlResumeDecision() {
+        return null;
+    }
+    default void setHitlResumeDecision(ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
+    }
+
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 
@@ -185,6 +296,21 @@ public interface IConversationMemory extends Serializable {
         void setCurrentWorkflowId(String workflowId);
 
         void resetConversationOutput(String rootKey);
+
+        /**
+         * Removes the first occurrence of {@code value} from the list stored under
+         * {@code key} in the conversation output, leaving every other entry intact.
+         * No-op when the key is absent, holds a non-list, or the value is not present.
+         * Used to drop a single transient entry (e.g. the HITL pending-approval
+         * placeholder on resume) without clearing legitimate earlier output.
+         */
+        void removeConversationOutputListItem(String key, Object value);
+
+        /**
+         * Removes an entire conversation-output entry by key (e.g. the transient
+         * {@code hitl:status} pause marker on resume).
+         */
+        void removeConversationOutput(String key);
 
         void addConversationOutputObject(String key, Object value);
 

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -12,7 +13,15 @@ import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
+import ai.labs.eddi.configs.rules.model.RuleConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.engine.hitl.lint.ReservedActionLint;
+import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -21,6 +30,7 @@ import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
@@ -31,6 +41,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.Period;
@@ -66,6 +77,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final ChannelConnectorMigration channelConnectorMigration;
     private final IAgentsReadiness agentsReadiness;
     private final IRuntime runtime;
+    private final IWorkflowStore workflowStore;
+    private final IRuleSetStore ruleSetStore;
     private final int maximumLifeTimeOfIdleConversationsInDays;
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(AgentDeploymentManagement.class);
@@ -75,7 +88,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
             IAgentsReadiness agentsReadiness, IConversationMemoryStore conversationMemoryStore, IDocumentDescriptorStore documentDescriptorStore,
             IMigrationManager migrationManager, V6RenameMigration v6RenameMigration, V6QuteMigration v6QuteMigration,
-            ChannelConnectorMigration channelConnectorMigration, IRuntime runtime,
+            ChannelConnectorMigration channelConnectorMigration, IRuntime runtime, IWorkflowStore workflowStore, IRuleSetStore ruleSetStore,
             @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays") int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
         this.agentFactory = agentFactory;
@@ -88,6 +101,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         this.v6QuteMigration = v6QuteMigration;
         this.channelConnectorMigration = channelConnectorMigration;
         this.runtime = runtime;
+        this.workflowStore = workflowStore;
+        this.ruleSetStore = ruleSetStore;
         this.maximumLifeTimeOfIdleConversationsInDays = maximumLifeTimeOfIdleConversationsInDays;
     }
 
@@ -143,6 +158,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                                     null);
 
                             this.deploymentInfos.add(deploymentInfo);
+
+                            lintInertHitlConfig(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
                         } catch (ServiceException | IllegalAccessException e) {
                             LOGGER.error(e.getLocalizedMessage(), e);
                         } catch (Exception e) {
@@ -170,6 +187,97 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             if (t instanceof ResourceNotFoundException)
                 return true;
             t = t.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * Non-fatal deploy-time lint (Task 15): WARNs when a deployed agent's
+     * hitlConfig can never actually trigger a pause — i.e. no rule in any ruleset
+     * reachable from this agent's workflows emits {@code PAUSE_CONVERSATION}, and
+     * {@code hitlConfig.toolApprovals} has no {@code requireApproval} patterns
+     * either. Never blocks or fails the deployment; a lookup failure while
+     * resolving rulesets is swallowed (logged) so a broken workflow/ruleset
+     * reference can't turn an informational lint into a deployment failure.
+     */
+    private void lintInertHitlConfig(String agentId, Integer agentVersion) {
+        try {
+            AgentConfiguration agentConfiguration = agentStore.read(agentId, agentVersion);
+            AgentConfiguration.HitlConfig hitlConfig = agentConfiguration.getHitlConfig();
+            if (hitlConfig == null) {
+                return;
+            }
+
+            boolean anyRulesetEmitsPause = anyRulesetEmitsPauseConversation(agentConfiguration);
+            ReservedActionLint.checkInertHitlConfig(agentId, hitlConfig, anyRulesetEmitsPause)
+                    .ifPresent(LOGGER::warn);
+        } catch (Exception e) {
+            // Non-fatal: this is an informational lint, not a deployment gate.
+            LOGGER.warn(format("Skipping inert-hitlConfig lint for Agent (id=%s, version=%d) — could not resolve "
+                    + "workflows/rulesets: %s", agentId, agentVersion, e.getMessage()));
+        }
+    }
+
+    private boolean anyRulesetEmitsPauseConversation(AgentConfiguration agentConfiguration) {
+        for (URI workflowUri : agentConfiguration.getWorkflows()) {
+            IResourceId workflowId = RestUtilities.extractResourceId(workflowUri);
+            if (workflowId == null) {
+                continue;
+            }
+
+            WorkflowConfiguration workflowConfiguration;
+            try {
+                workflowConfiguration = workflowStore.read(workflowId.getId(), workflowId.getVersion());
+            } catch (Exception e) {
+                continue;
+            }
+            if (workflowConfiguration == null || workflowConfiguration.getWorkflowSteps() == null) {
+                continue;
+            }
+
+            for (WorkflowConfiguration.WorkflowStep step : workflowConfiguration.getWorkflowSteps()) {
+                if (step.getType() == null || !step.getType().toString().contains("ai.labs.behavior")) {
+                    continue;
+                }
+
+                Object uriObj = step.getConfig() != null ? step.getConfig().get("uri") : null;
+                if (uriObj == null) {
+                    continue;
+                }
+
+                IResourceId ruleSetId = RestUtilities.extractResourceId(URI.create(uriObj.toString()));
+                if (ruleSetId == null) {
+                    continue;
+                }
+
+                RuleSetConfiguration ruleSetConfiguration;
+                try {
+                    ruleSetConfiguration = ruleSetStore.read(ruleSetId.getId(), ruleSetId.getVersion());
+                } catch (Exception e) {
+                    continue;
+                }
+
+                if (ruleSetEmitsPauseConversation(ruleSetConfiguration)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean ruleSetEmitsPauseConversation(RuleSetConfiguration ruleSetConfiguration) {
+        if (ruleSetConfiguration == null || ruleSetConfiguration.getBehaviorGroups() == null) {
+            return false;
+        }
+        for (RuleGroupConfiguration group : ruleSetConfiguration.getBehaviorGroups()) {
+            if (group == null || group.getRules() == null) {
+                continue;
+            }
+            for (RuleConfiguration rule : group.getRules()) {
+                if (rule != null && rule.getActions() != null && rule.getActions().contains(IConversation.PAUSE_CONVERSATION)) {
+                    return true;
+                }
+            }
         }
         return false;
     }
@@ -258,9 +366,25 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
         var conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
 
+        int sparedPausedConversations = 0;
         for (var conversationMemory : conversationMemorySnapshots) {
+            // A paused (AWAITING_HUMAN) conversation is a live pending approval:
+            // ending it here with a raw setConversationState(ENDED) would leave its
+            // armed timeout schedule and HITL bookmark behind, skip the EU AI Act
+            // oversight audit, and destroy the pause that getActiveConversationCount
+            // deliberately excludes so it survives undeploy. Skip it — reaping
+            // paused conversations needs an explicit, audited HITL-aware policy
+            // (see the HITL pending-approval retention sweep).
+            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                sparedPausedConversations++;
+                continue;
+            }
+
             var documentDescriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
 
+            // NOTE: age is derived from the AGENT document's lastModifiedOn, not the
+            // conversation's — a pre-existing heuristic that predates the HITL branch
+            // and is intentionally left unchanged here.
             var timeOfLastInteractionInConversation = documentDescriptor.getLastModifiedOn();
 
             var isOlderThanMaximumAmountOfDays = isOlderThanDays(
@@ -278,6 +402,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
                 LOGGER.info(message);
             }
+        }
+
+        if (sparedPausedConversations > 0) {
+            LOGGER.info(format(
+                    "Spared %d paused (AWAITING_HUMAN) conversation(s) of Agent (id: %s, version: %d) from the idle sweep — "
+                            + "their pending approvals are preserved",
+                    sparedPausedConversations, agentId, agentVersion));
         }
     }
 

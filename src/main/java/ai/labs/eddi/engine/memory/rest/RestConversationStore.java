@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.memory.rest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -35,6 +36,8 @@ import java.util.LinkedList;
 import java.util.List;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
+import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.redactRawPendingToolCallsForRead;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -51,6 +54,7 @@ public class RestConversationStore implements IRestConversationStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final IConversationService conversationService;
     private final IUserMemoryStore userMemoryStore;
     private final IRuntime runtime;
     private final Integer deleteEndedConversationsOnceOlderThanDays;
@@ -65,6 +69,7 @@ public class RestConversationStore implements IRestConversationStore {
             IDocumentDescriptorStore documentDescriptorStore,
             IConversationDescriptorStore conversationDescriptorStore,
             IConversationMemoryStore conversationMemoryStore,
+            IConversationService conversationService,
             IUserMemoryStore userMemoryStore,
             IRuntime runtime,
             @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
@@ -77,6 +82,7 @@ public class RestConversationStore implements IRestConversationStore {
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.conversationService = conversationService;
         this.userMemoryStore = userMemoryStore;
         this.runtime = runtime;
         this.deleteEndedConversationsOnceOlderThanDays = deleteEndedConversationsOnceOlderThanDays;
@@ -210,7 +216,13 @@ public class RestConversationStore implements IRestConversationStore {
         checkNotNull(conversationId, "conversationId");
 
         try {
-            return conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            // Project the pending tool-call batch down to names-only before returning:
+            // this generic raw-read surface is reachable by any authenticated caller
+            // and must NOT leak the unredacted tool arguments or the frozen LLM
+            // transcript of a paused conversation — those stay behind the approver-only
+            // detail=full gate. Mirrors fix #4's confinement on the Simple surface.
+            return redactRawPendingToolCallsForRead(
+                    conversationMemoryStore.loadConversationMemorySnapshot(conversationId));
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
@@ -238,9 +250,28 @@ public class RestConversationStore implements IRestConversationStore {
         checkNotNull(conversationId, "conversationId");
 
         if (deletePermanently) {
+            // If the conversation is a live pending approval, resolve the HITL state
+            // BEFORE removing the document: endConversation disarms the armed
+            // timeout schedule (otherwise it fires later against a deleted
+            // conversation, logs "Conversation not found", and leaves a dead
+            // schedule row), clears the bookmark, writes the hitl.approval
+            // cancellation audit, and invalidates the cached AWAITING_HUMAN state
+            // (which getConversationState would otherwise keep serving for a
+            // nonexistent conversation until TTL).
+            try {
+                if (conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN) {
+                    // G4: attribute the pause-terminating end (this store has no request
+                    // principal and also runs from scheduled cleanup).
+                    conversationService.endConversation(conversationId, "system:admin-end");
+                }
+            } catch (Exception e) {
+                log.warn(format("HITL cleanup before permanent delete failed for conversation %s: %s",
+                        sanitize(conversationId), e.getMessage()));
+            }
+
             deleteAttachmentsForConversation(conversationId);
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
-            log.info(format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
+            log.info(format("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId)));
         }
 
         // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this
@@ -344,7 +375,19 @@ public class RestConversationStore implements IRestConversationStore {
         try {
             for (ConversationStatus conversationStatus : conversationStatuses) {
                 String conversationId = conversationStatus.getConversationId();
-                conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
+
+                // A paused (AWAITING_HUMAN) conversation must be ended through the
+                // HITL-aware service path: a raw setConversationState(ENDED) would
+                // leave the armed timeout schedule (a later stale fire logs errors),
+                // keep the bookmark, skip the hitl.approval cancellation audit, and
+                // miss the in-flight-resume signal that stops a concurrent resume
+                // from persisting its snapshot back over the ENDED state.
+                if (conversationStatus.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                    // G4: attribute the pause-terminating end (admin bulk-end path).
+                    conversationService.endConversation(conversationId, "system:admin-end");
+                } else {
+                    conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
+                }
 
                 ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
                 conversationDescriptor.setConversationState(ConversationState.ENDED);

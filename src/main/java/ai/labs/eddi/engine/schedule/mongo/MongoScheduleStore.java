@@ -21,12 +21,14 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
 import org.bson.conversions.Bson;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.time.Instant;
 import java.util.*;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static com.mongodb.client.model.Filters.*;
 import static com.mongodb.client.model.Updates.*;
 
@@ -54,6 +56,7 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String COLLECTION_FIRE_LOGS = "eddi_schedule_fire_logs";
 
     private static final String ID = "_id";
+    private static final String NAME = "name";
     private static final String ENABLED = "enabled";
     private static final String NEXT_FIRE = "nextFire";
     private static final String FIRE_STATUS = "fireStatus";
@@ -75,10 +78,20 @@ public class MongoScheduleStore implements IScheduleStore {
     private final IDocumentBuilder documentBuilder;
     private final IJsonSerialization jsonSerialization;
 
+    /**
+     * Max schedules claimed per poll cycle. Raise for deployments that must drain
+     * large bursts of one-shot HITL timeouts quickly (they are dispatched
+     * concurrently by the poller); the CAS claim still guarantees exactly-once
+     * execution across the cluster.
+     */
+    private final int pollBatchSize;
+
     @Inject
-    public MongoScheduleStore(MongoDatabase database, IJsonSerialization jsonSerialization, IDocumentBuilder documentBuilder) {
+    public MongoScheduleStore(MongoDatabase database, IJsonSerialization jsonSerialization, IDocumentBuilder documentBuilder,
+            @ConfigProperty(name = "eddi.schedule.poll-batch-size", defaultValue = "100") int pollBatchSize) {
         this.jsonSerialization = jsonSerialization;
         this.documentBuilder = documentBuilder;
+        this.pollBatchSize = pollBatchSize > 0 ? pollBatchSize : 100;
         this.scheduleCollection = database.getCollection(COLLECTION_SCHEDULES);
         this.fireLogCollection = database.getCollection(COLLECTION_FIRE_LOGS);
 
@@ -88,6 +101,10 @@ public class MongoScheduleStore implements IScheduleStore {
                 new IndexOptions().name("idx_schedules_due"));
         scheduleCollection.createIndex(Indexes.ascending(AGENT_ID), new IndexOptions().name("idx_schedules_agentId"));
         scheduleCollection.createIndex(Indexes.ascending(TENANT_ID), new IndexOptions().name("idx_schedules_tenantId"));
+        // HITL timeout schedules are deleted/re-armed by name on every pause,
+        // resume, cancel, and crash-recovery pass — without this index each of
+        // those is a collection scan.
+        scheduleCollection.createIndex(Indexes.ascending(NAME), new IndexOptions().name("idx_schedules_name"));
 
         // Fire log indexes
         fireLogCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(SCHEDULE_ID), Indexes.descending(STARTED_AT)),
@@ -111,8 +128,10 @@ public class MongoScheduleStore implements IScheduleStore {
             Document doc = toDocument(schedule);
             doc.put(ID, id);
             doc.remove("id"); // use _id instead
-            // Fix #6: Store Instants as epoch-millis for consistent BSON comparison
-            storeInstantsAsLong(doc);
+            // Store every Instant field as an epoch-millis Long read straight from
+            // the getters — never trusting whatever numeric format the shared mapper
+            // produced (see writeScheduleInstants).
+            writeScheduleInstants(doc, schedule);
             scheduleCollection.insertOne(doc);
             LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
                     schedule.getAgentId());
@@ -146,7 +165,7 @@ public class MongoScheduleStore implements IScheduleStore {
             Document doc = toDocument(schedule);
             doc.remove("id");
             doc.remove(ID);
-            storeInstantsAsLong(doc);
+            writeScheduleInstants(doc, schedule);
 
             var result = scheduleCollection.replaceOne(eq(ID, scheduleId), doc);
             if (result.getMatchedCount() == 0) {
@@ -191,7 +210,7 @@ public class MongoScheduleStore implements IScheduleStore {
     public void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException {
         try {
             scheduleCollection.deleteOne(eq(ID, scheduleId));
-            LOGGER.infof("Deleted schedule id=%s", scheduleId);
+            LOGGER.infof("Deleted schedule id=%s", sanitize(scheduleId));
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to delete schedule " + scheduleId, e);
         }
@@ -203,11 +222,25 @@ public class MongoScheduleStore implements IScheduleStore {
             var result = scheduleCollection.deleteMany(eq(AGENT_ID, agentId));
             int count = (int) result.getDeletedCount();
             if (count > 0) {
-                LOGGER.infof("Cascade-deleted %d schedule(s) for Agent %s", count, agentId);
+                LOGGER.infof("Cascade-deleted %d schedule(s) for Agent %s", count, sanitize(agentId));
             }
             return count;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to delete schedules for Agent " + agentId, e);
+        }
+    }
+
+    @Override
+    public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
+        try {
+            var result = scheduleCollection.deleteMany(eq(NAME, name));
+            int count = (int) result.getDeletedCount();
+            if (count > 0) {
+                LOGGER.infof("Deleted %d HITL timeout schedule(s) with name '%s'", count, sanitize(name));
+            }
+            return count;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete schedules by name: " + name, e);
         }
     }
 
@@ -240,25 +273,30 @@ public class MongoScheduleStore implements IScheduleStore {
 
             Bson filter = and(eq(ENABLED, true), lte(NEXT_FIRE, nowMs), or(pendingFilter, leaseExpiredFilter, retryDueFilter));
 
-            return readSchedulesWithFilter(filter, 100);
+            return readSchedulesWithFilter(filter, pollBatchSize);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to find due schedules", e);
         }
     }
 
     @Override
-    public boolean tryClaim(String scheduleId, String instanceId, Instant now) throws IResourceStore.ResourceStoreException {
+    public boolean tryClaim(String scheduleId, String instanceId, Instant now, Instant leaseExpiry) throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(now);
+            long leaseMs = epochMillis(leaseExpiry);
 
-            // Fix #2: Atomic CAS with complete guards
-            // Only claim if PENDING, or FAILED with retry due + under max retries
+            // Atomic CAS with complete guards. Claim if PENDING, FAILED with retry
+            // due, OR a CLAIMED row whose lease expired (claimedAt <= leaseExpiry) —
+            // the last clause steals a crashed/wedged instance's claim and MUST mirror
+            // findDueSchedules' leaseExpiredFilter, else expired CLAIMED rows are
+            // returned every poll but never re-fired.
             Bson filter = and(eq(ID, scheduleId),
-                    or(eq(FIRE_STATUS, FireStatus.PENDING.name()), and(eq(FIRE_STATUS, FireStatus.FAILED.name()), lte(NEXT_RETRY_AT, nowMs)
-                    // Note: maxRetries guard is in findDueSchedules —
-                    // we trust the poller already filtered, but adding
-                    // the retryAt guard prevents premature claiming
-                    )));
+                    or(eq(FIRE_STATUS, FireStatus.PENDING.name()),
+                            and(eq(FIRE_STATUS, FireStatus.FAILED.name()), lte(NEXT_RETRY_AT, nowMs)),
+                            // Note: maxRetries guard is in findDueSchedules —
+                            // we trust the poller already filtered, but adding
+                            // the retryAt guard prevents premature claiming
+                            and(eq(FIRE_STATUS, FireStatus.CLAIMED.name()), lte(CLAIMED_AT, leaseMs))));
 
             Bson update = combine(set(FIRE_STATUS, FireStatus.CLAIMED.name()), set(CLAIMED_BY, instanceId), set(CLAIMED_AT, nowMs),
                     set(FIRE_ID, scheduleId + "_" + now.toString()), set(UPDATED_AT, nowMs));
@@ -354,7 +392,7 @@ public class MongoScheduleStore implements IScheduleStore {
         try {
             Document doc = toDocument(fireLog);
             doc.put(ID, fireLog.id());
-            storeInstantsAsLong(doc);
+            writeFireLogInstants(doc, fireLog);
             fireLogCollection.insertOne(doc);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to log fire", e);
@@ -403,33 +441,57 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     /**
-     * Fix #6: Convert known Instant fields to epoch-millis Long for BSON comparison
-     * consistency. Jackson with write-dates-as-timestamps=true serializes Instants
-     * as longs, but we must ensure the filter queries also use longs consistently.
+     * Overwrite every schedule {@link Instant} field on the document with an
+     * epoch-millisecond {@code Long} taken straight from the source object's
+     * getters.
+     * <p>
+     * This is deliberately independent of the shared JSON mapper. With
+     * {@code write-dates-as-timestamps=true} plus {@code JavaTimeModule} (default
+     * {@code WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS}), an Instant serializes as
+     * fractional <em>seconds</em> — e.g.
+     * {@code Instant.ofEpochMilli(1719964800123L)} becomes
+     * {@code 1719964800.123000000} — which, deserialized into a {@link Document},
+     * is a {@link Double}. Rounding that to a {@code Long} yields epoch
+     * <em>seconds</em> (~1.7e9), 1000x smaller than the epoch millis (~1.7e12) that
+     * {@link #findDueSchedules} compares against, so every future-armed schedule
+     * would look immediately due — and would diverge from
+     * {@link ai.labs.eddi.datastore.postgres.PostgresScheduleStore}, which stores
+     * epoch millis. Reading is handled symmetrically by {@link #readEpochMillis}.
      */
-    private static void storeInstantsAsLong(Document doc) {
-        convertInstantField(doc, "nextFire");
-        convertInstantField(doc, "lastFired");
-        convertInstantField(doc, "claimedAt");
-        convertInstantField(doc, "nextRetryAt");
-        convertInstantField(doc, "createdAt");
-        convertInstantField(doc, "updatedAt");
-        // fireLog fields
-        convertInstantField(doc, "fireTime");
-        convertInstantField(doc, "startedAt");
-        convertInstantField(doc, "completedAt");
+    private static void writeScheduleInstants(Document doc, ScheduleConfiguration schedule) {
+        putEpochMillis(doc, "nextFire", schedule.getNextFire());
+        putEpochMillis(doc, "lastFired", schedule.getLastFired());
+        putEpochMillis(doc, "claimedAt", schedule.getClaimedAt());
+        putEpochMillis(doc, "nextRetryAt", schedule.getNextRetryAt());
+        putEpochMillis(doc, "createdAt", schedule.getCreatedAt());
+        putEpochMillis(doc, "updatedAt", schedule.getUpdatedAt());
     }
 
-    private static void convertInstantField(Document doc, String field) {
+    private static void writeFireLogInstants(Document doc, ScheduleFireLog fireLog) {
+        putEpochMillis(doc, "fireTime", fireLog.fireTime());
+        putEpochMillis(doc, "startedAt", fireLog.startedAt());
+        putEpochMillis(doc, "completedAt", fireLog.completedAt());
+    }
+
+    private static void putEpochMillis(Document doc, String field, Instant instant) {
+        doc.put(field, instant == null ? null : instant.toEpochMilli());
+    }
+
+    /**
+     * Read an epoch-millisecond date field written by {@link #putEpochMillis}. The
+     * shared mapper reads a bare integer as epoch-<em>seconds</em> (JavaTimeModule
+     * default), so schedule date fields are always coerced here rather than
+     * deserialized by Jackson — mirroring PostgresScheduleStore's column reads.
+     */
+    private static Instant readEpochMillis(Document doc, String field) {
         Object val = doc.get(field);
-        if (val instanceof Number num) {
-            doc.put(field, num.longValue()); // already epoch-millis, normalize to Long
-        } else if (val instanceof Instant inst) {
-            doc.put(field, inst.toEpochMilli());
-        } else if (val instanceof Date date) {
-            doc.put(field, date.getTime());
+        return val instanceof Number num ? Instant.ofEpochMilli(num.longValue()) : null;
+    }
+
+    private static void stripFields(Document doc, String... fields) {
+        for (String field : fields) {
+            doc.remove(field);
         }
-        // null or other types left as-is
     }
 
     private static long epochMillis(Instant instant) {
@@ -449,7 +511,25 @@ public class MongoScheduleStore implements IScheduleStore {
             if (doc.containsKey(ID)) {
                 doc.put("id", doc.get(ID));
             }
-            return documentBuilder.build(doc, ScheduleConfiguration.class);
+            // Date fields are epoch-millis Longs (see writeScheduleInstants). Capture
+            // them here and strip them before the Jackson build, because the shared
+            // mapper reads a bare integer as epoch-SECONDS and would mangle them.
+            Instant nextFire = readEpochMillis(doc, "nextFire");
+            Instant lastFired = readEpochMillis(doc, "lastFired");
+            Instant claimedAt = readEpochMillis(doc, "claimedAt");
+            Instant nextRetryAt = readEpochMillis(doc, "nextRetryAt");
+            Instant createdAt = readEpochMillis(doc, "createdAt");
+            Instant updatedAt = readEpochMillis(doc, "updatedAt");
+            stripFields(doc, "nextFire", "lastFired", "claimedAt", "nextRetryAt", "createdAt", "updatedAt");
+
+            ScheduleConfiguration config = documentBuilder.build(doc, ScheduleConfiguration.class);
+            config.setNextFire(nextFire);
+            config.setLastFired(lastFired);
+            config.setClaimedAt(claimedAt);
+            config.setNextRetryAt(nextRetryAt);
+            config.setCreatedAt(createdAt);
+            config.setUpdatedAt(updatedAt);
+            return config;
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Deserialization failed", e);
         }
@@ -460,7 +540,16 @@ public class MongoScheduleStore implements IScheduleStore {
             if (doc.containsKey(ID)) {
                 doc.put("id", doc.get(ID));
             }
-            return documentBuilder.build(doc, ScheduleFireLog.class);
+            // See fromDocument — coerce the epoch-millis date fields ourselves rather
+            // than let the shared mapper read them as epoch-seconds.
+            Instant fireTime = readEpochMillis(doc, "fireTime");
+            Instant startedAt = readEpochMillis(doc, "startedAt");
+            Instant completedAt = readEpochMillis(doc, "completedAt");
+            stripFields(doc, "fireTime", "startedAt", "completedAt");
+
+            ScheduleFireLog log = documentBuilder.build(doc, ScheduleFireLog.class);
+            return new ScheduleFireLog(log.id(), log.scheduleId(), log.fireId(), fireTime, startedAt, completedAt, log.status(),
+                    log.instanceId(), log.conversationId(), log.errorMessage(), log.attemptNumber(), log.cost());
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Deserialization failed", e);
         }

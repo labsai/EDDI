@@ -50,7 +50,7 @@ class MongoScheduleStoreTest {
         when(database.getCollection("eddi_schedules")).thenReturn(scheduleCollection);
         when(database.getCollection("eddi_schedule_fire_logs")).thenReturn(fireLogCollection);
 
-        store = new MongoScheduleStore(database, jsonSerialization, documentBuilder);
+        store = new MongoScheduleStore(database, jsonSerialization, documentBuilder, 100);
     }
 
     // ==================== createSchedule ====================
@@ -237,7 +237,7 @@ class MongoScheduleStoreTest {
         Document result = new Document("_id", "sched-1");
         when(scheduleCollection.findOneAndUpdate(any(Bson.class), any(Bson.class))).thenReturn(result);
 
-        assertTrue(store.tryClaim("sched-1", "instance-1", Instant.now()));
+        assertTrue(store.tryClaim("sched-1", "instance-1", Instant.now(), Instant.now().minusSeconds(300)));
     }
 
     @Test
@@ -245,7 +245,7 @@ class MongoScheduleStoreTest {
     void tryClaimFail() throws Exception {
         when(scheduleCollection.findOneAndUpdate(any(Bson.class), any(Bson.class))).thenReturn(null);
 
-        assertFalse(store.tryClaim("sched-1", "instance-1", Instant.now()));
+        assertFalse(store.tryClaim("sched-1", "instance-1", Instant.now(), Instant.now().minusSeconds(300)));
     }
 
     // ==================== markCompleted ====================

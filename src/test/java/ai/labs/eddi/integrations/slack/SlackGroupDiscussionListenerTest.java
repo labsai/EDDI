@@ -359,4 +359,85 @@ class SlackGroupDiscussionListenerTest {
                 agentId, displayName, response, 0, "Opinion",
                 targetAgentId, targetDisplayName);
     }
+
+    // ─── HITL ───
+
+    @Test
+    void onHitlPause_postsThreadNotice() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "needs sign-off", "phase"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("awaiting approval"));
+    }
+
+    @Test
+    void onHitlPause_withApprovalChannelAndApprovers_postsButtons() {
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2");
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        // Interactive block message posted to the approval channel with group value
+        verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), anyList(), anyString());
+    }
+
+    @Test
+    void onHitlPause_withIntegrationName_buttonValueBindsIntegration() {
+        // H2/H1: the group approval button value carries
+        // "<integrationName>|group:<gcId>"
+        // so the decision binds to that integration at the interactivity endpoint.
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2", "acme-int");
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        var blocksCaptor = org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), blocksCaptor.capture(), anyString());
+        @SuppressWarnings("unchecked")
+        var blocks = (java.util.List<java.util.Map<String, Object>>) blocksCaptor.getValue();
+        var actions = blocks.stream().filter(b -> "actions".equals(b.get("type"))).findFirst().orElseThrow();
+        @SuppressWarnings("unchecked")
+        var elements = (java.util.List<java.util.Map<String, Object>>) actions.get("elements");
+        String value = (String) elements.get(0).get("value");
+        var parsed = SlackHitlSupport.parseActionValue(value);
+        assertEquals("acme-int", parsed.integrationName());
+        assertTrue(parsed.isGroup());
+    }
+
+    @Test
+    void onHitlPause_noApprovalChannel_noBlockMessage() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+        verify(slackApi, never()).postBlocksMessage(any(), any(), any(), anyList(), anyString());
+    }
+
+    @Test
+    void onHitlPause_countsDownCompletionLatch() {
+        // A HITL pause is terminal for this listener: resume runs through a different
+        // listener instance, so onGroupComplete/onCancelled never arrive here. The
+        // latch MUST be released or registerAgentThreadMappings() parks for the full
+        // awaitCompletion timeout and leaks a virtual thread on every paused
+        // expanded-mode discussion.
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        assertTrue(listener.awaitCompletion(1, TimeUnit.SECONDS),
+                "onHitlPause must release the completion latch so follow-up registration does not block");
+    }
+
+    @Test
+    void onHitlResume_postsVerdict() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlResume(new GroupConversationEventSink.HitlResumeEvent("APPROVED", "looks good", "slack:U1"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("approved"));
+    }
+
+    @Test
+    void onMemberPauseSkipped_postsWarning() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onMemberPauseSkipped(new GroupConversationEventSink.MemberPauseSkippedEvent(
+                "a1", "Alice", 0, "Phase 1", "gated action"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("skipped"));
+    }
 }

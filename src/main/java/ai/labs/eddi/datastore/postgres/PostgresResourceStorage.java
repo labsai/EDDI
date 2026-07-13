@@ -144,6 +144,43 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
+    public void storeIfFieldEquals(IResource<T> newResource, String fieldName, String expectedValue)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        Resource pgResource = checkInternalResource(newResource);
+        String sql = """
+                UPDATE resources SET version = ?, data = ?::jsonb
+                WHERE id = ?::uuid AND collection_name = ? AND data->>? = ?
+                """;
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, pgResource.getVersion());
+            ps.setString(2, pgResource.getJson());
+            ps.setString(3, pgResource.getId());
+            ps.setString(4, collectionName);
+            ps.setString(5, fieldName);
+            ps.setString(6, expectedValue);
+            if (ps.executeUpdate() == 0) {
+                // Distinguish "deleted" (404) from "field mismatch" (409) — parity
+                // with the Mongo backend.
+                String existsSql = "SELECT 1 FROM resources WHERE id = ?::uuid AND collection_name = ?";
+                try (PreparedStatement check = conn.prepareStatement(existsSql)) {
+                    check.setString(1, pgResource.getId());
+                    check.setString(2, collectionName);
+                    try (ResultSet rs = check.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new IResourceStore.ResourceNotFoundException(
+                                    String.format("Resource no longer exists (id=%s)", pgResource.getId()));
+                        }
+                    }
+                }
+                throw new IResourceStore.ResourceModifiedException(
+                        String.format("Resource field '%s' was not '%s' (id=%s)", fieldName, expectedValue, pgResource.getId()));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to store resource with field check", e);
+        }
+    }
+
+    @Override
     public void createNew(IResource<T> resource) {
         Resource pgResource = checkInternalResource(resource);
         String sql = "INSERT INTO resources (id, collection_name, version, data) " + "VALUES (?::uuid, ?, ?, ?::jsonb)";

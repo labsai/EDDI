@@ -53,7 +53,7 @@ E.D.D.I. (Enhanced Dialog Driven Interface) is a **multi-agent orchestration mid
 EDDI's architecture is built on several key principles:
 
 1. **Modularity**: Every component is pluggable and replaceable
-2. **Composability**: Agents are assembled from reusable packages and extensions
+2. **Composability**: Agents are assembled from reusable workflows and extensions
 3. **Asynchronous Processing**: Non-blocking I/O for handling concurrent conversations
 4. **State-Driven**: All operations transform or query the conversation state
 5. **Cloud-Native**: Designed for containerized, distributed deployments
@@ -232,14 +232,14 @@ EDDI agents are **not monolithic**. They are **composite objects** assembled fro
 
 ```
 Agent (.agent.json)
-  ├─ Workflow 1 (.package.json)
+  ├─ Workflow 1 (.workflow.json)
   │   ├─ Behavior Rules Extension (.behavior.json)
   │   ├─ HTTP Calls Extension (.httpcalls.json)
   │   └─ Output Extension (.output.json)
-  ├─ Workflow 2 (.package.json)
+  ├─ Workflow 2 (.workflow.json)
   │   ├─ Dictionary Extension (.dictionary.json)
   │   └─ LangChain Extension (.langchain.json)
-  └─ Workflow 3 (.package.json)
+  └─ Workflow 3 (.workflow.json)
       └─ Property Extension (.property.json)
 ```
 
@@ -247,26 +247,26 @@ Agent (.agent.json)
 
 **File**: `{agentId}.agent.json`
 
-A agent is simply a **list of package references**:
+A agent is simply a **list of workflow references**:
 
 ```json
 {
-  "packages": [
-    "eddi://ai.labs.package/packagestore/packages/{workflowId}?version={version}",
-    "eddi://ai.labs.package/packagestore/packages/{anotherWorkflowId}?version={version}"
+  "workflows": [
+    "eddi://ai.labs.workflow/workflowstore/workflows/{workflowId}?version={version}",
+    "eddi://ai.labs.workflow/workflowstore/workflows/{anotherWorkflowId}?version={version}"
   ]
 }
 ```
 
 ### 2. Workflow Level
 
-**File**: `{workflowId}.package.json`
+**File**: `{workflowId}.workflow.json`
 
-A package is a **container of functionality** with a list of extensions:
+A workflow is a **container of functionality** with a list of steps:
 
 ```json
 {
-  "packageExtensions": [
+  "workflowSteps": [
     {
       "type": "eddi://ai.labs.behavior",
       "extensions": {
@@ -375,7 +375,7 @@ When adding a new feature, use this guide to decide where configuration belongs:
 |---|---|---|
 | Does it affect the entire agent across all conversations? | **Agent level** (`AgentConfiguration`) | `enableMemoryTools`, `enableStreaming` |
 | Does it control how a pipeline step behaves? | **Extension level** (e.g., `langchain.json`, `property.json`) | LLM parameters, property instructions |
-| Does it define which extensions run and in what order? | **Workflow level** (`package.json`) | Extension types and URIs |
+| Does it define which extensions run and in what order? | **Workflow level** (`workflow.json`) | Extension types and URIs |
 | Is it a user-facing runtime setting? | **Agent level** | User memory config, audit settings |
 | Is it a tool/capability the LLM can use? | **Extension level** (in `langchain.json`) | `builtInToolsWhitelist` |
 
@@ -461,17 +461,17 @@ void executeLifecycle(
 
 ### WorkflowConfiguration
 
-**Location**: `ai.labs.eddi.configs.packages.model.WorkflowConfiguration`
+**Location**: `ai.labs.eddi.configs.workflows.model.WorkflowConfiguration`
 
-**Purpose**: Defines the structure of an agent package
+**Purpose**: Defines the structure of an agent workflow
 
 **Model**:
 
 ```java
 public class WorkflowConfiguration {
-    private List<WorkflowExtension> packageExtensions;
+    private List<WorkflowStep> workflowSteps;
 
-    public static class WorkflowExtension {
+    public static class WorkflowStep {
         private URI type;
         private Map<String, Object> extensions;
         private Map<String, Object> config;
@@ -622,13 +622,13 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 ### 4. Repository Pattern
 
-- **Where**: Data access (stores: agentstore, packagestore, etc.)
+- **Where**: Data access (stores: agentstore, workflowstore, etc.)
 - **Why**: Abstracts data persistence from business logic
 
 ### 5. Factory Pattern
 
 - **Where**: `IAgentFactory`
-- **Why**: Complex agent instantiation from multiple packages and configurations
+- **Why**: Complex agent instantiation from multiple workflows and configurations
 
 ### 6. Coordinator Pattern
 
@@ -801,7 +801,7 @@ Every resource references its dependencies by `eddi://` URI:
 Agent → Workflow: "eddi://ai.labs.workflow/workflowstore/workflows/{id}?version=1"
 Workflow → Rules: "eddi://ai.labs.rules/rulestore/rulesets/{id}?version=1"
 Workflow → ApiCalls: "eddi://ai.labs.apicalls/apicallstore/apicalls/{id}?version=1"
-Workflow → LLM: "eddi://ai.labs.llm/llmstore/llmconfigs/{id}?version=1"
+Workflow → LLM: "eddi://ai.labs.llm/llmstore/llms/{id}?version=1"
 ```
 
 ### Extension Types & Their Pipeline Role

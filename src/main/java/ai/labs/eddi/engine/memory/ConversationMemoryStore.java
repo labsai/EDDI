@@ -12,6 +12,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.Projections;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -56,6 +57,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE));
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_ID));
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_VERSION));
+        // owner-scoped pending-approvals inbox: filter by (state, userId) in-query
+        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE, "userId"));
     }
 
     @Override
@@ -69,6 +72,27 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         }
 
         return snapshot.getConversationId();
+    }
+
+    @Override
+    public boolean storeConversationMemorySnapshotIfState(ConversationMemorySnapshot snapshot, ConversationState expectedState) {
+        String conversationId = snapshot.getConversationId();
+        if (conversationId == null || expectedState == null) {
+            // A conditional store only makes sense against an existing document with a
+            // known expected state. expectedState can now be null when the caller
+            // derives it from a live lookup (say-path preTurnPersistedState, undo/redo
+            // loaded state) and the document was deleted concurrently — treat that as a
+            // CAS miss (discard) rather than NPE on expectedState.name().
+            return false;
+        }
+        var filter = new Document(OBJECT_ID, new ObjectId(conversationId))
+                .append(KEY_CONVERSATION_STATE, expectedState.name());
+        // Atomic compare-and-store: replaces the whole document (including its new
+        // state) only while the persisted state still equals expectedState. If a
+        // concurrent terminal writer already flipped it (ENDED/EXECUTION_INTERRUPTED),
+        // the filter misses and nothing is overwritten.
+        var result = conversationCollectionObject.replaceOne(filter, snapshot);
+        return result.getMatchedCount() > 0;
     }
 
     @Override
@@ -145,8 +169,14 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public Long getActiveConversationCount(String agentId, Integer agentVersion) {
+        // Plan §10(a): AWAITING_HUMAN conversations do not count as active — with
+        // the default WAIT_INDEFINITELY policy a single forgotten approval would
+        // otherwise block undeploy and old-version GC forever. A paused
+        // conversation whose agent was undeployed keeps its pause; resume then
+        // reports 409 "agent not deployed" and restores the pause.
         Bson query = Filters.and(Filters.eq(KEY_AGENT_ID, agentId), Filters.eq(KEY_AGENT_VERSION, agentVersion),
-                Filters.not(new Document(KEY_CONVERSATION_STATE, ENDED.toString())));
+                Filters.nin(KEY_CONVERSATION_STATE,
+                        ENDED.toString(), ConversationState.AWAITING_HUMAN.toString()));
         return conversationCollectionDocument.countDocuments(query);
     }
 
@@ -156,6 +186,97 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, ENDED.toString()))
                 .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
         return ids;
+    }
+
+    @Override
+    public boolean compareAndSetState(String conversationId, ConversationState expected, ConversationState target) {
+        var filter = Filters.and(
+                Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
+                Filters.eq(KEY_CONVERSATION_STATE, expected.name()));
+        var update = new Document("$set", new Document(KEY_CONVERSATION_STATE, target.name()));
+        var result = conversationCollectionDocument.updateOne(filter, update);
+        // matchedCount (not modifiedCount) so a no-op CAS (expected == target) still
+        // reports success — consistent with storeConversationMemorySnapshotIfState.
+        return result.getMatchedCount() > 0;
+    }
+
+    @Override
+    public List<String> findConversationIdsByState(ConversationState state) {
+        List<String> ids = new ArrayList<>();
+        conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, state.name()))
+                .projection(new Document(OBJECT_ID, 1))
+                .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
+        return ids;
+    }
+
+    /**
+     * Projected fields for pending-approval summaries — never the full document.
+     * {@code hitlPendingToolCalls.calls.toolName} pulls in ONLY the tool names
+     * (never {@code argumentsRaw}/{@code argumentsRedacted}) so this bulk listing
+     * stays cheap and never risks exposing tool-call arguments.
+     */
+    private static final Bson PENDING_SUMMARY_PROJECTION = Projections.include(KEY_AGENT_ID, "userId",
+            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
+            "hitlPauseType", "hitlPendingToolCalls.calls.toolName");
+
+    @Override
+    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
+        // Single bounded, projected query on the indexed state field — the
+        // (potentially multi-MB) step/output data of paused conversations is
+        // never deserialized, and there are no per-id point-reads (this listing
+        // is polled and backs the crash-recovery sweep).
+        return collectPendingSummaries(
+                conversationCollectionObject.find(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()))
+                        .projection(PENDING_SUMMARY_PROJECTION)
+                        .limit(limit));
+    }
+
+    @Override
+    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(String ownerUserId, int limit) {
+        // Owner filter INSIDE the query: the limit applies after the restriction,
+        // so a user's inbox is complete even behind a large global backlog.
+        return collectPendingSummaries(
+                conversationCollectionObject.find(Filters.and(
+                        Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()),
+                        Filters.eq("userId", ownerUserId)))
+                        .projection(PENDING_SUMMARY_PROJECTION)
+                        .limit(limit));
+    }
+
+    private List<ai.labs.eddi.engine.model.PendingApprovalSummary> collectPendingSummaries(
+                                                                                           com.mongodb.client.FindIterable<ConversationMemorySnapshot> snapshots) {
+        List<ai.labs.eddi.engine.model.PendingApprovalSummary> out = new ArrayList<>();
+        snapshots.forEach(snapshot -> {
+            var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                    snapshot.getConversationId(), snapshot.getAgentId(), snapshot.getUserId(),
+                    snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
+                    snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null);
+            summary.setApprovalTimeout(snapshot.getHitlApprovalTimeout());
+            summary.setPauseType(snapshot.getHitlPauseType());
+            if (snapshot.getHitlPendingToolCalls() != null && snapshot.getHitlPendingToolCalls().getCalls() != null) {
+                summary.setToolNames(snapshot.getHitlPendingToolCalls().getCalls().stream()
+                        .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                        .toList());
+            }
+            out.add(summary);
+        });
+        return out;
+    }
+
+    @Override
+    public void clearHitlBookmark(String conversationId) {
+        var unset = new Document();
+        // Terminal cleanup (end/cancel) must remove ALL pause state, including the
+        // tool-level HITL fields — otherwise a stale hitlPauseType / pending batch
+        // would linger on an ended or cancelled conversation document.
+        for (String field : List.of("hitlPausedWorkflowId", "hitlPausedAbsoluteTaskIndex", "hitlPausedAt",
+                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
+                "hitlPauseType", "hitlPendingToolCalls")) {
+            unset.append(field, "");
+        }
+        conversationCollectionDocument.updateOne(
+                new Document(OBJECT_ID, new ObjectId(conversationId)),
+                new Document("$unset", unset));
     }
 
     @Override

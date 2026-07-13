@@ -143,7 +143,8 @@ class LlmTaskTest {
                 identityMaskingService,
                 toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService, attachmentStore,
-                null, null, null, null, null);
+                null, null, null, null, null,
+                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
     }
 
     // ====================================================================
