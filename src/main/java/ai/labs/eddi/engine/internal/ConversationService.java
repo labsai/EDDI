@@ -13,6 +13,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
@@ -104,6 +105,14 @@ public class ConversationService implements IConversationService {
     private final IAgentStore agentStore;
     private final IJsonSerialization jsonSerialization;
     private final ICache<String, ConversationState> conversationStateCache;
+
+    // Field-injected so the numerous direct-construction unit tests need no change;
+    // used only to resolve stored-attachment metadata at conversation init.
+    @Inject
+    IAttachmentStore attachmentStore;
+
+    @ConfigProperty(name = "eddi.attachments.max-per-turn", defaultValue = "5")
+    int maxAttachmentsPerTurn;
 
     /**
      * Fires {@link HitlResumeCompletedEvent} when a resume settles to a non-paused
@@ -862,6 +871,16 @@ public class ConversationService implements IConversationService {
             @Override
             public String getUserId() {
                 return userId;
+            }
+
+            @Override
+            public IAttachmentStore getAttachmentStore() {
+                return attachmentStore;
+            }
+
+            @Override
+            public int getMaxAttachmentsPerTurn() {
+                return maxAttachmentsPerTurn;
             }
         };
     }

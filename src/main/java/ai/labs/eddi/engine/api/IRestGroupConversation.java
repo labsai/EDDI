@@ -137,8 +137,23 @@ public interface IRestGroupConversation {
 
     /**
      * Request body for starting a group discussion.
+     * <p>
+     * Optional {@code attachments} are shared with every member agent: inline files
+     * ({@code data}) are stored server-side bound to the group conversation and
+     * each member is granted access; {@code url} references are forwarded as-is.
+     * Old two-argument clients remain compatible.
      */
-    record DiscussRequest(String question, String userId) {
+    record DiscussRequest(String question, String userId, List<AttachmentRef> attachments) {
+        public DiscussRequest(String question, String userId) {
+            this(question, userId, null);
+        }
+    }
+
+    /**
+     * A single attachment reference on a group discussion request. Provide either
+     * inline base64 {@code data} (+ {@code mimeType}) or a hosted {@code url}.
+     */
+    record AttachmentRef(String mimeType, String data, String url, String fileName) {
     }
 
     /**

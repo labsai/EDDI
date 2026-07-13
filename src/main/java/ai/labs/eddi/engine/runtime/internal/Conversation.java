@@ -261,12 +261,27 @@ public class Conversation implements IConversation {
         addContextToConversationOutput(currentStep, contextData);
         removedTaskTypeResultsFromPreviousRuns(currentStep, taskTypeResultsToBeRemoved);
 
-        // Extract attachments from context (attachment_0, attachment_1, etc.)
-        var attachments = AttachmentContextExtractor.extractAttachments(contexts);
-        if (!attachments.isEmpty()) {
-            var data = new Data<>(MemoryKeys.ATTACHMENTS.key(), attachments);
-            data.setPublic(true);
-            currentStep.storeData(data);
+        // Extract attachments from context (attachment_0, attachment_1, etc.),
+        // resolve stored-blob metadata (owner/grant authorized) and enforce the
+        // per-turn cap. Failures surface as attachments:errors — never silent.
+        var parsedAttachments = AttachmentContextExtractor.extractAttachments(contexts);
+        if (!parsedAttachments.isEmpty()) {
+            var extraction = AttachmentContextExtractor.resolveAndGuard(
+                    parsedAttachments, propertiesHandler.getAttachmentStore(),
+                    conversationMemory.getConversationId(), propertiesHandler.getMaxAttachmentsPerTurn());
+
+            if (!extraction.errors().isEmpty()) {
+                extraction.errors().forEach(err -> LOGGER.warnv("Attachment issue in conversation {0}: {1}",
+                        conversationMemory.getConversationId(), err));
+                var errorData = new Data<>(MemoryKeys.ATTACHMENT_ERRORS.key(), extraction.errors());
+                errorData.setPublic(false);
+                currentStep.storeData(errorData);
+            }
+            if (!extraction.attachments().isEmpty()) {
+                var data = new Data<>(MemoryKeys.ATTACHMENTS.key(), extraction.attachments());
+                data.setPublic(true);
+                currentStep.storeData(data);
+            }
         }
 
         boolean isSecretInput = isSecretInputFlagged(contexts);
@@ -453,8 +468,10 @@ public class Conversation implements IConversation {
         List<IData<Context>> contextData = new LinkedList<>();
         if (context != null) {
             for (String key : context.keySet()) {
-                contextData.add(new Data<>(KEY_CONTEXT + ":" + key, context.get(key)));
-
+                // Persisted copy is scrubbed of inline base64 payloads; the live payload
+                // has already been captured into ATTACHMENTS memory for this turn.
+                Context persistedCopy = AttachmentContextExtractor.scrubInlinePayload(key, context.get(key));
+                contextData.add(new Data<>(KEY_CONTEXT + ":" + key, persistedCopy));
             }
         }
         return contextData;

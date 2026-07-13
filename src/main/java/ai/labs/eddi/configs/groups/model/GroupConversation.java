@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.model;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.engine.memory.model.Attachment;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.time.Instant;
@@ -73,6 +74,16 @@ public class GroupConversation {
      */
     @JsonIgnore
     private transient AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig;
+
+    /**
+     * Transient attachments for this discussion. Set at fan-out by
+     * {@code GroupConversationService} — inline files are materialized into the
+     * blob store (owned by this group conversation) and each member conversation is
+     * granted access. Not persisted to the transcript document; the blobs live in
+     * {@code IAttachmentStore} bound to this conversation's id.
+     */
+    @JsonIgnore
+    private transient List<Attachment> attachments;
 
     /**
      * A single entry in the discussion transcript. Each entry records one agent's
@@ -324,6 +335,15 @@ public class GroupConversation {
 
     public void setDynamicAgentConfig(AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig) {
         this.dynamicAgentConfig = dynamicAgentConfig;
+    }
+
+    @JsonIgnore
+    public List<Attachment> getAttachments() {
+        return attachments;
+    }
+
+    public void setAttachments(List<Attachment> attachments) {
+        this.attachments = attachments;
     }
 
     @JsonIgnore

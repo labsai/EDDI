@@ -10,8 +10,8 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
@@ -54,7 +54,7 @@ public class GdprComplianceService {
     private final IDatabaseLogs databaseLogs;
     private final IAuditStore auditStore;
     private final AuditLedgerService auditLedgerService;
-    private final Instance<IAttachmentStorage> attachmentStorageInstance;
+    private final Instance<IAttachmentStore> attachmentStorageInstance;
     private final IHitlToolJournalStore hitlToolJournalStore;
 
     @Inject
@@ -64,7 +64,7 @@ public class GdprComplianceService {
             IDatabaseLogs databaseLogs,
             IAuditStore auditStore,
             AuditLedgerService auditLedgerService,
-            Instance<IAttachmentStorage> attachmentStorageInstance,
+            Instance<IAttachmentStore> attachmentStorageInstance,
             IHitlToolJournalStore hitlToolJournalStore) {
         this.userMemoryStore = userMemoryStore;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -288,20 +288,45 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
+        // 5. Attachment metadata (no bytes — the payload is fetched via the
+        // download API; portability requires the metadata, not the blobs).
+        var attachmentEntries = new ArrayList<UserDataExport.AttachmentExportEntry>();
+        try {
+            if (attachmentStorageInstance.isResolvable()) {
+                var store = attachmentStorageInstance.get();
+                for (var convId : conversationMemoryStore.getConversationIdsByUserId(userId)) {
+                    try {
+                        for (var a : store.listByConversation(convId)) {
+                            attachmentEntries.add(new UserDataExport.AttachmentExportEntry(
+                                    convId, a.storageRef(), a.filename(), a.mimeType(), a.sizeBytes()));
+                        }
+                    } catch (Exception e) {
+                        // Isolate per conversation so one bad lookup doesn't truncate
+                        // the whole export (mirrors the conversation-snapshot block above).
+                        LOGGER.warnf("[GDPR] Skipping attachments for conversation %s during export: %s",
+                                convId, e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to export attachment metadata [%s]", pseudonym);
+        }
+
         LOGGER.infof("[GDPR] Export complete [%s]: memories=%d, "
-                + "conversations=%d, managedConversations=%d, auditEntries=%d",
+                + "conversations=%d, managedConversations=%d, auditEntries=%d, attachments=%d",
                 pseudonym, memories.size(), conversations.size(),
-                managedConversations.size(), auditExportEntries.size());
+                managedConversations.size(), auditExportEntries.size(), attachmentEntries.size());
 
         // Write compliance event to immutable audit ledger
         submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, Map.of(
                 "memoriesExported", memories.size(),
                 "conversationsExported", conversations.size(),
                 "managedConversationsExported", managedConversations.size(),
-                "auditEntriesExported", auditExportEntries.size()));
+                "auditEntriesExported", auditExportEntries.size(),
+                "attachmentsExported", attachmentEntries.size()));
 
         return new UserDataExport(userId, Instant.now(), memories,
-                conversations, managedConversations, auditExportEntries);
+                conversations, managedConversations, auditExportEntries, attachmentEntries);
     }
 
     // === Right to Restriction of Processing (GDPR Art. 18) ===

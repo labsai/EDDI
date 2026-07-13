@@ -30,6 +30,7 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -111,6 +112,27 @@ public class LlmTask implements ILifecycleTask {
     private final CounterweightService counterweightService;
     private final IdentityMaskingService identityMaskingService;
     private final IAttachmentStore attachmentStore;
+
+    // Field-injected so the many direct-construction unit tests are unaffected;
+    // null-guarded at the call site.
+    @Inject
+    AttachmentForwarder attachmentForwarder;
+
+    @Inject
+    AttachmentTextExtractor attachmentTextExtractor;
+
+    /**
+     * Wire the attachment services into the (constructor-built) AgentOrchestrator
+     * after CDI field injection completes, so the {@code readAttachment} tool can
+     * be offered. Skipped in direct-construction unit tests (no CDI) — the tool is
+     * simply never added there.
+     */
+    @jakarta.annotation.PostConstruct
+    void wireAttachmentServices() {
+        if (agentOrchestrator != null) {
+            agentOrchestrator.setAttachmentServices(attachmentStore, attachmentTextExtractor);
+        }
+    }
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -406,9 +428,23 @@ public class LlmTask implements ILifecycleTask {
                     includeFirstAgentMessage, summaryPrefix, skipSteps);
         }
 
-        // Enhance the last user message with multimodal attachment content (images,
-        // etc.)
-        MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, attachmentStore);
+        // Forward the current step's attachments to the LLM as multimodal content,
+        // gated on the resolved (provider, model) capabilities, honoring any
+        // per-task multimodal overrides.
+        if (attachmentForwarder != null) {
+            var mm = task.getMultimodal();
+            var vision = mm != null
+                    ? ModelCapabilityService.Support.parse(mm.getVision())
+                    : ModelCapabilityService.Support.AUTO;
+            var documents = mm != null
+                    ? ModelCapabilityService.Support.parse(mm.getDocuments())
+                    : ModelCapabilityService.Support.AUTO;
+            var audio = mm != null
+                    ? ModelCapabilityService.Support.parse(mm.getAudio())
+                    : ModelCapabilityService.Support.AUTO;
+            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams),
+                    vision, documents, audio);
+        }
 
         if (messages.isEmpty()) {
             return;

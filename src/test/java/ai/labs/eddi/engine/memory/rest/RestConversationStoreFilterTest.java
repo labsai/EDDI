@@ -8,7 +8,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.api.IConversationService;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -55,7 +55,7 @@ class RestConversationStoreFilterTest {
         IConversationService conversationService = mock(IConversationService.class);
         IUserMemoryStore userMemoryStore = mock(IUserMemoryStore.class);
         IRuntime runtime = mock(IRuntime.class);
-        Instance<IAttachmentStorage> attachmentStorageInstance = mock(Instance.class);
+        Instance<IAttachmentStore> attachmentStorageInstance = mock(Instance.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
 
         restConversationStore = new RestConversationStore(

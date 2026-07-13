@@ -8,8 +8,8 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -45,8 +45,11 @@ class GdprComplianceServiceTest {
     private AuditLedgerService auditLedgerService;
     private IHitlToolJournalStore hitlToolJournalStore;
     private GdprComplianceService service;
+    private Instance<IAttachmentStore> attachmentStorageInstance;
+    private IAttachmentStore attachmentStore;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         userMemoryStore = mock(IUserMemoryStore.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
@@ -56,8 +59,8 @@ class GdprComplianceServiceTest {
         auditLedgerService = mock(AuditLedgerService.class);
         hitlToolJournalStore = mock(IHitlToolJournalStore.class);
 
-        @SuppressWarnings("unchecked")
-        Instance<IAttachmentStorage> attachmentStorageInstance = mock(Instance.class);
+        attachmentStorageInstance = mock(Instance.class);
+        attachmentStore = mock(IAttachmentStore.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
 
         service = new GdprComplianceService(
@@ -203,9 +206,9 @@ class GdprComplianceServiceTest {
     @SuppressWarnings("unchecked")
     void deleteUserData_deletesAttachmentsWhenStorageAvailable() throws Exception {
         // Given — attachment storage is resolvable
-        Instance<IAttachmentStorage> attachInstance = mock(Instance.class);
+        Instance<IAttachmentStore> attachInstance = mock(Instance.class);
         when(attachInstance.isResolvable()).thenReturn(true);
-        var attachmentStorage = mock(IAttachmentStorage.class);
+        var attachmentStorage = mock(IAttachmentStore.class);
         when(attachInstance.get()).thenReturn(attachmentStorage);
         when(attachmentStorage.deleteByConversation("conv-1")).thenReturn(2L);
         when(attachmentStorage.deleteByConversation("conv-2")).thenReturn(3L);
@@ -236,9 +239,9 @@ class GdprComplianceServiceTest {
     @SuppressWarnings("unchecked")
     void deleteUserData_handlesAttachmentFailureGracefully() throws Exception {
         // Given — attachment storage throws
-        Instance<IAttachmentStorage> attachInstance = mock(Instance.class);
+        Instance<IAttachmentStore> attachInstance = mock(Instance.class);
         when(attachInstance.isResolvable()).thenReturn(true);
-        var attachmentStorage = mock(IAttachmentStorage.class);
+        var attachmentStorage = mock(IAttachmentStore.class);
         when(attachInstance.get()).thenReturn(attachmentStorage);
 
         var serviceWithAttachments = new GdprComplianceService(
@@ -298,6 +301,30 @@ class GdprComplianceServiceTest {
         assertEquals("conv-1", convExport.conversationId());
         assertEquals("agent-1", convExport.agentId());
         assertEquals(ConversationState.ENDED, convExport.state());
+    }
+
+    @Test
+    void exportUserData_includesAttachmentMetadata() throws Exception {
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(null);
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt())).thenReturn(List.of());
+
+        when(attachmentStorageInstance.isResolvable()).thenReturn(true);
+        when(attachmentStorageInstance.get()).thenReturn(attachmentStore);
+        when(attachmentStore.listByConversation("conv-1")).thenReturn(List.of(
+                new IAttachmentStore.Attachment("ref-1", "report.pdf", "application/pdf", 2048, "conv-1")));
+
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        assertEquals(1, export.attachments().size());
+        var a = export.attachments().getFirst();
+        assertEquals("conv-1", a.conversationId());
+        assertEquals("ref-1", a.storageRef());
+        assertEquals("report.pdf", a.fileName());
+        assertEquals("application/pdf", a.mimeType());
+        assertEquals(2048, a.sizeBytes());
     }
 
     @Test

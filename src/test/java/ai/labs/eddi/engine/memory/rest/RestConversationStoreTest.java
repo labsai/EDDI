@@ -9,7 +9,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -43,8 +43,8 @@ class RestConversationStoreTest {
     private IConversationService conversationService;
     private IUserMemoryStore userMemoryStore;
     private IRuntime runtime;
-    private Instance<IAttachmentStorage> attachmentStorageInstance;
-    private IAttachmentStorage attachmentStorage;
+    private Instance<IAttachmentStore> attachmentStorageInstance;
+    private IAttachmentStore attachmentStorage;
     private RestConversationStore restConversationStore;
 
     @SuppressWarnings("unchecked")
@@ -57,7 +57,7 @@ class RestConversationStoreTest {
         userMemoryStore = mock(IUserMemoryStore.class);
         runtime = mock(IRuntime.class);
         attachmentStorageInstance = mock(Instance.class);
-        attachmentStorage = mock(IAttachmentStorage.class);
+        attachmentStorage = mock(IAttachmentStore.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
 
         restConversationStore = new RestConversationStore(

@@ -5,6 +5,260 @@
 
 ---
 
+## 🧹 Multimodal Attachments Completion — Remove dead config knob `reattachTurns` (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+`LlmConfiguration.Task.reattachTurns` (`@since 6.1.0`, added on this branch) was a no-op: `getReattachTurns()` is called nowhere in `src/main`, so setting it changed nothing at runtime. Past-turn PDFs/docs already reach the model via text-extract stitching (`attachments:extracts`), never native re-attachment. Removed the field, getter/setter, and its round-trip test.
+
+Surfaced by a codebase-wide dead-config audit (adversarial multi-agent sweep). The audit flagged ~26 other candidate no-op knobs; rather than mass-delete, they were **triaged** and tracked as follow-ups:
+- **Genuinely dead** — `ModelCascadeConfig.strategy` ("parallel = future", never built), `dream.batchSize`.
+- **Feature exists but knob unwired** — `enableParallelExecution` + `parallelExecutionTimeoutMs` (orphaned `ToolExecutionService` parallel machinery), RAG `injectionStrategy`/`contextTemplate`, `McpServerConfig.transport`, `autoRecallCategories`, `dream.schedule`/`maxUsersPerRun`.
+- **⚠️ Unenforced guardrails** — `DynamicAgentConfig.allowRecruitment`/`allowDelegation`/`maxRecruitedAgentsPerDiscussion`/`maxDelegationsPerTask`/`inheritParentModel` are read nowhere; the guardrails silently don't apply (tracked as its own security/cost fix).
+- **Roadmap scaffolding — keep** — `sessionManagement`/`autoSnapshot`/`maxCheckpointsPerConversation` (Session Forking is in-progress per roadmap).
+- **Audit blind spot** — operator knobs selected via Quarkus `@IfBuildProfile`/`@LookupIfProperty` (e.g. `eddi.messaging.type`) are *not* dead; a getter-grep can't see build-time bean selection. Those need per-item verification, not deletion.
+
+---
+
+## 🔍 Multimodal Attachments Completion — PR #588 review-comment fixes (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Addressed CodeRabbit + Copilot review comments.
+
+**Correctness**
+- **Download 404-vs-500 (High):** `IAttachmentStore.load`/`getMetadata` threw a bare `AttachmentStoreException` for *both* a missing blob and an internal store failure, so `RestAttachmentUpload.downloadAttachment` mapped SQL/backend errors to 404 (at DEBUG) — hiding outages. Added a typed `AttachmentNotFoundException` (symmetric with `AttachmentAccessDeniedException`); both stores throw it for genuinely-missing blobs; the endpoint returns 404 for it and 500 (ERROR log, `ATTACHMENT_STORE_ERROR`) for any other store exception. +regression test.
+- **GDPR export isolation (Major):** the attachment-metadata export wrapped the whole conversation loop in one try/catch, so one failing `listByConversation` truncated the export for every remaining conversation. Each conversation is now isolated (mirrors the conversation-snapshot block above it).
+- **URL group attachment without mimeType (Medium):** `RestGroupConversation.toAttachments` kept URL refs with null/blank mimeType that `AttachmentContextExtractor` silently drops later; now skipped up front so the loss is explicit.
+
+**Observability**
+- `AttachmentForwarder`: reusable `Counter`s initialized once (in the constructor — the registry is constructor-injected, so `@PostConstruct` wouldn't fire in the direct-construction unit tests) instead of resolved per `forward()`; `MeterRegistry`/`Counter` imported.
+- `AttachmentTextExtractor`: per-extraction PDF logs lowered INFO → DEBUG (they run on every user turn / tool call).
+- `Conversation`: the attachment-issue warning now includes the conversation id.
+
+**Style** (the import guideline just added to AGENTS.md §4.7)
+- `LlmTask` (`@jakarta.inject.Inject` → `@Inject`), `GroupConversation` (`Attachment` imported), `GroupConversationServiceTest` (`Context` imported), and the FQN `MeterRegistry` in `AttachmentForwarder`.
+- `GridFsAttachmentStoreTest.whenFindIterate` generalized to any file count (was hardcoded to the 0/1/2-file cases).
+
+**Declined / documented**
+- `LlmConfiguration.MultimodalOverride` kept as a mutable Jackson POJO (not a record) for consistency with every sibling nested config type in the file — converting only one would be inconsistent and need `@JsonCreator` wiring.
+- URL-only group attachments still aren't recovered after a HITL resume — a deliberate, documented limitation (the blob store is the durable source; URLs aren't blob-backed). The PR description should note this.
+
+All affected unit tests green.
+
+---
+
+## 🐛 Multimodal Attachments Completion — Fix: group attachments lost on HITL resume (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Found by a critical adversarial re-review of the `origin/main` merge (10-dimension workflow + per-finding refutation). A **merge-emergent** bug — neither parent could exhibit it alone: our branch added group-shared attachments; `origin/main` added group HITL pause/resume; combined, they interact badly.
+
+**Bug:** `GroupConversation.attachments` is `@JsonIgnore` transient (the durable copy is the blob store). `resumeDiscussion()` reloads a fresh GC from the store, so `getAttachments()` is null; `executeDiscussion()` re-seeded the sibling transient field `dynamicAgentConfig` but **not** `attachments`. Result: a member speaking for the first time *after* a HITL resume got neither the blob-store grant nor the `attachment_*` context — blind to the shared files. Compiles cleanly; runtime-only.
+
+**Fix:** new package-private `rehydrateAttachmentsFromStore(gc)`, called in `executeDiscussion` right after the `dynamicAgentConfig` re-seed (so the two transient fields are handled symmetrically in one place). It rebuilds the metadata list from `IAttachmentStore.listByConversation(gc.getId())` when the in-memory list is empty — keeping the blob store as the single source of truth (no dangling refs after erasure) with **no persistence-schema change**. Guarded by null/empty (not `startPhaseIndex`, since a task-level pause in phase 0 resumes at index 0). **Known limitation:** URL-only attachments are not blob-backed and are not recovered on resume (documented in code; a follow-up can persist those if it becomes a real need).
+
+4 unit tests added (`rehydrate_*`); `GroupConversationServiceTest` + `RestGroupConversationTest` green. The rest of the merge review came back clean — 9/10 dimensions no findings, and the integration sweep confirmed the conflict resolutions themselves are correct (clean unions, no mis-picked sides, consistent call sites).
+
+---
+
+## 📎 Multimodal Attachments Completion — Human review fixes: FQN → imports (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Addressed @niedch's human review comments on PR #588:
+
+1. **`GroupConversationService`** — the field-injected attachment store used a fully-qualified `@jakarta.inject.Inject` and `ai.labs.eddi.engine.attachments.IAttachmentStore` type. `jakarta.inject.Inject` was already imported, so the annotation is now `@Inject`; added an `IAttachmentStore` import and the field reads `IAttachmentStore attachmentStore;`.
+2. **`ConversationService`** — same FQN smell on the injected field **and** the anonymous `getAttachmentStore()` override (reviewer flagged the override; the field had it too). Added the `IAttachmentStore` import and simplified both usages.
+
+Compile clean (`mvnw compile` → exit 0). No behavior change — pure import hygiene.
+
+Also codified the convention in `AGENTS.md` §4.7 (new **Imports** subsection): always import types/annotations and reference them by simple name; the only acceptable inline FQN is disambiguating two same-named classes used in one file. Prevents this review comment from recurring.
+
+**Deferred (tracked separately):** @niedch also suggested a "general solution for the authorization to avoid duplicating it in multiple places" on `PostgresAttachmentStore.authorize`. Verified as a real duplication — the access policy is copy-pasted across **4 sites** (read owner-or-grant + delete owner-only, in both the Postgres and GridFS stores) with an identical denial message, and the **read** path has already drifted for the null-owner edge case (Postgres denies, Mongo allows; the delete path stays consistent). Because the reviewer framed it as future work and unifying the read path is a security-behavior change that deserves its own tested PR, it was **not** folded into this PR — spun off as a dedicated follow-up (extract a shared `AttachmentAccessPolicy`, standardize null-owner reads to deny-by-default, add a two-backend regression test).
+
+---
+
+## 📎 Multimodal Attachments Completion — Automated review fixes (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Addressed the GitHub code-quality / Copilot review of PR #588:
+
+1. **(High) `readAttachment` couldn't see group-shared blobs.** `listByConversation` returns only *owned* blobs, so a group member — whose shared attachments are owned by the group conversation and merely *granted* to it — got an empty list and couldn't recall them via the tool. Added `IAttachmentStore.listAccessible(conversationId)` (owned **OR** granted) in both backends (GridFS `metadata.grants` array match / Postgres `? = ANY(grants)`), and `ReadAttachmentTool` now lists/resolves through it.
+2. **(Medium) URL attachments dropped when no store configured.** `GroupConversationService.materializeAttachments` returned early on a null store, discarding hosted-`url` attachments that don't need a store. Restructured to skip only the inline-base64 (store-requiring) path.
+3. **(Medium) Brittle access-denied detection.** The download endpoint keyed 403-vs-404 off `message.contains("denied")`. Added a typed `IAttachmentStore.AttachmentAccessDeniedException` (thrown by both backends' authz/delete paths); the REST layer catches it for 403 and treats other store exceptions as 404/500.
+4. **(Note) Unused local variable** removed from a GridFS test.
+
+Tests updated + added (grant-aware listing, url-without-store materialize, typed-exception 403 paths); 277 green across the affected classes, coverage gate still met.
+
+---
+
+## 📎 Multimodal Attachments Completion — Adversarial review + fixes (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+A multi-agent adversarial review of the whole implementation surfaced **two real high-severity defects** (both verified by an independent refutation pass, both missed by the unit tests because they stubbed `getLatestData` directly and used single-turn memories):
+
+1. **Prefix-collision silent data loss.** `IConversationStep.getLatestData` is a *prefix* scan, and the `ATTACHMENTS` key `"attachments"` is a prefix of the `attachments:extracts` / `attachments:errors` keys the forwarder `persist()`s. A second forwarder (or `readAttachment` auto-add, or `ContentTypeMatcher`) read in the same step reverse-scanned and returned a `List<String>` instead of the `List<Attachment>` → **zero attachments forwarded, no error note**. Reachable with two langchain tasks sharing an action or two langchain workflow steps. Fixed by reading the exact key via `getData(MemoryKey)` in `AttachmentForwarder`, `AgentOrchestrator`, and `ContentTypeMatcher`.
+2. **Mirror-inverted history stitching.** `ConversationLogGenerator.withAttachmentExtracts` passed the *forward* conversation-output index into `IConversationStepStack.get()`, which is *reverse*-ordered (`get(0)` = newest). In a 3-turn conversation, turn 1's extract surfaced on turn 3 and turn 1 lost it; only the middle turn aligned. Fixed by converting the forward index to the reverse accessor index (`size-1-index`).
+
+Regression tests added for both (a real `ConversationMemory` with persisted extract/error keys proving the forwarder still forwards; a 3-turn stitching test proving extracts land on the correct turn). All new/changed classes remain above the >90% instruction / >80% branch gate; 654 tests green across the touched surface.
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 6 (partial): Metrics + GDPR portability (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 6 of 6, partial).
+
+### What changed
+
+- **Forwarder metrics** — `AttachmentForwarder` now takes a `MeterRegistry` and records `eddi.attachment.forwarded` (content items sent to the LLM) and `eddi.attachment.errors` (dropped/gated/failed) per turn, satisfying AGENTS.md's "always add metrics" rule for the multimodal hot path.
+- **GDPR portability** — `UserDataExport` gains an `attachments` list (`AttachmentExportEntry` = conversationId/storageRef/fileName/mimeType/sizeBytes, **metadata only, never bytes**) plus a backward-compatible constructor. `GdprComplianceService.exportUserData` collects attachment metadata across the user's conversations via `IAttachmentStore.listByConversation`, and the compliance audit event records `attachmentsExported`.
+
+### Deferred (documented follow-ups)
+
+Still open in Phase 6: nightly reaper (orphaned blobs / stale grants via `ScheduleFireExecutor`), `CostTracker` multimodal token estimates, and an `attachmentsForwarded` audit-ledger entry. Phase 5 (multipart 1:1 `say`, SSE/output chips, and the EDDI-Manager / eddi-chat-ui frontend in their own repos) is likewise a follow-up — the two-step upload→say flow already works end-to-end.
+
+### Tests
+
+Forwarder metrics assertion + GDPR attachment-metadata export test. Both green.
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 3: Group parity (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 3 of 6).
+
+### What changed
+
+- **`DiscussRequest` carries attachments** — `IRestGroupConversation.DiscussRequest` gains an optional `List<AttachmentRef> attachments` (`AttachmentRef = {mimeType, data, url, fileName}`) plus a two-argument compat constructor, so existing JSON clients and call sites are unaffected. `IGroupConversationService.discuss(...)` and `startAndDiscussAsync(...)` gain attachment-carrying overloads (default methods → real impl overrides).
+- **Materialize + bind at fan-out** — `GroupConversationService.materializeAttachments` stores inline base64 files in `IAttachmentStore` **bound to the group conversation id** (so they can be granted and reaped with it) and passes hosted `url` refs through, stashing the result on the (transient) `GroupConversation.attachments`.
+- **Grant + inject per member** — on each member's **first** turn, `grantAndInjectAttachments` calls `IAttachmentStore.grantAccess(storageRef, memberConversationId)` (the only place grants are minted — trusted server code, D2) and injects `attachment_*` context into the member's `InputData`. Stored refs are granted; URL refs are forwarded without a grant. Later phases rely on the Phase-2 extract-stitching and the Phase-4 `readAttachment` tool. Nested groups receive the parent's attachments and re-grant down the chain.
+- **REST routing** — `RestGroupConversation` converts `AttachmentRef → Attachment` and routes through the attachment overload only when attachments are present (so the no-attachment path — and its existing mock-based tests — is untouched).
+
+### Design note
+
+Group members run in their **own** conversations, so strict per-conversation ownership would block them from reading a group-uploaded blob — grants are exactly the primitive that makes this safe without opening cross-conversation access generally. Transport is JSON inline (base64/url); a multipart file-part variant of the endpoint is a thin follow-up (the capability and service path are complete).
+
+### Tests
+
+7 service tests (materialize base64/url/no-store/empty; grant+inject stored-ref/url/grant-failure/none) + 2 REST routing tests (attachment overload vs plain). Group ITs (member observes content, grant-before-turn, nested) stay CI-only.
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 4: readAttachment tool (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 4 of 6).
+
+### What changed
+
+- **`ReadAttachmentTool`** (`modules/llm/tools/impl`, `@Vetoed`) — the multi-turn recall path. Two `@Tool`s: `listAttachments()` (name/type/size/ref of every attachment in the conversation) and `readAttachment(nameOrRef, page)` (loads one attachment, extracts text — 1-based PDF page or 0 for whole doc — else a "no extractable text" note). The conversation id is implicit (constructor-injected), so the LLM never supplies a userId/conversationId and can only reach its own (or granted) attachments — enforced by `IAttachmentStore`.
+- **Auto-add wiring** — `AgentOrchestrator` gains `setAttachmentServices(store, extractor)` (wired by `LlmTask` in a new `@PostConstruct`, after CDI injection, so the long constructor + its six direct-construction tests are untouched). `addReadAttachmentToolIfEnabled` adds the tool in the no-whitelist branch when the turn has attachments, and in the whitelist branch under key `readattachment`; skipped when the services are unset (isolated tests) or the turn has no attachments. The forwarder's fallback notes already point the model at this tool.
+
+### Tests
+
+`ReadAttachmentToolTest` (11 — list/read by name & ref, case-insensitive, PDF page, not-found, non-extractable, denied load, empty text, blank ref) + 5 orchestrator auto-add branch tests (no-whitelist, whitelisted, whitelist-excluded, services-unset, no-attachments). Existing orchestrator/LlmTask tests unchanged.
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 2: Unified forwarder (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 2 of 6). Forwarder core.
+
+### What changed
+
+- **`AttachmentForwarder`** (`modules/llm/impl`, new) — the single place attachments become langchain4j `Content` on the outgoing user message. Replaces the image-only `MultimodalMessageEnhancer` (deleted, with its tests). Per attachment it resolves bytes from any source (stored blob → `store.load`, URL → `SafeHttpClient` download, base64 → decode) under **uniform per-file (10 MB) and aggregate (20 MB) byte caps across all sources** (the base64 path was previously unguarded), gates on `ModelCapabilityService(provider, model)`, and emits:
+  - `image/*` → `ImageContent` when vision-capable (URL passed through when the provider fetches URLs, else **downloaded and inlined** — provider URL normalization, D7), else a note;
+  - `application/pdf` → **hybrid**: native `PdfFileContent` when the model supports documents, else PDFBox text extraction inlined as `TextContent`;
+  - text-like (`text/*`, JSON, XML, CSV, YAML) → decoded + inlined, **no capability required** (always works);
+  - `audio/*` → `AudioContent` when supported, else a note;
+  - everything else → a metadata note pointing at the (Phase 4) `readAttachment` tool.
+- Extracted text is persisted to `attachments:extracts` (for Phase-2 history stitching) and every drop/skip/gate is appended to `attachments:errors` — **never silent**; each also leaves a note the LLM can relay.
+- **`LlmTask`** now calls the forwarder with the resolved `(provider, model)` instead of the static enhancer (field-injected + null-guarded so the six direct-construction `LlmTask` tests are untouched).
+
+### Design decisions
+
+- **Capability service uses the real defaults, not mocks, in tests** — the forwarder test drives the true `ModelCapabilityService` matrix (OpenAI URL-image fast path, Gemini download-and-inline, Anthropic native PDF, OpenAI PDF text-fallback, jlama no-vision note).
+- **Skip ≠ silence** — a per-file/aggregate cap hit, store-load failure, or download failure records to `attachments:errors` *and* emits a `TextContent` note so the model can tell the user, rather than dropping the attachment invisibly.
+
+### Tests
+
+`AttachmentForwarderTest` (18) covers the full branch matrix incl. URL-passthrough vs download-inline, base64/stored images, PDF native vs text-fallback (with extract persistence), text inline, audio on/off, unsupported note, per-file cap, store-load failure, and no-source skip. Enhancer tests removed.
+
+### Phase 2 tail (completed same branch)
+
+- **Per-task multimodal override + reattachTurns** — `LlmConfiguration.Task` gains an optional `multimodal { vision|documents|audio: auto|on|off }` block and `reattachTurns` (default 0). Old JSON configs deserialize cleanly (`FAIL_ON_UNKNOWN_PROPERTIES=false`). `AttachmentForwarder.forward` gains a `Support`-parameterized overload; `LlmTask` parses the task block and passes the overrides (per-task > deployment > default precedence).
+- **History stitching** — `ConversationLogGenerator.generate` gains an opt-in `stitchAttachmentExtracts` flag (only the LLM-facing `ConversationHistoryBuilder` path passes `true`, so the visible transcript stays clean). Per turn it appends that step's `attachments:extracts` to the rebuilt user message; verified aligned 1:1 with conversation outputs and that non-public step data survives snapshot persistence/reload, so a turn-2 follow-up sees turn-1's PDF/text extracts. `reattachTurns` is schema-ready; extract-stitching + the `readAttachment` tool (Phase 4) are the primary multi-turn continuity mechanisms.
+
+### What's next (Phases 3–6)
+
+Phase 3 (group parity), 4 (`readAttachment` tool), 5 (UX), 6 (ops).
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 1: Storage unification + secure upload (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 1 of 6).
+
+### What changed
+
+1. **One blob store.** Collapsed the two parallel abstractions onto `IAttachmentStore`. Uploads already wrote to it (GridFS / Postgres `*Store`), but conversation-deletion and GDPR erasure cascaded through a *different* store (`IAttachmentStorage` → `Mongo`/`PostgresAttachmentStorage`), so uploaded blobs were never actually deleted. Ported both consumers (`RestConversationStore` delete cascade, `GdprComplianceService` erasure) to `IAttachmentStore`, then deleted `IAttachmentStorage` + both impls + their 4 tests (verified write-dead — only the delete cascades referenced them).
+2. **Grants + owner-or-grant authz.** New `IAttachmentStore.getMetadata()` (server-validated metadata, no bytes), `grantAccess()` (trusted-caller-only cross-conversation read grant), single-item `delete()` (owner-only). `load()`/`getMetadata()` authorize owner **OR** an explicit grant; grants die with the blob. This is what lets group members read a blob uploaded to the group conversation (Phase 3) without opening cross-conversation access generally.
+3. **UUID ref hardening (open decision #4).** GridFS now returns an unguessable random-UUID `storageRef` held in file metadata (legacy ObjectId-hex refs still resolve); Postgres already used UUIDs. Both backends unified on one opaque ref format.
+4. **Quotas.** Per-conversation count + total-byte caps enforced in `store()` (`eddi.attachments.max-per-conversation` = 50, `eddi.attachments.max-total-bytes-per-conversation` = 100 MB; non-positive disables).
+5. **`storageRef` extraction branch (defect #2 — upload was orphaned).** `AttachmentContextExtractor` now parses `{storageRef}` (precedence storageRef > url > data) and `resolveAndGuard()` resolves each stored ref's authoritative MIME/size via `getMetadata` (owner/grant authorized) **before** behavior rules run, enforces the per-turn cap (`eddi.attachments.max-per-turn` = 5), and records every drop/failure to `attachments:errors` — never silent. Wired into `Conversation` init via `IPropertiesHandler.getAttachmentStore()`/`getMaxAttachmentsPerTurn()` (populated by `ConversationService`).
+6. **Secure REST surface.** `RestAttachmentUpload` gains a `forwardableInline` hint on upload (upload cap 20 MB > forward cap 10 MB — warn at upload, not silently at forward), a single-item download endpoint (`GET /conversations/{id}/attachments/{storageRef}`, owner/grant-checked, Content-Disposition sanitized) and single-item `DELETE`.
+
+### Design decisions
+
+- **Auth model fits EDDI's anonymous-capable conversations.** No other conversation endpoint uses `@RolesAllowed` (only admin endpoints do), and anonymous deployments must keep working (D2). Enforcement is therefore store-level owner-or-grant authorization on every `load`/`getMetadata`/`delete`, plus unguessable UUID refs — not an OIDC role gate. `@RolesAllowed` can be layered on when a deployment makes OIDC mandatory. `tenantId` stays advisory (sanitized, not an access boundary).
+- **Field injection for the two new `ConversationService` deps** (attachment store + per-turn cap) so the numerous direct-construction unit tests need no change.
+
+### Tests
+
+161 unit tests across the affected classes: `GridFsAttachmentStoreTest` rewritten for UUID refs + grants + quota (26), `AttachmentContextExtractorTest` +storageRef/resolveAndGuard (27), `RestAttachmentUploadTest` +download/delete-one/forwardableInline/CD-sanitization (21), re-typed consumer tests. Postgres store IT and full ITs stay CI-only.
+
+### What's next
+
+Phase 2 — the unified `AttachmentForwarder` (replaces `MultimodalMessageEnhancer` + `convertMessage`): hybrid PDF (native `PdfFileContent` vs PDFBox text), universal text inline, uniform per-file/aggregate caps across all sources, provider image-URL normalization, capability gating via `ModelCapabilityService`, and extracts-in-history stitching.
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 0: Foundations & bug fixes (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 0 of 6). Low-risk foundations that ship alone.
+
+### What changed
+
+1. **`@JsonIgnore` on `Attachment.getBase64Data()`** (`engine/memory/model/Attachment.java`) — the `transient` keyword did **not** stop Jackson (getter-based serialization, no `PROPAGATE_TRANSIENT_MARKER`), so inline base64 payloads were being serialized into Mongo conversation documents. Now excluded; metadata still persists. Serialization tests prove the payload never reaches persisted JSON.
+2. **Scrub inline base64 from persisted context copies** (`engine/memory/AttachmentContextExtractor.java` + `engine/runtime/internal/Conversation.java`) — new `AttachmentContextExtractor.scrubInlinePayload()` returns a metadata-only copy of an `attachment_*` context when it carries a `data` payload. `Conversation.createContextData()` builds the persisted copy (step data + `context.*` conversation output) through it, so the raw base64 (~1.33× file size/turn against the 16 MB doc limit) never lands in Mongo and is never exposed via `{context.attachment_*.data}`. The live payload still rides ATTACHMENTS memory for the turn. Mirrors secret-input scrubbing.
+3. **`AttachmentTextExtractor`** (`modules/llm/tools/impl/`, new) — shared PDFBox + plain-text extraction behind a uniform, configurable cap (`eddi.attachments.extraction.max-chars`, default 10k). `extractText(bytes, mime[, maxChars])` dispatches PDF + text-like (text/*, JSON, XML, CSV, YAML); PDF full/page-range/info methods; `canExtractText()`. `PdfReaderTool` now delegates all extraction to it (download/SSRF/formatting unchanged). Reused by the Phase 2 forwarder and Phase 4 readAttachment tool.
+4. **`ModelCapabilityService`** (`modules/llm/capability/`, new) — resolves vision/documents/audio/image-by-URL support for a `(provider, model)` pair. Precedence: per-task override > deployment override (`eddi.multimodal.<provider>.<cap>` then `eddi.multimodal.<cap>`) > conservative model-aware defaults (plan §5). Unknown ⇒ unsupported ⇒ fallback. Injectable via MicroProfile Config; Function-based constructor keeps it unit-testable.
+5. **Body-size alignment** (`application.properties`) — added `quarkus.http.limits.max-body-size=25M` (was Quarkus' 10 MB default, below the 20 MB attachment cap → 10–20 MB uploads died with a bare 413), plus documented `eddi.attachments.max-size-bytes` and `eddi.attachments.extraction.max-chars`.
+
+### Design decisions
+
+- **Scrub is a copy, not a mutation** — the original context map keeps its payload so the current turn's extraction/forwarding is unaffected; only the persisted derivative is stripped.
+- **Extractor owns extraction, tool owns presentation** — `PdfReaderTool.getPdfInfo` still formats the human-readable string; the extractor returns a structured `PdfInfo`, so the shared service stays presentation-free and reusable by the forwarder.
+- **Capability defaults are conservative and model-aware** — vision-first providers (OpenAI/Anthropic/Gemini/Mistral) default on but downgrade for known text-only models; model-dependent providers (Ollama/Bedrock/Oracle) default off but upgrade for known vision models; image-by-URL only for OpenAI/Azure (everything else inlines).
+
+### Tests
+
+146 new/covered unit tests: `AttachmentTest` (serialization no-payload), `AttachmentContextExtractorTest` (scrub matrix), `AttachmentTextExtractorTest` (PDF/text/caps/corrupt), `ModelCapabilityServiceTest` (74 — default matrix across 11 providers + override precedence). `PdfReaderToolTest` remains CI-only (SafeHttpClient opens a loopback selector local JVMs may block).
+
+### What's next
+
+Phase 1 — storage unification (collapse `IAttachmentStorage` into `IAttachmentStore`, port conversation-delete + GDPR cascades), grants (`grantAccess`/grant-aware `load`), authenticated upload/list/download/delete, quotas, `storageRef` extraction branch, UUID ref hardening.
+
+---
+
 ## 🐛 schedule — correct poll-batch-size comment (at-least-once, not exactly-once) (2026-07-13)
 
 **Repo:** EDDI (`feat/hitl-framework`)

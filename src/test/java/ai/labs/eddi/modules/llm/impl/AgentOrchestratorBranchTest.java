@@ -10,8 +10,11 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -142,6 +145,89 @@ class AgentOrchestratorBranchTest {
             List<Object> tools = orchestrator.collectEnabledTools(task, memory);
             // Should include at least 9 built-in tools (calculator, datetime, etc.)
             assertTrue(tools.size() >= 9);
+        }
+    }
+
+    // =========================================================
+    // collectEnabledTools — readAttachment auto-add
+    // =========================================================
+
+    @Nested
+    @DisplayName("collectEnabledTools — readAttachment tool")
+    class ReadAttachmentAutoAdd {
+
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        private void withAttachments(boolean present) {
+            var step = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(step);
+            when(memory.getConversationId()).thenReturn("conv-1");
+            if (present) {
+                IData data = mock(IData.class);
+                doReturn(List.of(new Object())).when(data).getResult();
+                doReturn(data).when(step).getData(MemoryKeys.ATTACHMENTS);
+            } else {
+                doReturn(null).when(step).getData(MemoryKeys.ATTACHMENTS);
+            }
+        }
+
+        private boolean hasReadAttachmentTool(List<Object> tools) {
+            return tools.stream().anyMatch(t -> t instanceof ReadAttachmentTool);
+        }
+
+        @Test
+        @DisplayName("auto-added (no whitelist) when services set and attachments present")
+        void autoAdded() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachments(true);
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+
+            assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        @Test
+        @DisplayName("added when whitelisted by 'readattachment'")
+        void addedViaWhitelist() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachments(true);
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("readattachment"));
+
+            assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        @Test
+        @DisplayName("NOT added when whitelist excludes it")
+        void notAddedWhenWhitelistExcludes() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachments(true);
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+
+            assertFalse(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        @Test
+        @DisplayName("NOT added when attachment services are unset")
+        void notAddedWithoutServices() {
+            withAttachments(true); // services never set
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+
+            assertFalse(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        @Test
+        @DisplayName("NOT added when the turn has no attachments")
+        void notAddedWithoutAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachments(false);
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+
+            assertFalse(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
         }
     }
 

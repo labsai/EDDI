@@ -38,6 +38,209 @@ class ConversationLogGeneratorTest {
         }
     }
 
+    // ─── generate() branch coverage (compound conditions) ──────
+
+    @Nested
+    @DisplayName("generate branch coverage")
+    class GenerateBranches {
+
+        private IConversationMemory memoryWith(ConversationOutput output) {
+            var memory = mock(IConversationMemory.class);
+            when(memory.getConversationOutputs()).thenReturn(new ArrayList<>(List.of(output)));
+            return memory;
+        }
+
+        @Test
+        @DisplayName("inputFiles first element not a Map → only text content")
+        void inputFilesFirstNotMap() {
+            var output = new ConversationOutput();
+            output.put("input", "hi");
+            output.put("context", Map.of("inputFiles", List.of("not-a-map")));
+            var log = new ConversationLogGenerator(memoryWith(output)).generate(-1, true);
+            assertEquals("hi", log.getMessages().getFirst().getContent().getLast().getValue());
+            assertEquals(1, log.getMessages().getFirst().getContent().size());
+        }
+
+        @Test
+        @DisplayName("context without inputFiles → only text content")
+        void contextWithoutInputFiles() {
+            var output = new ConversationOutput();
+            output.put("input", "hi");
+            output.put("context", Map.of("language", "en"));
+            var log = new ConversationLogGenerator(memoryWith(output)).generate(-1, true);
+            assertEquals(1, log.getMessages().getFirst().getContent().size());
+        }
+
+        @Test
+        @DisplayName("empty output list → no assistant message")
+        void emptyOutputList() {
+            var output = new ConversationOutput();
+            output.put("input", "hi");
+            output.put("output", new ArrayList<>());
+            var log = new ConversationLogGenerator(memoryWith(output)).generate(-1, true);
+            assertEquals(1, log.getMessages().size());
+        }
+    }
+
+    // ─── withAttachmentExtracts (direct branch coverage) ────────
+
+    @Nested
+    @DisplayName("withAttachmentExtracts helper")
+    class WithAttachmentExtracts {
+
+        private IConversationMemory.IConversationStepStack stackWith(List<String> extracts) {
+            var step = mock(IConversationMemory.IConversationStep.class);
+            @SuppressWarnings("unchecked")
+            IData<List<String>> data = mock(IData.class);
+            when(data.getResult()).thenReturn(extracts);
+            when(step.getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS)).thenReturn(data);
+            var stack = mock(IConversationMemory.IConversationStepStack.class);
+            when(stack.size()).thenReturn(1);
+            when(stack.get(0)).thenReturn(step);
+            return stack;
+        }
+
+        @Test
+        void nullStack_returnsInput() {
+            assertEquals("hi", ConversationLogGenerator.withAttachmentExtracts(null, 0, "hi"));
+        }
+
+        @Test
+        void nullInput_returnsNull() {
+            assertNull(ConversationLogGenerator.withAttachmentExtracts(stackWith(List.of("x")), 0, null));
+        }
+
+        @Test
+        void negativeIndex_returnsInput() {
+            assertEquals("hi", ConversationLogGenerator.withAttachmentExtracts(stackWith(List.of("x")), -1, "hi"));
+        }
+
+        @Test
+        void indexOutOfRange_returnsInput() {
+            assertEquals("hi", ConversationLogGenerator.withAttachmentExtracts(stackWith(List.of("x")), 5, "hi"));
+        }
+
+        @Test
+        void nullData_returnsInput() {
+            var step = mock(IConversationMemory.IConversationStep.class);
+            when(step.getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS)).thenReturn(null);
+            var stack = mock(IConversationMemory.IConversationStepStack.class);
+            when(stack.size()).thenReturn(1);
+            when(stack.get(0)).thenReturn(step);
+            assertEquals("hi", ConversationLogGenerator.withAttachmentExtracts(stack, 0, "hi"));
+        }
+
+        @Test
+        void nullResult_returnsInput() {
+            assertEquals("hi", ConversationLogGenerator.withAttachmentExtracts(stackWith(null), 0, "hi"));
+        }
+
+        @Test
+        void emptyResult_returnsInput() {
+            assertEquals("hi", ConversationLogGenerator.withAttachmentExtracts(stackWith(List.of()), 0, "hi"));
+        }
+
+        @Test
+        void presentResult_appends() {
+            String out = ConversationLogGenerator.withAttachmentExtracts(stackWith(List.of("doc: text")), 0, "hi");
+            assertTrue(out.startsWith("hi"));
+            assertTrue(out.contains("doc: text"));
+        }
+    }
+
+    // ─── Attachment extract stitching ───────────────────────────
+
+    @Nested
+    @DisplayName("Attachment extract stitching")
+    class ExtractStitching {
+
+        private IConversationMemory memoryWithExtract(String input, List<String> extracts) {
+            var output = new ConversationOutput();
+            output.put("input", input);
+            var memory = mock(IConversationMemory.class);
+            when(memory.getConversationOutputs()).thenReturn(new ArrayList<>(List.of(output)));
+
+            var step = mock(IConversationMemory.IConversationStep.class);
+            @SuppressWarnings("unchecked")
+            IData<List<String>> data = mock(IData.class);
+            when(data.getResult()).thenReturn(extracts);
+            when(step.getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS)).thenReturn(data);
+
+            var stack = mock(IConversationMemory.IConversationStepStack.class);
+            when(stack.size()).thenReturn(1);
+            when(stack.get(0)).thenReturn(step);
+            when(memory.getAllSteps()).thenReturn(stack);
+            return memory;
+        }
+
+        @Test
+        @DisplayName("stitchExtracts=true appends extracts to the user turn")
+        void stitchesWhenEnabled() {
+            var memory = memoryWithExtract("Summarize this", List.of("report.pdf: quarterly numbers"));
+            var log = new ConversationLogGenerator(memory).generate(-1, true, true);
+
+            String userText = log.getMessages().getFirst().getContent().getLast().getValue();
+            assertTrue(userText.contains("Summarize this"));
+            assertTrue(userText.contains("quarterly numbers"), "extracts should be stitched: " + userText);
+        }
+
+        @Test
+        @DisplayName("stitchExtracts=false leaves the transcript clean")
+        void noStitchWhenDisabled() {
+            var memory = memoryWithExtract("Summarize this", List.of("report.pdf: quarterly numbers"));
+            var log = new ConversationLogGenerator(memory).generate(-1, true, false);
+
+            String userText = log.getMessages().getFirst().getContent().getLast().getValue();
+            assertEquals("Summarize this", userText);
+            verify(memory, never()).getAllSteps();
+        }
+
+        @Test
+        @DisplayName("no extracts on the step leaves input unchanged")
+        void noExtractsUnchanged() {
+            var memory = memoryWithExtract("Hi", List.of());
+            var log = new ConversationLogGenerator(memory).generate(-1, true, true);
+            assertEquals("Hi", log.getMessages().getFirst().getContent().getLast().getValue());
+        }
+
+        @Test
+        @DisplayName("multi-turn: extract lands on its own turn, not the mirror turn")
+        void stitchesOntoCorrectTurnAcrossTurns() {
+            // Three turns; the extract lives on the OLDEST turn (output index 0).
+            var out0 = new ConversationOutput();
+            out0.put("input", "turn0");
+            var out1 = new ConversationOutput();
+            out1.put("input", "turn1");
+            var out2 = new ConversationOutput();
+            out2.put("input", "turn2");
+            var memory = mock(IConversationMemory.class);
+            when(memory.getConversationOutputs()).thenReturn(new ArrayList<>(List.of(out0, out1, out2)));
+
+            var oldestStep = mock(IConversationMemory.IConversationStep.class);
+            @SuppressWarnings("unchecked")
+            IData<List<String>> data = mock(IData.class);
+            when(data.getResult()).thenReturn(List.of("PDF EXTRACT"));
+            when(oldestStep.getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS)).thenReturn(data);
+            var otherStep = mock(IConversationMemory.IConversationStep.class);
+            when(otherStep.getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS)).thenReturn(null);
+
+            // Stack.get() is reverse-ordered: get(0)=newest(turn2) … get(2)=oldest(turn0).
+            var stack = mock(IConversationMemory.IConversationStepStack.class);
+            when(stack.size()).thenReturn(3);
+            when(stack.get(0)).thenReturn(otherStep);
+            when(stack.get(1)).thenReturn(otherStep);
+            when(stack.get(2)).thenReturn(oldestStep);
+            when(memory.getAllSteps()).thenReturn(stack);
+
+            var log = new ConversationLogGenerator(memory).generate(-1, true, true);
+
+            String turn0 = log.getMessages().get(0).getContent().getLast().getValue();
+            String turn2 = log.getMessages().get(2).getContent().getLast().getValue();
+            assertTrue(turn0.contains("PDF EXTRACT"), "extract must land on turn 0: " + turn0);
+            assertFalse(turn2.contains("PDF EXTRACT"), "extract must NOT leak onto turn 2: " + turn2);
+        }
+    }
+
     // ─── Basic generation ───────────────────────────────────────
 
     @Nested

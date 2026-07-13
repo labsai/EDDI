@@ -590,6 +590,12 @@ When implementing a new feature, provide:
 - Include conversation context in logs
 - Use appropriate levels: DEBUG (verbose), INFO (important events), ERROR (failures)
 
+#### Imports
+
+- **Always reference types and annotations by their simple name with a top-level `import`** — never inline a fully-qualified name (e.g. write `@Inject IAttachmentStore store;` with the imports, not `@jakarta.inject.Inject ai.labs.eddi.engine.attachments.IAttachmentStore store;`). FQNs in field declarations, method signatures, annotations, and generics hurt readability and are a common review comment.
+- The **only** acceptable inline FQN is disambiguating two classes that share a simple name and are both used in the same file — and even then, prefer restructuring so only one is imported.
+- Don't leave unused imports behind after a refactor; run `./mvnw formatter:format` and `./mvnw validate` (Checkstyle) before committing.
+
 #### Production-Scale Thinking
 
 When designing any new feature, always consider these before finalizing the design:
