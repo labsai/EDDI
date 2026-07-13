@@ -73,7 +73,56 @@ public class SlackSignatureVerifier {
             return false;
         }
 
-        // Replay protection: reject requests older than 5 minutes
+        if (!isTimestampFresh(timestamp)) {
+            return false;
+        }
+
+        // Try each signing secret — return true on first match
+        for (String secret : signingSecrets) {
+            if (matchesSecret(timestamp, rawBody, signature, secret)) {
+                return true;
+            }
+        }
+
+        LOGGER.debug("Slack signature verification failed: no matching signing secret");
+        return false;
+    }
+
+    /**
+     * Verify the request signature against exactly ONE signing secret — the secret
+     * of the integration that owns the acted-on channel. Used by the interactivity
+     * endpoint (HITL decisions), where accepting any secret from the pool would let
+     * a holder of one integration's secret forge a decision on another
+     * integration's paused conversation (cross-integration IDOR).
+     *
+     * @param signingSecret
+     *            the single signing secret to verify against (the owning
+     *            integration's); a {@code null}/blank secret always fails
+     * @return true only if the signature matches THIS secret and the timestamp is
+     *         fresh
+     */
+    public boolean verifyWithSecret(String timestamp, String rawBody, String signature,
+                                    String signingSecret) {
+        if (timestamp == null || rawBody == null || signature == null) {
+            LOGGER.warn("Slack signature verification: missing required headers");
+            return false;
+        }
+        if (signingSecret == null || signingSecret.isBlank()) {
+            LOGGER.warn("Slack signature verification: no signing secret for the owning integration");
+            return false;
+        }
+        if (!isTimestampFresh(timestamp)) {
+            return false;
+        }
+        if (matchesSecret(timestamp, rawBody, signature, signingSecret)) {
+            return true;
+        }
+        LOGGER.debug("Slack signature verification failed: signature does not match the owning integration's secret");
+        return false;
+    }
+
+    /** Replay protection: reject requests older than 5 minutes. */
+    private boolean isTimestampFresh(String timestamp) {
         try {
             long requestTs = Long.parseLong(timestamp);
             long now = Instant.now().getEpochSecond();
@@ -82,40 +131,34 @@ public class SlackSignatureVerifier {
                         requestTs, now, Math.abs(now - requestTs));
                 return false;
             }
+            return true;
         } catch (NumberFormatException e) {
             LOGGER.warnf("Invalid Slack timestamp: %s", sanitize(timestamp));
             return false;
         }
+    }
 
-        // Try each signing secret — return true on first match
-        String baseString = VERSION + ":" + timestamp + ":" + rawBody;
-
-        for (String secret : signingSecrets) {
-            if (secret == null || secret.isBlank()) {
-                continue;
-            }
-
-            try {
-                Mac mac = Mac.getInstance(HMAC_SHA256);
-                mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), HMAC_SHA256));
-                byte[] hash = mac.doFinal(baseString.getBytes(StandardCharsets.UTF_8));
-
-                String computed = VERSION + "=" + bytesToHex(hash);
-
-                // Constant-time comparison to prevent timing attacks
-                if (MessageDigest.isEqual(
-                        computed.getBytes(StandardCharsets.UTF_8),
-                        signature.getBytes(StandardCharsets.UTF_8))) {
-                    return true;
-                }
-            } catch (Exception e) {
-                LOGGER.debugf("Slack signature computation failed for a secret: %s", e.getMessage());
-                // Continue trying other secrets
-            }
+    /** Constant-time HMAC comparison of the request against a single secret. */
+    private boolean matchesSecret(String timestamp, String rawBody, String signature, String secret) {
+        if (secret == null || secret.isBlank()) {
+            return false;
         }
+        String baseString = VERSION + ":" + timestamp + ":" + rawBody;
+        try {
+            Mac mac = Mac.getInstance(HMAC_SHA256);
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), HMAC_SHA256));
+            byte[] hash = mac.doFinal(baseString.getBytes(StandardCharsets.UTF_8));
 
-        LOGGER.debug("Slack signature verification failed: no matching signing secret");
-        return false;
+            String computed = VERSION + "=" + bytesToHex(hash);
+
+            // Constant-time comparison to prevent timing attacks
+            return MessageDigest.isEqual(
+                    computed.getBytes(StandardCharsets.UTF_8),
+                    signature.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            LOGGER.debugf("Slack signature computation failed for a secret: %s", e.getMessage());
+            return false;
+        }
     }
 
     private static String bytesToHex(byte[] bytes) {

@@ -5,6 +5,858 @@
 
 ---
 
+## 🐛 schedule — correct poll-batch-size comment (at-least-once, not exactly-once) (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Copilot PR review flagged that the `eddi.schedule.poll-batch-size` comment in `application.properties` claimed "cluster-wide CAS still guarantees exactly-once" — which **contradicts `IScheduleStore`'s documented contract**: firing is *at-least-once*, not exactly-once (an expired lease can be stolen, so schedule targets must be idempotent). Corrected the comment to state that per-lease CAS gives a single claimant but delivery is at-least-once, and the HITL timeout handler (resumes/cancels via CAS on conversation state) is idempotent.
+
+Two other Copilot nits were **declined** as inconsistent with established codebase convention: (a) the exact `GroupConversationState.values().length == 7` assertion is a deliberate tripwire matching its sibling `TranscriptEntryType` test — a lower-bound guard would lose the "did you mean to change the state set?" protection; (b) the `// MINOR-2:` label on `OwnershipValidator` is consistent with a pervasive plan-reference convention (9 `MINOR-/MAJOR-` labels plus hundreds of `#NN`/`Hn`/`Task N` markers) — a one-off removal would be inconsistent.
+
+---
+
+## 📝 HITL enum refactor — documentation audit (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Audited all documentation for the enum refactor (changelog accuracy, user-doc coverage, code comments). **User-facing docs correctly need no change**: `README.md`, `AGENTS.md`, and `docs/hitl.md` reference `timeoutPolicy` only at the config/REST layer (the JSON string values `AUTO_APPROVE`/`AUTO_REJECT`/`ABORT`/`WAIT_INDEFINITELY`), which the internal `String → enum` retype leaves byte-identical — no config-schema or wire-format change to document. Two accuracy fixes made:
+- **`HitlCrashRecoveryObserver` comment** (group re-arm site): the comment claimed the inline null-default avoids "the String overload the regular surface shares" — stale after the regular surface also became an enum. Corrected to state that **both** bookmarks are now enum and `parsePolicy(String)` survives only for the `PendingApprovalSummary` projection scan (still `String`).
+- **Changelog** (regular-surface entry): it listed the `McpHitlTools` regular read site among the sites updated to `.name()`, but that site was the one **missed** in that commit and fixed in the follow-up — corrected to say so.
+
+Also re-verified `HitlTimeoutPolicySerializationTest` passes directly (`Tests run: 15, Failures: 0`).
+
+---
+
+## ✅ HITL enum refactor — round-2 review clean + serialization regression guard (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+After the round-1 review caught `McpHitlTools:185`, ran a **second, deeper adversarial review** (4 orthogonal angles: complete call-site re-inventory, runtime serialization across both stores, end-to-end timeout-fire path, and an explicit "find one more bug" hunt — each finding verify-gated, plus a completeness critic). Result: **zero findings**, verdict `CORRECT_AND_COMPLETE`. Every remaining `String` touchpoint is a deliberate guarded boundary conversion (`PendingApprovalSummary` stays `String` via guarded `.name()`; schedule metadata stays `String` and `HitlTimeoutHandler` parses it back via `valueOf`; REST/MCP/Slack summaries via `.name()`); crash-recovery null-defaults faithfully mirror the old `parsePolicy`; `parsePolicy(String)` remains live for the projection-scan path.
+
+Added **`HitlTimeoutPolicySerializationTest`** (pure-unit, no Testcontainers) as a permanent regression guard for the invariant the whole refactor rests on. It replicates BOTH production mappers — the JSON mapper (Postgres JSONB + REST) and the BSON mapper (MongoDB, built like `PersistenceModule`) — across BOTH surfaces (`ConversationMemorySnapshot`, `GroupConversation`) and asserts: enum ⇄ `name()`-string round-trip for all four values; BSON encodes a **string, not an ordinal**; a null policy is omitted (NON_NULL) and round-trips to null; and **legacy pre-refactor documents** (policy as a bare JSON string) still deserialize into the enum. 15/15 pass locally — closing the residual runtime/persistence risk that the CI-only Testcontainer store tests would otherwise be the sole coverage for.
+
+---
+
+## 🐛 HITL enum refactor — fix missed McpHitlTools read site (clean-compile break) (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A thorough adversarial code review (5 dimensions + verify + completeness critic) of the two enum-refactor commits below found **one real, CRITICAL defect**: the regular-surface MCP read site `McpHitlTools.getApprovalStatus` (`McpHitlTools.java:185`) still put `snapshot.getHitlTimeoutPolicy()` (now the enum) into a `Map<String,String>` **without `.name()`**. Because that map's value type is `String` (unlike the `Map<String,Object>` sibling at `:359`), the mixed `enum : ""` ternary is a **hard javac error** (`bad type in conditional expression: HitlTimeoutPolicy cannot be converted to String`). The group twin (`:359`) and `RestAgentEngine:407` were fixed; this regular twin was missed.
+
+**Why it slipped past verification:** the earlier `./mvnw test` runs reported BUILD SUCCESS because Maven **incremental compilation reused a stale `McpHitlTools.class`** — the source file wasn't edited, so it wasn't recompiled even though its dependency (`ConversationMemorySnapshot`) changed type. A `./mvnw clean compile` fails. The prior changelog claim that "the full main + test tree compiles" was therefore based on a false pass and is corrected here. **Lesson: verify type-signature refactors with `clean compile`, not incremental.**
+
+**Fix:** append the guarded `.name()` to match its three siblings — `summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "")`. Wire output is byte-identical (`"AUTO_REJECT"` / `""`).
+
+Verified with a **clean** build: `./mvnw clean test` compiles the whole main + test tree from scratch and the affected suites pass (`Tests run: 258, Failures: 0, Errors: 0`). The review's other four dimensions (serialization/persistence, null-safety, behavior-preservation, test-fidelity) and the completeness critic returned **no other defects** — the refactor is otherwise correct and complete.
+
+---
+
+## 🎯 Regular surface — type hitlTimeoutPolicy as the HitlTimeoutPolicy enum (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Follow-up to the group-surface enum change (below): applied the same `String → HitlTimeoutPolicy` retype to the **regular (agent) conversation surface** so both surfaces are consistent. The `hitlApprovalTimeout` field stays `String` on both, for the same reasons documented in the group entry (uniform convention + `Duration` would serialize as a number under `write-dates-as-timestamps=true`).
+
+**Model layer** (`IConversationMemory` default methods, `ConversationMemory` impl field + accessors, `ConversationMemorySnapshot` field + accessors) now carry the enum. `ConversationMemoryUtilities` copies memory ↔ snapshot unchanged (both enum). **Consumer** (`ConversationService`): the four bookmark set-sites drop `.name()` (the source `AgentConfiguration.HitlConfig.getTimeoutPolicy()` / `ToolApprovalsConfig.getTimeoutPolicy()` / the computed `effectivePolicy` are all already the enum); `scheduleHitlTimeout` compares `== WAIT_INDEFINITELY` and emits `.name()` only into the `Map<String,Object>` schedule metadata. **Read/display sites** call `.name()`: the `RestAgentEngine` summary map, `ConversationMemoryStore.collectPendingSummaries` (feeds the `String`-typed `PendingApprovalSummary`), and `SlackEventHandler.formatTimeoutInfo`. (The parity `McpHitlTools:185` regular read site was **missed here** and fixed in the follow-up above.) **Crash recovery** (`HitlCrashRecoveryObserver`): the regular `IN_PROGRESS`-recovery site inlines the `null → WAIT_INDEFINITELY` default; `parsePolicy(String)` stays intact for its remaining caller (the `PendingApprovalSummary` projection, still `String`).
+
+**Persistence — verified wire-safe.** `ConversationMemorySnapshot` is stored as a JSONB/BSON blob (Jackson serializes the enum as its `name()`), so already-persisted `AWAITING_HUMAN` bookmarks deserialize unchanged. The Postgres bounded projection (`data->>'hitlTimeoutPolicy' AS timeout_policy` → `rs.getString(...)` → `PendingApprovalSummary`) reads the raw JSON name string and is unaffected by the model type change. The REST `awaitingApproval` summary and Manager UI contract are byte-identical.
+
+Scope: 9 main files + 12 test files (setters/asserts moved to enum constants; `String`-param helpers convert via `valueOf`; store-test call-sites retyped). `SimpleConversationMemorySnapshot` does not carry this field, so it is untouched. Verified: `Tests run: 258, Failures: 0, Errors: 0` across the regular + group HITL unit suites; full main + test tree compiles (the Testcontainer store tests compile and run in CI). `IRestAgentEngine.java` (formatter oscillation) restored/excluded again. Nothing pushed.
+
+---
+
+## 🎯 GroupConversation — type hitlTimeoutPolicy as the HitlTimeoutPolicy enum (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A PR review comment (@niedch) on `GroupConversation`'s HITL bookmark getters/setters said: *"I would prefer to go with the actual enum type and Duration for this."* Analyzed both halves (4-way investigation + adversarial verify) and **split the decision**: did the enum, deliberately skipped the `Duration`.
+
+**Enum — done.** `hitlTimeoutPolicy` was a raw `String` copied from config at pause time, but the `HitlTimeoutPolicy` enum (`WAIT_INDEFINITELY, AUTO_APPROVE, AUTO_REJECT, ABORT`) already exists and is the *declared* type in all three HITL config POJOs (`AgentConfiguration.HitlConfig`, `AgentGroupConfiguration.HitlConfig`, `ToolApprovalsConfig.timeoutPolicy`) — `GroupConversation` was the lone raw-`String` outlier for the policy. The field is control-flow-relevant (gates/arms `scheduleGroupHitlTimeout`, drives crash re-arm in `HitlCrashRecoveryObserver`), so typing it removes stringly-typed `valueOf`/`.name()`/`parsePolicy` juggling. It is **wire-safe**: Jackson serializes enums by `name()`, so `"AUTO_REJECT"` round-trips identically in Mongo/Postgres JSON, over REST, and to the Manager UI — exactly how the sibling `GroupConversationState state` field already persists. Every set-site only ever wrote a valid `name()` or `null`, so deserializing already-persisted `AWAITING_APPROVAL` transcripts cannot throw.
+
+Files:
+- **`GroupConversation.java`** — field + getter/setter → `HitlTimeoutPolicy` (import added).
+- **`GroupConversationService.java`** — `commitPause` / `restoreGroupPause` pass the enum directly (dropped `.name()`); `restoreGroupPause`'s `fallbackTimeoutPolicy` param + `resumeDiscussion`'s `savedTimeoutPolicy` local retyped to the enum; `scheduleGroupHitlTimeout` compares `== WAIT_INDEFINITELY` and calls `.name()` only when writing the schedule-metadata `Map<String,Object>`; `listGroupPendingApprovals` null-guards `.name()` for the `String`-typed `PendingApprovalSummary`.
+- **`HitlCrashRecoveryObserver.java`** — the group site inlines the `null → WAIT_INDEFINITELY` default instead of routing through the shared `parsePolicy(String)`, which stays intact for its two **regular-surface** callers (`PendingApprovalSummary`, `ConversationMemorySnapshot`).
+- **`RestGroupConversation.java` / `McpHitlTools.java`** — the summary map puts `.name()` (identical wire value, keeps the value a `String`).
+- Tests (`GroupConversationServiceHitlCoverage2Test`, `…CoverageTest`, `HitlCrashRecoveryObserverTest`, `…CoverageTest`) — reflective `restoreGroupPause` signature + args updated to the enum, assertions compare the enum, `gc.` helpers convert.
+
+**Duration — skipped (deliberate).** `hitlApprovalTimeout` stays `String`. Unlike the policy, `approvalTimeout` is uniformly `String` across every carrier (all three configs, the memory bookmark, `PendingApprovalSummary`, the transcript), so the convention favors `String`. And it is **not** wire-safe: the deployment sets `quarkus.jackson.write-dates-as-timestamps=true` with no `WRITE_DURATIONS_AS_TIMESTAMPS` override, so a `java.time.Duration` would serialize to a bare number (`900.0`) instead of `"PT15M"`, breaking the raw-over-REST OpenAPI/Manager-UI contract (the frontend reads it as an ISO-8601 string with a `PT15M` placeholder). A correct migration would need a whole-surface change + a custom ISO-8601 serializer + coordinated frontend work — a separate cross-cutting effort, out of scope for a review nit.
+
+**The `ConversationMemorySnapshot` regular surface keeps `String`** for both fields — it is a separate class with its own `parsePolicy(String)` path; only the group transcript was retyped. (A parallel enum change there is a possible follow-up but was left out to keep this diff scoped.)
+
+Verified: the four affected unit-test classes pass (`Tests run: 149, Failures: 0, Errors: 0`); surefire compiled the entire main + test tree first, so all call-sites type-check. Neither change is a correctness bug and the comment was a *"prefer"*, so this does not block the branch. `IRestAgentEngine.java` (reformatted by `formatter-maven-plugin` during the build, unrelated to this task) was restored and excluded. Nothing pushed.
+
+---
+
+## 🧹 ChannelTargetRouter — drop dead getPlatformConfig() null-checks + duplicate allocations (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A Copilot review of the HITL PR flagged one site in `ChannelTargetRouter.getIntegrationByApprovalChannel` where `getPlatformConfig()` was called twice behind a redundant `!= null` guard. Verified against `ChannelIntegrationConfiguration.getPlatformConfig()`: it returns `new HashMap<>(platformConfig)` — a fresh defensive copy, with the field initialized non-null and the setter null-guarded — so it **never returns null**. That makes every `getPlatformConfig() != null` sub-check dead code, and each doubled call allocates a throwaway map per invocation.
+
+The same pattern existed in **five other methods** Copilot did not flag; fixed all six for consistency:
+- `getIntegrationByApprovalChannel` (the flagged one) — cache the copy once, drop the dead guard
+- `getBotToken`, the config-load loop, `ResolvedTarget.botToken`, `ResolvedTarget.signingSecret` — drop the redundant `&& getPlatformConfig() != null` clause
+- `deepCopyConfig` — drop the always-true `if` wrapper, single call
+
+Every **genuine** guard is preserved (`integration != null`, `config != null`, `getChannelType() != null`); only the provably-dead `getPlatformConfig() != null` sub-checks and the duplicate allocations were removed. Behavior is identical because the getter cannot return null.
+
+**Copilot's second comment — rejected (verified against tooling):** it wanted `IRestAgentEngine.listPendingApprovals` collapsed to one line. The `formatter-maven-plugin` (Eclipse formatter, bound to the build) produces exactly the two-line split it objects to and auto-reverts the single-line form on every `mvnw compile`, so the nit conflicts with the project's enforced format — no change made.
+
+Verified: `./mvnw compile` exits 0 (checkstyle at `validate`, formatter at `process-sources`, javac all clean). Change isolated to `ChannelTargetRouter.java`. Nothing pushed.
+
+---
+
+## 🐛 mcpcalls — register McpCallsTask via startup module (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+`McpCallsTask` (the MCP-client httpcall lifecycle task) was tracked and committed, but its bootstrap registration was not — so on a fresh checkout the task was never inserted into the lifecycle-task provider map (`@LifecycleExtensions`) and the mcpcalls feature silently failed to wire into the pipeline. Added `McpCallsModule` (`@Startup(1000)` + `@PostConstruct`), mirroring the seven sibling bootstraps (`ApiCallsModule`, `LlmModule`, `OutputGenerationModule`, `PropertySetterModule`, `RulesModule`, `SemanticParserModule`, `TemplateEngineModule`), which registers `McpCallsTask.ID`. The file existed but was untracked in the working tree; surfaced while auditing the tree during the MCP-whitelist review and committed here as a wiring bug relevant to this branch. Compiles clean.
+
+---
+
+## 🔌 MCP tool filter — expose HITL/memory/GDPR tools + build-time regression guard (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A client reported that new HITL MCP tools were "implemented but not available." Confirmed: `McpToolFilter` is a **name whitelist** (`ToolFilter` SPI — quarkus-MCP only surfaces a tool's *name*, not its declaring class/annotation, so filtering must be by name), and it exposes only the intended MCP tools while hiding the langchain4j built-in agent tools (calculator, websearch, etc.) that leak into the same scan. Three `Mcp*Tools` classes had shipped `@Tool`s that were **never added to the whitelist**, making them unreachable dead code — a quarkus-MCP `@Tool` has no other invocation path:
+
+- **`McpHitlTools`** (9): `list_pending_approvals`, `get_approval_status`, `resume_conversation`, `cancel_conversation`, `list_group_pending_approvals`, `list_all_group_pending_approvals`, `get_group_approval_status`, `approve_group_phase`, `cancel_group_discussion` — documented as the MCP HITL surface in `docs/hitl.md` but invisible.
+- **`McpMemoryTools`** (8): `list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`, `count_user_memories`.
+- **`McpGdprTools`** (2): `delete_user_data`, `export_user_data`.
+
+**Why it slipped through:** the existing regression test (`McpToolFilterTest.test_allMcpToolMethods_areWhitelisted`) scanned only a **hardcoded array of 4** `Mcp*Tools` classes — HITL, memory, and GDPR were not in it, so CI stayed green.
+
+**Fix:**
+- **`McpToolFilter.java`** — added all 19 names to `MCP_TOOLS` (whitelist 55 → 74 = every declared quarkus-MCP `@Tool`). Verified there is **no name collision** with any langchain4j built-in tool (effective names cross-checked), so whitelisting a name cannot accidentally expose an internal agent tool. All three classes already enforce their own authz (`requireRole` viewer/admin + per-user `OwnershipValidator`; GDPR delete is admin-only + `CONFIRM` arg), identical to their REST counterparts — MCP is a transport, not new authority.
+- **`McpToolFilterTest.java`** — rewrote the guard to **auto-discover** every class in the `ai.labs.eddi.engine.mcp` package by scanning the compiled-classes directory (no hardcoded class list), resolve each `@Tool`'s effective name (explicit `name`, else method name — the `McpGroupTools` convention), and fail the build if any is not whitelisted. Anchor tools (one per `Mcp*Tools` class) guard against a broken scan passing vacuously. Any *future* MCP tool that isn't whitelisted now turns CI red.
+- **`docs/mcp-server.md`** — corrected the stale tool count (63 → 74), documented the name-only `ToolFilter` constraint and the new build-time guard.
+
+**Decision:** whitelist (not delete) memory/GDPR — they were intended MCP tools (Phase 11a persistent memory, GDPR/CCPA framework) that were simply never wired into the filter; the annotation encodes intent to expose.
+
+**Follow-up — adversarial code review + fixes:** the commit was then put through a 4-dimension adversarial review (whitelist-correctness, test-robustness, security/authz, docs-completeness), each finding skeptic-verified. Whitelist-correctness and test-robustness came back **clean**; 3 low-severity findings survived and 2 were addressed here:
+- **Doc role-name fix** (`docs/mcp-server.md`): the "Recommended Role Mapping" table named non-existent roles `mcp-user`/`mcp-admin` and cited `@RolesAllowed`; the code actually enforces `eddi-viewer`/`eddi-editor`/`eddi-admin` (via `requireRole`) and `eddi-approver`/owner (via `HitlAccessGuard`). Rewrote the section with the real role strings and mechanism; this became load-bearing now that 10 role-guarded memory/GDPR tools are reachable.
+- **Collision-guard test** (`McpToolFilterTest.test_noLangchain4jBuiltinToolIsWhitelisted`): the "no name collision with langchain4j built-ins" property was a one-time manual check. Added the **inverse** build-time guard — auto-discovers every `dev.langchain4j.agent.tool.Tool` under `modules.llm.tools` and fails if any effective name is whitelisted (would leak an internal agent tool to MCP). Also hardened both discovery helpers to load classes **without static init** (`Class.forName(name, false, …)`).
+- **Not fixed (decision deferred):** the memory/GDPR mutation tools lack an independent MCP mutation kill-switch like HITL's `eddi.mcp.hitl.mutations.enabled` — flagged low, consistent with the pre-existing posture of other whitelisted destructive tools (`delete_agent`, etc.); left for the maintainer to decide whether to add symmetric kill-switches across the MCP mutation surface.
+
+**Method:** verified the whole diagnosis against source (annotation imports, `ToolInfo`/langchain4j `@Tool` APIs via `javap`, collision analysis) before changing anything; both regression guards were proven to fail on an injected regression, then restored. `./mvnw -o test -Dtest=McpToolFilterTest` → 90 green; `./mvnw -o validate` clean. **Nothing pushed** — that stays the maintainer's call.
+
+---
+
+## 🔧 Dependency bumps — Quarkus 3.37.1, quarkus-mcp-server 1.13.1 (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Patch bumps in `pom.xml`: `quarkus.platform.version` `3.37.0` → `3.37.1` and `quarkus-mcp-server.version` `1.13.0` → `1.13.1` (used by `io.quarkiverse.mcp:quarkus-mcp-server-http`). Both are single-property changes; the version is defined only in `pom.xml`, so no other current-state reference needed updating (historical changelog/release-note mentions left as-is). Verified locally with `./mvnw -B compile` — BUILD SUCCESS against the new BOM (`quarkus:3.37.1:generate-code` ran) and `quarkus-mcp-server-http:1.13.1` resolved into the local repo; full test suite runs in CI.
+
+---
+
+## 📝 AI-agent docs audit — AGENTS.md overhaul + linked-doc consistency fixes (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Audited `AGENTS.md` (the instruction file AI coding assistants load; `CLAUDE.md` just delegates to it) against every authoritative source it relies on, then rewrote it for correctness and frictionless cold-checkout onboarding. Verification ran as five parallel research agents cross-checking claims against `pom.xml`, `ci.yml`, `Dockerfile`, `README.md`, `docs/project-philosophy.md`, `docs/architecture.md`, `docs/hitl.md`, and the Agent Father config, plus an independent "fresh contributor" friction review.
+
+**AGENTS.md — factual fixes:** Quarkus `3.34.1` de-pinned (versions now reference `pom.xml` as the single source of truth, per the file's own rule 7); MCP `33 tools` → `60+`; `CostTracker` → `ToolCostTracker` (real class name); `SafeMathParser` clarified as a static inner class of `CalculatorTool`; HITL tool-source count `8` → `7` (verified against `ToolApprovalPatterns.KNOWN_SOURCES`); §5.6 corrected (Agent Father uses `scope: "conversation"`, not `secret`); HITL moved Upcoming → Completed with residual work (Manager approvals UI, `inGroupTurns: INBOX`) kept in Upcoming; Multi-Channel narrowed to Teams (Slack ships via HITL); five broken `docs/planning/` → `planning/` links.
+
+**AGENTS.md — onboarding & policy:** added a table of contents, a Build & Test Commands section (Windows `.\mvnw.cmd` note, sandbox/IT caveat, `mise.toml` toolchain, prerequisites → README, pre-push hook activation), an external-contributor fork-model pointer, and a pillar cross-reference. Codified two team policies: **no AI co-authorship trailers or tool-advertising footers on commits/PRs** (§2 rule 5) and **ask before pushing** (§2 rule 4).
+
+**Linked-doc consistency fixes:** `docs/hitl.md` `eight` → `seven` tool sources; `docs/architecture.md` retired stale v5 `package` terminology across the Agent Composition section (`packagestore` → `workflowstore`, `.package.json` → `.workflow.json`, `packageExtensions`/`WorkflowExtension` → `workflowSteps`/`WorkflowStep`, `configs.packages.model` → `configs.workflows.model`, `"packages"` → `"workflows"`) and fixed the LLM URI `llmstore/llmconfigs` → `llmstore/llms` — all verified against `WorkflowConfiguration.java` and the Agent Father config; `CONTRIBUTING.md` reconciled "squash fixup commits" with the never-rewrite-pushed-history rule.
+
+**Decisions:** kept all content inline in AGENTS.md (no extraction to new files) per maintainer preference and because the architecture audit confirmed AGENTS.md's prescriptive content is high-value and, on workflow-vs-package naming, *more* current than `architecture.md` was; prefer referencing canonical sources over restating drift-prone numbers/versions; committed to `feat/hitl-framework` rather than a new branch off `origin/main` because `docs/hitl.md` exists only on this branch.
+
+**Method:** six delegated research/critique agents, each finding verified against source before acceptance. **Nothing pushed** — that stays the maintainer's call.
+
+---
+
+## 🧭 HITL — whole-branch merge review (round 2) + all 22 findings fixed + fix-batch review (2026-07-05)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+The **entire** branch (111 commits, 242 files, base `6f5f5dd68` → `a5df6afd2`) — including the ~90 commits of MCP-HITL pre-work the earlier 15-commit review never covered, plus the composition of the five follow-up fixes below — was put through a **second whole-branch adversarial review** (11 dimension reviewers → per-finding skeptic verification → gap round). It surfaced **25 confirmed defects (3 high, 6 medium, 13 low after de-dup)** that the narrower per-task and 15-commit reviews had missed because they are cross-cutting. The two most safety-critical dimensions (**durability/at-most-once**, **backward-compat**) again came back clean. Verdict: **not merge-ready until the 3 highs were fixed**; the user chose to **fix all 22**. All are now fixed across **10 commits** (`b9a6c1263..499095fa4`), each build+test-gated:
+
+**Blockers (high):**
+- **`b9a6c1263` — `EXECUTION_INTERRUPTED` no longer bricks input (H1).** The queued-say guard skipped `EXECUTION_INTERRUPTED`, but nothing returns that state to READY except a running turn — so an ordinary 60s `agentTimeout` watchdog expiry or a `HitlCrashRecoveryObserver` "unlock say()" recovery permanently locked the conversation's input (a non-HITL-scoped regression). It is a *recoverable* marker, not terminal: dropped from the guard so a fresh say re-runs and self-heals. Same commit fixes **M1** (pause-commit CAS now from the actual pre-turn state, not hard-coded READY, so an ERROR/interrupted-retry pause commits), **M2** (post-commit `isCancelled()` re-check converts a cancel-raced pause to `EXECUTION_INTERRUPTED` instead of stranding it with an armed timer), and two lows (undo/redo now CAS from the loaded state; the 2-min re-arm grace clamps only past-due deadlines, honoring sub-2min `approvalTimeout`).
+- **`056a02e13` — tool-approval gate honored on the `CONVERSATION_START` init turn (H2).** The agent-level `toolApprovals` carrier was populated only on say/resume, never at conversation start, so a gated tool invoked by a greeting-turn LLM task executed **without approval** (fail-open). The `Agent` now carries the config (like `memoryPolicy`) and sets it on memory before `init()`; also covers scheduled and group-member conversations.
+- **`6e4474552` — PostgreSQL journal store + working TTL + GDPR erasure (H3, M4, M5, M6).** `IHitlToolJournalStore` had no Postgres impl, so on `eddi.datastore.type=postgres` every tool-approval resume/approval-status read dialed a nonexistent Mongo — tool-level HITL was unusable on a first-class backend. Added `PostgresHitlToolJournalStore` (`INSERT … ON CONFLICT DO NOTHING` preserves at-most-once) + a `DataStoreProducers` selector matching the 16 sibling stores. **M4:** the Mongo TTL was inert (`executedAt` stored as int64, which the TTL monitor ignores) — now `claimedAt`/`executedAt` are BSON Dates, the TTL is anchored on `claimedAt` (so orphaned EXECUTING claims also expire), with `IndexOptionsConflict` drop+recreate. **M5:** GDPR erasure now cascades to the journal (before conversation deletion, so ids resolve). **M6:** the vacuous unique-index test and tautological `differentPauseEpoch` test are now genuine assertions.
+
+**Medium/low (other commits):** `dcfe2c2f7` (M3 — the raw conversation-read REST endpoint no longer leaks `argumentsRaw`+transcript; names-only projection reused from fix #4), `e7da12f8f` (gate lows: null-tool-name NPE, resume kill-switch threading, null-id callId normalization at AiMessage reception, cascade/watchdog abandoned-thread guard), `a7d0df601` (RULE-pause `hitl:status` output marker), `c6745b6ae` (MCP `approve_group_phase` returns BAD_REQUEST not INTERNAL for non-string values), `d76b84869` (group cancel-signal remove-window + sub-2min timeout parity), `50c97387f` (doc: `outcome_unknown` is WARN-logged not audited; errorCode set += CONFLICT/INTERNAL), `499095fa4` (LlmTask→orchestrator transcript-cap threading test).
+
+**Fix-batch critical review.** The 10 fix commits were then themselves put through an adversarial review (4 concern reviewers — state-machine, gate, journal, cross-cutting — each finding skeptic-verified). The **journal batch came back fully clean** (CDI producer pattern verified byte-identical to the 16 siblings; Postgres at-most-once and Mongo TTL-anchor correctness confirmed). The gate abandoned-thread concern was **refuted** (fail-safe holds). Two low, fix-introduced defects were **confirmed and fixed** in **`8ebf5b691`**: (a) `storeConversationMemorySnapshotIfState` could NPE on a null `expectedState` (M1/undo/redo now pass a live-looked-up state that is null if the conversation was deleted concurrently) — guarded to a clean CAS-miss in both stores; (b) the RULE-pause `hitl:status` marker was never cleared on resume, so a resolved turn kept advertising "awaiting approval" — now removed on resume via a new `removeConversationOutput` step API, with the key/value extracted to shared constants.
+
+**Method:** two deterministic multi-agent review workflows (11 + 4 reviewers, each finding adversarially verified before acceptance); the large Postgres-journal batch was implemented by a delegated agent whose diff was reviewed against spec before commit. Full clean compile green; every batch's targeted tests green. **Nothing pushed** — that stays the maintainer's call.
+
+---
+
+## 🔬 Tool-level HITL — adversarial final review + follow-up fixes (2026-07-04)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+After Tasks 5–17 landed (see the entry below), the whole tool-level HITL change (15 commits, `3e5da4345..dda7c644e`) was put through a **whole-branch adversarial review**: six independent dimension reviewers (correctness, concurrency, security, backward-compat, durability/at-most-once, spec-completeness), each finding then handed to an independent skeptic instructed to *refute* it, then a synthesis pass. Verdict: **merge-ready, no blockers** — the two most safety-critical dimensions, **durability/at-most-once** and **backward-compat**, came back clean (no double-execution of an approved tool across crash/re-approval; null-config / RULE-pause / legacy-snapshot paths byte-identical). Five fail-safe defects survived verification and are now all fixed (each via a TDD fix + independent review gate):
+
+- **`fix(hitl)` `6413db97a` — generic read surface no longer leaks raw tool args + transcript.** `SimpleConversationMemorySnapshot` (the generic conversation-read DTO behind e.g. MCP `read_conversation` and the REST simple log) carried the full `PendingToolCallBatch` including `argumentsRaw` and `chatTranscriptJson` with no `@JsonIgnore`, so any `eddi-viewer` could read unredacted tool arguments + the whole transcript of a paused conversation — broader than the deliberately approver-only `detail=full` gate. Fixed with a **names-only projection** at the Simple-snapshot boundary (fresh `PendingToolCall` objects carrying only `callId`/`toolName`/`source`/`gateReason`/`argsTruncated`); the persisted full `ConversationMemorySnapshot` is untouched, so the at-most-once resume path still round-trips. (Introduced by the Task-13 Simple-snapshot extension.)
+- **`fix(hitl)` `1d7ca72e7` — say-path pause commit guarded by a state-CAS.** The say-path fresh-pause persistence was an unconditional full-document store guarded only by an up-front `isCancelled()` check; a concurrent `end`/`cancel` landing in the TOCTOU window could be lost, **resurrecting an ENDED/cancelled conversation** as `AWAITING_HUMAN` with an armed timeout. Now uses `storeConversationMemorySnapshotIfState` (compare-and-store from the running `READY` state); a miss discards the pause (no store, no counter, no schedule), mirroring the resume path's existing guard. Covers both RULE and TOOL_CALL pauses.
+- **`fix(hitl)` `30e495b88` — tool-pause policy resolved from the task-scoped effective config.** Post-pause resolution of timeout policy, no-progress policy, auto-approval cap, and pending message read only the *agent-level* `hitlConfig.toolApprovals`, ignoring the per-task `LlmConfiguration.Task.toolApprovals` override that the gate itself honors — so a task-scoped finite `timeoutPolicy=AUTO_REJECT`/`approvalTimeout` silently degraded to `WAIT_INDEFINITELY` (waited forever instead of auto-rejecting). The gate's resolved effective config is now stamped onto the `PendingToolCallBatch` and read back by all four resolvers (agent-level fallback for legacy/RULE/null batches); Task 10's inherit-from-outer + `AUTO_APPROVE`-demotion semantics are unchanged.
+- **`fix(hitl)` `69143a799` — resumed tool-pause turn renders only the final answer.** On a same-index TOOL_CALL resume the final answer was appended to the same step's `"output"` list that still held the "awaiting approval" placeholder, so the turn rendered both stacked. Resume now removes exactly the deterministic placeholder (identified via `resolvePendingMessage`, stable across pause→resume through the persisted batch) plus its mirror `Data<>`; the placeholder still shows while `AWAITING_HUMAN`, earlier multi-task output is preserved, and the RULE path is unchanged.
+- **`fix(hitl)` `9d07c525d` — `eddi.hitl.tool.transcript-max-bytes` wired.** The plan-mandated transcript-cap override property was never wired (hard-coded 2 MB). Now injected in `LlmTask` (the CDI seam, like `eddi.hitl.tool.enabled`) and threaded through the standard + cascade branches to `buildPendingBatch`; an absent property reproduces the unchanged 2 MB default.
+
+**Method:** the review ran as a deterministic multi-agent workflow (12 agents); every finding was adversarially verified against HEAD before acceptance, and every fix was independently re-reviewed before landing. The full local suite is ~10,500 tests green with no logic regression (only the pre-existing Docker/Testcontainers/loopback-socket classes fail in the sandbox — they run in CI).
+
+**Tracked follow-ups (fail-safe, non-blocking):** (a) `resumeToolLoop`'s rare re-pause-during-continuation still caps the transcript at the 2 MB default rather than the configured value (commented at the call site); (b) no validation of a pathological `0`/negative `transcript-max-bytes` (fail-safe always-omit). The Testcontainers ITs and the BSON/JSONB round-trip of the new `effectiveToolApprovals` batch field are CI-verified only.
+
+---
+
+## 🛠️ Tool-level HITL — complete feature + documentation (Tasks 5–17 of 17) (2026-07-04)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Completes and documents **tool-level HITL approval gating**: the conversation pauses for human approval when the LLM invokes a *gated tool* (any of the 8 sources — built-in `@Tool`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`), gated *before* the tool executes (fail-safe), configured via allow/exempt glob patterns, coexisting with the behavior-rule `PAUSE_CONVERSATION` turn gate. Builds on the Tasks 1–4 foundation (see the earlier 2026-07-03 entry — do not duplicate). Full plan: [`planning/hitl-tool-approval-plan.md`](../planning/hitl-tool-approval-plan.md).
+
+**Task 17 — documentation (this entry).** No production code changed. Docs/markdown only:
+- **`docs/hitl.md`** — removed the now-false "Tool-level HITL … is deferred" from *Known Limitations* (it contradicted the rest of the same doc) and replaced it with an *implemented* note; scoped the Slack data-minimization sentence to **RULE** pauses and documented the **TOOL_CALL** exception (the approval channel renders redacted, 300-char-truncated tool arguments so a reviewer can see what they are approving; the in-thread notice stays pause-reason-only); added a **Tool-Level Approval Gating** section (config schema + defaults, pattern language, precedence, effective-timeout-policy rule, per-call verdict/amendment REST bodies with a JSON example, `pauseDetails` reference, the write-ahead journal + outcome-unknown contract, Slack all-or-nothing buttons, group-member REJECT, frozen-transcript semantics, and the `eddi.hitl.tool.enabled` rolling-upgrade note). Reconciled with the existing tool-level content earlier tasks had already added (the `pauseDetails` shapes, MCP Surface table, `eddi.mcp.hitl.mutations.enabled` kill-switch) — no duplicate sections.
+- **`AGENTS.md` §5.3** — extended the HITL note: behavior rules gate *turns* (`PAUSE_CONVERSATION`); `hitlConfig.toolApprovals` gates *individual LLM tool calls* (`hitlPauseType: "TOOL_CALL"`); both share the same pause/timeout/audit/Slack machinery; link to `docs/hitl.md`.
+- **`planning/hitl-framework-plan.md`** — flipped the decision-table line "Tool-level HITL: Deferred" to "Implemented — see `planning/hitl-tool-approval-plan.md`".
+
+**The 5 product decisions (from the plan's decision record), now locked and documented:**
+1. **`AUTO_APPROVE` never applies to tool pauses implicitly** — explicit opt-in only. Agent-level `AUTO_APPROVE` covers RULE pauses; for a tool pause it is demoted to `WAIT_INDEFINITELY` unless `toolApprovals.timeoutPolicy` sets `AUTO_APPROVE` explicitly (a silent timeout must never auto-execute a gated tool).
+2. **Crash inside an approved tool yields an honest `EXECUTION_OUTCOME_UNKNOWN`** — never silent re-execution. The write-ahead journal (`IHitlToolJournalStore`, keyed by `conversationId + pauseEpoch + callId`) replays `EXECUTED` results and reports `EXECUTING` (crashed mid-tool) as genuinely unknown, audited and surfaced in `pauseDetails.outcomeUnknown`.
+3. **Group-member tool pauses auto-reject gracefully** (`system:group`) — a group has no reviewer, so the member's gated call is REJECTED through the normal resume path and its LLM produces a coherent tool-less contribution (fallback: SKIP + auto-cancel). `inGroupTurns: "INBOX"` is reserved (400 in v1).
+4. **Ungated calls in a mixed batch execute before the human sees the pause** — the approver is then shown which ones already ran via `pauseDetails.executedUngatedCalls`.
+5. **A multi-day pause resumes against pause-time prompt state** — the exact in-flight langchain4j transcript is frozen at pause time and replayed on resume (same task index), never rebuilt from current memory.
+
+**Cross-checked every documented fact against source** (`ToolApprovalsConfig`, `ToolApprovalPatterns`, `ToolApprovalGate`, `HitlDecision`/`ToolCallDecision`, `HitlConfigValidation`, `ConversationService.applyEffectiveToolTimeoutPolicy` + `validateToolDecisions`, `RestAgentEngine.buildToolCallPauseDetails`, `AgentOrchestrator.resumeToolLoop`, `IHitlToolJournalStore`, `SlackHitlSupport`, `GroupConversationService.tryResolveMemberToolPause`, and the `eddi.hitl.tool.enabled` flag in `LlmTask`/`application.properties`) — field names, defaults (`maxPausesPerTurn` 3/1..10, `maxAutoApprovalsPerTurn` 2/0..10), ranges, note caps (top-level 4096, per-call 1024), the 300-char Slack display truncation, and the precedence/timeout rules all match the implementation.
+
+**Next:** the tool-level HITL feature (Tasks 1–17) is complete on `feat/hitl-framework`. Remaining HITL roadmap items: EDDI-Manager approvals UI (separate repo/PR) and the reserved `inGroupTurns: "INBOX"` mode.
+
+---
+
+## 🔐 MCP HITL surface — resolve approval gates over MCP (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Exposes the HITL approval operations over the MCP server so an external MCP client (agent / orchestrator / ops console) can list, read, resume/approve, and cancel paused conversations and group discussions — at full parity with the REST endpoints, for both the regular (1:1) and group surfaces. Closes the loop `chat_managed`/`talk_to_agent` already open: they return `PAUSED_FOR_APPROVAL` but, until now, the client had to drop to REST to resolve it. Full plan: [`planning/mcp-hitl-surface-plan.md`](../planning/mcp-hitl-surface-plan.md).
+
+**Design — human authority preserved:** MCP is a transport, not a new authority; no tool lets an agent approve its own gate. Authorization mirrors REST exactly via a new shared `HitlAccessGuard` (extracted from `RestAgentEngine`/`RestGroupConversation`, so *who may decide* lives in exactly one place): per-conversation owner / `eddi-admin` / `eddi-approver`, owner-scoped listings, fail-closed on a missing descriptor. Decisions are attributed server-side as `mcp:<principal>` (mirroring the existing `system:timeout` convention). A global kill-switch `eddi.mcp.hitl.mutations.enabled` (default `true`) can make MCP a read-only HITL surface without touching REST.
+
+**Method:** brainstorm → adversarial design critique (four subagent workflows: verify-assumptions + security + architecture + completeness; 28/28 code assumptions verified, ~26 findings triaged — folded in owner-scoped **group** listings, structured error codes, the discoverability hint, and metrics; **rejected** agent-level config, dev-mode fail-closed mutations, and a by-intent resume variant, each with reasons) → TDD execution, one commit per task. All new tests are plain Mockito (locally runnable, no Quarkus boot).
+
+**Landed (each task = its own commit, all tests green locally):**
+- `McpToolUtils.errorJson(msg, code, details)` — structured error JSON (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`), manual construction so it never throws on the error path.
+- `HitlAccessGuard` — shared HITL ownership check + owner-scoped pending-approval listing (regular + group). `RestAgentEngine`/`RestGroupConversation` refactored to delegate the `hitlOperation=true` path (non-HITL paths untouched); existing REST HITL tests pass unchanged via a real guard wired with the same mocks.
+- `McpHitlTools` — 9 `@Tool`s: `list_pending_approvals`, `get_approval_status`, `resume_conversation`, `cancel_conversation`, `list_group_pending_approvals`, `list_all_group_pending_approvals`, `get_group_approval_status`, `approve_group_phase` (optional `taskApprovals` JSON for TASK granularity), `cancel_group_discussion`. `@Blocking`, JSON returns, `eddi.mcp.hitl.*` metrics (verdict-tagged).
+- `chat_managed`/`talk_to_agent` `PAUSED_FOR_APPROVAL` payload now names `"suggestNextTool": "resume_conversation"` so an LLM client can chain the approval over MCP.
+
+**Pause-type-agnostic:** because the tool-level HITL layer (see below) reuses the same `AWAITING_HUMAN` state + `/resume` + single-verdict `HitlDecision`, the regular tools resolve **both** `RULE` and `TOOL_CALL` pauses unchanged; `get_approval_status` reports `pauseType` and exposes the pending tool-call batch via `detail=full`. No SSE/streaming variant over MCP, no autonomous approver, no new realm role.
+
+**Docs:** `docs/hitl.md` (new *MCP Surface* section), `docs/mcp-server.md` (new *HITL Tools* category).
+
+---
+
+## 🛠️ Tool-level HITL — foundational layer (Tasks 1–4 of 17) (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Implementing **tool-level HITL approval gating**: pausing a conversation for human approval when the LLM invokes a *gated tool* (any source — built-in `@Tool`, MCP, A2A, httpcall, dynamic-agent, memory, recall), configured via allow/disallow pattern lists, co-existing with the behavior-rule `PAUSE_CONVERSATION` mechanism. Full plan: [`planning/hitl-tool-approval-plan.md`](../planning/hitl-tool-approval-plan.md). This closes the deferred "Tool-level HITL" limitation (`docs/hitl.md` Known Limitations).
+
+**Architecture — Durable Re-entry (ToolGate-DR):** a batch gate in `AgentOrchestrator.executeWithTools()` intercepts gated calls *before execution* (fail-safe), serializes the exact in-flight langchain4j message list, persists it + pending-call metadata on `ConversationMemorySnapshot`, and aborts the LLM loop with an unchecked `ToolApprovalRequiredException` that `LifecycleManager` converts into the existing `ConversationPauseException` (new `pauseOrigin=TOOL_CALL`). Resume re-enters the **same** task index, replays the transcript, applies verdicts (write-ahead journal → at-most-once), and continues the loop. Chosen over a turn-completing "pending result" design after a 3-way design panel + 2 adversarial judges: durable replay uniquely preserves *exactly the state the human is approving against* (a multi-iteration turn that rebuilds from memory loses intermediate tool results).
+
+**Method:** two adversarial subagent workflows (design-judge, then fact-verification against the codebase); 20 verification findings (1 blocker, 5 major) folded back into the plan before execution.
+
+**Landed (each task = its own commit, TDD, all tests green locally):**
+- **Task 1 — the architectural gate.** `ChatTranscriptCodec` wraps langchain4j 1.17.0 `ChatMessageSerializer`/`Deserializer` with a size cap + typed failure. Its test **empirically proves** the round-trip the whole design depends on (`AiMessage`+`ToolExecutionRequest`+`ToolExecutionResultMessage`+multimodal content survive serialize→deserialize). 6 tests. *If this had failed, execution was gated to stop-and-escalate — it passed.*
+- **Task 2 — pattern engine + gate.** `ToolApprovalPatterns` (ReDoS-safe `*`-only glob, source-prefix validation with typo suggestions), `ToolApprovalGate` (batch classify; precedence exempt-beats-require; `source:name` then bare-name matching = fail-safe), `ToolApprovalsConfig` POJO. 9 tests.
+- **Task 3 — config homes + validation.** `toolApprovals` on `AgentConfiguration.HitlConfig` (agent-level default) and `LlmConfiguration.Task` (per-task full-replace override). `HitlConfigValidation.validateToolApprovals` (actionable 400s: bad pattern w/ index, both-lists conflict, duplicates, exempt-without-require, range checks, reserved `INBOX`, timeout/reason length); wired into `LlmStore` create/update; agent-level `AUTO_APPROVE`-inheritance WARN. 15 tests + all existing validation suites still green.
+- **Task 4 — memory model.** `PendingToolCallBatch` (+ `PendingToolCall`, size caps); `ConversationPauseException.PauseOrigin` (RULE default / TOOL_CALL, backward-compatible 3-arg ctor); transient `hitlPauseType`/`hitlPendingToolCalls`/`agentToolApprovalsConfig`/`hitlResumeDecision` on `ConversationMemory`+`IConversationMemory`; persisted mirrors on `ConversationMemorySnapshot`; both-directions copy in `ConversationMemoryUtilities`. Round-trips through Jackson; legacy documents (null pauseType) treated as RULE. 4 tests + all existing HITL/resume/lifecycle suites green.
+
+**Design decisions locked for the remaining tasks (flag if wrong):** (1) `AUTO_APPROVE` never applies to tool pauses implicitly — explicit per-gate opt-in only; (2) crash-inside-an-approved-tool yields honest `EXECUTION_OUTCOME_UNKNOWN`, never silent re-execution; (3) group-member tool pauses auto-reject gracefully (`system:group`); (4) ungated calls in a mixed batch execute before the human sees the pause (approver is shown which ran); (5) a multi-day pause resumes against pause-time prompt state.
+
+**Adversarial review of the foundation (5 dimensions → per-finding verification):** 14 raw findings → 9 refuted, 5 survived, all minor. Fixes applied: (a) reject leading/trailing-colon patterns (`:foo`, `mcp:`) at save time — previously accepted but inert; (b) terminal cleanup (`ConversationMemoryStore` + `PostgresConversationMemoryStore` `clearHitlBookmark`) now also drops `hitlPauseType`/`hitlPendingToolCalls` so no stale tool-pause state lingers on ended/cancelled docs; (c) `ConversationMemoryUtilitiesHitlTest` extended to assert the two new fields round-trip both directions; (d) `PendingToolCallBatchSnapshotTest` doc clarified as a *structural* proxy (production uses BSON-backed `JacksonCodec`) with the real BSON round-trip routed to a CI Testcontainers IT (added to Task 14). No blockers, no majors.
+
+**Next:** Task 5 (the gate hook + signal plumbing + pause commit in `AgentOrchestrator`/`LifecycleManager`/`Conversation` — the heaviest single task), then 6 (journal store), 7 (per-call verdict REST model), 8 (same-index re-entry), 9 (`resumeToolLoop`), 10 (timeout/no-progress), 11–13 (approver surfaces, Slack, delegated/group parity), 14 (crash recovery), 15 (lints), 16 (ITs), 17 (docs). Tasks 8→9 share a `resumeToolLoop` stub to keep each commit building.
+
+---
+
+## 🐰 CodeRabbit review triage — 21 fixes, adversarially verified (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+CodeRabbit posted 23 actionable findings (16 inline + 7 outside-diff) plus observability nitpicks. Each was **adversarially re-verified against HEAD** (two parallel review passes) before any change — several overlapped fixes already made, some were stale/unreachable, and one CRITICAL-tagged item turned out already-mitigated-or-worse than described. Fixed the 21 that survived verification; skipped 2 as INVALID; deferred 1 as a scoped follow-up. **No PR threads were replied to or resolved** (standing instruction).
+
+**Scheduler / crash-recovery:**
+- **(HIGH) Lease-expired `CLAIMED` schedules were never reclaimable.** `findDueSchedules` returns lease-expired `CLAIMED` rows, but both `tryClaim` impls only matched `PENDING`/`FAILED` — so a crashed/wedged pod's claim was fetched every poll and never re-fired. `tryClaim` now takes a `leaseExpiry` and steals a `CLAIMED` row with `claimedAt <= leaseExpiry` (Mongo + Postgres, mirroring `findDueSchedules`).
+- **(MEDIUM) `dispatchClaimed` per-future timeout could stack to N×leaseTimeout.** Now bounded by one shared batch deadline.
+- **(MEDIUM) Retention sweep ignored group conversations.** `HitlCrashRecoveryObserver.sweepExpiredPendingApprovals` now also cancels expired group `AWAITING_APPROVAL` pauses (new `IGroupConversationService` dependency).
+- **(MEDIUM) Crash-recovery re-arm could keep a stale timeout across pause→resume→pause.** The re-arm re-check now compares the pause bookmark (`pausedAt`), not just the awaiting state, at all three sites.
+- **(HIGH) `PostgresScheduleStore` metadata (de)serialization failed open** (returned `null`, silently stripping the HITL contract). Now fails closed with `ResourceStoreException`.
+- **(HIGH) `RestScheduleStore.requireAdminForHitl` failed open** on any read error. Now only `ResourceNotFoundException` falls through; other failures return 500 and stop the mutation.
+- **(doc) "exactly-once" was an overclaim** — the design is at-least-once with idempotent HITL fire targets (the lease-steal above makes this explicit). Corrected `SchedulePollerService`/`IScheduleStore` javadoc + `docs/hitl.md`.
+
+**Engine / conversation:**
+- **(LOW) `endConversation` only disarmed the timeout when `AWAITING_HUMAN`** — a resume-in-flight `IN_PROGRESS` window could leave a stale timer. Now disarms unconditionally (idempotent).
+- **(nitpick) `ConversationMemoryStore.compareAndSetState`** now uses `getMatchedCount()` (consistency with `storeConversationMemorySnapshotIfState`; avoids a no-op-CAS false negative).
+
+**Group surface:**
+- **(MEDIUM) Synchronous member-pause exception stranded the member approval.** `executeAgentTurn` now catches `ConversationAwaitingApprovalException` and routes to `handleMemberPause` (cancel + SKIPPED) instead of `handleAgentFailure`.
+- **(MEDIUM) Cancel window between the resume CAS and control-token registration.** The `DiscussionControlToken` is now registered immediately after the CAS, so a concurrent cancel takes the signal path and stops before any phase runs.
+- **(LOW) `RestGroupConversation` reflected raw ids** in `requireGroupMembership`/`validateGroupConversationOwnership` `NotFoundException` messages, and **(MEDIUM)** the streaming approve endpoint echoed raw exception text over SSE. Both now curated (generic message + sanitized server-side log), matching the non-streaming hardening.
+- **(MEDIUM) `GroupConversationStore.findByState` aborted the whole batch** on one record's `ResourceStoreException`. Now logged-and-skipped per record (mirrors `listByGroupId`).
+
+**Slack / MCP tools:**
+- **(HIGH) Slack approval-notification idempotency was too coarse** (keyed by `conversationId`, marked before the post). Now keyed per-pause (`hitlPausedAt`) and cleared on failed delivery, so retries deliver and a second distinct pause is not suppressed.
+- **(HIGH) Slack HITL `resolveOwningIntegration` fell back to a by-approval-channel lookup** for unbindable (bare) action values, reintroducing shared-channel cross-integration ambiguity. Removed — bare values now resolve to empty and are rejected (403).
+- **(HIGH) MCP `talk_to_agent`/`chat_with_agent` reported a deliberate `AWAITING_HUMAN` pause as BUSY** (and `chat_with_agent` lost a freshly-created conversation id on skip). Both now return a structured `PAUSED_FOR_APPROVAL` and preserve the created id.
+- **(MEDIUM) `CreateSubAgentTool`** treated a skipped initial turn as a real reply. Now mirrors `ConverseWithAgentTool`'s `onSkipped` handling.
+- **(LOW) `RestSlackWebhook`** malformed percent-encoding threw → 500 before signature check. Now caught → 400.
+- **(HIGH) `SecretRedactionFilter`** Bearer rule only matched dotted JWTs; opaque tokens leaked. Now redacts opaque tokens too (possessive, ReDoS-safe).
+
+**Skipped/deferred (with reason):**
+- **INVALID:** F9 (fractional-second read compat) — moot for unreleased/disposable schedule rows and would reintroduce the seconds-heuristic the epoch-millis fix removed; F14 (`ConverseWithAgentTool` ERROR-skip) — `onSkipped` provably never receives `ERROR`.
+- **DEFERRED (follow-up task):** owner-scoped group pending-approvals query (owner filter applied after the limit → possible starvation). The safe fix needs a DB-agnostic exact-match for `userId` (the query layer treats string filters as regex on both backends; `Pattern.quote` is Postgres-incompatible), so it warrants its own focused change rather than a rushed regex that could over-match.
+- Observability nitpicks (Micrometer counters, `SafeHttpClient` for the fixed Slack host, managed executor for one-shot startup recovery, `CREATE INDEX CONCURRENTLY`, test-style suggestions) — intentionally out of scope for this correctness/security pass.
+
+Every fix has a regression test; all touched unit suites are green locally (Testcontainers ITs run in CI).
+
+---
+
+## 🔬 Critical adversarial re-review — 7 findings fixed (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+A final 6-reviewer / adversarial-verify pass over the HITL branch surfaced seven confirmed defects (1 CRITICAL, 1 HIGH, 4 MEDIUM, 1 LOW). All fixed with regression tests:
+
+- **CRITICAL — `MongoScheduleStore` truncated every `Instant` to epoch-SECONDS (1000× too small).** `toDocument()` round-trips through the shared Jackson mapper, which (with `write-dates-as-timestamps=true` + `JavaTimeModule`, default `WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS`) serializes an `Instant` as fractional **seconds** (`1719964800.123`). Deserialized into a `Document` that's a `Double`; `convertInstantField`'s `num.longValue()` then stored epoch **seconds** (~1.7e9), not millis (~1.7e12). Since `findDueSchedules` compares `nextFire <= nowMs` (millis), **every future-armed schedule looked immediately due** — HITL approval timeouts (and Dream/maintenance) fired on the very next poll instead of after their configured duration, and it diverged from `PostgresScheduleStore` (which stores millis). This is why the earlier ISO-string "defence in depth" (commit `dc117cddc`) never actually fixed it: the numeric `Number` branch's millis assumption was the real bug, and no test asserted a *future* `nextFire`. Fix: `MongoScheduleStore` now writes every date field as an epoch-millis `Long` straight from the getters (`writeScheduleInstants`/`writeFireLogInstants`) and reads them back via `readEpochMillis` (`Instant.ofEpochMilli`), stripping them before the Jackson build — **both directions are now independent of the mapper's date format** (the seconds-based `convertInstantField` and its ISO branch are gone), mirroring `PostgresScheduleStore.setNullableEpoch`/`instantFromEpoch`. New `MongoScheduleStoreInstantRoundTripTest` exercises the REAL serialization (the sibling test mocks it, which is why the bug hid) and asserts a future `nextFire` is stored as millis and round-trips; the Mongo/Postgres store ITs gain an epoch-millis assertion; branch-coverage tests rewritten for the new helpers.
+- **HIGH — `SchedulePollerService.dispatchClaimed` could still pin the poll thread forever.** The per-fire `future.get(leaseTimeout)` bound was undermined by the try-with-resources `ExecutorService.close()`, which awaits termination indefinitely; `future.cancel(true)` only unblocks tasks that honor interruption, but the real fire path can stall on a NON-interruptible synchronous DB socket read. Replaced try-with-resources with an explicit `finally { executor.shutdownNow(); }` (no `awaitTermination`) so a wedged fire leaks a single cheap virtual thread instead of freezing all scheduling. New regression test uses a fire stub that swallows interruption and asserts the poll cycle still returns.
+- **MEDIUM — resume `onComplete` could clobber a terminal state (lost update / resurrection).** The resume persist was an unconditional full-document store guarded only by a single up-front `isCancelled()` check; a concurrent `end`/`cancel` landing between the check and the store overwrote `ENDED`/`EXECUTION_INTERRUPTED` with `READY`, resurrecting a terminated conversation that then accepted new `say()` input. Added `IConversationMemoryStore.storeConversationMemorySnapshotIfState(snapshot, expectedState)` — an atomic compare-and-store (Mongo: `replaceOne` with a state predicate; Postgres: `UPDATE … WHERE conversation_state = ?`) — and the resume `onComplete` now persists only while it still owns `IN_PROGRESS`, discarding its outcome (no schedule/notify) when a terminal writer won.
+- **MEDIUM — a transient snapshot-load failure during resume permanently dropped the finite-timeout schedule.** `resumeConversation` deleted the HITL timeout schedule *before* loading the snapshot; a transient load failure then restored `AWAITING_HUMAN` without re-arming, so an `AUTO_REJECT`/`AUTO_APPROVE`/`ABORT` policy silently degraded to wait-forever until the next restart. The delete now runs only *after* the snapshot loads and the agent is confirmed deployed — a pre-execution failure leaves the original timer armed. (The `AWAITING_HUMAN→IN_PROGRESS` CAS already prevents the timeout firing concurrently, so nothing races on the deferred window.)
+- **MEDIUM — Slack group HITL pause leaked a parked virtual thread per paused discussion.** `SlackGroupDiscussionListener.completionLatch` was counted down only in the terminal callbacks; `onHitlPause` (a pause is terminal for *this* listener — resume flows through a different instance) did not, so `SlackEventHandler.registerAgentThreadMappings` parked on `awaitCompletion(300s)` for every paused expanded-mode discussion and follow-up thread routing was unavailable for that window. `onHitlPause` now counts the latch down in a `finally`.
+- **MEDIUM — dead-letter endpoints bypassed the HITL admin guard.** `RestScheduleStore.dismissDeadLetter`/`retryDeadLetter` were the only schedule-by-id mutations lacking `requireAdminForHitl()`, so a non-admin editor could disarm an `ABORT`/`AUTO_REJECT` safety timeout (`dismissDeadLetter` on a one-shot → `markCompleted(id, null)` → disabled). Both now carry the guard; regression tests assert 403 for a non-admin on a HITL timeout schedule.
+- **LOW — group HITL REST error bodies reflected raw ids/exception text.** The CodeQL XSS/info-exposure hardening applied to `RestAgentEngine` was not mirrored on `RestGroupConversation`; `cancelDiscussion`/`approveGroupPhase`/`getGroupApprovalStatus` echoed `e.getMessage()` (which embeds the caller-supplied `gcId` for the gone/404 case). Now curated `text/plain` bodies with the detail logged server-side (id sanitized), same HTTP status codes.
+
+---
+
+## 🔍 Copilot PR review — 5 findings (2026-07-03, post-push)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+Automated PR review (`copilot-pull-request-reviewer`) flagged 5 issues in the already-pushed HITL work; all fixed:
+
+- **`SchedulePollerService.dispatchClaimed`**: each claimed fire's `Future#get()` had no timeout — one stalled downstream call (e.g. a hung LLM call inside a fired schedule) could block the `@Scheduled` poll loop forever, stopping this instance from claiming or firing *any* further schedule. Now bounded by `leaseTimeout` (the same window after which another instance may reclaim the schedule anyway) — a timeout cancels the future (best-effort interrupt) and logs, instead of hanging. New regression test asserts the poll cycle returns promptly under a stalled fire.
+- **`SchedulePollerService.claimSchedule`**: after a successful CAS claim, the in-memory `ScheduleConfiguration` still carried its pre-claim `fireId` (often `null`) — both `tryClaim()` implementations (Mongo, Postgres) persist a fresh `fireId` (`scheduleId + "_" + now`) but only return a `boolean`, so the caller never saw it. `ScheduleFireExecutor` uses this field for fire-log correlation and injects it into the agent context, so every claimed fire's correlation id was wrong. The poller now derives the identical value and sets it on the in-memory object after a successful claim. New regression test asserts the fired schedule carries a non-null, correctly-derived `fireId`.
+- **`ConversationPauseException`**: the exception message was built as `"Conversation paused: " + pauseReason`, producing the confusing `"Conversation paused: null"` in logs/clients when no `pauseReason` was configured (the common case, since `pauseReason` is optional). Now falls back to `"human approval required"` for the message only — `getPauseReason()` still returns the raw (possibly null) value for callers that need it.
+- **`GroupConversationStore.listByGroupId`**: called `SAFE_ID.matcher(groupId)` without a null guard — a `null` groupId (a defensive REST layer, or an internal caller) threw NPE instead of returning an honest empty list. Fixed; regression test added. (The sibling `findByState` already guarded this correctly.)
+- **`UserConversationStore`/`PostgresUserConversationStore`**: `readUserConversationByConversationId` (added by the Slack HITL continuation-push work) queried by `conversationId` with no supporting index — a full collection/table scan on every reverse lookup (which happens on every HITL resume that needs to notify a Slack thread). Added a dedicated index on both backends (Mongo: ascending index; Postgres: expression index on the JSONB field) and a regression test asserting the Mongo index is created on construction.
+
+---
+
+## 🛡️ CI gate fixes — CodeQL (XSS/ReDoS) + Postgres Instant serialization (2026-07-03, final gate)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+**CodeQL (high-severity) — both blockers fixed:**
+- `RestAgentEngine` HITL error bodies reflected the raw `conversationId` path param (`java/xss`) and echoed internal exception messages to the client — now `text/plain` with curated, non-reflecting messages; detail logged server-side (id sanitized). New-in-PR, HITL-introduced.
+- `SecretRedactionFilter` ReDoS (`java/polynomial-redos`, pre-existing on `main`): the redaction patterns used ambiguous/unbounded backtracking quantifiers, quadratic on adversarial inputs (long `${vault:` repetitions). Made the quantifiers **possessive** (`++`/`*+`/`{n,}+`) — behavior-preserving (every quantified class is followed by a literal outside the class, so no backtrack is ever needed for a correct match) and linear-time. `SecretRedactionFilterTest` 6/6 still green. Addressed here because it was the sole remaining CodeQL gate blocker.
+
+
+
+Final full-suite verification surfaced a latent Postgres-only defect: the JSONB-backed resource storage serializes snapshots through the shared Jackson mapper (`SerializationCustomizer.configureObjectMapper`), which did **not** explicitly register `JavaTimeModule` — it relied on Quarkus auto-registration. The HITL bookmark carries an `Instant` (`hitlPausedAt`); a **non-null** `Instant` (i.e. an actual pause) would fail serialization ("Java 8 date/time type not supported") on the Postgres backend, so HITL pause persistence was one module-registration-order change away from breaking on Postgres (Mongo was unaffected — its BSON codec handles `Instant`; null `Instant`s serialize fine, which is why it stayed latent). `SerializationCustomizer` now registers `JavaTimeModule` explicitly — the date **format is deliberately left at the default numeric timestamps** (an initial attempt to also switch to ISO-8601 strings was reverted: `MongoScheduleStore` normalizes date fields to epoch-millis for numeric range queries and expects numbers, so an ISO string silently broke `findDueSchedules`). As defence in depth, `MongoScheduleStore.convertInstantField` now also parses ISO-8601 strings → epoch-millis, so schedule storage is correct regardless of the mapper's date format. The Postgres store tests (and the MCP HITL test) now build their mapper via `configureObjectMapper` instead of a bare `new ObjectMapper()`, so they exercise the production serialization path — `PostgresConversationMemoryStoreTest` goes 20/22 → 22/22.
+
+---
+
+## 🛠️ HITL Round-2 Engine-Core Remediation (2026-07-03, WS-G)
+
+**Repo:** EDDI (`fix/hitl-r2-engine`, branched from `feat/hitl-framework`)
+**Scope:** Confirmed findings from a second adversarial review of the HITL remediation, engine-core only (no `integrations/slack/**`, no tool/mcp bridges).
+
+- **G1 (HIGH) — queued say resurrecting a terminated conversation:** `ConversationService.processConversationStep`'s queued-turn skip set only covered AWAITING_HUMAN/IN_PROGRESS. Added ENDED and EXECUTION_INTERRUPTED so a say queued behind a running turn that terminates (endConversation / cancel) before it runs is routed through `onSkipped` with the persisted terminal state instead of executing the pipeline and persisting READY over the terminal state.
+- **G2 (HIGH) — say-path onComplete ignoring cooperative-cancel (group member-pause stranded approval):** `runGuardedConversationStep`'s onComplete now checks `memory.isCancelled()` (parity with the resume path). A concurrent cancel/end (e.g. group `handleMemberPause → cancelConversation` that loses both state CAS races because the pause isn't persisted yet) makes the completing turn skip pause persistence/schedule/counter and CAS the running state to EXECUTION_INTERRUPTED — the approval is never stranded.
+- **G3 (HIGH) — approval gate bypass via schedule create/update:** `RestScheduleStore.createSchedule`/`updateSchedule` now reject any request BODY whose metadata is a `hitl_timeout` (via `HitlSchedules.isHitlTimeout`) for EVERYONE (even admin) with 400 — these schedules are minted internally only. Closes the forge/convert path that let an editor mint a timeout schedule the poller would fire to force-resume/abort a victim's approval unauthenticated.
+- **G4 (MEDIUM) — endConversation terminating a pause with no audit/actor:** added `endConversation(String, String endedBy)`; the AWAITING_HUMAN branch now writes the `hitl.approval` cancellation audit with the actor. Callers attribute: RestAgentEngine → principal, RestConversationStore delete/bulk-end paths → `system:admin-end`, 1-arg overload → `system:end`. AgentDeploymentManagement already SKIPs paused conversations (verified — no change).
+- **G5 (MEDIUM) — cancel/end never fired HitlResumeCompletedEvent:** cancelConversation's pauseCancelled branch and endConversation's AWAITING_HUMAN branch now fire `HitlResumeCompletedEvent` with `verdict=null`, the cancelling/ending actor, and the terminal snapshot (new `fireHitlResumeCompletedTerminal` helper, async + fully isolated). The Slack observer renders these; the event's fields/signature are unchanged.
+- **G6 (MEDIUM) — retention sweep attributed to "unknown":** `HitlCrashRecoveryObserver.sweepExpiredPendingApprovals` now calls the 3-arg `cancelConversation(id, CANCEL_GRACEFUL, "system:retention")`.
+- **G7 (LOW) — restored pause re-armed at now+timeout:** `ConversationService.scheduleHitlTimeout` and `GroupConversationService.scheduleGroupHitlTimeout` now anchor `fireAt` to `pausedAt + timeout` (clamped to `now + 2m` grace, mirroring crash recovery) so restore-after-failed-resume re-arms at the original deadline instead of extending it.
+- **G8 (test) — vacuous Postgres zombie regression:** added `loadReportsColumnStateOverForgedDivergentDocument` (Testcontainers, CI-only) that forges TRUE document/column divergence via raw SQL and asserts both `loadConversationMemorySnapshot` and `loadActiveConversationMemorySnapshot` report the COLUMN state — deleting `applyStateColumn` now fails a test.
+- **Cheap extras:** `RestAgentEngine.resumeConversation` null-guards `identity.getPrincipal()` (parity with cancel/end — no NPE for anonymous). The resume `catch (IllegalStateException)` carve-out is narrowed via a private `AgentNotDeployedForResumeException` sentinel so ONLY the deliberate agent-not-deployed ISE re-throws without a double restore; any other ISE (e.g. from continueConversation) now restores the pause and maps to 500.
+
+Verification: `./mvnw -q compile test-compile` clean. Plain-Mockito tests for all touched classes run green locally (G1/G2 in ConversationServiceSayHitlTest, G4/G5 end in ConversationServiceTest, G5 cancel in ConversationServiceHitlTest, G3 in RestScheduleStoreTest, G6 in HitlCrashRecoveryObserverTest, plus reconciled RestAgentEngineTest/RestConversationStoreTest). The G8 Postgres test is Testcontainers → CI-only.
+
+---
+
+## 🔐 HITL Slack round-2 remediation — IDOR fix + approval-flow correctness (2026-07-03, WS-H r2)
+
+**Repo:** EDDI (`fix/hitl-r2-slack-impl`, branched from `feat/hitl-framework`)
+**Scope:** Ten confirmed re-review findings (H1–H10) plus cancellation-rendering (H-consume) on the new Slack HITL surface + tool bridges. Ownership: `integrations/slack/**`, `integrations/channels/ChannelTargetRouter.java`, `modules/llm/tools/ConverseWithAgentTool.java`, `engine/mcp/McpConversationTools.java`, and their tests. No `engine/internal/*` or `engine/api/*` touched.
+
+### H1 (HIGH, security) — cross-integration IDOR on `/interactive`
+
+`/interactive` previously verified the raw-body signature against the **pooled** set of all Slack signing secrets (incl. legacy per-agent ChannelConnector secrets) and only checked authz afterward — so a holder of ANY one Slack secret could forge an approval on another integration's paused conversation. **Fix:** the decision is now **bound to the integration that owns it**, carried explicitly in the button value. New `SlackSignatureVerifier.verifyWithSecret(ts, body, sig, secret)` verifies against exactly ONE secret. `RestSlackWebhook.handleInteractive` resolves the owning integration's secret from the payload first (`SlackInteractivityHandler.resolveSigningSecretForDecision`), then verifies against only that; an unbindable decision (legacy/unknown → no owning new-style integration) is rejected. `/events` keeps pooled verification (unchanged).
+
+### H2 (MEDIUM) — shared-approval-channel nondeterminism
+
+The approval button `value` format changed from `<subject>` to **`<integrationName>|<subject>`** (`<integrationName>|<conversationId>` and `<integrationName>|group:<gcId>`). The handler resolves the owning integration by NAME (`ChannelTargetRouter.getIntegrationByName`), not by an arbitrary-first channel lookup — so authz + verification are deterministic even when integrations share one `hitlApprovalChannel`. New `SlackHitlSupport.buildActionValue`/`parseActionValue` (+ `ActionValue` record). Legacy bare values (no name) parse with a null integration and are rejected up-front (acceptable per spec).
+
+### H3 (MEDIUM) — group double-click idempotency
+
+`SlackInteractivityHandler.resolveGroup` caught only `IllegalStateException`; `resumeDiscussion` signals a non-paused group with the CHECKED `GroupDiscussionException`, a race with `ResourceModifiedException`, and a deleted group with the unchecked `GroupConversationGoneException` — all fell into the generic catch (warn-spam + live buttons). Now all four route to `finalizeAlreadyResolved`.
+
+### H4/H7 — dropped-turn (onSkipped) discrimination
+
+`SlackEventHandler.sendAndWait` now uses a full `ConversationResponseHandler` overriding `onSkipped`, mapping a skip to sentinel snapshots: `AWAITING_HUMAN` → STILL_AWAITING notice (no second approval card, H4); else → new `CONVERSATION_NOT_ACTIVE_NOTICE` (H7). `ConverseWithAgentTool` and `McpConversationTools` (talk_to_agent/chat_with_agent/chat_managed) detect `onSkipped` and return busy/not-active (chat_managed: AWAITING_HUMAN-skip → PAUSED_FOR_APPROVAL) instead of replaying the previous turn's output (mirrors RestAgentEngine's 409 discrimination).
+
+### H5 + H-consume — resume ERROR / cancellation rendering (defensive)
+
+`SlackHitlResumeObserver.decisionSummary` now takes the snapshot: an approved resume that ended in `ERROR` renders a failure ("continuation failed…") not "continuing" (H5), and a null-verdict event (cancel/timeout-abort/end, terminal `EXECUTION_INTERRUPTED`/`ENDED`) renders "⛔ cancelled or expired" — the previously-dead branch is now live and correct (H-consume). Implemented **defensively**: works whether or not the engine's parallel change to fire `HitlResumeCompletedEvent` with `verdict==null` on cancel/end has landed. (Approval-card button-removal on cancel is not done — the approval card's message ts is not resolvable from the conversationId in the current data model; the thread message, which IS resolvable, is delivered.)
+
+### H6 — "Bearer null" guard
+
+`notifyApprovers` now skips the call and logs an explicit "no bot token — HITL approval notification NOT delivered for <id>" error when neither the resolved integration token nor the approval-channel lookup yields a non-blank token (mirrors `postMessage`'s guard).
+
+### H8 — init-turn (CONVERSATION_START) pause never notified approvers
+
+An init-turn pause happens inside `getOrCreateConversation → startConversation`; the first user say then throws `ConversationAwaitingApprovalException` and no approval card was ever posted. The exception branch now calls `notifyApprovers`, made idempotent via a `slack-hitl-approval-notified` cache (`putIfAbsent`) so re-message-while-paused never posts a second card.
+
+### H9 — follow-up conversations get the resume continuation push
+
+`SlackHitlResumeObserver` now recognizes the `channel:followup:<channelId>:<parentTs>` intent shape (in the prefix guard and `parseIntent`) in addition to `channel:slack:...`, so agent-thread follow-ups receive the verdict/continuation in their thread.
+
+### H10 — pause card read the bookmark before it was persisted
+
+The say callback completes before `ConversationService` persists the HITL bookmark, so `getConversationMemorySnapshot` re-reads returned the previous turn (null pause reason/timeout). New `loadHitlBookmark` retries the read (5×100ms) until state==AWAITING_HUMAN and is loaded ONCE per pause, shared by the in-thread notice and the approval card.
+
+### New contracts
+
+- `SlackSignatureVerifier.verifyWithSecret(String ts, String body, String sig, String secret)` — single-secret (integration-bound) verification for `/interactive`.
+- `SlackInteractivityHandler.resolveSigningSecretForDecision(String payloadJson)` — resolves the owning integration's signing secret from the button value; null → endpoint rejects.
+- `ChannelTargetRouter.getIntegrationByName(String channelType, String name)` — deterministic by-name lookup.
+- Approval button `value` format: **`<integrationName>|<conversationId>`** / **`<integrationName>|group:<gcId>`** (was bare `<conversationId>` / `group:<gcId>`).
+
+### Tests
+
+Plain JUnit/Mockito (compile + test-compile pass; touched suites run green locally): `SlackSignatureVerifierTest` (+verifyWithSecret), `SlackHitlSupportTest` (+buildActionValue/parseActionValue), `SlackInteractivityHandlerTest` (rewritten for value-binding + H1 cross-integration + H3 group double-click + resolveSigningSecretForDecision), `SlackHitlResumeObserverTest` (3-arg decisionSummary, ERROR/cancellation/followup delivery), `RestSlackWebhookTest` (new interactivity flow), `SlackGroupDiscussionListenerTest` (integration-bound group value), `ConverseWithAgentToolHitlTest`/`McpConversationToolsHitlTest` (H7 skip), `ChannelTargetRouterRefreshTest` (getIntegrationByName).
+
+---
+
+## 🧪 HITL Coverage Closure + Schedule-Contract Consolidation (2026-07-03, WS-F + merge)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+**Coverage (WS-F, findings 10/22/23/24/41/43):** 13 test files, +1469 lines, tests only. Queued-say guard + say fast-fail (finding 10 — previously zero coverage), zombie-pause discard guard, the entire finite-timeout leg (schedule creation/metadata routing/fire-log parity/error isolation/delete-on-resume+cancel, initial say-path arming), regular-surface endpoint authz incl. fail-closed missing-descriptor, resume robustness against REAL workflow lists (config drift → ERROR, multi-workflow continuation order), HitlConfigValidation wiring at AgentStore/AgentGroupStore CRUD + the import seam, storage regressions (Postgres zombie: post-CAS load must report the column state; `jsonb_set` convergence; owner-filtered summaries; `storeIfFieldEquals` deleted-404 vs mismatch-409 on both backends; anchored group filters + SAFE_ID rejection), case-insensitive verdict round-trip, REJECTED-path `ConversationOutput` visibility + ACTIONS strip. Testcontainers classes (`PostgresConversationMemoryStoreTest`, `MongoConversationMemoryStoreTest`) execute in CI; everything else ran green locally (202 tests). Known residual gaps documented in the test agent's report: no wall-clock end-to-end timeout IT (every seam unit-covered), full ZIP pipeline (validation seam covered).
+
+**Consolidation:** new `ai.labs.eddi.engine.hitl.HitlSchedules` — single source of truth for the HITL timeout-schedule contract (names `hitl-timeout-*`/`hitl-timeout-group-*`; metadata keys `hitlType`/`policy`/`surface`/`conversationId`; `isHitlTimeout` predicate) — adopted by ConversationService, GroupConversationService, ScheduleFireExecutor, HitlTimeoutHandler, HitlCrashRecoveryObserver, RestScheduleStore. Closes the "HITL lifecycle glued by magic strings across five classes" review finding.
+
+---
+
+## 🔌 HITL — Slack integration + nested-consumer bridges (2026-07-03, WS-E)
+
+**Repo:** EDDI (`feat/hitl-ws-e-slack`, branched from `feat/hitl-framework`)
+**Scope:** Human-in-the-loop support in the Slack channel adapter, plus finding 25 (nested/managed/delegated conversation consumers stranded by a pause).
+
+### Slack HITL surface
+
+- **In-thread pause notice (`SlackEventHandler`):** when a say returns an `AWAITING_HUMAN` snapshot, the output-so-far is posted followed by a pause notice ("⏸️ This conversation is awaiting human approval" + pause reason from the HITL bookmark). A `ConversationAwaitingApprovalException` on subsequent messages posts "Still awaiting approval — a reviewer must decide…" instead of the generic error. Follow-up (group-thread) replies get the same handling.
+- **Approver notification + Approve/Reject buttons (config-driven, fail-closed):** two new **optional** `ChannelIntegrationConfiguration.platformConfig` keys — `hitlApprovalChannel` (Slack channel id for approval notifications) and `hitlApproverUserIds` (comma-separated Slack user ids allowed to decide). On pause, an interactive Block Kit message is posted to the approval channel (conversationId, agent, reason, timeout policy/deadline). Buttons are rendered **only** when `hitlApproverUserIds` is set (otherwise notification-only). Data minimization: only the pause reason is included, never the user's message.
+- **Interactivity endpoint (`RestSlackWebhook`):** new `POST /integrations/slack/interactive` (form-urlencoded, `payload` param). Verifies the Slack signature over the RAW body with the existing `SlackSignatureVerifier` + router signing secrets, acks 200 within 3s, processes async on a virtual thread (`SlackInteractivityHandler`). Handles `block_actions` (`hitl_approve`/`hitl_reject`). AUTHZ is fail-closed against the owning integration's approver list; `decidedBy` is always derived server-side (`slack:<userId>`). On success it `chat.update`s the message ("✅ Approved by …" / "⛔ Rejected"), removing buttons; an already-decided/timed-out click resolves to the `IllegalStateException` path and updates the message without error-spam (idempotent double-click).
+- **Continuation push after resume (CDI event):** `ConversationService` fires a new async CDI event `ai.labs.eddi.engine.events.HitlResumeCompletedEvent` when a resume settles to a non-paused state (in `resumeFinished.onComplete`, after `storeConversationMemory`, `fireAsync` so observers never block the engine; failures isolated). `SlackHitlResumeObserver` observes it, resolves the conversation's Slack routing via the new reverse-lookup `IUserConversationStore.readUserConversationByConversationId` (implemented on both Mongo + Postgres for parity), and posts the verdict + continuation output to the originating channel/thread. Timeout (`system:timeout`) and cancellation outcomes flow through the same event.
+- **Group discussions (`SlackGroupDiscussionListener`):** implemented the HITL listener callbacks — `onHitlPause` (thread notice + approval-channel buttons whose action value carries `group:<groupConversationId>`, routed to `resumeDiscussion`), `onHitlResume` (verdict), `onMemberPauseSkipped`, and `onCancelled`.
+- **Shared helpers:** `SlackHitlSupport` (config keys, Block Kit builders, approver authz, and the Slack-friendly response-text extraction refactored out of `SlackEventHandler`); `SlackWebApiClient` gained `postBlocksMessage` + `updateMessage` (chat.update), reusing a shared send/parse helper with the existing retry/backoff classification.
+
+### Finding 25 — nested/managed/delegated consumers
+
+- `ConverseWithAgentTool`, `McpConversationTools#chat_managed`, and `CreateSubAgentTool` now detect the delegated conversation pausing (AWAITING_HUMAN snapshot **or** `ConversationAwaitingApprovalException`) and return a structured, actionable `PAUSED_FOR_APPROVAL` result (with the conversationId and the `/resume` instruction) instead of "[no response]" or a 60s hang. The nested pause is **not** auto-cancelled (a delegated approval may be intended) and managed mappings are preserved so re-invoking after approval continues the same conversation.
+
+### Tests
+
+Plain JUnit/Mockito (no Quarkus boot): `SlackHitlSupportTest`, `SlackInteractivityHandlerTest`, `SlackHitlResumeObserverTest`, `ConverseWithAgentToolHitlTest`, `McpConversationToolsHitlTest`, plus additions to `SlackEventHandlerTest`, `SlackGroupDiscussionListenerTest`, `RestSlackWebhookTest`. Covers signature rejection on `/interactive`, unauthorized user cannot decide, authorized resume with `decidedBy=slack:…`, double-click no error-spam, buttons omitted without approvers, observer posts to the right channel/thread and ignores non-Slack conversations, and the bridges' PAUSED_FOR_APPROVAL result. `docs/hitl.md` needs a new "Slack" section (docs phase — not edited here).
+
+---
+
+## 🔧 HITL Production-Readiness Remediation — storage parity + say-path contract (2026-07-03, session 5)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+**Trigger:** A 92-agent adversarial review of the branch confirmed 46 findings (1 CRITICAL, 7 HIGH, 18 MEDIUM, 20 LOW). This entry covers the storage-layer and regular-surface batches; parallel batches (schedule security/sweeps, group surface) land as separate commits from their own branches.
+
+### CRITICAL — PostgreSQL conversation-state duality (the Postgres zombie)
+
+State was persisted twice on Postgres: in the indexed `conversation_state` column (updated by CAS/cancel) AND inside the JSONB snapshot (read by loads). A cancelled or ABORT-timed-out pause kept reporting `AWAITING_HUMAN` from the stale document — wedging `say()`, showing phantom pauses in approval-status, and letting the next user message resurrect the terminated approval as a zombie (full-document store flips the column back, re-arms a timeout; a later approve fails into ERROR). Fixes, defense in depth:
+
+- **Column wins on load** — `loadConversationMemorySnapshot`/`loadActiveConversationMemorySnapshot` overwrite the deserialized state with the `conversation_state` column (`applyStateColumn`).
+- **Writers converge the document** — `setConversationState` and `compareAndSetState` also `jsonb_set` the JSONB `conversationState` in the same statement.
+- **Say-path zombie guard** — `runGuardedConversationStep.onComplete` discards a turn result whose `AWAITING_HUMAN` state was already present at submit time (a stale pause the turn did not produce is never re-persisted or re-armed).
+
+### HIGH — say() into a paused conversation: honest 409 instead of a 60s hang
+
+`say()`/`sayStreaming()` now **fast-fail** with a new `ConversationAwaitingApprovalException` → REST 409 with an actionable body (matches the docs' "say() is rejected" promise, mirrors ENDED→410). The queued-say race backstop now completes the response via a new `ConversationResponseHandler.onSkipped(snapshot)` (default: delegates to `onComplete`) instead of dropping the turn into the 408 watchdog — and the `processingConversationReferences` gauge entry is removed on every exit path (was a permanent leak per dropped request). `RestAgentEngine` maps skipped turns to 409 ("awaiting approval" vs "busy — retry"). Callback consumers (group, Slack, MCP) are unaffected: the default `onSkipped` delivers the snapshot whose state they already inspect.
+
+### Storage-layer fixes (DB-agnostic parity)
+
+| Fix | Detail |
+|-----|--------|
+| Postgres regex 500s | `GroupConversationStore` built filters with `Pattern.quote` (`\Q…\E`) — valid in Mongo's PCRE, **rejected by PostgreSQL's regex engine** → group listing + pending-approvals 500'd on PG. Replaced with charset-validated plain anchoring (`^id$`; ids are hex/UUID, no metacharacters). Non-id input → honest empty result. |
+| Projected pending summaries | Postgres now runs ONE projected query (JSONB field extraction, `hitlPausedAt` round-tripped through the same Jackson mapper) instead of `1+limit` full-document deserializations; Mongo now runs ONE projected query instead of N+1 point-reads. |
+| Owner-scoped inbox | `findPendingApprovalSummaries(ownerUserId, limit)` implemented on both backends — the owner filter is INSIDE the query, so the limit applies after the restriction (a non-admin's inbox can no longer be starved by other users' backlog). New Mongo compound index `(conversationState, userId)`. `RestAgentEngine` uses it for non-admin/non-approver callers. |
+| CAS 404-vs-409 | `storeIfFieldEquals` (both backends) now distinguishes "document deleted" (`ResourceNotFoundException`) from "field mismatch" (`ResourceModifiedException`) via an existence check on zero-match. `GroupConversationStore.updateIfState` surfaces deletion as unchecked `GroupConversationGoneException` (kept unchecked so existing CAS call sites compile; surfaces map it to 404). The `IResourceStorage` default no longer silently degrades the CAS to an unconditional store — it throws `UnsupportedOperationException`. |
+| Truncation visibility | `findByState` WARNs when it hits its limit (pending listings / crash recovery must never truncate silently). |
+
+### Regular-surface fixes
+
+- **End-vs-resume race:** the resume pre-execution guard now also aborts on persisted `ENDED` (previously only `EXECUTION_INTERRUPTED`) — an accepted resume can no longer resurrect an ended conversation.
+- **Cooperative-cancel integrity:** all `inFlightConversations.remove(key)` calls are now value-conditional `remove(key, memory)` — a finishing leg can no longer evict a newer execution's registration.
+- **Cancel attribution (EU AI Act):** `cancelConversation(id, mode, cancelledBy)` threads the actor into the `hitl.approval` audit entry (`decidedBy` + `automated`); REST passes the principal, `HitlTimeoutHandler` passes `system:timeout`. Old 2-arg signature delegates (`unknown`).
+- **Configurable pause reason:** new optional `hitlConfig.pauseReason` (agent-level, ≤500 chars, validated at save/import) flows into the bookmark → pending-approvals/approval-status answer "what am I approving?". Falls back to the generic constant.
+- **approval-status payload** now includes `approvalTimeout` so UIs can render the auto-decision deadline.
+- **Fail-closed HITL authz:** resume/cancel/approval-status on a conversation whose descriptor is missing now require admin/approver (was: ownership check silently skipped).
+- **REJECTED-path visibility:** the rejection message is now written to `ConversationOutput["output"]` (UIs/log generator actually render it) and the stale `PAUSE_CONVERSATION` action is stripped on the REJECTED path (as on APPROVED).
+- **Verdict parsing** is case-insensitive on all surfaces (`HitlVerdict.fromString` @JsonCreator); note-length cap single-sourced as `HitlDecision.MAX_NOTE_LENGTH`.
+- **`IConversation.resume(decision)`** — dead `contexts` parameter removed (CodeQL).
+- Misleading "transient — not serialized" comment on the HITL bookmark fields corrected (they ARE persisted via the snapshot).
+
+### Deliberately deferred
+
+- Bookmark value-object refactor (6 flat fields → 1 object): cosmetic, touches the persisted snapshot shape late in the branch — deferred.
+- `RestGroupConversation`'s duplicated note-length constant: consolidation phase (group-surface files owned by a parallel batch).
+
+---
+
+## 🔒 HITL Schedule Security, Sweeps & Retention — WS-C (2026-07-03)
+
+**Repo:** EDDI (`fix/hitl-ws-c-schedules`, branched from `feat/hitl-framework`)
+**Trigger:** Confirmed code-review findings (5, 7, 17, 26, 32, 44) on schedule security, idle/undeploy sweeps, poller scalability, and pause retention.
+
+| Finding | Fix |
+|---------|-----|
+| #5 (HIGH, security) | **Editor could bypass the HITL approval gate via the schedule REST surface.** `RestScheduleStore` now: (a) `fireNow` **refuses** any schedule with `metadata.hitlType=="hitl_timeout"` — for **everyone** including admins — returning **409 Conflict** directing to `/agents/{id}/resume` or `/cancel` (manual firing side-steps the /resume owner/admin/approver audit gate); (b) `updateSchedule`/`deleteSchedule`/`enableSchedule`/`disableSchedule` on a HITL schedule require `eddi-admin`, else **403 Forbidden** (detected via the STORED schedule so a doctored request body can't hide the marker); (c) `readAllSchedules` **redacts** HITL schedules for non-admins so they can't be enumerated. Internal firing via `SchedulePollerService` is unaffected (it bypasses REST). **Parity enabler:** `PostgresScheduleStore` never persisted `metadata` (Mongo did via full-doc serialization) — added a `metadata JSONB` column (+ idempotent `ADD COLUMN IF NOT EXISTS` upgrade, `IJsonSerialization` round-trip). Without this the HITL timeout fast-path never fired on Postgres AND the security guard couldn't recognize HITL schedules there. |
+| #7 (HIGH) | `AgentDeploymentManagement.endOldConversationsWithOldAgents` now **skips AWAITING_HUMAN** conversations (mirrors the deliberate `getActiveConversationCount` exclusion) instead of force-ENDing them with a raw non-CAS write (which left armed schedules, stale bookmarks, and no audit). Logs at INFO how many paused conversations were spared. The pre-existing agent-document-age heuristic for non-paused conversations is left unchanged with an explanatory comment. |
+| #17 (MEDIUM, scalability) | Poll batch size is now configurable (`eddi.schedule.poll-batch-size`, default 100) in **both** stores; `SchedulePollerService` **claims all due schedules on the poll thread (CAS before dispatch)** then **fires the claimed ones concurrently on virtual threads** (`newVirtualThreadPerTaskExecutor`) with **per-fire error isolation** — a mass HITL-timeout burst no longer serializes behind one thread and starves Dream/maintenance schedules. Exactly-once cluster semantics preserved. |
+| #26 (MEDIUM) | `RestConversationStore.endActiveConversations` routes AWAITING_HUMAN conversations through the HITL-aware `IConversationService.endConversation` (schedule disarm + bookmark clear + audit + in-flight-resume signal) instead of a raw ENDED write; non-paused conversations keep the raw path. |
+| #44 (LOW) | `RestConversationStore.deleteConversationLog(deletePermanently=true)` now calls `endConversation` for an AWAITING_HUMAN conversation **before** deleting the document — disarming the leaked one-shot schedule, clearing the bookmark, auditing, and invalidating the cached state — via the existing public service method. |
+| #32 (LOW) | New **optional** pause-retention sweep in `HitlCrashRecoveryObserver` (`@Scheduled`): `eddi.hitl.pending.max-age` (ISO-8601, default empty=OFF) auto-cancels pauses older than the threshold via `cancelConversation` (audited, schedule-disarmed); `eddi.hitl.pending.sweep-interval` (default 6h). Reuses the existing poller/scheduling infra — no new scheduler. |
+| CodeQL | `HitlCrashRecoveryObserver.onStartup(@Observes StartupEvent event)` — silenced the "unused parameter" alert with `@SuppressWarnings("unused")` + comment; the param is the required CDI observer trigger. |
+
+**REST status codes chosen:** manual fire of a HITL schedule → **409 Conflict** (operation not permitted for anyone; directs to /resume|/cancel). Non-admin mutate/disable/delete of a HITL schedule → **403 Forbidden**.
+
+**New config properties:** `eddi.schedule.poll-batch-size` (default 100), `eddi.hitl.pending.max-age` (default empty/OFF), `eddi.hitl.pending.sweep-interval` (default 6h) — documented in `application.properties`. `docs/hitl.md` (owned by a later phase) should document the retention property for operators.
+
+**Tests (pure JUnit/Mockito):** RestScheduleStore HITL guards (editor/admin fire+mutate+redact); AgentDeploymentManagement paused-skip; SchedulePollerService concurrent dispatch + per-fire error isolation + claim-before-dispatch; RestConversationStore paused end/delete routing; HitlCrashRecoveryObserver retention sweep (OFF-by-default, cancels-expired, non-positive=OFF); PostgresScheduleStore metadata round-trip.
+
+---
+
+## 🔧 HITL PR Review Response — Copilot + CodeRabbit (2026-07-02, session 4)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+**Trigger:** Automated review on the open PR (GitHub Copilot + CodeRabbit) surfaced ~24 findings. Each was independently, adversarially re-verified against the actual code (not the bot's paraphrase); the confirmed ones are fixed here, deliberate skips are recorded with rationale.
+
+| Area | Fix |
+|------|-----|
+| Cross-group leak (MAJOR) | `GroupConversationStore.findByState(state, groupId, limit)` passed `groupId` as a raw filter value; `MongoResourceStorage.findResources` turns String filters into **unanchored** regexes, so a group id that is a substring of another matched across groups. Now anchored + `Pattern.quote`d (`^\Q…\E$`) in both `findByState` and the pre-existing `listByGroupId`. |
+| Stuck resume (MAJOR) | `resumeConversation`'s critical section (CAS → `submitInOrder`) only caught `ServiceException`/`InstantiationException`/`IllegalAccessException`; an unchecked exception from `continueConversation` escaped, leaving the conversation stuck `IN_PROGRESS` with a leaked `inFlightConversations` entry. The catch now also covers `RuntimeException` (restores the pause + drops the registry entry), while the deliberate agent-not-deployed `IllegalStateException` is re-thrown as-is so it still maps to 409. |
+| Props on failed resume (MAJOR) | `Conversation.resume()`'s finally ran `postConversationLifecycleTasks()` whenever the state was not `AWAITING_HUMAN` — including `ERROR`, so a failed resume persisted long-term properties, unlike the say path. Now also skipped on `ERROR`. |
+| Resume bookmark index (MAJOR) | `LifecycleManager` selective execution (`rerun`) ran a suffix sublist but stored the sublist-relative loop index as the "absolute" pause bookmark. Added an `indexOffset` threaded only into the pause-index computation (component-cache/telemetry indices unchanged), so a pause during selective execution records a true absolute index. Also added bounds validation to `executeLifecycleFromIndex` (negative → `LifecycleException`; strictly-past-end from a redeployed workflow → warn + skip; exactly `size()` remains valid). |
+| End-vs-resume race (MAJOR) | `endConversation` wrote `ENDED` without signalling `inFlightConversations`, so a resume past the CAS could persist its snapshot back over the terminal state. It now sets the cooperative-cancel flag on any in-flight memory (mirrors `cancelConversation`), so the resume's `onComplete` skips persistence and `ENDED` wins. |
+| Timeout fire-log parity | `ScheduleFireExecutor`'s HITL fast-path returned before `logFire()` and had no exception isolation. It now records a `ScheduleFireLog` (with the conversationId + FAILED status on error) and wraps `handleTimeout` in try/catch, matching the normal path. |
+| Consistency / hardening | `OwnershipValidator.isAdmin` null-guards `identity` (matches `isApprover`/`isOwner`); `AgentGroupConfiguration.HitlConfig` setters null-coalesce to their defaults (a JSON `null` can no longer wipe `timeoutPolicy`/`granularity`/`onTaskRejection`, mirroring `setLifecyclePolicy`); `DiscussionControlToken` wave loop re-checks `isCancelled()` after `setActiveFuture` so a `CANCEL_IMMEDIATE` landing mid-registration still cancels the new future; `MongoScheduleStore` uses a `NAME` constant; `ConversationMemory` drops redundant `java.time.Instant` FQNs; `SharedTaskList.TaskStatus` Javadoc corrected (AWAITING_APPROVAL is fully wired, not a placeholder). |
+| Tests | New `resetFromAnyToAssigned` coverage (7 cases: valid transitions, ASSIGNED no-op, rejected states); new resume test for an unexpected `RuntimeException` from `continueConversation` (asserts pause restored + `ResourceStoreException` + never submitted); `turnCounterSeedsFromPausedTurnCount` de-flaked by capturing `pausedTurnCount` at the synchronous resume CAS instead of racing the async completion; bogus timeout-policy strings in memory round-trip tests replaced with real enum names. |
+| Deliberately skipped | `listPendingApprovals` "max 1000 not enforced" — FALSE POSITIVE, the service already clamps `Math.min(limit, 1000)`. Crash-recovery pagination (10k scan cap) — 10k concurrent pauses is unrealistic and the code already warns. Pending-summary N+1 (Mongo/Postgres) and `findByState` bulk-read — perf-only on bounded/one-time paths, a pre-existing `IResourceStorage` API limitation; deferred. `HitlPauseType` vs `HitlGranularity` unification — intentional pause-record vs config separation. Duplicated cancel-check refactor — declined to churn just-hardened control flow. |
+
+---
+
+## 🔧 HITL Merge-Readiness Hardening (2026-07-02, session 2)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Second full-branch review after the phase 1–7 fixes; verified 22 tracked findings (10 FIXED, 7 PARTIAL, 5 UNFIXED) plus new regressions in the fix commits themselves. This session closes the remainder before PR.
+
+| Step | Fix |
+|------|-----|
+| Red tests | `HitlTimeoutHandlerTest` — inject `SimpleMeterRegistry` (new metrics field NPE'd all 7 tests); `RestGroupConversationHitlTest.approveDenied` — body validation runs before authz, so the test now sends a valid decision (plus a new test pinning the 400-before-authz ordering). The suite was red at HEAD; these commits restore green as the baseline. |
+
+| Crash recovery (C-A/F4/F6) | **`HitlCrashRecoveryObserver` reworked from destroyer to repairer.** It no longer transitions old paused conversations to ERROR/FAILED (the previous behavior destroyed legitimately-paused WAIT_INDEFINITELY conversations — the default policy — on every restart). New behavior: finite-policy pauses get their one-shot timeout schedule idempotently re-armed at the original due time (applies the configured policy through the normal handler, even after a crash); WAIT_INDEFINITELY pauses are never touched; regular conversations stuck IN_PROGRESS with an intact HITL bookmark (pod died mid-resume) are CAS-restored to AWAITING_HUMAN; IN_PROGRESS without bookmark → EXECUTION_INTERRUPTED. Stale-threshold config dropped (no longer meaningful); added `eddi.hitl.crash-recovery.recover-in-progress` (default true, multi-pod caveat documented). Prereq: the regular pause commit now populates `hitlTimeoutPolicy`/`hitlApprovalTimeout` bookmark fields (F6) — `approval-status`/`pending-approvals` finally report the effective policy on both surfaces. |
+| Regular cancel (F2) | `cancelConversation` is no longer a silent no-op: in-flight registry (`inFlightConversations`) lets cancel set the cooperative `setCancelled` flag the LifecycleManager checks at task boundaries (mode param now read; IMMEDIATE degrades to graceful, documented); returns typed `CancelOutcome` — REST maps CANCELLED→200, NOT_FOUND→404, NOTHING_TO_CANCEL→409 (was unconditional 200). |
+| Resume robustness (F4/F7) | Resume now: pre-checks existence → 404 (was 409 with misleading message); reports the current state in the 409 body; **restores the pause** (CAS back to AWAITING_HUMAN + re-arms timeout) when the agent is undeployed or a service error occurs, instead of destroying the approval with ERROR; wraps execution with the same watchdog as the say path (hung LLM → EXECUTION_INTERRUPTED, never stuck IN_PROGRESS). |
+| Undo/redo gate (F5/C-C) | Gate now reads the DB-loaded state (was per-pod cache — silently bypassed after restart/cross-pod) and returns `false` → 409 CONFLICT (was 500). |
+
+| Group cancel (F9) | No-token branch now uses the `updateIfState` state-CAS (was plain read-modify-write racing approve/resume); `CancelledEvent` is finally emitted via new `onCancelled` listener method and the SSE stream closes on cancel (was: `/discuss/stream` clients hung forever after a cancel). |
+| Group approvals (F13/C-D) | `taskApprovals` validated up front (unknown taskId / task not awaiting → 400, no partial in-memory mutation, schedule untouched); RETRY rejection now passes the reviewer's note into the re-queued task and `buildTaskExecutionInput` surfaces it as feedback (was: blind retry loop); `resetFromAnyToAssigned` enforces its documented status contract. |
+| Group robustness (F11/5f) | Stranded IN_PROGRESS tasks are reset to ASSIGNED in ALL wave-abort branches (was: timeout only — cancellation/error still stranded tasks forever); config-drift guard now also fails when phases were REMOVED (bookmarked index out of range no longer silently skips the check); nested-group sub-pauses are cancelled instead of stranded with an armed schedule; `commitPause` reuses the in-scope config (no duplicate store read per pause). |
+| Group pending list (C-B) | `GET /groups/{groupId}/conversations/pending-approvals` now scopes to the path's group and applies the same ownership filter as the regular listing (admin/approver see the group's items, others only their own, anonymous nothing) — was a global unfiltered dump of all users' paused conversations incl. transcripts. |
+| Approver role | New `eddi-approver` role: `OwnershipValidator.isApprover`, added to `@RolesAllowed` on all HITL endpoints (approver-only accounts were blocked at RBAC), and approvers now see pending listings on both surfaces (they could approve but not list). SSE error events now serialize through the JSON serializer (no string-concatenation injection). |
+
+| Audit (F15) | `hitl.approval` AuditEntry submitted on BOTH surfaces for every decision (verdict, decidedBy, automated flag, note) — covers human and `system:timeout` decisions; `GroupConversationService` now injects `AuditLedgerService`. Combined with the earlier resume audit-collector wiring, the EU AI Act human-oversight trail is complete. |
+| Quota (F16, plan §10a) | `getActiveConversationCount` excludes AWAITING_HUMAN on Mongo AND Postgres — paused conversations no longer block undeploy/old-version GC forever. Undeployed-while-paused conversations keep their pause; resume reports 409 and restores it. |
+| Pending listing scale (F17) | New `findPendingApprovalSummaries(limit)` store method: Mongo uses POJO-codec projection (never deserializes step data), Postgres a LIMIT-bounded loop; REST takes `?limit` (default 200, max 1000); `PendingApprovalSummary` gains `userId` so the ownership filter no longer does N+1 descriptor reads. |
+| Config safety (F20/C-E/C-F) | Duplicate `engine.lifecycle.model.HitlTimeoutPolicy` enum deleted — `AgentGroupConfiguration.HitlTimeoutPolicy` is the single source (no more constants-drift between schedule metadata writer and parser). New `HitlConfigValidation` enforced in `AgentStore`/`AgentGroupStore` create+update: finite policy requires a valid positive ISO-8601 `approvalTimeout`, actionable 400 messages via the existing `IllegalArgumentExceptionMapper`. |
+| Input bounds | HITL decision `note` capped at 4 KB on both surfaces (400 on overflow). Dead `counterHitlTimeout` field removed (handler owns the timeout metric). |
+
+| Test hardening (F22) | R2 cancel tests: `else assertNotNull` escape hatches removed — reverting the R2 fix now fails them. NEW R1 test: cancel racing a `requiresApproval` phase asserts CANCELLED + commitPause never ran. B1 test rebuilt: snapshot reflects post-CAS reality (IN_PROGRESS) and the memory state is captured at `continueConversation` time — deleting the B1 fix now fails it. New behavioral tests: `stripPauseAction` (stale action removed, others preserved), decision visibility (`hitlDecision` output + `hitlVerdict` property), Invariant 9 asserted via step-property survival (pause) vs purge (normal turn). |
+| Integration test (F22) | **New `HitlPauseResumeIT`** — full end-to-end with zero mocked seams: real behavior rule emits PAUSE_CONVERSATION → real Mongo persistence → REST resume completes the remaining pipeline tasks (the original BLOCKER's fail-on-revert), plus REJECTED path, cancel path, 400-does-not-consume-pause, 404 unknown id, 409 not-paused, and undo-blocked-while-paused. New `tests/hitl/*.json` agent fixtures. Runs in CI via `mvnw verify -DskipITs=false` (ci.yml:179); local Docker daemon was unavailable during this session, so first execution happens in CI — same as any IT change. |
+| Docs (F21) | New [docs/hitl.md](hitl.md): both surfaces, config reference incl. `onTaskRejection`, real REST paths, template access (`hitlDecision` / `{properties.hitlVerdict}`), timeout policies, approver role, crash recovery config, operations notes (metrics, undeploy semantics, cancel matrix), known v1 limitations, `requiresApproval` upgrade note. AGENTS.md reserved-action list updated with PAUSE_CONVERSATION. `planning/hitl-framework-plan.md` committed. |
+
+| Final sweep | Full 9,761-test suite executed: the only genuine branch defect was `GroupConversationTest.groupConversationStates` still asserting 6 enum values after the branch added CANCELLED (fixed: 7 + CANCELLED assertion). All other local failures are environmental (Docker unavailable for Testcontainers classes, sandbox-blocked loopback sockets for HTTP-server-based tool tests) — these classes are untouched by this branch and run in CI. Mongo `findPendingApprovalSummaries` reworked to bounded projected point-reads with explicit id mapping (the bulk POJO-codec projection could not be guaranteed to populate `_id`→conversationId). |
+
+*(End of session 2.)*
+
+---
+
+## 🔧 HITL Final-Review Fixes — Round 3 (2026-07-02, session 3)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Third full-branch multi-agent review (70 agents, adversarial verification completed): 43 confirmed findings (12 MAJOR). This session fixes all of them.
+
+| Area | Fix |
+|------|-----|
+| Queued-say race (MAJOR) | `processConversationStep` re-reads the persisted state at execution time and DROPS a queued turn when the conversation is AWAITING_HUMAN/IN_PROGRESS — a stale pre-pause memory copy can no longer execute and full-document-overwrite a just-committed pause. |
+| Zombie resume (MAJOR) | Resume persistence moved from the callable's `finally` into `IFinishedExecution.onComplete` — BaseRuntime's completed-after-cancellation discard now protects the resume path like the say path; a timed-out resume can never clobber state written after its watchdog fired. |
+| Cancel-vs-resume window (MAJOR) | The live memory is registered in `inFlightConversations` synchronously after the resume CAS; the resume callable re-checks `isCancelled()`/persisted EXECUTION_INTERRUPTED before executing and skips persistence when cancelled. Cancel now also wins over a pause committed by the very task it interrupted (`Conversation` treats pause-while-cancelled as stop), on both say and resume paths. |
+| Init pause (MAJOR) | `startConversation` performs the same HITL bookkeeping as the say path — a CONVERSATION_START pause now gets its policy bookmark, pause counter, and timeout schedule. |
+| Resume rollback (MAJOR) | Every post-CAS failure restores the pause: snapshot-load failures, `RejectedExecutionException` from a saturated coordinator, and service exceptions. Wrong-state/agent-undeployed now throw `IllegalStateException` → 409; infrastructure failures throw `ResourceStoreException` → 500 (was: everything 409). Audit + resume counter moved AFTER the successful submit — rolled-back resumes no longer pollute the compliance trail or metrics; undeployed-agent restores skip schedule re-arm (kills the infinite timeout→restore→re-arm loop). |
+| Bookmark hygiene | New `clearHitlBookmark` store op (Mongo `$unset` / Postgres jsonb key-removal) called when a pause is terminally resolved outside resume (cancel, end-while-paused) — stale bookmarks no longer round-trip forever, mislead approval-status (now also state-gated), or trick crash recovery into resurrecting dead pauses. Cancel of a pending approval writes an `hitl.approval` audit entry (verdict CANCELLED). `endConversation` on a paused conversation disarms the schedule and clears the bookmark (round-1 leftover). |
+| Config resolution | HITL timeout config is read ONCE per pause at the conversation's PINNED agentVersion (fallback to latest); `scheduleHitlTimeout` derives from the memory bookmark — bookmark and schedule can no longer diverge, and draft config edits no longer change paused conversations' behavior. Re-pauses now increment the pause counter (metric parity with the group surface). Undo/redo additionally rejected during IN_PROGRESS (protects the resume-CAS invariant crash recovery relies on). |
+| Group cancel window (MAJOR) | Control tokens are registered BEFORE the executor submit in `startAndDiscussAsync` and `resumeDiscussion` (`executeDiscussion` uses `computeIfAbsent` so a signalled pre-registered token is never wiped) — a cancel landing between the resume CAS (or async start) and thread startup now finds a signalable token instead of being overwritten by the running leg's unconditional updates. New `convertPauseToCancelIfSignalled`: a cancel that lands while `commitPause` is writing converts the just-committed pause to CANCELLED (CAS), disarms the schedule, audits, and emits the cancelled SSE event — cancel can no longer report success while the pause survives. |
+| Group TASK-gate bypass (MAJOR) | The `requiresApproval` EXECUTE gate now also pauses when an aborted wave (timeout/error) left executable tasks behind with nothing awaiting approval — previously the phase loop fell through to VERIFY/synthesis over unexecuted work and silently skipped the remaining tasks. |
+| Group resume resilience (MAJOR) | Config-drift aborts and pre-`executeDiscussion` failures now RESTORE the pause (`restoreGroupPause`: bookmark re-set, CAS IN_PROGRESS→AWAITING_APPROVAL, schedule re-armed) and fire `group_error` so SSE clients terminate — previously they persisted terminal FAILED, destroying the approval, without ever notifying the stream. `executorService.submit` failures roll back the same way (resume) or fail the conversation honestly (async start) instead of leaving IN_PROGRESS zombies. Failures INSIDE `executeDiscussion` are not double-handled (it owns its terminal states + events). REJECTED verdict now fires `group_complete` so streams close. |
+| Group terminal cleanup (MAJOR) | New `cleanupAfterTerminalState`: ephemeral dynamic agents and `lastVerifiedIndex` entries are released when a paused discussion reaches a terminal state OUTSIDE the execution loop (cancel-of-paused, REJECTED resume) — previously they leaked forever because the in-loop finally only runs while a thread is executing. |
+| Group cancel outcome | `cancelDiscussion` returns boolean (`false` = already terminal / lost CAS race) → REST maps to 409 (was unconditional 200); paused-cancels emit an `hitl.approval` audit entry (verdict CANCELLED) — parity with the regular surface. Timeout handler logs skipped aborts. |
+| Group approvals | `taskApprovals` VALUES validated up front (only APPROVED/REJECTED, case-insensitive → else 400 before any mutation); an explicit `{}` map is treated as the approve-all shortcut instead of approving nothing and instantly re-pausing. `approveGroupPhase` returns a freshly-read copy — the HTTP layer no longer serializes the live object being mutated by the background thread. |
+| Group timeout source | `scheduleGroupHitlTimeout` reads the pause bookmark on the conversation (set by `commitPause`/`restoreGroupPause`) instead of re-reading the group config — schedule and approval-status can no longer diverge after a config edit. |
+| Group pending listing | `listGroupPendingApprovals(groupId, limit)` returns bounded `PendingApprovalSummary` objects (query-level group filter + limit, new `findByState(state, groupId, limit)` store variant) instead of unbounded full transcripts; summary gains `groupId`; REST takes `?limit` (default 100). |
+| Approver read scope (MAJOR) | `detail=full` on both approval-status endpoints is now gated for approver-only callers (not owner, not admin): full content is readable ONLY while the conversation is actually awaiting approval → 403 otherwise. The approver role exists to decide pending approvals, not as a universal read-everything grant over all conversations/transcripts. New `OwnershipValidator.isOwner` helper. |
+| Group approval-status detail | `GET .../approval-status` on the group surface finally honors `detail`: default is a summary projection (state, pausedAt, phase, pauseType, reason, timeoutPolicy, awaiting task ids — stale fields suppressed outside AWAITING_APPROVAL, mirroring the regular surface) instead of always dumping the full conversation incl. transcript; `detail=full` returns the conversation, subject to the read-scope gate. |
+| Crash recovery scale (MAJOR) | The recovery sweep runs on a background virtual thread — application readiness no longer blocks on repairing thousands of paused conversations. The paused-regular sweep reads bounded PROJECTED summaries (10k cap, logged if hit) instead of full multi-MB documents, and skips WAIT_INDEFINITELY pauses without any further read (`PendingApprovalSummary` gains `approvalTimeout`, projected on Mongo + Postgres and exposed on both listing surfaces). `rearmSchedule` re-checks the pause state AFTER creating the schedule and withdraws it if a resume/cancel landed in the window — no armed timeout on a no-longer-paused conversation. |
+| Schedule + listing bounds | New `name` index on schedules (Mongo + Postgres) — HITL timeout delete/re-arm by name was a collection scan on every pause/resume/cancel. Mongo `findPendingApprovalSummaries` bounds the ids query with `.limit()` at the DB instead of materializing every paused id first. |
+| HITL enum home | `HitlTimeoutPolicy`/`HitlGranularity`/`HitlRejectionPolicy` moved from nested types in `AgentGroupConfiguration` to the neutral `ai.labs.eddi.configs.hitl` package (`HitlConfigValidation` moved there too) — the regular-surface agent config and the whole engine no longer depend on the GROUP config class for shared HITL vocabulary. JSON compatibility unchanged (enum names serialize identically). |
+| Dead surface removed | `ControlSignal.PAUSE` and `DiscussionControlToken.isPaused()/shouldStop()` deleted — HITL pauses are committed by the execution loop at the gates, never signalled through the token; the dead PAUSE path only invited misuse (a signalled "pause" would have been persisted as CANCELLED). Token checks now read `isCancelled()` explicitly. |
+| hitl_resume event wired | `HitlResumeEvent`/`EVENT_HITL_RESUME` existed but were never fired. New `onHitlResume` listener method fires after the resume CAS commits; the SSE streaming endpoint forwards `hitl_resume` WITHOUT closing, so `/approve/stream` clients see an explicit resume marker before the resumed discussion's events. |
+| ZIP import validation | `RestImportService` validates `hitlConfig` right after deserializing the agent file — an invalid config now fails the import up front with 400 (via `IllegalArgumentExceptionMapper`) instead of importing all workflows/extensions first and then failing agent creation with a 500 (partial import). |
+| Javadoc drift | `IConversationMemory.getHitlTimeoutPolicy` no longer documents non-existent policy values ("expire"); `AgentGroupConfiguration.HitlConfig` no longer claims a "per turn / per discussion" granularity that never existed (actual: PHASE or TASK). Unused Mongo `Updates` import removed. |
+| Test hardening (round 3) | New `HitlConfigValidationTest` (both surfaces, all rejection branches). `taskApprovals` validation tests: unknown id / wrong state / bad value → IAE with NOTHING mutated and no CAS; case-insensitive values; `{}` = approve-all. Audit emission tests (hitl.approval on resume with automated flag; verdict CANCELLED on cancel-of-paused; silent when ledger disabled). Note-cap tests on both surfaces (4097 → 400, 4096 → OK). Undo/redo HITL gate unit tests (AWAITING_HUMAN + IN_PROGRESS → false, nothing stored) + redo-409 IT. Group pending listing filter tests on summaries (admin/approver/owner/anonymous + default limit). Crash-observer tests rewritten for the projected sweep incl. schedule-withdraw races on both surfaces. Postgres container IT now covers the HITL store primitives (CAS, state query, projected summaries incl. approvalTimeout + limit, bookmark clearing). `HitlPauseResumeIT.waitForState` polls the DB-backed approval-status instead of the per-pod `/status` cache (flakiness fix). |
+| Docs | [docs/hitl.md](hitl.md) updated: approver read-scope gate (403 semantics), group approval-status summary/full, pending summaries + `?limit`, group cancel 409, `hitl_resume` SSE event + every-terminal-path-closes guarantee, drift-restores-pause behavior, cancel audit entries, async + projected crash recovery. |
+| Group end-to-end IT | **New `GroupHitlIT`** — full group-surface HITL path with zero mocked seams: a `requiresApproval` phase commits a real pause through the store, `/approve` applies the decision, and the background resume re-enters the phase loop and runs the post-gate phase to completion (transcript asserted). Also: approval-status summary vs `detail=full`, pending-approvals summary listing (conversationId + groupId), REJECTED-is-terminal (later approve/cancel → 409), cancel-of-paused → CANCELLED (second cancel/late approve → 409), 400s that do NOT consume the pause (missing verdict, >4 KB note), 404 for unknown ids. Like all ITs, first execution happens in CI (`-DskipITs=false`); local Docker unavailable. |
+
+*(End of session 3.)*
+
+---
+
+## 🔧 HITL Review Fixes — Phases 1–5 (partial) (2026-07-02)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** 7-phase implementation plan from code review (1 BLOCKER + 21 MAJORs).
+
+### Fixes Implemented
+
+| ID | Severity | Phase | Fix |
+|----|----------|-------|-----|
+| #1 | **BLOCKER** | 1a | **Resume re-pause loop**: `checkIfPauseConversationAction` is now delta-based — only throws if the just-executed task *added* `PAUSE_CONVERSATION` (not if it was stale from the prior turn). Belt-and-braces: `Conversation.resume()` strips `PAUSE_CONVERSATION` from step ACTIONS before re-entering the pipeline. |
+| #1b | MAJOR | 1b | **Decision visibility**: Verdict stored as conversation output (`hitlDecision`) and conversation-scoped property (`hitlVerdict`) for template/behavior-rule access. REJECTED emits public output. |
+| #8 | MAJOR | 2a | **Request body validation**: Null/missing verdict → 400 on both REST surfaces (regular + group + streaming). |
+| #12 | MAJOR | 5g | **Double-approve → 409**: `GroupDiscussionException` caught and mapped to 409 Conflict (was falling through to 500). |
+| #9 | MAJOR | 3a | **Group cancel state guard**: No-token branch validates state before writing CANCELLED — terminal states (COMPLETED/CANCELLED/FAILED) cannot be overwritten. |
+| #3 | MAJOR | 3b | **Timeout rescheduling on re-pause**: Resume callable's `finally` block arms a new HITL timeout if the conversation re-paused to AWAITING_HUMAN. |
+| #5 | MAJOR | 4a | **Undo/redo gate**: Undo and redo blocked during AWAITING_HUMAN state (would corrupt the HITL bookmark). |
+
+### Test Changes
+- `pauseActionThrowsPause`: Updated for delta-based semantics (sequential mock: null → actionData)
+- `fromIndexDetectsPause` → split into `fromIndexIgnoresStaleAction` (stale action = no re-pause) + `fromIndexDetectsNewPause` (new action = re-pause)
+- New: `executeLifecycleDetectsFreshPause` — verifies fresh pause on `executeLifecycle`
+
+### Files Changed
+- `LifecycleManager.java` — Delta-based `checkIfPauseConversationAction`, unconditional `actionsBefore` snapshot
+- `Conversation.java` — `stripPauseAction` helper, decision visibility, rejection output
+- `ConversationService.java` — Undo/redo gate, timeout rescheduling on re-pause
+- `RestAgentEngine.java` — Resume body validation
+- `RestGroupConversation.java` — Approve body validation, `GroupDiscussionException` → 409
+- `GroupConversationService.java` — Cancel state guard in no-token branch
+- `LifecycleManagerHitlTest.java` — 3 new/fixed delta-based pause tests
+
+### Completed (this session)
+- Phase 2b: HitlConfig string→enum typing (HitlGranularity, HitlTimeoutPolicy, HitlRejectionPolicy)
+- Phase 3d: Discriminating status codes — cancelDiscussion exception mapping (409/404 instead of 500)
+- Phase 4b: Strict ownership + eddi-approver role for HITL endpoints (requireOwnerAdminOrApprover)
+- Phase 4d: Micrometer HITL counters (eddi_hitl_pause/resume/timeout_count with surface tag)
+- Phase 6a: Deduplicated executeLifecycle/executeLifecycleFromIndex → shared executeTaskRange()
+- Phase 7b: HitlCrashRecoveryObserver unit tests (6 tests)
+- Phase 7b: OwnershipValidator approver role tests (6 tests)
+
+---
+
+## 🔧 HITL Review Fixes — Phases 5/6: Group Correctness + Config Surface (2026-07-02)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Continuing 7-phase implementation plan — group API correctness, config surface, and architecture.
+
+### Fixes Implemented
+
+| ID | Severity | Phase | Fix |
+|----|----------|-------|-----|
+| #10 | MAJOR | 5b | **Non-EXECUTE + TASK fallback**: TASK granularity only applies to EXECUTE phases (they have a SharedTaskList). Non-EXECUTE phases (OPINION, SYNTHESIS, etc.) now fall back to PHASE-style pause. |
+| #5e | MAJOR | 5e | **Resume ordering**: Timeout schedule deleted only AFTER the CAS succeeds (both approve + reject paths). If CAS fails, schedule preserved → timeout can still fire. |
+| #5f | MAJOR | 5f | **Config drift guard**: On resume, bookmarked phase name validated against loaded config. If config was edited while paused → FAILED + ERROR transcript entry. |
+| #10 | MAJOR | 5d | **Nested group HITL guard**: Sub-group returning AWAITING_APPROVAL → SKIPPED entry instead of extracting partial answer. Nested HITL not supported in v1. |
+| #11 | MAJOR | 5c | **Timed-out task fixup**: After wave timeout, IN_PROGRESS tasks reset to ASSIGNED (prevents permanent stranding). |
+| #5a | MAJOR | 5a | **Task rejection policy**: New `onTaskRejection` field in HitlConfig (FAIL/RETRY). RETRY resets rejected tasks to ASSIGNED for re-execution. |
+| #15 | MAJOR | 4c | **Audit trail**: Audit collector added to resume path (same as say path). |
+| #6c | MINOR | 6c | **Pause reason**: `hitlPauseReason` field on GroupConversation — human-readable reason set at commitPause. |
+| #6d | MINOR | 6d | **Bookmark timeout fields**: `hitlTimeoutPolicy` + `hitlApprovalTimeout` copied from config at pause time for REST visibility. |
+
+### Files Changed
+- `GroupConversationService.java` — HITL gate type check, drift guard, resume ordering, nested guard, timeout task fixup, rejection policy, bookmark population
+- `GroupConversation.java` — 3 new bookmark fields (hitlPauseReason, hitlTimeoutPolicy, hitlApprovalTimeout)
+- `AgentGroupConfiguration.java` — `onTaskRejection` field in HitlConfig
+- `SharedTaskList.java` — `resetFromAnyToAssigned()` method for RETRY policy
+- `ConversationService.java` — Audit collector on resume path
+
+---
+
+## 🔧 HITL Framework — Cancel Path Fixes: R1 + R2 MAJORs (2026-07-01)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Final merge verdict found 2 MAJORs in cancel path — cancel-vs-pause race and CancellationException misrouting.
+
+### Fixes
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| R1 | MAJOR | **Cancel-vs-pause race**: Added `isCancelled()` guard immediately before the HITL gate. After the wave loop breaks on cancel, the HITL gate fired before the next phase-loop iteration's `shouldStop()` check, converting a cancel into a pause. Guard uses `isCancelled()` (not `shouldStop()`) so real PAUSE still routes to `commitPause`. |
+| R2 | MAJOR | **CANCEL_IMMEDIATE → FAILED**: Added explicit `CancellationException` catch in the wave `allOf.get()` handler. Forward-cancels all source agent futures (since `allOf.cancel` doesn't propagate). Both generic `catch (GroupDiscussionException)` and `catch (Exception)` now check `token.isCancelled()` and route to CANCELLED instead of FAILED. Also added source-future forward-cancel in the `ExecutionException` branch. |
+
+### Regression Test Added
+- `InFlightCancel.gracefulCancelDuringExecution` — Concurrent latch-based test: launches `discuss()` on separate thread, blocks `say()` with latch, fires `cancelDiscussion(GRACEFUL)`, asserts CANCELLED state.
+
+### Files Changed
+- `GroupConversationService.java` — R1 cancel guard before HITL gate + R2 CancellationException handling + cancel-aware generic catch blocks
+- `GroupConversationServiceHitlTest.java` — In-flight cancel test with proper agent mock wiring
+
+---
+
+## 🔧 HITL Framework — Final Ship Fix: 2 BLOCKERs + 2 MAJORs in group TASK path (2026-07-01)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Ship/no-ship verdict found 2 BLOCKERs + 2 MAJORs, all in the group TASK surface.
+
+### Fixes
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| NEW-1 | BLOCKER | **Submit gate ≠ pause gate**: `submitForApproval` now gates on `taskLevelHitl && phase.requiresApproval()`. Without both, `completeTask` is used. Prevents TASK_FORCE preset from stranding all tasks in AWAITING_APPROVAL when the phase doesn't require approval. |
+| NEW-2 | BLOCKER | **Cancel-of-paused silent no-op**: `activeTokens.remove()` is now unconditional in the `finally` block. Paused conversations have no running thread, so a lingering token caused `cancelDiscussion` to take the no-op signal branch. Resume re-registers a fresh token. |
+| NEW-3 | MAJOR | **Control token write-only**: Added `token.shouldStop()` safe-points at the top of both the phase loop and the wave loop. Registered the wave `allOf` future via `setActiveFuture()` so IMMEDIATE cancel can interrupt. |
+| AUTO_APPROVE | MAJOR | **TASK auto-approve infinite loop**: When TASK granularity + APPROVED verdict + null taskApprovals (e.g., timeout handler), `resumeDiscussion` now synthesizes APPROVED for all AWAITING_APPROVAL tasks. Previously caused infinite reschedule. |
+
+### Regression Tests Added
+- `SubmitGateAlignment` — TASK granularity + requiresApproval=false → tasks COMPLETED not stranded
+- `CancelOfPaused` — Cancel of AWAITING_APPROVAL group does DB write to CANCELLED
+- `AutoApproveTaskSynthesis` — APPROVED + TASK + null taskApprovals auto-approves all tasks
+- `TaskResumeCompletesDependent` — TASK resume re-enters same phase, clears hitlPauseType
+
+### Files Changed
+- `GroupConversationService.java` — All 4 fixes + `taskLevelHitl` local variable in `executeTaskExecutionPhase`
+- `GroupConversationServiceHitlTest.java` — 4 new regression test classes (13 → 17 tests)
+
+---
+
+## 🔧 HITL Framework — Delta Code Review Fix #2: BLOCKER + MAJORs (2026-07-01)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Delta code review identified 1 BLOCKER + 7 MAJORs + 2 MINORs in group TASK surface.
+
+### Fixes
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| BLOCKER | BLOCKER | **TASK resume index**: `resumeDiscussion` now reads `hitlPauseType` before clearing. TASK resumes at same phase (re-entry idempotent via findExecutableTasks); PHASE resumes at +1. |
+| MAJOR-1 | MAJOR | **Mutual exclusion of PHASE/TASK gates**: TASK gate fires only when `phase.requiresApproval() AND taskLevelHitl AND hasAwaitingApproval()`. PHASE gate fires only when `NOT taskLevelHitl`. Eliminates double-pause. |
+| MAJOR-2 | MAJOR | **Group timeout scheduling**: `commitPause` now creates a one-shot `IScheduleStore` schedule for group HITL timeouts (reads `approvalTimeout` + `timeoutPolicy` from group config). |
+| MAJOR-3 | MAJOR | **Schedule deletion on resume/cancel**: Added `IScheduleStore.deleteSchedulesByName()` (MongoDB + PostgreSQL). Called in `ConversationService.resumeConversation`, `cancelConversation`, `GroupConversationService.resumeDiscussion`, and `cancelDiscussion`. |
+| MAJOR-4 | MAJOR | **REJECTED branch CAS**: Rejection now uses `updateIfState(gc, AWAITING_APPROVAL)` instead of plain `update(gc)` to prevent concurrent approve clobbering reject. |
+| MAJOR-5 | MAJOR | **activeTokens lifecycle**: `executeDiscussion` now registers control token at start (`activeTokens.put`) and removes it in `finally` block when discussion truly ends (not paused). |
+| MAJOR-6 | MAJOR | **listPendingApprovals ownership filter**: `RestAgentEngine.listPendingApprovals()` now filters by caller identity. Admin sees all; non-admin sees only their conversations. Added `OwnershipValidator.isAdmin()`. |
+| MINOR-1 | MINOR | **Metrics/events guard**: `counterGroupDiscussion.increment()` and `onGroupStart` only fire when `startPhaseIndex == 0` (fresh discussion, not resume). |
+| MINOR-2 | MINOR | **Fail-closed on null owner**: Added `OwnershipValidator.requireOwnerOrAdminStrict()` for state-changing ops where null-owner resources should deny access (admin exempted). |
+
+### Files Changed
+- `GroupConversationService.java` — BLOCKER, MAJOR-1/2/3/4/5, MINOR-1 fixes
+- `ConversationService.java` — MAJOR-3 schedule deletion on resume/cancel
+- `RestAgentEngine.java` — MAJOR-6 ownership filtering
+- `IScheduleStore.java` — MAJOR-3 new `deleteSchedulesByName` API
+- `MongoScheduleStore.java` — MAJOR-3 MongoDB implementation
+- `PostgresScheduleStore.java` — MAJOR-3 PostgreSQL implementation
+- `OwnershipValidator.java` — MAJOR-6 `isAdmin()`, MINOR-2 `requireOwnerOrAdminStrict()`
+- 6 test files — Constructor updated for new `IScheduleStore` param + test fixes
+
+---
+
+## 🔁 HITL Framework — Human-in-the-Loop Pause/Resume for Conversations & Group Discussions (2026-06-30)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Plan:** `planning/hitl-framework-plan.md`
+**What changed:** Full implementation of the Human-in-the-Loop (HITL) framework enabling conversations and group discussions to pause mid-pipeline for human approval, then resume or reject.
+
+### Wave 0: Storage Primitives & Lifecycle Prerequisites
+
+1. **`IResourceStorage.storeIfFieldEquals`** — New CAS primitive for conditional updates on arbitrary JSON fields (not just `_version`). Implemented in both `MongoResourceStorage` (Filters.eq) and `PostgresResourceStorage` (`data->>?`). Used by group conversation store for atomic state transitions.
+2. **`ControlSignal` enum** — CONTINUE, CANCEL_GRACEFUL, CANCEL_IMMEDIATE, PAUSE. Used by `DiscussionControlToken` for thread-safe in-flight control.
+3. **`DiscussionControlToken`** — AtomicReference-based token shared between execution loops and external callers (cancel/pause). Includes `activeFuture` for immediate cancel interrupt.
+4. **`ConversationPauseException`** — Checked exception carrying pausedWorkflowId, absoluteTaskIndex, and reason. Mirrors `ConversationStopException` pattern.
+5. **Cancel infrastructure** — `IConversationMemory.setCancelled/isCancelled`, `GroupConversationState.CANCELLED`, `IGroupConversationStore.updateIfState/findByState`, SSE events (EVENT_CANCELLED, EVENT_AWAITING_APPROVAL, EVENT_HITL_RESUME).
+
+### Wave 1: Core HITL State Machine
+
+6. **`ConversationState.AWAITING_HUMAN`** — New state for paused conversations. Gates `say()` with "use the /resume endpoint" message.
+7. **HITL bookmark fields** — 6 fields on `ConversationMemorySnapshot` (hitlPausedWorkflowId, hitlPausedAbsoluteTaskIndex, hitlPausedAt, hitlPauseReason, hitlTimeoutPolicy, hitlApprovalTimeout) + corresponding `IConversationMemory` defaults + `ConversationMemory` implementation.
+8. **`HitlDecision`** / **`HitlTimeoutPolicy`** — Decision model (APPROVED/REJECTED + note + decidedBy) and timeout policy enum (AUTO_REJECT, AUTO_APPROVE, ABORT, WAIT_INDEFINITELY).
+9. **`LifecycleManager` extensions** — `executeLifecycleFromIndex()` for resume-from-task, `checkIfPauseConversationAction()` for PAUSE_CONVERSATION detection, cancel check in main loop.
+10. **`Conversation.resume()`** — Full resume flow: skip-before-paused-workflow → resume-from-index → run-remaining-workflows. Handles re-pause, rejected short-circuit, and finally-block with state normalization.
+
+### Wave 2: REST API & Resume Flow
+
+11. **`POST /{conversationId}/resume`** — Accepts `HitlDecision` body, CAS on AWAITING_HUMAN→IN_PROGRESS, reloads agent, submits resume via coordinator.
+12. **`GET /{conversationId}/approval-status`** — Summary or full detail of paused conversation.
+13. **`GET /pending-approvals`** — Lists all AWAITING_HUMAN conversations with PendingApprovalSummary.
+14. **`POST /{conversationId}/cancel`** — Cancels active or paused conversations.
+15. **`IConversationMemoryStore.compareAndSetState`** — Atomic CAS on conversation state for both MongoDB and PostgreSQL.
+16. **Timeout handler guard** — `waitForExecutionFinishOrTimeout` skips state overwrite when AWAITING_HUMAN (Invariant 10).
+
+### Wave 3: Group Discussion HITL
+
+17. **`GroupConversation` HITL fields** — pausedAtPhaseIndex, pausedTurnCount, pausedPhaseName, pausedAt, hitlPauseType (PHASE/TASK).
+18. **`SharedTaskList` HITL methods** — submitForApproval (IN_PROGRESS→AWAITING_APPROVAL), approveTask, rejectTask, resetToAssigned, hasAwaitingApproval.
+19. **`GroupConversationService` HITL** — cancelDiscussion (via DiscussionControlToken or direct DB), resumeDiscussion (task approvals + phase resume).
+20. **Group REST endpoints** — POST /{gcId}/cancel, POST /{gcId}/approve, POST /{gcId}/approve/stream (SSE), GET /{gcId}/approval-status.
+21. **`GroupApprovalRequest`** — REST body with HitlDecision + Map<String,String> taskApprovals for per-task verdicts.
+
+### Wave 4: Configuration, Timeout & Audit
+
+22. **`AgentConfiguration.HitlConfig`** — approvalTimeout (ISO-8601 duration), timeoutPolicy (default WAIT_INDEFINITELY).
+23. **`AgentGroupConfiguration.HitlConfig`** — Same + granularity (PHASE/TASK).
+24. **`HitlTimeoutHandler`** — @ApplicationScoped handler dispatched by ScheduleFireExecutor when hitlType=hitl_timeout schedule fires. Routes to auto-approve/reject/abort based on policy.
+25. **`ScheduleFireExecutor` integration** — Early return for hitl_timeout metadata in fire() method.
+
+### Files changed (38 total: 32 modified, 6 new)
+
+**New files:** `ControlSignal.java`, `DiscussionControlToken.java`, `ConversationPauseException.java`, `HitlDecision.java`, `HitlTimeoutPolicy.java`, `PendingApprovalSummary.java`, `GroupApprovalRequest.java`, `HitlTimeoutHandler.java`
+
+**Key invariants preserved:** (1) No typed POJOs in snapshot storage — bookmark fields are first-class. (2) Resume task index is absolute. (3) Group halt = set state + return. (4) Per-task approval detection = post-join scan. (5) Group CAS on state field. (9) Paused turns skip postConversationLifecycleTasks. (10) AWAITING_HUMAN is never overwritten by timeout handler.
+
+### Bug Fixes — Code Review Round (2026-07-01)
+
+**B1: Regular resume always landed in ERROR.** `ConversationService.resumeConversation()` set in-memory state to `IN_PROGRESS` at line 844, but `Conversation.resume()` guards `if (state != AWAITING_HUMAN) throw`. The DB CAS was correct (AWAITING_HUMAN → IN_PROGRESS), but the in-memory state loaded from the updated snapshot was already IN_PROGRESS. **Fix:** set in-memory state to `AWAITING_HUMAN` so `resume()`'s own guard passes — it does its own transition at line 459.
+
+**B2: Group discussion never paused.** `phase.requiresApproval()` / `submitForApproval()` / `hasAwaitingApproval()` had zero consumers — nothing set `AWAITING_APPROVAL`. **Fix:** Added `commitPause()` helper. After each phase completes, if `requiresApproval()` → pause. For TASK granularity, `submitForApproval()` replaces `completeTask()`, and `hasAwaitingApproval()` is checked after the join. Guarded `COMPLETED` assignment and `finally` cleanup block against AWAITING_APPROVAL state.
+
+**B3+M2: Group REST endpoints missing ownership checks (IDOR).** `cancelDiscussion`, `approveGroupPhase`, `approveGroupPhaseStreaming`, and `getGroupApprovalStatus` had no ownership validation. **Fix:** Added `validateGroupConversationOwnership()` (mirrors RestAgentEngine pattern) and `setDecidedByFromIdentity()` to all 4 endpoints.
+
+**B4: Group double-resume race.** `resumeDiscussion` used `update(gc)` — plain write. **Fix:** `updateIfState(gc, AWAITING_APPROVAL)` → `ResourceModifiedException` on concurrent resume → 409 Conflict.
+
+**M1: Timeout schedule never created.** The `HitlTimeoutHandler` consumer was wired but no producer created schedules on pause. **Fix:** Injected `IScheduleStore` + `IAgentStore` into `ConversationService`. After `storeConversationMemory` detects `AWAITING_HUMAN`, `scheduleHitlTimeout()` loads agent config, checks for `approvalTimeout` + non-WAIT_INDEFINITELY policy, and creates a one-shot schedule with `hitlType=hitl_timeout` metadata.
+
+**M3: Turn budget reset on resume.** `turnCounter` was initialized to `0` in `executeDiscussion`, and `pausedTurnCount` was reset to `0` in `resumeDiscussion`. **Fix:** Seed `turnCounter` from `gc.getPausedTurnCount()`. Don't reset `pausedTurnCount` in `resumeDiscussion` — only clear it on successful COMPLETED.
+
+**Minor: Phase resume index.** Replaced `subList` hack in `resumeDiscussion` with `startPhaseIndex` parameter on `executeDiscussion`. Uses `pausedAtPhaseIndex + 1` (paused phase already completed). Fixes absolute index corruption.
+
+**Minor: Bookmark mismatch guard.** `Conversation.resume()` silently no-oped when `pausedWorkflowId` wasn't found. Now throws `LifecycleException` with descriptive message.
+
+**Minor: SSE leak on group HITL pause.** `onHitlPause` listener in `RestGroupConversation` didn't close the SSE sink. Client connections would leak until timeout. Now calls `closeQuietly(eventSink)`.
+
+**Files changed:** `ConversationService.java`, `GroupConversationService.java`, `RestGroupConversation.java`, `Conversation.java`
+
+---
+
 ## 🐛 Fix: PostgreSQL group conversations broken — JDBC `?|` operator escape (2026-07-02)
 
 **Repo:** EDDI (`fix/postgres-group-conversation-jdbc-escape`)

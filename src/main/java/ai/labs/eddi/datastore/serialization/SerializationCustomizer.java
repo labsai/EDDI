@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.quarkus.jackson.ObjectMapperCustomizer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -35,6 +36,15 @@ public class SerializationCustomizer implements ObjectMapperCustomizer {
         objectMapper.configure(INDENT_OUTPUT, prettyPrint);
         objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        // java.time support (Instant etc.) — the JSONB-backed Postgres resource
+        // storage serializes snapshots through this mapper, and HITL bookmarks carry
+        // an Instant (hitlPausedAt). Without the module a non-null Instant fails
+        // serialization ("Java 8 date/time type not supported"), which would break
+        // HITL pause persistence on Postgres. The date FORMAT is intentionally left
+        // at the default (numeric timestamps): MongoScheduleStore normalizes date
+        // fields to epoch-millis for numeric range queries and expects numbers, so
+        // this only ADDS Instant support without changing the wire format.
+        objectMapper.registerModule(new JavaTimeModule());
         return objectMapper;
     }
 }

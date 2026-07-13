@@ -10,7 +10,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | --------------------------- | ------------------------------------- |
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (65)
+## Available Tools (74)
 
 ### Conversation Tools (11)
 
@@ -98,6 +98,24 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                                                    |
 
 See [Group Conversations](group-conversations.md) for full style details, custom phases, and nested groups.
+
+### HITL Tools (9)
+
+Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly (per-conversation owner / `eddi-admin` / `eddi-approver` via the shared `HitlAccessGuard`); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`).
+
+| Tool                              | Description                                                                                                                    |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `list_pending_approvals`          | List regular (1:1) conversations awaiting approval (owner-scoped; includes RULE and TOOL_CALL pauses)                          |
+| `get_approval_status`             | Read a paused conversation's status; summary reports `pauseType`, `detail=full` returns the snapshot incl. any tool-call batch |
+| `resume_conversation`             | Resume with APPROVED/REJECTED (case-insensitive); resolves both RULE and TOOL_CALL pauses                                      |
+| `cancel_conversation`             | Cancel a paused or running conversation                                                                                        |
+| `list_group_pending_approvals`    | List a group's conversations awaiting approval (owner-scoped)                                                                  |
+| `list_all_group_pending_approvals`| Cross-group HITL inbox across all groups (owner-scoped)                                                                        |
+| `get_group_approval_status`       | Read a paused group discussion's status (summary; `detail=full` returns the whole conversation)                               |
+| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity; returns the resumed discussion         |
+| `cancel_group_discussion`         | Cancel an in-progress or paused group discussion                                                                              |
+
+See [HITL](hitl.md#mcp-surface) for the full authority model, the kill-switch, and REST-endpoint parity.
 
 ### Memory Tools (8)
 
@@ -547,23 +565,27 @@ eddi.docs.path=docs
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The filter ensures only the 63 intended tools are visible.
+**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 74 intended tools — conversation, admin/resource/schedule/channel, setup, group, **HITL approvals** (`McpHitlTools`), **persistent user memory** (`McpMemoryTools`), and **GDPR/CCPA** (`McpGdprTools`).
 
-To add a new MCP tool: add it to the `MCP_TOOLS` set in `McpToolFilter.java`.
+To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.java`. A quarkus-MCP `@Tool` has no other invocation path, so a tool that is *not* whitelisted is unreachable dead code. `McpToolFilterTest.test_allMcpToolMethods_areWhitelisted()` auto-discovers every `@Tool` in the `engine.mcp` package and fails the build if any is missing from the whitelist — so forgetting this step is caught by CI.
 
 ## Authentication & Authorization
 
 - The MCP endpoint inherits EDDI's existing OIDC/Keycloak authentication
 - When auth is enabled (`quarkus.oidc.tenant-enabled=true`), MCP clients must provide valid tokens
-- Admin tools (deploy, undeploy, delete) should be production to authorized users via `@RolesAllowed`
+- Authorization is enforced **in-code**, not via `@RolesAllowed`: most tools call `requireRole(identity, authEnabled, "<role>")` (`McpToolUtils`), and the HITL tools use the shared `HitlAccessGuard` (per-conversation owner / `eddi-admin` / `eddi-approver`). When `authorization.enabled=false` (the default dev posture) `requireRole` is a no-op — production is guarded by `AuthStartupGuard`, which fails startup if OIDC is disabled.
 - **Future**: Per-agent MCP access control via agent configuration for multi-tenant SaaS
 
-### Recommended Role Mapping
+### Role Mapping
 
-| Role        | Tools                                                                                                                                                                                                            |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mcp-user`  | `list_agents`, `discover_agents`, `create_conversation`, `talk_to_agent`, `chat_with_agent`, `chat_managed`, `read_conversation*`, `list_agent_triggers`, `read_agent_logs`, `read_audit_trail`, `describe_discussion_styles`, `discuss_with_group`, `read_group_conversation`, `list_group_conversations` |
-| `mcp-admin` | All user tools + `deploy_agent`, `undeploy_agent`, `create_agent`, `delete_agent`, `update_agent`, `setup_agent`, `create_api_agent`, resource CRUD, `apply_agent_changes`, `list_agent_resources`, trigger CRUD, group CRUD (`create_group`, `update_group`, `delete_group`) |
+These are the **actual Keycloak role strings** the tools check (not aliases). Roles are additive in intent — grant an editor/admin the read scope too. For exact per-tool roles see the code (`requireRole` calls) and the per-category sections above (HITL / Memory / GDPR).
+
+| Role           | Scope |
+| -------------- | ----- |
+| `eddi-viewer`  | Read-only + running conversations: `list_*`, `read_*`, `get_*`, `discover_agents`, `chat_with_agent`/`talk_to_agent`/`chat_managed`, `read_agent_logs`/`read_audit_trail`, and the memory **read** tools (`list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `count_user_memories`) |
+| `eddi-editor`  | Viewer + authoring: `setup_agent`, `create_api_agent`, group create/update, resource create/update, trigger/schedule/channel authoring |
+| `eddi-admin`   | Editor + destructive/deployment ops: `deploy_agent`/`undeploy_agent`, `delete_*`, resource delete, and the **memory writes** (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`) + **GDPR** tools (`delete_user_data`, `export_user_data`) |
+| `eddi-approver`| Decide HITL approvals (with the conversation owner and `eddi-admin`): `resume_conversation`, `approve_group_phase`, `cancel_*`, `*_pending_approvals`, `*_approval_status` — see [HITL](hitl.md#who-may-decide) |
 
 ## Sentiment Monitoring
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.model;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import com.fasterxml.jackson.annotation.JsonAlias;
 
 import java.net.URI;
@@ -246,6 +247,22 @@ public class AgentConfiguration {
 
     public void setSessionManagement(SessionManagement sessionManagement) {
         this.sessionManagement = sessionManagement;
+    }
+
+    /**
+     * Human-in-the-loop (HITL) configuration. Controls approval timeouts and
+     * timeout policies for paused conversations.
+     *
+     * @since 6.0.0
+     */
+    private HitlConfig hitlConfig;
+
+    public HitlConfig getHitlConfig() {
+        return hitlConfig;
+    }
+
+    public void setHitlConfig(HitlConfig hitlConfig) {
+        this.hitlConfig = hitlConfig;
     }
 
     /**
@@ -825,6 +842,69 @@ public class AgentConfiguration {
             public void setTriggerOn(List<String> triggerOn) {
                 this.triggerOn = triggerOn;
             }
+        }
+    }
+
+    /**
+     * HITL approval timeout configuration. Controls what happens when a
+     * human-in-the-loop approval is not provided within the configured duration.
+     *
+     * @since 6.0.0
+     */
+    public static class HitlConfig {
+        /** ISO-8601 duration (e.g., "PT30S"), null = indefinite. */
+        private String approvalTimeout;
+        private HitlTimeoutPolicy timeoutPolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        /**
+         * Designer-supplied reason shown to approvers in pending-approval listings and
+         * approval-status (e.g. "Deletion requires manager sign-off"). Answers "what am
+         * I approving?" — falls back to a generic reason when absent.
+         */
+        private String pauseReason;
+
+        public String getApprovalTimeout() {
+            return approvalTimeout;
+        }
+
+        public void setApprovalTimeout(String approvalTimeout) {
+            this.approvalTimeout = approvalTimeout;
+        }
+
+        public HitlTimeoutPolicy getTimeoutPolicy() {
+            return timeoutPolicy;
+        }
+
+        public void setTimeoutPolicy(HitlTimeoutPolicy timeoutPolicy) {
+            // JSON "timeoutPolicy": null must not wipe the default (mirrors the
+            // group-level HitlConfig setters)
+            if (timeoutPolicy != null) {
+                this.timeoutPolicy = timeoutPolicy;
+            }
+        }
+
+        public String getPauseReason() {
+            return pauseReason;
+        }
+
+        public void setPauseReason(String pauseReason) {
+            this.pauseReason = pauseReason;
+        }
+
+        /**
+         * Agent-level default tool-approval gating (tool-level HITL). Applies to every
+         * LLM task in the agent unless a task overrides it with its own
+         * {@code toolApprovals}. Absent = no tool gating.
+         *
+         * @since 6.0.0
+         */
+        private ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals;
+
+        public ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig getToolApprovals() {
+            return toolApprovals;
+        }
+
+        public void setToolApprovals(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals) {
+            this.toolApprovals = toolApprovals;
         }
     }
 }

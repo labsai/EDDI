@@ -6,10 +6,12 @@ package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.datastore.serialization.Id;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.model.Property;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.time.Instant;
 import java.util.*;
 
 /**
@@ -22,6 +24,16 @@ public class ConversationMemorySnapshot {
     private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    private String hitlPausedWorkflowId;
+    private int hitlPausedAbsoluteTaskIndex = -1;
+    private Instant hitlPausedAt;
+    private String hitlPauseReason;
+    private HitlTimeoutPolicy hitlTimeoutPolicy;
+    private String hitlApprovalTimeout;
+    // Tool-level HITL: null/"RULE" = behavior-rule pause, "TOOL_CALL" = gated tool
+    // pause.
+    private String hitlPauseType;
+    private PendingToolCallBatch hitlPendingToolCalls;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private Map<String, Property> conversationProperties = new LinkedHashMap<>();
     private List<ConversationStepSnapshot> conversationSteps = new LinkedList<>();
@@ -276,6 +288,70 @@ public class ConversationMemorySnapshot {
 
     public void setConversationState(ConversationState conversationState) {
         this.conversationState = conversationState;
+    }
+
+    public String getHitlPausedWorkflowId() {
+        return hitlPausedWorkflowId;
+    }
+
+    public void setHitlPausedWorkflowId(String hitlPausedWorkflowId) {
+        this.hitlPausedWorkflowId = hitlPausedWorkflowId;
+    }
+
+    public int getHitlPausedAbsoluteTaskIndex() {
+        return hitlPausedAbsoluteTaskIndex;
+    }
+
+    public void setHitlPausedAbsoluteTaskIndex(int hitlPausedAbsoluteTaskIndex) {
+        this.hitlPausedAbsoluteTaskIndex = hitlPausedAbsoluteTaskIndex;
+    }
+
+    public Instant getHitlPausedAt() {
+        return hitlPausedAt;
+    }
+
+    public void setHitlPausedAt(Instant hitlPausedAt) {
+        this.hitlPausedAt = hitlPausedAt;
+    }
+
+    public String getHitlPauseReason() {
+        return hitlPauseReason;
+    }
+
+    public void setHitlPauseReason(String hitlPauseReason) {
+        this.hitlPauseReason = hitlPauseReason;
+    }
+
+    public HitlTimeoutPolicy getHitlTimeoutPolicy() {
+        return hitlTimeoutPolicy;
+    }
+
+    public void setHitlTimeoutPolicy(HitlTimeoutPolicy hitlTimeoutPolicy) {
+        this.hitlTimeoutPolicy = hitlTimeoutPolicy;
+    }
+
+    public String getHitlApprovalTimeout() {
+        return hitlApprovalTimeout;
+    }
+
+    public void setHitlApprovalTimeout(String hitlApprovalTimeout) {
+        this.hitlApprovalTimeout = hitlApprovalTimeout;
+    }
+
+    public String getHitlPauseType() {
+        return hitlPauseType;
+    }
+
+    public void setHitlPauseType(String hitlPauseType) {
+        this.hitlPauseType = hitlPauseType;
+    }
+
+    public PendingToolCallBatch getHitlPendingToolCalls() {
+        return hitlPendingToolCalls;
+    }
+
+    public void setHitlPendingToolCalls(PendingToolCallBatch hitlPendingToolCalls) {
+        this.hitlPendingToolCalls = hitlPendingToolCalls;
     }
 
     public List<ConversationOutput> getConversationOutputs() {

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.time.Instant;
@@ -39,6 +40,28 @@ public class GroupConversation {
     private List<String> createdAgentIds = Collections.synchronizedList(new ArrayList<>());
     /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
+    private int pausedAtPhaseIndex = -1;
+    private int pausedTurnCount = 0;
+    private String pausedPhaseName;
+    private Instant pausedAt;
+    private HitlPauseType hitlPauseType;
+    /** Human-readable reason for the pause (from HITL gate). */
+    private String hitlPauseReason;
+    /** Timeout policy copied from config at pause time (Phase 6d). */
+    private HitlTimeoutPolicy hitlTimeoutPolicy;
+    /**
+     * Approval timeout duration (ISO-8601) copied from config at pause time (Phase
+     * 6d).
+     */
+    private String hitlApprovalTimeout;
+    /**
+     * Fingerprint of the task state at the previous TASK-granularity pause (#4). A
+     * resume that re-pauses at the SAME phase with an identical fingerprint made no
+     * progress — the discussion is failed instead of re-pausing, guaranteeing
+     * termination of the pause→approve→pause loop. Null until the first TASK pause;
+     * cleared on successful completion.
+     */
+    private String hitlLastPauseFingerprint;
     private Instant created;
     private Instant lastModified;
 
@@ -126,8 +149,14 @@ public class GroupConversation {
 
     public enum GroupConversationState {
         CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED,
+        /** Discussion was cancelled before completion — HITL foundation (Phase 9b). */
+        CANCELLED,
         /** Paused for human approval — HITL foundation (Phase 9b). */
         AWAITING_APPROVAL
+    }
+
+    public enum HitlPauseType {
+        PHASE, TASK
     }
 
     // --- Getters/Setters ---
@@ -295,5 +324,82 @@ public class GroupConversation {
 
     public void setDynamicAgentConfig(AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig) {
         this.dynamicAgentConfig = dynamicAgentConfig;
+    }
+
+    @JsonIgnore
+    public boolean isPaused() {
+        return pausedAt != null;
+    }
+
+    public int getPausedAtPhaseIndex() {
+        return pausedAtPhaseIndex;
+    }
+
+    public void setPausedAtPhaseIndex(int pausedAtPhaseIndex) {
+        this.pausedAtPhaseIndex = pausedAtPhaseIndex;
+    }
+
+    public int getPausedTurnCount() {
+        return pausedTurnCount;
+    }
+
+    public void setPausedTurnCount(int pausedTurnCount) {
+        this.pausedTurnCount = pausedTurnCount;
+    }
+
+    public String getPausedPhaseName() {
+        return pausedPhaseName;
+    }
+
+    public void setPausedPhaseName(String pausedPhaseName) {
+        this.pausedPhaseName = pausedPhaseName;
+    }
+
+    public Instant getPausedAt() {
+        return pausedAt;
+    }
+
+    public void setPausedAt(Instant pausedAt) {
+        this.pausedAt = pausedAt;
+    }
+
+    public HitlPauseType getHitlPauseType() {
+        return hitlPauseType;
+    }
+
+    public void setHitlPauseType(HitlPauseType hitlPauseType) {
+        this.hitlPauseType = hitlPauseType;
+    }
+
+    public String getHitlPauseReason() {
+        return hitlPauseReason;
+    }
+
+    public void setHitlPauseReason(String hitlPauseReason) {
+        this.hitlPauseReason = hitlPauseReason;
+    }
+
+    public HitlTimeoutPolicy getHitlTimeoutPolicy() {
+        return hitlTimeoutPolicy;
+    }
+
+    public void setHitlTimeoutPolicy(HitlTimeoutPolicy hitlTimeoutPolicy) {
+        this.hitlTimeoutPolicy = hitlTimeoutPolicy;
+    }
+
+    public String getHitlApprovalTimeout() {
+        return hitlApprovalTimeout;
+    }
+
+    public void setHitlApprovalTimeout(String hitlApprovalTimeout) {
+        this.hitlApprovalTimeout = hitlApprovalTimeout;
+    }
+
+    public String getHitlLastPauseFingerprint() {
+        return hitlLastPauseFingerprint;
+    }
+
+    public void setHitlLastPauseFingerprint(String hitlLastPauseFingerprint) {
+        this.hitlLastPauseFingerprint = hitlLastPauseFingerprint;
     }
 }

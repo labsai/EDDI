@@ -1,0 +1,444 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.integrations.slack;
+
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.modules.output.model.OutputItem;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/**
+ * Shared Slack HITL (human-in-the-loop) helpers: config-key access, Block Kit
+ * builders for approval notifications, approver authorization, and the
+ * Slack-friendly conversation response-text extraction.
+ * <p>
+ * Kept as a small static-utility class (no CDI) so it can be reused by
+ * {@link SlackEventHandler} (in-thread pause notice + approval notification),
+ * the interactivity endpoint handler (authorization), and
+ * {@link SlackGroupDiscussionListener} (group pause notification) without
+ * duplication.
+ *
+ * @since 6.1.0
+ */
+public final class SlackHitlSupport {
+
+    // ─── platformConfig keys (see ChannelIntegrationConfiguration Javadoc) ───
+    public static final String CFG_HITL_APPROVAL_CHANNEL = "hitlApprovalChannel";
+    public static final String CFG_HITL_APPROVER_USER_IDS = "hitlApproverUserIds";
+
+    // ─── Block Kit action ids ───
+    public static final String ACTION_APPROVE = "hitl_approve";
+    public static final String ACTION_REJECT = "hitl_reject";
+
+    /**
+     * Prefix marking an action value as targeting a group discussion (routed to
+     * {@code resumeDiscussion}) rather than a single conversation. A plain value
+     * (no prefix) is a conversationId.
+     */
+    public static final String GROUP_VALUE_PREFIX = "group:";
+
+    /**
+     * Separator between the owning integration name and the subject in an approval
+     * button value: {@code <integrationName>|<conversationId>} or
+     * {@code <integrationName>|group:<groupConversationId>}. Carrying the owning
+     * integration in the value binds the HITL decision to a specific integration —
+     * so signature verification and authorization use THAT integration's secret and
+     * approver list, closing the cross-integration IDOR (a shared approval channel
+     * can no longer let one integration's secret govern another's decision).
+     */
+    public static final String VALUE_SEPARATOR = "|";
+
+    /**
+     * {@code hitlPauseType} value for a tool-call gate (vs. a behavior-rule pause).
+     */
+    public static final String PAUSE_TYPE_TOOL_CALL = "TOOL_CALL";
+
+    /**
+     * Max pending tool calls rendered as individual context blocks before
+     * collapsing into "+N more".
+     */
+    private static final int MAX_RENDERED_TOOL_CALLS = 5;
+
+    /**
+     * Display truncation applied to {@code argumentsRedacted} in the approval card
+     * ONLY.
+     */
+    private static final int TOOL_ARGS_DISPLAY_MAX_CHARS = 300;
+
+    /** In-thread notice posted when a conversation enters AWAITING_HUMAN. */
+    public static final String PAUSE_NOTICE = "⏸️ This conversation is awaiting human approval.";
+
+    /** Notice when the user keeps messaging a paused conversation. */
+    public static final String STILL_AWAITING_NOTICE = "⏸️ Still awaiting approval — a reviewer must decide before I can continue.";
+
+    /**
+     * Notice when a message was dropped because the conversation is not currently
+     * accepting input (busy processing another turn, ended, or interrupted).
+     */
+    public static final String CONVERSATION_NOT_ACTIVE_NOTICE = "⚠️ I couldn't process that just now — the conversation is busy or no longer active. Please try again.";
+
+    private SlackHitlSupport() {
+        // Utility class
+    }
+
+    // ─── Action value (button payload) ───
+
+    /**
+     * Build the approval button value that carries the owning integration name so
+     * the decision can be bound to that integration:
+     * {@code <integrationName>|<subject>}. {@code subject} is a plain
+     * conversationId or {@code group:<groupConversationId>}.
+     * <p>
+     * When {@code integrationName} is null/blank the legacy bare-subject form is
+     * produced (backward compat with cards posted before this change).
+     */
+    public static String buildActionValue(String integrationName, String subject) {
+        if (integrationName == null || integrationName.isBlank()) {
+            return subject;
+        }
+        return integrationName + VALUE_SEPARATOR + subject;
+    }
+
+    /**
+     * Parse an approval button value into the owning integration name (may be null
+     * for legacy bare values) and the subject (conversationId or
+     * {@code group:<id>}). Only the FIRST separator splits — integration names must
+     * not contain {@code |} (validated at the integration store), but a subject id
+     * never does, so splitting on the first separator is safe. Returns {@code null}
+     * only for a null/blank value.
+     */
+    public static ActionValue parseActionValue(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        int sep = value.indexOf(VALUE_SEPARATOR);
+        if (sep < 0) {
+            // Legacy bare value — no integration binding available.
+            return new ActionValue(null, value);
+        }
+        String integrationName = value.substring(0, sep);
+        String subject = value.substring(sep + VALUE_SEPARATOR.length());
+        return new ActionValue(integrationName.isBlank() ? null : integrationName, subject);
+    }
+
+    /**
+     * Parsed approval button value.
+     *
+     * @param integrationName
+     *            the owning integration name, or {@code null} for a legacy bare
+     *            value (no integration binding — treated as unverifiable)
+     * @param subject
+     *            the conversationId, or {@code group:<groupConversationId>}
+     */
+    public record ActionValue(String integrationName, String subject) {
+        /** Whether the subject targets a group discussion. */
+        public boolean isGroup() {
+            return subject != null && subject.startsWith(GROUP_VALUE_PREFIX);
+        }
+
+        /** The groupConversationId (subject minus the {@code group:} prefix). */
+        public String groupConversationId() {
+            return isGroup() ? subject.substring(GROUP_VALUE_PREFIX.length()) : null;
+        }
+    }
+
+    // ─── Config access ───
+
+    /**
+     * Parse the comma-separated {@code hitlApproverUserIds} value into a set.
+     * Returns an empty set if unset/blank — the fail-closed default (no buttons,
+     * nobody authorized).
+     */
+    public static Set<String> parseApproverUserIds(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return Set.of();
+        }
+        return Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    /**
+     * Whether {@code slackUserId} is authorized to decide, given the configured
+     * comma-separated approver list. Fail-closed: an unset list authorizes nobody.
+     */
+    public static boolean isAuthorizedApprover(String slackUserId, String approverUserIdsCsv) {
+        if (slackUserId == null || slackUserId.isBlank()) {
+            return false;
+        }
+        return parseApproverUserIds(approverUserIdsCsv).contains(slackUserId);
+    }
+
+    // ─── Block Kit builders ───
+
+    /**
+     * Build the interactive approval-notification blocks for a paused
+     * conversation/group. If {@code includeButtons} is false (no approver list
+     * configured), the actions block is omitted — notification-only, fail-closed.
+     *
+     * @param title
+     *            leading section title (e.g. "⏸️ Conversation awaiting approval")
+     * @param subjectLabel
+     *            label for the subject id (e.g. "Conversation" or "Discussion")
+     * @param subjectId
+     *            the conversationId or groupConversationId
+     * @param agentLabel
+     *            agent/group descriptor (may be null)
+     * @param pauseReason
+     *            the pause reason from the HITL bookmark (may be null)
+     * @param timeoutInfo
+     *            human-readable timeout policy/deadline (may be null)
+     * @param actionValue
+     *            the value carried by both buttons (conversationId, or
+     *            {@code group:<id>} for a group discussion)
+     * @param includeButtons
+     *            whether to render Approve/Reject buttons
+     */
+    public static List<Map<String, Object>> buildApprovalBlocks(
+                                                                String title, String subjectLabel, String subjectId, String agentLabel,
+                                                                String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons) {
+        return buildApprovalBlocks(title, subjectLabel, subjectId, agentLabel, pauseReason,
+                timeoutInfo, actionValue, includeButtons, null, null);
+    }
+
+    /**
+     * Build the interactive approval-notification blocks for a paused
+     * conversation/group, additionally rendering pending-tool-call detail when the
+     * pause is a tool-call gate.
+     * <p>
+     * When {@code pauseType} equals {@link #PAUSE_TYPE_TOOL_CALL} and
+     * {@code pendingToolCalls} carries at least one call, one context block per
+     * call is appended (max {@value #MAX_RENDERED_TOOL_CALLS}, then a single "+N
+     * more" line): {@code "<toolName> — <argumentsRedacted truncated to 300
+     * chars>"}. {@code argumentsRedacted} is already redaction-filtered at batch
+     * build time (see {@code PendingToolCallBatch}) — the 300-char DISPLAY
+     * truncation happens here, and only here. This intentionally relaxes the
+     * names-only data-minimization stance of the plain overload above, but ONLY for
+     * the approval channel: a reviewer cannot responsibly approve
+     * {@code transfer_funds} without seeing the amount. The raw (unredacted)
+     * argument value is NEVER accessed here.
+     * <p>
+     * For a RULE pause (any other {@code pauseType}, including {@code null}) or a
+     * {@code null}/empty batch, this renders identically to the plain overload — no
+     * tool-detail blocks, no behavior change.
+     *
+     * @param pauseType
+     *            the bookmark's {@code hitlPauseType} ({@code "TOOL_CALL"},
+     *            {@code "RULE"}, or {@code null})
+     * @param pendingToolCalls
+     *            the bookmark's pending tool-call batch (may be {@code null})
+     */
+    public static List<Map<String, Object>> buildApprovalBlocks(
+                                                                String title, String subjectLabel, String subjectId, String agentLabel,
+                                                                String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons,
+                                                                String pauseType, PendingToolCallBatch pendingToolCalls) {
+
+        var blocks = new ArrayList<Map<String, Object>>();
+
+        blocks.add(section(markdown("*" + title + "*")));
+
+        var fields = new ArrayList<Map<String, Object>>();
+        fields.add(markdown("*" + subjectLabel + ":*\n`" + safe(subjectId) + "`"));
+        if (agentLabel != null && !agentLabel.isBlank()) {
+            fields.add(markdown("*Agent:*\n" + safe(agentLabel)));
+        }
+        if (pauseReason != null && !pauseReason.isBlank()) {
+            fields.add(markdown("*Reason:*\n" + safe(pauseReason)));
+        }
+        if (timeoutInfo != null && !timeoutInfo.isBlank()) {
+            fields.add(markdown("*Timeout:*\n" + safe(timeoutInfo)));
+        }
+        var fieldsSection = new LinkedHashMap<String, Object>();
+        fieldsSection.put("type", "section");
+        fieldsSection.put("fields", fields);
+        blocks.add(fieldsSection);
+
+        if (PAUSE_TYPE_TOOL_CALL.equals(pauseType)) {
+            blocks.addAll(buildToolCallDetailBlocks(pendingToolCalls));
+        }
+
+        if (includeButtons) {
+            var actions = new LinkedHashMap<String, Object>();
+            actions.put("type", "actions");
+            actions.put("elements", List.of(
+                    button("✅ Approve", ACTION_APPROVE, actionValue, "primary"),
+                    button("⛔ Reject", ACTION_REJECT, actionValue, "danger")));
+            blocks.add(actions);
+        } else {
+            blocks.add(context(
+                    "No approver user ids configured — approve or reject via the API."));
+        }
+
+        return blocks;
+    }
+
+    /**
+     * Build one context block per pending tool call (max
+     * {@value #MAX_RENDERED_TOOL_CALLS}, then a single "+N more" block). Returns an
+     * empty list when {@code batch} is null or has no calls — never throws.
+     */
+    private static List<Map<String, Object>> buildToolCallDetailBlocks(PendingToolCallBatch batch) {
+        if (batch == null || batch.getCalls() == null || batch.getCalls().isEmpty()) {
+            return List.of();
+        }
+        var calls = batch.getCalls();
+        var detailBlocks = new ArrayList<Map<String, Object>>();
+        int rendered = Math.min(calls.size(), MAX_RENDERED_TOOL_CALLS);
+        for (int i = 0; i < rendered; i++) {
+            var call = calls.get(i);
+            String toolName = safe(call.getToolName());
+            String args = truncateForDisplay(call.getArgumentsRedacted());
+            detailBlocks.add(context(toolName + " — " + args));
+        }
+        int remaining = calls.size() - rendered;
+        if (remaining > 0) {
+            detailBlocks.add(context("+" + remaining + " more"));
+        }
+        return detailBlocks;
+    }
+
+    /**
+     * Truncate an already-redacted argument string to
+     * {@value #TOOL_ARGS_DISPLAY_MAX_CHARS} characters for approval-card display.
+     * This is a DISPLAY-only truncation distinct from the byte caps already applied
+     * to {@code argumentsRedacted} at batch build time.
+     */
+    private static String truncateForDisplay(String argumentsRedacted) {
+        String text = safe(argumentsRedacted);
+        if (text.length() <= TOOL_ARGS_DISPLAY_MAX_CHARS) {
+            return text;
+        }
+        return text.substring(0, TOOL_ARGS_DISPLAY_MAX_CHARS) + "…";
+    }
+
+    /**
+     * Build the finalized (buttons-removed) blocks shown after a decision is made
+     * or when the message must reflect a resolved state.
+     */
+    public static List<Map<String, Object>> buildResolvedBlocks(String resolutionMarkdown) {
+        return List.of(section(markdown(resolutionMarkdown)));
+    }
+
+    // ─── Block Kit primitives ───
+
+    private static Map<String, Object> section(Map<String, Object> text) {
+        var block = new LinkedHashMap<String, Object>();
+        block.put("type", "section");
+        block.put("text", text);
+        return block;
+    }
+
+    private static Map<String, Object> context(String text) {
+        var block = new LinkedHashMap<String, Object>();
+        block.put("type", "context");
+        block.put("elements", List.of(markdown(text)));
+        return block;
+    }
+
+    private static Map<String, Object> markdown(String text) {
+        var obj = new LinkedHashMap<String, Object>();
+        obj.put("type", "mrkdwn");
+        obj.put("text", text);
+        return obj;
+    }
+
+    private static Map<String, Object> button(String text, String actionId, String value, String style) {
+        var btn = new LinkedHashMap<String, Object>();
+        btn.put("type", "button");
+        var txt = new LinkedHashMap<String, Object>();
+        txt.put("type", "plain_text");
+        txt.put("text", text);
+        txt.put("emoji", true);
+        btn.put("text", txt);
+        btn.put("action_id", actionId);
+        btn.put("value", value);
+        if (style != null) {
+            btn.put("style", style);
+        }
+        return btn;
+    }
+
+    private static String safe(String s) {
+        return s == null ? "" : s;
+    }
+
+    // ─── Response-text extraction (shared with SlackEventHandler) ───
+
+    /**
+     * Extract the text response from a conversation snapshot, returning a
+     * Slack-friendly placeholder (never null) when no meaningful output exists.
+     * Handles output items stored as {@link OutputItem} POJOs (live memory callback
+     * path) or as Maps (deserialized from MongoDB).
+     * <p>
+     * This is the single source of truth for both the normal say path and the HITL
+     * continuation push, so both surfaces format agent output identically.
+     */
+    public static String extractSlackResponseText(SimpleConversationMemorySnapshot snapshot) {
+        if (snapshot == null) {
+            return "_No response from agent._";
+        }
+        var outputs = snapshot.getConversationOutputs();
+        if (outputs == null || outputs.isEmpty()) {
+            return "_No response from agent._";
+        }
+
+        var lastOutput = outputs.get(outputs.size() - 1);
+        if (lastOutput == null) {
+            return "_No response from agent._";
+        }
+
+        var texts = new ArrayList<String>();
+
+        // Format 1: Nested "output" array — may contain TextOutputItem POJOs or Maps
+        Object outputArray = lastOutput.get("output");
+        if (outputArray instanceof List<?> list) {
+            for (var item : list) {
+                if (item instanceof String s) {
+                    texts.add(s);
+                } else if (item instanceof OutputItem oi && oi.toString() != null) {
+                    // TextOutputItem.toString() returns the text field
+                    texts.add(oi.toString());
+                } else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+                    texts.add(s);
+                }
+            }
+            if (!texts.isEmpty()) {
+                return String.join("\n", texts);
+            }
+        }
+
+        // Format 2: Flat keys like "output:text:agent" or "output:text:*"
+        for (var entry : lastOutput.entrySet()) {
+            if (entry.getKey() instanceof String key && key.startsWith("output:text:")) {
+                Object val = entry.getValue();
+                if (val instanceof String s) {
+                    texts.add(s);
+                } else if (val instanceof List<?> list) {
+                    for (var item : list) {
+                        if (item instanceof String s) {
+                            texts.add(s);
+                        } else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+                            texts.add(s);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!texts.isEmpty()) {
+            return String.join("\n", texts);
+        }
+
+        return "_Agent completed but produced no text output._";
+    }
+}

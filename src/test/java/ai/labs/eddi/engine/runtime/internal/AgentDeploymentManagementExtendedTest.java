@@ -13,6 +13,8 @@ import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -64,11 +66,13 @@ class AgentDeploymentManagementExtendedTest {
         var channelMigration = mock(ChannelConnectorMigration.class);
         var runtime = mock(IRuntime.class);
         when(runtime.getScheduledExecutorService()).thenReturn(mock(ScheduledExecutorService.class));
+        var workflowStore = mock(IWorkflowStore.class);
+        var ruleSetStore = mock(IRuleSetStore.class);
 
         management = new AgentDeploymentManagement(
                 deploymentStore, agentFactory, agentStore, agentsReadiness,
                 conversationMemoryStore, documentDescriptorStore,
-                migrationManager, v6Rename, v6Qute, channelMigration, runtime, 30);
+                migrationManager, v6Rename, v6Qute, channelMigration, runtime, workflowStore, ruleSetStore, 30);
     }
 
     // ─── manageAgentDeployments ─────────────────────────────

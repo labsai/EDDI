@@ -38,6 +38,24 @@ class SecretRedactionFilterTest {
     }
 
     @Test
+    void redact_bearerOpaqueToken() {
+        // The Bearer rule now redacts opaque (non-JWT, dot-less) tokens too, as long
+        // as they are long enough (>= 20 chars) to not be a benign word.
+        String input = "Authorization: Bearer abcdefghij1234567890abcdef";
+        String result = SecretRedactionFilter.redact(input);
+
+        assertFalse(result.contains("abcdefghij1234567890abcdef"));
+        assertTrue(result.contains("Bearer <REDACTED>"));
+    }
+
+    @Test
+    void redact_bearerShortToken_unchanged() {
+        // Below the 20-char minimum → left intact so benign short words survive.
+        String input = "Bearer short";
+        assertEquals(input, SecretRedactionFilter.redact(input));
+    }
+
+    @Test
     void redact_vaultReference() {
         String input = "Resolved secret: ${vault:default/agent1/apiKey}";
         String result = SecretRedactionFilter.redact(input);

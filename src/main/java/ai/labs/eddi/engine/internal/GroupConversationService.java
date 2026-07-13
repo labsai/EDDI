@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
@@ -24,6 +25,9 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LifecyclePolicy;
+import ai.labs.eddi.configs.hitl.HitlGranularity;
+import ai.labs.eddi.configs.hitl.HitlRejectionPolicy;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
@@ -47,6 +51,10 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -86,7 +94,9 @@ public class GroupConversationService implements IGroupConversationService {
     private final ExecutorService executorService;
     private final AgentSigningService agentSigningService;
     private final IAgentStore agentStore;
+    private final IScheduleStore scheduleStore;
     private final NonceCacheService nonceCacheService;
+    private final AuditLedgerService auditLedgerService;
     private final String defaultTenantId;
 
     // Incremental peer verification: tracks the last verified transcript index
@@ -98,12 +108,15 @@ public class GroupConversationService implements IGroupConversationService {
     private final Timer timerGroupDiscussion;
     private final Counter counterGroupDiscussion;
     private final Counter counterGroupFailure;
+    private final Counter counterGroupHitlPause;
+    private final Counter counterGroupHitlResume;
+    private final Counter counterGroupMemberPauseSkipped;
 
     @Inject
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
-            AgentSigningService agentSigningService, IAgentStore agentStore,
-            NonceCacheService nonceCacheService,
+            AgentSigningService agentSigningService, IAgentStore agentStore, IScheduleStore scheduleStore,
+            NonceCacheService nonceCacheService, AuditLedgerService auditLedgerService,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
@@ -115,7 +128,9 @@ public class GroupConversationService implements IGroupConversationService {
         this.maxDepth = maxDepth;
         this.agentSigningService = agentSigningService;
         this.agentStore = agentStore;
+        this.scheduleStore = scheduleStore;
         this.nonceCacheService = nonceCacheService;
+        this.auditLedgerService = auditLedgerService;
         this.defaultTenantId = defaultTenantId;
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
@@ -123,6 +138,9 @@ public class GroupConversationService implements IGroupConversationService {
         this.timerGroupDiscussion = meterRegistry.timer("eddi_group_discussion_duration");
         this.counterGroupDiscussion = meterRegistry.counter("eddi_group_discussion_count");
         this.counterGroupFailure = meterRegistry.counter("eddi_group_discussion_failure_count");
+        this.counterGroupHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "group");
+        this.counterGroupHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "group");
+        this.counterGroupMemberPauseSkipped = meterRegistry.counter("eddi_group_member_pause_skipped_count");
     }
 
     @PreDestroy
@@ -173,7 +191,7 @@ public class GroupConversationService implements IGroupConversationService {
         }
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
-        return executeDiscussion(gc, config, phases, question, listener);
+        return executeDiscussion(gc, config, phases, question, listener, 0);
     }
 
     @Override
@@ -202,18 +220,31 @@ public class GroupConversationService implements IGroupConversationService {
         // Create the conversation synchronously so we can return its ID
         GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
 
+        // Register the control token BEFORE submitting: the caller already has the
+        // conversation ID, so a cancel can arrive before the executor thread runs —
+        // it must find a signalable token instead of racing the DB state.
+        activeTokens.put(gc.getId(), new DiscussionControlToken());
+
         // Run the discussion in a virtual thread — reuse the same gc (no duplicate
         // creation)
-        executorService.submit(() -> {
-            try {
-                executeDiscussion(gc, config, phases, question, listener);
-            } catch (Exception e) {
-                LOGGER.errorf("Async group discussion failed for %s: %s", groupId, e.getMessage());
-                if (listener != null) {
-                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+        try {
+            executorService.submit(() -> {
+                try {
+                    executeDiscussion(gc, config, phases, question, listener, 0);
+                } catch (Exception e) {
+                    LOGGER.errorf("Async group discussion failed for %s: %s", groupId, e.getMessage());
+                    if (listener != null) {
+                        listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+                    }
                 }
-            }
-        });
+            });
+        } catch (RuntimeException e) {
+            // Executor saturated/shut down — no thread will ever run this
+            // discussion. Fail it instead of leaving an IN_PROGRESS zombie.
+            activeTokens.remove(gc.getId());
+            failConversation(gc);
+            throw new GroupDiscussionException("Failed to start group discussion: " + e.getMessage(), e);
+        }
 
         return gc;
     }
@@ -225,11 +256,14 @@ public class GroupConversationService implements IGroupConversationService {
      * synthesis_start for correct semantic ordering.
      */
     private GroupConversation executeDiscussion(GroupConversation gc, AgentGroupConfiguration config, List<DiscussionPhase> phases, String question,
-                                                GroupDiscussionEventListener listener)
+                                                GroupDiscussionEventListener listener, int startPhaseIndex)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException {
 
         long startTime = System.nanoTime();
-        counterGroupDiscussion.increment();
+        // MINOR-1: Only count/fire GROUP_START on fresh discussion, not resume
+        if (startPhaseIndex == 0) {
+            counterGroupDiscussion.increment();
+        }
 
         ProtocolConfig protocol = resolveProtocol(config);
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
@@ -240,10 +274,23 @@ public class GroupConversationService implements IGroupConversationService {
         gc.setDynamicAgentConfig(config.getDynamicAgents());
 
         // AtomicInteger: shared across the phase loop; parallel phases increment
-        // from virtual threads. Mutable counter avoids passing & returning counts.
-        var turnCounter = new java.util.concurrent.atomic.AtomicInteger(0);
+        // from virtual threads. Seed from pausedTurnCount to preserve budget across
+        // resumes (M3).
+        var turnCounter = new java.util.concurrent.atomic.AtomicInteger(
+                gc.getPausedTurnCount() > 0 ? gc.getPausedTurnCount() : 0);
 
-        if (listener != null) {
+        // Resolve HITL granularity from group config
+        boolean taskLevelHitl = config.getHitlConfig() != null
+                && config.getHitlConfig().getGranularity() == HitlGranularity.TASK;
+
+        // MAJOR-5: Register control token so cancelDiscussion can signal in-flight.
+        // computeIfAbsent — startAndDiscussAsync/resumeDiscussion pre-register the
+        // token before submitting, and a cancel signal set on it in that window
+        // must NOT be wiped by a fresh token here.
+        activeTokens.computeIfAbsent(gc.getId(), k -> new DiscussionControlToken());
+
+        // MINOR-1: Only fire GROUP_START on fresh discussion, not resume
+        if (startPhaseIndex == 0 && listener != null) {
             listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), gc.getGroupId(), question,
                     config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phases.size(),
                     config.getMembers().stream().map(GroupMember::agentId).toList()));
@@ -251,8 +298,19 @@ public class GroupConversationService implements IGroupConversationService {
 
         try {
             // Execute each phase
-            for (int phaseIdx = 0; phaseIdx < phases.size(); phaseIdx++) {
+            for (int phaseIdx = startPhaseIndex; phaseIdx < phases.size(); phaseIdx++) {
                 DiscussionPhase phase = phases.get(phaseIdx);
+
+                // NEW-3: Check control token at top of phase loop
+                var token = activeTokens.get(gc.getId());
+                if (token != null && token.isCancelled()) {
+                    gc.setState(GroupConversationState.CANCELLED);
+                    gc.setLastModified(Instant.now());
+                    conversationStore.update(gc);
+                    LOGGER.infof("Group discussion %s cancelled via control token at phase %d", gc.getId(), phaseIdx);
+                    notifyCancelled(gc, listener);
+                    return gc;
+                }
 
                 for (int repeat = 0; repeat < Math.max(phase.repeats(), 1); repeat++) {
 
@@ -298,11 +356,81 @@ public class GroupConversationService implements IGroupConversationService {
                         executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
                     }
 
+                    // #27/#45: a cross-pod cancel/ABORT flips the persisted state to
+                    // CANCELLED/FAILED while this leg runs. The periodic write below
+                    // is a whole-document store from this leg's in-memory copy — an
+                    // unconditional write would resurrect IN_PROGRESS and also clobber
+                    // transcript entries appended by the terminal writer. Honor a
+                    // cross-pod terminal flip at this phase boundary instead.
+                    if (persistedTerminalOverride(gc, listener)) {
+                        return conversationStore.read(gc.getId());
+                    }
+
                     gc.setLastModified(Instant.now());
                     conversationStore.update(gc);
 
                     if (listener != null) {
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
+                    }
+                }
+
+                // R1: Check for cancel BEFORE the HITL gate. After the wave loop
+                // breaks on a cancel signal, control reaches here before the next
+                // phase-loop iteration's cancel check — without this, the pause
+                // gate below would commit a pause for a cancelled discussion.
+                {
+                    var cancelToken = activeTokens.get(gc.getId());
+                    if (cancelToken != null && cancelToken.isCancelled()) {
+                        gc.setState(GroupConversationState.CANCELLED);
+                        gc.setLastModified(Instant.now());
+                        conversationStore.update(gc);
+                        LOGGER.infof("Group discussion %s cancelled before HITL gate at phase %d", gc.getId(), phaseIdx);
+                        notifyCancelled(gc, listener);
+                        return gc;
+                    }
+                }
+
+                // --- HITL gates: PHASE and TASK are mutually exclusive ---
+                // MAJOR-1: Only check phase.requiresApproval() for the relevant granularity.
+                // TASK-level: gate on requiresApproval() AND taskLevelHitl AND tasks awaiting.
+                // PHASE-level: gate on requiresApproval() AND NOT taskLevelHitl.
+                // Phase 5b: TASK granularity only applies to EXECUTE phases (they have
+                // a SharedTaskList). Non-EXECUTE phases fall back to PHASE-style pause.
+                if (phase.requiresApproval()) {
+                    if (taskLevelHitl && phase.type() == PhaseType.EXECUTE) {
+                        // TASK granularity: pause if tasks await approval — or if an
+                        // aborted wave (timeout/error) left executable tasks behind.
+                        // Falling through with unexecuted tasks would run VERIFY and
+                        // synthesis over incomplete work and silently skip the rest.
+                        boolean awaiting = gc.getTaskList() != null && gc.getTaskList().hasAwaitingApproval();
+                        boolean unfinished = gc.getTaskList() != null && !gc.getTaskList().findExecutableTasks().isEmpty();
+                        if (awaiting || unfinished) {
+                            // #4: no-progress guard. A resume that re-pauses at the same
+                            // phase with an identical task-state fingerprint made zero
+                            // progress (exhausted turn budget leaving ASSIGNED tasks, or
+                            // ASSIGNED tasks whose agentId no longer resolves). Re-pausing
+                            // would loop forever — unbounded under AUTO_APPROVE. Fail
+                            // instead, which guarantees termination.
+                            String fingerprint = taskPauseFingerprint(gc, phaseIdx);
+                            if (fingerprint.equals(gc.getHitlLastPauseFingerprint())) {
+                                failDiscussionNoProgress(gc, phaseIdx, phase, listener);
+                                return gc;
+                            }
+                            gc.setHitlLastPauseFingerprint(fingerprint);
+                            if (!awaiting) {
+                                LOGGER.warnf("EXECUTE phase %d of GC %s ended with executable task(s) left "
+                                        + "(aborted wave) — pausing for human review instead of skipping them",
+                                        phaseIdx, gc.getId());
+                            }
+                            commitPause(gc, phaseIdx, phase, "TASK", turnCounter.get(), listener, config);
+                            convertPauseToCancelIfSignalled(gc, listener);
+                            return gc;
+                        }
+                    } else {
+                        // PHASE granularity (or non-EXECUTE with TASK config → fallback)
+                        commitPause(gc, phaseIdx, phase, "PHASE", turnCounter.get(), listener, config);
+                        convertPauseToCancelIfSignalled(gc, listener);
+                        return gc;
                     }
                 }
 
@@ -317,9 +445,35 @@ public class GroupConversationService implements IGroupConversationService {
                     .reduce((first, second) -> second) // last one
                     .ifPresent(e -> gc.setSynthesizedAnswer(e.content()));
 
+            // Don't overwrite AWAITING_APPROVAL with COMPLETED
+            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+                return gc;
+            }
+            // #27/#45: complete with a CAS on the running state this leg believes it
+            // holds (IN_PROGRESS or SYNTHESIZING). If a cross-pod cancel/ABORT
+            // already flipped the persisted state, the CAS fails and we honor the
+            // terminal state instead of resurrecting a completed answer for work a
+            // human tried to stop.
+            var expectedRunningState = gc.getState();
             gc.setState(GroupConversationState.COMPLETED);
+            gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
+            gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
             gc.setLastModified(Instant.now());
-            conversationStore.update(gc);
+            try {
+                conversationStore.updateIfState(gc, expectedRunningState);
+            } catch (IResourceStore.ResourceModifiedException e) {
+                LOGGER.infof("Group discussion %s was terminated elsewhere (expected %s) — not overwriting with COMPLETED",
+                        gc.getId(), expectedRunningState);
+                var persisted = conversationStore.read(gc.getId());
+                if (listener != null && persisted.getState() == GroupConversationState.CANCELLED) {
+                    notifyCancelled(persisted, listener);
+                }
+                return persisted;
+            } catch (IGroupConversationStore.GroupConversationGoneException e) {
+                // deleted while the leg was running — nothing to persist into
+                LOGGER.infof("Group discussion %s was deleted while running — discarding its result", gc.getId());
+                return gc;
+            }
 
             if (listener != null) {
                 listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(gc.getState(), gc.getSynthesizedAnswer()));
@@ -328,12 +482,30 @@ public class GroupConversationService implements IGroupConversationService {
             return gc;
 
         } catch (GroupDiscussionException e) {
+            // R2: If the exception was caused by a cancel, route to CANCELLED
+            var cancelToken = activeTokens.get(gc.getId());
+            if (cancelToken != null && cancelToken.isCancelled()) {
+                gc.setState(GroupConversationState.CANCELLED);
+                gc.setLastModified(Instant.now());
+                conversationStore.update(gc);
+                notifyCancelled(gc, listener);
+                return gc;
+            }
             failConversation(gc);
             if (listener != null) {
                 listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
             }
             throw e;
         } catch (Exception e) {
+            // R2: If the exception was caused by a cancel, route to CANCELLED
+            var cancelToken = activeTokens.get(gc.getId());
+            if (cancelToken != null && cancelToken.isCancelled()) {
+                gc.setState(GroupConversationState.CANCELLED);
+                gc.setLastModified(Instant.now());
+                conversationStore.update(gc);
+                notifyCancelled(gc, listener);
+                return gc;
+            }
             failConversation(gc);
             if (listener != null) {
                 listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
@@ -341,11 +513,276 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDiscussionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
-            // Clean up incremental verification cursor — conversation is done
-            lastVerifiedIndex.remove(gc.getId());
-            // Ephemeral agent cleanup — undeploy/delete agents created during this
-            // discussion
-            cleanupEphemeralAgents(gc, config);
+            // NEW-2: Always remove the control token — paused conversations have no
+            // running thread, so a lingering token causes cancel-of-paused to take
+            // the no-op signal branch. Resume re-registers a fresh token. Re-check the
+            // removed token so a cancel that raced this remove is not silently dropped.
+            removeTokenAndConvertIfSignalled(gc, listener);
+            // Only clean up ephemeral agents when the discussion is truly done
+            if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
+                lastVerifiedIndex.remove(gc.getId());
+                cleanupEphemeralAgents(gc, config);
+            }
+        }
+    }
+
+    /**
+     * Fires the cancelled event so SSE subscribers see the terminal state and can
+     * close their streams (previously CancelledEvent existed but was never emitted,
+     * leaving /discuss/stream clients hanging after a cancel).
+     */
+    private void notifyCancelled(GroupConversation gc, GroupDiscussionEventListener listener) {
+        if (listener != null) {
+            listener.onCancelled(new GroupConversationEventSink.CancelledEvent(
+                    "Discussion cancelled", gc.getUserId()));
+        }
+    }
+
+    /**
+     * Cross-pod terminal-override check for a phase boundary (#27/#45). Group
+     * control is per-pod (activeTokens is process-local), so a cancel/ABORT landing
+     * on another pod flips only the persisted state — the running leg never sees it
+     * and its next whole-document write would resurrect the running state and
+     * clobber concurrent transcript writes. Re-reads the persisted state at the
+     * boundary: if another writer moved it to a terminal state, the leg stops and
+     * honors it (notifying the listener on a cancel). Best-effort: a store read
+     * failure keeps the leg running (the local token path still applies).
+     *
+     * @return true if the persisted state is terminal and this leg should stop
+     */
+    private boolean persistedTerminalOverride(GroupConversation gc, GroupDiscussionEventListener listener) {
+        try {
+            var persistedState = conversationStore.read(gc.getId()).getState();
+            if (persistedState == GroupConversationState.CANCELLED
+                    || persistedState == GroupConversationState.FAILED
+                    || persistedState == GroupConversationState.COMPLETED) {
+                LOGGER.infof("Group discussion %s was moved to %s elsewhere — stopping this leg at the phase boundary",
+                        gc.getId(), persistedState);
+                if (persistedState == GroupConversationState.CANCELLED) {
+                    notifyCancelled(gc, listener);
+                }
+                return true;
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Phase-boundary persisted-state re-check failed for %s: %s (continuing)",
+                    gc.getId(), e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * Commits an HITL pause to the group conversation — sets AWAITING_APPROVAL,
+     * records pause metadata, persists, and fires the SSE event.
+     */
+    private void commitPause(GroupConversation gc, int phaseIdx,
+                             AgentGroupConfiguration.DiscussionPhase phase,
+                             String granularity, int currentTurnCount,
+                             GroupDiscussionEventListener listener,
+                             AgentGroupConfiguration config)
+            throws IResourceStore.ResourceStoreException {
+        gc.setState(GroupConversationState.AWAITING_APPROVAL);
+        gc.setPausedAt(Instant.now());
+        gc.setPausedAtPhaseIndex(phaseIdx);
+        gc.setPausedPhaseName(phase.name());
+        gc.setPausedTurnCount(currentTurnCount);
+        gc.setHitlPauseType(GroupConversation.HitlPauseType.valueOf(granularity));
+        gc.setHitlPauseReason("Requires human approval (" + granularity + ") — phase: " + phase.name());
+        // Phase 6d: Copy timeout config into bookmark for REST visibility (from the
+        // already-loaded config — no extra store read)
+        if (config != null && config.getHitlConfig() != null) {
+            var hitlConfig = config.getHitlConfig();
+            gc.setHitlTimeoutPolicy(hitlConfig.getTimeoutPolicy() != null
+                    ? hitlConfig.getTimeoutPolicy()
+                    : HitlTimeoutPolicy.WAIT_INDEFINITELY);
+            gc.setHitlApprovalTimeout(hitlConfig.getApprovalTimeout());
+        } else {
+            gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
+        }
+        conversationStore.update(gc);
+
+        // MAJOR-2: Schedule group timeout if configured
+        scheduleGroupHitlTimeout(gc);
+        counterGroupHitlPause.increment();
+
+        if (listener != null) {
+            listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
+                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity));
+        }
+    }
+
+    /**
+     * Fingerprint of the task state at a TASK-granularity pause (#4). Captures the
+     * phase index plus every non-terminal task's id and status — deliberately NOT
+     * the turn count, so a resume that burns turns without advancing any task
+     * produces the SAME fingerprint and is detected as no-progress. Two pauses with
+     * equal fingerprints mean nothing changed between them.
+     */
+    private String taskPauseFingerprint(GroupConversation gc, int phaseIdx) {
+        var sb = new StringBuilder("phase=").append(phaseIdx).append(';');
+        if (gc.getTaskList() != null) {
+            gc.getTaskList().all().stream()
+                    .filter(t -> t.status() != SharedTaskList.TaskStatus.COMPLETED
+                            && t.status() != SharedTaskList.TaskStatus.VERIFIED
+                            && t.status() != SharedTaskList.TaskStatus.FAILED)
+                    .map(t -> t.id() + ":" + t.status())
+                    .sorted()
+                    .forEach(s -> sb.append(s).append(','));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Fails a TASK-granularity discussion that cannot make progress (#4): a resume
+     * re-paused at the same phase with an identical task-state fingerprint. Records
+     * an actionable transcript entry, fires a terminal SSE event, releases
+     * paused-state resources, and persists FAILED. Guarantees the
+     * pause→approve→pause loop terminates.
+     */
+    private void failDiscussionNoProgress(GroupConversation gc, int phaseIdx, DiscussionPhase phase,
+                                          GroupDiscussionEventListener listener)
+            throws IResourceStore.ResourceStoreException {
+        String msg = "Discussion failed: EXECUTE phase '" + phase.name() + "' cannot make progress — "
+                + "the same task(s) remained executable across an approval cycle without advancing "
+                + "(exhausted turn budget or tasks assigned to an agent that can no longer be resolved). "
+                + "Increase protocol.maxTurns, fix the task assignments, or cancel the discussion.";
+        LOGGER.warnf("No-progress TASK pause detected for GC %s at phase %d — failing to guarantee termination",
+                gc.getId(), phaseIdx);
+        gc.getTranscript().add(new TranscriptEntry(
+                "system", "System", null, phaseIdx, phase.name(),
+                TranscriptEntryType.ERROR, Instant.now(), msg, null));
+        gc.setState(GroupConversationState.FAILED);
+        gc.setPausedAt(null);
+        gc.setHitlLastPauseFingerprint(null);
+        gc.setLastModified(Instant.now());
+        conversationStore.update(gc);
+        counterGroupFailure.increment();
+        deleteGroupHitlTimeoutSchedule(gc.getId());
+        cleanupAfterTerminalState(gc);
+        if (listener != null) {
+            listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(msg));
+        }
+    }
+
+    /**
+     * Converts a just-committed pause into a cancellation when a cancel signal
+     * landed while the pause was being written. cancelDiscussion saw the live
+     * token, signalled it, and reported success — but the running leg had already
+     * passed its pre-gate cancel check, so without this the pause would survive a
+     * "successful" cancel and the token signal would be dropped by the finally
+     * block.
+     */
+    private void convertPauseToCancelIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener) {
+        convertPauseToCancelIfSignalled(gc, listener, activeTokens.get(gc.getId()));
+    }
+
+    /**
+     * Removes the control token AND re-checks the removed instance for a cancel
+     * signal. A cancel that landed AFTER an in-leg
+     * {@code convertPauseToCancelIfSignalled} check but BEFORE this remove would
+     * otherwise be dropped with the discarded token, leaving a "cancelled"
+     * discussion stuck AWAITING_APPROVAL with an armed timer (cancelDiscussion
+     * reported success on the token path and did not touch the DB/schedule).
+     * Re-checking the removed instance closes that window; signals arriving after
+     * the remove take cancelDiscussion's DB-CAS path instead.
+     */
+    private void removeTokenAndConvertIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener) {
+        var removed = activeTokens.remove(gc.getId());
+        if (removed != null && removed.isCancelled() && gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+            convertPauseToCancelIfSignalled(gc, listener, removed);
+        }
+    }
+
+    private void convertPauseToCancelIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener,
+                                                 DiscussionControlToken token) {
+        if (token == null || !token.isCancelled()) {
+            return;
+        }
+        try {
+            gc.setState(GroupConversationState.CANCELLED);
+            gc.setPausedAt(null);
+            gc.setLastModified(Instant.now());
+            conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+            deleteGroupHitlTimeoutSchedule(gc.getId());
+            auditHitlCancellation(gc, token.getSignal());
+            LOGGER.infof("Cancel signal landed while pausing GC %s — converted pause to CANCELLED", gc.getId());
+            notifyCancelled(gc, listener);
+        } catch (IResourceStore.ResourceModifiedException e) {
+            // Someone else moved the state concurrently (approve/timeout) — restore
+            // the in-memory state so the executeDiscussion finally block does not
+            // release paused-state resources for a conversation still paused in DB.
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            LOGGER.infof("Pause→cancel conversion for GC %s lost a state race — leaving persisted state", gc.getId());
+        } catch (IGroupConversationStore.GroupConversationGoneException e) {
+            // deleted concurrently — nothing left to cancel
+            LOGGER.infof("Pause→cancel conversion for GC %s skipped — conversation was deleted", gc.getId());
+        } catch (Exception e) {
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            LOGGER.warnf("Failed to convert just-committed pause of GC %s to CANCELLED: %s",
+                    gc.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Minimum delay before a past-due re-armed group timeout fires (mirrors crash
+     * recovery).
+     */
+    private static final java.time.Duration GROUP_HITL_REARM_GRACE = java.time.Duration.ofMinutes(2);
+
+    /**
+     * Creates a one-shot schedule for group HITL timeout. Reads the pause bookmark
+     * fields already set on the conversation (by commitPause/restoreGroupPause) —
+     * NOT the group config, so the schedule always matches what approval-status
+     * reports even if the config changed since the pause. No-ops if not configured
+     * or WAIT_INDEFINITELY.
+     * <p>
+     * G7: the deadline is anchored to the ORIGINAL pause time ({@code pausedAt +
+     * timeout}) so a restore-after-failed-resume re-arms at the same absolute due
+     * time approval-status reports, not now + another full timeout. A past-due
+     * deadline is clamped to {@code now + grace} (mirrors crash recovery). A fresh
+     * pause has pausedAt ≈ now, so this reduces to now + timeout.
+     */
+    private void scheduleGroupHitlTimeout(GroupConversation gc) {
+        try {
+            String timeoutStr = gc.getHitlApprovalTimeout();
+            HitlTimeoutPolicy policy = gc.getHitlTimeoutPolicy();
+            if (timeoutStr == null || timeoutStr.isBlank()
+                    || policy == null
+                    || policy == HitlTimeoutPolicy.WAIT_INDEFINITELY) {
+                return;
+            }
+
+            java.time.Duration timeout = java.time.Duration.parse(timeoutStr);
+            Instant pausedAt = gc.getPausedAt();
+            Instant now = Instant.now();
+            Instant fireAt = pausedAt != null ? pausedAt.plus(timeout) : now.plus(timeout);
+            // Clamp ONLY a past-due deadline (crash recovery / restore-after-failed-
+            // resume re-arm) up to the grace window. A FRESH pause has pausedAt ≈ now,
+            // so honor its configured timeout as-is — clamping it to the grace floor
+            // would silently raise any sub-2min approvalTimeout to 2 minutes (parity
+            // with the regular surface's scheduleHitlTimeout fix).
+            if (fireAt.isBefore(now)) {
+                fireAt = now.plus(GROUP_HITL_REARM_GRACE);
+            }
+
+            var schedule = new ScheduleConfiguration();
+            schedule.setName(ai.labs.eddi.engine.hitl.HitlSchedules.groupTimeoutScheduleName(gc.getId()));
+            schedule.setEnabled(true);
+            schedule.setOneTimeAt(fireAt.toString());
+            schedule.setNextFire(fireAt);
+            schedule.setCreatedAt(Instant.now());
+            schedule.setMetadata(java.util.Map.of(
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_KEY,
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_TIMEOUT,
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_POLICY_KEY, policy.name(),
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_SURFACE_KEY,
+                    ai.labs.eddi.engine.hitl.HitlSchedules.SURFACE_GROUP,
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_CONVERSATION_ID_KEY, gc.getId()));
+            scheduleStore.createSchedule(schedule);
+            LOGGER.infof("Scheduled group HITL timeout for %s at %s (policy: %s)",
+                    gc.getId(), fireAt, policy);
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to schedule group HITL timeout for %s: %s",
+                    gc.getId(), e.getMessage());
         }
     }
 
@@ -359,6 +796,15 @@ public class GroupConversationService implements IGroupConversationService {
     public void deleteGroupConversation(String groupConversationId) throws IResourceStore.ResourceStoreException {
         try {
             GroupConversation gc = conversationStore.read(groupConversationId);
+            // #12: deleting a paused discussion must run the same cleanup as
+            // cancel-of-paused. executeDiscussion's finally deliberately skipped
+            // cleanup while AWAITING_APPROVAL, so without this the armed timeout
+            // schedule fires against a deleted conversation, ephemeral dynamic
+            // agents stay deployed forever, and the lastVerifiedIndex entry leaks.
+            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+                deleteGroupHitlTimeoutSchedule(groupConversationId);
+                cleanupAfterTerminalState(gc);
+            }
             for (String privateConvId : gc.getMemberConversationIds().values()) {
                 try {
                     conversationService.endConversation(privateConvId);
@@ -375,6 +821,26 @@ public class GroupConversationService implements IGroupConversationService {
     @Override
     public List<GroupConversation> listGroupConversations(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException {
         return conversationStore.listByGroupId(groupId, index, limit);
+    }
+
+    @Override
+    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> listGroupPendingApprovals(String groupId, int limit)
+            throws IResourceStore.ResourceStoreException {
+        // Bounded summaries — never hand full transcripts to a listing endpoint.
+        // The groupId filter is applied in the QUERY (not post-limit), so a busy
+        // deployment cannot push this group's items past the limit window.
+        int clamped = Math.max(1, Math.min(limit, 1000));
+        return conversationStore.findByState(GroupConversationState.AWAITING_APPROVAL, groupId, clamped).stream()
+                .map(gc -> {
+                    var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                            gc.getId(), null, gc.getUserId(), gc.getPausedAt(),
+                            gc.getHitlPauseReason(),
+                            gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : null);
+                    summary.setGroupId(gc.getGroupId());
+                    summary.setApprovalTimeout(gc.getHitlApprovalTimeout());
+                    return summary;
+                })
+                .toList();
     }
 
     // =================================================================
@@ -605,7 +1071,7 @@ public class GroupConversationService implements IGroupConversationService {
                 planInput = "Decompose this goal into tasks for your team: " + question;
             }
 
-            TranscriptEntry planEntry = executeAgentTurn(planner, gc, planInput, protocol, phaseIdx, phase, null);
+            TranscriptEntry planEntry = executeAgentTurn(planner, gc, planInput, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(planEntry);
 
             if (listener != null) {
@@ -669,6 +1135,11 @@ public class GroupConversationService implements IGroupConversationService {
             return;
         }
 
+        // Resolve HITL TASK-level flag locally (not available from executeDiscussion
+        // scope)
+        boolean taskLevelHitl = config.getHitlConfig() != null
+                && config.getHitlConfig().getGranularity() == HitlGranularity.TASK;
+
         // Note: unlike executeParallelPhase, no transcript snapshot is needed here
         // because agents receive task-specific input via buildTaskExecutionInput(),
         // not transcript context.
@@ -681,6 +1152,13 @@ public class GroupConversationService implements IGroupConversationService {
         // Tasks that become executable when their dependencies finish are picked up
         // in the next wave. This handles dependsOn chains across any depth.
         for (int wave = 0; wave < maxWaves; wave++) {
+            // NEW-3: Check control token at top of wave loop
+            var token = activeTokens.get(gc.getId());
+            if (token != null && token.isCancelled()) {
+                LOGGER.infof("EXECUTE wave loop cancelled via control token at wave %d", wave);
+                break;
+            }
+
             Map<String, List<TaskItem>> tasksByAgent = gc.getTaskList().findExecutableTasks().stream()
                     .filter(t -> t.assignedAgentId() != null)
                     .collect(Collectors.groupingBy(TaskItem::assignedAgentId));
@@ -725,13 +1203,21 @@ public class GroupConversationService implements IGroupConversationService {
 
                             // Build task-specific input
                             String taskInput = buildTaskExecutionInput(task, question, phase, gc);
-                            TranscriptEntry entry = executeAgentTurn(member, gc, taskInput, protocol, phaseIdx, phase, null);
+                            TranscriptEntry entry = executeAgentTurn(member, gc, taskInput, protocol, phaseIdx, phase, null, listener);
 
                             synchronized (gc.getTranscript()) {
                                 gc.getTranscript().add(entry);
                             }
 
-                            gc.getTaskList().completeTask(task.id(), entry.content());
+                            // HITL TASK-level: submit for approval only when BOTH
+                            // taskLevelHitl AND this phase requires approval. Otherwise
+                            // auto-complete. Without this check, TASK_FORCE phases
+                            // (requiresApproval=false) strand tasks in AWAITING_APPROVAL.
+                            if (taskLevelHitl && phase.requiresApproval()) {
+                                gc.getTaskList().submitForApproval(task.id(), entry.content());
+                            } else {
+                                gc.getTaskList().completeTask(task.id(), entry.content());
+                            }
 
                             if (listener != null) {
                                 listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
@@ -762,12 +1248,32 @@ public class GroupConversationService implements IGroupConversationService {
             // Wait for this wave — timeout based on max tasks per agent (H2 fix)
             int maxTasksPerAgent = tasksByAgent.values().stream().mapToInt(List::size).max().orElse(1);
             try {
-                CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
-                        .get(timeout * (long) maxTasksPerAgent, TimeUnit.SECONDS);
+                var allOf = CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new));
+                // NEW-3: Register the blocking future so IMMEDIATE cancel can interrupt.
+                // Re-check the signal AFTER registering: a CANCEL_IMMEDIATE that landed
+                // while this future was being built cancelled only the previous handle,
+                // so cancel it here too — otherwise the wave blocks in get() until the
+                // timeout despite the cancel already having been requested.
+                if (token != null) {
+                    token.setActiveFuture(allOf);
+                    if (token.isCancelled()) {
+                        allOf.cancel(true);
+                    }
+                }
+                allOf.get(timeout * (long) maxTasksPerAgent, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
                 LOGGER.warnf("Task execution timed out for group %s (wave %d)",
                         LogSanitizer.sanitize(gc.getGroupId()), wave + 1);
                 futures.forEach(f -> f.cancel(true));
+                resetStrandedInProgressTasks(gc, "wave timeout");
+                break;
+            } catch (java.util.concurrent.CancellationException e) {
+                // R2: CANCEL_IMMEDIATE fires allOf.cancel(true) → CancellationException.
+                // Forward-cancel all source agent futures (allOf.cancel doesn't propagate).
+                LOGGER.infof("Wave cancelled via CANCEL_IMMEDIATE for group %s (wave %d)",
+                        LogSanitizer.sanitize(gc.getGroupId()), wave + 1);
+                futures.forEach(f -> f.cancel(true));
+                resetStrandedInProgressTasks(gc, "wave cancellation");
                 break;
             } catch (ExecutionException | InterruptedException e) {
                 LOGGER.warnf("Task execution error for group %s: %s",
@@ -775,6 +1281,9 @@ public class GroupConversationService implements IGroupConversationService {
                 if (e instanceof InterruptedException) {
                     Thread.currentThread().interrupt();
                 }
+                // R2: Forward-cancel remaining source futures on any error
+                futures.forEach(f -> f.cancel(true));
+                resetStrandedInProgressTasks(gc, "wave error");
                 break;
             }
 
@@ -799,6 +1308,28 @@ public class GroupConversationService implements IGroupConversationService {
         if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT && !errors.isEmpty()) {
             throw errors.getFirst();
         }
+    }
+
+    /**
+     * Resets tasks stranded IN_PROGRESS by an aborted wave back to ASSIGNED.
+     * Without this, a TASK-level pause committed after the abort persists tasks
+     * that {@code findExecutableTasks} can never pick up again — they and their
+     * dependents would silently never execute after resume (F11).
+     */
+    private void resetStrandedInProgressTasks(GroupConversation gc, String cause) {
+        if (gc.getTaskList() == null) {
+            return;
+        }
+        gc.getTaskList().all().stream()
+                .filter(t -> t.status() == SharedTaskList.TaskStatus.IN_PROGRESS)
+                .forEach(t -> {
+                    try {
+                        gc.getTaskList().resetToAssigned(t.id());
+                        LOGGER.infof("Reset stranded task '%s' to ASSIGNED after %s", t.id(), cause);
+                    } catch (Exception ex) {
+                        LOGGER.warnf("Failed to reset task '%s': %s", t.id(), ex.getMessage());
+                    }
+                });
     }
 
     /**
@@ -864,7 +1395,7 @@ public class GroupConversationService implements IGroupConversationService {
             verifyInput = "Review the task results and provide pass/fail for each task.";
         }
 
-        TranscriptEntry verifyEntry = executeAgentTurn(verifier, gc, verifyInput, protocol, phaseIdx, phase, null);
+        TranscriptEntry verifyEntry = executeAgentTurn(verifier, gc, verifyInput, protocol, phaseIdx, phase, null, listener);
         gc.getTranscript().add(verifyEntry);
 
         if (listener != null) {
@@ -903,12 +1434,19 @@ public class GroupConversationService implements IGroupConversationService {
             }
         }
 
+        String input;
         try {
-            return templatingEngine.processTemplate(template, data, ITemplatingEngine.TemplateMode.TEXT);
+            input = templatingEngine.processTemplate(template, data, ITemplatingEngine.TemplateMode.TEXT);
         } catch (ITemplatingEngine.TemplateEngineException e) {
             LOGGER.warnf("Template processing failed for task execution, using plain text: %s", e.getMessage());
-            return "Task: " + task.subject() + "\n" + task.description();
+            input = "Task: " + task.subject() + "\n" + task.description();
         }
+        // RETRY rejection policy: surface the reviewer's rejection feedback so the
+        // re-executing agent addresses it instead of reproducing the same output
+        if (task.verificationNote() != null && !task.verificationNote().isBlank()) {
+            input += "\n\nReviewer feedback on the previous attempt (address this): " + task.verificationNote();
+        }
+        return input;
     }
 
     /**
@@ -1106,7 +1644,7 @@ public class GroupConversationService implements IGroupConversationService {
                         new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
             }
             String input = buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null);
-            TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null);
+            TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
                 listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
@@ -1143,7 +1681,7 @@ public class GroupConversationService implements IGroupConversationService {
         List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
             try {
                 String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
-                return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null);
+                return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             } catch (GroupDiscussionException e) {
                 if (e.getCause() instanceof QuotaExceededException) {
                     throw new java.util.concurrent.CompletionException(e);
@@ -1220,7 +1758,7 @@ public class GroupConversationService implements IGroupConversationService {
                             new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
                 }
                 String input = buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target);
-                TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId());
+                TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(), listener);
                 gc.getTranscript().add(entry);
                 if (listener != null) {
                     listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
@@ -1235,7 +1773,7 @@ public class GroupConversationService implements IGroupConversationService {
     // =================================================================
 
     private TranscriptEntry executeAgentTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
-                                             DiscussionPhase phase, String targetAgentId)
+                                             DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener)
             throws GroupDiscussionException {
 
         TranscriptEntryType entryType = mapPhaseToEntryType(phase.type());
@@ -1313,8 +1851,23 @@ public class GroupConversationService implements IGroupConversationService {
             try {
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();
                 final String convId = privateConvId;
+                // #3: a member agent's own behavior rule may emit PAUSE_CONVERSATION,
+                // pausing its private conversation (AWAITING_HUMAN). Member-level HITL
+                // is not supported inside a group — flag it here and resolve it after
+                // the say callback returns, rather than recording an empty contribution.
+                final boolean[] memberPaused = {false};
+                // Task 13: capture the paused snapshot so we can branch on its HITL
+                // pause type after the callback returns — a TOOL_CALL pause is
+                // auto-resolved gracefully (system:group REJECTED), a RULE pause needs
+                // a real human and stays SKIP+cancel.
+                final ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot[] pausedSnapshot = {null};
 
                 conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false, snapshot -> {
+                    if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                        memberPaused[0] = true;
+                        pausedSnapshot[0] = snapshot;
+                    }
+
                     String response = extractResponse(snapshot);
                     // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
                     // returns empty because there are no output keys — only pipeline metadata.
@@ -1332,6 +1885,26 @@ public class GroupConversationService implements IGroupConversationService {
                 });
 
                 String response = responseFuture.get(timeout, TimeUnit.SECONDS);
+
+                // #3 / Task 13: member requested human approval mid-turn. A TOOL_CALL
+                // pause is auto-resolved gracefully — the group rejects the gated
+                // tool(s) (system:group REJECTED) via the NORMAL resume path so the
+                // member's LLM receives rejection tool-results and produces a coherent
+                // tool-less answer that becomes its contribution. Only if that resume
+                // cannot complete (times out / re-pauses) do we fall back to the
+                // RULE-pause behavior: cancel the stranded pause + record SKIPPED.
+                if (memberPaused[0]) {
+                    if (pausedSnapshot[0] != null && "TOOL_CALL".equals(pausedSnapshot[0].getHitlPauseType())) {
+                        TranscriptEntry graceful = tryResolveMemberToolPause(
+                                member, gc, convId, input, timeout, phaseIdx, phase, entryType, targetAgentId);
+                        if (graceful != null) {
+                            return graceful;
+                        }
+                    }
+                    // RULE pause (needs a real human) or a TOOL_CALL graceful attempt
+                    // that could not complete → existing SKIP + cancel handling.
+                    return handleMemberPause(member, gc, convId, phaseIdx, phase, targetAgentId, listener);
+                }
 
                 // Wave 6: Sign inter-agent messages with full envelope if configured
                 String signature = null;
@@ -1434,6 +2007,12 @@ public class GroupConversationService implements IGroupConversationService {
                 return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
                         Instant.now(), "Timeout after " + timeout + "s", targetAgentId);
 
+            } catch (IConversationService.ConversationAwaitingApprovalException e) {
+                // Member's private conversation is (or became) AWAITING_HUMAN before the say
+                // callback ran — member-level HITL is unsupported inside a group. Cancel the
+                // stranded pause and record SKIPPED (mirrors the memberPaused[0] path).
+                // convId is try-scoped, so pass the method-level privateConvId (same value).
+                return handleMemberPause(member, gc, privateConvId, phaseIdx, phase, targetAgentId, listener);
             } catch (Exception e) {
                 Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
                 // Quota errors are non-retryable and affect all agents — abort immediately
@@ -1448,6 +2027,139 @@ public class GroupConversationService implements IGroupConversationService {
                 return handleAgentFailure(member, phaseIdx, phase, protocol, cause, "Agent execution failed", targetAgentId);
             }
         }
+    }
+
+    /**
+     * Note recorded on the member's tool-less contribution when a group
+     * auto-rejects its gated tool call(s). Kept in one place so the transcript
+     * entry and docs stay consistent.
+     */
+    static final String MEMBER_TOOL_REJECTION_NOTE = "tool approval is not available during group discussions in this version";
+
+    /**
+     * Task 13 — graceful resolution of a member TOOL_CALL pause inside a group. The
+     * group has no human reviewer, so it auto-rejects the gated tool call(s) with a
+     * {@code system:group} REJECTED decision routed through the NORMAL resume path:
+     * the member's LLM receives rejection tool-results (Task 9) and produces a
+     * coherent tool-less answer, which becomes this turn's contribution.
+     * <p>
+     * The resume is driven synchronously within the member-turn budget. If it
+     * cannot complete in time, or the member re-pauses (its resumed snapshot is
+     * still {@code AWAITING_HUMAN}), this returns {@code null} — the caller then
+     * falls back to the existing member-pause handling (SKIP + cancel). A resume
+     * infrastructure failure likewise returns {@code null} so the fallback still
+     * terminates the turn cleanly.
+     *
+     * @return a real contribution entry on graceful success, or {@code null} to
+     *         signal "fall back to SKIP + cancel"
+     */
+    private TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
+                                                      String input, int timeoutSeconds, int phaseIdx,
+                                                      DiscussionPhase phase, TranscriptEntryType entryType,
+                                                      String targetAgentId) {
+        LOGGER.infof("Member agent '%s' TOOL_CALL-paused during group discussion %s (phase %d) — "
+                + "auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer",
+                member.agentId(), gc.getId(), phaseIdx);
+
+        var decision = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
+        decision.setVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.REJECTED);
+        decision.setDecidedBy("system:group");
+        decision.setNote(MEMBER_TOOL_REJECTION_NOTE);
+
+        var resumeFuture = new CompletableFuture<ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot>();
+        try {
+            conversationService.resumeConversation(convId, decision,
+                    new IConversationService.ConversationResponseHandler() {
+                        @Override
+                        public void onComplete(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+                            resumeFuture.complete(snapshot);
+                        }
+
+                        @Override
+                        public void onSkipped(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+                            // Dropped without producing a fresh answer — treat as
+                            // "could not complete" so the caller falls back.
+                            resumeFuture.complete(null);
+                        }
+                    });
+        } catch (Exception e) {
+            LOGGER.warnf("Graceful tool-pause resume failed to start for member '%s' (conv %s): %s — falling back to SKIP+cancel",
+                    member.agentId(), convId, e.getMessage());
+            return null;
+        }
+
+        ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot resumed;
+        try {
+            resumed = resumeFuture.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            LOGGER.warnf("Graceful tool-pause resume did not complete within %ds for member '%s' (conv %s) — falling back to SKIP+cancel",
+                    timeoutSeconds, member.agentId(), convId);
+            return null;
+        } catch (Exception e) {
+            LOGGER.warnf("Graceful tool-pause resume errored for member '%s' (conv %s): %s — falling back to SKIP+cancel",
+                    member.agentId(), convId, e instanceof ExecutionException && e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
+            return null;
+        }
+
+        // Re-paused (still awaiting a human) → the graceful attempt did not resolve.
+        if (resumed == null || resumed.getConversationState() == ConversationState.AWAITING_HUMAN) {
+            LOGGER.warnf("Member '%s' re-paused after graceful tool rejection (conv %s) — falling back to SKIP+cancel",
+                    member.agentId(), convId);
+            return null;
+        }
+
+        propagateDynamicAgentTracking(resumed, gc);
+
+        String response = extractResponse(resumed);
+        if ((response == null || response.isEmpty())
+                && resumed.getConversationState() == ConversationState.ERROR) {
+            response = "[Agent failed to produce output — conversation entered ERROR state]";
+        }
+
+        LOGGER.infof("Member '%s' produced a tool-less contribution after group auto-rejection (conv %s)",
+                member.agentId(), convId);
+        return new TranscriptEntry(member.agentId(), member.displayName(), response,
+                phaseIdx, phase.name(), entryType, Instant.now(),
+                null, targetAgentId);
+    }
+
+    /**
+     * Explanatory note for a member turn skipped because the member agent's own
+     * conversation requested human approval — kept in one place so the transcript
+     * entry, the SSE event, and docs stay consistent.
+     */
+    private static final String MEMBER_PAUSE_NOTE = "member agent requested human approval (PAUSE_CONVERSATION) — not supported inside group "
+            + "discussions; configure group-level HITL via requiresApproval instead";
+
+    /**
+     * Resolves a member turn whose private conversation paused for human approval
+     * (#3). Member-level HITL is unsupported inside a group in v1: leaving the
+     * pause armed strands an approval no human can meaningfully resolve, and
+     * recording the empty snapshot as a real contribution poisons later phases. So
+     * we cancel the member's pause (disarming its timeout schedule and removing it
+     * from the regular pending-approvals surface), count a metric, notify
+     * observers, and return a SKIPPED entry with an actionable note.
+     */
+    private TranscriptEntry handleMemberPause(GroupMember member, GroupConversation gc, String convId,
+                                              int phaseIdx, DiscussionPhase phase, String targetAgentId,
+                                              GroupDiscussionEventListener listener) {
+        LOGGER.warnf("Member agent '%s' paused for human approval during group discussion %s (phase %d) — "
+                + "member-level HITL is unsupported inside a group; skipping the turn and cancelling the pause",
+                member.agentId(), gc.getId(), phaseIdx);
+        try {
+            conversationService.cancelConversation(convId,
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL, "system:group");
+        } catch (Exception e) {
+            // Best-effort — still record SKIPPED so the discussion terminates cleanly.
+            LOGGER.warnf("Failed to cancel stranded member pause %s: %s", convId, e.getMessage());
+        }
+        counterGroupMemberPauseSkipped.increment();
+        if (listener != null) {
+            listener.onMemberPauseSkipped(new GroupConversationEventSink.MemberPauseSkippedEvent(
+                    member.agentId(), member.displayName(), phaseIdx, phase.name(), MEMBER_PAUSE_NOTE));
+        }
+        return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
+                TranscriptEntryType.SKIPPED, Instant.now(), MEMBER_PAUSE_NOTE, targetAgentId);
     }
 
     // =================================================================
@@ -1675,6 +2387,26 @@ public class GroupConversationService implements IGroupConversationService {
             LOGGER.infof("Executing sub-group '%s' (depth %d) as member of parent group '%s'", subGroupId, nextDepth, gc.getGroupId());
 
             GroupConversation subConversation = discuss(subGroupId, input, gc.getUserId(), nextDepth);
+
+            // Phase 5d: Nested group HITL guard — if the sub-group paused for
+            // approval, don't extract a partial answer. Nested HITL is not
+            // supported in v1; cancel the stranded sub-pause (releases its timeout
+            // schedule and removes it from pending-approval listings) and return a
+            // SKIPPED entry with explanation.
+            if (subConversation.getState() == GroupConversationState.AWAITING_APPROVAL) {
+                LOGGER.warnf("Sub-group '%s' is awaiting approval — nested HITL not supported in v1; cancelling sub-pause",
+                        subGroupId);
+                try {
+                    cancelDiscussion(subConversation.getId(), ControlSignal.CANCEL_GRACEFUL);
+                } catch (Exception cancelEx) {
+                    // best-effort cleanup — still return the SKIPPED entry below
+                    LOGGER.warnf("Failed to cancel stranded sub-group pause %s: %s",
+                            subConversation.getId(), cancelEx.getMessage());
+                }
+                return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
+                        TranscriptEntryType.SKIPPED, Instant.now(),
+                        "Sub-group awaiting approval — nested HITL not supported in v1", targetAgentId);
+            }
 
             // Extract the synthesized answer, or concatenate all responses
             String response = subConversation.getSynthesizedAnswer();
@@ -1918,6 +2650,541 @@ public class GroupConversationService implements IGroupConversationService {
         } catch (Exception e) {
             LOGGER.warnf("Peer verification check failed for agent '%s': %s",
                     receivingAgentId, e.getMessage());
+        }
+    }
+
+    // =================================================================
+    // HITL lifecycle — cancel & resume
+    // =================================================================
+
+    private final ConcurrentHashMap<String, DiscussionControlToken> activeTokens = new ConcurrentHashMap<>();
+
+    @Override
+    public boolean cancelDiscussion(String conversationId, ControlSignal mode)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        // #13: decide the cancel path BEFORE deleting the timeout schedule. The old
+        // order deleted the schedule unconditionally up front, so a cancel racing a
+        // fresh pause (token present, pause just committed) reported success yet
+        // left the pause intact — stripped of its finite timeout, silently
+        // degrading a bounded policy to WAIT_INDEFINITELY.
+        var token = activeTokens.get(conversationId);
+        if (token != null) {
+            if (mode == ControlSignal.CANCEL_IMMEDIATE) {
+                token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+                token.cancelActiveFuture();
+            } else {
+                token.setSignal(ControlSignal.CANCEL_GRACEFUL);
+            }
+            // Do NOT delete the schedule here: a running leg has no armed schedule,
+            // and if the leg is mid-pause-commit it converts the pause to CANCELLED
+            // itself (convertPauseToCancelIfSignalled), deleting the schedule only
+            // once the cancel actually wins.
+            return true; // in-flight leg signalled — it will persist CANCELLED
+        }
+        // Not actively running — update DB with a state-CAS (#9): a plain
+        // read-modify-write would race a concurrent approve/resume and could
+        // resurrect a terminal state.
+        var gc = conversationStore.read(conversationId);
+        var state = gc.getState();
+        // Only cancel from non-terminal states — guard against
+        // overwriting COMPLETED or FAILED after a race.
+        if (state == GroupConversationState.COMPLETED
+                || state == GroupConversationState.CANCELLED
+                || state == GroupConversationState.FAILED) {
+            LOGGER.infof("Cancel skipped: GC %s already in terminal state %s", conversationId, state);
+            return false;
+        }
+        boolean wasPaused = state == GroupConversationState.AWAITING_APPROVAL;
+        gc.setState(GroupConversationState.CANCELLED);
+        gc.setPausedAt(null); // keep isPaused() consistent with the terminal state
+        gc.setLastModified(Instant.now());
+        try {
+            conversationStore.updateIfState(gc, state);
+        } catch (IResourceStore.ResourceModifiedException e) {
+            // CAS lost — leave the schedule alone: whoever won the race (a fresh
+            // pause / approve / timeout) owns the schedule now. Report 409.
+            LOGGER.infof("Cancel of group conversation %s lost a concurrent state race — not overwriting", conversationId);
+            return false;
+        }
+        // Cancel won: delete the timeout schedule only now (MAJOR-3).
+        deleteGroupHitlTimeoutSchedule(conversationId);
+        if (wasPaused) {
+            // Cancelling a pending approval is an HITL decision — audit it, and
+            // release resources that were kept alive across the pause.
+            auditHitlCancellation(gc, mode);
+            cleanupAfterTerminalState(gc);
+        }
+        return true;
+    }
+
+    @Override
+    public GroupConversation resumeDiscussion(String groupConversationId, GroupApprovalRequest request,
+                                              GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+
+        var gc = conversationStore.read(groupConversationId);
+        if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
+            throw new GroupDiscussionException("Group conversation is not awaiting approval");
+        }
+
+        // Apply task-level approvals if present
+        // Phase 5a: Load rejection policy from config
+        boolean retryOnReject = false;
+        try {
+            var resId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (resId != null) {
+                var config = groupStore.read(gc.getGroupId(), resId.getVersion());
+                if (config.getHitlConfig() != null) {
+                    retryOnReject = config.getHitlConfig().getOnTaskRejection() == HitlRejectionPolicy.RETRY;
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not load rejection policy for %s, defaulting to FAIL: %s",
+                    groupConversationId, e.getMessage());
+        }
+
+        // An explicit empty map is treated exactly like an absent map (the
+        // approve-all shortcut) — otherwise {} approves nothing and the resumed
+        // phase instantly re-pauses.
+        boolean hasTaskApprovals = request.getTaskApprovals() != null && !request.getTaskApprovals().isEmpty();
+        // #30: a task-level body against a PHASE-paused (or task-list-less)
+        // conversation must fail 400 — not be silently ignored and treated as a
+        // plain phase approve. Reject before the CAS so the operator sees the error
+        // instead of an unexpected full resume.
+        if (hasTaskApprovals
+                && (gc.getTaskList() == null || gc.getHitlPauseType() == GroupConversation.HitlPauseType.PHASE)) {
+            throw new IllegalArgumentException(
+                    "taskApprovals were provided but this conversation has no task-level approval to apply "
+                            + "(it is " + (gc.getHitlPauseType() == GroupConversation.HitlPauseType.PHASE
+                                    ? "paused at PHASE granularity"
+                                    : "paused without a task list")
+                            + "); omit taskApprovals to approve the phase");
+        }
+        if (hasTaskApprovals && gc.getTaskList() != null) {
+            // #13: validate the WHOLE map up front — unknown taskIds, tasks not
+            // awaiting approval, and unknown decision VALUES must fail as a
+            // 400-class error BEFORE any mutation (partial application) and
+            // BEFORE the CAS/schedule deletion.
+            for (var entry : request.getTaskApprovals().entrySet()) {
+                var task = gc.getTaskList().findById(entry.getKey());
+                if (task == null) {
+                    throw new IllegalArgumentException(
+                            "Unknown taskId in taskApprovals: '" + entry.getKey() + "'");
+                }
+                if (task.status() != SharedTaskList.TaskStatus.AWAITING_APPROVAL) {
+                    throw new IllegalArgumentException(
+                            "Task '" + entry.getKey() + "' is not awaiting approval (status: " + task.status() + ")");
+                }
+                String value = entry.getValue();
+                if (value == null
+                        || (!"APPROVED".equalsIgnoreCase(value) && !"REJECTED".equalsIgnoreCase(value))) {
+                    throw new IllegalArgumentException(
+                            "Invalid taskApprovals value for '" + entry.getKey()
+                                    + "': expected APPROVED or REJECTED (case-insensitive), got '" + value + "'");
+                }
+            }
+
+            String reviewerNote = request.getDecision() != null && request.getDecision().getNote() != null
+                    ? request.getDecision().getNote()
+                    : "Rejected by human reviewer";
+            for (var entry : request.getTaskApprovals().entrySet()) {
+                if ("APPROVED".equalsIgnoreCase(entry.getValue())) {
+                    gc.getTaskList().approveTask(entry.getKey());
+                } else if (retryOnReject) {
+                    // RETRY policy: reset to ASSIGNED with the reviewer's feedback so
+                    // the re-executing agent knows what to fix (C-D)
+                    gc.getTaskList().resetFromAnyToAssigned(entry.getKey(), reviewerNote);
+                    LOGGER.infof("Task '%s' rejected with RETRY policy — reset to ASSIGNED", entry.getKey());
+                } else {
+                    // FAIL policy (default): permanently reject the task
+                    gc.getTaskList().rejectTask(entry.getKey(), reviewerNote);
+                }
+            }
+        }
+
+        // AUTO_APPROVE fix: When TASK granularity + APPROVED verdict + no explicit
+        // taskApprovals (e.g., from timeout handler), auto-approve all
+        // AWAITING_APPROVAL
+        // tasks. Without this, resume re-enters the same TASK phase, tasks are still
+        // excluded by findExecutableTasks, and it re-pauses → infinite reschedule loop.
+        var decision = request.getDecision();
+        if (decision != null
+                && decision.getVerdict() == ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.APPROVED
+                && !hasTaskApprovals
+                && gc.getTaskList() != null
+                && gc.getHitlPauseType() == GroupConversation.HitlPauseType.TASK) {
+            gc.getTaskList().all().stream()
+                    .filter(t -> t.status() == SharedTaskList.TaskStatus.AWAITING_APPROVAL)
+                    .forEach(t -> gc.getTaskList().approveTask(t.id()));
+        }
+
+        // #4: On an EXPLICIT HUMAN approval of a TASK pause, grant a fresh turn
+        // budget so the resume can actually drive the remaining executable tasks —
+        // the preserved budget (seeded from pausedTurnCount) may already be
+        // exhausted, which would otherwise re-pause immediately. AUTO_APPROVE
+        // (decidedBy "system:...") deliberately does NOT get a fresh budget: it
+        // must terminate via the no-progress fingerprint guard, never run
+        // unattended forever. If the fresh budget still yields no task progress,
+        // the fingerprint guard fails the discussion on the next pause.
+        boolean humanDecision = decision != null
+                && (decision.getDecidedBy() == null || !decision.getDecidedBy().startsWith("system:"));
+        if (humanDecision
+                && decision.getVerdict() == ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.APPROVED
+                && gc.getHitlPauseType() == GroupConversation.HitlPauseType.TASK
+                && gc.getPausedTurnCount() > 0) {
+            LOGGER.infof("Human approval of TASK pause for GC %s — granting a fresh turn budget", groupConversationId);
+            gc.setPausedTurnCount(0);
+        }
+
+        // Apply phase-level decision
+        if (decision != null && decision.getVerdict() == ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.REJECTED) {
+            gc.setState(GroupConversationState.FAILED);
+            gc.setPausedAt(null);
+            // MAJOR-4: Use CAS to prevent concurrent approve clobbering reject
+            conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+            // Delete timeout schedule only after CAS succeeds (Phase 5e)
+            deleteGroupHitlTimeoutSchedule(groupConversationId);
+            auditHitlDecision(gc, decision);
+            // A rejection is terminal: notify the (SSE) listener so streams close
+            // instead of hanging, and release paused-state resources.
+            if (listener != null) {
+                listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
+                        gc.getState(), gc.getSynthesizedAnswer()));
+            }
+            cleanupAfterTerminalState(gc);
+            return gc;
+        }
+
+        // Save resume point and pause type before clearing
+        int resumePhaseIndex = gc.getPausedAtPhaseIndex();
+        String pausedPhaseName = gc.getPausedPhaseName(); // saved for config drift guard
+        // BLOCKER: read hitlPauseType — TASK pauses mid-phase, so we must re-enter
+        // at the SAME phase (findExecutableTasks is idempotent for approved tasks).
+        // PHASE pauses after the phase completes, so resume at +1.
+        var pauseType = gc.getHitlPauseType();
+        // #29: capture the timeout-policy bookmark BEFORE it is nulled below, so a
+        // failed resume whose config re-read also fails can restore the ORIGINAL
+        // finite policy instead of silently disarming it (persisting null →
+        // WAIT_INDEFINITELY). #35: capture the original pausedAt for the same reason
+        // — a restore must not shift a re-armed timeout's due time forward.
+        final HitlTimeoutPolicy savedTimeoutPolicy = gc.getHitlTimeoutPolicy();
+        final String savedApprovalTimeout = gc.getHitlApprovalTimeout();
+        final Instant originalPausedAt = gc.getPausedAt();
+
+        // Clear pause state but preserve pausedTurnCount — it seeds turnCounter on
+        // resume (M3)
+        gc.setPausedAt(null);
+        gc.setPausedAtPhaseIndex(-1);
+        gc.setPausedPhaseName(null);
+        gc.setHitlPauseType(null);
+        gc.setHitlPauseReason(null);
+        gc.setHitlTimeoutPolicy(null);
+        gc.setHitlApprovalTimeout(null);
+        gc.setState(GroupConversationState.IN_PROGRESS);
+
+        // Zero-match outcomes are distinguished by the store: a concurrent DELETE
+        // surfaces as (unchecked) GroupConversationGoneException → REST 404, a
+        // genuine state race as ResourceModifiedException → REST 409.
+        conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+        // O2: register the control token IMMEDIATELY after the resume CAS — before
+        // deleting the schedule and notifying listeners. Otherwise a concurrent
+        // cancelDiscussion landing between the CAS and a later put finds no token,
+        // takes the DB branch, sees IN_PROGRESS (non-terminal), CAS's to CANCELLED,
+        // and returns success — yet the resume then registers a FRESH non-cancelled
+        // token and runs a full phase on a discussion the operator was told was
+        // cancelled. With the token present here, that cancel takes the SIGNAL path
+        // (setSignal) and executeDiscussion's top-of-phase isCancelled() check stops
+        // before any member-agent work runs.
+        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        // Delete timeout schedule only after CAS succeeds (Phase 5e) — if CAS
+        // fails, the schedule is preserved so the timeout can still fire.
+        deleteGroupHitlTimeoutSchedule(groupConversationId);
+        // #35: the metric + audit entry are deliberately NOT written here — they are
+        // deferred until the resume is actually enqueued (below), mirroring the
+        // regular surface. A submit failure rolls the pause back, so a rolled-back
+        // attempt must not pollute the resume metric or the EU-AI-Act audit trail.
+
+        // The resume is committed — tell SSE subscribers the discussion is live
+        // again (the stream stays open for the resumed discussion's events).
+        if (listener != null) {
+            listener.onHitlResume(new GroupConversationEventSink.HitlResumeEvent(
+                    decision != null && decision.getVerdict() != null ? decision.getVerdict().name() : "APPROVED",
+                    decision != null ? decision.getNote() : null,
+                    decision != null ? decision.getDecidedBy() : null));
+        }
+
+        // Resume execution in background thread
+        var groupId = gc.getGroupId();
+        var question = gc.getOriginalQuestion();
+        // BLOCKER fix: TASK pauses mid-phase → re-enter at same phase (idempotent).
+        // PHASE pauses after phase completes → resume at +1.
+        int startFromPhase = (pauseType == GroupConversation.HitlPauseType.TASK)
+                ? resumePhaseIndex
+                : resumePhaseIndex + 1;
+
+        // Saved bookmark fields for pause restoration on transient failures.
+        // #35: restore with the ORIGINAL pausedAt so a re-armed timeout keeps its
+        // due time (pausedAt + approvalTimeout) instead of shifting forward to the
+        // resume-attempt instant.
+        final Instant savedPausedAt = originalPausedAt != null ? originalPausedAt : Instant.now();
+        final int savedPhaseIndex = resumePhaseIndex;
+        final String savedPhaseName = pausedPhaseName;
+        final var savedPauseType = pauseType;
+
+        // O2: the control token is registered right after the resume CAS above (not
+        // here) so a cancel racing the window between the CAS and the executor thread
+        // reaching executeDiscussion finds a signalable token and takes the SIGNAL
+        // path, rather than falling through to the DB branch and being overwritten by
+        // the resumed leg's unconditional updates.
+
+        Runnable resumeWork = () -> {
+            AgentGroupConfiguration groupConfig;
+            List<DiscussionPhase> phases;
+            try {
+                IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
+                if (currentGroupId == null) {
+                    throw new IResourceStore.ResourceNotFoundException("Group not found: " + groupId);
+                }
+                groupConfig = groupStore.read(groupId, currentGroupId.getVersion());
+                phases = resolvePhases(groupConfig);
+
+                // Phase 5f: Config drift guard — verify the phase at the bookmark
+                // still matches what was paused. If the config was edited while the
+                // discussion was awaiting approval, the phase list may have shifted.
+                // Compare against resumePhaseIndex (the bookmarked phase), not
+                // startFromPhase (which is +1 for PHASE pauses). The bookmarked
+                // phase MUST exist — if the list shrank below it, that is drift too
+                // (a silently-skipped guard would complete a discussion whose gated
+                // phases never ran).
+                if (savedPhaseName != null) {
+                    String actualPhase = savedPhaseIndex < phases.size()
+                            ? phases.get(savedPhaseIndex).name()
+                            : null;
+                    if (!savedPhaseName.equals(actualPhase)) {
+                        LOGGER.warnf("Config drift detected for GC %s: expected phase '%s' at index %d but found '%s'",
+                                groupConversationId, savedPhaseName, savedPhaseIndex, actualPhase);
+                        String driftMessage = "Resume aborted: group config changed while paused (expected phase '"
+                                + savedPhaseName + "' at index " + savedPhaseIndex
+                                + " but found " + (actualPhase != null ? "'" + actualPhase + "'" : "no phase at that index")
+                                + ") — the discussion remains awaiting approval; fix the config and retry, or cancel";
+                        gc.getTranscript().add(new TranscriptEntry(
+                                "system", "System",
+                                driftMessage,
+                                savedPhaseIndex, actualPhase != null ? actualPhase : "n/a",
+                                TranscriptEntryType.ERROR, Instant.now(), driftMessage, null));
+                        // Restore the pause instead of destroying the approval: the
+                        // operator can fix the config and approve again, or cancel.
+                        restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, groupConfig,
+                                savedTimeoutPolicy, savedApprovalTimeout);
+                        // A cancel signalled in this window must win over the restore —
+                        // remove-and-recheck so a signal racing the remove is not dropped.
+                        removeTokenAndConvertIfSignalled(gc, listener);
+                        if (listener != null) {
+                            listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(driftMessage));
+                        }
+                        return;
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.error("Failed to resume group discussion: " + groupConversationId, e);
+                // Transient failure BEFORE executeDiscussion (store hiccup, config
+                // unreadable): restore the pause instead of failing the discussion
+                // terminally — symmetric with the regular surface.
+                restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, null,
+                        savedTimeoutPolicy, savedApprovalTimeout);
+                // A cancel signalled in this window must win over the restore —
+                // remove-and-recheck so a signal racing the remove is not dropped.
+                removeTokenAndConvertIfSignalled(gc, listener);
+                if (listener != null) {
+                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
+                            "Resume failed: " + e.getMessage() + " — the discussion remains awaiting approval; retry"));
+                }
+                return;
+            }
+
+            try {
+                executeDiscussion(gc, groupConfig, phases, question, listener, startFromPhase);
+            } catch (Exception e) {
+                // executeDiscussion already persisted the terminal state (FAILED or
+                // CANCELLED) and fired the listener — do NOT restore the pause or
+                // fire a second error event here.
+                LOGGER.errorf(e, "Resumed group discussion %s failed", groupConversationId);
+            }
+        };
+        try {
+            executorService.submit(resumeWork);
+        } catch (RuntimeException e) {
+            // Executor saturated/shut down — no thread will run the resume. The CAS
+            // above already consumed the pause; restore it so the approval remains
+            // actionable instead of leaving an IN_PROGRESS zombie.
+            activeTokens.remove(gc.getId());
+            restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, null,
+                    savedTimeoutPolicy, savedApprovalTimeout);
+            throw new IResourceStore.ResourceStoreException(
+                    "Failed to submit resumed group discussion: " + e.getMessage(), e);
+        }
+
+        // #35: only NOW — after the resume was actually enqueued — count the resume
+        // and write the audit entry, so a rolled-back submit does not pollute the
+        // metric or the compliance trail (mirrors the regular surface).
+        counterGroupHitlResume.increment();
+        auditHitlDecision(gc, decision);
+
+        // The live gc instance is being mutated by the background thread — hand
+        // the HTTP layer a freshly-read copy instead (CME-safe serialization).
+        try {
+            return conversationStore.read(groupConversationId);
+        } catch (Exception e) {
+            LOGGER.debugf("Could not re-read group conversation %s for the response: %s",
+                    groupConversationId, e.getMessage());
+            return gc;
+        }
+    }
+
+    /**
+     * Restores a consumed group pause after a failed resume: re-sets the bookmark
+     * fields, CAS-flips IN_PROGRESS back to AWAITING_APPROVAL, and re-arms the
+     * timeout schedule. The human decision is lost (it was never executed) but the
+     * approval remains actionable — a transient failure must not terminally FAIL a
+     * multi-agent discussion.
+     */
+    private void restoreGroupPause(GroupConversation gc, int phaseIndex, String phaseName,
+                                   GroupConversation.HitlPauseType pauseType, Instant pausedAt,
+                                   AgentGroupConfiguration configOrNull,
+                                   HitlTimeoutPolicy fallbackTimeoutPolicy, String fallbackApprovalTimeout) {
+        try {
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAt(pausedAt);
+            gc.setPausedAtPhaseIndex(phaseIndex);
+            gc.setPausedPhaseName(phaseName);
+            gc.setHitlPauseType(pauseType != null ? pauseType : GroupConversation.HitlPauseType.PHASE);
+            gc.setHitlPauseReason("Pause restored after failed resume");
+            // #29: resumeDiscussion already NULLED the in-memory timeout bookmark
+            // before the CAS, so we must re-set it here or the restore persists a
+            // disarmed policy. Prefer a fresh config read; if that fails, fall back
+            // to the bookmark values captured BEFORE the clear — never leave null,
+            // which parsePolicy treats as WAIT_INDEFINITELY (silently disarming a
+            // finite AUTO_REJECT/ABORT policy).
+            var config = configOrNull;
+            if (config == null) {
+                try {
+                    var resId = groupStore.getCurrentResourceId(gc.getGroupId());
+                    config = resId != null ? groupStore.read(gc.getGroupId(), resId.getVersion()) : null;
+                } catch (Exception ignored) {
+                    // fall through to the captured fallback below
+                }
+            }
+            if (config != null && config.getHitlConfig() != null) {
+                gc.setHitlTimeoutPolicy(config.getHitlConfig().getTimeoutPolicy() != null
+                        ? config.getHitlConfig().getTimeoutPolicy()
+                        : HitlTimeoutPolicy.WAIT_INDEFINITELY);
+                gc.setHitlApprovalTimeout(config.getHitlConfig().getApprovalTimeout());
+            } else {
+                // Config unreadable — preserve the original bookmark so a finite
+                // policy is not silently disarmed.
+                gc.setHitlTimeoutPolicy(fallbackTimeoutPolicy);
+                gc.setHitlApprovalTimeout(fallbackApprovalTimeout);
+            }
+            conversationStore.updateIfState(gc, GroupConversationState.IN_PROGRESS);
+            scheduleGroupHitlTimeout(gc);
+            LOGGER.warnf("Group resume of %s failed — pause restored (AWAITING_APPROVAL)", gc.getId());
+        } catch (Exception e) {
+            LOGGER.errorf(e, "Failed to restore group pause after failed resume: %s", gc.getId());
+        }
+    }
+
+    /**
+     * Submits an {@code hitl.approval} audit entry for a group HITL decision (#15,
+     * EU AI Act). Covers human and automated timeout decisions.
+     */
+    private void auditHitlDecision(GroupConversation gc, ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
+        if (auditLedgerService == null || !auditLedgerService.isEnabled() || decision == null) {
+            return;
+        }
+        try {
+            var detail = new java.util.LinkedHashMap<String, Object>();
+            detail.put("verdict", decision.getVerdict() != null ? decision.getVerdict().name() : "UNKNOWN");
+            detail.put("decidedBy", decision.getDecidedBy() != null ? decision.getDecidedBy() : "unknown");
+            detail.put("automated", decision.getDecidedBy() != null && decision.getDecidedBy().startsWith("system:"));
+            detail.put("surface", "group");
+            if (decision.getNote() != null) {
+                detail.put("note", decision.getNote());
+            }
+            auditLedgerService.submit(new ai.labs.eddi.engine.audit.model.AuditEntry(
+                    java.util.UUID.randomUUID().toString(), gc.getId(), gc.getGroupId(), null, gc.getUserId(),
+                    null, -1, "hitl.approval", "hitl", -1, 0L,
+                    java.util.Map.of(), detail, null, null, java.util.List.of(), 0.0,
+                    Instant.now(), null, null));
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to submit HITL audit entry for group conversation %s: %s",
+                    gc.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Submits an {@code hitl.approval} audit entry when a pending approval is
+     * cancelled — a human (or timeout policy) decided NOT to let the gated work
+     * proceed, which is just as much an HITL decision as approve/reject.
+     */
+    private void auditHitlCancellation(GroupConversation gc, ControlSignal mode) {
+        if (auditLedgerService == null || !auditLedgerService.isEnabled()) {
+            return;
+        }
+        try {
+            var detail = new java.util.LinkedHashMap<String, Object>();
+            detail.put("verdict", "CANCELLED");
+            detail.put("mode", mode != null ? mode.name() : ControlSignal.CANCEL_GRACEFUL.name());
+            detail.put("surface", "group");
+            detail.put("pauseReason", gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");
+            auditLedgerService.submit(new ai.labs.eddi.engine.audit.model.AuditEntry(
+                    java.util.UUID.randomUUID().toString(), gc.getId(), gc.getGroupId(), null, gc.getUserId(),
+                    null, -1, "hitl.approval", "hitl", -1, 0L,
+                    java.util.Map.of(), detail, null, null, java.util.List.of(), 0.0,
+                    Instant.now(), null, null));
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to submit HITL cancellation audit entry for group conversation %s: %s",
+                    gc.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Releases resources held across an HITL pause once the conversation reaches a
+     * terminal state OUTSIDE the executeDiscussion finally block (cancel-of-paused,
+     * REJECTED resume). executeDiscussion skips cleanup while AWAITING_APPROVAL —
+     * without this, ephemeral dynamic agents stay deployed and lastVerifiedIndex
+     * entries leak forever on every paused-then-terminal path.
+     */
+    private void cleanupAfterTerminalState(GroupConversation gc) {
+        lastVerifiedIndex.remove(gc.getId());
+        try {
+            IResourceStore.IResourceId resId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (resId == null) {
+                LOGGER.warnf("Terminal cleanup: group config %s not found — ephemeral agents of GC %s not cleaned",
+                        gc.getGroupId(), gc.getId());
+                return;
+            }
+            var config = groupStore.read(gc.getGroupId(), resId.getVersion());
+            cleanupEphemeralAgents(gc, config);
+        } catch (Exception e) {
+            LOGGER.warnf("Terminal cleanup failed for group conversation %s: %s", gc.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Deletes any existing HITL timeout schedule for the given group conversation.
+     * Called on resume and cancel to prevent stale fires.
+     */
+    private void deleteGroupHitlTimeoutSchedule(String groupConversationId) {
+        try {
+            int deleted = scheduleStore.deleteSchedulesByName(
+                    ai.labs.eddi.engine.hitl.HitlSchedules.groupTimeoutScheduleName(groupConversationId));
+            if (deleted > 0) {
+                LOGGER.infof("Cleaned up %d group HITL timeout schedule(s) for %s", deleted, groupConversationId);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to delete group HITL timeout schedule for %s: %s",
+                    groupConversationId, e.getMessage());
         }
     }
 }

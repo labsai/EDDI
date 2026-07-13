@@ -117,7 +117,8 @@ class LlmTaskBranchTest {
                 identityMaskingService, toolResponseTruncator,
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
                 null, null,
-                null, null, null, null, null);
+                null, null, null, null, null,
+                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
     }
 
     private IConversationMemory setupMemory(List<String> actions) {

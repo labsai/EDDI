@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -42,6 +43,7 @@ class GdprComplianceServiceTest {
     private IDatabaseLogs databaseLogs;
     private IAuditStore auditStore;
     private AuditLedgerService auditLedgerService;
+    private IHitlToolJournalStore hitlToolJournalStore;
     private GdprComplianceService service;
 
     @BeforeEach
@@ -52,6 +54,7 @@ class GdprComplianceServiceTest {
         databaseLogs = mock(IDatabaseLogs.class);
         auditStore = mock(IAuditStore.class);
         auditLedgerService = mock(AuditLedgerService.class);
+        hitlToolJournalStore = mock(IHitlToolJournalStore.class);
 
         @SuppressWarnings("unchecked")
         Instance<IAttachmentStorage> attachmentStorageInstance = mock(Instance.class);
@@ -60,7 +63,7 @@ class GdprComplianceServiceTest {
         service = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachmentStorageInstance);
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore);
     }
 
     @Test
@@ -93,6 +96,52 @@ class GdprComplianceServiceTest {
         verify(userConversationStore).deleteAllForUser(USER_ID);
         verify(databaseLogs).pseudonymizeByUserId(eq(USER_ID), anyString());
         verify(auditStore).pseudonymizeByUserId(eq(USER_ID), anyString());
+    }
+
+    @Test
+    void deleteUserData_deletesHitlToolJournalEntries() throws Exception {
+        // Given — user has two conversations, each with journal entries
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-1", "conv-2"));
+        when(hitlToolJournalStore.deleteByConversationId("conv-1")).thenReturn(2L);
+        when(hitlToolJournalStore.deleteByConversationId("conv-2")).thenReturn(3L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(2L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        // When
+        service.deleteUserData(USER_ID);
+
+        // Then — journal deletion runs per conversation, BEFORE conversations are
+        // deleted
+        var inOrder = inOrder(hitlToolJournalStore, conversationMemoryStore);
+        inOrder.verify(hitlToolJournalStore).deleteByConversationId("conv-1");
+        inOrder.verify(hitlToolJournalStore).deleteByConversationId("conv-2");
+        inOrder.verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
+    }
+
+    @Test
+    void deleteUserData_continuesWhenJournalDeleteFails() throws Exception {
+        // Given — journal store throws, but the cascade must continue
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-1"));
+        when(hitlToolJournalStore.deleteByConversationId("conv-1"))
+                .thenThrow(new RuntimeException("Journal store unavailable"));
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(1L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        // When — should not throw
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        // Then — cascade continued past the journal failure
+        assertNotNull(result);
+        assertEquals(1, result.conversationsDeleted());
+        verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
     }
 
     @Test
@@ -164,7 +213,7 @@ class GdprComplianceServiceTest {
         var serviceWithAttachments = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachInstance);
+                auditLedgerService, attachInstance, hitlToolJournalStore);
 
         when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
@@ -195,7 +244,7 @@ class GdprComplianceServiceTest {
         var serviceWithAttachments = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachInstance);
+                auditLedgerService, attachInstance, hitlToolJournalStore);
 
         when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))

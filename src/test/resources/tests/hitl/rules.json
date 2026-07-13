@@ -1,0 +1,58 @@
+{
+  "behaviorGroups": [
+    {
+      "name": "HITL",
+      "behaviorRules": [
+        {
+          "name": "Welcome",
+          "actions": [
+            "welcome"
+          ],
+          "conditions": [
+            {
+              "type": "occurrence",
+              "configs": {
+                "maxTimesOccurred": "0",
+                "behaviorRuleName": "Welcome"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "Greeting",
+          "actions": [
+            "greet"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "greeting(*)",
+                "occurrence": "currentStep"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "Pause_For_Deletion_Approval",
+          "actions": [
+            "ask_supervisor",
+            "PAUSE_CONVERSATION"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "delete_account(*)",
+                "occurrence": "currentStep"
+              },
+              "conditions": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

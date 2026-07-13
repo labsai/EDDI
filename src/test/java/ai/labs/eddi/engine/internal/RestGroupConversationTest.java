@@ -42,7 +42,13 @@ class RestGroupConversationTest {
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
         when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
-        restGroupConversation = new RestGroupConversation(groupService, jsonSerialization, identity, ownershipValidator);
+        var hitlAccessGuard = new ai.labs.eddi.engine.hitl.HitlAccessGuard(
+                identity, ownershipValidator,
+                mock(ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore.class),
+                mock(ai.labs.eddi.engine.api.IConversationService.class),
+                groupService);
+        restGroupConversation = new RestGroupConversation(
+                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
     }
 
     @Nested
@@ -123,6 +129,7 @@ class RestGroupConversationTest {
         void success() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1"); // must belong to the {groupId} in the path (404 otherwise)
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
 
             GroupConversation result = restGroupConversation.readGroupConversation("group-1", "gc-1");
@@ -160,6 +167,7 @@ class RestGroupConversationTest {
         void success() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
 
             Response response = restGroupConversation.deleteGroupConversation("group-1", "gc-1");
@@ -173,6 +181,7 @@ class RestGroupConversationTest {
         void storeError() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new IResourceStore.ResourceStoreException("Delete failed"))
                     .when(groupService).deleteGroupConversation("gc-1");
@@ -232,6 +241,7 @@ class RestGroupConversationTest {
         void readGroupConversation_rejectsNonOwner() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             gc.setUserId("other-user");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new ForbiddenException("Access denied"))
@@ -246,6 +256,7 @@ class RestGroupConversationTest {
         void deleteGroupConversation_rejectsNonOwner() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             gc.setUserId("other-user");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new ForbiddenException("Access denied"))
