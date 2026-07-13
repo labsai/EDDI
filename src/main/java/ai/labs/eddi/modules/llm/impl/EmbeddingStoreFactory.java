@@ -55,7 +55,8 @@ public class EmbeddingStoreFactory {
 
     private static MongoDriverInformation buildDriverInfo() {
         MongoDriverInformation.Builder builder = MongoDriverInformation.builder().driverName("EDDI");
-        String version = EmbeddingStoreFactory.class.getPackage().getImplementationVersion();
+        Package pkg = EmbeddingStoreFactory.class.getPackage();
+        String version = pkg != null ? pkg.getImplementationVersion() : null;
         if (version != null) {
             builder.driverVersion(version);
         }

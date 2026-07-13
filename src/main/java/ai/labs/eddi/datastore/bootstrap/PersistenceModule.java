@@ -51,7 +51,8 @@ public class PersistenceModule {
 
     private static MongoDriverInformation buildDriverInfo() {
         MongoDriverInformation.Builder builder = MongoDriverInformation.builder().driverName("EDDI");
-        String version = PersistenceModule.class.getPackage().getImplementationVersion();
+        Package pkg = PersistenceModule.class.getPackage();
+        String version = pkg != null ? pkg.getImplementationVersion() : null;
         if (version != null) {
             builder.driverVersion(version);
         }
