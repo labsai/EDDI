@@ -5,6 +5,34 @@
 
 ---
 
+## 🔍 Multimodal Attachments Completion — PR #588 review-comment fixes (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Addressed CodeRabbit + Copilot review comments.
+
+**Correctness**
+- **Download 404-vs-500 (High):** `IAttachmentStore.load`/`getMetadata` threw a bare `AttachmentStoreException` for *both* a missing blob and an internal store failure, so `RestAttachmentUpload.downloadAttachment` mapped SQL/backend errors to 404 (at DEBUG) — hiding outages. Added a typed `AttachmentNotFoundException` (symmetric with `AttachmentAccessDeniedException`); both stores throw it for genuinely-missing blobs; the endpoint returns 404 for it and 500 (ERROR log, `ATTACHMENT_STORE_ERROR`) for any other store exception. +regression test.
+- **GDPR export isolation (Major):** the attachment-metadata export wrapped the whole conversation loop in one try/catch, so one failing `listByConversation` truncated the export for every remaining conversation. Each conversation is now isolated (mirrors the conversation-snapshot block above it).
+- **URL group attachment without mimeType (Medium):** `RestGroupConversation.toAttachments` kept URL refs with null/blank mimeType that `AttachmentContextExtractor` silently drops later; now skipped up front so the loss is explicit.
+
+**Observability**
+- `AttachmentForwarder`: reusable `Counter`s initialized once (in the constructor — the registry is constructor-injected, so `@PostConstruct` wouldn't fire in the direct-construction unit tests) instead of resolved per `forward()`; `MeterRegistry`/`Counter` imported.
+- `AttachmentTextExtractor`: per-extraction PDF logs lowered INFO → DEBUG (they run on every user turn / tool call).
+- `Conversation`: the attachment-issue warning now includes the conversation id.
+
+**Style** (the import guideline just added to AGENTS.md §4.7)
+- `LlmTask` (`@jakarta.inject.Inject` → `@Inject`), `GroupConversation` (`Attachment` imported), `GroupConversationServiceTest` (`Context` imported), and the FQN `MeterRegistry` in `AttachmentForwarder`.
+- `GridFsAttachmentStoreTest.whenFindIterate` generalized to any file count (was hardcoded to the 0/1/2-file cases).
+
+**Declined / documented**
+- `LlmConfiguration.MultimodalOverride` kept as a mutable Jackson POJO (not a record) for consistency with every sibling nested config type in the file — converting only one would be inconsistent and need `@JsonCreator` wiring.
+- URL-only group attachments still aren't recovered after a HITL resume — a deliberate, documented limitation (the blob store is the durable source; URLs aren't blob-backed). The PR description should note this.
+
+All affected unit tests green.
+
+---
+
 ## 🐛 Multimodal Attachments Completion — Fix: group attachments lost on HITL resume (2026-07-13)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)

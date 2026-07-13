@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.model;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.engine.memory.model.Attachment;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.time.Instant;
@@ -82,7 +83,7 @@ public class GroupConversation {
      * {@code IAttachmentStore} bound to this conversation's id.
      */
     @JsonIgnore
-    private transient List<ai.labs.eddi.engine.memory.model.Attachment> attachments;
+    private transient List<Attachment> attachments;
 
     /**
      * A single entry in the discussion transcript. Each entry records one agent's
@@ -337,11 +338,11 @@ public class GroupConversation {
     }
 
     @JsonIgnore
-    public List<ai.labs.eddi.engine.memory.model.Attachment> getAttachments() {
+    public List<Attachment> getAttachments() {
         return attachments;
     }
 
-    public void setAttachments(List<ai.labs.eddi.engine.memory.model.Attachment> attachments) {
+    public void setAttachments(List<Attachment> attachments) {
         this.attachments = attachments;
     }
 

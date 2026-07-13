@@ -121,7 +121,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     public byte[] load(String storageRef, String requestingConversationId) throws AttachmentStoreException {
         GridFSFile file = findFileByRef(storageRef);
         if (file == null) {
-            throw new AttachmentStoreException("Attachment not found: " + storageRef);
+            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
         }
         authorize(file, requestingConversationId);
 
@@ -134,7 +134,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     public Attachment getMetadata(String storageRef, String requestingConversationId) throws AttachmentStoreException {
         GridFSFile file = findFileByRef(storageRef);
         if (file == null) {
-            throw new AttachmentStoreException("Attachment not found: " + storageRef);
+            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
         }
         authorize(file, requestingConversationId);
 
@@ -153,7 +153,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
         var result = filesCollection.updateOne(refFilter(storageRef),
                 Updates.addToSet("metadata." + META_GRANTS, conversationId));
         if (result.getMatchedCount() == 0) {
-            throw new AttachmentStoreException("Attachment not found: " + storageRef);
+            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
         }
         LOGGER.debugf("Granted conversation '%s' access to attachment %s",
                 sanitize(conversationId), storageRef);

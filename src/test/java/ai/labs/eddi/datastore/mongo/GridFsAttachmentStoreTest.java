@@ -107,18 +107,22 @@ class GridFsAttachmentStoreTest {
         @SuppressWarnings("unchecked")
         MongoCursor<GridFSFile> cursor = mock(MongoCursor.class);
         doReturn(cursor).when(it).iterator();
+        // hasNext() returns true once per file then false; next() returns each file
+        // in order. Generalizes to any file count (not just 0/1/2).
         Boolean[] hasNext = new Boolean[files.length + 1];
-        for (int i = 0; i < files.length; i++)
+        for (int i = 0; i < files.length; i++) {
             hasNext[i] = true;
+        }
         hasNext[files.length] = false;
-        if (files.length == 0) {
-            when(cursor.hasNext()).thenReturn(false);
-        } else if (files.length == 1) {
-            when(cursor.hasNext()).thenReturn(true, false);
-            when(cursor.next()).thenReturn(files[0]);
-        } else {
-            when(cursor.hasNext()).thenReturn(true, true, false);
-            when(cursor.next()).thenReturn(files[0], files[1]);
+        var hasNextStub = when(cursor.hasNext());
+        for (Boolean b : hasNext) {
+            hasNextStub = hasNextStub.thenReturn(b);
+        }
+        if (files.length > 0) {
+            var nextStub = when(cursor.next());
+            for (GridFSFile f : files) {
+                nextStub = nextStub.thenReturn(f);
+            }
         }
     }
 

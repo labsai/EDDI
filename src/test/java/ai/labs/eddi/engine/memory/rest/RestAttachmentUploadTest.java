@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory.rest;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
+import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentNotFoundException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentStoreException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
@@ -414,7 +415,7 @@ class RestAttachmentUploadTest {
         @Test
         void shouldReturn404WhenNotFound() throws Exception {
             when(attachmentStore.getMetadata("missing", "conv-1"))
-                    .thenThrow(new AttachmentStoreException("Attachment not found: missing"));
+                    .thenThrow(new AttachmentNotFoundException("Attachment not found: missing"));
 
             Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "missing", ar));
 
@@ -446,6 +447,20 @@ class RestAttachmentUploadTest {
             Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "ref-1", ar));
 
             assertEquals(500, response.getStatus());
+        }
+
+        @Test
+        void shouldReturn500OnStoreError() throws Exception {
+            // A backend/store failure (not a missing blob) must be a 500, not a 404.
+            when(attachmentStore.getMetadata("ref-1", "conv-1"))
+                    .thenThrow(new AttachmentStoreException("Failed to load attachment"));
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "ref-1", ar));
+
+            assertEquals(500, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_STORE_ERROR", body.get("code"));
         }
 
         @Test

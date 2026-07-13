@@ -119,7 +119,7 @@ public class AttachmentTextExtractor {
         try (PDDocument document = Loader.loadPDF(pdfBytes)) {
             PDFTextStripper stripper = new PDFTextStripper();
             String text = stripper.getText(document);
-            LOGGER.infof("Extracted %d characters from PDF with %d pages",
+            LOGGER.debugf("Extracted %d characters from PDF with %d pages",
                     text.length(), document.getNumberOfPages());
             return cap(text, cap);
         } catch (Exception e) {
@@ -147,7 +147,7 @@ public class AttachmentTextExtractor {
             stripper.setStartPage(startPage);
             stripper.setEndPage(effectiveEnd);
             String text = stripper.getText(document);
-            LOGGER.infof("Extracted text from PDF pages %d-%d (%d characters)",
+            LOGGER.debugf("Extracted text from PDF pages %d-%d (%d characters)",
                     startPage, effectiveEnd, text.length());
             return cap(text, cap);
         } catch (AttachmentExtractionException e) {

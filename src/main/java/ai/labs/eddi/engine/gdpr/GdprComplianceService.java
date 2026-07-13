@@ -295,9 +295,16 @@ public class GdprComplianceService {
             if (attachmentStorageInstance.isResolvable()) {
                 var store = attachmentStorageInstance.get();
                 for (var convId : conversationMemoryStore.getConversationIdsByUserId(userId)) {
-                    for (var a : store.listByConversation(convId)) {
-                        attachmentEntries.add(new UserDataExport.AttachmentExportEntry(
-                                convId, a.storageRef(), a.filename(), a.mimeType(), a.sizeBytes()));
+                    try {
+                        for (var a : store.listByConversation(convId)) {
+                            attachmentEntries.add(new UserDataExport.AttachmentExportEntry(
+                                    convId, a.storageRef(), a.filename(), a.mimeType(), a.sizeBytes()));
+                        }
+                    } catch (Exception e) {
+                        // Isolate per conversation so one bad lookup doesn't truncate
+                        // the whole export (mirrors the conversation-snapshot block above).
+                        LOGGER.warnf("[GDPR] Skipping attachments for conversation %s during export: %s",
+                                convId, e.getMessage());
                     }
                 }
             }

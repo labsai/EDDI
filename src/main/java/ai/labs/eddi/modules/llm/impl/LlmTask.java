@@ -115,10 +115,10 @@ public class LlmTask implements ILifecycleTask {
 
     // Field-injected so the many direct-construction unit tests are unaffected;
     // null-guarded at the call site.
-    @jakarta.inject.Inject
+    @Inject
     AttachmentForwarder attachmentForwarder;
 
-    @jakarta.inject.Inject
+    @Inject
     AttachmentTextExtractor attachmentTextExtractor;
 
     /**

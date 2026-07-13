@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -167,7 +168,7 @@ class GroupConversationServiceTest {
             service.attachmentStore = store;
             var gc = gc("gc-1");
             gc.setAttachments(List.of(new Attachment("application/pdf", "doc.pdf", 10, "ref-1")));
-            Map<String, ai.labs.eddi.engine.model.Context> context = new LinkedHashMap<>();
+            Map<String, Context> context = new LinkedHashMap<>();
 
             service.grantAndInjectAttachments(gc, "member-conv", context);
 
@@ -187,7 +188,7 @@ class GroupConversationServiceTest {
             url.setMimeType("image/png");
             url.setUrl("https://example.com/y.png");
             gc.setAttachments(List.of(url));
-            Map<String, ai.labs.eddi.engine.model.Context> context = new LinkedHashMap<>();
+            Map<String, Context> context = new LinkedHashMap<>();
 
             service.grantAndInjectAttachments(gc, "member-conv", context);
 
@@ -203,7 +204,7 @@ class GroupConversationServiceTest {
             doThrow(new IAttachmentStore.AttachmentStoreException("nope")).when(store).grantAccess(any(), any());
             var gc = gc("gc-1");
             gc.setAttachments(List.of(new Attachment("application/pdf", "d.pdf", 1, "ref-1")));
-            Map<String, ai.labs.eddi.engine.model.Context> context = new LinkedHashMap<>();
+            Map<String, Context> context = new LinkedHashMap<>();
 
             service.grantAndInjectAttachments(gc, "m", context);
             assertFalse(context.containsKey("attachment_0"));
@@ -212,7 +213,7 @@ class GroupConversationServiceTest {
         @Test
         void grantAndInject_noAttachments_noop() {
             service.attachmentStore = mock(IAttachmentStore.class);
-            Map<String, ai.labs.eddi.engine.model.Context> context = new LinkedHashMap<>();
+            Map<String, Context> context = new LinkedHashMap<>();
             service.grantAndInjectAttachments(gc("gc-1"), "m", context);
             assertTrue(context.isEmpty());
         }

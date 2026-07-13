@@ -141,7 +141,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             ps.setString(1, storageRef);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
-                    throw new AttachmentStoreException("Attachment not found: " + storageRef);
+                    throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
                 }
                 authorize(rs.getString("conversation_id"), rs, requestingConversationId);
                 return rs.getBytes("data");
@@ -160,7 +160,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             ps.setString(1, storageRef);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
-                    throw new AttachmentStoreException("Attachment not found: " + storageRef);
+                    throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
                 }
                 authorize(rs.getString("conversation_id"), rs, requestingConversationId);
                 return new Attachment(

@@ -182,4 +182,17 @@ public interface IAttachmentStore {
             super(message);
         }
     }
+
+    /**
+     * Thrown when a storage reference does not resolve to any blob — a genuinely
+     * missing attachment, as opposed to a backend/store failure (which stays a
+     * plain {@link AttachmentStoreException}). Lets the REST layer return 404 for a
+     * missing blob while a store outage surfaces as 500 instead of being
+     * misreported as "not found".
+     */
+    class AttachmentNotFoundException extends AttachmentStoreException {
+        public AttachmentNotFoundException(String message) {
+            super(message);
+        }
+    }
 }

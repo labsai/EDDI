@@ -204,7 +204,7 @@ public class RestAttachmentUpload {
     @Operation(
                operationId = "downloadAttachment",
                summary = "Download a single attachment",
-               description = "Streams the raw bytes of one attachment. Access is checked against "
+               description = "Returns the raw bytes of one attachment (buffered, not chunked). Access is checked against "
                        + "the owning conversation (owner or explicit grant); references are "
                        + "unguessable.")
     @APIResponse(responseCode = "200", description = "Attachment bytes with Content-Type and Content-Disposition.")
@@ -232,11 +232,19 @@ public class RestAttachmentUpload {
                 asyncResponse.resume(Response.status(Response.Status.FORBIDDEN)
                         .entity(Map.of("error", e.getMessage(), "code", "ATTACHMENT_ACCESS_DENIED"))
                         .build());
-            } catch (IAttachmentStore.AttachmentStoreException e) {
+            } catch (IAttachmentStore.AttachmentNotFoundException e) {
                 LOGGER.debugf("Attachment download not found for conversation '%s': %s",
                         sanitize(conversationId), e.getMessage());
                 asyncResponse.resume(Response.status(Response.Status.NOT_FOUND)
                         .entity(Map.of("error", e.getMessage(), "code", "ATTACHMENT_NOT_FOUND"))
+                        .build());
+            } catch (IAttachmentStore.AttachmentStoreException e) {
+                // A store/backend failure (not a missing blob) — surface as 500 and
+                // log at ERROR so outages are not silently misreported as 404.
+                LOGGER.errorf(e, "Attachment store error downloading attachment for conversation '%s'",
+                        sanitize(conversationId));
+                asyncResponse.resume(Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                        .entity(Map.of("error", "Failed to download attachment", "code", "ATTACHMENT_STORE_ERROR"))
                         .build());
             } catch (Exception e) {
                 LOGGER.errorf(e, "Failed to download attachment for conversation '%s'", sanitize(conversationId));

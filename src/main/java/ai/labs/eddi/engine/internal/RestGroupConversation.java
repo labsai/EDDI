@@ -131,6 +131,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             if (r.data() != null && !r.data().isBlank()) {
                 a.setBase64Data(r.data());
             } else if (r.url() != null && !r.url().isBlank()) {
+                // A URL attachment with no mimeType is dropped later by
+                // AttachmentContextExtractor; skip it here so the loss is explicit
+                // rather than silent.
+                if (r.mimeType() == null || r.mimeType().isBlank()) {
+                    continue;
+                }
                 a.setUrl(r.url());
             } else {
                 continue;

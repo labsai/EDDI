@@ -21,6 +21,8 @@ import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.PdfFileContent;
 import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.UserMessage;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -78,14 +80,15 @@ public class AttachmentForwarder {
     private final SafeHttpClient httpClient;
     private final long maxForwardBytes;
     private final long maxAggregateBytes;
-    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    private final Counter forwardedCounter;
+    private final Counter errorsCounter;
 
     @Inject
     public AttachmentForwarder(IAttachmentStore attachmentStore,
             ModelCapabilityService capabilityService,
             AttachmentTextExtractor textExtractor,
             SafeHttpClient httpClient,
-            io.micrometer.core.instrument.MeterRegistry meterRegistry,
+            MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.attachments.max-forward-bytes",
                             defaultValue = "10485760") long maxForwardBytes,
             @ConfigProperty(name = "eddi.attachments.max-forward-aggregate-bytes",
@@ -94,7 +97,8 @@ public class AttachmentForwarder {
         this.capabilityService = capabilityService;
         this.textExtractor = textExtractor;
         this.httpClient = httpClient;
-        this.meterRegistry = meterRegistry;
+        this.forwardedCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.forwarded") : null;
+        this.errorsCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.errors") : null;
         this.maxForwardBytes = maxForwardBytes;
         this.maxAggregateBytes = maxAggregateBytes;
     }
@@ -167,14 +171,11 @@ public class AttachmentForwarder {
     }
 
     private void recordMetrics(int forwarded, int errored) {
-        if (meterRegistry == null) {
-            return;
+        if (forwardedCounter != null && forwarded > 0) {
+            forwardedCounter.increment(forwarded);
         }
-        if (forwarded > 0) {
-            meterRegistry.counter("eddi.attachment.forwarded").increment(forwarded);
-        }
-        if (errored > 0) {
-            meterRegistry.counter("eddi.attachment.errors").increment(errored);
+        if (errorsCounter != null && errored > 0) {
+            errorsCounter.increment(errored);
         }
     }
 
