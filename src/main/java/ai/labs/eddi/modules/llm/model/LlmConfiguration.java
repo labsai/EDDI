@@ -309,15 +309,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private MultimodalOverride multimodal;
 
         /**
-         * Number of past turns whose attachments are natively re-attached to the LLM on
-         * later turns (in addition to the always-on text-extract stitching). {@code 0}
-         * (default) means attachments attach only on their own turn.
-         *
-         * @since 6.1.0
-         */
-        private Integer reattachTurns = 0;
-
-        /**
          * Per-task tool-approval gating override (tool-level HITL). When present, it
          * FULLY REPLACES the agent-level {@code hitlConfig.toolApprovals} for this task
          * (no list merging). Absent = inherit the agent-level default.
@@ -670,14 +661,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMultimodal(MultimodalOverride multimodal) {
             this.multimodal = multimodal;
-        }
-
-        public Integer getReattachTurns() {
-            return reattachTurns != null ? reattachTurns : 0;
-        }
-
-        public void setReattachTurns(Integer reattachTurns) {
-            this.reattachTurns = reattachTurns;
         }
 
     }

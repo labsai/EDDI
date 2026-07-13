@@ -5,6 +5,21 @@
 
 ---
 
+## 🧹 Multimodal Attachments Completion — Remove dead config knob `reattachTurns` (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+`LlmConfiguration.Task.reattachTurns` (`@since 6.1.0`, added on this branch) was a no-op: `getReattachTurns()` is called nowhere in `src/main`, so setting it changed nothing at runtime. Past-turn PDFs/docs already reach the model via text-extract stitching (`attachments:extracts`), never native re-attachment. Removed the field, getter/setter, and its round-trip test.
+
+Surfaced by a codebase-wide dead-config audit (adversarial multi-agent sweep). The audit flagged ~26 other candidate no-op knobs; rather than mass-delete, they were **triaged** and tracked as follow-ups:
+- **Genuinely dead** — `ModelCascadeConfig.strategy` ("parallel = future", never built), `dream.batchSize`.
+- **Feature exists but knob unwired** — `enableParallelExecution` + `parallelExecutionTimeoutMs` (orphaned `ToolExecutionService` parallel machinery), RAG `injectionStrategy`/`contextTemplate`, `McpServerConfig.transport`, `autoRecallCategories`, `dream.schedule`/`maxUsersPerRun`.
+- **⚠️ Unenforced guardrails** — `DynamicAgentConfig.allowRecruitment`/`allowDelegation`/`maxRecruitedAgentsPerDiscussion`/`maxDelegationsPerTask`/`inheritParentModel` are read nowhere; the guardrails silently don't apply (tracked as its own security/cost fix).
+- **Roadmap scaffolding — keep** — `sessionManagement`/`autoSnapshot`/`maxCheckpointsPerConversation` (Session Forking is in-progress per roadmap).
+- **Audit blind spot** — operator knobs selected via Quarkus `@IfBuildProfile`/`@LookupIfProperty` (e.g. `eddi.messaging.type`) are *not* dead; a getter-grep can't see build-time bean selection. Those need per-item verification, not deletion.
+
+---
+
 ## 🔍 Multimodal Attachments Completion — PR #588 review-comment fixes (2026-07-13)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)

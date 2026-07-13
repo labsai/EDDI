@@ -54,33 +54,6 @@ class LlmConfigurationTaskTest {
     }
 
     @Nested
-    @DisplayName("reattachTurns")
-    class ReattachTurns {
-
-        @Test
-        @DisplayName("defaults to 0")
-        void defaultsZero() {
-            assertEquals(0, new LlmConfiguration.Task().getReattachTurns());
-        }
-
-        @Test
-        @DisplayName("null coalesces to 0")
-        void nullCoalescesZero() {
-            var task = new LlmConfiguration.Task();
-            task.setReattachTurns(null);
-            assertEquals(0, task.getReattachTurns());
-        }
-
-        @Test
-        @DisplayName("getter/setter round-trip")
-        void setAndGet() {
-            var task = new LlmConfiguration.Task();
-            task.setReattachTurns(3);
-            assertEquals(3, task.getReattachTurns());
-        }
-    }
-
-    @Nested
     @DisplayName("isAgentMode")
     class IsAgentMode {
 
