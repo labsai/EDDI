@@ -101,7 +101,7 @@ public interface IGroupConversationService {
      * @return the closed group conversation
      */
     GroupConversation closeGroupConversation(String groupConversationId)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     // --- Event listener for SSE streaming ---
 

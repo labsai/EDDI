@@ -381,6 +381,16 @@ public class GroupConversationService implements IGroupConversationService {
 
     @Override
     public void deleteGroupConversation(String groupConversationId) throws IResourceStore.ResourceStoreException {
+        // Serialize against an in-flight follow-up/continue/close on the same
+        // conversation
+        // (single-node) — delete is terminal (it ends member conversations and reclaims
+        // ephemeral agents), so racing an active discussion could tear those down
+        // mid-run
+        // and let a later update() resurrect a stale "zombie" document.
+        if (!operationsInProgress.add(groupConversationId)) {
+            throw new IResourceStore.ResourceStoreException(
+                    "Cannot delete: another operation is already in progress for this group conversation");
+        }
         try {
             GroupConversation gc = conversationStore.read(groupConversationId);
             for (String privateConvId : gc.getMemberConversationIds().values()) {
@@ -397,6 +407,8 @@ public class GroupConversationService implements IGroupConversationService {
             conversationStore.delete(groupConversationId);
         } catch (IResourceStore.ResourceNotFoundException e) {
             LOGGER.warnf("Group conversation %s not found for deletion", LogSanitizer.sanitize(groupConversationId));
+        } finally {
+            operationsInProgress.remove(groupConversationId);
         }
     }
 
@@ -588,10 +600,10 @@ public class GroupConversationService implements IGroupConversationService {
 
     @Override
     public GroupConversation closeGroupConversation(String groupConversationId)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         if (!operationsInProgress.add(groupConversationId)) {
-            throw new IResourceStore.ResourceStoreException(
+            throw new GroupDiscussionException(
                     "Another operation is already in progress for this group conversation");
         }
         try {
@@ -605,7 +617,7 @@ public class GroupConversationService implements IGroupConversationService {
                         groupConversationId, GroupConversationState.FAILED, GroupConversationState.CLOSED);
             }
             if (!transitioned) {
-                throw new IResourceStore.ResourceStoreException(
+                throw new GroupDiscussionException(
                         "Cannot close: conversation is in %s state (expected COMPLETED or FAILED)".formatted(gc.getState()));
             }
 

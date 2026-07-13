@@ -140,4 +140,57 @@ class GroupConversationStoreTest {
         List<GroupConversation> result = store.listByGroupId("group-1", 0, 10);
         assertTrue(result.isEmpty());
     }
+
+    // ==================== compareAndSetState ====================
+
+    @Test
+    @DisplayName("compareAndSetState — transitions and returns true when state matches")
+    void compareAndSetState_matches() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setState(GroupConversation.GroupConversationState.COMPLETED);
+        IResourceStorage.IResource<GroupConversation> readResource = mock(IResourceStorage.IResource.class);
+        when(readResource.getData()).thenReturn(gc);
+        when(storage.read("gc-1", 1)).thenReturn(readResource);
+        IResourceStorage.IResource<GroupConversation> writeResource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource(eq("gc-1"), eq(1), any(GroupConversation.class))).thenReturn(writeResource);
+
+        boolean result = store.compareAndSetState("gc-1",
+                GroupConversation.GroupConversationState.COMPLETED,
+                GroupConversation.GroupConversationState.IN_PROGRESS);
+
+        assertTrue(result);
+        // read() returns the same object that compareAndSetState mutates
+        assertEquals(GroupConversation.GroupConversationState.IN_PROGRESS, gc.getState());
+        assertNotNull(gc.getLastModified());
+        verify(storage).store(writeResource);
+    }
+
+    @Test
+    @DisplayName("compareAndSetState — returns false and does not update when state differs")
+    void compareAndSetState_mismatch() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setState(GroupConversation.GroupConversationState.FAILED);
+        IResourceStorage.IResource<GroupConversation> readResource = mock(IResourceStorage.IResource.class);
+        when(readResource.getData()).thenReturn(gc);
+        when(storage.read("gc-1", 1)).thenReturn(readResource);
+
+        boolean result = store.compareAndSetState("gc-1",
+                GroupConversation.GroupConversationState.COMPLETED,
+                GroupConversation.GroupConversationState.CLOSED);
+
+        assertFalse(result);
+        assertEquals(GroupConversation.GroupConversationState.FAILED, gc.getState());
+        verify(storage, never()).store(any());
+    }
+
+    @Test
+    @DisplayName("compareAndSetState — throws ResourceNotFoundException when missing")
+    void compareAndSetState_notFound() {
+        when(storage.read("missing", 1)).thenReturn(null);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class,
+                () -> store.compareAndSetState("missing",
+                        GroupConversation.GroupConversationState.COMPLETED,
+                        GroupConversation.GroupConversationState.CLOSED));
+    }
 }

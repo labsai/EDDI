@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -396,7 +397,7 @@ public class McpGroupTools {
                     groupConversationId, targetAgentId, question);
             return jsonSerialization.serialize(gc);
         } catch (Exception e) {
-            LOGGER.errorf("followup_with_member failed: %s", e.getMessage());
+            LOGGER.errorf("followup_with_member failed: %s", LogSanitizer.sanitize(e.getMessage()));
             return errorJson(e.getMessage());
         }
     }
@@ -415,7 +416,7 @@ public class McpGroupTools {
                     groupConversationId, question, null);
             return jsonSerialization.serialize(gc);
         } catch (Exception e) {
-            LOGGER.errorf("continue_group_discussion failed: %s", e.getMessage());
+            LOGGER.errorf("continue_group_discussion failed: %s", LogSanitizer.sanitize(e.getMessage()));
             return errorJson(e.getMessage());
         }
     }
@@ -431,7 +432,7 @@ public class McpGroupTools {
             GroupConversation gc = groupConversationService.closeGroupConversation(groupConversationId);
             return jsonSerialization.serialize(gc);
         } catch (Exception e) {
-            LOGGER.errorf("close_group_conversation failed: %s", e.getMessage());
+            LOGGER.errorf("close_group_conversation failed: %s", LogSanitizer.sanitize(e.getMessage()));
             return errorJson(e.getMessage());
         }
     }

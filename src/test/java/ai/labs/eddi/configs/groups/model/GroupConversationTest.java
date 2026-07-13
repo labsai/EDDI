@@ -39,6 +39,7 @@ class GroupConversationTest {
         assertNull(gc.getCurrentPhaseName());
         assertNull(gc.getSynthesizedAnswer());
         assertEquals(0, gc.getDepth());
+        assertEquals(1, gc.getRound());
         assertNull(gc.getCreated());
         assertNull(gc.getLastModified());
     }
@@ -218,24 +219,26 @@ class GroupConversationTest {
         @DisplayName("TranscriptEntryType — all values")
         void transcriptEntryTypes() {
             var values = TranscriptEntryType.values();
-            assertEquals(14, values.length);
+            assertEquals(15, values.length);
             assertNotNull(TranscriptEntryType.valueOf("QUESTION"));
             assertNotNull(TranscriptEntryType.valueOf("SYNTHESIS"));
             assertNotNull(TranscriptEntryType.valueOf("SKIPPED"));
             assertNotNull(TranscriptEntryType.valueOf("PLAN"));
             assertNotNull(TranscriptEntryType.valueOf("TASK_RESULT"));
             assertNotNull(TranscriptEntryType.valueOf("VERIFICATION"));
+            assertNotNull(TranscriptEntryType.valueOf("FOLLOW_UP"));
         }
 
         @Test
         @DisplayName("GroupConversationState — all values")
         void groupConversationStates() {
             var values = GroupConversationState.values();
-            assertEquals(6, values.length);
+            assertEquals(7, values.length);
             assertNotNull(GroupConversationState.valueOf("CREATED"));
             assertNotNull(GroupConversationState.valueOf("COMPLETED"));
             assertNotNull(GroupConversationState.valueOf("FAILED"));
             assertNotNull(GroupConversationState.valueOf("AWAITING_APPROVAL"));
+            assertNotNull(GroupConversationState.valueOf("CLOSED"));
         }
     }
 
@@ -260,5 +263,110 @@ class GroupConversationTest {
         gc.setTranscript(List.of(entry));
 
         assertEquals(1, gc.getTranscript().size());
+    }
+
+    @Test
+    @DisplayName("round setter round-trips")
+    void round_setterRoundTrips() {
+        var gc = new GroupConversation();
+        gc.setRound(3);
+        assertEquals(3, gc.getRound());
+    }
+
+    // ==================== availableActions (computed) ====================
+
+    @Nested
+    @DisplayName("availableActions")
+    class AvailableActionsTests {
+
+        @Test
+        @DisplayName("COMPLETED offers followup, continue, close")
+        void completed() {
+            var gc = new GroupConversation();
+            gc.setState(GroupConversationState.COMPLETED);
+            assertEquals(List.of("followup", "continue", "close"), gc.getAvailableActions());
+        }
+
+        @Test
+        @DisplayName("FAILED offers close only")
+        void failed() {
+            var gc = new GroupConversation();
+            gc.setState(GroupConversationState.FAILED);
+            assertEquals(List.of("close"), gc.getAvailableActions());
+        }
+
+        @Test
+        @DisplayName("CLOSED offers nothing")
+        void closed() {
+            var gc = new GroupConversation();
+            gc.setState(GroupConversationState.CLOSED);
+            assertTrue(gc.getAvailableActions().isEmpty());
+        }
+
+        @Test
+        @DisplayName("non-terminal states offer nothing")
+        void nonTerminal() {
+            for (var state : List.of(GroupConversationState.CREATED, GroupConversationState.IN_PROGRESS,
+                    GroupConversationState.SYNTHESIZING, GroupConversationState.AWAITING_APPROVAL)) {
+                var gc = new GroupConversation();
+                gc.setState(state);
+                assertTrue(gc.getAvailableActions().isEmpty(), "expected no actions for " + state);
+            }
+        }
+
+        @Test
+        @DisplayName("null state yields empty list, not null")
+        void nullState() {
+            var gc = new GroupConversation();
+            assertNotNull(gc.getAvailableActions());
+            assertTrue(gc.getAvailableActions().isEmpty());
+        }
+    }
+
+    // ==================== memberDisplayNames encapsulation ====================
+
+    @Nested
+    @DisplayName("memberDisplayNames")
+    class MemberDisplayNamesTests {
+
+        @Test
+        @DisplayName("getter returns an unmodifiable view")
+        void getterUnmodifiable() {
+            var gc = new GroupConversation();
+            gc.addMemberDisplayName("a", "Alice");
+            assertThrows(UnsupportedOperationException.class,
+                    () -> gc.getMemberDisplayNames().put("b", "Bob"));
+        }
+
+        @Test
+        @DisplayName("addMemberDisplayName populates the map")
+        void addPopulates() {
+            var gc = new GroupConversation();
+            gc.addMemberDisplayName("a", "Alice");
+            gc.addMemberDisplayName("b", "Bob");
+            assertEquals("Alice", gc.getMemberDisplayNames().get("a"));
+            assertEquals(2, gc.getMemberDisplayNames().size());
+        }
+
+        @Test
+        @DisplayName("setter defensively copies the input map")
+        void setterDefensiveCopy() {
+            var gc = new GroupConversation();
+            var src = new LinkedHashMap<String, String>();
+            src.put("a", "Alice");
+            gc.setMemberDisplayNames(src);
+            src.put("b", "Bob"); // mutate caller's map afterward — must not leak in
+            assertEquals(1, gc.getMemberDisplayNames().size());
+        }
+
+        @Test
+        @DisplayName("setter treats null as empty and stays mutable via add")
+        void setterNull() {
+            var gc = new GroupConversation();
+            gc.setMemberDisplayNames(null);
+            assertTrue(gc.getMemberDisplayNames().isEmpty());
+            assertDoesNotThrow(() -> gc.addMemberDisplayName("a", "Alice"));
+            assertEquals("Alice", gc.getMemberDisplayNames().get("a"));
+        }
     }
 }

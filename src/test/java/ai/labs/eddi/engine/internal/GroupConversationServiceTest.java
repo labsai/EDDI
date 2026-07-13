@@ -720,4 +720,228 @@ class GroupConversationServiceTest {
             assertEquals(GroupConversationState.FAILED, gc.getState());
         }
     }
+
+    // =================================================================
+    // Post-discussion operations: follow-up / continue / close
+    // =================================================================
+
+    /** Reflectively access the private per-conversation concurrency guard set. */
+    @SuppressWarnings("unchecked")
+    private java.util.Set<String> operationsInProgress() throws Exception {
+        var field = GroupConversationService.class.getDeclaredField("operationsInProgress");
+        field.setAccessible(true);
+        return (java.util.Set<String>) field.get(service);
+    }
+
+    @Nested
+    class FollowUpWithMemberTests {
+
+        private GroupConversation completedGc() {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            gc.setMemberConversationIds(new LinkedHashMap<>(Map.of("agentA", "convA")));
+            gc.addMemberDisplayName("agentA", "Alice");
+            return gc;
+        }
+
+        @Test
+        void followUp_resolvesDisplayName_callsCorrectAgentAndRecordsTranscript() throws Exception {
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            var output = new ConversationOutput();
+            output.put("output", List.of("Sure, here is the answer"));
+            snapshot.setConversationOutputs(new LinkedList<>(List.of(output)));
+            doAnswer(inv -> {
+                IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(), eq("agentA"), eq("convA"),
+                    any(), any(), any(), any(), anyBoolean(), any());
+
+            // Address the member by display name (case-insensitive) rather than agent id
+            GroupConversation result = service.followUpWithMember("gc-1", "alice", "What now?");
+
+            verify(conversationService).say(any(), eq("agentA"), eq("convA"),
+                    any(), any(), any(), any(), anyBoolean(), any());
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            var transcript = result.getTranscript();
+            assertEquals(2, transcript.size());
+            assertEquals(TranscriptEntryType.FOLLOW_UP, transcript.get(0).type());
+            assertEquals("What now?", transcript.get(0).content());
+            assertEquals("agentA", transcript.get(1).speakerAgentId());
+            assertEquals("Sure, here is the answer", transcript.get(1).content());
+            verify(conversationStore).update(gc);
+        }
+
+        @Test
+        void followUp_unknownMember_throwsAndDoesNotCallAgent() throws Exception {
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.followUpWithMember("gc-1", "ghost", "hello"));
+            verify(conversationService, never())
+                    .say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        void followUp_notCompleted_throwsAndDoesNotCallAgent() throws Exception {
+            var gc = completedGc();
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(false);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.followUpWithMember("gc-1", "Alice", "hello"));
+            verify(conversationService, never())
+                    .say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        void followUp_concurrentOperation_rejected() throws Exception {
+            operationsInProgress().add("gc-1");
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.followUpWithMember("gc-1", "Alice", "hello"));
+            verify(conversationStore, never()).compareAndSetState(any(), any(), any());
+        }
+
+        @Test
+        void followUp_agentCallFails_restoresCompletedState() throws Exception {
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            doThrow(new RuntimeException("agent boom")).when(conversationService)
+                    .say(any(), eq("agentA"), eq("convA"), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.followUpWithMember("gc-1", "Alice", "hello"));
+            // finally-block must restore COMPLETED so the conversation stays usable
+            verify(conversationStore).compareAndSetState("gc-1",
+                    GroupConversationState.IN_PROGRESS, GroupConversationState.COMPLETED);
+        }
+    }
+
+    @Nested
+    class ContinueDiscussionTests {
+
+        @Test
+        void continue_notCompleted_throws() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(false);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.continueDiscussion("gc-1", "next", null));
+        }
+
+        @Test
+        void continue_concurrentOperation_rejected() throws Exception {
+            operationsInProgress().add("gc-1");
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.continueDiscussion("gc-1", "q", null));
+            verify(conversationStore, never()).compareAndSetState(any(), any(), any());
+        }
+
+        @Test
+        void continue_incrementsRoundAndAppendsQuestion() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            gc.setRound(1);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            // Fail fast right after the round/question mutation: group config not found.
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.continueDiscussion("gc-1", "round two question", null));
+
+            assertEquals(2, gc.getRound());
+            var transcript = gc.getTranscript();
+            assertFalse(transcript.isEmpty());
+            var last = transcript.get(transcript.size() - 1);
+            assertEquals(TranscriptEntryType.QUESTION, last.type());
+            assertEquals("round two question", last.content());
+        }
+    }
+
+    @Nested
+    class CloseGroupConversationTests {
+
+        @Test
+        void close_completed_transitionsToClosedAndEndsMembers() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            gc.setMemberConversationIds(new LinkedHashMap<>(Map.of("agentA", "convA", "agentB", "convB")));
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.CLOSED)).thenReturn(true);
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null); // ephemeral cleanup no-op
+
+            GroupConversation result = service.closeGroupConversation("gc-1");
+
+            verify(conversationService).endConversation("convA");
+            verify(conversationService).endConversation("convB");
+            assertSame(gc, result);
+        }
+
+        @Test
+        void close_failedState_usesFallbackCas() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.FAILED);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.CLOSED)).thenReturn(false);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.FAILED, GroupConversationState.CLOSED)).thenReturn(true);
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null);
+
+            assertDoesNotThrow(() -> service.closeGroupConversation("gc-1"));
+            verify(conversationStore).compareAndSetState("gc-1",
+                    GroupConversationState.FAILED, GroupConversationState.CLOSED);
+        }
+
+        @Test
+        void close_wrongState_throwsGroupDiscussionException() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState(eq("gc-1"), any(), eq(GroupConversationState.CLOSED)))
+                    .thenReturn(false);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.closeGroupConversation("gc-1"));
+        }
+
+        @Test
+        void close_concurrentOperation_rejected() throws Exception {
+            operationsInProgress().add("gc-1");
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.closeGroupConversation("gc-1"));
+            verify(conversationStore, never()).compareAndSetState(any(), any(), any());
+        }
+    }
 }

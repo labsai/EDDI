@@ -25,7 +25,7 @@ Addresses static-analysis and code-review findings on [PR #595](https://github.c
 
 - **`@PreDestroy` on `RestGroupConversation`**: the virtual-thread executor is now shut down on bean destroy.
 - **Ephemeral cleanup on delete**: `deleteGroupConversation` now reclaims dynamically-created agents. Deferred cleanup previously ran only on `close`, so deleting a `COMPLETED` conversation orphaned them — this regression is introduced-and-fixed within the same feature branch. Extracted `cleanupEphemeralAgentsForGroup()` shared by close + delete.
-- **Known limitation**: a `COMPLETED` conversation that is never closed *or* deleted still retains its ephemeral agents. A TTL reaper (built on `ScheduleFireExecutor`) is the planned mitigation — tracked as a separate item.
+- **Known limitations** (ephemeral-agent reclamation): (a) a `COMPLETED` conversation that is never closed *or* deleted still retains its ephemeral agents; (b) if cleanup fails on `delete` (group config already gone, or a transient undeploy error), the record is still hard-deleted, so the `createdAgentIds` mapping is lost and a future reaper cannot reclaim those agents (they remain operator-recoverable via the agent store). A TTL reaper (built on `ScheduleFireExecutor`) is the planned mitigation for (a) — tracked as a separate item.
 
 ### API cleanup
 
@@ -33,6 +33,17 @@ Addresses static-analysis and code-review findings on [PR #595](https://github.c
 - **Configurable follow-up timeout**: the follow-up agent call now uses the group's `protocol.agentTimeoutSeconds()` (default 60, consistent with discussion turns) via `resolveAgentTimeoutSeconds()`, instead of a hardcoded 120s.
 - **Model encapsulation**: `GroupConversation.getMemberDisplayNames()` returns an unmodifiable view; population goes through the new `addMemberDisplayName()` method (the getter can no longer be mutated); the setter defensively copies.
 - **OpenAPI**: added `404` responses to `followup` / `continue`, and `200` / `404` + event listing (incl. `round_start`) to `continue/stream`.
+
+### Round 2 — multi-agent adversarial review + CI (2026-07-13)
+
+Second pass after an adversarial multi-dimension review (concurrency / security / REST / lifecycle / test-coverage) plus the CI test run.
+
+- **CI green**: updated the `GroupConversationState` (6→7, `CLOSED`) and `TranscriptEntryType` (14→15, `FOLLOW_UP`) enum-count guard tests. Added the three follow-up MCP tools (`followup_with_member`, `continue_group_discussion`, `close_group_conversation`) to `McpToolFilter` — they were **filtered out entirely** (never exposed to MCP clients) because the whitelist was never updated, so this is a functional fix, not just a test tweak.
+- **Delete race** (flagged by two review dimensions): `deleteGroupConversation` now participates in the per-conversation guard. Because deferred cleanup made delete a *terminal* operation, an unguarded delete could tear down member conversations / ephemeral agents while a `continue`/`follow-up` was mid-run and then be resurrected as a "zombie" document via the store's upsert-by-id `update()`.
+- **`close` status codes**: business conflicts (in-progress / wrong-state) now throw `GroupDiscussionException` → `409`; a genuine `ResourceStoreException` (DB failure) falls through to `500` via the global mapper, instead of every store error mapping to `409`. Aligns `close` with `followup`/`continue`.
+- **Consistent group-scoping**: `readGroupConversation` and `deleteGroupConversation` now also route through `loadInGroup()`, so *every* endpoint under `/groups/{groupId}/conversations/{id}` verifies the conversation belongs to the path group (404 on mismatch). Previously only the new endpoints did.
+- **CWE-117 in MCP tools**: the three new MCP follow-up tools now sanitize `e.getMessage()` before logging (`targetAgentId` is user-controlled and flows into exception messages).
+- **Test coverage**: added unit tests for `getAvailableActions()` (per state), `memberDisplayNames` encapsulation, the `round` default, `compareAndSetState()` (all branches), `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` service logic (display-name resolution, wrong-state, concurrency guard, state restore, round increment), and the new REST endpoints including the `loadInGroup` 404 guard.
 
 ### Deliberately not done
 
@@ -42,6 +53,7 @@ Addresses static-analysis and code-review findings on [PR #595](https://github.c
 
 - TTL reaper for abandoned `COMPLETED` conversations (ephemeral-agent reclamation).
 - Optional cluster-wide atomic state transition at the storage layer if concurrent group operations become a real deployment concern.
+- Optional: sweep the remaining pre-existing `McpGroupTools` catch blocks for the same `LogSanitizer` treatment (≈11 older tools still use the unsanitized `errorf(..., e.getMessage())` pattern — lower priority, outside this PR's scope).
 
 ---
 

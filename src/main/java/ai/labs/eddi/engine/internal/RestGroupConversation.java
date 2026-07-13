@@ -181,7 +181,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public GroupConversation readGroupConversation(String groupId, String groupConversationId) {
         try {
-            GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
+            GroupConversation gc = loadInGroup(groupId, groupConversationId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
             return gc;
         } catch (ForbiddenException e) {
@@ -194,7 +194,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public Response deleteGroupConversation(String groupId, String groupConversationId) {
         try {
-            GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
+            GroupConversation gc = loadInGroup(groupId, groupConversationId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
             groupConversationService.deleteGroupConversation(groupConversationId);
             return Response.ok().build();
@@ -359,11 +359,13 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
             throw e;
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
-        } catch (IResourceStore.ResourceStoreException e) {
-            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
         } catch (Exception e) {
+            // Genuine store/DB failures (ResourceStoreException) map to 500 via the
+            // global mapper — only business conflicts above are 409.
             LOGGER.errorf("Close group conversation failed: %s", e.getMessage());
             throw sneakyThrow(e);
         }

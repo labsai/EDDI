@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IRestGroupConversation.DiscussRequest;
+import ai.labs.eddi.engine.api.IRestGroupConversation.FollowUpRequest;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -123,6 +124,7 @@ class RestGroupConversationTest {
         void success() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
 
             GroupConversation result = restGroupConversation.readGroupConversation("group-1", "gc-1");
@@ -160,6 +162,7 @@ class RestGroupConversationTest {
         void success() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
 
             Response response = restGroupConversation.deleteGroupConversation("group-1", "gc-1");
@@ -173,6 +176,7 @@ class RestGroupConversationTest {
         void storeError() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new IResourceStore.ResourceStoreException("Delete failed"))
                     .when(groupService).deleteGroupConversation("gc-1");
@@ -232,6 +236,7 @@ class RestGroupConversationTest {
         void readGroupConversation_rejectsNonOwner() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             gc.setUserId("other-user");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new ForbiddenException("Access denied"))
@@ -246,6 +251,7 @@ class RestGroupConversationTest {
         void deleteGroupConversation_rejectsNonOwner() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             gc.setUserId("other-user");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new ForbiddenException("Access denied"))
@@ -295,6 +301,141 @@ class RestGroupConversationTest {
 
             assertEquals(1, result.size());
             assertEquals("gc-1", result.get(0).getId());
+        }
+    }
+
+    @Nested
+    @DisplayName("PostDiscussionOperations (followup / continue / close)")
+    class PostDiscussionOperations {
+
+        private GroupConversation gcInGroup(String groupId) {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId(groupId);
+            gc.setUserId("user-1");
+            return gc;
+        }
+
+        @Test
+        @DisplayName("followUp — 404 when conversation belongs to a different group")
+        void followUp_groupMismatch_returns404() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("other-group"));
+
+            Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("q", "agentA", "user-1"));
+
+            assertEquals(404, response.getStatus());
+            verify(groupService, never()).followUpWithMember(any(), any(), any());
+            verify(ownershipValidator, never()).requireOwnerOrAdmin(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("followUp — 404 when conversation has no group set")
+        void followUp_nullGroup_returns404() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1"); // groupId left null
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+
+            Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("q", "agentA", "user-1"));
+
+            assertEquals(404, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("followUp — 409 on GroupDiscussionException (wrong state)")
+        void followUp_conflict_returns409() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.followUpWithMember("gc-1", "agentA", "q"))
+                    .thenThrow(new IGroupConversationService.GroupDiscussionException("not COMPLETED"));
+
+            Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("q", "agentA", "user-1"));
+
+            assertEquals(409, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("followUp — 200 and validates ownership before delegating")
+        void followUp_success_returns200() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.followUpWithMember("gc-1", "agentA", "q")).thenReturn(gcInGroup("group-1"));
+
+            Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("q", "agentA", "user-1"));
+
+            assertEquals(200, response.getStatus());
+            verify(ownershipValidator).requireOwnerOrAdmin(identity, "user-1", "group conversation");
+        }
+
+        @Test
+        @DisplayName("continue — 404 when conversation belongs to a different group")
+        void continue_groupMismatch_returns404() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("other-group"));
+
+            Response response = restGroupConversation.continueDiscussion("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1"));
+
+            assertEquals(404, response.getStatus());
+            verify(groupService, never()).continueDiscussion(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("continue — 200 on success")
+        void continue_success_returns200() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion("gc-1", "q", null)).thenReturn(gcInGroup("group-1"));
+
+            Response response = restGroupConversation.continueDiscussion("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1"));
+
+            assertEquals(200, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("close — 404 when conversation belongs to a different group")
+        void close_groupMismatch_returns404() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("other-group"));
+
+            Response response = restGroupConversation.closeGroupConversation("group-1", "gc-1");
+
+            assertEquals(404, response.getStatus());
+            verify(groupService, never()).closeGroupConversation(any());
+        }
+
+        @Test
+        @DisplayName("close — 409 on GroupDiscussionException (wrong state / in progress)")
+        void close_conflict_returns409() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.closeGroupConversation("gc-1"))
+                    .thenThrow(new IGroupConversationService.GroupDiscussionException("in progress"));
+
+            Response response = restGroupConversation.closeGroupConversation("group-1", "gc-1");
+
+            assertEquals(409, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("close — 500 on genuine store failure (not 409)")
+        void close_storeError_returns500() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.closeGroupConversation("gc-1"))
+                    .thenThrow(new IResourceStore.ResourceStoreException("DB down"));
+
+            // ResourceStoreException falls through to the generic mapper (500), not 409
+            assertThrows(IResourceStore.ResourceStoreException.class,
+                    () -> restGroupConversation.closeGroupConversation("group-1", "gc-1"));
+        }
+
+        @Test
+        @DisplayName("close — 200 on success")
+        void close_success_returns200() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.closeGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+
+            Response response = restGroupConversation.closeGroupConversation("group-1", "gc-1");
+
+            assertEquals(200, response.getStatus());
         }
     }
 }
