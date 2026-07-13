@@ -5,6 +5,16 @@
 
 ---
 
+## ✅ HITL enum refactor — round-2 review clean + serialization regression guard (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+After the round-1 review caught `McpHitlTools:185`, ran a **second, deeper adversarial review** (4 orthogonal angles: complete call-site re-inventory, runtime serialization across both stores, end-to-end timeout-fire path, and an explicit "find one more bug" hunt — each finding verify-gated, plus a completeness critic). Result: **zero findings**, verdict `CORRECT_AND_COMPLETE`. Every remaining `String` touchpoint is a deliberate guarded boundary conversion (`PendingApprovalSummary` stays `String` via guarded `.name()`; schedule metadata stays `String` and `HitlTimeoutHandler` parses it back via `valueOf`; REST/MCP/Slack summaries via `.name()`); crash-recovery null-defaults faithfully mirror the old `parsePolicy`; `parsePolicy(String)` remains live for the projection-scan path.
+
+Added **`HitlTimeoutPolicySerializationTest`** (pure-unit, no Testcontainers) as a permanent regression guard for the invariant the whole refactor rests on. It replicates BOTH production mappers — the JSON mapper (Postgres JSONB + REST) and the BSON mapper (MongoDB, built like `PersistenceModule`) — across BOTH surfaces (`ConversationMemorySnapshot`, `GroupConversation`) and asserts: enum ⇄ `name()`-string round-trip for all four values; BSON encodes a **string, not an ordinal**; a null policy is omitted (NON_NULL) and round-trips to null; and **legacy pre-refactor documents** (policy as a bare JSON string) still deserialize into the enum. 15/15 pass locally — closing the residual runtime/persistence risk that the CI-only Testcontainer store tests would otherwise be the sole coverage for.
+
+---
+
 ## 🐛 HITL enum refactor — fix missed McpHitlTools read site (clean-compile break) (2026-07-13)
 
 **Repo:** EDDI (`feat/hitl-framework`)
