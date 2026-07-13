@@ -5,6 +5,20 @@
 
 ---
 
+## 🐛 HITL enum refactor — fix missed McpHitlTools read site (clean-compile break) (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A thorough adversarial code review (5 dimensions + verify + completeness critic) of the two enum-refactor commits below found **one real, CRITICAL defect**: the regular-surface MCP read site `McpHitlTools.getApprovalStatus` (`McpHitlTools.java:185`) still put `snapshot.getHitlTimeoutPolicy()` (now the enum) into a `Map<String,String>` **without `.name()`**. Because that map's value type is `String` (unlike the `Map<String,Object>` sibling at `:359`), the mixed `enum : ""` ternary is a **hard javac error** (`bad type in conditional expression: HitlTimeoutPolicy cannot be converted to String`). The group twin (`:359`) and `RestAgentEngine:407` were fixed; this regular twin was missed.
+
+**Why it slipped past verification:** the earlier `./mvnw test` runs reported BUILD SUCCESS because Maven **incremental compilation reused a stale `McpHitlTools.class`** — the source file wasn't edited, so it wasn't recompiled even though its dependency (`ConversationMemorySnapshot`) changed type. A `./mvnw clean compile` fails. The prior changelog claim that "the full main + test tree compiles" was therefore based on a false pass and is corrected here. **Lesson: verify type-signature refactors with `clean compile`, not incremental.**
+
+**Fix:** append the guarded `.name()` to match its three siblings — `summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "")`. Wire output is byte-identical (`"AUTO_REJECT"` / `""`).
+
+Verified with a **clean** build: `./mvnw clean test` compiles the whole main + test tree from scratch and the affected suites pass (`Tests run: 258, Failures: 0, Errors: 0`). The review's other four dimensions (serialization/persistence, null-safety, behavior-preservation, test-fidelity) and the completeness critic returned **no other defects** — the refactor is otherwise correct and complete.
+
+---
+
 ## 🎯 Regular surface — type hitlTimeoutPolicy as the HitlTimeoutPolicy enum (2026-07-13)
 
 **Repo:** EDDI (`feat/hitl-framework`)
