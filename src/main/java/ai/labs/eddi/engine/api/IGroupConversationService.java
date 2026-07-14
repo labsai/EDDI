@@ -125,18 +125,6 @@ public interface IGroupConversationService {
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     /**
-     * Continuation variant that additionally shares {@code attachments} with every
-     * member agent for the new round (on top of the ones already bound to the
-     * conversation from prior rounds). {@code attachments} may be null/empty.
-     */
-    default GroupConversation continueDiscussion(String groupConversationId, String question,
-                                                 GroupDiscussionEventListener listener,
-                                                 List<Attachment> attachments)
-            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        return continueDiscussion(groupConversationId, question, listener);
-    }
-
-    /**
      * Explicitly close a group conversation. Ends all member conversations,
      * triggers ephemeral agent cleanup, and sets state to CLOSED. Irreversible.
      *

@@ -13,6 +13,8 @@ A third critical review targeted what the earlier passes never looked at — the
 
 ### Security — MCP was an authorization bypass (IDOR)
 - `McpGroupTools` gated the conversation-scoped tools on a **role check only** (`eddi-viewer` for `followup_with_member` / `continue_group_discussion` / `read_group_conversation`, `eddi-editor` for `close`/`delete`) with **no ownership check**, while the equivalent REST endpoints all enforce `requireOwnerOrAdmin` (403). Any authenticated viewer could read another user's full transcript, append to it, re-run every phase against their conversation (burning their LLM budget), and an editor could close or delete it. Injected `OwnershipValidator` and added a `requireConversationOwner()` gate to all five tools, with a uniform non-leaking denial. Main's own HITL MCP tools already enforced this via `HitlAccessGuard` — MCP is now consistent with REST.
+- **Owner resolution on creation** (found reviewing the gate above): MCP recorded the owner as the literal `"mcp-client"` (or any caller-supplied `userId`), so the new gate would have **locked the creator out of their own conversation** whenever auth was enabled — and let a caller create a conversation owned by someone else. `discuss_with_group` / `start_group_discussion` now resolve the owner via `validateAndResolveUserId` (the calling principal; impersonation rejected), falling back to `"mcp-client"` only when auth is off.
+- **`list_group_conversations` is now owner-filtered** (mirroring REST). It returns full conversation documents, so without this the per-conversation gate was pointless — a non-owner could simply list the group and read everyone's transcripts.
 
 ### Correctness — a systemic `CLOSED`-blindness
 Ours introduced `CLOSED` as a new terminal state; theirs' HITL/cancel code predates it. A sweep of every terminal-state check found exactly two blind spots:
@@ -24,8 +26,7 @@ Ours introduced `CLOSED` as a new terminal state; theirs' HITL/cancel code preda
 
 ### Contract / robustness
 - `followUpWithMember` with a null/blank `targetAgentId` NPE'd into a **500**; now validated → **400** (service throws `IllegalArgumentException`, REST rejects up front). Same for a blank `question` on follow-up and continue.
-- `POST /continue` advertised `attachments` on its body but **silently dropped them**. Now honored: added an attachment-aware `continueDiscussion` overload that materializes new inline files into the blob store and assembles the union (prior rounds + new) for the round.
-- Follow-up by display name now resolves **dynamically recruited** agents (they are not in `memberDisplayNames`, which is populated from the static config).
+- `POST /continue` advertised `attachments` on its body but **silently dropped them**. Now **rejected with 400** rather than silently ignored. (A first attempt to *honour* them was reverted after review: attachments are granted and injected to a member only on its first-ever turn, and on a continuation every member conversation already exists — so the "fix" was a no-op that stored an orphaned blob and still returned 200. Actually sharing new files mid-conversation needs the attachment fan-out reworked — see *What's next*.)
 - `DELETE` during an in-flight follow-up/continue returned **500**; now a `GroupDiscussionException` → **409**.
 - OpenAPI updated for the new 400/409 responses and the `CANCELLED`-closeable state.
 
@@ -34,7 +35,12 @@ Backfilled the previously untested fixes (they could each have been reverted wit
 
 Also fixed a **latent broken test the merge introduced**: `GroupConversationHitlTest` still asserted 7 enum states (the merge made it 8 with `CLOSED`) — it was never in the narrower test selections and had been failing since the merge commit.
 
-Verified: `mvnw test` green — **773 group/MCP unit tests pass** (0 failures).
+### What's next (deliberately not done here)
+
+- **Attachments on a continuation round.** `grantAndInjectAttachments` runs only on a member's *first-ever* turn (`privateConvId == null`), so a continuation cannot share new files. Supporting it means reworking the fan-out to grant/inject per *round* (e.g. tracking which member conversations have been granted the current attachment set) — a change to shared attachment code, out of scope for a merge-response fix. Until then `/continue` rejects attachments with 400.
+- **Follow-up to a dynamically recruited agent.** `GroupConversation.dynamicMembers` has no production writer (sub-agent creation records only `createdAgentIds`), so recruited agents are not addressable as follow-up targets at all. A first attempt to resolve them by display name was reverted as dead code; the real fix is to register recruited agents as members (roster + `memberConversationIds`).
+
+Verified: `mvnw test` green — **758 group/MCP unit tests pass** (0 failures). The remaining full-suite failures are environmental only (Testcontainers/Docker and loopback-socket suites — Mongo/Postgres stores, HTTP tool tests); no group or MCP test fails. CI covers those.
 
 ---
 

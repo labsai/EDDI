@@ -1077,39 +1077,14 @@ public class GroupConversationService implements IGroupConversationService {
                         }
                     }
                 }
-                if (privateConvId == null && gc.getDynamicMembers() != null) {
-                    // Dynamically recruited/created agents are NOT in memberDisplayNames
-                    // (that map is populated from the static group config at round start),
-                    // so a follow-up addressed to one of them by display name would other-
-                    // wise be rejected as "not a member". Resolve against the dynamic
-                    // roster too. Defensive copy — the list is mutated from member turns.
-                    for (GroupMember dynamicMember : new ArrayList<>(gc.getDynamicMembers())) {
-                        if (dynamicMember.displayName() != null
-                                && targetAgentId.equalsIgnoreCase(dynamicMember.displayName())) {
-                            resolvedAgentId = dynamicMember.agentId();
-                            privateConvId = gc.getMemberConversationIds().get(resolvedAgentId);
-                            break;
-                        }
-                    }
-                }
                 if (privateConvId == null) {
                     throw new GroupDiscussionException(
                             "Agent '%s' is not a member of this group conversation. Available members: %s"
                                     .formatted(targetAgentId, gc.getMemberDisplayNames()));
                 }
 
-                // Resolve display name — fall back to the dynamic roster for recruited agents.
-                String displayName = gc.getMemberDisplayNames().get(resolvedAgentId);
-                if (displayName == null && gc.getDynamicMembers() != null) {
-                    final String target = resolvedAgentId;
-                    displayName = new ArrayList<>(gc.getDynamicMembers()).stream()
-                            .filter(m -> target.equals(m.agentId()) && m.displayName() != null)
-                            .map(GroupMember::displayName)
-                            .findFirst().orElse(null);
-                }
-                if (displayName == null) {
-                    displayName = resolvedAgentId;
-                }
+                // Resolve display name
+                String displayName = gc.getMemberDisplayNames().getOrDefault(resolvedAgentId, resolvedAgentId);
 
                 // Record the user's follow-up question on the transcript
                 gc.getTranscript().add(new TranscriptEntry(
@@ -1198,14 +1173,6 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversation continueDiscussion(String groupConversationId, String question,
                                                 GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        return continueDiscussion(groupConversationId, question, listener, null);
-    }
-
-    @Override
-    public GroupConversation continueDiscussion(String groupConversationId, String question,
-                                                GroupDiscussionEventListener listener,
-                                                List<Attachment> attachments)
-            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         // Validate before taking the guard / transitioning state — a blank question
         // would
@@ -1241,33 +1208,6 @@ public class GroupConversationService implements IGroupConversationService {
                     "user", "User", question, 0, "Question",
                     TranscriptEntryType.QUESTION, Instant.now(), null, null));
             conversationStore.update(gc);
-
-            // Share any NEW attachments supplied with this round. materializeAttachments
-            // persists inline files to the blob store bound to this conversation, so the
-            // full set for this round = everything blob-backed on the conversation
-            // (prior rounds + these new inline files) plus any URL-only refs, which are
-            // not blob-backed and so must be carried across explicitly.
-            if (attachments != null && !attachments.isEmpty()) {
-                materializeAttachments(gc, attachments);
-                List<Attachment> newlyShared = gc.getAttachments() != null
-                        ? new ArrayList<>(gc.getAttachments())
-                        : new ArrayList<Attachment>();
-                // Clear first: rehydrateAttachmentsFromStore is a no-op while the
-                // transient list is populated, and we want the union from the store.
-                gc.setAttachments(null);
-                rehydrateAttachmentsFromStore(gc);
-                List<Attachment> combined = gc.getAttachments() != null
-                        ? new ArrayList<>(gc.getAttachments())
-                        : new ArrayList<Attachment>();
-                for (Attachment a : newlyShared) {
-                    if (a.getStorageRef() == null && a.getUrl() != null && !a.getUrl().isBlank()) {
-                        combined.add(a);
-                    }
-                }
-                if (!combined.isEmpty()) {
-                    gc.setAttachments(combined);
-                }
-            }
 
             // Pre-register the control token BEFORE the config-load window so a cancel
             // racing the gap between the CAS above and executeDiscussion's own token

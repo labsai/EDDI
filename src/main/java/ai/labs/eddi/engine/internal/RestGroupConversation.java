@@ -345,19 +345,33 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
     }
 
+    /**
+     * A continuation round cannot share NEW files: attachments are granted and
+     * injected to a member only on its first-ever turn, and on a continuation every
+     * member conversation already exists. Rather than accept them and silently drop
+     * them (or store an orphaned blob), reject them explicitly. Honouring them
+     * requires reworking the attachment fan-out — tracked as follow-up work.
+     */
+    private static Response rejectAttachmentsOnContinue() {
+        return Response.status(Response.Status.BAD_REQUEST)
+                .entity("Attachments cannot be added on a continuation round — they are only "
+                        + "shared with member agents when the discussion starts. Start a new "
+                        + "discussion to share new files.")
+                .build();
+    }
+
     @Override
     public Response continueDiscussion(String groupId, String gcId, DiscussRequest request) {
         if (request == null || blank(request.question())) {
             return Response.status(Response.Status.BAD_REQUEST).entity("'question' is required").build();
         }
+        if (request.attachments() != null && !request.attachments().isEmpty()) {
+            return rejectAttachmentsOnContinue();
+        }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
-            // Honor attachments on a continuation round — the request body advertises
-            // them, so silently dropping them would leave round-2 agents blind to a file
-            // the caller explicitly shared.
-            GroupConversation result = groupConversationService.continueDiscussion(
-                    gcId, request.question(), null, toAttachments(request.attachments()));
+            GroupConversation result = groupConversationService.continueDiscussion(gcId, request.question(), null);
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
             throw e;
@@ -382,6 +396,14 @@ public class RestGroupConversation implements IRestGroupConversation {
             closeQuietly(eventSink);
             return;
         }
+        if (request.attachments() != null && !request.attachments().isEmpty()) {
+            // See rejectAttachmentsOnContinue — a continuation cannot share new files.
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+                    toJson(new GroupConversationEventSink.GroupErrorEvent(
+                            "Attachments cannot be added on a continuation round.")));
+            closeQuietly(eventSink);
+            return;
+        }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
@@ -391,11 +413,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             // member_pause_skipped events (and round_start) instead of silently
             // swallowing them and hanging the client.
             var listener = createStreamingListener(eventSink, sse);
-            List<Attachment> attachments = toAttachments(request.attachments());
 
             executorService.submit(() -> {
                 try {
-                    groupConversationService.continueDiscussion(gcId, request.question(), listener, attachments);
+                    groupConversationService.continueDiscussion(gcId, request.question(), listener);
                 } catch (Exception e) {
                     LOGGER.errorf("Continue discussion streaming failed: %s", e.getMessage());
                     listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));

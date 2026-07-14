@@ -80,6 +80,20 @@ public class McpGroupTools {
     }
 
     /**
+     * Resolves the owner to record on a conversation created over MCP. With auth
+     * enabled this is the CALLING principal (a blank {@code userId} resolves to the
+     * caller, and a non-admin naming someone else is rejected) — so the creator can
+     * subsequently read/continue/close their own conversation through the ownership
+     * gate, and cannot create one owned by another user. The legacy "mcp-client"
+     * default only applies when auth is off (with auth on, {@code requireRole} has
+     * already rejected anonymous callers before this runs).
+     */
+    private String resolveOwner(String userId) {
+        String resolved = ownershipValidator.validateAndResolveUserId(identity, userId);
+        return resolved != null && !resolved.isBlank() ? resolved : "mcp-client";
+    }
+
+    /**
      * Uniform, non-leaking denial for an MCP call on someone else's conversation.
      */
     private String accessDenied(String tool, String groupConversationId) {
@@ -321,12 +335,15 @@ public class McpGroupTools {
             + "poll with read_group_conversation).")
     public String discuss_with_group(@ToolArg(description = "Group configuration ID (from create_group " + "or list_groups)") String groupId,
                                      @ToolArg(description = "The question or topic for the group to " + "discuss") String question,
-                                     @ToolArg(description = "User ID (optional, defaults to " + "'mcp-client')") String userId) {
+                                     @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the "
+                                             + "calling user and may not name another user.") String userId) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
-            String user = userId != null && !userId.isBlank() ? userId : "mcp-client";
+            String user = resolveOwner(userId);
             GroupConversation gc = groupConversationService.discuss(groupId, question, user, 0);
             return jsonSerialization.serialize(gc);
+        } catch (ForbiddenException e) {
+            return errorJson("Access denied: you cannot start a conversation as another user");
         } catch (Exception e) {
             LOGGER.errorf("discuss_with_group failed: %s", e.getMessage());
             return errorJson(e.getMessage());
@@ -364,6 +381,20 @@ public class McpGroupTools {
             int idx = parseIntOrDefault(index, 0);
             int lim = parseIntOrDefault(limit, 20);
             List<GroupConversation> conversations = groupConversationService.listGroupConversations(groupId, idx, lim);
+            // Owner-filter (mirrors RestGroupConversation.listGroupConversations): these
+            // are
+            // FULL conversation documents (transcript, synthesized answer). Without this
+            // the
+            // per-conversation ownership gate is pointless — a non-owner could just list
+            // the
+            // group and read everyone's transcripts.
+            if (ownershipValidator.isAuthEnabled() && identity != null && !identity.isAnonymous()
+                    && !identity.hasRole("eddi-admin")) {
+                String callerId = identity.getPrincipal().getName();
+                conversations = conversations.stream()
+                        .filter(gc -> callerId.equals(gc.getUserId()))
+                        .toList();
+            }
             return jsonSerialization.serialize(conversations);
         } catch (Exception e) {
             LOGGER.errorf("list_group_conversations failed: %s", e.getMessage());
@@ -381,15 +412,17 @@ public class McpGroupTools {
     public String start_group_discussion(
                                          @ToolArg(description = "Group configuration ID (from create_group or list_groups)") String groupId,
                                          @ToolArg(description = "The question or topic for the group to discuss") String question,
-                                         @ToolArg(description = "User ID (optional, defaults to 'mcp-client')") String userId) {
+                                         @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.") String userId) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
-            String user = userId != null && !userId.isBlank() ? userId : "mcp-client";
+            String user = resolveOwner(userId);
             GroupConversation gc = groupConversationService.startAndDiscussAsync(groupId, question, user, null);
             return jsonSerialization.serialize(java.util.Map.of(
                     "groupConversationId", gc.getId(),
                     "state", String.valueOf(gc.getState()),
                     "message", "Discussion started. Poll read_group_conversation with this ID to check progress."));
+        } catch (ForbiddenException e) {
+            return errorJson("Access denied: you cannot start a conversation as another user");
         } catch (Exception e) {
             LOGGER.errorf("start_group_discussion failed: %s", e.getMessage());
             return errorJson(e.getMessage());

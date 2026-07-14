@@ -511,22 +511,18 @@ class RestGroupConversationTest {
         }
 
         @Test
-        @DisplayName("continue — attachments on the request body are forwarded, not dropped")
-        @SuppressWarnings("unchecked")
-        void continue_forwardsAttachments() throws Exception {
-            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
-            when(groupService.continueDiscussion(eq("gc-1"), eq("round two"), isNull(), anyList()))
-                    .thenReturn(gcInGroup("group-1"));
-
+        @DisplayName("continue — attachments are rejected with 400, never silently dropped")
+        void continue_rejectsAttachments() throws Exception {
+            // A continuation cannot share NEW files: the fan-out grants/injects attachments
+            // only on a member's first-ever turn, and on a continuation every member
+            // conversation already exists. Reject explicitly instead of pretending.
             var req = new DiscussRequest("round two", "user-1",
                     List.of(new AttachmentRef("image/png", "aGVsbG8=", null, "diagram.png")));
+
             Response response = restGroupConversation.continueDiscussion("group-1", "gc-1", req);
 
-            assertEquals(200, response.getStatus());
-            ArgumentCaptor<List<Attachment>> captor = ArgumentCaptor.forClass(List.class);
-            verify(groupService).continueDiscussion(eq("gc-1"), eq("round two"), isNull(), captor.capture());
-            assertEquals(1, captor.getValue().size());
-            assertEquals("aGVsbG8=", captor.getValue().get(0).getBase64Data());
+            assertEquals(400, response.getStatus());
+            verify(groupService, never()).continueDiscussion(any(), any(), any());
         }
 
         @Test

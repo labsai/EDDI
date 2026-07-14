@@ -106,11 +106,11 @@ public interface IRestGroupConversation {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Continue a group discussion",
                description = "Re-run all discussion phases with a new question. All agents retain "
-                       + "memory of prior rounds. The round counter increments. Any 'attachments' on "
-                       + "the request are shared with every member agent for this round, on top of "
-                       + "those already bound to the conversation.")
+                       + "memory of prior rounds. The round counter increments. NOTE: 'attachments' are "
+                       + "NOT supported on a continuation (they are only shared with member agents when "
+                       + "the discussion starts) and are rejected with 400 rather than silently ignored.")
     @APIResponse(responseCode = "200", description = "Updated group conversation with new round.")
-    @APIResponse(responseCode = "400", description = "Missing 'question'.")
+    @APIResponse(responseCode = "400", description = "Missing 'question', or 'attachments' supplied (unsupported on continuation).")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state.")
     Response continueDiscussion(@PathParam("groupId") String groupId,
@@ -125,7 +125,10 @@ public interface IRestGroupConversation {
                description = "Re-run all discussion phases with SSE event streaming for progress. "
                        + "Emits round_start (new round marker) followed by the same events as the "
                        + "initial stream (phase_start, speaker_start, speaker_complete, phase_complete, "
-                       + "synthesis_start, group_complete, group_error).")
+                       + "synthesis_start, group_complete, group_error), plus the HITL events "
+                       + "(awaiting_approval, hitl_resume, cancelled, member_pause_skipped). NOTE: "
+                       + "'attachments' are NOT supported on a continuation and are rejected with a "
+                       + "terminal group_error event rather than silently ignored.")
     @APIResponse(responseCode = "200", description = "SSE event stream of continuation progress.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     void continueDiscussionStreaming(@PathParam("groupId") String groupId,

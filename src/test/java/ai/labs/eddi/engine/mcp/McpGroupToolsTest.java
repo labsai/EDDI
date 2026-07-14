@@ -526,4 +526,62 @@ class McpGroupToolsTest {
         assertEquals("{\"id\":\"gc1\"}", result);
         verify(groupConversationService).followUpWithMember("gc1", "Analyst", "why?");
     }
+
+    // --- owner resolution on creation (the gate must not lock out the creator) ---
+
+    @Test
+    void startGroupDiscussion_recordsTheCallerAsOwner_notMcpClient() throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc1");
+        when(groupConversationService.startAndDiscussAsync(eq("g1"), eq("Q?"), eq("alice"), isNull()))
+                .thenReturn(gc);
+
+        toolsAsUser("alice", "eddi-viewer").start_group_discussion("g1", "Q?", null);
+
+        // If the conversation were owned by the literal "mcp-client", the ownership
+        // gate
+        // would then deny the creator on every follow-up read/continue/close.
+        verify(groupConversationService).startAndDiscussAsync("g1", "Q?", "alice", null);
+    }
+
+    @Test
+    void startGroupDiscussion_cannotCreateAConversationOwnedByAnotherUser() throws Exception {
+        String result = toolsAsUser("bob", "eddi-viewer").start_group_discussion("g1", "Q?", "alice");
+
+        assertTrue(result.contains("Access denied"), "impersonating another owner must be rejected");
+        verify(groupConversationService, never()).startAndDiscussAsync(any(), any(), any(), any());
+    }
+
+    @Test
+    void discussWithGroup_recordsTheCallerAsOwner() throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc1");
+        when(groupConversationService.discuss("g1", "Q?", "alice", 0)).thenReturn(gc);
+
+        toolsAsUser("alice", "eddi-viewer").discuss_with_group("g1", "Q?", null);
+
+        verify(groupConversationService).discuss("g1", "Q?", "alice", 0);
+    }
+
+    // --- listing must be owner-filtered, else the per-conversation gate is
+    // pointless ---
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listGroupConversations_filtersToTheCallersOwnConversations() throws Exception {
+        var mine = new GroupConversation();
+        mine.setId("gc-mine");
+        mine.setUserId("bob");
+        var theirs = new GroupConversation();
+        theirs.setId("gc-theirs");
+        theirs.setUserId("alice");
+        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(mine, theirs));
+
+        toolsAsUser("bob", "eddi-viewer").list_group_conversations("g1", null, null);
+
+        ArgumentCaptor<List<GroupConversation>> captor = ArgumentCaptor.forClass(List.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        assertEquals(1, captor.getValue().size(), "a non-owner must not see another user's transcript via list");
+        assertEquals("gc-mine", captor.getValue().get(0).getId());
+    }
 }

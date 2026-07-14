@@ -398,28 +398,28 @@ class RestGroupConversationExtendedTest {
 
             verify(eventSink, never()).send(any(OutboundSseEvent.class));
             verify(eventSink, never()).close();
-            verify(groupService, never()).continueDiscussion(any(), any(), any(), any());
+            verify(groupService, never()).continueDiscussion(any(), any(), any());
         }
 
         @Test
         @DisplayName("happy path delegates continue to the background executor")
         void success_delegatesToExecutor() throws Exception {
             when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
-            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any(), any())).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any())).thenReturn(gcInGroup("group-1"));
             when(jsonSerialization.serialize(any())).thenReturn("{}");
 
             restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",
                     new DiscussRequest("q", "user-1"), eventSink, sse);
 
             // continue runs on a background virtual thread — wait for the invocation
-            verify(groupService, timeout(2000)).continueDiscussion(eq("gc-1"), eq("q"), any(), any());
+            verify(groupService, timeout(2000)).continueDiscussion(eq("gc-1"), eq("q"), any());
         }
 
         @Test
         @DisplayName("executor task failure routes the error to the SSE sink")
         void executorTaskFailure_sendsErrorAndCloses() throws Exception {
             when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
-            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any(), any()))
+            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any()))
                     .thenThrow(new IGroupConversationService.GroupDiscussionException("boom"));
             when(jsonSerialization.serialize(any())).thenReturn("{\"error\":\"boom\"}");
 
@@ -435,14 +435,14 @@ class RestGroupConversationExtendedTest {
         @DisplayName("continuation streams HITL pause + cancel events (shared listener) instead of hanging the client")
         void continueListenerForwardsHitlAndCancelEvents() throws Exception {
             when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
-            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any(), any())).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any())).thenReturn(gcInGroup("group-1"));
             when(jsonSerialization.serialize(any())).thenReturn("{}");
 
             restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",
                     new DiscussRequest("q", "user-1"), eventSink, sse);
 
             var captor = ArgumentCaptor.forClass(GroupDiscussionEventListener.class);
-            verify(groupService, timeout(2000)).continueDiscussion(eq("gc-1"), eq("q"), captor.capture(), any());
+            verify(groupService, timeout(2000)).continueDiscussion(eq("gc-1"), eq("q"), captor.capture());
             var listener = captor.getValue();
 
             // The old hand-rolled inline listener had no HITL overrides, so a continuation
@@ -454,17 +454,33 @@ class RestGroupConversationExtendedTest {
         }
 
         @Test
+        @DisplayName("continue/stream rejects attachments with a terminal error, never silently drops them")
+        void continueStreaming_rejectsAttachments() throws Exception {
+            when(jsonSerialization.serialize(any())).thenReturn("{\"error\":\"attachments\"}");
+
+            restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1",
+                            List.of(new ai.labs.eddi.engine.api.IRestGroupConversation.AttachmentRef(
+                                    "image/png", "aGVsbG8=", null, "d.png"))),
+                    eventSink, sse);
+
+            verify(eventSink).send(any(OutboundSseEvent.class));
+            verify(eventSink).close();
+            verify(groupService, never()).continueDiscussion(any(), any(), any());
+        }
+
+        @Test
         @DisplayName("continuation streams round_start (the shared listener keeps ours' event)")
         void continueListenerForwardsRoundStart() throws Exception {
             when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
-            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any(), any())).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any())).thenReturn(gcInGroup("group-1"));
             when(jsonSerialization.serialize(any())).thenReturn("{}");
 
             restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",
                     new DiscussRequest("q", "user-1"), eventSink, sse);
 
             var captor = ArgumentCaptor.forClass(GroupDiscussionEventListener.class);
-            verify(groupService, timeout(2000)).continueDiscussion(eq("gc-1"), eq("q"), captor.capture(), any());
+            verify(groupService, timeout(2000)).continueDiscussion(eq("gc-1"), eq("q"), captor.capture());
 
             captor.getValue().onRoundStart(
                     new GroupConversationEventSink.RoundStartEvent("gc-1", 2, "q", 3));
