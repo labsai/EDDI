@@ -90,7 +90,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         GroupConversation gc = groupConversationService.readGroupConversation(gcId);
         if (gc.getGroupId() == null || !gc.getGroupId().equals(groupId)) {
-            throw new IResourceStore.ResourceNotFoundException("Group conversation not found in group: " + groupId);
+            // Curated body: the caller-supplied groupId/gcId are never reflected back
+            // (CodeQL reflected-value/XSS) — several callers echo e.getMessage() into the
+            // 404. The detail is logged server-side with both ids sanitized.
+            LOGGER.infof("Group conversation %s does not belong to group %s", sanitize(gcId), sanitize(groupId));
+            throw new IResourceStore.ResourceNotFoundException("Group conversation not found.");
         }
         return gc;
     }
@@ -202,8 +206,14 @@ public class RestGroupConversation implements IRestGroupConversation {
             throw e;
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // Another operation (follow-up / continue / close) is mid-flight — a retryable
-            // conflict, not a server error.
-            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+            // conflict, not a server error. Curated body: never surface the raw exception
+            // text to the client (CodeQL: information exposure through an error message);
+            // the detail is logged server-side with the id sanitized.
+            LOGGER.infof("Delete of group conversation %s conflicted: %s",
+                    sanitize(groupConversationId), e.getMessage());
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("Group conversation is busy — another operation is in progress. Please retry.")
+                    .build();
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }

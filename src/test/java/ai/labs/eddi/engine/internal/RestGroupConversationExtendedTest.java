@@ -454,6 +454,28 @@ class RestGroupConversationExtendedTest {
         }
 
         @Test
+        @DisplayName("continuation streams the cancelled event and closes the sink")
+        void continueListenerForwardsCancelledEvent() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any())).thenReturn(gcInGroup("group-1"));
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+            restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1"), eventSink, sse);
+
+            var captor = ArgumentCaptor.forClass(GroupDiscussionEventListener.class);
+            verify(groupService, timeout(2000)).continueDiscussion(eq("gc-1"), eq("q"), captor.capture());
+
+            // A cancelled continuation must terminate the stream — the old inline listener
+            // had no onCancelled override, so the client waited forever.
+            captor.getValue().onCancelled(
+                    new GroupConversationEventSink.CancelledEvent("Discussion cancelled", "user-1"));
+
+            verify(eventSink, atLeastOnce()).send(any(OutboundSseEvent.class));
+            verify(eventSink).close();
+        }
+
+        @Test
         @DisplayName("continue/stream rejects attachments with a terminal error, never silently drops them")
         void continueStreaming_rejectsAttachments() throws Exception {
             when(jsonSerialization.serialize(any())).thenReturn("{\"error\":\"attachments\"}");

@@ -5,6 +5,36 @@
 
 ---
 
+## 🤖 Group follow-ups — automated PR review response (CodeQL / Copilot / CodeRabbit) (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`) — responses to the bot reviews on [PR #595](https://github.com/labsai/EDDI/pull/595).
+
+### Correctness
+
+- **Terminal-state resurrection in `continueDiscussion`** (Copilot, *High*): after the `COMPLETED → IN_PROGRESS` CAS, the round/question mutation was persisted with an **unconditional** whole-document `update()`. A cancel/close/delete winning the window would be overwritten and the conversation resurrected as `IN_PROGRESS`. Now a conditional write (`updateIfState(gc, IN_PROGRESS)`) → `409` on conflict. This is the same defect class already fixed in `followUpWithMember`; the continue path had been missed.
+
+### Security — reflected input & error exposure
+
+- **Reflected `groupId` in 404 bodies** (Copilot, *Medium*): `loadInGroup()` embedded the caller-supplied `groupId` in its exception message, which follow-up / continue / close echo verbatim into the `404` body (CodeQL reflected-value/XSS). Now a curated body; both ids are logged server-side via `LogSanitizer`.
+- **Reflected `targetAgentId` in 409 bodies**: `followUpWithMember`'s "not a member" message echoed the caller-supplied agent id into the `409`. The id is no longer reflected (the available-member list — server data — is kept).
+- **Information exposure through an error message** (CodeQL, *Medium*): the delete-conflict `409` returned the raw `e.getMessage()`. Now a curated "busy, please retry" body with the detail logged server-side.
+
+### Observability & docs
+
+- **Metrics for the new operations** (CodeRabbit): `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` were uninstrumented, contrary to AGENTS.md. Added `eddi_group_followup_count`, `eddi_group_continue_count`, `eddi_group_close_count`. Instrumented in the **service** (not the MCP tools, as suggested) so the counters cover the REST *and* MCP surfaces.
+- **Authorization denials now log at WARN** (CodeRabbit) — a security-relevant event should be alertable.
+- **`getAvailableActions()` javadoc corrected** (Copilot, *Low*): it claimed "not persisted", but Jackson serializes it into stored documents. It is `READ_ONLY`, so the value is never read back and is always recomputed from `state` — the javadoc now says so rather than making a false claim.
+
+### Tests
+
+Post-CAS `IN_PROGRESS` read modelled so the `FAILED` recovery path is actually exercised; `close` now asserts a `CLOSED` result rather than `assertSame` on a stale instance; added the concurrent-terminal-transition conflict test, the SSE `cancelled` callback test, the admin-bypass tests (the other half of `requireOwnerOrAdmin` and the list-filter exemption), and assertions that neither the raw exception text nor the caller-supplied `groupId` reaches the client.
+
+### Not actioned (false positive)
+
+- CodeRabbit (*Major*) claimed `updateIfState` wrapping `ResourceNotFoundException` in the unchecked `GroupConversationGoneException` bypasses the REST layer's 404 handling and yields a 500. It does not: `RestGroupConversation` explicitly catches `GroupConversationGoneException` alongside `ResourceNotFoundException` in a multi-catch on every surface that exposes the operation (cancel / approve / approve-stream) and maps it to `404`. The unchecked type is a deliberate design from the HITL work (documented on the exception) so existing CAS call sites keep compiling; `compareAndSetState` converts it to `ResourceNotFoundException` for its own callers. No change made.
+
+---
+
 ## 🔐 Group merge — third-pass review: MCP authz, CLOSED-blindness, atomic CAS (2026-07-14)
 
 **Repo:** EDDI (`feat/group-followups`)

@@ -125,6 +125,13 @@ public class GroupConversationService implements IGroupConversationService {
     private final Counter counterGroupHitlPause;
     private final Counter counterGroupHitlResume;
     private final Counter counterGroupMemberPauseSkipped;
+    /**
+     * Post-discussion operations (follow-up / continue / close) — REST and MCP
+     * surfaces.
+     */
+    private final Counter counterGroupFollowUp;
+    private final Counter counterGroupContinue;
+    private final Counter counterGroupClose;
 
     @Inject
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
@@ -155,6 +162,9 @@ public class GroupConversationService implements IGroupConversationService {
         this.counterGroupHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "group");
         this.counterGroupHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "group");
         this.counterGroupMemberPauseSkipped = meterRegistry.counter("eddi_group_member_pause_skipped_count");
+        this.counterGroupFollowUp = meterRegistry.counter("eddi_group_followup_count");
+        this.counterGroupContinue = meterRegistry.counter("eddi_group_continue_count");
+        this.counterGroupClose = meterRegistry.counter("eddi_group_close_count");
     }
 
     @PreDestroy
@@ -1079,8 +1089,11 @@ public class GroupConversationService implements IGroupConversationService {
                 }
                 if (privateConvId == null) {
                     throw new GroupDiscussionException(
-                            "Agent '%s' is not a member of this group conversation. Available members: %s"
-                                    .formatted(targetAgentId, gc.getMemberDisplayNames()));
+                            // The caller-supplied targetAgentId is deliberately NOT echoed —
+                            // this message is surfaced verbatim in the 409 body (CodeQL
+                            // reflected-value/XSS). The available members are server data.
+                            "The requested agent is not a member of this group conversation. Available members: %s"
+                                    .formatted(gc.getMemberDisplayNames()));
                 }
 
                 // Resolve display name
@@ -1149,6 +1162,7 @@ public class GroupConversationService implements IGroupConversationService {
                 }
 
                 success = true;
+                counterGroupFollowUp.increment();
                 return gc;
 
             } finally {
@@ -1207,7 +1221,19 @@ public class GroupConversationService implements IGroupConversationService {
             gc.getTranscript().add(new TranscriptEntry(
                     "user", "User", question, 0, "Question",
                     TranscriptEntryType.QUESTION, Instant.now(), null, null));
-            conversationStore.update(gc);
+            gc.setLastModified(Instant.now());
+            // Conditional write (CAS on IN_PROGRESS): an unconditional whole-document
+            // update here would resurrect a conversation that a concurrent
+            // cancel/close/delete moved to a terminal state in the window after our CAS
+            // above. Terminal states must stay irreversible (mirrors followUpWithMember).
+            try {
+                conversationStore.updateIfState(gc, GroupConversationState.IN_PROGRESS);
+            } catch (IResourceStore.ResourceModifiedException
+                    | IGroupConversationStore.GroupConversationGoneException e) {
+                throw new GroupDiscussionException(
+                        "Cannot continue: the conversation was concurrently cancelled, closed or deleted", e);
+            }
+            counterGroupContinue.increment();
 
             // Pre-register the control token BEFORE the config-load window so a cancel
             // racing the gap between the CAS above and executeDiscussion's own token
@@ -1288,6 +1314,7 @@ public class GroupConversationService implements IGroupConversationService {
                 throw new GroupDiscussionException(
                         "Cannot close: conversation is in %s state (expected COMPLETED, FAILED, or CANCELLED)".formatted(gc.getState()));
             }
+            counterGroupClose.increment();
 
             // End all member conversations
             for (String privateConvId : gc.getMemberConversationIds().values()) {

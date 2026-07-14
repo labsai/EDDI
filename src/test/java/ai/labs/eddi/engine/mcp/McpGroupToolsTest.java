@@ -458,6 +458,53 @@ class McpGroupToolsTest {
                 new OwnershipValidator(true), true);
     }
 
+    /**
+     * An admin caller: holds eddi-admin (plus the baseline roles the tools
+     * require).
+     */
+    private McpGroupTools toolsAsAdmin(String callerId) {
+        var identity = mock(SecurityIdentity.class);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        var principal = mock(java.security.Principal.class);
+        lenient().when(principal.getName()).thenReturn(callerId);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.hasRole(anyString())).thenReturn(true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
+                new OwnershipValidator(true), true);
+    }
+
+    @Test
+    void admin_mayActOnAnotherUsersConversation() throws Exception {
+        GroupConversation gc = ownedBy("alice");
+        when(groupConversationService.followUpWithMember("gc1", "Analyst", "why?")).thenReturn(gc);
+        when(jsonSerialization.serialize(gc)).thenReturn("{\"id\":\"gc1\"}");
+
+        // The other half of requireOwnerOrAdmin: an admin is NOT the owner but must
+        // pass.
+        String result = toolsAsAdmin("root").followup_with_member("gc1", "Analyst", "why?");
+
+        assertFalse(result.contains("Access denied"));
+        verify(groupConversationService).followUpWithMember("gc1", "Analyst", "why?");
+    }
+
+    @Test
+    void admin_seesAllConversationsInTheGroupListing() throws Exception {
+        var mine = new GroupConversation();
+        mine.setId("gc-mine");
+        mine.setUserId("bob");
+        var theirs = new GroupConversation();
+        theirs.setId("gc-theirs");
+        theirs.setUserId("alice");
+        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(mine, theirs));
+
+        toolsAsAdmin("root").list_group_conversations("g1", null, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GroupConversation>> captor = ArgumentCaptor.forClass(List.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        assertEquals(2, captor.getValue().size(), "the owner filter must exempt admins");
+    }
+
     private GroupConversation ownedBy(String userId) throws Exception {
         GroupConversation gc = new GroupConversation();
         gc.setId("gc1");

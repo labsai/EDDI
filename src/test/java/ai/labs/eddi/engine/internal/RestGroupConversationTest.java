@@ -536,6 +536,23 @@ class RestGroupConversationTest {
             Response response = restGroupConversation.deleteGroupConversation("group-1", "gc-1");
 
             assertEquals(409, response.getStatus());
+            // The raw exception text must not reach the client (CodeQL: information
+            // exposure through an error message) — the body is curated.
+            assertFalse(String.valueOf(response.getEntity()).contains("Cannot delete:"),
+                    "the raw exception message must not be echoed to the caller");
+        }
+
+        @Test
+        @DisplayName("group mismatch — 404 body does not reflect the caller-supplied groupId")
+        void groupMismatch_doesNotReflectGroupId() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("other-group"));
+
+            Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("q", "Analyst", "user-1"));
+
+            assertEquals(404, response.getStatus());
+            assertFalse(String.valueOf(response.getEntity()).contains("group-1"),
+                    "the caller-supplied groupId must not be reflected back (CodeQL reflected-value)");
         }
     }
 }

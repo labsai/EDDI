@@ -399,8 +399,11 @@ public class GroupConversation {
     }
 
     /**
-     * Computed property — not persisted. Tells clients which operations are
-     * available based on the current conversation state.
+     * Computed property derived from {@link #state} — tells clients which
+     * operations are available. It is serialized (so REST/MCP clients see it, and
+     * it therefore also lands in the stored document), but {@code READ_ONLY} access
+     * means it is never read back in: the value is always recomputed from
+     * {@code state}, so a stale value in an old document cannot be trusted or used.
      */
     @JsonProperty(value = "availableActions", access = JsonProperty.Access.READ_ONLY)
     public List<String> getAvailableActions() {

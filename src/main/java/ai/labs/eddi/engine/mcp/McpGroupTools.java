@@ -97,7 +97,9 @@ public class McpGroupTools {
      * Uniform, non-leaking denial for an MCP call on someone else's conversation.
      */
     private String accessDenied(String tool, String groupConversationId) {
-        LOGGER.infof("%s denied: caller does not own group conversation %s",
+        // WARN, not INFO: an authorization denial is a security-relevant event that log
+        // monitoring should be able to alert on.
+        LOGGER.warnf("%s denied: caller does not own group conversation %s",
                 tool, LogSanitizer.sanitize(groupConversationId));
         return errorJson("Access denied: you do not own this group conversation");
     }

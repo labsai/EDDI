@@ -1057,7 +1057,15 @@ class GroupConversationServiceTest {
             gc.setGroupId("group-1");
             gc.setState(GroupConversationState.COMPLETED);
             gc.setRound(1);
-            when(conversationStore.read("gc-1")).thenReturn(gc);
+            // Model the real sequence: the pre-CAS read sees COMPLETED, the post-CAS
+            // re-read sees IN_PROGRESS. Without this the config-load failure would skip
+            // failConversation() and the FAILED recovery path would never be exercised.
+            var inProgress = new GroupConversation();
+            inProgress.setId("gc-1");
+            inProgress.setGroupId("group-1");
+            inProgress.setState(GroupConversationState.IN_PROGRESS);
+            inProgress.setRound(1);
+            when(conversationStore.read("gc-1")).thenReturn(gc, inProgress);
             when(conversationStore.compareAndSetState("gc-1",
                     GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
             // Fail fast right after the round/question mutation: group config not found.
@@ -1066,12 +1074,42 @@ class GroupConversationServiceTest {
             assertThrows(IResourceStore.ResourceNotFoundException.class,
                     () -> service.continueDiscussion("gc-1", "round two question", null));
 
-            assertEquals(2, gc.getRound());
-            var transcript = gc.getTranscript();
+            assertEquals(2, inProgress.getRound());
+            var transcript = inProgress.getTranscript();
             assertFalse(transcript.isEmpty());
             var last = transcript.get(transcript.size() - 1);
             assertEquals(TranscriptEntryType.QUESTION, last.type());
             assertEquals("round two question", last.content());
+            // The round/question mutation is persisted with a CAS on IN_PROGRESS so a
+            // racing cancel/close cannot be resurrected by an unconditional write.
+            verify(conversationStore).updateIfState(inProgress, GroupConversationState.IN_PROGRESS);
+            // Config load failed after the transition — the conversation must be FAILED,
+            // not left stranded IN_PROGRESS.
+            assertEquals(GroupConversationState.FAILED, inProgress.getState());
+        }
+
+        @Test
+        void continue_concurrentTerminalTransition_isNotResurrected() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            var inProgress = new GroupConversation();
+            inProgress.setId("gc-1");
+            inProgress.setGroupId("group-1");
+            inProgress.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(gc, inProgress);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            // A cancel/close/delete on another node wins the window after our CAS.
+            doThrow(new IResourceStore.ResourceModifiedException("terminal elsewhere"))
+                    .when(conversationStore).updateIfState(inProgress, GroupConversationState.IN_PROGRESS);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.continueDiscussion("gc-1", "round two", null));
+
+            // Must NOT fall through to running the discussion on a terminal conversation.
+            verify(groupStore, never()).getCurrentResourceId(any());
         }
     }
 
@@ -1224,7 +1262,14 @@ class GroupConversationServiceTest {
             gc.setGroupId("group-1");
             gc.setState(GroupConversationState.COMPLETED);
             gc.setMemberConversationIds(new LinkedHashMap<>(Map.of("agentA", "convA", "agentB", "convB")));
-            when(conversationStore.read("gc-1")).thenReturn(gc);
+            // close() re-reads the conversation to return the final state; the mocked CAS
+            // does not mutate gc, so model the post-transition read explicitly — otherwise
+            // asserting on the returned object would accept a stale, non-CLOSED response.
+            var closed = new GroupConversation();
+            closed.setId("gc-1");
+            closed.setGroupId("group-1");
+            closed.setState(GroupConversationState.CLOSED);
+            when(conversationStore.read("gc-1")).thenReturn(gc, closed);
             when(conversationStore.compareAndSetState("gc-1",
                     GroupConversationState.COMPLETED, GroupConversationState.CLOSED)).thenReturn(true);
             when(groupStore.getCurrentResourceId("group-1")).thenReturn(null); // ephemeral cleanup no-op
@@ -1233,7 +1278,7 @@ class GroupConversationServiceTest {
 
             verify(conversationService).endConversation("convA");
             verify(conversationService).endConversation("convB");
-            assertSame(gc, result);
+            assertEquals(GroupConversationState.CLOSED, result.getState());
         }
 
         @Test
