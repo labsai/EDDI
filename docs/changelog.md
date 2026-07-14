@@ -5,6 +5,31 @@
 
 ---
 
+## 🔬 Multi-Model Cascade — Merge-readiness review: fixes + coverage backfill (2026-07-14)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+
+A critical whole-branch review (6 parallel high-effort reviewers, then adversarial confirm/refute on each finding) declared the branch **merge-ready** — every unit "ready-with-nits", no blockers. Acted on the confirmed nits and backfilled test coverage for new/adapted paths the existing suite missed.
+
+### Fixes
+
+- **Validator ↔ runtime parity (`CascadeConfigValidator`).** The `convertToObject`-incompatibility warning now uses `EvaluationStrategy.fromConfigOrDefault`, so an *unknown* `evaluationStrategy` — which `resolveEffectiveStrategy` also resolves to `structured_output` and then downgrades at runtime — warns too (previously only `null`/`structured_output` warned).
+- **Live-stream mid-failure de-dup (`CascadingModelExecutor`).** If the live-streamed final step fails *after* emitting partial tokens, the fallback to the buffered best is now marked `streamedLive=true`, so `LlmTask` does not re-emit the best's (different) text as a duplicate token stream after the partial tokens the client already received — the correct full response still arrives via the final `done` snapshot. Added a `withRun(…, streamedLive)` overload and a per-step `stepStreamedLive` flag read in the catch.
+
+### Coverage backfill (new tests; all green)
+
+- **AgentOrchestrator:** token accumulation into `ExecutionResult.responseMetadata` (the cascade-cost feed — previously 0% exercised because every test mocked null response metadata), direct `sumTokens`/`tokenUsageMap` unit tests (helpers made package-private), and the before-tool cooperative-cancellation check.
+- **CascadingModelExecutor:** step-param templating + credential skip (`TEMPLATE_SKIP_PARAMS` — previously 0%, all tests used a null templating engine), a deterministic duration-ceiling test (replacing a timing-flaky one), and the streaming mid-failure de-dup above.
+- **LlmTask:** the skipCascade legacy-fallback SSE emit and cascade token-usage surfacing (`responseMetadata` + `audit:cascade_token_usage`).
+- **ConfidenceEvaluator:** `stripJsonWrapper` fallback, `extractFirstBalancedObject` backslash-escaped-quote handling, and the judge-model readTree-throw → regex-fallback path.
+- **CascadeConfigValidator:** cascade-level negative-pricing hard-fail and the `convertToObject` + unknown-strategy warn path.
+
+### Flagged (pre-existing, out of scope)
+
+- A HITL tool-approval pause originating *inside* an agent-mode cascade step resumes on the base model, not the cascade step's (cheaper) model — misattributing cost/audit. Confirmed real but pre-existing (baseline already threaded the tool-approval params; the resume path predates cascade-step pauses and stores only the outer task's model). Tracked as a follow-up.
+
+---
+
 ## 🧊 Multi-Model Cascade — PR-review follow-ups: type-safe SSE events + strategy enums (2026-07-14)
 
 **Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)

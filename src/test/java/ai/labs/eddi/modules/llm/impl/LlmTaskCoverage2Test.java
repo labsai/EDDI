@@ -33,6 +33,8 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.output.TokenUsage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -637,6 +639,110 @@ class LlmTaskCoverage2Test {
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         verify(eventSink).onToken("cascade answer");
+    }
+
+    // ============================================================
+    // skipCascade branch — agent mode with cascade disabled in agent mode
+    // (cascadeConfigured && isAgentMode && !enableInAgentMode): both the
+    // agent-result
+    // emit and the buffered legacy-fallback emit forward to the event sink
+    // ============================================================
+
+    @Test
+    @DisplayName("skipCascade + agent returns null → buffered legacy response streamed to the event sink once")
+    void skipCascade_legacyFallback_streamsBufferedResponse() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        // Agent orchestrator yields no tools → legacy fallback runs the ChatModel.
+        agentReturnsNull();
+        when(chatModel.chat(anyList())).thenReturn(chatResponse("legacy answer"));
+        var eventSink = mock(ConversationEventSink.class);
+        when(memory.getEventSink()).thenReturn(eventSink);
+
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEnableInAgentMode(false); // agent mode + this → skipCascade == true
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step));
+
+        var t = task("taskA", List.of("action1"), null);
+        t.setEnableBuiltInTools(true); // isAgentMode() true
+        t.setModelCascade(cascade);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        // Legacy fallback executed and its buffered response was forwarded once so an
+        // SSE client is not left empty.
+        verify(chatModel).chat(anyList());
+        verify(eventSink).onToken("legacy answer");
+    }
+
+    @Test
+    @DisplayName("skipCascade + agent result non-null → agent response streamed to the event sink once")
+    void skipCascade_agentResult_streamsResponse() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        agentReturns("agent answer");
+        var eventSink = mock(ConversationEventSink.class);
+        when(memory.getEventSink()).thenReturn(eventSink);
+
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEnableInAgentMode(false); // agent mode + this → skipCascade == true
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step));
+
+        var t = task("taskA", List.of("action1"), null);
+        t.setEnableBuiltInTools(true); // isAgentMode() true
+        t.setModelCascade(cascade);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        verify(eventSink).onToken("agent answer");
+    }
+
+    // ============================================================
+    // Cascade token-usage surfacing — non-empty tokenUsage reaches
+    // responseMetadata (responseMetadataObjectName) AND audit:cascade_token_usage
+    // ============================================================
+
+    @Test
+    @DisplayName("cascade legacy step with non-empty tokenUsage → surfaced in responseMetadata + audit:cascade_token_usage stored")
+    void cascadeEnabled_tokenUsageSurfaced() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        // The step's ChatResponse carries real token usage → LegacyChatExecutor emits a
+        // non-empty tokenUsage map, which the cascade result then surfaces.
+        when(chatModel.chat(anyList())).thenReturn(ChatResponse.builder().aiMessage(aiMessage("cascade answer"))
+                .metadata(ChatResponseMetadata.builder().tokenUsage(new TokenUsage(120, 30)).build()).build());
+        when(memory.getAuditCollector()).thenReturn(mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class));
+        var templateData = new HashMap<String, Object>();
+        when(memoryItemConverter.convert(memory)).thenReturn(templateData);
+
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step));
+
+        var t = task("taskA", List.of("action1"), null);
+        t.setResponseMetadataObjectName("meta");
+        t.setModelCascade(cascade);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        // (a) tokenUsage surfaced under the configured response-metadata object name.
+        var meta = (Map<String, Object>) templateData.get("meta");
+        assertNotNull(meta, "response metadata should be stored under the configured object name");
+        assertTrue(meta.containsKey("tokenUsage"), "non-empty cascade tokenUsage must be surfaced in responseMetadata");
+        // (b) audit token-usage key stored (mirrors audit:cascade_model /
+        // cascade_cost).
+        verify(dataFactory).createData(eq("audit:cascade_token_usage"), any());
     }
 
     // ============================================================

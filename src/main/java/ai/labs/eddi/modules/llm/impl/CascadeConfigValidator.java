@@ -107,8 +107,13 @@ final class CascadeConfigValidator {
         }
 
         // convertToObject + structured_output → auto-downgraded at runtime (warn once).
+        // Use fromConfigOrDefault so an unknown/blank token — which
+        // resolveEffectiveStrategy
+        // also resolves to structured_output and then downgrades — warns too (validator
+        // ↔
+        // runtime parity).
         boolean convertToObject = task.getParameters() != null && Boolean.parseBoolean(task.getParameters().get("convertToObject"));
-        if (convertToObject && (evalStrategy == null || EvaluationStrategy.fromConfig(evalStrategy) == EvaluationStrategy.STRUCTURED_OUTPUT)) {
+        if (convertToObject && EvaluationStrategy.fromConfigOrDefault(evalStrategy) == EvaluationStrategy.STRUCTURED_OUTPUT) {
             LOGGER.warnf("LLM task '%s': convertToObject=true is incompatible with the structured_output confidence wrapper — "
                     + "the cascade will use %s for confidence evaluation instead.", taskId,
                     cascade.getJudgeModel() != null ? "judge_model" : "heuristic");

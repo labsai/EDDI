@@ -153,6 +153,22 @@ class CascadeConfigValidatorTest {
     }
 
     @Test
+    @DisplayName("cascade-level negative inputPricePer1M — throws")
+    void cascadeNegativeInputPrice_throws() {
+        var c = enabled(List.of(step("openai", null)));
+        c.setInputPricePer1M(-1.0);
+        assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(c)));
+    }
+
+    @Test
+    @DisplayName("cascade-level negative outputPricePer1M — throws")
+    void cascadeNegativeOutputPrice_throws() {
+        var c = enabled(List.of(step("openai", null)));
+        c.setOutputPricePer1M(-1.0);
+        assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(c)));
+    }
+
+    @Test
     @DisplayName("non-positive maxTotalDurationMs — throws")
     void badDurationCeiling_throws() {
         var c = enabled(List.of(step("openai", null)));
@@ -181,6 +197,18 @@ class CascadeConfigValidatorTest {
     void convertToObjectStructured_ok() {
         var c = enabled(List.of(step("openai", null)));
         c.setEvaluationStrategy("structured_output");
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c, Map.of("convertToObject", "true"))));
+    }
+
+    @Test
+    @DisplayName("convertToObject + unknown evaluationStrategy — allowed (resolves to structured_output, warns)")
+    void convertToObjectUnknownStrategy_warns() {
+        // 'vibes' is unknown; fromConfigOrDefault resolves it to structured_output (as
+        // the runtime does before downgrading), so convertToObject emits the
+        // incompatibility warning too — a WARN, not an exception, so the agent still
+        // loads. Warn-only, hence assertDoesNotThrow.
+        var c = enabled(List.of(step("openai", null)));
+        c.setEvaluationStrategy("vibes");
         assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c, Map.of("convertToObject", "true"))));
     }
 

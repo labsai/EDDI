@@ -257,6 +257,12 @@ class CascadingModelExecutor {
             stepTrace.put("model", modelName);
             stepTrace.put("modelType", modelType);
 
+            // Tracks whether THIS step engaged live token streaming — read in the catch so
+            // a
+            // mid-stream failure of a live-streamed final step does not trigger a duplicate
+            // (garbled) re-emit of the buffered best response.
+            boolean stepStreamedLive = false;
+
             try {
                 ChatModel chatModel = registry.getOrCreate(modelType, mergedParams);
 
@@ -272,6 +278,7 @@ class CascadingModelExecutor {
                         && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
                         && guaranteedAccept;
                 StreamingChatModel streamingModel = streamLiveCandidate ? registry.getOrCreateStreaming(modelType, mergedParams) : null;
+                stepStreamedLive = streamingModel != null;
 
                 // A live stream is terminal and MUST NOT be cancelled mid-flight: cancelling
                 // the awaiting virtual thread does not stop the provider's callback thread, so
@@ -409,7 +416,12 @@ class CascadingModelExecutor {
                 if (isLastStep) {
                     if (bestSoFar != null) {
                         LOGGER.warn("All cascade steps exhausted (last failed), returning best response");
-                        return withRun(bestSoFar, runCostUsd, trace);
+                        // If the failed last step was streamed live, the client may already
+                        // have received partial tokens — mark the fallback streamedLive so
+                        // LlmTask does not re-emit best's (different) text as a duplicate token
+                        // stream. The correct full response still reaches the client via the
+                        // final snapshot ("done") event.
+                        return withRun(bestSoFar, runCostUsd, trace, bestSoFar.streamedLive() || stepStreamedLive);
                     }
                     throw new LifecycleException("Model cascade failed: all steps exhausted. Errors: " + String.join("; ", errors), e);
                 }
@@ -678,8 +690,12 @@ class CascadingModelExecutor {
 
     /** Rebuild the best-so-far result with the final aggregate run cost + trace. */
     private static CascadeResult withRun(CascadeResult best, double runCostUsd, List<Map<String, Object>> trace) {
+        return withRun(best, runCostUsd, trace, best.streamedLive());
+    }
+
+    private static CascadeResult withRun(CascadeResult best, double runCostUsd, List<Map<String, Object>> trace, boolean streamedLive) {
         return new CascadeResult(best.response(), best.confidence(), best.stepUsed(), best.modelType(), best.modelName(), best.tokenUsage(),
-                runCostUsd, trace, best.agentResult(), best.streamedLive());
+                runCostUsd, trace, best.agentResult(), streamedLive);
     }
 
     private static CascadeResult finalizeBest(CascadeResult bestSoFar, double runCostUsd, List<Map<String, Object>> trace, List<String> errors)

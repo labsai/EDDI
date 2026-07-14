@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -90,6 +91,14 @@ class CascadingModelExecutorCoverageTest {
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         return new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), mr);
+    }
+
+    // Same as executor(...) but wired with a real (mock) templating engine so the
+    // step-parameter templating path in templateParams() is actually exercised.
+    private CascadingModelExecutor executorWithTemplating(ChatModelRegistry registry, ITemplatingEngine templatingEngine) {
+        GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
+        when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        return new CascadingModelExecutor(registry, resolver, templatingEngine, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
     }
 
     // ─── Agent mode ──────────────────────────────────────────────────
@@ -456,6 +465,63 @@ class CascadingModelExecutorCoverageTest {
         assertEquals(0, result.stepUsed(), "best (step 0) is returned once the duration budget is spent");
     }
 
+    @Test
+    @DisplayName("duration ceiling — deterministic: budget spent by a slow middle step, best (step 0) returned; metric recorded")
+    void durationCeiling_deterministicReturnsBestAndRecordsMetric() throws Exception {
+        var meter = new SimpleMeterRegistry();
+
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("heuristic");
+        cascade.setMaxTotalDurationMs(50L);
+
+        // step0: completes instantly, but its confidence is forced below threshold so
+        // it
+        // escalates and becomes the best-so-far result (stepUsed == 0).
+        var step0 = new CascadeStep();
+        step0.setType("a");
+        step0.setConfidenceThreshold(0.99);
+        step0.setTimeoutMs(5000L);
+
+        // step1: a slow call whose per-step timeout is capped to the REMAINING duration
+        // budget. future.get() blocks the entire remaining budget before timing out, so
+        // by
+        // the time the loop reaches step2's pre-step check, elapsed >=
+        // maxTotalDurationMs is
+        // guaranteed — the duration ceiling fires deterministically (no timing race).
+        var step1 = new CascadeStep();
+        step1.setType("b");
+        step1.setConfidenceThreshold(0.99);
+        step1.setTimeoutMs(5000L);
+
+        // step2: never reached — the duration ceiling returns before it starts.
+        var step2 = new CascadeStep();
+        step2.setType("c");
+        step2.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step0, step1, step2));
+
+        ChatModel a = modelReturning("A confident and complete first answer to the question.");
+        ChatModel b = mock(ChatModel.class);
+        when(b.chat(anyList())).thenAnswer(inv -> {
+            Thread.sleep(500); // >> the remaining budget → blocks the whole budget, then times out
+            return ChatResponse.builder().aiMessage(AiMessage.from("late")).build();
+        });
+        ChatModel c = modelReturning("never used");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(eq("a"), anyMap())).thenReturn(a);
+        when(registry.getOrCreate(eq("b"), anyMap())).thenReturn(b);
+        when(registry.getOrCreate(eq("c"), anyMap())).thenReturn(c);
+
+        var result = executor(registry, meter).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
+                mock(AgentOrchestrator.class), Map.of(), false, false, false);
+
+        assertEquals(0, result.stepUsed(), "duration ceiling returns the best (step 0)");
+        assertEquals("A confident and complete first answer to the question.", result.response());
+        assertTrue(meter.find("eddi.llm.cascade.ceiling.exceeded").tag("kind", "duration").counter().count() >= 1.0,
+                "the duration ceiling metric must be recorded");
+        verify(c, never()).chat(anyList());
+    }
+
     // ─── convertToObject downgrade + jsonMode ────────────────────────
 
     @Test
@@ -598,5 +664,70 @@ class CascadingModelExecutorCoverageTest {
 
         assertEquals(1, result.stepUsed());
         assertEquals("retryable_error", result.trace().get(0).get("status"));
+    }
+
+    // ─── step-param templating + credential skip ─────────────────────
+
+    @Test
+    @DisplayName("step params — templated values are resolved, credential keys skip the template engine")
+    void templateParams_resolvesValues_skipsCredentialKeys() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        // A templated model name AND a credential — the credential must NOT be
+        // templated.
+        step.setParameters(Map.of("model", "{properties.tier}", "apiKey", "secret-key"));
+        cascade.setSteps(List.of(step));
+
+        ITemplatingEngine templatingEngine = mock(ITemplatingEngine.class);
+        when(templatingEngine.processTemplate(eq("{properties.tier}"), anyMap())).thenReturn("gpt-4o");
+
+        ChatModel model = modelReturning("answer");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+
+        var templateData = Map.<String, Object>of("properties", Map.of("tier", "gpt-4o"));
+        var result = executorWithTemplating(registry, templatingEngine).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(),
+                memory(null), mock(AgentOrchestrator.class), templateData, false, false, false);
+
+        assertEquals("answer", result.response());
+        // The templated model name flows into the trace (resolveModelName picks the
+        // "model" key).
+        assertEquals("gpt-4o", result.trace().get(0).get("model"), "templated model name should be resolved for the trace");
+        // The template engine ran for the model value...
+        verify(templatingEngine).processTemplate(eq("{properties.tier}"), anyMap());
+        // ...but NEVER for the credential value — apiKey is in TEMPLATE_SKIP_PARAMS.
+        verify(templatingEngine, never()).processTemplate(eq("secret-key"), anyMap());
+    }
+
+    @Test
+    @DisplayName("step params — a TemplateEngineException falls back to the raw parameter value")
+    void templateParams_templateEngineException_fallsBackToRawValue() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setParameters(Map.of("model", "{properties.tier}"));
+        cascade.setSteps(List.of(step));
+
+        ITemplatingEngine templatingEngine = mock(ITemplatingEngine.class);
+        when(templatingEngine.processTemplate(eq("{properties.tier}"), anyMap()))
+                .thenThrow(new ITemplatingEngine.TemplateEngineException("boom", null));
+
+        ChatModel model = modelReturning("answer");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+
+        var templateData = Map.<String, Object>of("properties", Map.of("tier", "gpt-4o"));
+        var result = executorWithTemplating(registry, templatingEngine).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(),
+                memory(null), mock(AgentOrchestrator.class), templateData, false, false, false);
+
+        assertEquals("answer", result.response());
+        // Template processing failed → the raw, un-rendered value is used as the
+        // fallback.
+        assertEquals("{properties.tier}", result.trace().get(0).get("model"), "raw value should be used when templating fails");
     }
 }

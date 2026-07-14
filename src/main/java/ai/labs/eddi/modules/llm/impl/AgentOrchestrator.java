@@ -1012,8 +1012,9 @@ class AgentOrchestrator {
 
     /**
      * Sum two (possibly null) TokenUsage values field-by-field, tolerating nulls.
+     * Package-private for direct unit testing of the accumulation arithmetic.
      */
-    private static TokenUsage sumTokens(TokenUsage a, TokenUsage b) {
+    static TokenUsage sumTokens(TokenUsage a, TokenUsage b) {
         if (a == null) {
             return b;
         }
@@ -1024,7 +1025,7 @@ class AgentOrchestrator {
                 sumInt(a.totalTokenCount(), b.totalTokenCount()));
     }
 
-    private static Integer sumInt(Integer a, Integer b) {
+    static Integer sumInt(Integer a, Integer b) {
         return (a != null ? a : 0) + (b != null ? b : 0);
     }
 

@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -16,7 +17,10 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
@@ -286,5 +290,61 @@ class CascadingModelExecutorEnterpriseTest {
         step.setOutputPricePer1M(4.0);
         assertEquals(4.0, CascadingModelExecutor.computeCost(step, new ModelCascadeConfig(), Map.of("inputTokens", 999, "outputTokens", 1_000_000)),
                 0.0001);
+    }
+
+    // ─── live-stream mid-failure de-dup ──────────────────────────────
+
+    @Test
+    @DisplayName("live-streamed final step fails mid-stream → fallback marked streamedLive so LlmTask won't re-emit a duplicate")
+    void streamingFinalStepFailsMidStream_fallbackMarkedStreamedLive() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("heuristic"); // non-structured → the last step is eligible for live streaming
+        var step0 = new CascadeStep();
+        step0.setType("cheap");
+        step0.setConfidenceThreshold(0.9); // step0 hedges (heuristic ≈ 0.4) → escalates, becomes buffered best
+        var step1 = new CascadeStep();
+        step1.setType("expensive"); // last step → streamed live
+        cascade.setSteps(List.of(step0, step1));
+
+        // step0: buffered, hedging response → low heuristic confidence → escalate +
+        // become best.
+        ChatModel cheap = modelReturning("I'm not sure, I don't know.");
+
+        // step1: live-streamed, emits a partial token then errors mid-stream.
+        StreamingChatModel expensiveStream = mock(StreamingChatModel.class);
+        doAnswer(inv -> {
+            StreamingChatResponseHandler h = inv.getArgument(1);
+            h.onPartialResponse("partial ");
+            h.onError(new RuntimeException("provider blew up mid-stream"));
+            return null;
+        }).when(expensiveStream).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
+
+        ChatModel expensiveBuffered = modelReturning("unused-buffered");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheap);
+        when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(expensiveBuffered);
+        when(registry.getOrCreateStreaming(eq("expensive"), anyMap())).thenReturn(expensiveStream);
+
+        // A non-null event sink makes allowLiveStreaming meaningful.
+        var sink = mock(ConversationEventSink.class);
+        IConversationMemory memory = mock(IConversationMemory.class);
+        when(memory.getEventSink()).thenReturn(sink);
+
+        GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
+        when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+
+        var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory, mock(AgentOrchestrator.class),
+                Map.of(), false, false, /* allowLiveStreaming */ true);
+
+        // The last (streamed) step failed after emitting a partial token; the best is
+        // step0
+        // (buffered). The fix marks the fallback streamedLive=true so LlmTask does not
+        // re-emit
+        // step0's (different) text as a duplicate token stream after the
+        // already-emitted partial.
+        assertEquals(0, result.stepUsed(), "best (step0) must be returned");
+        assertTrue(result.streamedLive(), "a fallback after a failed live-streamed step must be marked streamedLive");
     }
 }
