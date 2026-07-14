@@ -126,6 +126,46 @@ class SlackSignatureVerifierTest {
                 Set.of(SIGNING_SECRET)));
     }
 
+    // ─── verifyWithSecret (single-secret, integration-bound) ───
+
+    @Test
+    void verifyWithSecret_matchingSecret_returnsTrue() {
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = computeHmac(SIGNING_SECRET, "v0:" + timestamp + ":" + TEST_BODY);
+        assertTrue(verifier.verifyWithSecret(timestamp, TEST_BODY, signature, SIGNING_SECRET));
+    }
+
+    @Test
+    void verifyWithSecret_wrongSecret_returnsFalse() {
+        // Signed with secret #1 but verified against secret #2 — cross-integration
+        // forgery must NOT pass.
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = computeHmac(SIGNING_SECRET, "v0:" + timestamp + ":" + TEST_BODY);
+        assertFalse(verifier.verifyWithSecret(timestamp, TEST_BODY, signature, SIGNING_SECRET_2));
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    void verifyWithSecret_nullOrBlankSecret_returnsFalse(String secret) {
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = computeHmac(SIGNING_SECRET, "v0:" + timestamp + ":" + TEST_BODY);
+        assertFalse(verifier.verifyWithSecret(timestamp, TEST_BODY, signature, secret));
+    }
+
+    @Test
+    void verifyWithSecret_expiredTimestamp_returnsFalse() {
+        String expired = String.valueOf(Instant.now().getEpochSecond() - 600);
+        String signature = computeHmac(SIGNING_SECRET, "v0:" + expired + ":" + TEST_BODY);
+        assertFalse(verifier.verifyWithSecret(expired, TEST_BODY, signature, SIGNING_SECRET));
+    }
+
+    @Test
+    void verifyWithSecret_missingHeaders_returnsFalse() {
+        assertFalse(verifier.verifyWithSecret(null, TEST_BODY, "v0=x", SIGNING_SECRET));
+        assertFalse(verifier.verifyWithSecret("12345", null, "v0=x", SIGNING_SECRET));
+        assertFalse(verifier.verifyWithSecret("12345", TEST_BODY, null, SIGNING_SECRET));
+    }
+
     /**
      * Helper to compute HMAC-SHA256 signature in the v0= format.
      */

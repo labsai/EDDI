@@ -51,6 +51,13 @@ class AgentExecutionHelper {
                 return result;
 
             } catch (Exception e) {
+                // HITL tool pause: a gated tool call must abort the loop and travel
+                // up UNCHANGED — it is not a retryable failure. Rethrow before any
+                // retry/backoff or LifecycleException wrapping so the pause signal
+                // reaches LifecycleManager intact.
+                if (e instanceof ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException tare) {
+                    throw tare;
+                }
                 lastException = e;
 
                 if (attempt < maxAttempts) {

@@ -10,12 +10,15 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -27,21 +30,41 @@ import static org.mockito.Mockito.*;
 class RestScheduleStoreTest {
 
     private IScheduleStore scheduleStore;
+    private ScheduleFireExecutor fireExecutor;
+    private SecurityIdentity identity;
     private RestScheduleStore rest;
 
     @BeforeEach
     void setUp() {
         scheduleStore = mock(IScheduleStore.class);
-        var fireExecutor = mock(ScheduleFireExecutor.class);
+        fireExecutor = mock(ScheduleFireExecutor.class);
         var pollerService = mock(SchedulePollerService.class);
+        identity = mock(SecurityIdentity.class);
 
         rest = new RestScheduleStore();
         // Inject mocks (field injection in REST — we use reflection for tests)
         setField(rest, "scheduleStore", scheduleStore);
         setField(rest, "fireExecutor", fireExecutor);
         setField(rest, "pollerService", pollerService);
+        setField(rest, "identity", identity);
+        // Auth-enabled validator: isAdmin() is then driven by the mocked identity's
+        // role.
+        setField(rest, "ownershipValidator", new OwnershipValidator(true));
         setField(rest, "defaultTimeZone", "UTC");
         setField(rest, "minIntervalSeconds", 60L);
+    }
+
+    /** A HITL approval-timeout schedule as stored by ConversationService. */
+    private static ScheduleConfiguration hitlSchedule(String id) {
+        var s = new ScheduleConfiguration();
+        s.setId(id);
+        s.setName("hitl-timeout-conv-" + id);
+        s.setTriggerType(TriggerType.CRON);
+        s.setAgentId("agent-1");
+        s.setOneTimeAt(Instant.now().plusSeconds(3600).toString());
+        s.setMetadata(Map.of("hitlType", "hitl_timeout", "policy", "AUTO_APPROVE",
+                "surface", "regular", "conversationId", "conv-" + id));
+        return s;
     }
 
     // --- Create ---
@@ -202,6 +225,168 @@ class RestScheduleStoreTest {
     }
 
     // --- Helpers ---
+
+    // --- Finding #5: HITL schedule bypass guards ---
+
+    @Test
+    void fireNow_hitlSchedule_refusedWithConflict_evenForAdmin() throws Exception {
+        // An admin firing manually would STILL side-step the /resume audit path.
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        when(scheduleStore.readSchedule("h1")).thenReturn(hitlSchedule("h1"));
+
+        Response response = rest.fireNow("h1");
+
+        assertEquals(409, response.getStatus());
+        // Must NOT invoke the fire executor's HITL fast-path.
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_hitlSchedule_refusedForEditor() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false); // plain editor
+        when(scheduleStore.readSchedule("h1")).thenReturn(hitlSchedule("h1"));
+
+        Response response = rest.fireNow("h1");
+
+        assertEquals(409, response.getStatus());
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_regularSchedule_stillFires() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        var regular = makeCronSchedule("r1");
+        when(scheduleStore.readSchedule("r1")).thenReturn(regular);
+        when(fireExecutor.fire(any(), any(), anyInt()))
+                .thenReturn(new ai.labs.eddi.engine.schedule.model.ScheduleFireLog(
+                        "log-1", "r1", "fire-1", null, Instant.now(), Instant.now(),
+                        FireStatus.COMPLETED.name(), "n1", "conv-1", null, 1, 0.0));
+
+        Response response = rest.fireNow("r1");
+
+        assertEquals(200, response.getStatus());
+        verify(fireExecutor).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void deleteSchedule_hitl_forbiddenForEditor() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        when(scheduleStore.readSchedule("h1")).thenReturn(hitlSchedule("h1"));
+
+        Response response = rest.deleteSchedule("h1");
+
+        assertEquals(403, response.getStatus());
+        verify(scheduleStore, never()).deleteSchedule("h1");
+    }
+
+    @Test
+    void deleteSchedule_hitl_allowedForAdmin() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        when(scheduleStore.readSchedule("h1")).thenReturn(hitlSchedule("h1"));
+
+        Response response = rest.deleteSchedule("h1");
+
+        assertEquals(204, response.getStatus());
+        verify(scheduleStore).deleteSchedule("h1");
+    }
+
+    @Test
+    void disableSchedule_hitl_forbiddenForEditor() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        when(scheduleStore.readSchedule("h1")).thenReturn(hitlSchedule("h1"));
+
+        Response response = rest.disableSchedule("h1");
+
+        assertEquals(403, response.getStatus());
+        verify(scheduleStore, never()).setScheduleEnabled(eq("h1"), anyBoolean(), any());
+    }
+
+    @Test
+    void updateSchedule_hitl_forbiddenForEditor() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        when(scheduleStore.readSchedule("h1")).thenReturn(hitlSchedule("h1"));
+
+        // Body omits the metadata marker — the guard must still detect HITL via the
+        // STORED schedule.
+        var body = makeCronSchedule("h1");
+        Response response = rest.updateSchedule("h1", body);
+
+        assertEquals(403, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(eq("h1"), any());
+    }
+
+    // --- G3: forging a HITL timeout schedule via create/update is denied for
+    // EVERYONE (even admin). These schedules are minted internally only; a forged
+    // one would let the poller force-resume/abort a victim's approval
+    // unauthenticated.
+
+    @Test
+    void createSchedule_hitlBody_rejectedForEditor() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+
+        Response response = rest.createSchedule(hitlSchedule("v1"));
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void createSchedule_hitlBody_rejectedForAdmin() throws Exception {
+        // Even an admin cannot mint a HITL timeout schedule via REST.
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+
+        Response response = rest.createSchedule(hitlSchedule("v1"));
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void updateSchedule_convertBodyToHitl_rejectedForEditor() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        // Stored schedule is a plain (non-HITL) cron — the guard must catch the
+        // hitl_timeout marker on the INCOMING body, closing the conversion path.
+        when(scheduleStore.readSchedule("r1")).thenReturn(makeCronSchedule("r1"));
+
+        Response response = rest.updateSchedule("r1", hitlSchedule("r1"));
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(eq("r1"), any());
+    }
+
+    @Test
+    void updateSchedule_convertBodyToHitl_rejectedForAdmin() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        when(scheduleStore.readSchedule("r1")).thenReturn(makeCronSchedule("r1"));
+
+        Response response = rest.updateSchedule("r1", hitlSchedule("r1"));
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(eq("r1"), any());
+    }
+
+    @Test
+    void readAllSchedules_redactsHitlForEditor() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        when(scheduleStore.readAllSchedules(anyInt()))
+                .thenReturn(List.of(makeCronSchedule("r1"), hitlSchedule("h1")));
+
+        List<ScheduleConfiguration> result = rest.readAllSchedules(null);
+
+        assertEquals(1, result.size());
+        assertEquals("r1", result.get(0).getId());
+    }
+
+    @Test
+    void readAllSchedules_showsHitlForAdmin() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        when(scheduleStore.readAllSchedules(anyInt()))
+                .thenReturn(List.of(makeCronSchedule("r1"), hitlSchedule("h1")));
+
+        List<ScheduleConfiguration> result = rest.readAllSchedules(null);
+
+        assertEquals(2, result.size());
+    }
 
     private static ScheduleConfiguration makeCronSchedule(String id) {
         var s = new ScheduleConfiguration();

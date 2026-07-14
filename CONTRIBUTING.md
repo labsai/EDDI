@@ -192,7 +192,7 @@ chore(deps): bump Quarkus to 3.33.0
 - **One concern per PR** — don't mix refactoring with features
 - **Write a clear PR description** using the template
 - **Link the related issue** with `Closes #123`
-- **Keep commits clean** — squash fixup commits before requesting review
+- **Keep commits clean** — squash fixup commits *before pushing*. Once a branch is pushed and under review, don't rewrite history (no force-push); use GitHub's *Squash and merge* at the end instead.
 
 ## What the CI Checks
 

@@ -5,10 +5,12 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 
 import javax.sql.DataSource;
@@ -16,6 +18,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -39,7 +42,9 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
     static void init() {
         var dsInstance = createDataSourceInstance();
         ds = dsInstance.get();
-        store = new PostgresScheduleStore(dsInstance);
+        store = new PostgresScheduleStore(dsInstance,
+                new JsonSerialization(ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)),
+                100);
     }
 
     @BeforeEach
@@ -79,6 +84,21 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         void readNonExistent() {
             assertThrows(IResourceStore.ResourceNotFoundException.class,
                     () -> store.readSchedule("nonexistent-id"));
+        }
+
+        @Test
+        @DisplayName("Finding #5 parity: HITL metadata survives create/read round-trip")
+        void metadataRoundTrip() throws Exception {
+            var config = createCronSchedule("HITL timeout", "agent1", "t");
+            config.setMetadata(Map.of("hitlType", "hitl_timeout", "policy", "AUTO_APPROVE",
+                    "surface", "regular", "conversationId", "conv-xyz"));
+            String id = store.createSchedule(config);
+
+            var found = store.readSchedule(id);
+            assertNotNull(found.getMetadata());
+            assertEquals("hitl_timeout", found.getMetadata().get("hitlType"));
+            assertEquals("AUTO_APPROVE", found.getMetadata().get("policy"));
+            assertEquals("conv-xyz", found.getMetadata().get("conversationId"));
         }
 
         @Test
@@ -211,7 +231,9 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
 
-            boolean claimed = store.tryClaim(id, "node-1", Instant.now());
+            // Past leaseExpiry: a fresh PENDING row is claimed via the PENDING clause,
+            // never the lease-steal clause.
+            boolean claimed = store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES));
             assertTrue(claimed);
 
             var found = store.readSchedule(id);
@@ -228,9 +250,47 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
 
-            assertTrue(store.tryClaim(id, "node-1", Instant.now()));
-            // Second claim should fail — already CLAIMED
-            assertFalse(store.tryClaim(id, "node-2", Instant.now()));
+            // A PAST leaseExpiry (5 min ago) means the second claim cannot steal the
+            // fresh lease: node-1's claimed_at ≈ now is NOT <= leaseExpiry.
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)));
+            // Second claim should fail — already CLAIMED with a still-valid lease
+            assertFalse(store.tryClaim(id, "node-2", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)));
+        }
+
+        @Test
+        @DisplayName("tryClaim steals a CLAIMED schedule whose lease expired")
+        void claimStealsExpiredLease() throws Exception {
+            var config = createCronSchedule("Steal", "a", "t");
+            config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
+            String id = store.createSchedule(config);
+
+            // node-1 claims at a fixed instant T; its lease (claimed_at) is anchored at T.
+            Instant t = Instant.now().minus(10, ChronoUnit.MINUTES);
+            assertTrue(store.tryClaim(id, "node-1", t, t.minus(5, ChronoUnit.MINUTES)));
+            assertEquals("node-1", store.readSchedule(id).getClaimedBy());
+
+            // node-2 polls with a leaseExpiry AFTER node-1's claimed_at (T) — lease
+            // considered expired, so the CLAIMED row is stolen.
+            assertTrue(store.tryClaim(id, "node-2", Instant.now(), t.plusSeconds(1)),
+                    "an expired-lease CLAIMED schedule must be reclaimable");
+            var found = store.readSchedule(id);
+            assertEquals(FireStatus.CLAIMED, found.getFireStatus());
+            assertEquals("node-2", found.getClaimedBy(), "the stolen lease is now owned by node-2");
+        }
+
+        @Test
+        @DisplayName("tryClaim does NOT steal a CLAIMED schedule whose lease is still valid")
+        void claimDoesNotStealValidLease() throws Exception {
+            var config = createCronSchedule("NoSteal", "a", "t");
+            config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
+            String id = store.createSchedule(config);
+
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)));
+
+            // leaseExpiry BEFORE node-1's fresh claimed_at → lease still valid → no steal.
+            assertFalse(store.tryClaim(id, "node-2", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)),
+                    "a still-valid lease must not be stolen");
+            assertEquals("node-1", store.readSchedule(id).getClaimedBy(), "node-1 keeps its valid lease");
         }
 
         @Test
@@ -238,7 +298,7 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         void markCompletedWithReschedule() throws Exception {
             var config = createCronSchedule("S", "a", "t");
             String id = store.createSchedule(config);
-            store.tryClaim(id, "node-1", Instant.now());
+            store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES));
 
             Instant nextFire = Instant.now().plus(1, ChronoUnit.DAYS);
             store.markCompleted(id, nextFire);
@@ -256,7 +316,7 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         void markCompletedOneShot() throws Exception {
             var config = createCronSchedule("OneShot", "a", "t");
             String id = store.createSchedule(config);
-            store.tryClaim(id, "node-1", Instant.now());
+            store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES));
 
             store.markCompleted(id, null);
 
@@ -270,7 +330,7 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         void markFailed() throws Exception {
             var config = createCronSchedule("S", "a", "t");
             String id = store.createSchedule(config);
-            store.tryClaim(id, "node-1", Instant.now());
+            store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES));
 
             Instant retry = Instant.now().plus(5, ChronoUnit.MINUTES);
             store.markFailed(id, retry);

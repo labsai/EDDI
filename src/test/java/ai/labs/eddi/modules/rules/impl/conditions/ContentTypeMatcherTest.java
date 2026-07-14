@@ -47,7 +47,7 @@ class ContentTypeMatcherTest {
      * arise with {@code when().thenReturn()} on generic methods.
      */
     private void stubAttachments(IData<List<Attachment>> data) {
-        doReturn(data).when(currentStep).getLatestData(ArgumentMatchers.<MemoryKey<?>>any());
+        doReturn(data).when(currentStep).getData(ArgumentMatchers.<MemoryKey<?>>any());
     }
 
     private void stubAttachmentList(Attachment... attachments) {
@@ -190,7 +190,7 @@ class ContentTypeMatcherTest {
         @DisplayName("should FAIL when no attachment data in memory")
         void failsWhenNoDataInMemory() {
             matcher.setConfigs(Map.of("mimeType", "image/png"));
-            doReturn(null).when(currentStep).getLatestData(ArgumentMatchers.<MemoryKey<?>>any());
+            doReturn(null).when(currentStep).getData(ArgumentMatchers.<MemoryKey<?>>any());
 
             assertEquals(FAIL, matcher.execute(memory, List.of()));
         }
@@ -452,7 +452,7 @@ class ContentTypeMatcherTest {
             att.setMimeType("image/png");
             List<?> mixed = List.of(att, "not-an-attachment", 42);
             doReturn(new Data<>("attachments", mixed)).when(currentStep)
-                    .getLatestData(ArgumentMatchers.<MemoryKey<?>>any());
+                    .getData(ArgumentMatchers.<MemoryKey<?>>any());
 
             assertEquals(SUCCESS, matcher.execute(memory, List.of()));
         }
@@ -463,7 +463,7 @@ class ContentTypeMatcherTest {
             matcher.setConfigs(Map.of("mimeType", "image/*"));
             List<?> nonAttachments = List.of("string", 123, Map.of("key", "val"));
             doReturn(new Data<>("attachments", nonAttachments)).when(currentStep)
-                    .getLatestData(ArgumentMatchers.<MemoryKey<?>>any());
+                    .getData(ArgumentMatchers.<MemoryKey<?>>any());
 
             assertEquals(FAIL, matcher.execute(memory, List.of()));
         }

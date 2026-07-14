@@ -35,6 +35,15 @@ public final class GroupConversationEventSink {
     public static final String EVENT_TASK_PLAN_CREATED = "task_plan_created";
     public static final String EVENT_TASK_VERIFIED = "task_verified";
     public static final String EVENT_ROUND_START = "round_start";
+    public static final String EVENT_CANCELLED = "cancelled";
+    public static final String EVENT_AWAITING_APPROVAL = "awaiting_approval";
+    public static final String EVENT_HITL_RESUME = "hitl_resume";
+    /**
+     * A member agent's own conversation paused for human approval
+     * (PAUSE_CONVERSATION) mid-turn — unsupported inside a group discussion. The
+     * member turn is recorded SKIPPED and its stranded pause is cancelled.
+     */
+    public static final String EVENT_MEMBER_PAUSE_SKIPPED = "member_pause_skipped";
 
     // --- Event payloads ---
 
@@ -82,5 +91,23 @@ public final class GroupConversationEventSink {
     }
 
     public record RoundStartEvent(String groupConversationId, int round, String question, int phaseCount) {
+    }
+
+    public record CancelledEvent(String reason, String cancelledBy) {
+    }
+
+    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
+    }
+
+    public record HitlResumeEvent(String verdict, String note, String decidedBy) {
+    }
+
+    /**
+     * Emitted when a member agent's private conversation requested human approval
+     * (PAUSE_CONVERSATION) during its group turn. Member-level HITL is not
+     * supported inside a group discussion in v1 — the turn is recorded SKIPPED and
+     * the stranded member pause is cancelled.
+     */
+    public record MemberPauseSkippedEvent(String agentId, String displayName, int phaseIndex, String phaseName, String reason) {
     }
 }

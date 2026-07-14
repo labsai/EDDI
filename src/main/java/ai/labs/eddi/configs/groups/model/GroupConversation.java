@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.engine.memory.model.Attachment;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -48,6 +50,28 @@ public class GroupConversation {
     private List<String> createdAgentIds = Collections.synchronizedList(new ArrayList<>());
     /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
+    private int pausedAtPhaseIndex = -1;
+    private int pausedTurnCount = 0;
+    private String pausedPhaseName;
+    private Instant pausedAt;
+    private HitlPauseType hitlPauseType;
+    /** Human-readable reason for the pause (from HITL gate). */
+    private String hitlPauseReason;
+    /** Timeout policy copied from config at pause time (Phase 6d). */
+    private HitlTimeoutPolicy hitlTimeoutPolicy;
+    /**
+     * Approval timeout duration (ISO-8601) copied from config at pause time (Phase
+     * 6d).
+     */
+    private String hitlApprovalTimeout;
+    /**
+     * Fingerprint of the task state at the previous TASK-granularity pause (#4). A
+     * resume that re-pauses at the SAME phase with an identical fingerprint made no
+     * progress — the discussion is failed instead of re-pausing, guaranteeing
+     * termination of the pause→approve→pause loop. Null until the first TASK pause;
+     * cleared on successful completion.
+     */
+    private String hitlLastPauseFingerprint;
     private Instant created;
     private Instant lastModified;
 
@@ -59,6 +83,16 @@ public class GroupConversation {
      */
     @JsonIgnore
     private transient AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig;
+
+    /**
+     * Transient attachments for this discussion. Set at fan-out by
+     * {@code GroupConversationService} — inline files are materialized into the
+     * blob store (owned by this group conversation) and each member conversation is
+     * granted access. Not persisted to the transcript document; the blobs live in
+     * {@code IAttachmentStore} bound to this conversation's id.
+     */
+    @JsonIgnore
+    private transient List<Attachment> attachments;
 
     /**
      * A single entry in the discussion transcript. Each entry records one agent's
@@ -137,6 +171,8 @@ public class GroupConversation {
 
     public enum GroupConversationState {
         CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED,
+        /** Discussion was cancelled before completion — HITL foundation (Phase 9b). */
+        CANCELLED,
         /** Paused for human approval — HITL foundation (Phase 9b). */
         AWAITING_APPROVAL,
         /**
@@ -144,6 +180,10 @@ public class GroupConversation {
          * further follow-ups.
          */
         CLOSED
+    }
+
+    public enum HitlPauseType {
+        PHASE, TASK
     }
 
     // --- Getters/Setters ---
@@ -353,7 +393,94 @@ public class GroupConversation {
             case COMPLETED -> List.of("followup", "continue", "close");
             case FAILED -> List.of("close");
             case IN_PROGRESS, SYNTHESIZING, CREATED, AWAITING_APPROVAL -> List.of();
-            case CLOSED -> List.of();
+            // CANCELLED (HITL) is terminal with no follow-up/close path — no actions.
+            case CLOSED, CANCELLED -> List.of();
         };
+    }
+
+    @JsonIgnore
+    public List<Attachment> getAttachments() {
+        return attachments;
+    }
+
+    public void setAttachments(List<Attachment> attachments) {
+        this.attachments = attachments;
+    }
+
+    @JsonIgnore
+    public boolean isPaused() {
+        return pausedAt != null;
+    }
+
+    public int getPausedAtPhaseIndex() {
+        return pausedAtPhaseIndex;
+    }
+
+    public void setPausedAtPhaseIndex(int pausedAtPhaseIndex) {
+        this.pausedAtPhaseIndex = pausedAtPhaseIndex;
+    }
+
+    public int getPausedTurnCount() {
+        return pausedTurnCount;
+    }
+
+    public void setPausedTurnCount(int pausedTurnCount) {
+        this.pausedTurnCount = pausedTurnCount;
+    }
+
+    public String getPausedPhaseName() {
+        return pausedPhaseName;
+    }
+
+    public void setPausedPhaseName(String pausedPhaseName) {
+        this.pausedPhaseName = pausedPhaseName;
+    }
+
+    public Instant getPausedAt() {
+        return pausedAt;
+    }
+
+    public void setPausedAt(Instant pausedAt) {
+        this.pausedAt = pausedAt;
+    }
+
+    public HitlPauseType getHitlPauseType() {
+        return hitlPauseType;
+    }
+
+    public void setHitlPauseType(HitlPauseType hitlPauseType) {
+        this.hitlPauseType = hitlPauseType;
+    }
+
+    public String getHitlPauseReason() {
+        return hitlPauseReason;
+    }
+
+    public void setHitlPauseReason(String hitlPauseReason) {
+        this.hitlPauseReason = hitlPauseReason;
+    }
+
+    public HitlTimeoutPolicy getHitlTimeoutPolicy() {
+        return hitlTimeoutPolicy;
+    }
+
+    public void setHitlTimeoutPolicy(HitlTimeoutPolicy hitlTimeoutPolicy) {
+        this.hitlTimeoutPolicy = hitlTimeoutPolicy;
+    }
+
+    public String getHitlApprovalTimeout() {
+        return hitlApprovalTimeout;
+    }
+
+    public void setHitlApprovalTimeout(String hitlApprovalTimeout) {
+        this.hitlApprovalTimeout = hitlApprovalTimeout;
+    }
+
+    public String getHitlLastPauseFingerprint() {
+        return hitlLastPauseFingerprint;
+    }
+
+    public void setHitlLastPauseFingerprint(String hitlLastPauseFingerprint) {
+        this.hitlLastPauseFingerprint = hitlLastPauseFingerprint;
     }
 }

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
@@ -27,6 +28,8 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,7 +60,10 @@ class ConversationServiceExtendedTest {
     private AuditLedgerService auditLedgerService;
     private GdprComplianceService gdprComplianceService;
     private TenantQuotaService tenantQuotaService;
+    private IScheduleStore scheduleStore;
+    private IAgentStore agentStore;
     private IUserMemoryStore userMemoryStore;
+    private IJsonSerialization jsonSerialization;
 
     private static final Environment ENV = Environment.production;
     private static final String AGENT_ID = "test-agent-id";
@@ -80,7 +86,10 @@ class ConversationServiceExtendedTest {
         auditLedgerService = mock(AuditLedgerService.class);
         gdprComplianceService = mock(GdprComplianceService.class);
         tenantQuotaService = mock(TenantQuotaService.class);
+        scheduleStore = mock(IScheduleStore.class);
+        agentStore = mock(IAgentStore.class);
         userMemoryStore = mock(IUserMemoryStore.class);
+        jsonSerialization = mock(IJsonSerialization.class);
 
         when(tenantQuotaService.acquireConversationSlot()).thenReturn(QuotaCheckResult.OK);
         when(tenantQuotaService.acquireApiCallSlot()).thenReturn(QuotaCheckResult.OK);
@@ -93,7 +102,9 @@ class ConversationServiceExtendedTest {
         conversationService = new ConversationService(agentFactory, conversationMemoryStore,
                 conversationDescriptorStore, userMemoryStore, conversationCoordinator,
                 conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService,
-                gdprComplianceService, tenantQuotaService, meterRegistry, AGENT_TIMEOUT);
+                gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
+                meterRegistry, ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
     }
 
     @Nested

@@ -112,6 +112,36 @@ final class McpToolUtils {
     }
 
     /**
+     * Structured error JSON for tools whose callers need to branch on the failure
+     * kind (e.g. NOT_FOUND vs WRONG_STATE vs FORBIDDEN vs DISABLED vs BAD_REQUEST).
+     * Manual construction — like {@link #errorJson(String)} it can never throw on
+     * the error path. {@code errorCode} and {@code details} may be null/blank/empty
+     * (omitted when so).
+     */
+    static String errorJson(String message, String errorCode, java.util.Map<String, String> details) {
+        var sb = new StringBuilder();
+        sb.append("{\"error\":\"").append(escapeJsonString(message)).append("\"");
+        if (errorCode != null && !errorCode.isBlank()) {
+            sb.append(",\"errorCode\":\"").append(escapeJsonString(errorCode)).append("\"");
+        }
+        if (details != null && !details.isEmpty()) {
+            sb.append(",\"details\":{");
+            boolean first = true;
+            for (var entry : details.entrySet()) {
+                if (!first) {
+                    sb.append(",");
+                }
+                sb.append("\"").append(escapeJsonString(entry.getKey())).append("\":\"")
+                        .append(escapeJsonString(entry.getValue())).append("\"");
+                first = false;
+            }
+            sb.append("}");
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    /**
      * Escape a string for safe inclusion in a JSON string value. Handles all
      * JSON-special characters per RFC 8259.
      */

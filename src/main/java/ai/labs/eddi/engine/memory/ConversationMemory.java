@@ -5,12 +5,17 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -30,6 +35,7 @@ public class ConversationMemory implements IConversationMemory {
     private final Stack<ConversationOutput> conversationOutputs = new Stack<>();
     private final IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
+    private volatile boolean cancelled;
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
     private transient ConversationEventSink eventSink;
@@ -217,6 +223,140 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setMemoryPolicy(AgentConfiguration.MemoryPolicy memoryPolicy) {
         this.memoryPolicy = memoryPolicy;
+    }
+
+    @Override
+    public void setCancelled(boolean cancelled) {
+        this.cancelled = cancelled;
+    }
+
+    @Override
+    public boolean isCancelled() {
+        return cancelled;
+    }
+
+    // === HITL pause bookmark ===
+    // The `transient` keyword only exempts these fields from Java serialization of
+    // this LIVE object — they ARE persisted: ConversationMemoryUtilities copies
+    // them onto ConversationMemorySnapshot, which is what gets stored in the DB
+    // and restored on load. Clearing them here without persisting the snapshot
+    // does NOT clear the stored bookmark (that's what clearHitlBookmark on the
+    // store is for).
+
+    private transient String hitlPausedWorkflowId;
+    private transient int hitlPausedAbsoluteTaskIndex = -1;
+    private transient Instant hitlPausedAt;
+    private transient String hitlPauseReason;
+    private transient HitlTimeoutPolicy hitlTimeoutPolicy;
+    private transient String hitlApprovalTimeout;
+    // Tool-level HITL: discriminator (null/"RULE"/"TOOL_CALL") + the interrupted
+    // tool-call batch. Persisted via ConversationMemorySnapshot like the bookmark.
+    private transient String hitlPauseType;
+    private transient PendingToolCallBatch hitlPendingToolCalls;
+    // The agent-level tool-approval config, carried onto memory at conversation
+    // start; NOT persisted (re-resolved from the pinned agent config each turn).
+    private transient ToolApprovalsConfig agentToolApprovalsConfig;
+    // The human decision being applied during an in-JVM resume; NOT persisted.
+    private transient HitlDecision hitlResumeDecision;
+
+    @Override
+    public String getHitlPausedWorkflowId() {
+        return hitlPausedWorkflowId;
+    }
+
+    @Override
+    public void setHitlPausedWorkflowId(String workflowId) {
+        this.hitlPausedWorkflowId = workflowId;
+    }
+
+    @Override
+    public int getHitlPausedAbsoluteTaskIndex() {
+        return hitlPausedAbsoluteTaskIndex;
+    }
+
+    @Override
+    public void setHitlPausedAbsoluteTaskIndex(int index) {
+        this.hitlPausedAbsoluteTaskIndex = index;
+    }
+
+    @Override
+    public Instant getHitlPausedAt() {
+        return hitlPausedAt;
+    }
+
+    @Override
+    public void setHitlPausedAt(Instant pausedAt) {
+        this.hitlPausedAt = pausedAt;
+    }
+
+    @Override
+    public String getHitlPauseReason() {
+        return hitlPauseReason;
+    }
+
+    @Override
+    public void setHitlPauseReason(String reason) {
+        this.hitlPauseReason = reason;
+    }
+
+    @Override
+    public HitlTimeoutPolicy getHitlTimeoutPolicy() {
+        return hitlTimeoutPolicy;
+    }
+
+    @Override
+    public void setHitlTimeoutPolicy(HitlTimeoutPolicy policy) {
+        this.hitlTimeoutPolicy = policy;
+    }
+
+    @Override
+    public String getHitlApprovalTimeout() {
+        return hitlApprovalTimeout;
+    }
+
+    @Override
+    public void setHitlApprovalTimeout(String timeout) {
+        this.hitlApprovalTimeout = timeout;
+    }
+
+    @Override
+    public String getHitlPauseType() {
+        return hitlPauseType;
+    }
+
+    @Override
+    public void setHitlPauseType(String pauseType) {
+        this.hitlPauseType = pauseType;
+    }
+
+    @Override
+    public PendingToolCallBatch getHitlPendingToolCalls() {
+        return hitlPendingToolCalls;
+    }
+
+    @Override
+    public void setHitlPendingToolCalls(PendingToolCallBatch batch) {
+        this.hitlPendingToolCalls = batch;
+    }
+
+    @Override
+    public ToolApprovalsConfig getAgentToolApprovalsConfig() {
+        return agentToolApprovalsConfig;
+    }
+
+    @Override
+    public void setAgentToolApprovalsConfig(ToolApprovalsConfig config) {
+        this.agentToolApprovalsConfig = config;
+    }
+
+    @Override
+    public HitlDecision getHitlResumeDecision() {
+        return hitlResumeDecision;
+    }
+
+    @Override
+    public void setHitlResumeDecision(HitlDecision decision) {
+        this.hitlResumeDecision = decision;
     }
 
     public static final class ConversationStepStack implements IConversationStepStack {

@@ -17,6 +17,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * DB-agnostic store for group conversation transcripts. Uses
@@ -32,6 +33,15 @@ public class GroupConversationStore implements IGroupConversationStore {
 
     private static final Logger LOGGER = Logger.getLogger(GroupConversationStore.class);
     private static final int SINGLE_VERSION = 1;
+
+    /**
+     * Ids are hex ObjectIds or UUIDs — no regex metacharacters. This makes plain
+     * anchoring ({@code ^id$}) an exact match on BOTH regex engines. Never use
+     * {@link Pattern#quote} here: its {@code \Q...\E} output is Java-specific and
+     * rejected by PostgreSQL's regex engine (the DB-agnostic findResources maps
+     * String filters to {@code ~} on Postgres and to a Mongo regex on MongoDB).
+     */
+    private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9-]+");
 
     private final IResourceStorage<GroupConversation> storage;
 
@@ -90,9 +100,19 @@ public class GroupConversationStore implements IGroupConversationStore {
         // queries.
         // This is a placeholder that works with both DB backends.
         var results = new ArrayList<GroupConversation>();
+        if (groupId == null || groupId.isBlank() || !SAFE_ID.matcher(groupId).matches()) {
+            // no stored group can carry such an id — honest empty result, and the
+            // value never reaches either backend's regex engine
+            LOGGER.warnf("listByGroupId called with non-id value — returning empty");
+            return results;
+        }
         try {
+            // Anchored exact match (see SAFE_ID): findResources turns a String
+            // filter value into an unanchored regex, so a raw groupId would
+            // substring-match other groups.
             var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
-                    java.util.List.of(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("groupId", groupId)));
+                    java.util.List.of(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter(
+                            "groupId", "^" + groupId + "$")));
             var resourceIds = storage.findResources(new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{filter}, "lastModified", index, limit);
             for (var resourceId : resourceIds) {
                 try {
@@ -124,5 +144,68 @@ public class GroupConversationStore implements IGroupConversationStore {
         gc.setLastModified(java.time.Instant.now());
         update(gc);
         return true;
+    }
+
+    @Override
+    public void updateIfState(GroupConversation gc, GroupConversation.GroupConversationState expectedState)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException {
+        try {
+            IResourceStorage.IResource<GroupConversation> resource = storage.newResource(gc.getId(), SINGLE_VERSION, gc);
+            storage.storeIfFieldEquals(resource, "state", expectedState.name());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // deleted-vs-mismatch distinction from the storage CAS: surface the
+            // deletion as its own (unchecked) type so callers can answer 404
+            throw new GroupConversationGoneException(
+                    "Group conversation " + gc.getId() + " no longer exists", e);
+        } catch (IOException e) {
+            throw new IResourceStore.ResourceStoreException("Failed conditional update: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<GroupConversation> findByState(GroupConversation.GroupConversationState state)
+            throws IResourceStore.ResourceStoreException {
+        return findByState(state, null, 1000);
+    }
+
+    @Override
+    public List<GroupConversation> findByState(GroupConversation.GroupConversationState state, String groupId, int limit)
+            throws IResourceStore.ResourceStoreException {
+        var filterList = new ArrayList<ai.labs.eddi.datastore.IResourceFilter.QueryFilter>();
+        filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("state", "^" + state.name() + "$"));
+        if (groupId != null) {
+            if (!SAFE_ID.matcher(groupId).matches()) {
+                LOGGER.warnf("findByState called with non-id groupId — returning empty");
+                return new ArrayList<>();
+            }
+            // Anchored exact match (see SAFE_ID): a raw groupId would leak
+            // conversations from other groups whose id contains it as a substring.
+            filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter(
+                    "groupId", "^" + groupId + "$"));
+        }
+        var filters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{
+                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(filterList)};
+        List<IResourceStore.IResourceId> ids = storage.findResources(filters, "lastModified", 0, limit);
+        List<GroupConversation> out = new ArrayList<>();
+        for (var id : ids) {
+            try {
+                GroupConversation gc = read(id.getId());
+                if (gc != null)
+                    out.add(gc);
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                LOGGER.warnf("Group conversation %s disappeared during findByState: %s", id.getId(), e.getMessage());
+            } catch (IResourceStore.ResourceStoreException e) {
+                // A single unreadable record (e.g. wrapped IOException) must not abort
+                // the whole scan — this backs crash recovery and pending-approvals
+                // listing. Log the id and continue (mirrors listByGroupId).
+                LOGGER.warnf("Failed to read group conversation %s during findByState: %s", id.getId(), e.getMessage());
+            }
+        }
+        if (ids.size() >= limit) {
+            // never truncate silently — callers (pending listings, crash recovery)
+            // must be able to see that there were more results than the cap
+            LOGGER.warnf("findByState(%s) hit its limit of %d — results are truncated", state, limit);
+        }
+        return out;
     }
 }

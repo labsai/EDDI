@@ -374,6 +374,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             boolean isMerge = STRATEGY_MERGE.equalsIgnoreCase(strategy);
 
             return importAgentZipFile(zippedAgentConfigFiles, targetDir, isMerge, selectedSet);
+        } catch (IllegalArgumentException e) {
+            // Config validation failure (e.g. invalid hitlConfig) → 400 via the
+            // IllegalArgumentExceptionMapper, not a 500.
+            throw e;
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getMessage(), e);
@@ -413,6 +417,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     agentFileString = normalizeVaultReferences(agentFileString);
 
                     AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
+
+                    // Reject an invalid HITL config BEFORE importing workflows —
+                    // otherwise the store-level validation only fires at agent
+                    // creation, after all extensions already landed (partial
+                    // import), and surfaced as a 500 instead of a 400.
+                    ai.labs.eddi.configs.hitl.HitlConfigValidation.validate(agentConfig.getHitlConfig());
+
                     agentConfig.getWorkflows()
                             .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet));
 

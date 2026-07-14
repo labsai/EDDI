@@ -16,6 +16,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -25,7 +26,12 @@ import java.util.Set;
  * <p>
  * Currently supports:
  * <ul>
- * <li>{@code chat.postMessage} — post a message to a channel/thread</li>
+ * <li>{@code chat.postMessage} — post a plain-text message to a
+ * channel/thread</li>
+ * <li>{@code chat.postMessage} with Block Kit blocks — interactive messages
+ * (HITL approval notifications with Approve/Reject buttons)</li>
+ * <li>{@code chat.update} — replace an existing message's text/blocks (used to
+ * finalize an approval message once a reviewer decides)</li>
  * </ul>
  * <p>
  * Error handling policy:
@@ -75,24 +81,95 @@ public class SlackWebApiClient {
      *             on retryable failures (network, HTTP 429/500/503)
      */
     public String postMessage(String authToken, String channelId, String threadTs, String text) {
+        // Convert standard Markdown to Slack mrkdwn format
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("channel", channelId);
+        body.put("text", convertMarkdownToSlackMrkdwn(text));
+        if (threadTs != null) {
+            body.put("thread_ts", threadTs);
+        }
+        body.put("mrkdwn", true);
+
+        JsonNode responseJson = callSlackApi("chat.postMessage", authToken, body);
+        if (responseJson == null) {
+            return null;
+        }
+        // Extract "ts" — the posted message's timestamp (used for threading)
+        return responseJson.has("ts") ? responseJson.get("ts").asText() : null;
+    }
+
+    /**
+     * Post an interactive Block Kit message to a Slack channel or thread. Used for
+     * HITL approval notifications (Approve/Reject buttons).
+     * <p>
+     * {@code blocks} is the raw Slack blocks array (as a {@code List} of block
+     * maps). {@code fallbackText} is the plain-text accessibility fallback shown in
+     * notifications and by clients that cannot render blocks.
+     *
+     * @return the posted message's ts on success, or {@code null} on non-retryable
+     *         API errors
+     * @throws SlackDeliveryException
+     *             on retryable failures (network, HTTP 429/500/503)
+     */
+    public String postBlocksMessage(String authToken, String channelId, String threadTs,
+                                    List<?> blocks, String fallbackText) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("channel", channelId);
+        // text acts as the notification/accessibility fallback for block messages
+        body.put("text", fallbackText != null ? fallbackText : "");
+        body.put("blocks", blocks);
+        if (threadTs != null) {
+            body.put("thread_ts", threadTs);
+        }
+
+        JsonNode responseJson = callSlackApi("chat.postMessage", authToken, body);
+        if (responseJson == null) {
+            return null;
+        }
+        return responseJson.has("ts") ? responseJson.get("ts").asText() : null;
+    }
+
+    /**
+     * Update an existing message via {@code chat.update} — replaces its text and
+     * (optionally) blocks. Used to finalize a HITL approval message once a reviewer
+     * decides (e.g. remove the buttons and show "Approved by …").
+     *
+     * @param blocks
+     *            new blocks, or {@code null} to clear blocks and show plain text
+     * @return {@code true} if the update succeeded, {@code false} on non-retryable
+     *         API errors
+     * @throws SlackDeliveryException
+     *             on retryable failures (network, HTTP 429/500/503)
+     */
+    public boolean updateMessage(String authToken, String channelId, String ts,
+                                 String text, List<?> blocks) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("channel", channelId);
+        body.put("ts", ts);
+        body.put("text", convertMarkdownToSlackMrkdwn(text));
+        // Explicitly send an empty blocks array to remove existing blocks (buttons)
+        body.put("blocks", blocks != null ? blocks : List.of());
+
+        return callSlackApi("chat.update", authToken, body) != null;
+    }
+
+    /**
+     * Send a JSON POST to a Slack Web API method and parse the response.
+     * Centralizes retry classification and {@code ok:false} handling shared by
+     * {@code chat.postMessage} and {@code chat.update}.
+     *
+     * @return the parsed response JSON on success ({@code ok:true}), or
+     *         {@code null} on any non-retryable failure (HTTP != 200, {@code
+     *         ok:false}, or an unexpected deterministic error)
+     * @throws SlackDeliveryException
+     *             on retryable failures (network, HTTP 429/500/503)
+     */
+    private JsonNode callSlackApi(String endpoint, String authToken, Map<String, Object> body) {
         try {
-            // Convert standard Markdown to Slack mrkdwn format
-            text = convertMarkdownToSlackMrkdwn(text);
-
-            // Build JSON body using Jackson for proper escaping (handles all
-            // Unicode control characters, surrogate pairs, etc.)
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("channel", channelId);
-            body.put("text", text);
-            if (threadTs != null) {
-                body.put("thread_ts", threadTs);
-            }
-            body.put("mrkdwn", true);
-
             String jsonBody = objectMapper.writeValueAsString(body);
 
             var request = HttpRequest.newBuilder()
-                    .uri(URI.create(SLACK_API_BASE + "chat.postMessage"))
+                    .uri(URI.create(SLACK_API_BASE + endpoint))
                     .header("Content-Type", "application/json; charset=utf-8")
                     .header("Authorization", authToken)
                     .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
@@ -108,7 +185,7 @@ public class SlackWebApiClient {
 
             // Non-retryable HTTP errors — log and return null
             if (response.statusCode() != 200) {
-                LOGGER.warnf("Slack chat.postMessage returned HTTP %d: %s", response.statusCode(),
+                LOGGER.warnf("Slack %s returned HTTP %d: %s", endpoint, response.statusCode(),
                         truncateForLog(response.body()));
                 return null;
             }
@@ -118,12 +195,11 @@ public class SlackWebApiClient {
 
             if (!responseJson.path("ok").asBoolean(false)) {
                 String error = responseJson.path("error").asText("unknown");
-                LOGGER.warnf("Slack chat.postMessage returned ok=false: error=%s", error);
+                LOGGER.warnf("Slack %s returned ok=false: error=%s", endpoint, error);
                 return null;
             }
 
-            // Extract "ts" — the posted message's timestamp (used for threading)
-            return responseJson.has("ts") ? responseJson.get("ts").asText() : null;
+            return responseJson;
 
         } catch (SlackDeliveryException e) {
             throw e; // re-throw — don't wrap in another exception

@@ -16,7 +16,7 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.37.0</quarkus.platform.version>
+        <quarkus.platform.version>3.37.1</quarkus.platform.version>
         <langchain4j-beta.version>1.17.0-beta27</langchain4j-beta.version>
         <langchain4j.version>1.17.0</langchain4j.version>
         <langchain4j-libs.version>1.17.0</langchain4j-libs.version>
@@ -26,7 +26,7 @@
         <failsafe-plugin.version>3.5.5</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.4.0</war-plugin.version>
-        <quarkus-mcp-server.version>1.13.0</quarkus-mcp-server.version>
+        <quarkus-mcp-server.version>1.13.1</quarkus-mcp-server.version>
         <langchain4j-community.version>1.17.0-beta27</langchain4j-community.version>
         <skipITs>true</skipITs>
     </properties>

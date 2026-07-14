@@ -23,15 +23,26 @@ import java.net.InetAddress;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Polls the schedule store for due schedules and fires them.
  * <p>
- * Uses atomic CAS claiming to ensure exactly-once execution across clustered
- * EDDI instances. Implements exponential backoff on failure with dead-lettering
- * after max retries.
+ * Uses atomic CAS claiming so exactly one instance owns a schedule per fire.
+ * Delivery is <strong>at-least-once</strong>, not exactly-once: a claim's lease
+ * can expire and be stolen by another instance (see
+ * {@link IScheduleStore#tryClaim}) while the original, possibly-wedged fire may
+ * still commit, so a fire can run more than once. Fire targets are therefore
+ * expected to be idempotent — HITL timeout fires resolve via a state CAS
+ * (resume/cancel) and no-op on a duplicate. Implements exponential backoff on
+ * failure with dead-lettering after max retries.
  * <p>
  * Supports two trigger types:
  * <ul>
@@ -140,25 +151,112 @@ public class SchedulePollerService {
                 LOGGER.debugf("[SCHEDULE] Found %d due schedules", dueSchedules.size());
             }
 
+            // Claim BEFORE dispatch: the cluster-wide CAS claim must run on the poll
+            // thread so exactly one instance owns each schedule. Only the schedules
+            // this instance won are dispatched.
+            List<ScheduleConfiguration> claimed = new ArrayList<>();
             for (ScheduleConfiguration schedule : dueSchedules) {
-                processSchedule(schedule, now);
+                if (claimSchedule(schedule, now, leaseExpiry)) {
+                    claimed.add(schedule);
+                }
             }
+
+            // Fire claimed schedules concurrently on virtual threads with per-fire
+            // error isolation: a large burst of one-shot HITL timeouts (each doing a
+            // synchronous snapshot load) no longer serializes behind one thread and
+            // starves other schedule types (Dream, maintenance) for the poll cycle.
+            dispatchClaimed(claimed);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Poll cycle failed");
         }
     }
 
-    private void processSchedule(ScheduleConfiguration schedule, Instant now) {
+    /**
+     * Atomically claim a schedule for this instance. Returns true only if the CAS
+     * claim succeeded.
+     */
+    private boolean claimSchedule(ScheduleConfiguration schedule, Instant now, Instant leaseExpiry) {
         try {
-            // Atomic CAS claim
-            boolean claimed = scheduleStore.tryClaim(schedule.getId(), instanceId, now);
-
+            boolean claimed = scheduleStore.tryClaim(schedule.getId(), instanceId, now, leaseExpiry);
             if (!claimed) {
                 claimConflictCounter.increment();
                 LOGGER.debugf("[SCHEDULE] Claim conflict for schedule %s — another instance got it", schedule.getId());
-                return;
+                return false;
             }
+            // tryClaim() returns only a boolean; it does not hand back the fireId it
+            // just persisted. Without this, the in-memory ScheduleConfiguration keeps
+            // its stale pre-claim fireId (often null), which ScheduleFireExecutor uses
+            // for fire-log correlation and injects into the agent context — the fired
+            // turn couldn't be correlated to the claimed DB row. Both MongoScheduleStore
+            // and PostgresScheduleStore derive the persisted fireId identically as
+            // `scheduleId + "_" + now` — mirror that here to keep the in-memory copy in
+            // sync with what was actually written.
+            schedule.setFireId(schedule.getId() + "_" + now);
+            return true;
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Error claiming schedule %s", schedule.getId());
+            return false;
+        }
+    }
 
+    /**
+     * Fire all claimed schedules on a virtual-thread-per-task executor and wait for
+     * the batch to finish within the poll cycle. Each fire is isolated so one
+     * failure never blocks the rest of the batch.
+     */
+    private void dispatchClaimed(List<ScheduleConfiguration> claimed) {
+        if (claimed.isEmpty()) {
+            return;
+        }
+        // Deliberately NOT try-with-resources: ExecutorService.close() awaits
+        // termination indefinitely, and future.cancel(true) only unblocks a task that
+        // honors Thread.interrupt(). The real fire path (say() → synchronous DB driver
+        // calls) can stall on a NON-interruptible socket read, which close() would then
+        // wait on forever — pinning this @Scheduled poll thread and stopping this
+        // instance from claiming or firing ANY further schedule (HITL timeouts, Dream,
+        // maintenance). That is the exact hang the per-fire timeout exists to prevent.
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
+            List<Future<?>> futures = new ArrayList<>(claimed.size());
+            for (ScheduleConfiguration schedule : claimed) {
+                futures.add(executor.submit(() -> fireClaimedSchedule(schedule)));
+            }
+            // Bound the WHOLE batch by ONE shared deadline, not leaseTimeout per
+            // future: a per-future bound in this sequential loop would let N stalled
+            // fires pin the poll thread for up to N*leaseTimeout (hours for a large
+            // batch), defeating the point of the timeout. leaseTimeout is the window
+            // after which another instance may reclaim these schedules anyway
+            // (findDueSchedules' leaseExpiredFilter), so waiting longer serves no
+            // purpose. On per-future timeout, cancel (best-effort interrupt) and move on.
+            long deadlineNanos = System.nanoTime() + Math.max(leaseTimeout.toNanos(), 1_000_000L);
+            for (Future<?> future : futures) {
+                long remainingMs = Math.max(0L, (deadlineNanos - System.nanoTime()) / 1_000_000L);
+                try {
+                    future.get(remainingMs, TimeUnit.MILLISECONDS);
+                } catch (TimeoutException e) {
+                    future.cancel(true);
+                    LOGGER.errorf("[SCHEDULE] Dispatched fire task exceeded the batch lease deadline (%s) — cancelling; "
+                            + "the schedule will become reclaimable once its lease expires", leaseTimeout);
+                } catch (Exception e) {
+                    LOGGER.errorf(e, "[SCHEDULE] Dispatched fire task failed unexpectedly");
+                }
+            }
+        } finally {
+            // shutdownNow() interrupts any still-running task (best effort) and returns
+            // immediately WITHOUT awaiting termination — so a fire wedged in a
+            // non-interruptible call leaks a single (cheap) virtual thread rather than
+            // freezing the poll loop. The claim's lease expiry lets another instance
+            // reclaim the schedule. Never awaitTermination() here.
+            executor.shutdownNow();
+        }
+    }
+
+    /**
+     * Fire an already-claimed schedule and record its outcome. Must not throw —
+     * error isolation for the concurrent dispatch depends on this.
+     */
+    private void fireClaimedSchedule(ScheduleConfiguration schedule) {
+        try {
             // Fix #4: compute correct attempt number from schedule state
             int attemptNumber = schedule.getFailCount() + 1;
 

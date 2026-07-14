@@ -17,6 +17,7 @@ import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -49,7 +50,13 @@ class RestGroupConversationExtendedTest {
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
         when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
-        restGroupConversation = new RestGroupConversation(groupService, jsonSerialization, identity, ownershipValidator);
+        var hitlAccessGuard = new ai.labs.eddi.engine.hitl.HitlAccessGuard(
+                identity, ownershipValidator,
+                mock(ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore.class),
+                mock(ai.labs.eddi.engine.api.IConversationService.class),
+                groupService);
+        restGroupConversation = new RestGroupConversation(
+                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
         eventSink = mock(SseEventSink.class);
         sse = mock(Sse.class);
 
@@ -64,6 +71,15 @@ class RestGroupConversationExtendedTest {
         when(eventBuilder.name(anyString())).thenReturn(eventBuilder);
         when(eventBuilder.data(any(Class.class), anyString())).thenReturn(eventBuilder);
         when(eventBuilder.build()).thenReturn(sseEvent);
+    }
+
+    @AfterEach
+    void tearDown() {
+        // Each test builds a fresh RestGroupConversation whose virtual-thread executor
+        // is otherwise only closed by the CDI @PreDestroy — never invoked in a plain
+        // unit test. Shut it down here so a full suite run does not accumulate
+        // un-terminated executors.
+        restGroupConversation.shutdown();
     }
 
     // Helper factory methods for events matching actual record signatures

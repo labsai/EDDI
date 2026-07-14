@@ -233,12 +233,13 @@ class GroupConversationTest {
         @DisplayName("GroupConversationState — all values")
         void groupConversationStates() {
             var values = GroupConversationState.values();
-            assertEquals(7, values.length);
+            assertEquals(8, values.length);
             assertNotNull(GroupConversationState.valueOf("CREATED"));
             assertNotNull(GroupConversationState.valueOf("COMPLETED"));
             assertNotNull(GroupConversationState.valueOf("FAILED"));
             assertNotNull(GroupConversationState.valueOf("AWAITING_APPROVAL"));
             assertNotNull(GroupConversationState.valueOf("CLOSED"));
+            assertNotNull(GroupConversationState.valueOf("CANCELLED"));
         }
     }
 
