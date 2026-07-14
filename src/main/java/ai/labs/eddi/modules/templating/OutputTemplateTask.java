@@ -47,7 +47,7 @@ public class OutputTemplateTask implements ILifecycleTask {
     private final IDataFactory dataFactory;
     private final ObjectMapper objectMapper;
 
-    private static final Logger log = Logger.getLogger(OutputTemplateTask.class);
+    private static final Logger LOGGER = Logger.getLogger(OutputTemplateTask.class);
 
     @Inject
     public OutputTemplateTask(ITemplatingEngine templatingEngine, IMemoryItemConverter memoryItemConverter, IDataFactory dataFactory,
@@ -146,7 +146,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                         currentStep.replaceConversationOutputObject(KEY_OUTPUT, preTemplated, postTemplated);
                     }
                 } catch (ITemplatingEngine.TemplateEngineException e) {
-                    log.errorf(e, "Template processing failed for output '%s': %s", outputKey, e.getLocalizedMessage());
+                    LOGGER.errorf(e, "Template processing failed for output '%s': %s", outputKey, e.getLocalizedMessage());
                 }
             }
         });
@@ -172,7 +172,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                     quickReply.setExpressions(postTemplatedExpressions);
                     return quickReply;
                 } catch (ITemplatingEngine.TemplateEngineException e) {
-                    log.errorf(e, "Template processing failed for quick reply '%s': %s",
+                    LOGGER.errorf(e, "Template processing failed for quick reply '%s': %s",
                             quickReply.getValue(), e.getLocalizedMessage());
                     return null;
                 }

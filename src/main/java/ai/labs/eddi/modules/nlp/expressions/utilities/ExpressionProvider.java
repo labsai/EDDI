@@ -26,7 +26,7 @@ import static java.lang.String.format;
 public class ExpressionProvider implements IExpressionProvider {
     private final IExpressionFactory expressionFactory;
 
-    private static final Logger log = Logger.getLogger(ExpressionProvider.class);
+    private static final Logger LOGGER = Logger.getLogger(ExpressionProvider.class);
 
     @Inject
     public ExpressionProvider(IExpressionFactory expressionFactory) {
@@ -116,7 +116,7 @@ public class ExpressionProvider implements IExpressionProvider {
                 Expressions expressions = parseExpressions(subExpressions);
                 exp.setSubExpressions(expressions);
             } catch (Exception e) {
-                log.error(format("Error while parsing Expression: %s, indexOfOpening: %s, indexOfClosing: %s, message: %s", sanitize(expression),
+                LOGGER.error(format("Error while parsing Expression: %s, indexOfOpening: %s, indexOfClosing: %s, message: %s", sanitize(expression),
                         indexOfOpening, indexOfClosing, e.getLocalizedMessage()));
             }
         } else {

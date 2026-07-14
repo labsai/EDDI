@@ -82,7 +82,7 @@ public class InputParserTask implements ILifecycleTask {
     private final Map<String, Provider<IDictionaryProvider>> dictionaryProviders;
     private final Map<String, Provider<ICorrectionProvider>> correctionProviders;
 
-    private static final Logger log = Logger.getLogger(InputParserTask.class);
+    private static final Logger LOGGER = Logger.getLogger(InputParserTask.class);
 
     @Inject
     public InputParserTask(IExpressionProvider expressionProvider,
@@ -126,7 +126,7 @@ public class InputParserTask implements ILifecycleTask {
             storeNormalizedResultInMemory(memory.getCurrentStep(), normalizedUserInput);
             parsedSolutions = parser.parse(normalizedUserInput, userLanguage, temporaryDictionaries);
         } catch (InterruptedException e) {
-            log.warn(e.getLocalizedMessage(), e);
+            LOGGER.warn(e.getLocalizedMessage(), e);
             return;
         }
 
