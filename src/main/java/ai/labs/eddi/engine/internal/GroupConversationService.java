@@ -732,11 +732,18 @@ public class GroupConversationService implements IGroupConversationService {
             var persistedState = conversationStore.read(gc.getId()).getState();
             if (persistedState == GroupConversationState.CANCELLED
                     || persistedState == GroupConversationState.FAILED
-                    || persistedState == GroupConversationState.COMPLETED) {
+                    || persistedState == GroupConversationState.COMPLETED
+                    // CLOSED is terminal too: without it, a leg that keeps running past a
+                    // concurrent close would fall through to the unconditional whole-document
+                    // write below and RESURRECT the closed conversation (its member
+                    // conversations are already ended and its ephemeral agents deleted).
+                    || persistedState == GroupConversationState.CLOSED) {
                 // Align the in-memory state with the terminal value another pod/writer
                 // committed so executeDiscussion's finally makes the correct ephemeral-
                 // agent cleanup decision — this leg's gc is otherwise still a running
-                // state (IN_PROGRESS/SYNTHESIZING) and cleanup would be skipped.
+                // state (IN_PROGRESS/SYNTHESIZING) and cleanup would be skipped. (CLOSED
+                // is deliberately NOT in the finally's cleanup set — close already
+                // reclaimed the agents.)
                 gc.setState(persistedState);
                 LOGGER.infof("Group discussion %s was moved to %s elsewhere — stopping this leg at the phase boundary",
                         gc.getId(), persistedState);
@@ -975,7 +982,8 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     @Override
-    public void deleteGroupConversation(String groupConversationId) throws IResourceStore.ResourceStoreException {
+    public void deleteGroupConversation(String groupConversationId)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException {
         // Serialize against an in-flight follow-up/continue/close on the same
         // conversation
         // (single-node) — delete is terminal (it ends member conversations and reclaims
@@ -983,7 +991,8 @@ public class GroupConversationService implements IGroupConversationService {
         // mid-run
         // and let a later update() resurrect a stale "zombie" document.
         if (!operationsInProgress.add(groupConversationId)) {
-            throw new IResourceStore.ResourceStoreException(
+            // A retryable conflict, not a store failure — surfaces as 409, not 500.
+            throw new GroupDiscussionException(
                     "Cannot delete: another operation is already in progress for this group conversation");
         }
         try {
@@ -1026,6 +1035,17 @@ public class GroupConversationService implements IGroupConversationService {
                                                 String question)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
+        // Validate BEFORE taking the guard or transitioning state: a null targetAgentId
+        // would otherwise NPE deep in the member-resolution scan (500 instead of 400),
+        // and a null question would be appended to the transcript and sent to the
+        // agent.
+        if (targetAgentId == null || targetAgentId.isBlank()) {
+            throw new IllegalArgumentException("targetAgentId must not be null or blank");
+        }
+        if (question == null || question.isBlank()) {
+            throw new IllegalArgumentException("question must not be null or blank");
+        }
+
         if (!operationsInProgress.add(groupConversationId)) {
             throw new GroupDiscussionException(
                     "Another operation is already in progress for this group conversation");
@@ -1057,14 +1077,39 @@ public class GroupConversationService implements IGroupConversationService {
                         }
                     }
                 }
+                if (privateConvId == null && gc.getDynamicMembers() != null) {
+                    // Dynamically recruited/created agents are NOT in memberDisplayNames
+                    // (that map is populated from the static group config at round start),
+                    // so a follow-up addressed to one of them by display name would other-
+                    // wise be rejected as "not a member". Resolve against the dynamic
+                    // roster too. Defensive copy — the list is mutated from member turns.
+                    for (GroupMember dynamicMember : new ArrayList<>(gc.getDynamicMembers())) {
+                        if (dynamicMember.displayName() != null
+                                && targetAgentId.equalsIgnoreCase(dynamicMember.displayName())) {
+                            resolvedAgentId = dynamicMember.agentId();
+                            privateConvId = gc.getMemberConversationIds().get(resolvedAgentId);
+                            break;
+                        }
+                    }
+                }
                 if (privateConvId == null) {
                     throw new GroupDiscussionException(
                             "Agent '%s' is not a member of this group conversation. Available members: %s"
                                     .formatted(targetAgentId, gc.getMemberDisplayNames()));
                 }
 
-                // Resolve display name
-                String displayName = gc.getMemberDisplayNames().getOrDefault(resolvedAgentId, resolvedAgentId);
+                // Resolve display name — fall back to the dynamic roster for recruited agents.
+                String displayName = gc.getMemberDisplayNames().get(resolvedAgentId);
+                if (displayName == null && gc.getDynamicMembers() != null) {
+                    final String target = resolvedAgentId;
+                    displayName = new ArrayList<>(gc.getDynamicMembers()).stream()
+                            .filter(m -> target.equals(m.agentId()) && m.displayName() != null)
+                            .map(GroupMember::displayName)
+                            .findFirst().orElse(null);
+                }
+                if (displayName == null) {
+                    displayName = resolvedAgentId;
+                }
 
                 // Record the user's follow-up question on the transcript
                 gc.getTranscript().add(new TranscriptEntry(
@@ -1153,6 +1198,21 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversation continueDiscussion(String groupConversationId, String question,
                                                 GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return continueDiscussion(groupConversationId, question, listener, null);
+    }
+
+    @Override
+    public GroupConversation continueDiscussion(String groupConversationId, String question,
+                                                GroupDiscussionEventListener listener,
+                                                List<Attachment> attachments)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        // Validate before taking the guard / transitioning state — a blank question
+        // would
+        // otherwise be appended to the transcript and drive every phase's agent input.
+        if (question == null || question.isBlank()) {
+            throw new IllegalArgumentException("question must not be null or blank");
+        }
 
         if (!operationsInProgress.add(groupConversationId)) {
             throw new GroupDiscussionException(
@@ -1181,6 +1241,33 @@ public class GroupConversationService implements IGroupConversationService {
                     "user", "User", question, 0, "Question",
                     TranscriptEntryType.QUESTION, Instant.now(), null, null));
             conversationStore.update(gc);
+
+            // Share any NEW attachments supplied with this round. materializeAttachments
+            // persists inline files to the blob store bound to this conversation, so the
+            // full set for this round = everything blob-backed on the conversation
+            // (prior rounds + these new inline files) plus any URL-only refs, which are
+            // not blob-backed and so must be carried across explicitly.
+            if (attachments != null && !attachments.isEmpty()) {
+                materializeAttachments(gc, attachments);
+                List<Attachment> newlyShared = gc.getAttachments() != null
+                        ? new ArrayList<>(gc.getAttachments())
+                        : new ArrayList<Attachment>();
+                // Clear first: rehydrateAttachmentsFromStore is a no-op while the
+                // transient list is populated, and we want the union from the store.
+                gc.setAttachments(null);
+                rehydrateAttachmentsFromStore(gc);
+                List<Attachment> combined = gc.getAttachments() != null
+                        ? new ArrayList<>(gc.getAttachments())
+                        : new ArrayList<Attachment>();
+                for (Attachment a : newlyShared) {
+                    if (a.getStorageRef() == null && a.getUrl() != null && !a.getUrl().isBlank()) {
+                        combined.add(a);
+                    }
+                }
+                if (!combined.isEmpty()) {
+                    gc.setAttachments(combined);
+                }
+            }
 
             // Pre-register the control token BEFORE the config-load window so a cancel
             // racing the gap between the CAS above and executeDiscussion's own token
@@ -3198,11 +3285,15 @@ public class GroupConversationService implements IGroupConversationService {
         // resurrect a terminal state.
         var gc = conversationStore.read(conversationId);
         var state = gc.getState();
-        // Only cancel from non-terminal states — guard against
-        // overwriting COMPLETED or FAILED after a race.
+        // Only cancel from non-terminal states — guard against overwriting COMPLETED,
+        // FAILED or CLOSED after a race. CLOSED is irreversible: without it here a
+        // cancel
+        // would CAS CLOSED → CANCELLED and un-terminalize an already-reclaimed
+        // conversation.
         if (state == GroupConversationState.COMPLETED
                 || state == GroupConversationState.CANCELLED
-                || state == GroupConversationState.FAILED) {
+                || state == GroupConversationState.FAILED
+                || state == GroupConversationState.CLOSED) {
             LOGGER.infof("Cancel skipped: GC %s already in terminal state %s", conversationId, state);
             return false;
         }

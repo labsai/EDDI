@@ -5,6 +5,39 @@
 
 ---
 
+## 🔐 Group merge — third-pass review: MCP authz, CLOSED-blindness, atomic CAS (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A third critical review targeted what the earlier passes never looked at — the **auto-merged** files (git merged them without conflict, so nobody had reviewed them), the whole-branch PR surface, test coverage of the fixes, and security. 14 findings survived adversarial verification. All fixed:
+
+### Security — MCP was an authorization bypass (IDOR)
+- `McpGroupTools` gated the conversation-scoped tools on a **role check only** (`eddi-viewer` for `followup_with_member` / `continue_group_discussion` / `read_group_conversation`, `eddi-editor` for `close`/`delete`) with **no ownership check**, while the equivalent REST endpoints all enforce `requireOwnerOrAdmin` (403). Any authenticated viewer could read another user's full transcript, append to it, re-run every phase against their conversation (burning their LLM budget), and an editor could close or delete it. Injected `OwnershipValidator` and added a `requireConversationOwner()` gate to all five tools, with a uniform non-leaking denial. Main's own HITL MCP tools already enforced this via `HitlAccessGuard` — MCP is now consistent with REST.
+
+### Correctness — a systemic `CLOSED`-blindness
+Ours introduced `CLOSED` as a new terminal state; theirs' HITL/cancel code predates it. A sweep of every terminal-state check found exactly two blind spots:
+- **`persistedTerminalOverride`** treated only `{CANCELLED, FAILED, COMPLETED}` as terminal, so a running leg that found the conversation `CLOSED` did **not** stop — it fell through to an unconditional whole-document write and **resurrected the closed conversation** to `IN_PROGRESS`→`COMPLETED` after its member conversations were ended and its ephemeral agents deleted. (The previous round's fix F — close-of-`CANCELLED` — made this materially more reachable.)
+- **`cancelDiscussion`** likewise ignored `CLOSED`, so a cancel could CAS `CLOSED → CANCELLED` and un-terminalize an irreversible state.
+
+### Correctness — the cross-process guard wasn't atomic
+- **`compareAndSetState` was a read-check-write**, not a CAS: it read, compared in Java, then wrote unconditionally, so two racing callers could both pass the check and both write. It is the *only* cross-process guard behind follow-up/continue/close (the original changelog admitted "single-node only… would require a conditional update at the storage layer"). The merge made the fix available — it now uses theirs' `storeIfFieldEquals`, returning `false` on a lost race.
+
+### Contract / robustness
+- `followUpWithMember` with a null/blank `targetAgentId` NPE'd into a **500**; now validated → **400** (service throws `IllegalArgumentException`, REST rejects up front). Same for a blank `question` on follow-up and continue.
+- `POST /continue` advertised `attachments` on its body but **silently dropped them**. Now honored: added an attachment-aware `continueDiscussion` overload that materializes new inline files into the blob store and assembles the union (prior rounds + new) for the round.
+- Follow-up by display name now resolves **dynamically recruited** agents (they are not in `memberDisplayNames`, which is populated from the static config).
+- `DELETE` during an in-flight follow-up/continue returned **500**; now a `GroupDiscussionException` → **409**.
+- OpenAPI updated for the new 400/409 responses and the `CANCELLED`-closeable state.
+
+### Tests
+Backfilled the previously untested fixes (they could each have been reverted with the suite still green): `resumeQuestion` persistence, control-token pre-registration + removal, `persistedTerminalOverride` state alignment across all four terminal states, cancel-of-`CLOSED`, conditional-CAS + lost-race, MCP ownership denial/allow, blank-input 400s, continue-attachment forwarding, delete 409, and the streaming listener forwarding HITL + `round_start` events.
+
+Also fixed a **latent broken test the merge introduced**: `GroupConversationHitlTest` still asserted 7 enum states (the merge made it 8 with `CLOSED`) — it was never in the narrower test selections and had been failing since the merge commit.
+
+Verified: `mvnw test` green — **773 group/MCP unit tests pass** (0 failures).
+
+---
+
 ## 🩹 Group merge — cross-feature review-response fixes (2026-07-14)
 
 **Repo:** EDDI (`feat/group-followups`)

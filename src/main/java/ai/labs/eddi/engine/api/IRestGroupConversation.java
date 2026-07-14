@@ -69,6 +69,7 @@ public interface IRestGroupConversation {
     @Operation(summary = "Delete a group conversation", description = "Deletes a group conversation and its member conversations.")
     @APIResponse(responseCode = "200", description = "Group conversation deleted.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Another operation (follow-up / continue / close) is in progress — retry.")
     Response deleteGroupConversation(@PathParam("groupId") String groupId, @PathParam("groupConversationId") String groupConversationId);
 
     @GET
@@ -92,8 +93,9 @@ public interface IRestGroupConversation {
                        + "The targetAgentId field accepts either an agent ID or a display name. "
                        + "Returns the full updated GroupConversation including the new transcript entries.")
     @APIResponse(responseCode = "200", description = "Updated group conversation with follow-up on transcript.")
+    @APIResponse(responseCode = "400", description = "Missing 'question' or 'targetAgentId'.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
-    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state, or concurrently cancelled/deleted.")
     Response followUpWithMember(@PathParam("groupId") String groupId,
                                 @PathParam("groupConversationId") String gcId,
                                 FollowUpRequest request);
@@ -104,8 +106,11 @@ public interface IRestGroupConversation {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Continue a group discussion",
                description = "Re-run all discussion phases with a new question. All agents retain "
-                       + "memory of prior rounds. The round counter increments.")
+                       + "memory of prior rounds. The round counter increments. Any 'attachments' on "
+                       + "the request are shared with every member agent for this round, on top of "
+                       + "those already bound to the conversation.")
     @APIResponse(responseCode = "200", description = "Updated group conversation with new round.")
+    @APIResponse(responseCode = "400", description = "Missing 'question'.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state.")
     Response continueDiscussion(@PathParam("groupId") String groupId,
@@ -138,7 +143,7 @@ public interface IRestGroupConversation {
                        + "Lifecycle: discuss → COMPLETED → [followup|continue]* → close → CLOSED (terminal).")
     @APIResponse(responseCode = "200", description = "Closed group conversation.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
-    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED or FAILED state.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED, FAILED or CANCELLED state.")
     Response closeGroupConversation(@PathParam("groupId") String groupId,
                                     @PathParam("groupConversationId") String gcId);
 

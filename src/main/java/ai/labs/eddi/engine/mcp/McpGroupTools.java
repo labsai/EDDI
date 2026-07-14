@@ -13,11 +13,14 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -48,16 +51,41 @@ public class McpGroupTools {
     private final IGroupConversationService groupConversationService;
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
+    private final OwnershipValidator ownershipValidator;
     private final boolean authEnabled;
 
     @Inject
     public McpGroupTools(IRestAgentGroupStore groupStore, IGroupConversationService groupConversationService, IJsonSerialization jsonSerialization,
-            SecurityIdentity identity, @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
+            SecurityIdentity identity, OwnershipValidator ownershipValidator,
+            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this.groupStore = groupStore;
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
+        this.ownershipValidator = ownershipValidator;
         this.authEnabled = authEnabled;
+    }
+
+    /**
+     * MCP parity with the REST surface: a specific group conversation may only be
+     * read or mutated by its owner (or an admin). The MCP role check alone is a
+     * coarse gate — without this, any caller holding the baseline MCP role could
+     * read, append to, re-run or close ANOTHER user's group conversation, while the
+     * equivalent REST endpoints all enforce {@code requireOwnerOrAdmin} (403).
+     */
+    private void requireConversationOwner(String groupConversationId)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
+        ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+    }
+
+    /**
+     * Uniform, non-leaking denial for an MCP call on someone else's conversation.
+     */
+    private String accessDenied(String tool, String groupConversationId) {
+        LOGGER.infof("%s denied: caller does not own group conversation %s",
+                tool, LogSanitizer.sanitize(groupConversationId));
+        return errorJson("Access denied: you do not own this group conversation");
     }
 
     // --- Discovery ---
@@ -317,7 +345,10 @@ public class McpGroupTools {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
             return jsonSerialization.serialize(gc);
+        } catch (ForbiddenException e) {
+            return accessDenied("read_group_conversation", groupConversationId);
         } catch (Exception e) {
             LOGGER.errorf("read_group_conversation failed: %s", e.getMessage());
             return errorJson(e.getMessage());
@@ -371,8 +402,11 @@ public class McpGroupTools {
                                             @ToolArg(description = "Group conversation ID to delete") String groupConversationId) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
+            requireConversationOwner(groupConversationId);
             groupConversationService.deleteGroupConversation(groupConversationId);
             return "Deleted group conversation " + groupConversationId;
+        } catch (ForbiddenException e) {
+            return accessDenied("delete_group_conversation", groupConversationId);
         } catch (Exception e) {
             LOGGER.errorf("delete_group_conversation failed: %s", e.getMessage());
             return errorJson(e.getMessage());
@@ -393,9 +427,12 @@ public class McpGroupTools {
                                        @ToolArg(description = "The follow-up question") String question) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
+            requireConversationOwner(groupConversationId);
             GroupConversation gc = groupConversationService.followUpWithMember(
                     groupConversationId, targetAgentId, question);
             return jsonSerialization.serialize(gc);
+        } catch (ForbiddenException e) {
+            return accessDenied("followup_with_member", groupConversationId);
         } catch (Exception e) {
             LOGGER.errorf("followup_with_member failed: %s", LogSanitizer.sanitize(e.getMessage()));
             return errorJson(e.getMessage());
@@ -412,9 +449,12 @@ public class McpGroupTools {
                                             @ToolArg(description = "The follow-up question for the group") String question) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
+            requireConversationOwner(groupConversationId);
             GroupConversation gc = groupConversationService.continueDiscussion(
                     groupConversationId, question, null);
             return jsonSerialization.serialize(gc);
+        } catch (ForbiddenException e) {
+            return accessDenied("continue_group_discussion", groupConversationId);
         } catch (Exception e) {
             LOGGER.errorf("continue_group_discussion failed: %s", LogSanitizer.sanitize(e.getMessage()));
             return errorJson(e.getMessage());
@@ -429,8 +469,11 @@ public class McpGroupTools {
                                            @ToolArg(description = "Group conversation ID") String groupConversationId) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
+            requireConversationOwner(groupConversationId);
             GroupConversation gc = groupConversationService.closeGroupConversation(groupConversationId);
             return jsonSerialization.serialize(gc);
+        } catch (ForbiddenException e) {
+            return accessDenied("close_group_conversation", groupConversationId);
         } catch (Exception e) {
             LOGGER.errorf("close_group_conversation failed: %s", LogSanitizer.sanitize(e.getMessage()));
             return errorJson(e.getMessage());

@@ -138,12 +138,26 @@ public class GroupConversationStore implements IGroupConversationStore {
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         GroupConversation gc = read(id);
         if (gc.getState() != expectedState) {
+            // Fast path: clearly the wrong state — no need to attempt the write.
             return false;
         }
         gc.setState(newState);
         gc.setLastModified(java.time.Instant.now());
-        update(gc);
-        return true;
+        try {
+            // Conditional write — the persisted state must STILL be expectedState. The
+            // read-check above alone was a read-check-update (single-node only): two
+            // racing callers could both pass it and both write. storeIfFieldEquals makes
+            // the transition atomic across processes.
+            updateIfState(gc, expectedState);
+            return true;
+        } catch (IResourceStore.ResourceModifiedException e) {
+            // Another writer transitioned the conversation between our read and our
+            // write — this CAS lost the race.
+            return false;
+        } catch (GroupConversationGoneException e) {
+            throw new IResourceStore.ResourceNotFoundException(
+                    "Group conversation " + id + " no longer exists");
+        }
     }
 
     @Override

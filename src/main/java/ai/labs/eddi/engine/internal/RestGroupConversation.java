@@ -200,6 +200,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.ok().build();
         } catch (ForbiddenException e) {
             throw e;
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            // Another operation (follow-up / continue / close) is mid-flight — a retryable
+            // conflict, not a server error.
+            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -223,8 +227,19 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
     }
 
+    /** True when the string is absent or whitespace-only. */
+    private static boolean blank(String s) {
+        return s == null || s.isBlank();
+    }
+
     @Override
     public Response followUpWithMember(String groupId, String gcId, FollowUpRequest request) {
+        // Reject an incomplete body up front: without this a missing targetAgentId NPEs
+        // during member resolution and surfaces as a 500 rather than a 400.
+        if (request == null || blank(request.question()) || blank(request.targetAgentId())) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Both 'question' and 'targetAgentId' are required").build();
+        }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
@@ -232,6 +247,8 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
             throw e;
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
             return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -330,13 +347,22 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response continueDiscussion(String groupId, String gcId, DiscussRequest request) {
+        if (request == null || blank(request.question())) {
+            return Response.status(Response.Status.BAD_REQUEST).entity("'question' is required").build();
+        }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
-            GroupConversation result = groupConversationService.continueDiscussion(gcId, request.question(), null);
+            // Honor attachments on a continuation round — the request body advertises
+            // them, so silently dropping them would leave round-2 agents blind to a file
+            // the caller explicitly shared.
+            GroupConversation result = groupConversationService.continueDiscussion(
+                    gcId, request.question(), null, toAttachments(request.attachments()));
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
             throw e;
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
             return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -350,6 +376,12 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public void continueDiscussionStreaming(String groupId, String gcId, DiscussRequest request,
                                             SseEventSink eventSink, Sse sse) {
+        if (request == null || blank(request.question())) {
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+                    toJson(new GroupConversationEventSink.GroupErrorEvent("'question' is required")));
+            closeQuietly(eventSink);
+            return;
+        }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
@@ -359,10 +391,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             // member_pause_skipped events (and round_start) instead of silently
             // swallowing them and hanging the client.
             var listener = createStreamingListener(eventSink, sse);
+            List<Attachment> attachments = toAttachments(request.attachments());
 
             executorService.submit(() -> {
                 try {
-                    groupConversationService.continueDiscussion(gcId, request.question(), listener);
+                    groupConversationService.continueDiscussion(gcId, request.question(), listener, attachments);
                 } catch (Exception e) {
                     LOGGER.errorf("Continue discussion streaming failed: %s", e.getMessage());
                     listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));

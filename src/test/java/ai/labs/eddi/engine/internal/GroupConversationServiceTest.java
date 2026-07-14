@@ -24,7 +24,9 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -45,6 +47,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -1069,6 +1072,145 @@ class GroupConversationServiceTest {
             var last = transcript.get(transcript.size() - 1);
             assertEquals(TranscriptEntryType.QUESTION, last.type());
             assertEquals("round two question", last.content());
+        }
+    }
+
+    /** Reflective access to the private control-token map. */
+    @SuppressWarnings("unchecked")
+    private Map<String, ?> activeTokens() throws Exception {
+        var field = GroupConversationService.class.getDeclaredField("activeTokens");
+        field.setAccessible(true);
+        return (Map<String, ?>) field.get(service);
+    }
+
+    /**
+     * Regression tests for the cross-feature defects found reviewing the
+     * origin/main merge (continue/follow-up/close vs HITL pause/cancel/resume).
+     */
+    @Nested
+    class MergeReviewFixTests {
+
+        private GroupConversation completedGc() {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            gc.setOriginalQuestion("round one");
+            gc.setRound(1);
+            return gc;
+        }
+
+        /**
+         * Arms the CAS and fails fast at config load, after the round/question
+         * mutation.
+         */
+        private GroupConversation armContinue() throws Exception {
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            return gc;
+        }
+
+        @Test
+        void continue_persistsResumeQuestion_andLeavesOriginalQuestionAlone() throws Exception {
+            var gc = armContinue();
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.continueDiscussion("gc-1", "round two", null));
+
+            // resumeDiscussion reads resumeQuestion — a paused continuation must resume
+            // with
+            // THIS question, while originalQuestion (the UI title) stays as round one.
+            assertEquals("round two", gc.getResumeQuestion());
+            assertEquals("round one", gc.getOriginalQuestion());
+        }
+
+        @Test
+        void continue_preRegistersControlToken_andRemovesItWhenExecutionNeverStarts() throws Exception {
+            armContinue();
+            var tokenPresentInWindow = new AtomicBoolean(false);
+            when(groupStore.getCurrentResourceId("group-1")).thenAnswer(inv -> {
+                tokenPresentInWindow.set(activeTokens().containsKey("gc-1"));
+                return null; // -> ResourceNotFoundException, so executeDiscussion is never reached
+            });
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.continueDiscussion("gc-1", "q", null));
+
+            assertTrue(tokenPresentInWindow.get(),
+                    "a cancel racing the CAS->execute window must find a signalable token");
+            assertFalse(activeTokens().containsKey("gc-1"),
+                    "the pre-registered token must not leak when execution never started");
+        }
+
+        @Test
+        void followUp_blankInput_rejectedBeforeAnyStateChange() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.followUpWithMember("gc-1", "   ", "question"));
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.followUpWithMember("gc-1", "agentA", null));
+            verifyNoInteractions(conversationStore);
+        }
+
+        @Test
+        void continue_blankQuestion_rejectedBeforeAnyStateChange() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.continueDiscussion("gc-1", "  ", null));
+            verifyNoInteractions(conversationStore);
+        }
+
+        @Test
+        void delete_whileAnotherOperationRuns_isAConflictNotAStoreError() throws Exception {
+            operationsInProgress().add("gc-1");
+
+            // GroupDiscussionException -> REST 409; a ResourceStoreException would be a
+            // 500.
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.deleteGroupConversation("gc-1"));
+        }
+
+        @Test
+        void cancel_closedConversation_isATerminalNoOp() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.CLOSED);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+
+            boolean cancelled = service.cancelDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL);
+
+            assertFalse(cancelled, "CLOSED is irreversible — a cancel must not un-terminalize it");
+            verify(conversationStore, never()).compareAndSetState(any(),
+                    eq(GroupConversationState.CLOSED), eq(GroupConversationState.CANCELLED));
+        }
+
+        @Test
+        void persistedTerminalOverride_stopsTheLegAndAlignsStateForEveryTerminalState() throws Exception {
+            var method = GroupConversationService.class.getDeclaredMethod(
+                    "persistedTerminalOverride", GroupConversation.class, GroupDiscussionEventListener.class);
+            method.setAccessible(true);
+
+            for (var terminal : List.of(GroupConversationState.CANCELLED, GroupConversationState.FAILED,
+                    GroupConversationState.COMPLETED, GroupConversationState.CLOSED)) {
+                var running = new GroupConversation();
+                running.setId("gc-1");
+                running.setState(GroupConversationState.IN_PROGRESS);
+
+                var persisted = new GroupConversation();
+                persisted.setId("gc-1");
+                persisted.setState(terminal);
+                when(conversationStore.read("gc-1")).thenReturn(persisted);
+
+                boolean stop = (boolean) method.invoke(service, running, null);
+
+                assertTrue(stop, "the leg must stop when another writer moved the state to " + terminal);
+                // Without the alignment the finally would decide cleanup on a stale running
+                // state (leaking ephemeral agents); CLOSED additionally prevents the leg's
+                // whole-document write from resurrecting a closed conversation.
+                assertEquals(terminal, running.getState(),
+                        "in-memory state must be aligned to the persisted terminal state: " + terminal);
+            }
         }
     }
 

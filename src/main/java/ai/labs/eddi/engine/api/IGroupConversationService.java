@@ -82,8 +82,14 @@ public interface IGroupConversationService {
 
     /**
      * Delete a group conversation and cascade-delete member conversations.
+     *
+     * @throws GroupDiscussionException
+     *             if another operation (follow-up / continue / close) is currently
+     *             in progress for this conversation — a retryable conflict (REST:
+     *             409), not a store failure.
      */
-    void deleteGroupConversation(String groupConversationId) throws IResourceStore.ResourceStoreException;
+    void deleteGroupConversation(String groupConversationId)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException;
 
     /**
      * List group conversations for a given group config.
@@ -117,6 +123,18 @@ public interface IGroupConversationService {
     GroupConversation continueDiscussion(String groupConversationId, String question,
                                          GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    /**
+     * Continuation variant that additionally shares {@code attachments} with every
+     * member agent for the new round (on top of the ones already bound to the
+     * conversation from prior rounds). {@code attachments} may be null/empty.
+     */
+    default GroupConversation continueDiscussion(String groupConversationId, String question,
+                                                 GroupDiscussionEventListener listener,
+                                                 List<Attachment> attachments)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return continueDiscussion(groupConversationId, question, listener);
+    }
 
     /**
      * Explicitly close a group conversation. Ends all member conversations,

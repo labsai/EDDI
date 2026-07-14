@@ -165,7 +165,33 @@ class GroupConversationStoreTest {
         // read() returns the same object that compareAndSetState mutates
         assertEquals(GroupConversation.GroupConversationState.IN_PROGRESS, gc.getState());
         assertNotNull(gc.getLastModified());
-        verify(storage).store(writeResource);
+        // The transition must be a CONDITIONAL write (expected state still persisted),
+        // not
+        // an unconditional store — otherwise two racing callers could both pass the
+        // read-check and both write.
+        verify(storage).storeIfFieldEquals(writeResource, "state", "COMPLETED");
+        verify(storage, never()).store(any());
+    }
+
+    @Test
+    @DisplayName("compareAndSetState — returns false when the conditional write loses the race")
+    void compareAndSetState_lostRace_returnsFalse() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setState(GroupConversation.GroupConversationState.COMPLETED);
+        IResourceStorage.IResource<GroupConversation> readResource = mock(IResourceStorage.IResource.class);
+        when(readResource.getData()).thenReturn(gc);
+        when(storage.read("gc-1", 1)).thenReturn(readResource);
+        IResourceStorage.IResource<GroupConversation> writeResource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource(eq("gc-1"), eq(1), any(GroupConversation.class))).thenReturn(writeResource);
+        // Another writer moved the state between our read and our conditional write.
+        doThrow(new IResourceStore.ResourceModifiedException("state changed"))
+                .when(storage).storeIfFieldEquals(eq(writeResource), eq("state"), anyString());
+
+        boolean result = store.compareAndSetState("gc-1",
+                GroupConversation.GroupConversationState.COMPLETED,
+                GroupConversation.GroupConversationState.IN_PROGRESS);
+
+        assertFalse(result, "a lost CAS must report false, not silently overwrite the winner");
     }
 
     @Test

@@ -480,5 +480,66 @@ class RestGroupConversationTest {
 
             assertEquals(200, response.getStatus());
         }
+
+        // --- merge-review fixes ---
+
+        @Test
+        @DisplayName("followUp — 400 (not 500) when targetAgentId is missing")
+        void followUp_missingTargetAgentId_returns400() {
+            Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("what did you mean?", null, "user-1"));
+
+            assertEquals(400, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("followUp — 400 when question is blank")
+        void followUp_blankQuestion_returns400() {
+            Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("  ", "agentA", "user-1"));
+
+            assertEquals(400, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("continue — 400 when question is blank")
+        void continue_blankQuestion_returns400() {
+            Response response = restGroupConversation.continueDiscussion("group-1", "gc-1",
+                    new DiscussRequest("", "user-1"));
+
+            assertEquals(400, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("continue — attachments on the request body are forwarded, not dropped")
+        @SuppressWarnings("unchecked")
+        void continue_forwardsAttachments() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion(eq("gc-1"), eq("round two"), isNull(), anyList()))
+                    .thenReturn(gcInGroup("group-1"));
+
+            var req = new DiscussRequest("round two", "user-1",
+                    List.of(new AttachmentRef("image/png", "aGVsbG8=", null, "diagram.png")));
+            Response response = restGroupConversation.continueDiscussion("group-1", "gc-1", req);
+
+            assertEquals(200, response.getStatus());
+            ArgumentCaptor<List<Attachment>> captor = ArgumentCaptor.forClass(List.class);
+            verify(groupService).continueDiscussion(eq("gc-1"), eq("round two"), isNull(), captor.capture());
+            assertEquals(1, captor.getValue().size());
+            assertEquals("aGVsbG8=", captor.getValue().get(0).getBase64Data());
+        }
+
+        @Test
+        @DisplayName("delete — 409 (not 500) when another operation is in flight")
+        void delete_operationInProgress_returns409() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            doThrow(new IGroupConversationService.GroupDiscussionException(
+                    "Cannot delete: another operation is already in progress for this group conversation"))
+                    .when(groupService).deleteGroupConversation("gc-1");
+
+            Response response = restGroupConversation.deleteGroupConversation("group-1", "gc-1");
+
+            assertEquals(409, response.getStatus());
+        }
     }
 }
