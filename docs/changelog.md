@@ -5,6 +5,39 @@
 
 ---
 
+## 🧬 Group conversations — mutation-audited regression coverage (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+The question "do we have coverage for everything we fixed?" was answered with **mutation testing** rather than by reading test names: each fix was reverted in turn and the suite re-run. A fix whose mutant *survives* (suite still green) has no coverage and can silently regress.
+
+### Mutants that survived — i.e. bugs with ZERO coverage
+
+| Fix | Why the tests could not see it |
+| --- | --- |
+| **JAX-RS routing** — the `/{groupId}/conversations` prefix on the four post-discussion endpoints | The unit tests invoke resource methods **directly** and never exercise JAX-RS path binding. This was the single highest-severity bug of the whole effort (every follow-up/continue/close would have 404'd), and it could be reintroduced with the suite still green. |
+| **SSE error curation** — the *service* pushing raw `e.getMessage()` into `GroupErrorEvent` | Nothing asserted what actually goes out over the wire to the browser. |
+| **Malformed-id reflected value** — Mongo's `ObjectId` parser echoing the raw caller string | No test drove an unparseable id. |
+| **Curated exception messages** (store + `loadInGroup`) | The existing test asserted the *response body*, which the REST layer curates anyway — so the message itself (which `read`/`delete` surface through the global mapper) was unguarded. |
+| **Continuation `startPhaseIndex = 0`** | Nothing asserted that a continuation re-runs from the FIRST phase; a mutant that skipped phase 0 passed. |
+| **`finally` cleanup condition** (defer `COMPLETED`, reclaim on `FAILED`/`CANCELLED`) | Nothing asserted that a COMPLETED round keeps its ephemeral agents for follow-ups. |
+| **`resumeQuestion` read side** | Only the *write* was tested; nothing asserted that `resumeDiscussion` actually uses it. |
+| **The three new metrics counters** | Never asserted. |
+
+### Coverage added (each verified to KILL its mutant)
+
+- **`IRestGroupConversationRoutingTest`** (new) — reflective assertions on the JAX-RS annotations: every `@PathParam` must have a matching `{template}` segment (a mismatch binds `null` — the exact production failure), every per-conversation route stays under `/groups/{groupId}/conversations/{groupConversationId}`, and the four endpoints resolve to their documented URLs. This is the invariant a direct-invocation test structurally cannot check.
+- **`GroupConversationServiceExtendedTest.MergeRegressionGuards`** (new) — a failed discussion streams a *curated* error (never the raw exception text); a continuation re-runs from phase 0 and emits `round_start` (not `group_start`); a COMPLETED round keeps its ephemeral agents.
+- **`GroupConversationServiceHitlTest`** — a paused *continuation* resumes with the follow-up question, not the stale round-1 one.
+- **`GroupConversationStoreTest` / `RestGroupConversationTest`** — the not-found message never embeds the caller id; a malformed id is answered 404 without reflecting the payload; the group-mismatch exception *message* is curated.
+- **`GroupConversationServiceTest`** — the three operation counters, and the failure counter incrementing even when the CAS is lost.
+
+Mutants **already killed** before this pass (genuinely covered): `failConversation`'s upsert, the MCP ownership gate, `CLOSED`-blindness in `persistedTerminalOverride`, `continueDiscussion`'s conditional write, the control-token pre-registration, `cancelDiscussion`'s `CLOSED` guard, `availableActions` for `CANCELLED`, and the MCP list owner-filter.
+
+647 group/MCP unit tests pass; Checkstyle clean. No production code changed in this commit.
+
+---
+
 ## 🛡️ Group conversations — terminal-state integrity + error-body hardening (2026-07-14)
 
 **Repo:** EDDI (`feat/group-followups`). Found by an adversarial review of the previous PR-review-response commit — which had hardened the *success* write in `continueDiscussion` while leaving the *failure* write, and the rest of the reflected-value surface, wide open.

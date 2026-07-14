@@ -90,6 +90,23 @@ class GroupConversationStoreTest {
         assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.read("missing"));
     }
 
+    @Test
+    @DisplayName("read — the not-found message never embeds the caller-supplied id")
+    void readNotFound_messageDoesNotEmbedTheId() {
+        // This message is surfaced to clients by ResourceNotFoundExceptionMapper (which
+        // echoes getLocalizedMessage()) and by every REST handler that forwards it, so
+        // an
+        // id in here is a reflected-value sink (CodeQL) on every group endpoint.
+        String payload = "<script>alert(1)</script>";
+        when(storage.read(payload, 1)).thenReturn(null);
+
+        var thrown = assertThrows(IResourceStore.ResourceNotFoundException.class,
+                () -> store.read(payload));
+
+        assertFalse(String.valueOf(thrown.getMessage()).contains(payload),
+                "the caller-supplied id must not appear in the exception message");
+    }
+
     // ==================== update ====================
 
     @Test

@@ -543,6 +543,43 @@ class RestGroupConversationTest {
         }
 
         @Test
+        @DisplayName("malformed id — the storage layer's raw payload is never reflected back")
+        void malformedId_doesNotReflectThePayload() throws Exception {
+            // Mongo's ObjectId parser puts the RAW caller string in its message. Echoing it
+            // (directly, or via the global IllegalArgumentException mapper) is an arbitrary
+            // reflected-value sink.
+            String payload = "<script>alert(1)</script>";
+            when(groupService.readGroupConversation(payload))
+                    .thenThrow(new IllegalArgumentException(
+                            "invalid hexadecimal representation of an ObjectId: [" + payload + "]"));
+
+            Response response = restGroupConversation.followUpWithMember("group-1", payload,
+                    new FollowUpRequest("q", "Analyst", "user-1"));
+
+            assertEquals(404, response.getStatus(), "a malformed id cannot name a conversation");
+            assertFalse(String.valueOf(response.getEntity()).contains("script"),
+                    "the caller-supplied payload must never be reflected back");
+            assertFalse(String.valueOf(response.getEntity()).contains("ObjectId"),
+                    "the storage layer's raw message must never be reflected back");
+        }
+
+        @Test
+        @DisplayName("group mismatch — the thrown 404's MESSAGE carries no groupId (read/delete surface it via the mapper)")
+        void groupMismatch_exceptionMessageIsCurated() throws Exception {
+            // readGroupConversation/deleteGroupConversation sneakyThrow this exception; the
+            // global ResourceNotFoundExceptionMapper echoes getLocalizedMessage() into the
+            // body. So the MESSAGE itself — not just the curated bodies of the endpoints
+            // that build their own Response — has to be free of caller input.
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("other-group"));
+
+            var thrown = assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> restGroupConversation.readGroupConversation("group-1", "gc-1"));
+
+            assertFalse(String.valueOf(thrown.getMessage()).contains("group-1"),
+                    "the exception message reaches the client via the mapper — it must not embed the groupId");
+        }
+
+        @Test
         @DisplayName("group mismatch — 404 body does not reflect the caller-supplied groupId")
         void groupMismatch_doesNotReflectGroupId() throws Exception {
             when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("other-group"));

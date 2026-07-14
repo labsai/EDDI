@@ -80,6 +80,8 @@ class GroupConversationServiceTest {
     private NonceCacheService nonceCacheService;
 
     private GroupConversationService service;
+    /** Real registry (not a mock) so the new operation counters can be asserted. */
+    private SimpleMeterRegistry meterRegistry;
 
     private static final int MAX_DEPTH = 3;
     private static final String DEFAULT_TENANT = "default";
@@ -87,10 +89,11 @@ class GroupConversationServiceTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        meterRegistry = new SimpleMeterRegistry();
         service = new GroupConversationService(
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
-                new SimpleMeterRegistry(), agentSigningService, agentStore,
+                meterRegistry, agentSigningService, agentStore,
                 mock(IScheduleStore.class), nonceCacheService, null, DEFAULT_TENANT, MAX_DEPTH);
     }
 
@@ -916,6 +919,23 @@ class GroupConversationServiceTest {
         }
 
         @Test
+        void failConversation_countsTheFailureEvenWhenTheCasIsLost() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            var persisted = new GroupConversation();
+            persisted.setId("gc-1");
+            persisted.setState(GroupConversationState.CANCELLED);
+            when(conversationStore.read("gc-1")).thenReturn(persisted);
+
+            failConversationMethod.invoke(service, gc);
+
+            // The metric must record the failure itself, not the outcome of the race —
+            // otherwise a lost CAS hides the failure from operators entirely.
+            assertEquals(1.0, meterRegistry.counter("eddi_group_discussion_failure_count").count());
+        }
+
+        @Test
         void failConversation_casesOnThePersistedState_notTheStaleInMemoryOne() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
@@ -1028,6 +1048,8 @@ class GroupConversationServiceTest {
             // Success path now writes atomically (CAS on IN_PROGRESS) so a racing cancel
             // cannot be clobbered — see followUpWithMember.
             verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+            // New feature => must be observable (AGENTS.md).
+            assertEquals(1.0, meterRegistry.counter("eddi_group_followup_count").count());
         }
 
         @Test
@@ -1143,6 +1165,9 @@ class GroupConversationServiceTest {
             // (failConversation below also CASes on IN_PROGRESS, hence atLeastOnce.)
             verify(conversationStore, atLeastOnce()).updateIfState(inProgress, GroupConversationState.IN_PROGRESS);
             verify(conversationStore, never()).update(inProgress);
+            // The round was committed, so the continuation is counted (AGENTS.md: new
+            // features must be observable).
+            assertEquals(1.0, meterRegistry.counter("eddi_group_continue_count").count());
             // Config load failed after the transition — the conversation must be FAILED,
             // not left stranded IN_PROGRESS.
             assertEquals(GroupConversationState.FAILED, inProgress.getState());
@@ -1339,6 +1364,7 @@ class GroupConversationServiceTest {
             verify(conversationService).endConversation("convA");
             verify(conversationService).endConversation("convB");
             assertEquals(GroupConversationState.CLOSED, result.getState());
+            assertEquals(1.0, meterRegistry.counter("eddi_group_close_count").count());
         }
 
         @Test
