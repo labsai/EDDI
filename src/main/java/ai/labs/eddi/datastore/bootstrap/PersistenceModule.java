@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.bootstrap;
 
+import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.datastore.mongo.codec.JacksonProvider;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,17 +48,8 @@ import static org.bson.codecs.configuration.CodecRegistries.*;
 @DefaultBean
 public class PersistenceModule {
 
-    private static final MongoDriverInformation DRIVER_INFO = buildDriverInfo();
+    private static final MongoDriverInformation DRIVER_INFO = MongoDriverInfoFactory.build();
 
-    private static MongoDriverInformation buildDriverInfo() {
-        MongoDriverInformation.Builder builder = MongoDriverInformation.builder().driverName("EDDI");
-        Package pkg = PersistenceModule.class.getPackage();
-        String version = pkg != null ? pkg.getImplementationVersion() : null;
-        if (version != null) {
-            builder.driverVersion(version);
-        }
-        return builder.build();
-    }
     @Produces
     @ApplicationScoped
     @DefaultBean

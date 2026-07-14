@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -51,17 +52,8 @@ import java.util.regex.Pattern;
 public class EmbeddingStoreFactory {
 
     private static final Logger LOGGER = Logger.getLogger(EmbeddingStoreFactory.class);
-    private static final MongoDriverInformation DRIVER_INFO = buildDriverInfo();
+    private static final MongoDriverInformation DRIVER_INFO = MongoDriverInfoFactory.build();
 
-    private static MongoDriverInformation buildDriverInfo() {
-        MongoDriverInformation.Builder builder = MongoDriverInformation.builder().driverName("EDDI");
-        Package pkg = EmbeddingStoreFactory.class.getPackage();
-        String version = pkg != null ? pkg.getImplementationVersion() : null;
-        if (version != null) {
-            builder.driverVersion(version);
-        }
-        return builder.build();
-    }
     private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
     private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
     private static final Pattern TRAILING_UNDERSCORES = Pattern.compile("_+$");
