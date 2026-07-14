@@ -145,10 +145,11 @@ class AgentOrchestrator {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
 
-    // Wired post-construction by LlmTask (see setAttachmentServices) so the long
-    // constructor and its many direct-construction unit tests stay unchanged.
-    private IAttachmentStore attachmentStore;
-    private AttachmentTextExtractor attachmentTextExtractor;
+    // Set once after construction by LlmTask (@PostConstruct), past the
+    // constructor's final-field freeze; `volatile` publishes this write-once
+    // field to the per-turn reader threads (see setAttachmentServices).
+    private volatile IAttachmentStore attachmentStore;
+    private volatile AttachmentTextExtractor attachmentTextExtractor;
 
     /**
      * Provide the attachment services used to build the {@code readAttachment}
