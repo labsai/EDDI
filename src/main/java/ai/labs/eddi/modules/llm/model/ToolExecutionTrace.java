@@ -356,7 +356,12 @@ public class ToolExecutionTrace {
     /**
      * Add a successful tool call to the trace
      */
-    public void addToolCall(String toolName, String arguments, String result, long executionTimeMs, double cost, boolean fromCache) {
+    // synchronized: ToolExecutionService.executeToolsParallel shares one trace
+    // across parallel
+    // tool executions, so the backing ArrayList + counter mutations here must be
+    // serialized
+    // (concurrent ArrayList.add corrupts the array → ArrayIndexOutOfBounds).
+    public synchronized void addToolCall(String toolName, String arguments, String result, long executionTimeMs, double cost, boolean fromCache) {
         ToolCall call = new ToolCall();
         call.setToolName(toolName);
         call.setArguments(arguments);
@@ -383,7 +388,9 @@ public class ToolExecutionTrace {
     /**
      * Add a failed tool call to the trace
      */
-    public void addFailedToolCall(String toolName, String arguments, String error, long executionTimeMs, double cost) {
+    // synchronized: see addToolCall — shared across parallel executions in
+    // executeToolsParallel.
+    public synchronized void addFailedToolCall(String toolName, String arguments, String error, long executionTimeMs, double cost) {
         ToolCall call = new ToolCall();
         call.setToolName(toolName);
         call.setArguments(arguments);
