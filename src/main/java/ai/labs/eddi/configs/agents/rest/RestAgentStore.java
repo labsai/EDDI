@@ -47,7 +47,7 @@ public class RestAgentStore implements IRestAgentStore {
     private final IScheduleStore scheduleStore;
     private final CapabilityRegistryService capabilityRegistryService;
 
-    private static final Logger log = Logger.getLogger(RestAgentStore.class);
+    private static final Logger LOGGER = Logger.getLogger(RestAgentStore.class);
 
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -78,14 +78,14 @@ public class RestAgentStore implements IRestAgentStore {
                         registered++;
                     }
                 } catch (Exception e) {
-                    log.debugf("Skipping capability registration for agent: %s", e.getMessage());
+                    LOGGER.debugf("Skipping capability registration for agent: %s", e.getMessage());
                 }
             }
             if (registered > 0) {
-                log.infof("Capability registry populated: %d agent(s) with capabilities", registered);
+                LOGGER.infof("Capability registry populated: %d agent(s) with capabilities", registered);
             }
         } catch (Exception e) {
-            log.warnf("Failed to populate capability registry at startup: %s", e.getMessage());
+            LOGGER.warnf("Failed to populate capability registry at startup: %s", e.getMessage());
         }
     }
 
@@ -169,7 +169,7 @@ public class RestAgentStore implements IRestAgentStore {
         try {
             capabilityRegistryService.register(resourceId.getId(), agentConfiguration);
         } catch (Exception e) {
-            log.debugf("Could not register capabilities for new agent: %s", e.getMessage());
+            LOGGER.debugf("Could not register capabilities for new agent: %s", e.getMessage());
         }
 
         return Response.created(createdUri).location(createdUri)
@@ -245,10 +245,10 @@ public class RestAgentStore implements IRestAgentStore {
             try {
                 int deletedSchedules = scheduleStore.deleteSchedulesByAgentId(id);
                 if (deletedSchedules > 0) {
-                    log.infof("Cascade-deleted %d schedule(s) for Agent %s", deletedSchedules, id);
+                    LOGGER.infof("Cascade-deleted %d schedule(s) for Agent %s", deletedSchedules, id);
                 }
             } catch (Exception e) {
-                log.warnf("Failed to cascade-delete schedules for Agent %s: %s", id, e.getMessage());
+                LOGGER.warnf("Failed to cascade-delete schedules for Agent %s: %s", id, e.getMessage());
             }
 
             try {
@@ -259,21 +259,22 @@ public class RestAgentStore implements IRestAgentStore {
                         // Check if this package is referenced by other agents
                         var referencingAgents = agentStore.getAgentDescriptorsContainingWorkflow(resourceId.getId(), resourceId.getVersion(), false);
                         if (referencingAgents.size() > 1) {
-                            log.infof("Skipping cascade-delete of package %s (v%d) — " + "still referenced by %d other agent(s)", resourceId.getId(),
+                            LOGGER.infof("Skipping cascade-delete of package %s (v%d) — " + "still referenced by %d other agent(s)",
+                                    resourceId.getId(),
                                     resourceId.getVersion(), referencingAgents.size() - 1);
                             continue;
                         }
 
                         restWorkflowStore.deleteWorkflow(resourceId.getId(), resourceId.getVersion(), permanent, true);
-                        log.infof("Cascade-deleted package %s (v%d) for Agent %s", resourceId.getId(), resourceId.getVersion(), id);
+                        LOGGER.infof("Cascade-deleted package %s (v%d) for Agent %s", resourceId.getId(), resourceId.getVersion(), id);
                     } catch (Exception e) {
-                        log.warnf("Failed to cascade-delete package %s: %s", resourceId.getId(), e.getMessage());
+                        LOGGER.warnf("Failed to cascade-delete package %s: %s", resourceId.getId(), e.getMessage());
                     }
                 }
             } catch (IResourceStore.ResourceNotFoundException e) {
-                log.warnf("Agent %s (v%d) not found for cascade — deleting Agent only", id, version);
+                LOGGER.warnf("Agent %s (v%d) not found for cascade — deleting Agent only", id, version);
             } catch (IResourceStore.ResourceStoreException e) {
-                log.warnf("Error reading Agent %s for cascade: %s", id, e.getMessage());
+                LOGGER.warnf("Error reading Agent %s for cascade: %s", id, e.getMessage());
             }
         }
         capabilityRegistryService.unregister(id);

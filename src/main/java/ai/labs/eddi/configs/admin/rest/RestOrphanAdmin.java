@@ -46,7 +46,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 @ApplicationScoped
 public class RestOrphanAdmin implements IRestOrphanAdmin {
 
-    private static final Logger log = Logger.getLogger(RestOrphanAdmin.class);
+    private static final Logger LOGGER = Logger.getLogger(RestOrphanAdmin.class);
 
     /**
      * Store types to scan for orphans. Each entry is {descriptorType,
@@ -88,20 +88,20 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
             try {
                 resourceClientLibrary.deleteResource(orphan.getResourceUri(), true);
                 deletedCount++;
-                log.infof("Purged orphan: %s [%s]", orphan.getResourceUri(), orphan.getType());
+                LOGGER.infof("Purged orphan: %s [%s]", orphan.getResourceUri(), orphan.getType());
             } catch (Exception e) {
-                log.warnf("Failed to purge orphan %s: %s", orphan.getResourceUri(), e.getMessage());
+                LOGGER.warnf("Failed to purge orphan %s: %s", orphan.getResourceUri(), e.getMessage());
             }
         }
 
-        log.infof("Orphan purge complete: %d/%d deleted", deletedCount, orphans.size());
+        LOGGER.infof("Orphan purge complete: %d/%d deleted", deletedCount, orphans.size());
         return new OrphanReport(orphans.size(), deletedCount, orphans);
     }
 
     private List<OrphanInfo> findOrphans(boolean includeDeleted) {
         // Step 1: Build the set of all referenced resource URIs
         Set<String> referencedUris = buildReferencedUrisSet();
-        log.infof("Orphan scan: found %d referenced resource URIs", referencedUris.size());
+        LOGGER.infof("Orphan scan: found %d referenced resource URIs", referencedUris.size());
 
         // Step 2: Scan all store types and find unreferenced resources
         List<OrphanInfo> orphans = new ArrayList<>();
@@ -119,11 +119,11 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     }
                 }
             } catch (Exception e) {
-                log.warnf("Error scanning store type %s: %s", type, e.getMessage());
+                LOGGER.warnf("Error scanning store type %s: %s", type, e.getMessage());
             }
         }
 
-        log.infof("Orphan scan complete: %d orphans found", orphans.size());
+        LOGGER.infof("Orphan scan complete: %d orphans found", orphans.size());
         return orphans;
     }
 
@@ -152,7 +152,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     // Agent descriptor exists but resource doesn't — skip
                 } catch (Exception e) {
-                    log.debugf("Error reading Agent %s: %s", agentDescriptor.getResource(), e.getMessage());
+                    LOGGER.debugf("Error reading Agent %s: %s", agentDescriptor.getResource(), e.getMessage());
                 }
             }
 
@@ -169,12 +169,12 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     // Workflow descriptor exists but resource doesn't — skip
                 } catch (Exception e) {
-                    log.debugf("Error reading workflow %s: %s", workflowDescriptor.getResource(), e.getMessage());
+                    LOGGER.debugf("Error reading workflow %s: %s", workflowDescriptor.getResource(), e.getMessage());
                 }
             }
 
         } catch (Exception e) {
-            log.errorf("Error building referenced URIs set: %s", e.getMessage());
+            LOGGER.errorf("Error building referenced URIs set: %s", e.getMessage());
         }
 
         return referencedUris;

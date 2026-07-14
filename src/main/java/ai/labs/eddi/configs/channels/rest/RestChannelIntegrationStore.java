@@ -33,7 +33,7 @@ import java.util.Set;
  */
 @ApplicationScoped
 public class RestChannelIntegrationStore implements IRestChannelIntegrationStore {
-    private static final Logger LOG = Logger.getLogger(RestChannelIntegrationStore.class);
+    private static final Logger LOGGER = Logger.getLogger(RestChannelIntegrationStore.class);
 
     /**
      * Currently registered channel type adapters. Future: make this discoverable
@@ -89,7 +89,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 var resourceId = RestUtilities.extractResourceId(location);
                 syncDescriptor(resourceId.getId(), channelConfiguration);
             } catch (Exception e) {
-                LOG.warn("Failed to sync channel descriptor on create", e);
+                LOGGER.warn("Failed to sync channel descriptor on create", e);
             }
         }
         return response;
@@ -114,7 +114,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 var resourceId = RestUtilities.extractResourceId(location);
                 syncDescriptor(resourceId.getId(), config);
             } catch (Exception e) {
-                LOG.warn("Failed to sync channel descriptor on duplicate", e);
+                LOGGER.warn("Failed to sync channel descriptor on duplicate", e);
             }
         }
         return response;
@@ -283,13 +283,13 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 } catch (BadRequestException e) {
                     throw e; // re-throw validation errors
                 } catch (Exception e) {
-                    LOG.debugf("Skipping descriptor during uniqueness check: %s", e.getMessage());
+                    LOGGER.debugf("Skipping descriptor during uniqueness check: %s", e.getMessage());
                 }
             }
         } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
-            LOG.warn("Failed to check channel ID uniqueness — allowing save", e);
+            LOGGER.warn("Failed to check channel ID uniqueness — allowing save", e);
         }
     }
 
@@ -327,7 +327,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                         resourceId, currentResourceId.getVersion(), descriptor);
             }
         } catch (Exception e) {
-            LOG.warnf(e, "Failed to sync channel descriptor for id=%s",
+            LOGGER.warnf(e, "Failed to sync channel descriptor for id=%s",
                     sanitizeForLog(resourceId));
         }
     }

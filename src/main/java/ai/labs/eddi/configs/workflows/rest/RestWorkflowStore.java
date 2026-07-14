@@ -42,7 +42,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     private final RestVersionInfo<WorkflowConfiguration> restVersionInfo;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
-    private static final Logger log = Logger.getLogger(RestWorkflowStore.class);
+    private static final Logger LOGGER = Logger.getLogger(RestWorkflowStore.class);
 
     @Inject
     public RestWorkflowStore(IWorkflowStore workflowStore, ResourceClientLibrary resourceClientLibrary,
@@ -170,9 +170,9 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                     }
                 }
             } catch (IResourceStore.ResourceNotFoundException e) {
-                log.warnf("Workflow %s (v%d) not found for cascade — deleting workflow only", id, version);
+                LOGGER.warnf("Workflow %s (v%d) not found for cascade — deleting workflow only", id, version);
             } catch (IResourceStore.ResourceStoreException e) {
-                log.warnf("Error reading workflow %s for cascade: %s", id, e.getMessage());
+                LOGGER.warnf("Error reading workflow %s for cascade: %s", id, e.getMessage());
             }
         }
         return restVersionInfo.delete(id, version, permanent);
@@ -202,15 +202,15 @@ public class RestWorkflowStore implements IRestWorkflowStore {
             // Check if this resource is referenced by other workflows
             var referencingWorkflows = workflowStore.getWorkflowDescriptorsContainingResource(resourceUri.toString(), false);
             if (referencingWorkflows.size() > 1) {
-                log.infof("Skipping cascade-delete of resource %s — " + "still referenced by %d other workflow(s)", resourceUri,
+                LOGGER.infof("Skipping cascade-delete of resource %s — " + "still referenced by %d other workflow(s)", resourceUri,
                         referencingWorkflows.size() - 1);
                 return;
             }
 
             resourceClientLibrary.deleteResource(resourceUri, permanent);
-            log.infof("Cascade-deleted resource %s", resourceUri);
+            LOGGER.infof("Cascade-deleted resource %s", resourceUri);
         } catch (Exception e) {
-            log.warnf("Failed to cascade-delete resource %s: %s", resourceUri, e.getMessage());
+            LOGGER.warnf("Failed to cascade-delete resource %s: %s", resourceUri, e.getMessage());
         }
     }
 
