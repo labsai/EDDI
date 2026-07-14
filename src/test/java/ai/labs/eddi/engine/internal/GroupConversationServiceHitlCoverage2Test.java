@@ -450,7 +450,8 @@ class GroupConversationServiceHitlCoverage2Test {
         invoke(m, gc);
 
         assertEquals(GroupConversationState.FAILED, gc.getState());
-        verify(conversationStore).update(gc);
+        // Conditional write (CAS on the running state), never an unconditional upsert.
+        verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
     }
 
     @Test
@@ -458,7 +459,8 @@ class GroupConversationServiceHitlCoverage2Test {
     void failConversationUpdateThrows() throws Exception {
         var gc = pausedPhaseGc("gc-fail-throw");
         gc.setState(GroupConversationState.IN_PROGRESS);
-        doThrow(new RuntimeException("update failed")).when(conversationStore).update(gc);
+        doThrow(new RuntimeException("update failed"))
+                .when(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
         var m = method("failConversation", GroupConversation.class);
 
         assertDoesNotThrow(() -> invoke(m, gc));

@@ -68,7 +68,7 @@ public class GroupConversationStore implements IGroupConversationStore {
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.read(id, SINGLE_VERSION);
             if (resource == null) {
-                throw new IResourceStore.ResourceNotFoundException("Group conversation not found: " + id);
+                throw new IResourceStore.ResourceNotFoundException("Group conversation not found.");
             }
             GroupConversation conversation = resource.getData();
             conversation.setId(id);
@@ -156,7 +156,7 @@ public class GroupConversationStore implements IGroupConversationStore {
             return false;
         } catch (GroupConversationGoneException e) {
             throw new IResourceStore.ResourceNotFoundException(
-                    "Group conversation " + id + " no longer exists");
+                    "Group conversation no longer exists.");
         }
     }
 
@@ -170,7 +170,7 @@ public class GroupConversationStore implements IGroupConversationStore {
             // deleted-vs-mismatch distinction from the storage CAS: surface the
             // deletion as its own (unchecked) type so callers can answer 404
             throw new GroupConversationGoneException(
-                    "Group conversation " + gc.getId() + " no longer exists", e);
+                    "Group conversation no longer exists.", e);
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed conditional update: " + e.getMessage(), e);
         }

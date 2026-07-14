@@ -894,7 +894,11 @@ class GroupConversationServiceTest {
 
             assertEquals(GroupConversationState.FAILED, gc.getState());
             assertNotNull(gc.getLastModified());
-            verify(conversationStore).update(gc);
+            // Conditional write (CAS on the running state) — an unconditional update() is
+            // an upsert and would resurrect a conversation another pod deleted, or
+            // overwrite a terminal CANCELLED with FAILED.
+            verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+            verify(conversationStore, never()).update(gc);
         }
 
         @Test
@@ -903,12 +907,66 @@ class GroupConversationServiceTest {
             gc.setId("gc-1");
             gc.setState(GroupConversationState.IN_PROGRESS);
             doThrow(new IResourceStore.ResourceStoreException("DB error"))
-                    .when(conversationStore).update(gc);
+                    .when(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
 
             // Should not throw — logs warning instead
             assertDoesNotThrow(() -> failConversationMethod.invoke(service, gc));
 
             assertEquals(GroupConversationState.FAILED, gc.getState());
+        }
+
+        @Test
+        void failConversation_casesOnThePersistedState_notTheStaleInMemoryOne() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            // executeDiscussion flips the conversation to SYNTHESIZING in memory BEFORE the
+            // synthesis phase runs, and only persists it afterwards. A CAS on the in-memory
+            // value would therefore expect SYNTHESIZING while the document still says
+            // IN_PROGRESS — it would lose, skip the write, and strand the conversation
+            // IN_PROGRESS forever.
+            gc.setState(GroupConversationState.SYNTHESIZING);
+            var persisted = new GroupConversation();
+            persisted.setId("gc-1");
+            persisted.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(persisted);
+
+            failConversationMethod.invoke(service, gc);
+
+            assertEquals(GroupConversationState.FAILED, gc.getState());
+            verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+        }
+
+        @Test
+        void failConversation_alreadyTerminalInStore_writesNothing() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            var persisted = new GroupConversation();
+            persisted.setId("gc-1");
+            persisted.setState(GroupConversationState.CANCELLED); // another pod cancelled it
+            when(conversationStore.read("gc-1")).thenReturn(persisted);
+
+            failConversationMethod.invoke(service, gc);
+
+            // Neither a conditional nor an unconditional write — the terminal state stands.
+            verify(conversationStore, never()).updateIfState(any(), any());
+            verify(conversationStore, never()).update(any());
+        }
+
+        @Test
+        void failConversation_doesNotResurrectATerminalOrDeletedConversation() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            // Another pod already cancelled (or deleted) it — the CAS must lose.
+            doThrow(new IResourceStore.ResourceModifiedException("cancelled elsewhere"))
+                    .when(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+
+            assertDoesNotThrow(() -> failConversationMethod.invoke(service, gc));
+
+            // Crucially: no unconditional write — update() upserts and would re-create a
+            // deleted document / clobber the terminal state.
+            verify(conversationStore, never()).update(any());
         }
     }
 
@@ -1082,7 +1140,9 @@ class GroupConversationServiceTest {
             assertEquals("round two question", last.content());
             // The round/question mutation is persisted with a CAS on IN_PROGRESS so a
             // racing cancel/close cannot be resurrected by an unconditional write.
-            verify(conversationStore).updateIfState(inProgress, GroupConversationState.IN_PROGRESS);
+            // (failConversation below also CASes on IN_PROGRESS, hence atLeastOnce.)
+            verify(conversationStore, atLeastOnce()).updateIfState(inProgress, GroupConversationState.IN_PROGRESS);
+            verify(conversationStore, never()).update(inProgress);
             // Config load failed after the transition — the conversation must be FAILED,
             // not left stranded IN_PROGRESS.
             assertEquals(GroupConversationState.FAILED, inProgress.getState());

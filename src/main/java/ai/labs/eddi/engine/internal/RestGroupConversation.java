@@ -88,7 +88,19 @@ public class RestGroupConversation implements IRestGroupConversation {
      */
     private GroupConversation loadInGroup(String groupId, String gcId)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
-        GroupConversation gc = groupConversationService.readGroupConversation(gcId);
+        GroupConversation gc;
+        try {
+            gc = groupConversationService.readGroupConversation(gcId);
+        } catch (IllegalArgumentException e) {
+            // Scoped deliberately to the id lookup ONLY. A malformed id reaches the
+            // storage layer's ObjectId parser, whose message embeds the raw caller string
+            // ("invalid hexadecimal representation of an ObjectId: [...]") and would be
+            // echoed by the global mapper — a reflected-value sink. A malformed id cannot
+            // name a conversation, so "not found" is the honest answer. Catching this any
+            // wider would mask a genuine internal IllegalArgumentException as a 404.
+            LOGGER.infof("Malformed group conversation id: %s", sanitize(gcId));
+            throw new IResourceStore.ResourceNotFoundException("Group conversation not found.");
+        }
         if (gc.getGroupId() == null || !gc.getGroupId().equals(groupId)) {
             // Curated body: the caller-supplied groupId/gcId are never reflected back
             // (CodeQL reflected-value/XSS) — several callers echo e.getMessage() into the
@@ -112,9 +124,27 @@ public class RestGroupConversation implements IRestGroupConversation {
             URI location = URI.create("/groups/" + groupId + "/conversations/" + gc.getId());
             return Response.created(location).entity(gc).build();
         } catch (IGroupConversationService.GroupDepthExceededException e) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
+            // Curated bodies throughout this class: the raw exception text is never
+            // returned to the caller (CodeQL: information exposure / reflected value —
+            // several of these messages used to embed the caller-supplied groupId/gcId).
+            // The detail is logged server-side with the ids sanitized.
+            LOGGER.infof("Group discussion rejected (depth) for group %s", sanitize(groupId));
+            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                    .entity("Maximum group nesting depth exceeded.").build();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+            LOGGER.infof("Group discussion → not found for group %s", sanitize(groupId));
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group not found.").build();
+        } catch (IllegalArgumentException e) {
+            // Usually a malformed groupId: it reaches the storage layer's ObjectId parser,
+            // whose message embeds the raw caller string and would be echoed by the global
+            // mapper. discuss() has no loadInGroup to scope this to the id lookup, so log
+            // the full exception — a genuine internal IllegalArgumentException must stay
+            // diagnosable rather than vanish behind a "not found".
+            LOGGER.error("Group discussion rejected for group " + sanitize(groupId)
+                    + " (malformed id, or an internal IllegalArgumentException)", e);
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group not found.").build();
         } catch (Exception e) {
             LOGGER.errorf("Group discussion failed: %s", e.getMessage());
             throw sneakyThrow(e);
@@ -137,13 +167,14 @@ public class RestGroupConversation implements IRestGroupConversation {
             }
 
         } catch (IResourceStore.ResourceNotFoundException e) {
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
-                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
+            // Curated event text: the SSE body is rendered by the chat UI, so never push
+            // the raw message (it used to embed the caller-supplied groupId).
+            LOGGER.infof("Group streaming discussion → not found for group %s: %s", sanitize(groupId), e.getMessage());
+            sendErrorEvent(eventSink, sse, "Group not found.");
             closeQuietly(eventSink);
         } catch (Exception e) {
             LOGGER.errorf("Group streaming discussion failed: %s", e.getMessage());
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
-                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
+            sendErrorEvent(eventSink, sse, "Group discussion could not be started.");
             closeQuietly(eventSink);
         }
     }
@@ -210,7 +241,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             // text to the client (CodeQL: information exposure through an error message);
             // the detail is logged server-side with the id sanitized.
             LOGGER.infof("Delete of group conversation %s conflicted: %s",
-                    sanitize(groupConversationId), e.getMessage());
+                    sanitize(groupConversationId), sanitize(e.getMessage()));
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
                     .entity("Group conversation is busy — another operation is in progress. Please retry.")
                     .build();
@@ -257,12 +288,21 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
             throw e;
-        } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
-            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+            // Curated body — GroupDiscussionException messages can embed the target agent
+            // id (caller input). Deliberately phrased as possibilities: this exception
+            // covers wrong-state, the concurrent-operation guard, an unknown member AND
+            // agent-call/timeout failures, so it must not assert a single cause.
+            LOGGER.infof("Follow-up on %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The follow-up could not be applied. The conversation may not accept follow-ups "
+                            + "right now (it must be COMPLETED and have no other operation in progress), the "
+                            + "target agent may not be a member, or the agent could not be reached. Read the "
+                            + "conversation for its current state and members.")
+                    .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group conversation not found.").build();
         } catch (Exception e) {
             LOGGER.errorf("Follow-up with member failed: %s", e.getMessage());
             throw sneakyThrow(e);
@@ -385,12 +425,18 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
             throw e;
-        } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
-            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+            // Curated, and phrased as possibilities: this exception covers wrong-state,
+            // the concurrent-operation guard AND execution failures inside the round.
+            LOGGER.infof("Continue on %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The continuation could not be applied. The conversation may not accept a new "
+                            + "round right now (it must be COMPLETED and have no other operation in progress), "
+                            + "or the round could not be completed. Read the conversation for its current state.")
+                    .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group conversation not found.").build();
         } catch (Exception e) {
             LOGGER.errorf("Continue discussion failed: %s", e.getMessage());
             throw sneakyThrow(e);
@@ -428,21 +474,21 @@ public class RestGroupConversation implements IRestGroupConversation {
                 try {
                     groupConversationService.continueDiscussion(gcId, request.question(), listener);
                 } catch (Exception e) {
+                    // Curated event text — never forward the raw message over SSE.
                     LOGGER.errorf("Continue discussion streaming failed: %s", e.getMessage());
-                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
+                            "The continuation could not be completed."));
                 }
             });
 
         } catch (ForbiddenException e) {
             throw e;
         } catch (IResourceStore.ResourceNotFoundException e) {
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
-                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
+            sendErrorEvent(eventSink, sse, "Group conversation not found.");
             closeQuietly(eventSink);
         } catch (Exception e) {
             LOGGER.errorf("Continue discussion streaming setup failed: %s", e.getMessage());
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
-                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
+            sendErrorEvent(eventSink, sse, "The continuation could not be started.");
             closeQuietly(eventSink);
         }
     }
@@ -519,9 +565,14 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (ForbiddenException e) {
             throw e;
         } catch (IGroupConversationService.GroupDiscussionException e) {
-            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+            LOGGER.infof("Close of %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("Close not possible: the conversation must be COMPLETED, FAILED or CANCELLED "
+                            + "(it may still be running or already closed), and no other operation may be in progress.")
+                    .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group conversation not found.").build();
         } catch (Exception e) {
             // Genuine store/DB failures (ResourceStoreException) map to 500 via the
             // global mapper — only business conflicts above are 409.

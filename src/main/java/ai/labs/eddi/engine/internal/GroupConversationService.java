@@ -208,17 +208,17 @@ public class GroupConversationService implements IGroupConversationService {
         // PostgreSQL
         IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
         if (currentGroupId == null) {
-            throw new IResourceStore.ResourceNotFoundException("Group not found: " + groupId);
+            throw new IResourceStore.ResourceNotFoundException("Group not found.");
         }
         AgentGroupConfiguration config = groupStore.read(groupId, currentGroupId.getVersion());
         if (config == null) {
-            throw new IResourceStore.ResourceNotFoundException("Group configuration not found: " + groupId);
+            throw new IResourceStore.ResourceNotFoundException("Group configuration not found.");
         }
 
         // Resolve phases
         List<DiscussionPhase> phases = resolvePhases(config);
         if (phases.isEmpty()) {
-            throw new GroupDiscussionException("No phases defined for group: " + groupId);
+            throw new GroupDiscussionException("No discussion phases are defined for this group.");
         }
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
@@ -244,16 +244,16 @@ public class GroupConversationService implements IGroupConversationService {
         // Validate early — so errors are returned synchronously
         IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
         if (currentGroupId == null) {
-            throw new IResourceStore.ResourceNotFoundException("Group not found: " + groupId);
+            throw new IResourceStore.ResourceNotFoundException("Group not found.");
         }
         AgentGroupConfiguration config = groupStore.read(groupId, currentGroupId.getVersion());
         if (config == null) {
-            throw new IResourceStore.ResourceNotFoundException("Group configuration not found: " + groupId);
+            throw new IResourceStore.ResourceNotFoundException("Group configuration not found.");
         }
 
         List<DiscussionPhase> phases = resolvePhases(config);
         if (phases.isEmpty()) {
-            throw new GroupDiscussionException("No phases defined for group: " + groupId);
+            throw new GroupDiscussionException("No discussion phases are defined for this group.");
         }
 
         // Create the conversation synchronously so we can return its ID
@@ -274,7 +274,10 @@ public class GroupConversationService implements IGroupConversationService {
                 } catch (Exception e) {
                     LOGGER.errorf("Async group discussion failed for %s: %s", groupId, e.getMessage());
                     if (listener != null) {
-                        listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+                        // Curated: the raw exception text (LLM/DB/driver detail, and possibly the
+                        // caller's own input) must never be pushed to an SSE client. Logged above.
+                        listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
+                                "The group discussion could not be started."));
                     }
                 }
             });
@@ -669,9 +672,14 @@ public class GroupConversationService implements IGroupConversationService {
                 notifyCancelled(gc, listener);
                 return gc;
             }
+            LOGGER.errorf(e, "Group discussion %s failed", LogSanitizer.sanitize(gc.getId()));
             failConversation(gc);
             if (listener != null) {
-                listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+                // Curated: the raw exception text (LLM/DB/driver detail, and possibly the
+                // caller's own input) must never be pushed to an SSE client — it is logged
+                // above and the exception is rethrown for the non-streaming callers.
+                listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
+                        "The group discussion failed."));
             }
             throw e;
         } catch (Exception e) {
@@ -684,9 +692,12 @@ public class GroupConversationService implements IGroupConversationService {
                 notifyCancelled(gc, listener);
                 return gc;
             }
+            LOGGER.errorf(e, "Group discussion %s failed", LogSanitizer.sanitize(gc.getId()));
             failConversation(gc);
             if (listener != null) {
-                listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+                // Curated — see above.
+                listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
+                        "The group discussion failed."));
             }
             throw new GroupDiscussionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
@@ -1089,9 +1100,11 @@ public class GroupConversationService implements IGroupConversationService {
                 }
                 if (privateConvId == null) {
                     throw new GroupDiscussionException(
-                            // The caller-supplied targetAgentId is deliberately NOT echoed —
-                            // this message is surfaced verbatim in the 409 body (CodeQL
-                            // reflected-value/XSS). The available members are server data.
+                            // The caller-supplied targetAgentId is deliberately NOT echoed.
+                            // The REST layer no longer surfaces this text to the client (it
+                            // returns a curated 409 and logs this sanitized), but keeping the
+                            // id out of it means the message is safe wherever it does surface
+                            // — e.g. the MCP tools, which return it as their error string.
                             "The requested agent is not a member of this group conversation. Available members: %s"
                                     .formatted(gc.getMemberDisplayNames()));
                 }
@@ -1248,14 +1261,14 @@ public class GroupConversationService implements IGroupConversationService {
             try {
                 IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
                 if (currentGroupId == null) {
-                    throw new IResourceStore.ResourceNotFoundException("Group not found: " + gc.getGroupId());
+                    throw new IResourceStore.ResourceNotFoundException("Group not found.");
                 }
                 AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
 
                 // Resolve phases and re-execute
                 List<DiscussionPhase> phases = resolvePhases(config);
                 if (phases.isEmpty()) {
-                    throw new GroupDiscussionException("No phases defined for group: " + gc.getGroupId());
+                    throw new GroupDiscussionException("No discussion phases are defined for this group.");
                 }
 
                 // Continuation re-runs the full protocol from the first phase.
@@ -3010,15 +3023,65 @@ public class GroupConversationService implements IGroupConversationService {
         return new TranscriptEntry(agentId, displayName, null, phaseIdx, phase.name(), TranscriptEntryType.ERROR, Instant.now(), message, null);
     }
 
+    /** Terminal states: no further transition may overwrite them. */
+    private static boolean isTerminalState(GroupConversationState state) {
+        return state == GroupConversationState.COMPLETED
+                || state == GroupConversationState.FAILED
+                || state == GroupConversationState.CANCELLED
+                || state == GroupConversationState.CLOSED;
+    }
+
     private void failConversation(GroupConversation gc) {
+        // Never write unconditionally: conversationStore.update() is a whole-document
+        // UPSERT, so it would RE-CREATE a conversation another pod deleted and would
+        // clobber a terminal state (e.g. a cross-pod CANCELLED) with FAILED.
+        //
+        // The CAS expectation must come from the PERSISTED state, not the in-memory
+        // one:
+        // executeDiscussion flips gc to SYNTHESIZING in memory BEFORE the synthesis
+        // phase
+        // runs and only persists it afterwards, so a CAS on the in-memory value would
+        // lose
+        // the race and silently strand the conversation IN_PROGRESS forever.
+        var inMemoryState = gc.getState();
+        GroupConversationState expected;
+        try {
+            expected = conversationStore.read(gc.getId()).getState();
+        } catch (Exception e) {
+            expected = inMemoryState; // best effort — the re-read failed
+        }
+        if (expected == null) {
+            expected = inMemoryState;
+        }
+
         gc.setState(GroupConversationState.FAILED);
         gc.setLastModified(Instant.now());
+        // Count the failure itself, never the outcome of the race — otherwise a lost
+        // CAS
+        // would hide the failure from operators entirely.
+        counterGroupFailure.increment();
+
+        if (expected == null || isTerminalState(expected)) {
+            // Another writer already made it terminal — honor that. Align the in-memory
+            // state with it (mirrors persistedTerminalOverride) so executeDiscussion's
+            // finally makes the RIGHT ephemeral-agent decision: leaving a stale FAILED
+            // here would undeploy the agents of a conversation that is actually COMPLETED
+            // (whose agents a follow-up/continue must reuse) or already CLOSED.
+            if (expected != null) {
+                gc.setState(expected);
+            }
+            LOGGER.infof("Not failing group conversation %s — it is already terminal (%s)",
+                    LogSanitizer.sanitize(gc.getId()), expected);
+            return;
+        }
         try {
-            conversationStore.update(gc);
+            conversationStore.updateIfState(gc, expected);
+        } catch (IResourceStore.ResourceModifiedException | IGroupConversationStore.GroupConversationGoneException e) {
+            LOGGER.infof("Not failing group conversation %s — another writer made it terminal or deleted it",
+                    LogSanitizer.sanitize(gc.getId()));
         } catch (Exception e) {
             LOGGER.warnf("Failed to update group conversation state to FAILED: %s", e.getMessage());
         }
-        counterGroupFailure.increment();
     }
 
     /**
@@ -3517,7 +3580,7 @@ public class GroupConversationService implements IGroupConversationService {
             try {
                 IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
                 if (currentGroupId == null) {
-                    throw new IResourceStore.ResourceNotFoundException("Group not found: " + groupId);
+                    throw new IResourceStore.ResourceNotFoundException("Group not found.");
                 }
                 groupConfig = groupStore.read(groupId, currentGroupId.getVersion());
                 phases = resolvePhases(groupConfig);
@@ -3570,8 +3633,9 @@ public class GroupConversationService implements IGroupConversationService {
                 // remove-and-recheck so a signal racing the remove is not dropped.
                 removeTokenAndConvertIfSignalled(gc, listener);
                 if (listener != null) {
+                    // Curated: never push the raw exception text to an SSE client.
                     listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
-                            "Resume failed: " + e.getMessage() + " — the discussion remains awaiting approval; retry"));
+                            "Resume failed — the discussion remains awaiting approval; retry."));
                 }
                 return;
             }

@@ -5,6 +5,28 @@
 
 ---
 
+## 🛡️ Group conversations — terminal-state integrity + error-body hardening (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`). Found by an adversarial review of the previous PR-review-response commit — which had hardened the *success* write in `continueDiscussion` while leaving the *failure* write, and the rest of the reflected-value surface, wide open.
+
+### Terminal states are now irreversible
+
+- **`failConversation` was an unconditional whole-document write — i.e. an UPSERT.** It could **re-create a group conversation another pod had deleted**, and could overwrite a terminal `CANCELLED` (committed by a cross-pod cancel) with `FAILED`, clobbering that writer's transcript. It is now a conditional write.
+- **The CAS expectation is taken from the PERSISTED state, not the in-memory one.** A first attempt CASed on `gc.getState()` and was itself a blocker: `executeDiscussion` flips the conversation to `SYNTHESIZING` **in memory** before the synthesis phase runs and only persists it afterwards, so a failure inside a synthesis phase would have CASed `SYNTHESIZING` against a persisted `IN_PROGRESS`, lost the race, skipped the write, and **stranded the conversation `IN_PROGRESS` forever** — worse than the bug being fixed. `failConversation` now re-reads the persisted state, skips the write when it is already terminal (aligning the in-memory state to it, so the `finally` makes the right ephemeral-agent decision), and counts the failure metric unconditionally so a lost race can never hide a failure from operators.
+
+### No exception text reaches the client (CodeQL: information exposure / reflected value)
+
+The previous commit curated one handler. This closes the class:
+
+- **Throw sites:** `GroupConversationStore` and `GroupConversationService` no longer embed caller-supplied ids in exception messages (`"Group conversation not found: {id}"`, `"Group not found: {groupId}"`, `"No phases defined for group: {groupId}"`).
+- **Sinks:** `RestGroupConversation` returns **no raw exception text in any body** — every 400/404/409 is a curated, deliberately non-committal message (these exceptions cover several causes, so the body must not assert one), with the detail logged via `LogSanitizer`.
+- **SSE:** the *service* was pushing raw `e.getMessage()` into `GroupErrorEvent`, which the streaming listener forwards to the browser — so LLM/DB/driver detail (and the caller's own input) reached the client even though the REST catch sites were curated. Those events are now curated too, and the raw cause is logged with its stack trace.
+- **Malformed ids:** a non-hex id reaches Mongo's `ObjectId` parser, whose message embeds the **raw caller string** — the most exploitable sink. It is caught **inside `loadInGroup`, scoped to the id lookup only**, and answered with a curated 404. It is deliberately *not* a blanket `catch (IllegalArgumentException)` around the whole operation: that would mask a genuine internal bug as a false "not found" and hide its stack trace.
+
+Verified: 636 group/MCP unit tests pass (incl. new regression tests for the persisted-state CAS and the already-terminal skip); Checkstyle clean. Remaining full-suite failures are environmental only (Testcontainers/Docker + loopback-socket suites).
+
+---
+
 ## 🤖 Group follow-ups — automated PR review response (CodeQL / Copilot / CodeRabbit) (2026-07-14)
 
 **Repo:** EDDI (`feat/group-followups`) — responses to the bot reviews on [PR #595](https://github.com/labsai/EDDI/pull/595).
