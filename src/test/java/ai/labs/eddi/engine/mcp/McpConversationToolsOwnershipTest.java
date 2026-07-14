@@ -289,9 +289,23 @@ class McpConversationToolsOwnershipTest {
     class ListConversations {
 
         private ConversationDescriptor descriptorOwnedBy(String ownerId) {
+            return descriptorOwnedBy(ownerId, "conv-" + ownerId);
+        }
+
+        private ConversationDescriptor descriptorOwnedBy(String ownerId, String conversationId) {
             var descriptor = new ConversationDescriptor();
             descriptor.setUserId(ownerId);
+            descriptor.setResource(URI.create("eddi://ai.labs.conversation/conversationstore/conversations/" + conversationId));
             return descriptor;
+        }
+
+        /** A full page (the store's cap) of conversations owned by someone else. */
+        private List<ConversationDescriptor> foreignPage(int startIndex) {
+            var page = new java.util.ArrayList<ConversationDescriptor>();
+            for (int i = 0; i < 100; i++) {
+                page.add(descriptorOwnedBy(INTRUDER, "conv-foreign-" + (startIndex + i)));
+            }
+            return page;
         }
 
         @SuppressWarnings("unchecked")
@@ -318,14 +332,56 @@ class McpConversationToolsOwnershipTest {
         }
 
         @Test
-        @DisplayName("over-fetches the full page so a personal list is not starved by other users' conversations")
-        void overFetchesWhenFiltering() throws Exception {
-            when(convStore.readConversationDescriptors(anyInt(), anyInt(), any(), any(), eq(AGENT_ID), any(), any(), any()))
-                    .thenReturn(List.of());
+        @DisplayName("scans past pages of other users' conversations instead of reporting an empty list")
+        void scansPastForeignPages() throws Exception {
+            // The two newest pages belong to someone else; the caller's conversation
+            // only appears on the third. A single-page filter would report "none".
+            when(convStore.readConversationDescriptors(eq(0), eq(100), any(), any(), eq(AGENT_ID), any(), any(), any()))
+                    .thenReturn(foreignPage(0));
+            when(convStore.readConversationDescriptors(eq(100), eq(100), any(), any(), eq(AGENT_ID), any(), any(), any()))
+                    .thenReturn(foreignPage(100));
+            when(convStore.readConversationDescriptors(eq(200), eq(100), any(), any(), eq(AGENT_ID), any(), any(), any()))
+                    .thenReturn(List.of(descriptorOwnedBy(OWNER)));
 
             asOwner().listConversations(AGENT_ID, null, null, 20);
 
-            verify(convStore).readConversationDescriptors(0, 100, null, null, AGENT_ID, null, null, null);
+            Map<String, Object> result = capturedResult();
+            assertEquals(1, result.get("count"));
+            assertNull(result.get("incomplete"), "the store ran out, so the list is complete");
+        }
+
+        @Test
+        @DisplayName("says so when the scan budget runs out rather than passing a partial list off as complete")
+        void reportsIncompleteWhenScanBudgetExhausted() throws Exception {
+            // Every page is full and foreign — the scan stops on its budget (500).
+            when(convStore.readConversationDescriptors(anyInt(), eq(100), any(), any(), eq(AGENT_ID), any(), any(), any()))
+                    .thenAnswer(invocation -> foreignPage(invocation.getArgument(0)));
+
+            asOwner().listConversations(AGENT_ID, null, null, 20);
+
+            Map<String, Object> result = capturedResult();
+            assertEquals(0, result.get("count"));
+            assertEquals(true, result.get("incomplete"));
+            // 5 pages of 100 = the 500-descriptor scan budget, then it stops.
+            verify(convStore, times(5)).readConversationDescriptors(anyInt(), eq(100), any(), any(), eq(AGENT_ID), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a conversation re-read across pages (the store skips deleted rows) is listed only once")
+        void dedupesRepeatedDescriptorsAcrossPages() throws Exception {
+            var mine = descriptorOwnedBy(OWNER, "conv-mine");
+            var firstPage = new java.util.ArrayList<>(foreignPage(0));
+            firstPage.set(99, mine); // full page, so the scan continues
+            when(convStore.readConversationDescriptors(eq(0), eq(100), any(), any(), eq(AGENT_ID), any(), any(), any()))
+                    .thenReturn(firstPage);
+            // The store's cursor outran the rows it returned — the same conversation
+            // comes back on the next page.
+            when(convStore.readConversationDescriptors(eq(100), eq(100), any(), any(), eq(AGENT_ID), any(), any(), any()))
+                    .thenReturn(List.of(mine));
+
+            asOwner().listConversations(AGENT_ID, null, null, 20);
+
+            assertEquals(1, capturedResult().get("count"));
         }
 
         @Test

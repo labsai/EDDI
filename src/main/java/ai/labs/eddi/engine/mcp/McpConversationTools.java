@@ -42,6 +42,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -64,11 +65,16 @@ public class McpConversationTools {
     private static final Logger LOGGER = Logger.getLogger(McpConversationTools.class);
     private static final int CONVERSATION_TIMEOUT_SECONDS = 60;
     /**
-     * The conversation descriptor store caps a page at 100. When a listing has to
-     * be owner-filtered after the fact, fetch that full page so the caller's own
-     * conversations are not crowded out of the result by other users'.
+     * Page size for descriptor scans — the conversation descriptor store's own cap.
      */
     private static final int MAX_DESCRIPTOR_FETCH = 100;
+    /**
+     * How many descriptors an owner-filtered listing will scan before giving up.
+     * The store has no owner-scoped query, so a caller's conversations can only be
+     * found by scanning; this bounds that scan, and a listing that stops here says
+     * so ({@code incomplete}) instead of reporting a partial list as complete.
+     */
+    private static final int MAX_OWNER_SCAN = 500;
 
     private final IConversationService conversationService;
     private final IRestAgentAdministration agentAdmin;
@@ -400,25 +406,60 @@ public class McpConversationTools {
             }
 
             // Owner-scoping: a non-admin lists only their own conversations. The
-            // descriptor store has no owner-scoped query, so we post-filter — and
-            // over-fetch (up to the store's own cap) first, so that a personal list
-            // is not starved by other users' conversations filling the first page.
+            // descriptor store has no owner-scoped query, so we post-filter. A single
+            // page would silently starve a personal list — on a shared agent the newest
+            // page can be entirely other users' conversations, which would report an
+            // empty list as if the caller had none. So we scan forward until the
+            // requested limit is filled or the scan budget is spent, and say so when we
+            // stop early rather than passing a partial list off as complete.
             boolean seesAll = conversationAccessGuard.seesAllConversations();
-            int fetchLimit = seesAll ? limitInt : MAX_DESCRIPTOR_FETCH;
 
-            List<ConversationDescriptor> descriptors = convStore.readConversationDescriptors(0, fetchLimit, null, null, agentId,
-                    ver == 0 ? null : ver, state, null);
-
-            List<ConversationDescriptor> visible = seesAll
-                    ? descriptors
-                    : descriptors.stream()
-                            .filter(descriptor -> conversationAccessGuard.canAccessConversation(descriptor.getUserId()))
-                            .limit(limitInt)
-                            .toList();
+            List<ConversationDescriptor> visible;
+            boolean incomplete = false;
+            if (seesAll) {
+                visible = convStore.readConversationDescriptors(0, limitInt, null, null, agentId, ver == 0 ? null : ver, state, null);
+            } else {
+                visible = new ArrayList<>();
+                // The store's own paging skips deleted descriptors, so its cursor can
+                // outrun the rows it hands back and an offset-based scan may re-read a
+                // row. Dedupe by resource URI so a conversation is never listed twice.
+                var seen = new HashSet<URI>();
+                int scanned = 0;
+                while (visible.size() < limitInt && scanned < MAX_OWNER_SCAN) {
+                    var page = convStore.readConversationDescriptors(scanned, MAX_DESCRIPTOR_FETCH, null, null, agentId,
+                            ver == 0 ? null : ver, state, null);
+                    if (page.isEmpty()) {
+                        break; // store exhausted — the list is complete
+                    }
+                    scanned += page.size();
+                    for (var descriptor : page) {
+                        if (visible.size() >= limitInt) {
+                            break;
+                        }
+                        if (descriptor.getResource() != null && !seen.add(descriptor.getResource())) {
+                            continue; // already listed from an earlier page
+                        }
+                        if (conversationAccessGuard.canAccessConversation(descriptor.getUserId())) {
+                            visible.add(descriptor);
+                        }
+                    }
+                    if (page.size() < MAX_DESCRIPTOR_FETCH) {
+                        break; // last page — the list is complete
+                    }
+                }
+                // We stopped on the scan budget rather than on the store running out,
+                // so conversations owned by the caller may lie beyond what we scanned.
+                incomplete = visible.size() < limitInt && scanned >= MAX_OWNER_SCAN;
+            }
 
             var result = new LinkedHashMap<String, Object>();
             result.put("agentId", agentId);
             result.put("count", visible.size());
+            if (incomplete) {
+                result.put("incomplete", true);
+                result.put("note", "Only the " + MAX_OWNER_SCAN + " most recent conversations of this agent were scanned; "
+                        + "older conversations of yours may exist but are not listed.");
+            }
             result.put("conversations", visible);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
@@ -669,8 +710,13 @@ public class McpConversationTools {
             result.putFirst("environment", userConversation.getEnvironment().name());
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
-            LOGGER.infof("chat_managed denied: caller may not chat as user %s", LogSanitizer.sanitize(userId));
-            return errorJson("Access denied: you cannot chat as another user");
+            // Two ways in: naming another user's userId, or a stale intent→conversation
+            // mapping pointing at a conversation the caller does not own (the ownership
+            // check inside getConversationState). One message covers both without
+            // disclosing which.
+            LOGGER.infof("chat_managed denied for intent %s as user %s",
+                    LogSanitizer.sanitize(intent), LogSanitizer.sanitize(userId));
+            return errorJson("Access denied: you do not own this managed conversation");
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
             return errorJson("Failed to chat via managed agent: " + e.getMessage());
