@@ -30,6 +30,16 @@ public class GroupConversation {
     private String userId;
     private GroupConversationState state;
     private String originalQuestion;
+    /**
+     * The question driving the CURRENT run's phases. Equals
+     * {@link #originalQuestion} for the initial round; a continuation round sets it
+     * to the follow-up question so an HITL resume re-runs the remaining phases with
+     * the right question. Kept separate from {@code originalQuestion} (which the UI
+     * renders as the conversation title) so continuations don't rewrite that title.
+     * {@code null} on legacy documents — resume falls back to
+     * {@code originalQuestion}.
+     */
+    private String resumeQuestion;
     private List<TranscriptEntry> transcript = Collections.synchronizedList(new ArrayList<>());
     private Map<String, String> memberConversationIds = new ConcurrentHashMap<>();
     /**
@@ -228,6 +238,14 @@ public class GroupConversation {
         this.originalQuestion = originalQuestion;
     }
 
+    public String getResumeQuestion() {
+        return resumeQuestion;
+    }
+
+    public void setResumeQuestion(String resumeQuestion) {
+        this.resumeQuestion = resumeQuestion;
+    }
+
     public List<TranscriptEntry> getTranscript() {
         return transcript;
     }
@@ -391,10 +409,11 @@ public class GroupConversation {
         }
         return switch (state) {
             case COMPLETED -> List.of("followup", "continue", "close");
-            case FAILED -> List.of("close");
+            // FAILED and CANCELLED are terminal but closeable — close ends member
+            // conversations and reclaims ephemeral agents.
+            case FAILED, CANCELLED -> List.of("close");
             case IN_PROGRESS, SYNTHESIZING, CREATED, AWAITING_APPROVAL -> List.of();
-            // CANCELLED (HITL) is terminal with no follow-up/close path — no actions.
-            case CLOSED, CANCELLED -> List.of();
+            case CLOSED -> List.of();
         };
     }
 

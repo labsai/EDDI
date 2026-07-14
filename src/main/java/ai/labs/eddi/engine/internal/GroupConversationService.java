@@ -629,6 +629,10 @@ public class GroupConversationService implements IGroupConversationService {
                 LOGGER.infof("Group discussion %s was terminated elsewhere (expected %s) — not overwriting with COMPLETED",
                         gc.getId(), expectedRunningState);
                 var persisted = conversationStore.read(gc.getId());
+                // This leg optimistically set COMPLETED before the CAS; align the
+                // in-memory state with the terminal value the racing writer committed so
+                // the finally cleans up ephemeral agents for a CANCELLED/FAILED outcome.
+                gc.setState(persisted.getState());
                 if (listener != null && persisted.getState() == GroupConversationState.CANCELLED) {
                     notifyCancelled(persisted, listener);
                 }
@@ -729,6 +733,11 @@ public class GroupConversationService implements IGroupConversationService {
             if (persistedState == GroupConversationState.CANCELLED
                     || persistedState == GroupConversationState.FAILED
                     || persistedState == GroupConversationState.COMPLETED) {
+                // Align the in-memory state with the terminal value another pod/writer
+                // committed so executeDiscussion's finally makes the correct ephemeral-
+                // agent cleanup decision — this leg's gc is otherwise still a running
+                // state (IN_PROGRESS/SYNTHESIZING) and cleanup would be skipped.
+                gc.setState(persistedState);
                 LOGGER.infof("Group discussion %s was moved to %s elsewhere — stopping this leg at the phase boundary",
                         gc.getId(), persistedState);
                 if (persistedState == GroupConversationState.CANCELLED) {
@@ -1100,10 +1109,24 @@ public class GroupConversationService implements IGroupConversationService {
                         resolvedAgentId, displayName, response, -1, "Follow-up",
                         TranscriptEntryType.FOLLOW_UP, Instant.now(), null, null));
 
-                // Transition back to COMPLETED
+                // Transition back to COMPLETED — atomically (CAS on IN_PROGRESS) so a
+                // follow-up that races a cancel cannot resurrect a CANCELLED terminal
+                // state via an unconditional whole-document write. Mirrors the CAS the
+                // error path below already uses.
                 gc.setState(GroupConversationState.COMPLETED);
                 gc.setLastModified(Instant.now());
-                conversationStore.update(gc);
+                try {
+                    conversationStore.updateIfState(gc, GroupConversationState.IN_PROGRESS);
+                } catch (IResourceStore.ResourceModifiedException
+                        | IGroupConversationStore.GroupConversationGoneException e) {
+                    // A concurrent cancel/delete moved the conversation out of
+                    // IN_PROGRESS while the follow-up ran — do not overwrite that
+                    // terminal state; the follow-up exchange is not applied.
+                    throw new GroupDiscussionException(
+                            "Follow-up could not be applied: the conversation was concurrently "
+                                    + "cancelled or deleted",
+                            e);
+                }
 
                 success = true;
                 return gc;
@@ -1147,12 +1170,24 @@ public class GroupConversationService implements IGroupConversationService {
             // Re-read after CAS
             gc = conversationStore.read(groupConversationId);
 
-            // Increment round and append the new question
+            // Increment round and append the new question. Persist the follow-up as the
+            // run's resumeQuestion so that if a continuation round pauses at an HITL gate,
+            // resumeDiscussion re-runs the remaining phases with THIS question rather than
+            // the stale round-1 one. Uses a dedicated field (not originalQuestion, which
+            // the UI shows as the conversation title) so continuations don't rewrite it.
             gc.setRound(gc.getRound() + 1);
+            gc.setResumeQuestion(question);
             gc.getTranscript().add(new TranscriptEntry(
                     "user", "User", question, 0, "Question",
                     TranscriptEntryType.QUESTION, Instant.now(), null, null));
             conversationStore.update(gc);
+
+            // Pre-register the control token BEFORE the config-load window so a cancel
+            // racing the gap between the CAS above and executeDiscussion's own token
+            // registration takes the signal path (stops at the top-of-phase check)
+            // rather than the DB branch, which would CAS to CANCELLED and then be
+            // overwritten by this leg (mirrors startAndDiscussAsync / resumeDiscussion).
+            activeTokens.put(groupConversationId, new DiscussionControlToken());
 
             // Load the group config and re-execute — wrapped in try-catch so that
             // failures before executeDiscussion() (which has its own failConversation
@@ -1174,7 +1209,10 @@ public class GroupConversationService implements IGroupConversationService {
                 return executeDiscussion(gc, config, phases, question, listener, 0);
             } catch (Exception e) {
                 // executeDiscussion handles its own failures, so this only catches
-                // errors from config loading / phase resolution above.
+                // errors from config loading / phase resolution above. If it was never
+                // reached, its finally never removed the pre-registered token — drop it
+                // here (idempotent: a no-op if executeDiscussion already removed it).
+                activeTokens.remove(groupConversationId);
                 if (gc.getState() == GroupConversationState.IN_PROGRESS) {
                     failConversation(gc);
                 }
@@ -1205,7 +1243,10 @@ public class GroupConversationService implements IGroupConversationService {
         try {
             GroupConversation gc = conversationStore.read(groupConversationId);
 
-            // Atomic state transition: try COMPLETED → CLOSED, then FAILED → CLOSED
+            // Atomic state transition: try COMPLETED → CLOSED, then FAILED → CLOSED,
+            // then CANCELLED → CLOSED. CANCELLED is closeable so an operator can reclaim
+            // the ephemeral agents of a discussion cancelled in a window where no running
+            // leg cleaned them up (CANCELLED has no follow-up/continue path otherwise).
             boolean transitioned = conversationStore.compareAndSetState(
                     groupConversationId, GroupConversationState.COMPLETED, GroupConversationState.CLOSED);
             if (!transitioned) {
@@ -1213,8 +1254,12 @@ public class GroupConversationService implements IGroupConversationService {
                         groupConversationId, GroupConversationState.FAILED, GroupConversationState.CLOSED);
             }
             if (!transitioned) {
+                transitioned = conversationStore.compareAndSetState(
+                        groupConversationId, GroupConversationState.CANCELLED, GroupConversationState.CLOSED);
+            }
+            if (!transitioned) {
                 throw new GroupDiscussionException(
-                        "Cannot close: conversation is in %s state (expected COMPLETED or FAILED)".formatted(gc.getState()));
+                        "Cannot close: conversation is in %s state (expected COMPLETED, FAILED, or CANCELLED)".formatted(gc.getState()));
             }
 
             // End all member conversations
@@ -3381,9 +3426,12 @@ public class GroupConversationService implements IGroupConversationService {
                     decision != null ? decision.getDecidedBy() : null));
         }
 
-        // Resume execution in background thread
+        // Resume execution in background thread. Use the current run's resumeQuestion
+        // (set by continueDiscussion for a continuation round) so the remaining phases
+        // re-run with the follow-up question; fall back to originalQuestion for the
+        // initial round and legacy documents that predate the field.
         var groupId = gc.getGroupId();
-        var question = gc.getOriginalQuestion();
+        var question = gc.getResumeQuestion() != null ? gc.getResumeQuestion() : gc.getOriginalQuestion();
         // BLOCKER fix: TASK pauses mid-phase → re-enter at same phase (idempotent).
         // PHASE pauses after phase completes → resume at +1.
         int startFromPhase = (pauseType == GroupConversation.HitlPauseType.TASK)

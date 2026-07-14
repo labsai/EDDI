@@ -5,6 +5,23 @@
 
 ---
 
+## 🩹 Group merge — cross-feature review-response fixes (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A deep adversarial review of the merge (7 dimensions, 58 agents, each finding cross-examined by 3 skeptics) confirmed the conflict resolution was sound but surfaced **cross-feature interaction bugs** between *ours* (continue/follow-up/close) and *theirs* (HITL pause/cancel/resume) that neither branch could have had alone — none caught by the impl-level unit tests. Fixed:
+
+- **A — stale question on continuation resume:** a continuation round that paused at an HITL gate resumed with the round-1 question (`resumeDiscussion` read `originalQuestion`, which `continueDiscussion` never updated) — silent wrong multi-agent output. Added a dedicated `GroupConversation.resumeQuestion` field: `continueDiscussion` sets it, `resumeDiscussion` reads it (falling back to `originalQuestion` for round 1 / legacy docs). Kept separate from `originalQuestion` so the Manager conversation-list title (which renders `originalQuestion`) is not rewritten by continuations.
+- **B — continue/stream dropped HITL events:** `continueDiscussionStreaming` used a hand-rolled inline SSE listener predating theirs' HITL callbacks, so a continuation that paused/cancelled emitted no event and hung the client + leaked the sink. Unified it on the shared `createStreamingListener` (added an `onRoundStart` override there); removed ~55 lines of duplication.
+- **C — ephemeral-agent leak on cross-pod terminal race:** the merged `finally` cleans up only on `FAILED`/`CANCELLED` (to defer `COMPLETED` for follow-up reuse), but the cross-pod terminal-override and lost-completion-CAS exits left in-memory state stale (running/optimistic-`COMPLETED`), skipping cleanup. Both exits now align in-memory `state` to the actual persisted terminal value so the `finally` decides correctly.
+- **D — follow-up clobbered a racing cancel:** `followUpWithMember`'s success path used an unconditional `update()` that could overwrite a concurrent `CANCELLED`. Switched to `updateIfState(gc, IN_PROGRESS)` (matching its own error path); a concurrent cancel/delete now yields a `409` instead of resurrecting the conversation.
+- **E — cancel race + latency on continuation:** `continueDiscussion` didn't pre-register a `DiscussionControlToken`, so a cancel racing the CAS→`executeDiscussion` window took the DB branch and was overwritten, and cancel latency was a whole phase worse. Now pre-registers the token right after the CAS (mirrors `startAndDiscussAsync`/`resumeDiscussion`); removed on the pre-exec failure path.
+- **F — `CANCELLED` had no reclaim path:** a cancel landing in the follow-up/continue pre-exec window could reach `CANCELLED` with orphaned ephemeral agents and no recovery. `closeGroupConversation` now accepts `CANCELLED → CLOSED` and `getAvailableActions()` returns `["close"]` for `CANCELLED`, giving operators a reclaim path.
+
+Added regression tests (`CANCELLED` available-actions, close-of-`CANCELLED`); updated the follow-up success-write assertion. Verified: `mvnw test` green — 189 group-conversation unit tests pass (0 failures); each fix re-verified by an adversarial pass (5/6 clean first time; A refined from overloading `originalQuestion` to the dedicated field per that review).
+
+---
+
 ## 🔀 Merge `origin/main` into `feat/group-followups` — conflict resolution (2026-07-14)
 
 **Repo:** EDDI (`feat/group-followups`)

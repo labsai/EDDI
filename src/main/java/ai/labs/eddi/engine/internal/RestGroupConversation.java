@@ -354,64 +354,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
 
-            GroupDiscussionEventListener listener = new GroupDiscussionEventListener() {
-                @Override
-                public void onRoundStart(GroupConversationEventSink.RoundStartEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ROUND_START, toJson(event));
-                }
-
-                @Override
-                public void onGroupStart(GroupConversationEventSink.GroupStartEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_START, toJson(event));
-                }
-
-                @Override
-                public void onPhaseStart(GroupConversationEventSink.PhaseStartEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_PHASE_START, toJson(event));
-                }
-
-                @Override
-                public void onSpeakerStart(GroupConversationEventSink.SpeakerStartEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SPEAKER_START, toJson(event));
-                }
-
-                @Override
-                public void onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SPEAKER_COMPLETE, toJson(event));
-                }
-
-                @Override
-                public void onPhaseComplete(GroupConversationEventSink.PhaseCompleteEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_PHASE_COMPLETE, toJson(event));
-                }
-
-                @Override
-                public void onSynthesisStart(GroupConversationEventSink.SynthesisStartEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SYNTHESIS_START, toJson(event));
-                }
-
-                @Override
-                public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE, toJson(event));
-                    closeQuietly(eventSink);
-                }
-
-                @Override
-                public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
-                    closeQuietly(eventSink);
-                }
-
-                @Override
-                public void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_PLAN_CREATED, toJson(event));
-                }
-
-                @Override
-                public void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_VERIFIED, toJson(event));
-                }
-            };
+            // Reuse the shared streaming listener so a continuation that pauses or is
+            // cancelled for HITL streams the awaiting_approval / cancelled /
+            // member_pause_skipped events (and round_start) instead of silently
+            // swallowing them and hanging the client.
+            var listener = createStreamingListener(eventSink, sse);
 
             executorService.submit(() -> {
                 try {
@@ -634,6 +581,11 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     private GroupDiscussionEventListener createStreamingListener(SseEventSink eventSink, Sse sse) {
         return new GroupDiscussionEventListener() {
+            @Override
+            public void onRoundStart(GroupConversationEventSink.RoundStartEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ROUND_START, toJson(event));
+            }
+
             @Override
             public void onGroupStart(GroupConversationEventSink.GroupStartEvent event) {
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_START, toJson(event));

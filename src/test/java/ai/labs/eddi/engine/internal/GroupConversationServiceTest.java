@@ -964,7 +964,9 @@ class GroupConversationServiceTest {
             assertEquals("What now?", transcript.get(0).content());
             assertEquals("agentA", transcript.get(1).speakerAgentId());
             assertEquals("Sure, here is the answer", transcript.get(1).content());
-            verify(conversationStore).update(gc);
+            // Success path now writes atomically (CAS on IN_PROGRESS) so a racing cancel
+            // cannot be clobbered — see followUpWithMember.
+            verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
         }
 
         @Test
@@ -1108,6 +1110,26 @@ class GroupConversationServiceTest {
             assertDoesNotThrow(() -> service.closeGroupConversation("gc-1"));
             verify(conversationStore).compareAndSetState("gc-1",
                     GroupConversationState.FAILED, GroupConversationState.CLOSED);
+        }
+
+        @Test
+        void close_cancelledState_usesCancelledCas() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.CANCELLED);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.CLOSED)).thenReturn(false);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.FAILED, GroupConversationState.CLOSED)).thenReturn(false);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.CANCELLED, GroupConversationState.CLOSED)).thenReturn(true);
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null);
+
+            assertDoesNotThrow(() -> service.closeGroupConversation("gc-1"));
+            verify(conversationStore).compareAndSetState("gc-1",
+                    GroupConversationState.CANCELLED, GroupConversationState.CLOSED);
         }
 
         @Test

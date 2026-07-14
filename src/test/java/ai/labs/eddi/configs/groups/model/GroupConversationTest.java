@@ -297,6 +297,14 @@ class GroupConversationTest {
         }
 
         @Test
+        @DisplayName("CANCELLED offers close only")
+        void cancelled() {
+            var gc = new GroupConversation();
+            gc.setState(GroupConversationState.CANCELLED);
+            assertEquals(List.of("close"), gc.getAvailableActions());
+        }
+
+        @Test
         @DisplayName("CLOSED offers nothing")
         void closed() {
             var gc = new GroupConversation();
