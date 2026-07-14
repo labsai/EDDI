@@ -5,6 +5,37 @@
 
 ---
 
+## 🔒 Security — MCP conversation tools had no ownership check (2026-07-14)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`, from `main`)
+
+**Gap (pre-existing on `main`):** every conversation-scoped tool in `McpConversationTools` was gated on the coarse `eddi-viewer` role and nothing else, while the equivalent REST endpoints on `RestAgentEngine` all enforce `requireOwnerOrAdmin` (403). With `authorization.enabled=true`, any caller holding `eddi-viewer` could — over MCP — read **any** user's conversation memory (`read_conversation`) and transcript (`read_conversation_log`), enumerate conversations across all users (`list_conversations`), read another conversation's prompts/tool-calls/costs (`read_audit_trail`, whose REST surface is `@RolesAllowed("eddi-admin")`) and its server logs (`read_agent_logs`), **inject turns into** someone else's conversation and read the agent's reply (`talk_to_agent`, `chat_with_agent` with a foreign `conversationId`), and take over another user's managed conversation by simply naming their `userId` (`chat_managed`). The read half also defeats the group-conversation ownership gate: group members' conversations are ordinary conversations, so `list_conversations` + `read_conversation_log` reached transcripts that `read_group_conversation` denies.
+
+**Two findings that shaped the fix:**
+
+1. **A naive ownership gate would have broken MCP outright.** MCP created conversations with `userId = null`, and `ConversationSetup.computeAnonymousUserIdIfEmpty` turns that into a generated `anonymous-<uuid>` — a *non-blank* owner matching no principal. Gating reads on `requireOwnerOrAdmin` alone would therefore have locked every MCP-created conversation away from its own creator (admins only). REST never had this problem because it resolves the owner at creation. So the fix has to **stamp the caller as owner at MCP conversation creation** — that is what makes the gate both effective and non-regressive.
+2. **The read gap had a write-side twin** (`talk_to_agent` / `chat_with_agent` / `chat_managed`), which is strictly worse than reading and lives in the same file, so it is closed here too.
+
+**Fix — new `ConversationAccessGuard` (`engine.security`), the non-HITL sibling of `HitlAccessGuard`:**
+- `requireConversationOwner(conversationId)` — owner-or-admin via the conversation descriptor; skips when the descriptor is absent (the operation itself 404s); fail-closed on a store error. This is `RestAgentEngine`'s private `validateConversationOwnership` lifted out verbatim.
+- `canAccessConversation(ownerId)` / `seesAllConversations()` — non-throwing predicates for listings; admit exactly what the read gate admits (admin, owner, or unowned legacy data), so a caller never lists what they cannot read, nor reads what they cannot list.
+- `resolveOwnerUserId(requestedUserId)` — delegates to `validateAndResolveUserId`, stamping the caller and rejecting impersonation.
+
+`RestAgentEngine` now delegates to the guard (behavior identical; its `IConversationDescriptorStore` dependency became dead and was dropped). `McpConversationTools` gates all eight conversation-scoped tools, each catching `ForbiddenException` ahead of its generic catch and returning a uniform, non-leaking `accessDenied(...)` that never distinguishes "not yours" from "does not exist". `list_conversations` owner-filters descriptors and over-fetches the store's full 100-row page first, so a personal list is not starved by other users' conversations filling page one.
+
+**Design decisions**
+- **Shared guard, not a third copy.** `McpGroupTools` (on `feat/group-followups`) had already duplicated this logic once; a third copy in the MCP conversation tools would guarantee drift. One `@ApplicationScoped` guard is now the single answer to "who may read or drive a conversation", exactly as `HitlAccessGuard` is for "who may decide an approval".
+- **No auth-disabled short-circuit inside the guard.** It reads the descriptor unconditionally, as `RestAgentEngine` always has; `OwnershipValidator` already no-ops when authorization is off. Short-circuiting would have quietly changed REST semantics (and its tests mock `OwnershipValidator`).
+- **`read_audit_trail` gets the ownership gate, not admin-only.** REST's audit surface is admin-only; matching that would have been a role-policy change beyond this fix. The ownership gate is a strict tightening either way.
+
+**Behavior change (auth on only).** With `authorization.enabled=false` — the default — nothing changes: every check no-ops and new conversations still get their `anonymous-*` id. With auth on, pre-existing `anonymous-*` conversations become invisible and unreadable to non-admins over MCP: they provably belong to nobody. That is the intended tightening.
+
+**Residual gaps, deliberately out of scope** (filed as follow-ups): `RestConversationStore.readConversationDescriptors` — the REST store listing — is unfiltered for every caller, and `read_agent_logs` *without* a conversationId still returns cross-user server logs to any viewer.
+
+**Tests:** new `ConversationAccessGuardTest` (owner / non-owner / admin / missing descriptor / store error / unowned / auth-off, plus the listing predicates) and `McpConversationToolsOwnershipTest`, which asserts for every gated tool that a non-owner is denied **and** the underlying service is never reached — no data leaves, not even inside an error message — while owner and admin pass. Existing `McpConversationTools*Test` and `RestAgentEngine*Test` constructors updated to wire a real guard from the same mocks.
+
+---
+
 ## 🧹 Multimodal Attachments Completion — Remove dead config knob `reattachTurns` (2026-07-13)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)

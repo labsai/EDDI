@@ -30,8 +30,11 @@ import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -60,6 +63,12 @@ public class McpConversationTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpConversationTools.class);
     private static final int CONVERSATION_TIMEOUT_SECONDS = 60;
+    /**
+     * The conversation descriptor store caps a page at 100. When a listing has to
+     * be owner-filtered after the fact, fetch that full page so the caller's own
+     * conversations are not crowded out of the result by other users'.
+     */
+    private static final int MAX_DESCRIPTOR_FETCH = 100;
 
     private final IConversationService conversationService;
     private final IRestAgentAdministration agentAdmin;
@@ -72,13 +81,14 @@ public class McpConversationTools {
     private final IUserConversationStore userConversationStore;
     private final IRestAgentEngine restAgentEngine;
     private final SecurityIdentity identity;
+    private final ConversationAccessGuard conversationAccessGuard;
     private final boolean authEnabled;
 
     @Inject
     public McpConversationTools(IConversationService conversationService, IRestAgentAdministration agentAdmin, IRestAgentStore agentStore,
             IRestInterfaceFactory restInterfaceFactory, IJsonSerialization jsonSerialization, BoundedLogStore boundedLogStore,
             IRestAuditStore auditStore, IRestAgentTriggerStore agentTriggerStore, IUserConversationStore userConversationStore,
-            IRestAgentEngine restAgentEngine, SecurityIdentity identity,
+            IRestAgentEngine restAgentEngine, SecurityIdentity identity, ConversationAccessGuard conversationAccessGuard,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this.conversationService = conversationService;
         this.agentAdmin = agentAdmin;
@@ -91,7 +101,18 @@ public class McpConversationTools {
         this.userConversationStore = userConversationStore;
         this.restAgentEngine = restAgentEngine;
         this.identity = identity;
+        this.conversationAccessGuard = conversationAccessGuard;
         this.authEnabled = authEnabled;
+    }
+
+    /**
+     * Uniform, non-leaking denial for an MCP call on someone else's conversation.
+     * The message never distinguishes "not yours" from "does not exist", so it
+     * cannot be used to probe for the existence of other users' conversations.
+     */
+    private String accessDenied(String tool, String conversationId) {
+        LOGGER.infof("%s denied: caller does not own conversation %s", tool, LogSanitizer.sanitize(conversationId));
+        return errorJson("Access denied: you do not own this conversation");
     }
 
     @Tool(name = "list_agents", description = "List all deployed agents with their status, version, and name. "
@@ -134,7 +155,12 @@ public class McpConversationTools {
             return errorJson("agentId is required");
         try {
             var env = parseEnvironment(environment);
-            ConversationResult result = conversationService.startConversation(env, agentId, null, Collections.emptyMap());
+            // Stamp the caller as owner (null when authorization is disabled — the
+            // engine then assigns an anonymous id, as before). Without this, an
+            // MCP-created conversation would belong to nobody and its own creator
+            // could never read it back once the ownership gate applies.
+            String ownerUserId = conversationAccessGuard.resolveOwnerUserId(null);
+            ConversationResult result = conversationService.startConversation(env, agentId, ownerUserId, Collections.emptyMap());
             return jsonSerialization.serialize(Map.of("conversationId", result.conversationId(), "conversationUri",
                     result.conversationUri().toString(), "agentId", agentId, "environment", env.name()));
         } catch (Exception e) {
@@ -158,6 +184,11 @@ public class McpConversationTools {
         if (message == null || message.isBlank())
             return errorJson("message is required");
         try {
+            // Driving someone else's conversation is a write — gate it exactly like
+            // the REST say() does, or a viewer could inject turns into another
+            // user's conversation and read the agent's reply.
+            conversationAccessGuard.requireConversationOwner(conversationId);
+
             var snapshot = sendMessageAndWait(conversationId, message);
 
             // Finding 25: this turn itself paused for human approval — return a
@@ -169,6 +200,8 @@ public class McpConversationTools {
 
             var result = buildConversationResponse(snapshot, null);
             return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            return accessDenied("talk_to_agent", conversationId);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
             // Finding 25: already-paused at submit — say() rejects the input
             // synchronously. Report the pending approval instead of a generic error.
@@ -207,10 +240,15 @@ public class McpConversationTools {
         try {
             var env = parseEnvironment(environment);
 
-            // Step 1: Create conversation if not provided
+            // Step 1: Create conversation if not provided — stamping the caller as
+            // owner. An existing conversation must instead be owned by the caller:
+            // continuing another user's conversation is a write into it.
             if (convId == null || convId.isBlank()) {
-                ConversationResult convResult = conversationService.startConversation(env, agentId, null, Collections.emptyMap());
+                String ownerUserId = conversationAccessGuard.resolveOwnerUserId(null);
+                ConversationResult convResult = conversationService.startConversation(env, agentId, ownerUserId, Collections.emptyMap());
                 convId = convResult.conversationId();
+            } else {
+                conversationAccessGuard.requireConversationOwner(convId);
             }
 
             // Step 2: Send the message
@@ -229,6 +267,8 @@ public class McpConversationTools {
             result.putFirst("agentId", agentId);
             result.putFirst("conversationId", convId);
             return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            return accessDenied("chat_with_agent", convId);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
             // Finding 25: already-paused at submit — say() rejects the input
             // synchronously. Report the pending approval instead of a generic error.
@@ -260,6 +300,8 @@ public class McpConversationTools {
                                            + "Empty = all fields.") String returningFields) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
+            conversationAccessGuard.requireConversationOwner(conversationId);
+
             boolean stepOnly = currentStepOnly != null ? currentStepOnly : true;
             boolean detailed = returnDetailed != null ? returnDetailed : false;
 
@@ -298,6 +340,8 @@ public class McpConversationTools {
             }
 
             return jsonSerialization.serialize(snapshot);
+        } catch (ForbiddenException e) {
+            return accessDenied("read_conversation", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation failed for conversation " + conversationId, e);
             return errorJson("Failed to read conversation: " + e.getMessage());
@@ -311,8 +355,12 @@ public class McpConversationTools {
                                       @ToolArg(description = "Number of recent steps to include (default: all)") Integer logSize) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
+            conversationAccessGuard.requireConversationOwner(conversationId);
+
             var result = conversationService.readConversationLog(conversationId, "text", logSize != null && logSize > 0 ? logSize : null);
             return result.content().toString();
+        } catch (ForbiddenException e) {
+            return accessDenied("read_conversation_log", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation_log failed for conversation " + conversationId, e);
             return errorJson("Failed to read conversation log: " + e.getMessage());
@@ -351,13 +399,27 @@ public class McpConversationTools {
                 return errorJson("Failed to get conversation store: " + e.getMessage());
             }
 
-            List<ConversationDescriptor> descriptors = convStore.readConversationDescriptors(0, limitInt, null, null, agentId, ver == 0 ? null : ver,
-                    state, null);
+            // Owner-scoping: a non-admin lists only their own conversations. The
+            // descriptor store has no owner-scoped query, so we post-filter — and
+            // over-fetch (up to the store's own cap) first, so that a personal list
+            // is not starved by other users' conversations filling the first page.
+            boolean seesAll = conversationAccessGuard.seesAllConversations();
+            int fetchLimit = seesAll ? limitInt : MAX_DESCRIPTOR_FETCH;
+
+            List<ConversationDescriptor> descriptors = convStore.readConversationDescriptors(0, fetchLimit, null, null, agentId,
+                    ver == 0 ? null : ver, state, null);
+
+            List<ConversationDescriptor> visible = seesAll
+                    ? descriptors
+                    : descriptors.stream()
+                            .filter(descriptor -> conversationAccessGuard.canAccessConversation(descriptor.getUserId()))
+                            .limit(limitInt)
+                            .toList();
 
             var result = new LinkedHashMap<String, Object>();
             result.put("agentId", agentId);
-            result.put("count", descriptors.size());
-            result.put("conversations", descriptors);
+            result.put("count", visible.size());
+            result.put("conversations", visible);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_conversations failed for Agent " + agentId, e);
@@ -418,6 +480,13 @@ public class McpConversationTools {
             String convFilter = (conversationId != null && !conversationId.isBlank()) ? conversationId : null;
             String levelFilter = (level != null && !level.isBlank()) ? level.toUpperCase() : null;
 
+            // Logs scoped to one conversation are that conversation's data.
+            // (An unscoped/agent-only read still returns cross-user server logs to any
+            // viewer — a separate, coarser gap tracked outside this change.)
+            if (convFilter != null) {
+                conversationAccessGuard.requireConversationOwner(convFilter);
+            }
+
             List<LogEntry> entries = boundedLogStore.getEntries(agentFilter, convFilter, levelFilter, limitInt);
 
             var result = new LinkedHashMap<String, Object>();
@@ -431,6 +500,8 @@ public class McpConversationTools {
                 result.put("level", levelFilter);
             result.put("entries", entries);
             return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            return accessDenied("read_agent_logs", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_agent_logs failed", e);
             return errorJson("Failed to read Agent logs: " + e.getMessage());
@@ -447,6 +518,10 @@ public class McpConversationTools {
         if (conversationId == null || conversationId.isBlank())
             return errorJson("conversationId is required");
         try {
+            // The audit trail carries that conversation's prompts, tool calls and
+            // costs — at least as sensitive as the transcript itself.
+            conversationAccessGuard.requireConversationOwner(conversationId);
+
             int limitInt = limit != null ? limit : 20;
             List<AuditEntry> entries = auditStore.getAuditTrail(conversationId, 0, limitInt);
 
@@ -455,6 +530,8 @@ public class McpConversationTools {
             result.put("count", entries.size());
             result.put("entries", entries);
             return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            return accessDenied("read_audit_trail", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_audit_trail failed for conversation " + conversationId, e);
             return errorJson("Failed to read audit trail: " + e.getMessage());
@@ -548,6 +625,11 @@ public class McpConversationTools {
         try {
             var env = parseEnvironment(environment);
 
+            // The userId here is a plain tool argument: without this check a caller
+            // could name any userId and take over that user's managed conversation
+            // for the intent. Admins may still act on another user's behalf.
+            userId = conversationAccessGuard.resolveOwnerUserId(userId);
+
             // Step 1: Get or create the user conversation for this intent
             var userConversation = getOrCreateManagedConversation(intent, userId, env);
             var conversationId = userConversation.getConversationId();
@@ -586,6 +668,9 @@ public class McpConversationTools {
             result.putFirst("conversationId", conversationId);
             result.putFirst("environment", userConversation.getEnvironment().name());
             return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            LOGGER.infof("chat_managed denied: caller may not chat as user %s", LogSanitizer.sanitize(userId));
+            return errorJson("Access denied: you cannot chat as another user");
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
             return errorJson("Failed to chat via managed agent: " + e.getMessage());

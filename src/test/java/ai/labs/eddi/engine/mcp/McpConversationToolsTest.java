@@ -17,8 +17,11 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.*;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -75,8 +78,12 @@ class McpConversationToolsTest {
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
+        // Authorization disabled: the guard admits every caller (an unstubbed
+        // descriptor store reads back no descriptor, i.e. no owner to check against).
+        var conversationAccessGuard = new ConversationAccessGuard(mockIdentity, new OwnershipValidator(false),
+                mock(IConversationDescriptorStore.class));
         tools = new McpConversationTools(conversationService, agentAdmin, AgentStore, restInterfaceFactory, jsonSerialization, boundedLogStore,
-                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, false);
+                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, conversationAccessGuard, false);
     }
 
     // --- listAgents ---

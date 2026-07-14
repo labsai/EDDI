@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -79,9 +80,11 @@ class RestAgentEngineHitlTest {
         var hitlAccessGuard = new HitlAccessGuard(
                 identity, ownershipValidator, conversationDescriptorStore, conversationService,
                 mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
+        var conversationAccessGuard = new ConversationAccessGuard(
+                identity, ownershipValidator, conversationDescriptorStore);
         restAgentEngine = new RestAgentEngine(
-                conversationService, conversationDescriptorStore,
-                identity, ownershipValidator, hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
+                conversationService, identity, ownershipValidator, conversationAccessGuard,
+                hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
     }
 
     // =========================================================================
