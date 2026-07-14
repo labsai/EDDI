@@ -5,6 +5,19 @@
 
 ---
 
+## 🧊 Multi-Model Cascade — PR-review follow-ups: type-safe SSE events + strategy enums (2026-07-14)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+
+Addressed two @niedch review comments on PR #587, after merging `origin/main` (tool-level HITL) into the branch.
+
+- **Typed SSE cascade events (comment #1).** `RestAgentEngineStreaming` built the `cascade_step_start` / `cascade_escalation` SSE payloads with hand-written `String.format` JSON (manual escaping, `%.4f` formatting). Replaced with two `record` payloads serialized through the existing Jackson `MAPPER` via a new `sendJsonEvent` helper (graceful `{}` fallback on the unexpected serialization failure). Non-finite `confidence`/`threshold` are still sanitized via `finite()` before serialization. The `escapeJson`/`finite` helpers remain (still used by the task/error events).
+- **Strategy enums (comment #2).** Introduced `EvaluationStrategy` (`structured_output` / `heuristic` / `judge_model` / `none`) and `CascadingStrategy` (`cascade` / `parallel`) as the **single source of truth** for the recognized strategy tokens. `ConfidenceEvaluator` (exhaustive enum switch), `CascadingModelExecutor` (`resolveEffectiveStrategy` + gating checks), and `CascadeConfigValidator` (valid-set + warn logic) now resolve to these enums instead of scattered magic strings.
+  - **Design note (answers "is there a reason it's a String?"):** the config *wire* fields (`ModelCascadeConfig.strategy` / `.evaluationStrategy`) deliberately stay lenient `String`s. An unrecognized value (a typo, or one written by a newer engine) still loads, the validator warns, the runtime falls back to the enum `DEFAULT`, and the original token round-trips unchanged through export/import — behavior a strict enum field would regress. Parsing to the enum happens at the boundary via `fromConfig` / `fromConfigOrDefault`. If the field type itself should become an enum, that's a separate contract decision (see the HITL enums for the pattern).
+  - Behavior is byte-for-byte preserved (verified: `ConfidenceEvaluator*Test`, `CascadeConfigValidatorTest`, `CascadingModelExecutor*Test`, `LlmTask*Test` — 324 tests green); new `StrategyEnumsTest` locks the lenient `fromConfig` contract (case-insensitive, trimmed, unknown→null, default fallback).
+
+---
+
 ## 🚀 Multi-Model Cascade — Enterprise Hardening (2026-07-03)
 
 **Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)

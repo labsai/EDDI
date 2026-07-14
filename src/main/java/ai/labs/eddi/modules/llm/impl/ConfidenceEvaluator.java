@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -89,11 +90,11 @@ class ConfidenceEvaluator {
             return new EvaluationResult("", 0.0);
         }
 
-        return switch (strategy != null ? strategy.toLowerCase() : "structured_output") {
-            case "heuristic" -> evaluateHeuristic(response, heuristicConfig);
-            case "judge_model" -> evaluateWithJudge(response, judgeModel, heuristicConfig);
-            case "none" -> new EvaluationResult(response, 1.0);
-            default -> evaluateStructuredOutput(response, heuristicConfig);
+        return switch (EvaluationStrategy.fromConfigOrDefault(strategy)) {
+            case HEURISTIC -> evaluateHeuristic(response, heuristicConfig);
+            case JUDGE_MODEL -> evaluateWithJudge(response, judgeModel, heuristicConfig);
+            case NONE -> new EvaluationResult(response, 1.0);
+            case STRUCTURED_OUTPUT -> evaluateStructuredOutput(response, heuristicConfig);
         };
     }
 

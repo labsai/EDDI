@@ -5,14 +5,16 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
+import ai.labs.eddi.modules.llm.model.CascadingStrategy;
+import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import org.jboss.logging.Logger;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Deploy-time validation for {@link ModelCascadeConfig}. Runs from
@@ -30,8 +32,12 @@ import java.util.Set;
 final class CascadeConfigValidator {
     private static final Logger LOGGER = Logger.getLogger(CascadeConfigValidator.class);
 
-    private static final Set<String> VALID_EVALUATION_STRATEGIES = Set.of("structured_output", "heuristic", "judge_model", "none");
-    private static final Set<String> KNOWN_STRATEGIES = Set.of("cascade", "parallel");
+    /**
+     * Recognized evaluationStrategy tokens, derived from the enum for warn
+     * messages.
+     */
+    private static final List<String> VALID_EVALUATION_STRATEGIES = Arrays.stream(EvaluationStrategy.values())
+            .map(EvaluationStrategy::configValue).toList();
 
     private CascadeConfigValidator() {
     }
@@ -64,20 +70,20 @@ final class CascadeConfigValidator {
 
         // strategy (legacy field — warn only)
         String strategy = cascade.getStrategy();
-        if (strategy != null && !KNOWN_STRATEGIES.contains(strategy.toLowerCase())) {
+        if (strategy != null && CascadingStrategy.fromConfig(strategy) == null) {
             warn(taskId, "unknown cascade strategy '" + strategy + "' (expected 'cascade' or 'parallel') — running sequentially");
-        } else if (strategy != null && "parallel".equalsIgnoreCase(strategy)) {
+        } else if (CascadingStrategy.fromConfig(strategy) == CascadingStrategy.PARALLEL) {
             warn(taskId, "cascade strategy 'parallel' is not implemented yet — steps will run sequentially");
         }
 
         // evaluationStrategy (legacy field — warn only)
         String evalStrategy = cascade.getEvaluationStrategy();
-        if (evalStrategy != null && !VALID_EVALUATION_STRATEGIES.contains(evalStrategy.toLowerCase())) {
+        if (evalStrategy != null && EvaluationStrategy.fromConfig(evalStrategy) == null) {
             warn(taskId, "unknown evaluationStrategy '" + evalStrategy + "' (expected one of " + VALID_EVALUATION_STRATEGIES
                     + ") — defaulting to structured_output");
         }
 
-        if ("judge_model".equalsIgnoreCase(evalStrategy)) {
+        if (EvaluationStrategy.fromConfig(evalStrategy) == EvaluationStrategy.JUDGE_MODEL) {
             var judge = cascade.getJudgeModel();
             if (judge == null || isBlank(judge.getType())) {
                 warn(taskId, "evaluationStrategy 'judge_model' has no judgeModel with a 'type' — confidence will fall back to heuristic");
@@ -102,7 +108,7 @@ final class CascadeConfigValidator {
 
         // convertToObject + structured_output → auto-downgraded at runtime (warn once).
         boolean convertToObject = task.getParameters() != null && Boolean.parseBoolean(task.getParameters().get("convertToObject"));
-        if (convertToObject && (evalStrategy == null || "structured_output".equalsIgnoreCase(evalStrategy))) {
+        if (convertToObject && (evalStrategy == null || EvaluationStrategy.fromConfig(evalStrategy) == EvaluationStrategy.STRUCTURED_OUTPUT)) {
             LOGGER.warnf("LLM task '%s': convertToObject=true is incompatible with the structured_output confidence wrapper — "
                     + "the cascade will use %s for confidence evaluation instead.", taskId,
                     cascade.getJudgeModel() != null ? "judge_model" : "heuristic");

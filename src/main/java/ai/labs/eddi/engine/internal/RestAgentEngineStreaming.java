@@ -97,17 +97,15 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
                         @Override
                         public void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
-                            sendEvent(eventSink, sse, "cascade_step_start",
-                                    String.format("{\"stepIndex\":%d,\"modelType\":\"%s\",\"modelName\":\"%s\",\"totalSteps\":%d}", stepIndex,
-                                            escapeJson(modelType), escapeJson(modelName), totalSteps));
+                            sendJsonEvent(eventSink, sse, "cascade_step_start",
+                                    new CascadeStepStartEvent(stepIndex, modelType, modelName, totalSteps));
                         }
 
                         @Override
                         public void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason,
                                                         long durationMs) {
-                            sendEvent(eventSink, sse, "cascade_escalation", String.format(java.util.Locale.ROOT,
-                                    "{\"fromStep\":%d,\"toStep\":%d,\"confidence\":%.4f,\"threshold\":%.4f,\"reason\":\"%s\",\"durationMs\":%d}",
-                                    fromStep, toStep, finite(confidence), finite(threshold), escapeJson(reason), durationMs));
+                            sendJsonEvent(eventSink, sse, "cascade_escalation",
+                                    new CascadeEscalationEvent(fromStep, toStep, finite(confidence), finite(threshold), reason, durationMs));
                         }
 
                         @Override
@@ -147,6 +145,31 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         } catch (Exception e) {
             LOGGER.warnf("Failed to send SSE event '%s': %s", eventName, e.getMessage());
         }
+    }
+
+    /**
+     * Serialize a typed event payload to JSON via Jackson and send it. Preferred
+     * over hand-built JSON strings — the mapper handles string escaping and number
+     * formatting. Falls back to an empty object on the (unexpected) serialization
+     * failure so a single bad payload cannot break the stream.
+     */
+    private void sendJsonEvent(SseEventSink eventSink, Sse sse, String eventName, Object payload) {
+        String data;
+        try {
+            data = MAPPER.writeValueAsString(payload);
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to serialize '%s' event payload: %s", eventName, e.getMessage());
+            data = "{}";
+        }
+        sendEvent(eventSink, sse, eventName, data);
+    }
+
+    /** Typed payload for the {@code cascade_step_start} SSE event. */
+    private record CascadeStepStartEvent(int stepIndex, String modelType, String modelName, int totalSteps) {
+    }
+
+    /** Typed payload for the {@code cascade_escalation} SSE event. */
+    private record CascadeEscalationEvent(int fromStep, int toStep, double confidence, double threshold, String reason, long durationMs) {
     }
 
     private void closeQuietly(SseEventSink eventSink) {

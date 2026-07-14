@@ -11,6 +11,8 @@ import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.modules.llm.model.CascadingStrategy;
+import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
@@ -186,7 +188,7 @@ class CascadingModelExecutor {
         }
 
         String strategy = cascade.getStrategy();
-        if (strategy != null && !"cascade".equalsIgnoreCase(strategy)) {
+        if (strategy != null && CascadingStrategy.fromConfig(strategy) != CascadingStrategy.CASCADE) {
             // Only sequential 'cascade' is implemented. 'parallel' is reserved.
             // A deploy-time validation warning is emitted in LlmTask.configure — keep
             // runtime quiet to avoid per-turn log spam.
@@ -199,7 +201,7 @@ class CascadingModelExecutor {
 
         // Build the judge model once if the effective strategy needs it.
         ChatModel judgeModel = null;
-        if ("judge_model".equalsIgnoreCase(effectiveStrategy) && cascade.getJudgeModel() != null) {
+        if (EvaluationStrategy.fromConfig(effectiveStrategy) == EvaluationStrategy.JUDGE_MODEL && cascade.getJudgeModel() != null) {
             judgeModel = buildJudgeModel(cascade.getJudgeModel(), templateDataObjects);
         }
 
@@ -265,8 +267,9 @@ class CascadingModelExecutor {
                 // confidence is always 1.0). Non-wrapper strategies only, so the raw tokens are
                 // the actual answer; and only when the provider supports streaming.
                 boolean guaranteedAccept = isLastStep || step.getConfidenceThreshold() == null
-                        || ("none".equalsIgnoreCase(effectiveStrategy) && step.getConfidenceThreshold() <= 1.0);
-                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && !"structured_output".equalsIgnoreCase(effectiveStrategy)
+                        || (EvaluationStrategy.fromConfig(effectiveStrategy) == EvaluationStrategy.NONE && step.getConfidenceThreshold() <= 1.0);
+                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode
+                        && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
                         && guaranteedAccept;
                 StreamingChatModel streamingModel = streamLiveCandidate ? registry.getOrCreateStreaming(modelType, mergedParams) : null;
 
@@ -427,22 +430,18 @@ class CascadingModelExecutor {
      * {@code LlmTask.configure}; runtime logs at debug to avoid per-turn spam.
      */
     private String resolveEffectiveStrategy(String configured, boolean convertToObject, boolean useAgentMode, ModelCascadeConfig cascade) {
-        String s = configured != null ? configured.toLowerCase() : "structured_output";
-        // Normalize an unknown strategy to structured_output — matches the deploy-time
-        // validator warning and the evaluator's own switch default, so
-        // streaming/wrapper
+        // Normalize an unknown/absent strategy to the default — matches the deploy-time
+        // validator warning and the evaluator's own fallback, so streaming/wrapper
         // gating and confidence evaluation stay consistent.
-        if (!Set.of("structured_output", "heuristic", "judge_model", "none").contains(s)) {
-            s = "structured_output";
-        }
+        EvaluationStrategy strategy = EvaluationStrategy.fromConfigOrDefault(configured);
         boolean wrapperUnusable = convertToObject || useAgentMode;
-        if ("structured_output".equals(s) && wrapperUnusable) {
-            String downgraded = cascade.getJudgeModel() != null ? "judge_model" : "heuristic";
+        if (strategy == EvaluationStrategy.STRUCTURED_OUTPUT && wrapperUnusable) {
+            EvaluationStrategy downgraded = cascade.getJudgeModel() != null ? EvaluationStrategy.JUDGE_MODEL : EvaluationStrategy.HEURISTIC;
             LOGGER.debugf("structured_output confidence not usable with %s; using '%s'", convertToObject ? "convertToObject" : "agent mode",
-                    downgraded);
-            return downgraded;
+                    downgraded.configValue());
+            return downgraded.configValue();
         }
-        return s;
+        return strategy.configValue();
     }
 
     /** Build the judge model from its config, resolving type + templated params. */
