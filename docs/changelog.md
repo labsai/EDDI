@@ -5,6 +5,20 @@
 
 ---
 
+## 🌐 Group follow-up/continue — status-split completion: mid-round timeout → 504 (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+An adversarial re-review of the status-code split found one path the split had missed. `executeAgentTurn` (the per-member turn used by the *initial* discussion and re-run by every continuation) still threw a **base** `GroupDiscussionException` on an ABORT-policy member timeout — so a genuine member-agent timeout mid-round mapped to `502 Bad Gateway`, not the `504 Gateway Timeout` the split documents. Every other timeout site was already `GroupTimeoutException`; this was the last one.
+
+- **Fix:** `GroupConversationService.executeAgentTurn` now throws `GroupTimeoutException` on the `onAgentFailure=ABORT` timeout branch. `executeDiscussion`'s re-wrap preserves the subtype, so it surfaces as `504`.
+- **REST body hedge:** `continueDiscussion`'s `502` (`GroupExecutionException`) body previously claimed only "a member agent could not be reached". That catch also covers unrunnable-config failures, so the body now reads "a member agent or a required dependency could not be reached, or the group is misconfigured" — no longer asserting a single cause it cannot verify.
+- **Coverage (mutation-verified):** new `GroupConversationServiceExtendedTest.FailurePolicies#abortPolicy_agentTimesOut_throwsGroupTimeoutException` drives a real member timeout (a `doNothing()` say stub so the future never completes) under `ABORT` and asserts `GroupTimeoutException`. Reverting the fix to the parent `GroupExecutionException` flips exactly this one test to failing ("expected GroupTimeoutException but was GroupExecutionException") — proving it pins the 504-vs-502 distinction, not just "some 5xx".
+
+250 group/MCP unit tests pass (52 extended, 82 service, 39 REST, 3 routing, 31 HITL, 43 MCP); Checkstyle clean.
+
+---
+
 ## 🌐 Group follow-up/continue — HTTP status-code split (2026-07-14)
 
 **Repo:** EDDI (`feat/group-followups`)

@@ -444,11 +444,14 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.status(Response.Status.GATEWAY_TIMEOUT).type(TEXT_PLAIN)
                     .entity("A member agent did not respond in time. Try again.").build();
         } catch (IGroupConversationService.GroupExecutionException e) {
-            // A member agent / model call failed during the round — upstream failure, 5xx.
+            // The round could not be executed — a member agent / model call failed, or the
+            // group config is unrunnable. An upstream/server failure (5xx), not a retryable
+            // conflict. Hedged body: this catch covers both the agent-call and config
+            // paths.
             LOGGER.error("Continue on " + sanitize(gcId) + " failed to execute", e);
             return Response.status(Response.Status.BAD_GATEWAY).type(TEXT_PLAIN)
-                    .entity("The continuation round could not be completed because a member agent could not be "
-                            + "reached. The conversation has been marked failed.")
+                    .entity("The continuation round could not be completed: a member agent or a required "
+                            + "dependency could not be reached, or the group is misconfigured.")
                     .build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // Base type now means only a state / concurrency conflict.

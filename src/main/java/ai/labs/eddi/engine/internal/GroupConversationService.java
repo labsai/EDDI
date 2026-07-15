@@ -2590,7 +2590,10 @@ public class GroupConversationService implements IGroupConversationService {
                     continue;
                 }
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
-                    throw new GroupDiscussionException("Agent %s timed out and onAgentFailure=ABORT".formatted(member.agentId()));
+                    // A member-agent timeout — surface as GroupTimeoutException so it maps
+                    // to 504 at REST (executeDiscussion's re-wrap preserves the subtype).
+                    throw new GroupTimeoutException(
+                            "Agent %s timed out and onAgentFailure=ABORT".formatted(member.agentId()), null);
                 }
                 return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
                         Instant.now(), "Timeout after " + timeout + "s", targetAgentId);

@@ -660,6 +660,35 @@ class GroupConversationServiceExtendedTest {
                     .anyMatch(e -> e.type() == TranscriptEntryType.SKIPPED &&
                             "a1".equals(e.speakerAgentId())));
         }
+
+        @Test
+        void abortPolicy_agentTimesOut_throwsGroupTimeoutException() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setModeratorAgentId("mod");
+            // 1s timeout, ABORT on failure, no retries → a member timeout aborts fast.
+            cfg.setProtocol(new ProtocolConfig(1,
+                    ProtocolConfig.MemberFailurePolicy.ABORT, 0,
+                    ProtocolConfig.MemberUnavailablePolicy.SKIP));
+            setupStore(cfg);
+
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
+                    .thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("a1"), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+            // say() never invokes the response handler → the future never completes → the
+            // get(timeout) call times out, and under ABORT the round is aborted.
+            doNothing().when(conversationService).say(any(Environment.class), eq("a1"),
+                    anyString(), any(), any(), any(), any(InputData.class),
+                    anyBoolean(), any(ConversationResponseHandler.class));
+
+            // A real member-agent timeout must be a GroupTimeoutException so REST maps it
+            // to
+            // 504 (not the 502 an ordinary execution failure gets). executeDiscussion's
+            // re-wrap preserves the subtype.
+            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupTimeoutException.class,
+                    () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
+        }
     }
 
     // =========================================================
