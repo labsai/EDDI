@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -80,7 +81,7 @@ class LegacyChatExecutorTest {
                 }
             };
             var task = createTask();
-            var retryConfig = new LlmConfiguration.RetryConfiguration();
+            var retryConfig = new RetryConfiguration();
             retryConfig.setMaxAttempts(1);
             task.setRetry(retryConfig);
 
@@ -147,7 +148,7 @@ class LegacyChatExecutorTest {
         task.setType("openai");
         task.setActions(List.of("action1"));
         task.setParameters(Map.of("apiKey", "test-key"));
-        var retryConfig = new LlmConfiguration.RetryConfiguration();
+        var retryConfig = new RetryConfiguration();
         retryConfig.setMaxAttempts(2);
         retryConfig.setBackoffDelayMs(10L);
         task.setRetry(retryConfig);

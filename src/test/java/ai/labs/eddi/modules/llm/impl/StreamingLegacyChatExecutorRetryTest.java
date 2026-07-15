@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -392,8 +393,8 @@ class StreamingLegacyChatExecutorRetryTest {
         return task;
     }
 
-    private LlmConfiguration.RetryConfiguration createRetryConfig(int maxAttempts, long backoffMs) {
-        var retryConfig = new LlmConfiguration.RetryConfiguration();
+    private RetryConfiguration createRetryConfig(int maxAttempts, long backoffMs) {
+        var retryConfig = new RetryConfiguration();
         retryConfig.setMaxAttempts(maxAttempts);
         retryConfig.setBackoffDelayMs(backoffMs);
         return retryConfig;

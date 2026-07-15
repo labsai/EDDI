@@ -5,6 +5,30 @@
 
 ---
 
+## 🧹 Refactor: Remove duplicate `RetryConfiguration` shim in LlmConfiguration (2026-07-16)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+Follow-up to the error-handling PR (#593): resolved a code-quality finding (nested class with the same simple name as its superclass). The `LlmConfiguration.RetryConfiguration` nested class was an empty subclass of the extracted `ai.labs.eddi.configs.shared.RetryConfiguration`, kept as a backward-compat shim. It overrode nothing and shadowed the imported shared type within `LlmConfiguration`'s body.
+
+### Key Changes
+
+- **`LlmConfiguration.java`**: Deleted the empty nested `RetryConfiguration` subclass. The `retry` field, getter, and setter now bind directly to the imported shared `RetryConfiguration` (import already present).
+- **9 test files**: Replaced `new LlmConfiguration.RetryConfiguration()` with the shared `RetryConfiguration` (added the `configs.shared` import). Includes `LlmConfigurationTest`, which had pulled the nested type in via a `LlmConfiguration.*` wildcard import.
+
+### Design Decisions
+
+- **Deleted the shim rather than renaming it** (a reviewer suggested `LegacyRetryConfiguration`). The subclass added zero fields/overrides, so a rename would keep a misleadingly-named dead class for the same test churn. Per project philosophy, internal-API removal is safe — the only backward-compat concern is stored JSON, and because the removed subclass added no fields, the `retry` JSON structure is byte-for-byte identical (existing MongoDB/ZIP configs deserialize unchanged).
+
+### Verification
+
+- `mvnw clean test-compile` clean; 123 affected unit tests pass (0 failures).
+- Repo-wide grep confirms zero remaining references to the nested type (dotted, JVM binary-name, reflection strings, or wildcard imports).
+
+---
+
 ## ⚡ Feat: Holistic Error Handling and Recovery Infrastructure (2026-07-07)
 
 **Repo:** EDDI (`feat/error-handling-recovery`)

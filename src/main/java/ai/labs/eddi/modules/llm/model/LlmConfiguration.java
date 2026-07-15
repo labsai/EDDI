@@ -951,14 +951,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         }
     }
 
-    // RetryConfiguration has been extracted to
-    // ai.labs.eddi.configs.shared.RetryConfiguration
-    // for reuse by MCP and other subsystems. The import at the top of this file
-    // provides
-    // backward-compatible access — existing JSON configs deserialize unchanged.
-    public static class RetryConfiguration extends ai.labs.eddi.configs.shared.RetryConfiguration {
-    }
-
     /**
      * Reference from an LLM task to a specific knowledge base in the workflow. The
      * name must match a RagConfiguration.name in the workflow.

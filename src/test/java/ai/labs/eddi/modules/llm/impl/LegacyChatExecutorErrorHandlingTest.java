@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -160,7 +161,7 @@ class LegacyChatExecutorErrorHandlingTest {
         task.setType("openai");
         task.setActions(List.of("action1"));
         task.setParameters(Map.of("apiKey", "test-key"));
-        var retryConfig = new LlmConfiguration.RetryConfiguration();
+        var retryConfig = new RetryConfiguration();
         retryConfig.setMaxAttempts(1);
         retryConfig.setBackoffDelayMs(1L);
         task.setRetry(retryConfig);
