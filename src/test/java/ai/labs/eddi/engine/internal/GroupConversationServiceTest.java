@@ -1059,10 +1059,27 @@ class GroupConversationServiceTest {
             when(conversationStore.compareAndSetState("gc-1",
                     GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
 
-            assertThrows(GroupDiscussionException.class,
+            // Specific subtype so REST can map an unknown member to 404 (not a 409
+            // conflict).
+            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupMemberNotFoundException.class,
                     () -> service.followUpWithMember("gc-1", "ghost", "hello"));
             verify(conversationService, never())
                     .say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        void followUp_agentCallFails_throwsGroupExecutionException() throws Exception {
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            // The agent call itself blows up (provider error) — an upstream failure, which
+            // REST must map to 5xx, not a 409 "conflict, retry".
+            doThrow(new RuntimeException("provider 500")).when(conversationService)
+                    .say(any(), eq("agentA"), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException.class,
+                    () -> service.followUpWithMember("gc-1", "agentA", "hello"));
         }
 
         @Test

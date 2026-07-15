@@ -223,4 +223,42 @@ public interface IGroupConversationService {
             super(message);
         }
     }
+
+    /**
+     * The follow-up target agent is not a member of this group conversation — a
+     * client error (typically a typo'd agent id / display name). REST surfaces this
+     * as {@code 404}, distinct from the {@code 409} used for state/concurrency
+     * conflicts: retrying with the same target will never succeed.
+     */
+    class GroupMemberNotFoundException extends GroupDiscussionException {
+        public GroupMemberNotFoundException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * The operation could not be completed because a member agent or model call
+     * failed — an upstream-dependency failure, not a client or state error. REST
+     * surfaces this as {@code 502}, so clients do not mistake a provider outage for
+     * a retryable "conversation is busy" conflict.
+     */
+    class GroupExecutionException extends GroupDiscussionException {
+        public GroupExecutionException(String message) {
+            super(message);
+        }
+
+        public GroupExecutionException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * A member agent did not respond within the configured timeout. REST surfaces
+     * this as {@code 504}.
+     */
+    class GroupTimeoutException extends GroupExecutionException {
+        public GroupTimeoutException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
 }

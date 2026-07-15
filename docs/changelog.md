@@ -5,6 +5,21 @@
 
 ---
 
+## 🌐 Group follow-up/continue — HTTP status-code split (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A final pre-review pass flagged that `followUpWithMember` / `continueDiscussion` mapped **every** `GroupDiscussionException` to `409 Conflict` — including an unknown target agent (a client error) and mid-round server/upstream failures (LLM/DB down, agent timeout). A `409` tells the client "retryable conflict", which is wrong for a typo'd agent or a provider outage. This was pre-existing feature behaviour, not a regression, but it is a real API-semantics issue a reviewer would raise, so it was fixed properly.
+
+- **Cause-differentiated exception subtypes** (all extend `GroupDiscussionException`, so existing `catch (GroupDiscussionException)` in the MCP tools and tests keeps working): `GroupMemberNotFoundException` (→ 404), `GroupExecutionException` (→ 502), `GroupTimeoutException extends GroupExecutionException` (→ 504). The base type now means **only** a state/concurrency conflict (→ 409).
+- **Single interception point** for execution failures: `executeDiscussion` re-throws every failure caught in its phase loop as `GroupExecutionException` (preserving `GroupTimeoutException`), so the many deep agent/quota/config throw sites did not each need editing. `followUpWithMember`'s own agent-call/timeout throws are re-typed directly.
+- **REST mapping** (most-specific catch first): unknown member → `404`, agent timeout → `504`, agent/model failure → `502` (Bad Gateway — an upstream dependency failed, logged with its stack trace), state/concurrency → `409`. The `@APIResponse` annotations now list the full set. `close` is unchanged (only ever a state conflict → 409).
+- Nits swept: the new `400` bodies now set `.type(TEXT_PLAIN)` for consistency; the follow-up `InterruptedException` path restores the interrupt flag.
+
+Coverage: added REST tests (`followUp`/`continue` → 404/502/504, and still-409 for a genuine conflict) and service tests asserting the specific subtypes are thrown (unknown member → `GroupMemberNotFoundException`, agent failure → `GroupExecutionException`, and the `executeDiscussion` failure-policy tests now assert `GroupExecutionException`). **Each new mapping was mutation-verified**: reverting the split makes the corresponding test fail (404/502/504 → 409; specific subtype → base). 654 group/MCP unit tests pass; Checkstyle clean.
+
+---
+
 ## 🧬 Group conversations — mutation-audited regression coverage (2026-07-14)
 
 **Repo:** EDDI (`feat/group-followups`)

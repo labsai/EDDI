@@ -94,8 +94,10 @@ public interface IRestGroupConversation {
                        + "Returns the full updated GroupConversation including the new transcript entries.")
     @APIResponse(responseCode = "200", description = "Updated group conversation with follow-up on transcript.")
     @APIResponse(responseCode = "400", description = "Missing 'question' or 'targetAgentId'.")
-    @APIResponse(responseCode = "404", description = "Group conversation not found.")
-    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state, or concurrently cancelled/deleted.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found, or the target agent is not a member.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state, or another operation is in progress.")
+    @APIResponse(responseCode = "502", description = "The member agent could not be reached / the agent call failed.")
+    @APIResponse(responseCode = "504", description = "The member agent did not respond within the timeout.")
     Response followUpWithMember(@PathParam("groupId") String groupId,
                                 @PathParam("groupConversationId") String gcId,
                                 FollowUpRequest request);
@@ -112,7 +114,9 @@ public interface IRestGroupConversation {
     @APIResponse(responseCode = "200", description = "Updated group conversation with new round.")
     @APIResponse(responseCode = "400", description = "Missing 'question', or 'attachments' supplied (unsupported on continuation).")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
-    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state, or another operation is in progress.")
+    @APIResponse(responseCode = "502", description = "A member agent could not be reached during the round.")
+    @APIResponse(responseCode = "504", description = "A member agent did not respond within the timeout.")
     Response continueDiscussion(@PathParam("groupId") String groupId,
                                 @PathParam("groupConversationId") String gcId,
                                 DiscussRequest request);

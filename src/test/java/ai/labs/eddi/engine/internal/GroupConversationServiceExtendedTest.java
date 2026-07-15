@@ -591,7 +591,10 @@ class GroupConversationServiceExtendedTest {
             when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
                     .thenReturn(null);
 
-            assertThrows(GroupDiscussionException.class,
+            // executeDiscussion must surface an execution failure as
+            // GroupExecutionException
+            // (which REST maps to 5xx), not a bare GroupDiscussionException (409).
+            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException.class,
                     () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
         }
 
@@ -607,7 +610,7 @@ class GroupConversationServiceExtendedTest {
             when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
                     .thenThrow(new RuntimeException("Agent check failed"));
 
-            assertThrows(GroupDiscussionException.class,
+            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException.class,
                     () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
         }
 

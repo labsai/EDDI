@@ -399,6 +399,52 @@ class RestGroupConversationTest {
         }
 
         @Test
+        @DisplayName("followUp — 404 (not 409) when the target agent is not a member")
+        void followUp_unknownMember_returns404() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.followUpWithMember("gc-1", "ghost", "q"))
+                    .thenThrow(new IGroupConversationService.GroupMemberNotFoundException(
+                            "The requested agent is not a member of this group conversation. Available members: {}"));
+
+            Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("q", "ghost", "user-1"));
+
+            // A typo'd agent is a client error, not a retryable conflict.
+            assertEquals(404, response.getStatus());
+            assertFalse(String.valueOf(response.getEntity()).contains("ghost"),
+                    "the caller-supplied targetAgentId must not be reflected");
+        }
+
+        @Test
+        @DisplayName("followUp — 502 (not 409) when the member agent call fails")
+        void followUp_agentFailure_returns502() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.followUpWithMember("gc-1", "agentA", "q"))
+                    .thenThrow(new IGroupConversationService.GroupExecutionException(
+                            "Failed to call agent 'agentA': provider 500"));
+
+            Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("q", "agentA", "user-1"));
+
+            // An upstream agent/model failure is a 5xx, not a "conflict — retry".
+            assertEquals(502, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("followUp — 504 (not 409) when the member agent times out")
+        void followUp_timeout_returns504() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.followUpWithMember("gc-1", "agentA", "q"))
+                    .thenThrow(new IGroupConversationService.GroupTimeoutException(
+                            "Follow-up timed out for agent 'agentA'", new java.util.concurrent.TimeoutException()));
+
+            Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("q", "agentA", "user-1"));
+
+            assertEquals(504, response.getStatus());
+        }
+
+        @Test
         @DisplayName("followUp — 200 and validates ownership before delegating")
         void followUp_success_returns200() throws Exception {
             when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
@@ -433,6 +479,47 @@ class RestGroupConversationTest {
                     new DiscussRequest("q", "user-1"));
 
             assertEquals(200, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("continue — 502 (not 409) when a member agent fails mid-round")
+        void continue_agentFailure_returns502() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion("gc-1", "q", null))
+                    .thenThrow(new IGroupConversationService.GroupExecutionException(
+                            "Group discussion failed: provider 500"));
+
+            Response response = restGroupConversation.continueDiscussion("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1"));
+
+            assertEquals(502, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("continue — 504 (not 409) when a member agent times out mid-round")
+        void continue_timeout_returns504() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion("gc-1", "q", null))
+                    .thenThrow(new IGroupConversationService.GroupTimeoutException(
+                            "timed out", new java.util.concurrent.TimeoutException()));
+
+            Response response = restGroupConversation.continueDiscussion("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1"));
+
+            assertEquals(504, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("continue — still 409 for a genuine state/concurrency conflict")
+        void continue_stateConflict_returns409() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            when(groupService.continueDiscussion("gc-1", "q", null))
+                    .thenThrow(new IGroupConversationService.GroupDiscussionException("not COMPLETED"));
+
+            Response response = restGroupConversation.continueDiscussion("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1"));
+
+            assertEquals(409, response.getStatus());
         }
 
         @Test

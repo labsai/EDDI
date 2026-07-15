@@ -278,8 +278,8 @@ public class RestGroupConversation implements IRestGroupConversation {
         // Reject an incomplete body up front: without this a missing targetAgentId NPEs
         // during member resolution and surfaces as a 500 rather than a 400.
         if (request == null || blank(request.question()) || blank(request.targetAgentId())) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity("Both 'question' and 'targetAgentId' are required").build();
+            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                    .entity("Both 'question' and 'targetAgentId' are required.").build();
         }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
@@ -288,17 +288,30 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
             throw e;
+        } catch (IGroupConversationService.GroupMemberNotFoundException e) {
+            // A typo'd / non-member agent — a client error, not a conflict. 404, curated:
+            // the exception text carries the member list (server data), never the caller
+            // id.
+            LOGGER.infof("Follow-up on %s → target not a member: %s", sanitize(gcId), sanitize(e.getMessage()));
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("The target agent is not a member of this group conversation.").build();
+        } catch (IGroupConversationService.GroupTimeoutException e) {
+            LOGGER.warn("Follow-up on " + sanitize(gcId) + " timed out", e);
+            return Response.status(Response.Status.GATEWAY_TIMEOUT).type(TEXT_PLAIN)
+                    .entity("The member agent did not respond in time. Try again.").build();
+        } catch (IGroupConversationService.GroupExecutionException e) {
+            // A member agent / model call failed — an upstream-dependency failure, 5xx, not
+            // a retryable "conflict". Log the full cause; the client gets a curated body.
+            LOGGER.error("Follow-up on " + sanitize(gcId) + " failed to execute", e);
+            return Response.status(Response.Status.BAD_GATEWAY).type(TEXT_PLAIN)
+                    .entity("The follow-up could not be completed because the member agent could not be reached.")
+                    .build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
-            // Curated body — GroupDiscussionException messages can embed the target agent
-            // id (caller input). Deliberately phrased as possibilities: this exception
-            // covers wrong-state, the concurrent-operation guard, an unknown member AND
-            // agent-call/timeout failures, so it must not assert a single cause.
+            // Base type now means only a state / concurrency conflict.
             LOGGER.infof("Follow-up on %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
-                    .entity("The follow-up could not be applied. The conversation may not accept follow-ups "
-                            + "right now (it must be COMPLETED and have no other operation in progress), the "
-                            + "target agent may not be a member, or the agent could not be reached. Read the "
-                            + "conversation for its current state and members.")
+                    .entity("The follow-up could not be applied: the conversation must be COMPLETED and have no "
+                            + "other operation in progress.")
                     .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
@@ -413,7 +426,8 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public Response continueDiscussion(String groupId, String gcId, DiscussRequest request) {
         if (request == null || blank(request.question())) {
-            return Response.status(Response.Status.BAD_REQUEST).entity("'question' is required").build();
+            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                    .entity("'question' is required.").build();
         }
         if (request.attachments() != null && !request.attachments().isEmpty()) {
             return rejectAttachmentsOnContinue();
@@ -425,14 +439,23 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
             throw e;
+        } catch (IGroupConversationService.GroupTimeoutException e) {
+            LOGGER.warn("Continue on " + sanitize(gcId) + " timed out", e);
+            return Response.status(Response.Status.GATEWAY_TIMEOUT).type(TEXT_PLAIN)
+                    .entity("A member agent did not respond in time. Try again.").build();
+        } catch (IGroupConversationService.GroupExecutionException e) {
+            // A member agent / model call failed during the round — upstream failure, 5xx.
+            LOGGER.error("Continue on " + sanitize(gcId) + " failed to execute", e);
+            return Response.status(Response.Status.BAD_GATEWAY).type(TEXT_PLAIN)
+                    .entity("The continuation round could not be completed because a member agent could not be "
+                            + "reached. The conversation has been marked failed.")
+                    .build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
-            // Curated, and phrased as possibilities: this exception covers wrong-state,
-            // the concurrent-operation guard AND execution failures inside the round.
+            // Base type now means only a state / concurrency conflict.
             LOGGER.infof("Continue on %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
-                    .entity("The continuation could not be applied. The conversation may not accept a new "
-                            + "round right now (it must be COMPLETED and have no other operation in progress), "
-                            + "or the round could not be completed. Read the conversation for its current state.")
+                    .entity("The continuation could not be applied: the conversation must be COMPLETED and have no "
+                            + "other operation in progress.")
                     .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)

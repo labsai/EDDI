@@ -681,7 +681,14 @@ public class GroupConversationService implements IGroupConversationService {
                 listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
                         "The group discussion failed."));
             }
-            throw e;
+            // Every GroupDiscussionException thrown inside the phase loop is an execution
+            // failure (agent unavailable/unreachable/timeout, quota, config) — never a
+            // state/concurrency conflict. Re-throw as GroupExecutionException so it maps to
+            // 5xx at REST, preserving a more specific subtype (e.g. GroupTimeoutException).
+            if (e instanceof GroupExecutionException) {
+                throw e;
+            }
+            throw new GroupExecutionException(e.getMessage(), e);
         } catch (Exception e) {
             // R2: If the exception was caused by a cancel, route to CANCELLED
             var cancelToken = activeTokens.get(gc.getId());
@@ -699,7 +706,7 @@ public class GroupConversationService implements IGroupConversationService {
                 listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
                         "The group discussion failed."));
             }
-            throw new GroupDiscussionException("Group discussion failed: " + e.getMessage(), e);
+            throw new GroupExecutionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
             // NEW-2: Always remove the control token — paused conversations have no
@@ -1099,12 +1106,11 @@ public class GroupConversationService implements IGroupConversationService {
                     }
                 }
                 if (privateConvId == null) {
-                    throw new GroupDiscussionException(
+                    throw new GroupMemberNotFoundException(
                             // The caller-supplied targetAgentId is deliberately NOT echoed.
-                            // The REST layer no longer surfaces this text to the client (it
-                            // returns a curated 409 and logs this sanitized), but keeping the
-                            // id out of it means the message is safe wherever it does surface
-                            // — e.g. the MCP tools, which return it as their error string.
+                            // REST maps this to 404 with a curated body; keeping the id out
+                            // keeps the message safe wherever it DOES surface — e.g. the MCP
+                            // tools, which return it as their error string.
                             "The requested agent is not a member of this group conversation. Available members: %s"
                                     .formatted(gc.getMemberDisplayNames()));
                 }
@@ -1137,7 +1143,7 @@ public class GroupConversationService implements IGroupConversationService {
                         responseFuture.complete(response);
                     });
                 } catch (Exception e) {
-                    throw new GroupDiscussionException("Failed to call agent '%s': %s".formatted(resolvedAgentId, e.getMessage()), e);
+                    throw new GroupExecutionException("Failed to call agent '%s': %s".formatted(resolvedAgentId, e.getMessage()), e);
                 }
 
                 int timeoutSeconds = resolveAgentTimeoutSeconds(gc);
@@ -1145,9 +1151,12 @@ public class GroupConversationService implements IGroupConversationService {
                 try {
                     response = responseFuture.get(timeoutSeconds, TimeUnit.SECONDS);
                 } catch (TimeoutException e) {
-                    throw new GroupDiscussionException("Follow-up timed out for agent '%s'".formatted(resolvedAgentId), e);
+                    throw new GroupTimeoutException("Follow-up timed out for agent '%s'".formatted(resolvedAgentId), e);
                 } catch (ExecutionException | InterruptedException e) {
-                    throw new GroupDiscussionException("Follow-up failed for agent '%s': %s".formatted(resolvedAgentId, e.getMessage()), e);
+                    if (e instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                    }
+                    throw new GroupExecutionException("Follow-up failed for agent '%s': %s".formatted(resolvedAgentId, e.getMessage()), e);
                 }
 
                 // Record the agent's response on the transcript
@@ -1268,7 +1277,9 @@ public class GroupConversationService implements IGroupConversationService {
                 // Resolve phases and re-execute
                 List<DiscussionPhase> phases = resolvePhases(config);
                 if (phases.isEmpty()) {
-                    throw new GroupDiscussionException("No discussion phases are defined for this group.");
+                    // A group config with no phases is a server-side misconfiguration the
+                    // caller cannot fix by retrying, not a conversation-state conflict.
+                    throw new GroupExecutionException("No discussion phases are defined for this group.");
                 }
 
                 // Continuation re-runs the full protocol from the first phase.
@@ -1291,7 +1302,7 @@ public class GroupConversationService implements IGroupConversationService {
                 if (e instanceof IResourceStore.ResourceStoreException rse) {
                     throw rse;
                 }
-                throw new GroupDiscussionException("Continue discussion failed: " + e.getMessage(), e);
+                throw new GroupExecutionException("Continue discussion failed: " + e.getMessage(), e);
             }
         } finally {
             operationsInProgress.remove(groupConversationId);
