@@ -5,6 +5,22 @@
 
 ---
 
+## 🔍 Group conversations — Copilot PR-review response (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Copilot flagged 5 items on the pushed branch. Each was adversarially verified against the actual code (a 6-agent verification workflow plus independent reading) before implementing — external review is evaluated, not rubber-stamped. **All 5 confirmed**, all fixed:
+
+- **MCP raw-exception leak (×3, Medium)** — `followup_with_member`, `continue_group_discussion`, `close_group_conversation` returned `errorJson(e.getMessage())`, forwarding raw internal exception text to MCP callers (information exposure). Now each logs the full throwable server-side (`LOGGER.error(msg, e)`) and returns a stable curated `errorJson("Failed to …", "INTERNAL", null)` — matching the hardened `McpHitlTools` convention. (Verified the 3-arg `errorJson` overload exists, so this compiles; Copilot's suggested form was correct despite its own hedge.)
+- **REST 400 missing `TEXT_PLAIN` (Medium)** — `rejectAttachmentsOnContinue()` was the sole error response in `RestGroupConversation` not setting `.type(TEXT_PLAIN)`. Added, for content-type consistency with every sibling 400/404/409/504.
+- **Stale concurrency comment (Low)** — the `operationsInProgress` field comment called `compareAndSetState` a "best-effort read-check-update". That is now false: `GroupConversationStore.compareAndSetState` does a fast-path read then an **atomic** storage-layer conditional write (`storeIfFieldEquals` → single Mongo `updateOne` / Postgres `UPDATE` filtered on the current `state`). Corrected the comment: the in-memory `Set` is a single-node fast-fail optimization; the cluster-wide guard is the storage CAS.
+
+**Coverage (mutation-verified):** three new `McpGroupToolsTest` cases drive each tool's generic `catch` (service throws a recognizable `boom-internal-detail-42`) and assert the response does **not** contain the raw text and **does** contain the curated message + `"errorCode":"INTERNAL"`. Reverting all three curations fails exactly those three tests (and nothing else) — proving they pin the non-leak contract. 46 `McpGroupToolsTest` cases pass (was 43); full group/MCP suite green; Checkstyle clean.
+
+**Deliberately out of scope:** the same `errorJson(e.getMessage())` pattern exists in ~10 pre-existing catch blocks in `McpGroupTools` (and other MCP tool classes), and two existing tests *depend* on those messages (`start_group_discussion` → "Group not found", `delete` → "Not found"). A blanket sweep would break tested behaviour and expand well beyond this PR, so it is left as a separate follow-up rather than bundled here.
+
+---
+
 ## 🌐 Group follow-up/continue — status-split completion: mid-round timeout → 504 (2026-07-15)
 
 **Repo:** EDDI (`feat/group-followups`)

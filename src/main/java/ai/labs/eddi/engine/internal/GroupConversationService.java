@@ -111,11 +111,14 @@ public class GroupConversationService implements IGroupConversationService {
     // amortized instead of O(N²)). Cleaned up when conversations complete.
     private final ConcurrentHashMap<String, Integer> lastVerifiedIndex = new ConcurrentHashMap<>();
 
-    // Guards against concurrent post-discussion operations (follow-up / continue /
-    // close) on the same conversation within this node. Fail-fast: a second
-    // operation on the same gcId is rejected rather than queued. NOTE: single-node
-    // only — cluster-wide safety would require an atomic conditional update at the
-    // storage layer (compareAndSetState is a best-effort read-check-update).
+    // In-node fast-fail guard for concurrent post-discussion operations
+    // (follow-up, continue, close) on the same conversation: a second
+    // operation on the same gcId is rejected rather than queued. The Set is
+    // single-node only, but it is NOT the cluster-wide safety mechanism:
+    // cross-node races are prevented by conversationStore.compareAndSetState,
+    // which performs an atomic storage-layer conditional update (Mongo
+    // updateOne / Postgres UPDATE filtered on the current state field). The
+    // Set only avoids redundant work within a single node.
     private final Set<String> operationsInProgress = ConcurrentHashMap.newKeySet();
 
     // Metrics

@@ -416,7 +416,7 @@ public class RestGroupConversation implements IRestGroupConversation {
      * requires reworking the attachment fan-out — tracked as follow-up work.
      */
     private static Response rejectAttachmentsOnContinue() {
-        return Response.status(Response.Status.BAD_REQUEST)
+        return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
                 .entity("Attachments cannot be added on a continuation round — they are only "
                         + "shared with member agents when the discussion starts. Start a new "
                         + "discussion to share new files.")

@@ -469,8 +469,11 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return accessDenied("followup_with_member", groupConversationId);
         } catch (Exception e) {
-            LOGGER.errorf("followup_with_member failed: %s", LogSanitizer.sanitize(e.getMessage()));
-            return errorJson(e.getMessage());
+            // Curated payload — never echo the raw exception text to MCP callers
+            // (info exposure). Full detail (with stack trace) goes to the server log.
+            // Matches the McpHitlTools convention.
+            LOGGER.error("followup_with_member failed", e);
+            return errorJson("Failed to process follow-up with member", "INTERNAL", null);
         }
     }
 
@@ -491,8 +494,8 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return accessDenied("continue_group_discussion", groupConversationId);
         } catch (Exception e) {
-            LOGGER.errorf("continue_group_discussion failed: %s", LogSanitizer.sanitize(e.getMessage()));
-            return errorJson(e.getMessage());
+            LOGGER.error("continue_group_discussion failed", e);
+            return errorJson("Failed to continue group discussion", "INTERNAL", null);
         }
     }
 
@@ -510,8 +513,8 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return accessDenied("close_group_conversation", groupConversationId);
         } catch (Exception e) {
-            LOGGER.errorf("close_group_conversation failed: %s", LogSanitizer.sanitize(e.getMessage()));
-            return errorJson(e.getMessage());
+            LOGGER.error("close_group_conversation failed", e);
+            return errorJson("Failed to close group conversation", "INTERNAL", null);
         }
     }
 }

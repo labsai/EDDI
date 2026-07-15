@@ -562,6 +562,61 @@ class McpGroupToolsTest {
         verify(groupConversationService, never()).deleteGroupConversation(any());
     }
 
+    // --- curated error contract for the post-discussion mutation tools ---
+    // The generic catch(Exception) must NOT echo the raw exception text to the MCP
+    // caller (info exposure); it returns a stable curated message + INTERNAL code
+    // and
+    // logs the full throwable server-side. These pin that contract against
+    // regression.
+
+    @Test
+    void followupWithMember_genericFailure_returnsCuratedErrorNotRawMessage() throws Exception {
+        stubConversation("gc1");
+        when(groupConversationService.followUpWithMember(eq("gc1"), any(), any()))
+                .thenThrow(new RuntimeException("boom-internal-detail-42"));
+
+        String result = tools.followup_with_member("gc1", "Analyst", "why?");
+
+        assertFalse(result.contains("boom-internal-detail-42"),
+                "the raw exception message must never reach the MCP caller");
+        assertTrue(result.contains("Failed to process follow-up with member"),
+                "a stable curated message is returned instead");
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""),
+                "the curated error carries an INTERNAL errorCode");
+    }
+
+    @Test
+    void continueGroupDiscussion_genericFailure_returnsCuratedErrorNotRawMessage() throws Exception {
+        stubConversation("gc1");
+        when(groupConversationService.continueDiscussion(eq("gc1"), any(), any()))
+                .thenThrow(new RuntimeException("boom-internal-detail-42"));
+
+        String result = tools.continue_group_discussion("gc1", "next?");
+
+        assertFalse(result.contains("boom-internal-detail-42"),
+                "the raw exception message must never reach the MCP caller");
+        assertTrue(result.contains("Failed to continue group discussion"),
+                "a stable curated message is returned instead");
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""),
+                "the curated error carries an INTERNAL errorCode");
+    }
+
+    @Test
+    void closeGroupConversation_genericFailure_returnsCuratedErrorNotRawMessage() throws Exception {
+        stubConversation("gc1");
+        when(groupConversationService.closeGroupConversation("gc1"))
+                .thenThrow(new RuntimeException("boom-internal-detail-42"));
+
+        String result = tools.close_group_conversation("gc1");
+
+        assertFalse(result.contains("boom-internal-detail-42"),
+                "the raw exception message must never reach the MCP caller");
+        assertTrue(result.contains("Failed to close group conversation"),
+                "a stable curated message is returned instead");
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""),
+                "the curated error carries an INTERNAL errorCode");
+    }
+
     @Test
     void followupWithMember_allowedForOwner() throws Exception {
         GroupConversation gc = ownedBy("alice");
