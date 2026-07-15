@@ -52,6 +52,15 @@ import static java.lang.String.format;
 public class RestConversationStore implements IRestConversationStore {
     public static final String DESCRIPTOR_TYPE = "ai.labs.conversation";
 
+    /**
+     * Upper bound on how many descriptors an owner-filtered listing will scan
+     * before giving up, so a caller who owns few/none of a large shared store
+     * cannot turn one list request into a full-collection scan. Mirrors the MCP
+     * conversation tools' owner-scan cap. Admins / auth-disabled callers are not
+     * filtered and never reach this bound.
+     */
+    private static final int MAX_OWNER_SCAN = 500;
+
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
@@ -114,14 +123,17 @@ public class RestConversationStore implements IRestConversationStore {
         // post-filter each descriptor by its resolved owner. Admins (and any caller
         // when authorization is disabled) see all — resolved once, up front, so the
         // per-row check is skipped entirely on that path. The existing do-while
-        // already re-pages until it fills `limit` (or the store is exhausted), so a
-        // filtered-out row is naturally back-filled from later pages — a caller's own
-        // conversations are never starved just because newer pages belong to others.
+        // back-fills across pages so a filtered-out row does not starve a personal
+        // list, but that back-fill is bounded by MAX_OWNER_SCAN so a caller who owns
+        // few/none of a large shared store cannot force a full-collection scan
+        // (descriptors come back most-recent-first, so a typical caller's own
+        // conversations fall well within the budget).
         final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
 
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
+            int scannedDescriptors = 0;
 
             do {
                 conversationDescriptors = readConversationDescriptors(index, limit, filter);
@@ -130,6 +142,7 @@ public class RestConversationStore implements IRestConversationStore {
                 }
 
                 for (var conversationDescriptor : conversationDescriptors) {
+                    scannedDescriptors++;
                     try {
                         URI resourceUri = conversationDescriptor.getResource();
                         var conversationResourceId = extractResourceId(resourceUri);
@@ -138,15 +151,27 @@ public class RestConversationStore implements IRestConversationStore {
                             continue;
                         }
 
+                        // Ownership gate — split around the expensive snapshot load so a
+                        // foreign conversation is skipped WITHOUT loading its memory
+                        // document. Every conversation since v5.1.6 records its owner on
+                        // the descriptor, so decide here for the common case; only a
+                        // legacy row with no recorded owner falls through to the
+                        // post-populate re-check below (populate resolves its owner from
+                        // the snapshot). A fully unowned (null both ways) conversation
+                        // stays visible, matching OwnershipValidator.requireOwnerOrAdmin.
+                        String recordedOwner = conversationDescriptor.getUserId();
+                        boolean ownerRecorded = !isNullOrEmpty(recordedOwner);
+                        if (!seesAllConversations && ownerRecorded
+                                && !conversationAccessGuard.canAccessConversation(recordedOwner)) {
+                            continue;
+                        }
+
                         populateDataToDescriptor(conversationDescriptor, conversationResourceId);
 
-                        // Ownership gate: skip conversations the caller does not own
-                        // (admins/auth-disabled short-circuit via seesAllConversations).
-                        // Runs after populateDataToDescriptor so the userId is resolved,
-                        // including the pre-v5.1.6 fallback to the snapshot's userId; an
-                        // unowned (legacy) conversation stays visible, matching
-                        // OwnershipValidator.requireOwnerOrAdmin.
-                        if (!seesAllConversations
+                        // Legacy safety net: the descriptor recorded no owner; populate
+                        // has now resolved it from the snapshot (pre-v5.1.6 fallback), so
+                        // re-check before returning it.
+                        if (!seesAllConversations && !ownerRecorded
                                 && !conversationAccessGuard.canAccessConversation(conversationDescriptor.getUserId())) {
                             continue;
                         }
@@ -189,7 +214,11 @@ public class RestConversationStore implements IRestConversationStore {
                 } else {
                     break; // prevent integer overflow
                 }
-            } while (!conversationDescriptors.isEmpty() && retConversationDescriptors.size() < limit);
+                // Bound the owner-filtered back-fill: stop once the scan budget is spent
+                // (admins/auth-disabled are never filtered, so they page only as far as
+                // filling `limit` requires and never hit this).
+            } while (!conversationDescriptors.isEmpty() && retConversationDescriptors.size() < limit
+                    && (seesAllConversations || scannedDescriptors < MAX_OWNER_SCAN));
 
             return retConversationDescriptors;
 

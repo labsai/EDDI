@@ -37,6 +37,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -200,5 +203,76 @@ class RestConversationStoreOwnershipTest {
 
         assertEquals(1, result.size());
         assertEquals(OWNER, result.get(0).getUserId());
+    }
+
+    @Test
+    @DisplayName("a foreign conversation is skipped WITHOUT loading its (expensive) memory snapshot")
+    void foreignRowSkippedWithoutSnapshotLoad() throws Exception {
+        // The owner is already recorded on the descriptor (every conversation since
+        // v5.1.6), so the ownership decision is made before populateDataToDescriptor —
+        // a foreign row never triggers a full conversation-memory document load. This
+        // is what keeps a non-admin listing from becoming O(store) document reads.
+        firstPage(descriptor("conv-owner", OWNER));
+
+        assertTrue(asIntruder().readConversationDescriptors(0, 20, null, null, null, null, null, null).isEmpty());
+
+        verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+    }
+
+    @Test
+    @DisplayName("a legacy (null-userId) descriptor is filtered by the owner resolved from its snapshot")
+    void legacyDescriptorFilteredBySnapshotResolvedOwner() throws Exception {
+        // Pre-v5.1.6 rows carry no owner on the descriptor; populateDataToDescriptor
+        // resolves it from the memory snapshot. The ownership check therefore MUST run
+        // after that resolution for these rows — otherwise a foreign legacy
+        // conversation
+        // would leak, because canAccessConversation(null) admits everyone. A fresh
+        // descriptor per call avoids populate's userId mutation bleeding across calls.
+        // The conversationId must be a valid hex id, or extractResourceId yields a null
+        // id, the snapshot lookup is skipped, and the owner is never resolved.
+        String legacyId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean()))
+                .thenAnswer(invocation -> List.of(descriptor(legacyId, null)));
+        var ownerSnapshot = new ConversationMemorySnapshot();
+        ownerSnapshot.setConversationState(ConversationState.READY);
+        ownerSnapshot.setConversationSteps(new ArrayList<>());
+        ownerSnapshot.setUserId(OWNER); // the snapshot supplies a (foreign-to-intruder) owner
+        when(conversationMemoryStore.loadConversationMemorySnapshot(legacyId)).thenReturn(ownerSnapshot);
+
+        // The intruder must NOT see OWNER's legacy conversation...
+        assertTrue(asIntruder().readConversationDescriptors(0, 20, null, null, null, null, null, null).isEmpty(),
+                "a legacy conversation whose snapshot resolves to another user must not leak");
+        // ...but the owner does.
+        assertEquals(1, asOwner().readConversationDescriptors(0, 20, null, null, null, null, null, null).size());
+    }
+
+    @Test
+    @DisplayName("a sparse owner's listing is bounded by a scan budget, not a full-store scan")
+    void scanIsBoundedForSparseOwner() throws Exception {
+        // Every page is a full page of another user's conversations; the caller owns
+        // none. Without a budget the loop would page the ENTIRE store (a DoS on a large
+        // shared deployment). With MAX_OWNER_SCAN=500 and a 100-row page it stops after
+        // 5 reads — and since the owner is recorded on each descriptor, no snapshot is
+        // loaded for the discarded foreign rows.
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+                .thenAnswer(invocation -> {
+                    int idx = invocation.getArgument(2);
+                    int lim = invocation.getArgument(3);
+                    var page = new ArrayList<ConversationDescriptor>();
+                    for (int i = 0; i < lim; i++) {
+                        page.add(descriptor("conv-foreign-" + idx + "-" + i, INTRUDER));
+                    }
+                    return page;
+                });
+
+        List<ConversationDescriptor> result = asOwner().readConversationDescriptors(
+                0, 100, null, null, null, null, null, null);
+
+        assertTrue(result.isEmpty());
+        // 5 pages of 100 = the 500-descriptor budget, then it stops (not the whole
+        // store).
+        verify(conversationDescriptorStore, times(5))
+                .readDescriptors(anyString(), any(), anyInt(), eq(100), anyBoolean());
+        verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
     }
 }
