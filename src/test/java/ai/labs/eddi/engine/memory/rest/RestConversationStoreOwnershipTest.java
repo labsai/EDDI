@@ -212,7 +212,10 @@ class RestConversationStoreOwnershipTest {
         // v5.1.6), so the ownership decision is made before populateDataToDescriptor —
         // a foreign row never triggers a full conversation-memory document load. This
         // is what keeps a non-admin listing from becoming O(store) document reads.
-        firstPage(descriptor("conv-owner", OWNER));
+        // The id is a valid hex id so that IF the check were reordered after populate,
+        // the resulting loadConversationMemorySnapshot(<hexId>) would be a non-null
+        // String that anyString() matches — making the never() assertion load-bearing.
+        firstPage(descriptor("bbbbbbbbbbbbbbbbbbbbbbbb", OWNER));
 
         assertTrue(asIntruder().readConversationDescriptors(0, 20, null, null, null, null, null, null).isEmpty());
 
@@ -253,14 +256,16 @@ class RestConversationStoreOwnershipTest {
         // none. Without a budget the loop would page the ENTIRE store (a DoS on a large
         // shared deployment). With MAX_OWNER_SCAN=500 and a 100-row page it stops after
         // 5 reads — and since the owner is recorded on each descriptor, no snapshot is
-        // loaded for the discarded foreign rows.
+        // loaded for the discarded foreign rows. Valid hex ids so the never()-load
+        // assertion stays load-bearing (a reordered populate would load a matchable
+        // id).
         when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
                 .thenAnswer(invocation -> {
                     int idx = invocation.getArgument(2);
                     int lim = invocation.getArgument(3);
                     var page = new ArrayList<ConversationDescriptor>();
                     for (int i = 0; i < lim; i++) {
-                        page.add(descriptor("conv-foreign-" + idx + "-" + i, INTRUDER));
+                        page.add(descriptor(String.format("%024x", (long) (idx * lim + i)), INTRUDER));
                     }
                     return page;
                 });
