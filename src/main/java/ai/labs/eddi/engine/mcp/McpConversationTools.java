@@ -515,15 +515,28 @@ public class McpConversationTools {
                                 @ToolArg(description = "Filter by log level: 'ERROR', 'WARN', 'INFO', 'DEBUG' (optional)") String level,
                                 @ToolArg(description = "Maximum number of log entries to return (default: 50)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
+        // An unscoped or agent-only read pulls from a shared server-side buffer that
+        // mixes every user's workflow logs, provider errors and diagnostics — an
+        // operator surface, not one user's data. The REST log endpoint
+        // (IRestLogAdmin) is @RolesAllowed("eddi-admin") for exactly this reason;
+        // require the same here so MCP is not the more permissive door. A
+        // conversation-scoped read stays owner-or-admin (below) — BoundedLogStore
+        // filters by exact conversationId, so it returns only that conversation's
+        // lines. Gated before the try so an admin-role denial surfaces as a role
+        // error rather than the ownership "Access denied" message.
+        String convFilter = (conversationId != null && !conversationId.isBlank()) ? conversationId : null;
+        if (convFilter == null) {
+            // In addition to the eddi-viewer floor above (which every tool in this
+            // class shares); eddi-admin holders are expected to also hold eddi-viewer.
+            requireRole(identity, authEnabled, "eddi-admin");
+        }
         try {
             int limitInt = limit != null ? limit : 50;
             String agentFilter = (agentId != null && !agentId.isBlank()) ? agentId : null;
-            String convFilter = (conversationId != null && !conversationId.isBlank()) ? conversationId : null;
             String levelFilter = (level != null && !level.isBlank()) ? level.toUpperCase() : null;
 
-            // Logs scoped to one conversation are that conversation's data.
-            // (An unscoped/agent-only read still returns cross-user server logs to any
-            // viewer — a separate, coarser gap tracked outside this change.)
+            // A conversation-scoped read is that one conversation's data — owner or
+            // admin only. (Unscoped/agent-only was gated to admin above.)
             if (convFilter != null) {
                 conversationAccessGuard.requireConversationOwner(convFilter);
             }

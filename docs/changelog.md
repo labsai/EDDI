@@ -5,6 +5,24 @@
 
 ---
 
+## 🔒 Security — `read_agent_logs`: admin-gate unscoped/agent-only log reads (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+**Closes the residual gap filed by the entry below.** The ownership pass gated `read_agent_logs` only when a `conversationId` was supplied; **without** one (unfiltered, or filtered by `agentId` alone) it still returned `BoundedLogStore` entries — workflow execution logs, LLM provider errors, internal diagnostics that can quote other users' conversation data — to any caller holding the coarse `eddi-viewer` role. That unscoped read pulls from a single shared server-side ring buffer that mixes every user's activity: an **operator surface**, not one user's data.
+
+**Why this is the same class of bug the ownership pass fixed:** the REST equivalent, `IRestLogAdmin` (`/administration/logs` — recent, `/history`, and `/stream`), is `@RolesAllowed("eddi-admin")` at the interface level. Every log read over REST already requires admin; the MCP tool was the more permissive door. This aligns MCP with REST.
+
+**Fix (`McpConversationTools.readAgentLogs`):** require `eddi-admin` when no `conversationId` filter is present; the conversation-scoped path is unchanged (`ConversationAccessGuard.requireConversationOwner` → owner-or-admin). The admin check is placed **before** the `try` so a role denial surfaces as an honest role error, not the ownership `accessDenied(...)` "you do not own this conversation" message (there is no conversation to own).
+
+**Design decisions**
+- **Owner-or-admin kept for the conversation-scoped path, rather than admin-only parity with REST.** `BoundedLogStore.getEntries` filters by **exact** `conversationId`, so a scoped read returns only that one conversation's log lines — no cross-user leakage. That preserves the self-service diagnostics the ownership pass deliberately added for `read_conversation` / `read_audit_trail`. The cross-user exposure was only ever in the *unscoped* path, and that is what is now closed. (An admin-only-for-all-log-reads posture was considered and rejected as an unnecessary regression of that self-service capability.)
+- **`agentId`-only counts as unscoped.** An agent filter still spans every user of that agent, so it is admin-gated too — only a `conversationId` narrows the read to a single owner's data.
+
+**Tests:** extended `McpConversationToolsOwnershipTest.ReadAgentLogs` — a viewer is denied the unscoped buffer and the agent-only buffer (`ForbiddenException`, and `BoundedLogStore` is never reached); owning one conversation does **not** grant the unscoped firehose; an admin may read both the unscoped and agent-scoped buffers; the existing owner/non-owner conversation-scoped cases still pass.
+
+---
+
 ## 🔒 Security — MCP conversation tools had no ownership check (2026-07-14)
 
 **Repo:** EDDI (`fix/mcp-conversation-ownership`, from `main`)

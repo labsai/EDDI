@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -281,6 +282,58 @@ class McpConversationToolsOwnershipTest {
             asOwner().readAgentLogs(AGENT_ID, CONV_ID, null, null);
 
             verify(boundedLogStore).getEntries(any(), eq(CONV_ID), any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("a viewer cannot read the unscoped, cross-user server log buffer")
+        void viewerDeniedForUnscopedLogs() {
+            assertThrows(ForbiddenException.class, () -> asIntruder().readAgentLogs(null, null, null, null));
+
+            verify(boundedLogStore, never()).getEntries(any(), any(), any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("an agent-only read is still the cross-user buffer — a viewer is denied")
+        void viewerDeniedForAgentOnlyLogs() {
+            assertThrows(ForbiddenException.class, () -> asIntruder().readAgentLogs(AGENT_ID, null, null, null));
+
+            verify(boundedLogStore, never()).getEntries(any(), any(), any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("owning one conversation does not grant the unscoped log firehose")
+        void conversationOwnerStillDeniedForUnscopedLogs() {
+            assertThrows(ForbiddenException.class, () -> asOwner().readAgentLogs(null, null, null, null));
+
+            verify(boundedLogStore, never()).getEntries(any(), any(), any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("an admin may read the unscoped server logs")
+        void adminAllowedForUnscopedLogs() {
+            when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
+
+            asAdmin().readAgentLogs(null, null, null, null);
+
+            verify(boundedLogStore).getEntries(any(), any(), any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("an admin may read agent-scoped server logs")
+        void adminAllowedForAgentOnlyLogs() {
+            when(boundedLogStore.getEntries(eq(AGENT_ID), any(), any(), anyInt())).thenReturn(List.of());
+
+            asAdmin().readAgentLogs(AGENT_ID, null, null, null);
+
+            verify(boundedLogStore).getEntries(eq(AGENT_ID), any(), any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("a whitespace-only conversationId is treated as unscoped — a viewer is denied")
+        void viewerDeniedForWhitespaceConversationId() {
+            assertThrows(ForbiddenException.class, () -> asIntruder().readAgentLogs(null, "   ", null, null));
+
+            verify(boundedLogStore, never()).getEntries(any(), any(), any(), anyInt());
         }
     }
 
