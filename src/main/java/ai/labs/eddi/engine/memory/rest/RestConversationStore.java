@@ -151,6 +151,13 @@ public class RestConversationStore implements IRestConversationStore {
                 }
 
                 for (var conversationDescriptor : conversationDescriptors) {
+                    // Enforce the scan budget per-descriptor, not just per-page, so a
+                    // non-admin scan honours MAX_OWNER_SCAN exactly rather than
+                    // overrunning by up to a page (and the exhaustion metric fires at
+                    // the documented bound).
+                    if (!seesAllConversations && scannedDescriptors >= MAX_OWNER_SCAN) {
+                        break;
+                    }
                     scannedDescriptors++;
                     try {
                         URI resourceUri = conversationDescriptor.getResource();
