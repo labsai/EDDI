@@ -20,6 +20,8 @@ import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -55,9 +57,10 @@ public class RestConversationStore implements IRestConversationStore {
     /**
      * Upper bound on how many descriptors an owner-filtered listing will scan
      * before giving up, so a caller who owns few/none of a large shared store
-     * cannot turn one list request into a full-collection scan. Mirrors the MCP
-     * conversation tools' owner-scan cap. Admins / auth-disabled callers are not
-     * filtered and never reach this bound.
+     * cannot turn one list request into a full-collection scan. This is the single
+     * owner-scan budget in the system — the MCP {@code list_conversations} tool
+     * delegates to this endpoint rather than scanning itself. Admins /
+     * auth-disabled callers are not filtered and never reach this bound.
      */
     private static final int MAX_OWNER_SCAN = 500;
 
@@ -71,6 +74,12 @@ public class RestConversationStore implements IRestConversationStore {
     private final Integer deleteEndedConversationsOnceOlderThanDays;
     private final Integer deleteMemoriesOlderThanDays;
     private final Instance<IAttachmentStore> attachmentStorageInstance;
+
+    // Field-injected per the AGENTS.md metrics pattern; the SimpleMeterRegistry
+    // default keeps it non-null in unit tests that construct this bean directly
+    // (CDI overwrites it with the real registry in production).
+    @Inject
+    MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -219,6 +228,14 @@ public class RestConversationStore implements IRestConversationStore {
                 // filling `limit` requires and never hit this).
             } while (!conversationDescriptors.isEmpty() && retConversationDescriptors.size() < limit
                     && (seesAllConversations || scannedDescriptors < MAX_OWNER_SCAN));
+
+            // Observability: a non-admin listing that stopped on the scan budget with
+            // fewer than `limit` results may have owned conversations beyond what was
+            // scanned (the List return type can't signal that truncation to the
+            // caller). Count it so a persistently-truncated user is not invisible.
+            if (!seesAllConversations && retConversationDescriptors.size() < limit && scannedDescriptors >= MAX_OWNER_SCAN) {
+                meterRegistry.counter("eddi.conversations.listing.owner_scan_exhausted").increment();
+            }
 
             return retConversationDescriptors;
 

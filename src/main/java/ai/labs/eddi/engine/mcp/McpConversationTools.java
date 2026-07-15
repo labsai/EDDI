@@ -32,6 +32,8 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.ForbiddenException;
@@ -78,6 +80,12 @@ public class McpConversationTools {
     private final ConversationAccessGuard conversationAccessGuard;
     private final boolean authEnabled;
 
+    // Field-injected per the AGENTS.md metrics pattern; the SimpleMeterRegistry
+    // default keeps it non-null in unit tests that construct this bean directly
+    // (CDI overwrites it with the real registry in production).
+    @Inject
+    MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
     @Inject
     public McpConversationTools(IConversationService conversationService, IRestAgentAdministration agentAdmin, IRestAgentStore agentStore,
             IRestInterfaceFactory restInterfaceFactory, IJsonSerialization jsonSerialization, BoundedLogStore boundedLogStore,
@@ -100,12 +108,15 @@ public class McpConversationTools {
     }
 
     /**
-     * Uniform, non-leaking denial for an MCP call on someone else's conversation.
-     * The message never distinguishes "not yours" from "does not exist", so it
-     * cannot be used to probe for the existence of other users' conversations.
+     * Uniform ownership denial for an MCP call on someone else's conversation. The
+     * message discloses neither the owner nor any conversation content and reads
+     * the same for every gated tool. It covers the ownership denial only — a
+     * genuinely missing conversation is reported by the tool's normal
+     * not-found/error path, so the two are not guaranteed to be indistinguishable.
      */
     private String accessDenied(String tool, String conversationId) {
         LOGGER.infof("%s denied: caller does not own conversation %s", tool, LogSanitizer.sanitize(conversationId));
+        meterRegistry.counter("eddi.mcp.conversation.access.denied", "tool", tool).increment();
         return errorJson("Access denied: you do not own this conversation");
     }
 
@@ -675,6 +686,7 @@ public class McpConversationTools {
             // disclosing which.
             LOGGER.infof("chat_managed denied for intent %s as user %s",
                     LogSanitizer.sanitize(intent), LogSanitizer.sanitize(userId));
+            meterRegistry.counter("eddi.mcp.conversation.access.denied", "tool", "chat_managed").increment();
             return errorJson("Access denied: you do not own this managed conversation");
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());

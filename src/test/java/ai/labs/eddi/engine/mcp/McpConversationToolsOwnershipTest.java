@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
@@ -117,6 +118,23 @@ class McpConversationToolsOwnershipTest {
 
     private void assertDenied(String result) {
         assertTrue(result.contains("Access denied"), "expected an access-denied result, got: " + result);
+    }
+
+    @Nested
+    @DisplayName("metrics")
+    class Metrics {
+
+        @Test
+        @DisplayName("an ownership denial increments the access-denied counter, tagged by tool")
+        void denialIncrementsCounterTaggedByTool() throws Exception {
+            var registry = new SimpleMeterRegistry();
+            var tools = toolsFor(INTRUDER, "eddi-viewer");
+            tools.meterRegistry = registry;
+
+            tools.readConversation(AGENT_ID, CONV_ID, null, null, null, null);
+
+            assertEquals(1.0, registry.counter("eddi.mcp.conversation.access.denied", "tool", "read_conversation").count());
+        }
     }
 
     @Nested

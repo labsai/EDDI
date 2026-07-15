@@ -185,6 +185,24 @@ class RestConversationStoreOwnershipTest {
     }
 
     @Test
+    @DisplayName("hitting the owner-scan budget increments the exhausted counter")
+    void scanBudgetExhaustedIncrementsCounter() throws Exception {
+        // Every page is full and foreign, so the non-admin scan never fills `limit`
+        // and stops on the MAX_OWNER_SCAN budget — the truncation the List can't
+        // signal.
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+                .thenReturn(List.of(descriptor("conv-foreign-a", INTRUDER), descriptor("conv-foreign-b", INTRUDER)));
+
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        var store = asOwner();
+        store.meterRegistry = registry;
+
+        store.readConversationDescriptors(0, 20, null, null, null, null, null, null);
+
+        assertEquals(1.0, registry.counter("eddi.conversations.listing.owner_scan_exhausted").count());
+    }
+
+    @Test
     @DisplayName("a personal list is back-filled across foreign pages, not starved by them")
     void personalListNotStarvedAcrossForeignPages() throws Exception {
         // The newest page is entirely other users' conversations; the caller's own
