@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -57,6 +58,7 @@ public class RestConversationStore implements IRestConversationStore {
     private final IConversationService conversationService;
     private final IUserMemoryStore userMemoryStore;
     private final IRuntime runtime;
+    private final ConversationAccessGuard conversationAccessGuard;
     private final Integer deleteEndedConversationsOnceOlderThanDays;
     private final Integer deleteMemoriesOlderThanDays;
     private final Instance<IAttachmentStore> attachmentStorageInstance;
@@ -72,6 +74,7 @@ public class RestConversationStore implements IRestConversationStore {
             IConversationService conversationService,
             IUserMemoryStore userMemoryStore,
             IRuntime runtime,
+            ConversationAccessGuard conversationAccessGuard,
             @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
             Integer deleteEndedConversationsOnceOlderThanDays,
             @ConfigProperty(name = "eddi.usermemories.deleteOlderThanDays")
@@ -85,6 +88,7 @@ public class RestConversationStore implements IRestConversationStore {
         this.conversationService = conversationService;
         this.userMemoryStore = userMemoryStore;
         this.runtime = runtime;
+        this.conversationAccessGuard = conversationAccessGuard;
         this.deleteEndedConversationsOnceOlderThanDays = deleteEndedConversationsOnceOlderThanDays;
         this.deleteMemoriesOlderThanDays = deleteMemoriesOlderThanDays;
         this.attachmentStorageInstance = attachmentStorageInstance;
@@ -104,6 +108,16 @@ public class RestConversationStore implements IRestConversationStore {
         if (limit > 100) {
             limit = 100;
         }
+
+        // Owner-scoping: a non-admin caller may only enumerate their own
+        // conversations. The descriptor store has no owner-scoped query, so we
+        // post-filter each descriptor by its resolved owner. Admins (and any caller
+        // when authorization is disabled) see all — resolved once, up front, so the
+        // per-row check is skipped entirely on that path. The existing do-while
+        // already re-pages until it fills `limit` (or the store is exhausted), so a
+        // filtered-out row is naturally back-filled from later pages — a caller's own
+        // conversations are never starved just because newer pages belong to others.
+        final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
 
         try {
             List<ConversationDescriptor> conversationDescriptors;
@@ -125,6 +139,17 @@ public class RestConversationStore implements IRestConversationStore {
                         }
 
                         populateDataToDescriptor(conversationDescriptor, conversationResourceId);
+
+                        // Ownership gate: skip conversations the caller does not own
+                        // (admins/auth-disabled short-circuit via seesAllConversations).
+                        // Runs after populateDataToDescriptor so the userId is resolved,
+                        // including the pre-v5.1.6 fallback to the snapshot's userId; an
+                        // unowned (legacy) conversation stays visible, matching
+                        // OwnershipValidator.requireOwnerOrAdmin.
+                        if (!seesAllConversations
+                                && !conversationAccessGuard.canAccessConversation(conversationDescriptor.getUserId())) {
+                            continue;
+                        }
 
                         // Agent filtering uses the agentResource URI (which contains
                         // the agent's ID), NOT the conversation's resource URI.

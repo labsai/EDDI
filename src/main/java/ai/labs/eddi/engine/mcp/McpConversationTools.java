@@ -42,7 +42,6 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import java.net.URI;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -64,17 +63,6 @@ public class McpConversationTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpConversationTools.class);
     private static final int CONVERSATION_TIMEOUT_SECONDS = 60;
-    /**
-     * Page size for descriptor scans — the conversation descriptor store's own cap.
-     */
-    private static final int MAX_DESCRIPTOR_FETCH = 100;
-    /**
-     * How many descriptors an owner-filtered listing will scan before giving up.
-     * The store has no owner-scoped query, so a caller's conversations can only be
-     * found by scanning; this bounds that scan, and a listing that stops here says
-     * so ({@code incomplete}) instead of reporting a partial list as complete.
-     */
-    private static final int MAX_OWNER_SCAN = 500;
 
     private final IConversationService conversationService;
     private final IRestAgentAdministration agentAdmin;
@@ -405,61 +393,19 @@ public class McpConversationTools {
                 return errorJson("Failed to get conversation store: " + e.getMessage());
             }
 
-            // Owner-scoping: a non-admin lists only their own conversations. The
-            // descriptor store has no owner-scoped query, so we post-filter. A single
-            // page would silently starve a personal list — on a shared agent the newest
-            // page can be entirely other users' conversations, which would report an
-            // empty list as if the caller had none. So we scan forward until the
-            // requested limit is filled or the scan budget is spent, and say so when we
-            // stop early rather than passing a partial list off as complete.
-            boolean seesAll = conversationAccessGuard.seesAllConversations();
-
-            List<ConversationDescriptor> visible;
-            boolean incomplete = false;
-            if (seesAll) {
-                visible = convStore.readConversationDescriptors(0, limitInt, null, null, agentId, ver == 0 ? null : ver, state, null);
-            } else {
-                visible = new ArrayList<>();
-                // The store's own paging skips deleted descriptors, so its cursor can
-                // outrun the rows it hands back and an offset-based scan may re-read a
-                // row. Dedupe by resource URI so a conversation is never listed twice.
-                var seen = new HashSet<URI>();
-                int scanned = 0;
-                while (visible.size() < limitInt && scanned < MAX_OWNER_SCAN) {
-                    var page = convStore.readConversationDescriptors(scanned, MAX_DESCRIPTOR_FETCH, null, null, agentId,
-                            ver == 0 ? null : ver, state, null);
-                    if (page.isEmpty()) {
-                        break; // store exhausted — the list is complete
-                    }
-                    scanned += page.size();
-                    for (var descriptor : page) {
-                        if (visible.size() >= limitInt) {
-                            break;
-                        }
-                        if (descriptor.getResource() != null && !seen.add(descriptor.getResource())) {
-                            continue; // already listed from an earlier page
-                        }
-                        if (conversationAccessGuard.canAccessConversation(descriptor.getUserId())) {
-                            visible.add(descriptor);
-                        }
-                    }
-                    if (page.size() < MAX_DESCRIPTOR_FETCH) {
-                        break; // last page — the list is complete
-                    }
-                }
-                // We stopped on the scan budget rather than on the store running out,
-                // so conversations owned by the caller may lie beyond what we scanned.
-                incomplete = visible.size() < limitInt && scanned >= MAX_OWNER_SCAN;
-            }
+            // Ownership filtering is enforced by the conversation store itself:
+            // RestConversationStore owner-filters this listing and back-fills the page
+            // for the caller, so a single call returns exactly the conversations this
+            // caller may see — admins (and any caller when authorization is disabled)
+            // get all, everyone else gets only their own. No MCP-side over-fetch loop
+            // is needed (and passing a row count as the store's page index over-skipped
+            // once past the first page).
+            List<ConversationDescriptor> visible = convStore.readConversationDescriptors(0, limitInt, null, null, agentId, ver == 0 ? null : ver,
+                    state, null);
 
             var result = new LinkedHashMap<String, Object>();
             result.put("agentId", agentId);
             result.put("count", visible.size());
-            if (incomplete) {
-                result.put("incomplete", true);
-                result.put("note", "Only the " + MAX_OWNER_SCAN + " most recent conversations of this agent were scanned; "
-                        + "older conversations of yours may exist but are not listed.");
-            }
             result.put("conversations", visible);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {

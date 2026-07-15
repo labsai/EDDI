@@ -5,6 +5,32 @@
 
 ---
 
+## 🔒 Security — `RestConversationStore` listing: owner-filter the conversation store enumeration (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+**Closes the first residual gap filed two entries below.** `RestConversationStore.readConversationDescriptors` — the `GET /conversationstore/conversations` endpoint declared on `IRestConversationStore` — carried no `@RolesAllowed` and no ownership filter, so it fell through to the global `authenticated` policy. With `authorization.enabled=true`, any authenticated caller could enumerate **every** user's conversation descriptors (id, agent, state, and the descriptor's `userId`). It is the REST twin of the MCP `list_conversations` gap fixed in the entry two below.
+
+**Fix (`RestConversationStore`):** inject the existing `ConversationAccessGuard` and filter the listing inside the endpoint's existing paging `do-while`. `seesAllConversations()` is resolved once up front (admins, and any caller when authorization is disabled, skip filtering entirely); otherwise each descriptor is dropped unless `canAccessConversation(descriptor.getUserId())` admits it. The check runs **after** `populateDataToDescriptor`, so the `userId` is resolved first (including the pre-v5.1.6 fallback to the snapshot's `userId`); an unowned/legacy conversation stays visible, matching `OwnershipValidator.requireOwnerOrAdmin`.
+
+**Design decisions**
+- **Owner-filter, not admin-only.** The endpoint backs the **EDDI-Manager** conversation views (its bundled UI calls `conversationstore/conversations`). Owner-filtering keeps admins' full visibility and still lets a non-admin Manager user see *their own* conversations; a blanket `@RolesAllowed("eddi-admin")` would 403 the listing for every non-admin and diverge from the MCP twin, which chose owner-filtering. The `ConversationAccessGuard` was purpose-built for a listing (`canAccessConversation` / `seesAllConversations`), so this reuses it rather than adding a check.
+- **No starvation, no dedup needed.** The store's `readDescriptors` treats its `index` as a **page number** (`ResourceFilter`: `skip = index * limit`), and the endpoint's `do-while` already re-pages (`index++`) until it fills `limit` or the store is exhausted. So a filtered-out row is naturally back-filled from a later, non-overlapping page — a caller's own conversations are never starved just because newer pages belong to others, and (unlike the MCP over-fetch) no resource-URI dedup is required.
+
+**MCP `list_conversations` simplified (same branch).** `McpConversationTools.listConversations` now issues a **single** store call and relays the result, dropping its per-caller `seesAll`/over-fetch branch, the 100-row chunking, the resource-URI dedup, and the `incomplete`/`note` signal. This is safe once the reality of the internal hop is accounted for — and that reality is why the removed loop was effectively dead code:
+- **The MCP→store call is an unauthenticated loopback.** `RestInterfaceFactory` builds a bare REST client to `http://127.0.0.1:<port>` with no `ClientHeadersFactory` and no header propagation anywhere, so the caller's identity does **not** cross that hop.
+- **Auth off (the default):** `DisabledAuthController` reports authorization disabled, so the loopback is allowed and the store's `seesAllConversations()` is `true` — it returns everything and the tool relays it. This matches the prior behavior exactly (the tool's own guard also admitted everything with auth off), so the simplification is **behavior-neutral** here.
+- **Auth on:** the `authenticated` HTTP policy rejects the token-less loopback with **401 before the endpoint method runs**, so the tool's internal listing is non-functional under `authorization.enabled=true` — and was **already** so, independently of this change. That is also why the removed scan-loop is safe to delete: its only runtime path (auth-on, non-admin) 401s upstream and never executes. (For the record, that loop also carried a latent bug — it passed `scanned += page.size()`, a row count, as the store's page `index`, so a second page would `skip = 100 * 100`; the ownership unit test masked it by mocking `IRestConversationStore` directly.)
+
+**Tests**
+- New `RestConversationStoreOwnershipTest` (real guard over a mocked `SecurityIdentity`, `authorization.enabled=true`): a caller sees only their own conversations and never another user's; a non-owner enumerating the store gets nothing of the owner's; an admin sees all; an unowned/legacy (null-owner) conversation stays visible; and a personal list is **back-filled across foreign pages** (first page all-foreign, the caller's own on the next) rather than starved.
+- `RestConversationStoreTest` and `RestConversationStoreFilterTest` updated to construct with the guard (stubbed `seesAllConversations() → true`, so their filter/paging assertions are unchanged).
+- `McpConversationToolsOwnershipTest.ListConversations` reduced to a single delegation test (one store call, no scan loop); the ownership-filtering assertions moved to `RestConversationStoreOwnershipTest`. `McpConversationToolsExtendedTest`'s `list_conversations` cases already exercised the single-call path (its guard has auth disabled) and are unchanged.
+
+**Remaining residual gaps** (deliberately out of scope): the single-conversation REST reads (`readRawConversationLog` / `readSimpleConversationLog`) and `getActiveConversations` carry no ownership check; **internal loopback REST calls via `RestInterfaceFactory` do not authenticate**, so MCP tools that call them are non-functional under `authorization.enabled=true` (a pre-existing, cross-cutting gap affecting every internal REST caller and the auth model, not just this endpoint — filed as a follow-up); `read_agent_logs` without a `conversationId` was closed in the entry immediately below.
+
+---
+
 ## 🔒 Security — `read_agent_logs`: admin-gate unscoped/agent-only log reads (2026-07-15)
 
 **Repo:** EDDI (`fix/mcp-conversation-ownership`)
