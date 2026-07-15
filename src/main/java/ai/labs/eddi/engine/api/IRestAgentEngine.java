@@ -229,5 +229,6 @@ public interface IRestAgentEngine {
     @Operation(summary = "List pending approvals",
                description = "Lists conversations currently awaiting human approval (bounded by limit, max 1000).")
     @APIResponse(responseCode = "200", description = "List of pending approvals.")
-    List<PendingApprovalSummary> listPendingApprovals(@QueryParam("limit") @DefaultValue("200") Integer limit);
+    List<PendingApprovalSummary> listPendingApprovals(@QueryParam("limit")
+    @DefaultValue("200") Integer limit);
 }
