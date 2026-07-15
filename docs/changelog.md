@@ -5,6 +5,18 @@
 
 ---
 
+## 🧵 ToolExecutionTrace — thread-safe recording (fixes CI flake) (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`) — a **pre-existing** bug on `main`, unrelated to the group work, that surfaced as an intermittent full-suite CI failure on this branch: `ToolExecutionServiceBranchTest.executeMultipleInParallel` → `expected <Hello, Alice!> but was <Error executing tool: ConcurrentModificationException>`. Committed here to unblock this branch's CI (per decision), clearly scoped as an independent fix.
+
+**Root cause (systematic-debugging, root-caused before any fix):** `ToolExecutionService.executeToolsParallel` shares **one** `ToolExecutionTrace` across every concurrent task by design (it's the accumulator). But the trace's `addToolCall` / `addFailedToolCall` mutated a plain `ArrayList`, a plain `HashMap` (`toolMetrics`), and non-atomic counters with no synchronization. Under real parallelism, `HashMap.computeIfAbsent` detects concurrent structural modification and throws `ConcurrentModificationException`; `executeTool` catches it and returns `"Error executing tool: " + e.getClass().getSimpleName()` (CME's message is null) — the exact observed string. This is a genuine production bug: `executeToolsParallelAndWait` is a live API.
+
+**Fix:** `synchronized` on both trace mutators, serializing concurrent recording (covers the collection adds, the `computeIfAbsent`, and the primitive accumulations). `updateMetrics` is private and only called under those locks. Reads happen after `CompletableFuture.allOf(...).join()` (a happens-before edge), so writer synchronization is sufficient.
+
+**Coverage:** new `concurrentToolsShareTraceWithoutCorruption` stress test — 50 rounds × 32 parallel tasks sharing one trace, asserting no task returns an error string and every call is recorded exactly once (no lost `ArrayList` updates). It fails reliably on the unsynchronized version (reproduced the CME at round 41) and passes 5/5 with the fix. The original 2-task test had too small a race window to be a reliable regression guard.
+
+---
+
 ## 🔍 Group conversations — Copilot PR-review response (2026-07-15)
 
 **Repo:** EDDI (`feat/group-followups`)
