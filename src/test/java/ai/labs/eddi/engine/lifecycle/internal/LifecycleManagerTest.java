@@ -21,6 +21,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -413,6 +414,42 @@ class LifecycleManagerTest {
             lifecycleManager.executeLifecycle(memory, null);
 
             verify(auditCollector).collect(any());
+        }
+
+        @Test
+        @DisplayName("a failing audit collector does not mask the original task exception")
+        void auditFailureDoesNotMaskTaskException() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("behavior"));
+            when(task.getType()).thenReturn("behavior_rules");
+            doThrow(new RuntimeException("task blew up"))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(memory.getAgentVersion()).thenReturn(1);
+            when(memory.size()).thenReturn(1);
+
+            var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+            doThrow(new RuntimeException("audit ledger unavailable"))
+                    .when(auditCollector).collect(any());
+            when(memory.getAuditCollector()).thenReturn(auditCollector);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            var thrown = assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            assertEquals("task blew up", thrown.getCause().getMessage(),
+                    "the original task failure must be the reported cause, not the audit error");
+            assertTrue(Arrays.stream(thrown.getCause().getSuppressed())
+                    .anyMatch(s -> "audit ledger unavailable".equals(s.getMessage())),
+                    "the audit failure should ride along as suppressed, not be swallowed");
         }
     }
 

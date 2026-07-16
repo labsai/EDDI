@@ -5,6 +5,27 @@
 
 ---
 
+## 🔒 Fix: CodeRabbit review — LifecycleManager failure-path hardening (2026-07-16)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+Addressed four CodeRabbit findings on the error-handling PR's own `LifecycleManager` failure path (PR #593). All four verified as valid against the code; each fix reuses existing infrastructure rather than adding a new utility.
+
+### Key Changes
+
+- **Audit must not bypass strict-write recovery (Major).** If `auditCollector.collect()` threw, the strict-write rollback was skipped — leaving the partial task writes it exists to remove — *and* the audit exception propagated out of the catch, replacing the original task failure. Strict-write recovery now runs **first** (it is integrity-critical), and audit collection is shielded in a try/catch that attaches any reporting error to the original exception via `addSuppressed` instead of masking it.
+- **Redact credentials from audit/SSE summaries (Major).** `summarizeForAudit()` only truncated; its output is persisted to the audit ledger and streamed to admins over `task_failed` SSE. It now applies the existing `SecretRedactionFilter.redact()` **before** truncating — cutting first can split a secret so the pattern no longer matches, leaving a fragment behind. URLs and class names are deliberately retained: the audience is privileged and needs them to diagnose (this is what distinguishes it from `summarizeException`, the LLM-facing path).
+- **Typed causes outrank wrapper messages (Minor).** `classifyError()` checked each level's message before descending, so a `"429"` wrapper around a `SocketTimeoutException` classified as `rate_limit`. It now scans the whole chain for typed causes first (authoritative), and only then falls back to message heuristics — substring matching is easily fooled (e.g. `"failed after 429ms"`).
+- **SSE failure logging (Minor).** The `task_failed` emission catch logged at DEBUG and dropped the throwable plus all context. Now WARN, with the throwable, the sanitized conversation id (`LogSanitizer`, CWE-117) and the task id.
+
+### Tests
+
+Four regression tests added, each of which fails under the previous behavior: typed-cause precedence, credential redaction, redact-before-truncate ordering, and audit-failure-does-not-mask-the-original.
+
+---
+
 ## 🐛 Fix: two stale tests red since the error-handling PR (2026-07-16)
 
 **Repo:** EDDI (`feat/error-handling-recovery`)

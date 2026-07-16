@@ -109,6 +109,15 @@ class LifecycleManagerErrorClassificationTest {
         }
 
         @Test
+        @DisplayName("typed cause outranks a wrapper message — '429' wrapping a SocketTimeoutException is a timeout")
+        void typedCauseOutranksWrapperMessage() {
+            var root = new SocketTimeoutException("read timed out");
+            var wrapped = new RuntimeException("HTTP 429 Too Many Requests", root);
+
+            assertEquals("timeout", LifecycleManager.classifyError(wrapped));
+        }
+
+        @Test
         @DisplayName("returns 'rate_limit' for 'too many' in message")
         void tooManyMessage() {
             assertEquals("rate_limit",
@@ -167,6 +176,29 @@ class LifecycleManagerErrorClassificationTest {
                     new RuntimeException("   "));
 
             assertEquals("RuntimeException", result);
+        }
+
+        @Test
+        @DisplayName("redacts credentials — this summary reaches the audit ledger and admin SSE")
+        void redactsCredentials() {
+            var result = LifecycleManager.summarizeForAudit(
+                    new RuntimeException("LLM call rejected key sk-abcdefghijklmnopqrstuvwxyz123456"));
+
+            assertFalse(result.contains("sk-abcdefghijklmnopqrstuvwxyz123456"));
+            assertTrue(result.contains("sk-<REDACTED>"));
+        }
+
+        @Test
+        @DisplayName("redacts before truncating, so the cut cannot leave a secret fragment behind")
+        void redactsBeforeTruncating() {
+            // The key straddles the 500-char cut. Truncating first would leave an
+            // 'sk-...' fragment too short to match the redaction pattern.
+            String message = "x".repeat(480) + " sk-abcdefghijklmnopqrstuvwxyz123456";
+
+            var result = LifecycleManager.summarizeForAudit(new RuntimeException(message));
+
+            assertFalse(result.contains("sk-abcdefg"), "no secret fragment may survive the cut");
+            assertTrue(result.contains("sk-<REDACTED>"));
         }
 
         @Test
