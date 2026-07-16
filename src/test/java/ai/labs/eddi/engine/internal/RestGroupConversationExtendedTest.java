@@ -48,7 +48,13 @@ class RestGroupConversationExtendedTest {
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
         when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
-        restGroupConversation = new RestGroupConversation(groupService, jsonSerialization, identity, ownershipValidator);
+        var hitlAccessGuard = new ai.labs.eddi.engine.hitl.HitlAccessGuard(
+                identity, ownershipValidator,
+                mock(ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore.class),
+                mock(ai.labs.eddi.engine.api.IConversationService.class),
+                groupService);
+        restGroupConversation = new RestGroupConversation(
+                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
         eventSink = mock(SseEventSink.class);
         sse = mock(Sse.class);
 

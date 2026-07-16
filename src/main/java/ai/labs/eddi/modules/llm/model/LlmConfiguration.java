@@ -318,6 +318,23 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private Integer streamingTimeoutSeconds;
 
+        /**
+         * Per-task multimodal capability overrides. Each of {@code vision},
+         * {@code documents}, {@code audio} may be {@code "auto"} (defer to
+         * deployment/built-in defaults), {@code "on"} (force enabled) or {@code "off"}
+         * (force disabled). {@code null} means all defer.
+         *
+         * @since 6.1.0
+         */
+        private MultimodalOverride multimodal;
+
+        /**
+         * Per-task tool-approval gating override (tool-level HITL). When present, it
+         * FULLY REPLACES the agent-level {@code hitlConfig.toolApprovals} for this task
+         * (no list merging). Absent = inherit the agent-level default.
+         */
+        private ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals;
+
         // === Helper Methods ===
 
         /**
@@ -352,6 +369,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setId(String id) {
             this.id = id;
+        }
+
+        public ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig getToolApprovals() {
+            return toolApprovals;
+        }
+
+        public void setToolApprovals(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals) {
+            this.toolApprovals = toolApprovals;
         }
 
         public String getType() {
@@ -666,6 +691,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.streamingTimeoutSeconds = streamingTimeoutSeconds;
         }
 
+        public MultimodalOverride getMultimodal() {
+            return multimodal;
+        }
+
+        public void setMultimodal(MultimodalOverride multimodal) {
+            this.multimodal = multimodal;
+        }
+
     }
 
     /**
@@ -755,6 +788,44 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setOnStreamingTimeout(String onStreamingTimeout) {
             this.onStreamingTimeout = onStreamingTimeout;
+        }
+    }
+
+    /**
+     * Per-task multimodal capability overrides. Each field is a tri-state token
+     * {@code "auto"|"on"|"off"} parsed by
+     * {@link ai.labs.eddi.modules.llm.capability.ModelCapabilityService.Support#parse}.
+     * Unset fields default to {@code "auto"}.
+     *
+     * @since 6.1.0
+     */
+    public static class MultimodalOverride {
+        private String vision = "auto";
+        private String documents = "auto";
+        private String audio = "auto";
+
+        public String getVision() {
+            return vision;
+        }
+
+        public void setVision(String vision) {
+            this.vision = vision;
+        }
+
+        public String getDocuments() {
+            return documents;
+        }
+
+        public void setDocuments(String documents) {
+            this.documents = documents;
+        }
+
+        public String getAudio() {
+            return audio;
+        }
+
+        public void setAudio(String audio) {
+            this.audio = audio;
         }
     }
 

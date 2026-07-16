@@ -4,11 +4,13 @@
  */
 package ai.labs.eddi.engine.api;
 
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.container.AsyncResponse;
@@ -191,4 +193,56 @@ public interface IRestAgentEngine {
     Response resetState(@PathParam("conversationId") String conversationId,
                         @QueryParam("state")
                         @DefaultValue("READY") String targetState);
+
+    // --- Cancel ---
+
+    @POST
+    @Path("/{conversationId}/cancel")
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "Cancel a conversation", description = "Gracefully cancels the conversation, stopping any in-progress processing.")
+    @APIResponse(responseCode = "200", description = "Conversation cancelled.")
+    @APIResponse(responseCode = "404", description = "Conversation not found.")
+    @APIResponse(responseCode = "409", description = "Nothing to cancel (conversation neither paused nor executing).")
+    Response cancelConversation(@PathParam("conversationId") String conversationId);
+
+    // --- HITL (Human-in-the-Loop) ---
+
+    @POST
+    @Path("/{conversationId}/resume")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "Resume a paused conversation",
+               description = "Submits a human decision (APPROVED/REJECTED) to resume a conversation that is in AWAITING_HUMAN state.")
+    @APIResponse(responseCode = "200", description = "Conversation resumed.")
+    @APIResponse(responseCode = "400", description = "Missing or invalid decision body.")
+    @APIResponse(responseCode = "404", description = "Conversation not found.")
+    @APIResponse(responseCode = "409", description = "Conversation is not in AWAITING_HUMAN state.")
+    Response resumeConversation(@PathParam("conversationId") String conversationId,
+                                HitlDecision decision);
+
+    @GET
+    @NoCache
+    @Path("/{conversationId}/approval-status")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "Get HITL approval status",
+               description = "Returns the approval status of a paused conversation. Use detail=full for the complete memory snapshot "
+                       + "(approver-only callers may use detail=full only while the conversation is awaiting approval).")
+    @APIResponse(responseCode = "200", description = "Approval status.")
+    @APIResponse(responseCode = "403", description = "Approver-only caller requested detail=full on a non-paused conversation.")
+    @APIResponse(responseCode = "404", description = "Conversation not found.")
+    Response getApprovalStatus(@PathParam("conversationId") String conversationId,
+                               @QueryParam("detail")
+                               @DefaultValue("summary") String detail);
+
+    @GET
+    @NoCache
+    @Path("/pending-approvals")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "List pending approvals",
+               description = "Lists conversations currently awaiting human approval (bounded by limit, max 1000).")
+    @APIResponse(responseCode = "200", description = "List of pending approvals.")
+    List<PendingApprovalSummary> listPendingApprovals(@QueryParam("limit")
+    @DefaultValue("200") Integer limit);
 }

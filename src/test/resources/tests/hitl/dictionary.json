@@ -1,0 +1,16 @@
+{
+  "language": "en",
+  "words": [
+    {
+      "word": "hello",
+      "expressions": "greeting(hello)",
+      "frequency": 0
+    },
+    {
+      "word": "delete",
+      "expressions": "delete_account(delete)",
+      "frequency": 0
+    }
+  ],
+  "phrases": []
+}

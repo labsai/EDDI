@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -18,6 +19,9 @@ import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import dev.langchain4j.store.embedding.mongodb.MongoDbEmbeddingStore;
 import dev.langchain4j.store.embedding.pgvector.PgVectorEmbeddingStore;
 import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
+import com.mongodb.ConnectionString;
+import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoDriverInformation;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -48,6 +52,8 @@ import java.util.regex.Pattern;
 public class EmbeddingStoreFactory {
 
     private static final Logger LOGGER = Logger.getLogger(EmbeddingStoreFactory.class);
+    private static final MongoDriverInformation DRIVER_INFO = MongoDriverInfoFactory.build();
+
     private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
     private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
     private static final Pattern TRAILING_UNDERSCORES = Pattern.compile("_+$");
@@ -162,7 +168,12 @@ public class EmbeddingStoreFactory {
         LOGGER.infof("Building MongoDB Atlas store: database=%s, collection=%s, index=%s", sanitize(databaseName), sanitize(collectionName),
                 sanitize(indexName));
 
-        MongoClient mongoClient = mongoClientCache.computeIfAbsent(connectionString, MongoClients::create);
+        MongoClient mongoClient = mongoClientCache.computeIfAbsent(connectionString, cs -> {
+            MongoClientSettings settings = MongoClientSettings.builder()
+                    .applyConnectionString(new ConnectionString(cs))
+                    .build();
+            return MongoClients.create(settings, DRIVER_INFO);
+        });
 
         return MongoDbEmbeddingStore.builder().fromClient(mongoClient).databaseName(databaseName).collectionName(collectionName).indexName(indexName)
                 .build();

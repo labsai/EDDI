@@ -96,6 +96,7 @@ LABEL name="labsai/eddi" \
       Built on Quarkus for cloud-native, high-performance operation." \
       maintainer="LABS.AI GmbH <contact@labs.ai>" \
       url="https://eddi.labs.ai" \
+      org.opencontainers.image.source="https://github.com/labsai/EDDI" \
       io.k8s.display-name="EDDI AI Platform" \
       io.k8s.description="Multi-Agent AI Orchestration Middleware" \
       io.openshift.tags="ai,conversational-ai,llm,chatbot,multi-agent,quarkus"

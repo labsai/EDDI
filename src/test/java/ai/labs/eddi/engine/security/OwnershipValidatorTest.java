@@ -300,4 +300,72 @@ class OwnershipValidatorTest {
                     "Expected message to contain 'conversation', was: " + ex.getMessage());
         }
     }
+
+    // ==================== requireOwnerAdminOrApprover ====================
+
+    @Nested
+    @DisplayName("requireOwnerAdminOrApprover()")
+    class RequireOwnerAdminOrApprover {
+
+        private SecurityIdentity approverIdentity(String principalName) {
+            var identity = mock(SecurityIdentity.class);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn(principalName);
+            when(identity.getPrincipal()).thenReturn(principal);
+            when(identity.isAnonymous()).thenReturn(false);
+            when(identity.hasRole("eddi-admin")).thenReturn(false);
+            when(identity.hasRole("eddi-approver")).thenReturn(true);
+            return identity;
+        }
+
+        @Test
+        @DisplayName("allows owner")
+        void allows_owner() {
+            var validator = new OwnershipValidator(true);
+            var identity = authenticatedIdentity(CALLER_ID, false);
+            assertDoesNotThrow(() -> validator.requireOwnerAdminOrApprover(identity, CALLER_ID, "conversation"));
+        }
+
+        @Test
+        @DisplayName("allows admin (non-owner)")
+        void allows_admin() {
+            var validator = new OwnershipValidator(true);
+            var identity = authenticatedIdentity(CALLER_ID, true);
+            assertDoesNotThrow(() -> validator.requireOwnerAdminOrApprover(identity, OTHER_USER, "conversation"));
+        }
+
+        @Test
+        @DisplayName("allows eddi-approver role (non-owner)")
+        void allows_approver_role() {
+            var validator = new OwnershipValidator(true);
+            var identity = approverIdentity(CALLER_ID);
+            assertDoesNotThrow(() -> validator.requireOwnerAdminOrApprover(identity, OTHER_USER, "conversation"));
+        }
+
+        @Test
+        @DisplayName("denies non-owner without approver/admin role")
+        void denies_nonOwner_noApproverRole() {
+            var validator = new OwnershipValidator(true);
+            var identity = authenticatedIdentity(CALLER_ID, false);
+            assertThrows(ForbiddenException.class,
+                    () -> validator.requireOwnerAdminOrApprover(identity, OTHER_USER, "conversation"));
+        }
+
+        @Test
+        @DisplayName("denies anonymous on unowned resource (fail-closed)")
+        void denies_anonymous_unowned() {
+            var validator = new OwnershipValidator(true);
+            var identity = anonymousIdentity();
+            assertThrows(ForbiddenException.class,
+                    () -> validator.requireOwnerAdminOrApprover(identity, null, "conversation"));
+        }
+
+        @Test
+        @DisplayName("allows everything when auth disabled")
+        void allows_everything_authDisabled() {
+            var validator = new OwnershipValidator(false);
+            var identity = authenticatedIdentity(CALLER_ID, false);
+            assertDoesNotThrow(() -> validator.requireOwnerAdminOrApprover(identity, OTHER_USER, "conversation"));
+        }
+    }
 }
