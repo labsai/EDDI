@@ -5,6 +5,25 @@
 
 ---
 
+## 🐛 Fix: two stale tests red since the error-handling PR (2026-07-16)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+CI on this branch had been red since 2026-07-08 (commit `c054b430`, "Tests run: 9776, Failures: 1, Errors: 1") — both failures pre-date the `origin/main` merge and were surfaced again by it. Each is a stale test asserting a contract the error-handling PR itself deliberately superseded. Test-only changes; no production behavior altered.
+
+### Key Changes
+
+- **`StreamingLegacyChatExecutorTest.execute_error_throwsRuntimeException`** — asserted that a streaming error *always* throws. The PR intentionally changed this: an error arriving *after* partial tokens now returns the partial text with a `streaming_error_partial` warning, and only a zero-content error throws. Retargeted the test at the zero-content case (matching its name) and added `execute_errorAfterPartial_returnsPartialContent` to cover the partial contract, preserving the original token-forwarding assertion.
+- **`ConversationExtendedTest.saySucceeds`** — stubbed `getConversationState()` with a call-count-sensitive consecutive-return sequence (`READY`, then `IN_PROGRESS`). The PR's `EXECUTION_INTERRUPTED` auto-recovery added a state read at the top of `runStep`, consuming the `READY`, so the in-progress guard saw `IN_PROGRESS` and threw `ConversationNotReadyException`. The mock now tracks state like real memory (returns whatever was last set), making it robust to how often production reads it.
+
+### Design Decisions
+
+- Fixed the **tests**, not the production code: both behaviors (partial-response salvage, interrupted-state auto-recovery) are intentional, documented features of this PR and are covered by `StreamingLegacyChatExecutorRetryTest`. The tests simply encoded the pre-feature contract.
+
+---
+
 ## 🧹 Refactor: Remove duplicate `RetryConfiguration` shim in LlmConfiguration (2026-07-16)
 
 **Repo:** EDDI (`feat/error-handling-recovery`)
