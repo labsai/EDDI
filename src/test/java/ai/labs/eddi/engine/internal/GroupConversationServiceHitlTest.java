@@ -37,6 +37,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -45,6 +46,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -309,6 +311,59 @@ class GroupConversationServiceHitlTest {
 
             // Verify updateIfState was called with AWAITING_APPROVAL (CAS)
             verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+        }
+
+        @Test
+        @DisplayName("resuming a paused CONTINUATION re-runs the remaining phases with the follow-up question")
+        void resumeUsesTheContinuationQuestion_notTheStaleRoundOneQuestion() throws Exception {
+            // A continuation round sets resumeQuestion; originalQuestion still holds the
+            // round-1 question (the UI renders it as the conversation title). If resume
+            // read originalQuestion, every post-pause phase — and the final synthesis —
+            // would silently answer the WRONG question.
+            var gc = new GroupConversation();
+            gc.setId("gc-resume");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(0);
+            gc.setPausedPhaseName("Phase0");
+            gc.setPausedAt(Instant.now());
+            gc.setOriginalQuestion("round one question");
+            gc.setResumeQuestion("round two question");
+            gc.setRound(2);
+
+            doReturn(gc).when(conversationStore).read("gc-resume");
+
+            var phases = List.of(
+                    new DiscussionPhase("Phase0", PhaseType.OPINION),
+                    new DiscussionPhase("Phase1", PhaseType.CRITIQUE));
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            stubAgentSay();
+
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(decision);
+
+            service.resumeDiscussion("gc-resume", request, null);
+
+            // The resumed leg runs on a background thread; the phase prompt is built from
+            // this data map, so it carries the question the agents actually answer.
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+            verify(templatingEngine, timeout(3000).atLeastOnce())
+                    .processTemplate(anyString(), captor.capture(), any(ITemplatingEngine.TemplateMode.class));
+
+            var questions = captor.getAllValues().stream()
+                    .map(d -> String.valueOf(d.get("question")))
+                    .distinct()
+                    .toList();
+            assertTrue(questions.contains("round two question"),
+                    "resume must re-run the phases with the continuation question, but used: " + questions);
+            assertFalse(questions.contains("round one question"),
+                    "resume must NOT fall back to the stale round-1 question: " + questions);
         }
     }
 

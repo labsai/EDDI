@@ -28,6 +28,15 @@ public interface IGroupConversationStore {
     List<GroupConversation> listByGroupId(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
 
     /**
+     * Atomically transition a group conversation from expectedState to newState.
+     * Returns true if the transition succeeded (state matched), false if the state
+     * had already changed (concurrent modification).
+     */
+    boolean compareAndSetState(String id, GroupConversation.GroupConversationState expectedState,
+                               GroupConversation.GroupConversationState newState)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    /**
      * Update the group conversation only if it is currently in the expected state.
      * Throws {@link IResourceStore.ResourceModifiedException} if the conversation
      * exists but the state does not match (CAS conflict — REST: 409), and

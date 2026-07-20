@@ -69,6 +69,7 @@ public interface IRestGroupConversation {
     @Operation(summary = "Delete a group conversation", description = "Deletes a group conversation and its member conversations.")
     @APIResponse(responseCode = "200", description = "Group conversation deleted.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Another operation (follow-up / continue / close) is in progress — retry.")
     Response deleteGroupConversation(@PathParam("groupId") String groupId, @PathParam("groupConversationId") String groupConversationId);
 
     @GET
@@ -80,6 +81,78 @@ public interface IRestGroupConversation {
     @DefaultValue("0") Integer index,
                                                    @QueryParam("limit")
                                                    @DefaultValue("20") Integer limit);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/followup")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Follow up with a group member",
+               description = "Send a follow-up question to a specific member agent in a completed "
+                       + "group conversation. The agent retains full context from the discussion. "
+                       + "Both the question and response are recorded on the group transcript. "
+                       + "The targetAgentId field accepts either an agent ID or a display name. "
+                       + "Returns the full updated GroupConversation including the new transcript entries.")
+    @APIResponse(responseCode = "200", description = "Updated group conversation with follow-up on transcript.")
+    @APIResponse(responseCode = "400", description = "Missing 'question' or 'targetAgentId'.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found, or the target agent is not a member.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state, or another operation is in progress.")
+    @APIResponse(responseCode = "502", description = "The member agent could not be reached / the agent call failed.")
+    @APIResponse(responseCode = "504", description = "The member agent did not respond within the timeout.")
+    Response followUpWithMember(@PathParam("groupId") String groupId,
+                                @PathParam("groupConversationId") String gcId,
+                                FollowUpRequest request);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/continue")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Continue a group discussion",
+               description = "Re-run all discussion phases with a new question. All agents retain "
+                       + "memory of prior rounds. The round counter increments. NOTE: 'attachments' are "
+                       + "NOT supported on a continuation (they are only shared with member agents when "
+                       + "the discussion starts) and are rejected with 400 rather than silently ignored.")
+    @APIResponse(responseCode = "200", description = "Updated group conversation with new round.")
+    @APIResponse(responseCode = "400", description = "Missing 'question', or 'attachments' supplied (unsupported on continuation).")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state, or another operation is in progress.")
+    @APIResponse(responseCode = "502", description = "A member agent could not be reached during the round.")
+    @APIResponse(responseCode = "504", description = "A member agent did not respond within the timeout.")
+    Response continueDiscussion(@PathParam("groupId") String groupId,
+                                @PathParam("groupConversationId") String gcId,
+                                DiscussRequest request);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/continue/stream")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.SERVER_SENT_EVENTS)
+    @Operation(summary = "Continue a group discussion with SSE streaming",
+               description = "Re-run all discussion phases with SSE event streaming for progress. "
+                       + "Emits round_start (new round marker) followed by the same events as the "
+                       + "initial stream (phase_start, speaker_start, speaker_complete, phase_complete, "
+                       + "synthesis_start, group_complete, group_error), plus the HITL events "
+                       + "(awaiting_approval, hitl_resume, cancelled, member_pause_skipped). NOTE: "
+                       + "'attachments' are NOT supported on a continuation and are rejected with a "
+                       + "terminal group_error event rather than silently ignored.")
+    @APIResponse(responseCode = "200", description = "SSE event stream of continuation progress.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    void continueDiscussionStreaming(@PathParam("groupId") String groupId,
+                                     @PathParam("groupConversationId") String gcId,
+                                     DiscussRequest request,
+                                     @Context SseEventSink eventSink, @Context Sse sse);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/close")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Close a group conversation",
+               description = "Permanently close a group conversation. Ends all member conversations "
+                       + "and cleans up ephemeral agents. No further follow-ups or continuations "
+                       + "are accepted after closing. "
+                       + "Lifecycle: discuss → COMPLETED → [followup|continue]* → close → CLOSED (terminal).")
+    @APIResponse(responseCode = "200", description = "Closed group conversation.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED, FAILED or CANCELLED state.")
+    Response closeGroupConversation(@PathParam("groupId") String groupId,
+                                    @PathParam("groupConversationId") String gcId);
 
     @POST
     @Path("/{groupId}/conversations/{groupConversationId}/cancel")
@@ -147,6 +220,13 @@ public interface IRestGroupConversation {
         public DiscussRequest(String question, String userId) {
             this(question, userId, null);
         }
+    }
+
+    /**
+     * Request body for following up with a specific group member.
+     * {@code targetAgentId} accepts either a raw agent ID or a display name.
+     */
+    record FollowUpRequest(String question, String targetAgentId, String userId) {
     }
 
     /**

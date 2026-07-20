@@ -5,6 +5,332 @@
 
 ---
 
+## 🔀 Merge `origin/main` into `feat/group-followups` — conflict resolution (2026-07-20)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Merged `origin/main` (multi-model cascade enterprise hardening + MCP/REST conversation-ownership security hardening) to resolve PR #595's merge conflicts against `main`. Two files conflicted, both non-substantive:
+
+- **`ToolExecutionTrace.java`:** both branches independently documented the same `synchronized` rationale on `addToolCall`/`addFailedToolCall` — ours as a Javadoc block above each method, `origin/main`'s as an inline comment restating it. Kept the existing Javadoc, dropped the redundant inline comment.
+- **`docs/changelog.md`:** both branches appended new entries directly below the file header. Resolved as a union, newest-first per branch: this branch's own entries (group follow-ups work, 2026-07-08 to 2026-07-15) kept first, followed by `origin/main`'s entries (MCP/REST conversation-ownership hardening + multi-model cascade, 2026-07-03 to 2026-07-15).
+
+---
+
+## 🧵 ToolExecutionTrace — thread-safe recording (fixes CI flake) (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`) — a **pre-existing** bug on `main`, unrelated to the group work, that surfaced as an intermittent full-suite CI failure on this branch: `ToolExecutionServiceBranchTest.executeMultipleInParallel` → `expected <Hello, Alice!> but was <Error executing tool: ConcurrentModificationException>`. Committed here to unblock this branch's CI (per decision), clearly scoped as an independent fix.
+
+**Root cause (systematic-debugging, root-caused before any fix):** `ToolExecutionService.executeToolsParallel` shares **one** `ToolExecutionTrace` across every concurrent task by design (it's the accumulator). But the trace's `addToolCall` / `addFailedToolCall` mutated a plain `ArrayList`, a plain `HashMap` (`toolMetrics`), and non-atomic counters with no synchronization. Under real parallelism, `HashMap.computeIfAbsent` detects concurrent structural modification and throws `ConcurrentModificationException`; `executeTool` catches it and returns `"Error executing tool: " + e.getClass().getSimpleName()` (CME's message is null) — the exact observed string. This is a genuine production bug: `executeToolsParallelAndWait` is a live API.
+
+**Fix:** `synchronized` on both trace mutators, serializing concurrent recording (covers the collection adds, the `computeIfAbsent`, and the primitive accumulations). `updateMetrics` is private and only called under those locks. Reads happen after `CompletableFuture.allOf(...).join()` (a happens-before edge), so writer synchronization is sufficient.
+
+**Coverage:** new `concurrentToolsShareTraceWithoutCorruption` stress test — 50 rounds × 32 parallel tasks sharing one trace, asserting no task returns an error string and every call is recorded exactly once (no lost `ArrayList` updates). It fails reliably on the unsynchronized version (reproduced the CME at round 41) and passes 5/5 with the fix. The original 2-task test had too small a race window to be a reliable regression guard.
+
+---
+
+## 🔍 Group conversations — Copilot PR-review response (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Copilot flagged 5 items on the pushed branch. Each was adversarially verified against the actual code (a 6-agent verification workflow plus independent reading) before implementing — external review is evaluated, not rubber-stamped. **All 5 confirmed**, all fixed:
+
+- **MCP raw-exception leak (×3, Medium)** — `followup_with_member`, `continue_group_discussion`, `close_group_conversation` returned `errorJson(e.getMessage())`, forwarding raw internal exception text to MCP callers (information exposure). Now each logs the full throwable server-side (`LOGGER.error(msg, e)`) and returns a stable curated `errorJson("Failed to …", "INTERNAL", null)` — matching the hardened `McpHitlTools` convention. (Verified the 3-arg `errorJson` overload exists, so this compiles; Copilot's suggested form was correct despite its own hedge.)
+- **REST 400 missing `TEXT_PLAIN` (Medium)** — `rejectAttachmentsOnContinue()` was the sole error response in `RestGroupConversation` not setting `.type(TEXT_PLAIN)`. Added, for content-type consistency with every sibling 400/404/409/504.
+- **Stale concurrency comment (Low)** — the `operationsInProgress` field comment called `compareAndSetState` a "best-effort read-check-update". That is now false: `GroupConversationStore.compareAndSetState` does a fast-path read then an **atomic** storage-layer conditional write (`storeIfFieldEquals` → single Mongo `updateOne` / Postgres `UPDATE` filtered on the current `state`). Corrected the comment: the in-memory `Set` is a single-node fast-fail optimization; the cluster-wide guard is the storage CAS.
+
+**Coverage (mutation-verified):** three new `McpGroupToolsTest` cases drive each tool's generic `catch` (service throws a recognizable `boom-internal-detail-42`) and assert the response does **not** contain the raw text and **does** contain the curated message + `"errorCode":"INTERNAL"`. Reverting all three curations fails exactly those three tests (and nothing else) — proving they pin the non-leak contract. 46 `McpGroupToolsTest` cases pass (was 43); full group/MCP suite green; Checkstyle clean.
+
+**Deliberately out of scope:** the same `errorJson(e.getMessage())` pattern exists in ~10 pre-existing catch blocks in `McpGroupTools` (and other MCP tool classes), and two existing tests *depend* on those messages (`start_group_discussion` → "Group not found", `delete` → "Not found"). A blanket sweep would break tested behaviour and expand well beyond this PR, so it is left as a separate follow-up rather than bundled here.
+
+---
+
+## 🌐 Group follow-up/continue — status-split completion: mid-round timeout → 504 (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+An adversarial re-review of the status-code split found one path the split had missed. `executeAgentTurn` (the per-member turn used by the *initial* discussion and re-run by every continuation) still threw a **base** `GroupDiscussionException` on an ABORT-policy member timeout — so a genuine member-agent timeout mid-round mapped to `502 Bad Gateway`, not the `504 Gateway Timeout` the split documents. Every other timeout site was already `GroupTimeoutException`; this was the last one.
+
+- **Fix:** `GroupConversationService.executeAgentTurn` now throws `GroupTimeoutException` on the `onAgentFailure=ABORT` timeout branch. `executeDiscussion`'s re-wrap preserves the subtype, so it surfaces as `504`.
+- **REST body hedge:** `continueDiscussion`'s `502` (`GroupExecutionException`) body previously claimed only "a member agent could not be reached". That catch also covers unrunnable-config failures, so the body now reads "a member agent or a required dependency could not be reached, or the group is misconfigured" — no longer asserting a single cause it cannot verify.
+- **Coverage (mutation-verified):** new `GroupConversationServiceExtendedTest.FailurePolicies#abortPolicy_agentTimesOut_throwsGroupTimeoutException` drives a real member timeout (a `doNothing()` say stub so the future never completes) under `ABORT` and asserts `GroupTimeoutException`. Reverting the fix to the parent `GroupExecutionException` flips exactly this one test to failing ("expected GroupTimeoutException but was GroupExecutionException") — proving it pins the 504-vs-502 distinction, not just "some 5xx".
+
+250 group/MCP unit tests pass (52 extended, 82 service, 39 REST, 3 routing, 31 HITL, 43 MCP); Checkstyle clean.
+
+---
+
+## 🌐 Group follow-up/continue — HTTP status-code split (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A final pre-review pass flagged that `followUpWithMember` / `continueDiscussion` mapped **every** `GroupDiscussionException` to `409 Conflict` — including an unknown target agent (a client error) and mid-round server/upstream failures (LLM/DB down, agent timeout). A `409` tells the client "retryable conflict", which is wrong for a typo'd agent or a provider outage. This was pre-existing feature behaviour, not a regression, but it is a real API-semantics issue a reviewer would raise, so it was fixed properly.
+
+- **Cause-differentiated exception subtypes** (all extend `GroupDiscussionException`, so existing `catch (GroupDiscussionException)` in the MCP tools and tests keeps working): `GroupMemberNotFoundException` (→ 404), `GroupExecutionException` (→ 502), `GroupTimeoutException extends GroupExecutionException` (→ 504). The base type now means **only** a state/concurrency conflict (→ 409).
+- **Single interception point** for execution failures: `executeDiscussion` re-throws every failure caught in its phase loop as `GroupExecutionException` (preserving `GroupTimeoutException`), so the many deep agent/quota/config throw sites did not each need editing. `followUpWithMember`'s own agent-call/timeout throws are re-typed directly.
+- **REST mapping** (most-specific catch first): unknown member → `404`, agent timeout → `504`, agent/model failure → `502` (Bad Gateway — an upstream dependency failed, logged with its stack trace), state/concurrency → `409`. The `@APIResponse` annotations now list the full set. `close` is unchanged (only ever a state conflict → 409).
+- Nits swept: the new `400` bodies now set `.type(TEXT_PLAIN)` for consistency; the follow-up `InterruptedException` path restores the interrupt flag.
+
+Coverage: added REST tests (`followUp`/`continue` → 404/502/504, and still-409 for a genuine conflict) and service tests asserting the specific subtypes are thrown (unknown member → `GroupMemberNotFoundException`, agent failure → `GroupExecutionException`, and the `executeDiscussion` failure-policy tests now assert `GroupExecutionException`). **Each new mapping was mutation-verified**: reverting the split makes the corresponding test fail (404/502/504 → 409; specific subtype → base). 654 group/MCP unit tests pass; Checkstyle clean.
+
+---
+
+## 🧬 Group conversations — mutation-audited regression coverage (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+The question "do we have coverage for everything we fixed?" was answered with **mutation testing** rather than by reading test names: each fix was reverted in turn and the suite re-run. A fix whose mutant *survives* (suite still green) has no coverage and can silently regress.
+
+### Mutants that survived — i.e. bugs with ZERO coverage
+
+| Fix | Why the tests could not see it |
+| --- | --- |
+| **JAX-RS routing** — the `/{groupId}/conversations` prefix on the four post-discussion endpoints | The unit tests invoke resource methods **directly** and never exercise JAX-RS path binding. This was the single highest-severity bug of the whole effort (every follow-up/continue/close would have 404'd), and it could be reintroduced with the suite still green. |
+| **SSE error curation** — the *service* pushing raw `e.getMessage()` into `GroupErrorEvent` | Nothing asserted what actually goes out over the wire to the browser. |
+| **Malformed-id reflected value** — Mongo's `ObjectId` parser echoing the raw caller string | No test drove an unparseable id. |
+| **Curated exception messages** (store + `loadInGroup`) | The existing test asserted the *response body*, which the REST layer curates anyway — so the message itself (which `read`/`delete` surface through the global mapper) was unguarded. |
+| **Continuation `startPhaseIndex = 0`** | Nothing asserted that a continuation re-runs from the FIRST phase; a mutant that skipped phase 0 passed. |
+| **`finally` cleanup condition** (defer `COMPLETED`, reclaim on `FAILED`/`CANCELLED`) | Nothing asserted that a COMPLETED round keeps its ephemeral agents for follow-ups. |
+| **`resumeQuestion` read side** | Only the *write* was tested; nothing asserted that `resumeDiscussion` actually uses it. |
+| **The three new metrics counters** | Never asserted. |
+
+### Coverage added (each verified to KILL its mutant)
+
+- **`IRestGroupConversationRoutingTest`** (new) — reflective assertions on the JAX-RS annotations: every `@PathParam` must have a matching `{template}` segment (a mismatch binds `null` — the exact production failure), every per-conversation route stays under `/groups/{groupId}/conversations/{groupConversationId}`, and the four endpoints resolve to their documented URLs. This is the invariant a direct-invocation test structurally cannot check.
+- **`GroupConversationServiceExtendedTest.MergeRegressionGuards`** (new) — a failed discussion streams a *curated* error (never the raw exception text); a continuation re-runs from phase 0 and emits `round_start` (not `group_start`); a COMPLETED round keeps its ephemeral agents.
+- **`GroupConversationServiceHitlTest`** — a paused *continuation* resumes with the follow-up question, not the stale round-1 one.
+- **`GroupConversationStoreTest` / `RestGroupConversationTest`** — the not-found message never embeds the caller id; a malformed id is answered 404 without reflecting the payload; the group-mismatch exception *message* is curated.
+- **`GroupConversationServiceTest`** — the three operation counters, and the failure counter incrementing even when the CAS is lost.
+
+Mutants **already killed** before this pass (genuinely covered): `failConversation`'s upsert, the MCP ownership gate, `CLOSED`-blindness in `persistedTerminalOverride`, `continueDiscussion`'s conditional write, the control-token pre-registration, `cancelDiscussion`'s `CLOSED` guard, `availableActions` for `CANCELLED`, and the MCP list owner-filter.
+
+647 group/MCP unit tests pass; Checkstyle clean. No production code changed in this commit.
+
+---
+
+## 🛡️ Group conversations — terminal-state integrity + error-body hardening (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`). Found by an adversarial review of the previous PR-review-response commit — which had hardened the *success* write in `continueDiscussion` while leaving the *failure* write, and the rest of the reflected-value surface, wide open.
+
+### Terminal states are now irreversible
+
+- **`failConversation` was an unconditional whole-document write — i.e. an UPSERT.** It could **re-create a group conversation another pod had deleted**, and could overwrite a terminal `CANCELLED` (committed by a cross-pod cancel) with `FAILED`, clobbering that writer's transcript. It is now a conditional write.
+- **The CAS expectation is taken from the PERSISTED state, not the in-memory one.** A first attempt CASed on `gc.getState()` and was itself a blocker: `executeDiscussion` flips the conversation to `SYNTHESIZING` **in memory** before the synthesis phase runs and only persists it afterwards, so a failure inside a synthesis phase would have CASed `SYNTHESIZING` against a persisted `IN_PROGRESS`, lost the race, skipped the write, and **stranded the conversation `IN_PROGRESS` forever** — worse than the bug being fixed. `failConversation` now re-reads the persisted state, skips the write when it is already terminal (aligning the in-memory state to it, so the `finally` makes the right ephemeral-agent decision), and counts the failure metric unconditionally so a lost race can never hide a failure from operators.
+
+### No exception text reaches the client (CodeQL: information exposure / reflected value)
+
+The previous commit curated one handler. This closes the class:
+
+- **Throw sites:** `GroupConversationStore` and `GroupConversationService` no longer embed caller-supplied ids in exception messages (`"Group conversation not found: {id}"`, `"Group not found: {groupId}"`, `"No phases defined for group: {groupId}"`).
+- **Sinks:** `RestGroupConversation` returns **no raw exception text in any body** — every 400/404/409 is a curated, deliberately non-committal message (these exceptions cover several causes, so the body must not assert one), with the detail logged via `LogSanitizer`.
+- **SSE:** the *service* was pushing raw `e.getMessage()` into `GroupErrorEvent`, which the streaming listener forwards to the browser — so LLM/DB/driver detail (and the caller's own input) reached the client even though the REST catch sites were curated. Those events are now curated too, and the raw cause is logged with its stack trace.
+- **Malformed ids:** a non-hex id reaches Mongo's `ObjectId` parser, whose message embeds the **raw caller string** — the most exploitable sink. It is caught **inside `loadInGroup`, scoped to the id lookup only**, and answered with a curated 404. It is deliberately *not* a blanket `catch (IllegalArgumentException)` around the whole operation: that would mask a genuine internal bug as a false "not found" and hide its stack trace.
+
+Verified: 636 group/MCP unit tests pass (incl. new regression tests for the persisted-state CAS and the already-terminal skip); Checkstyle clean. Remaining full-suite failures are environmental only (Testcontainers/Docker + loopback-socket suites).
+
+---
+
+## 🤖 Group follow-ups — automated PR review response (CodeQL / Copilot / CodeRabbit) (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`) — responses to the bot reviews on [PR #595](https://github.com/labsai/EDDI/pull/595).
+
+### Correctness
+
+- **Terminal-state resurrection in `continueDiscussion`** (Copilot, *High*): after the `COMPLETED → IN_PROGRESS` CAS, the round/question mutation was persisted with an **unconditional** whole-document `update()`. A cancel/close/delete winning the window would be overwritten and the conversation resurrected as `IN_PROGRESS`. Now a conditional write (`updateIfState(gc, IN_PROGRESS)`) → `409` on conflict. This is the same defect class already fixed in `followUpWithMember`; the continue path had been missed.
+
+### Security — reflected input & error exposure
+
+- **Reflected `groupId` in 404 bodies** (Copilot, *Medium*): `loadInGroup()` embedded the caller-supplied `groupId` in its exception message, which follow-up / continue / close echo verbatim into the `404` body (CodeQL reflected-value/XSS). Now a curated body; both ids are logged server-side via `LogSanitizer`.
+- **Reflected `targetAgentId` in 409 bodies**: `followUpWithMember`'s "not a member" message echoed the caller-supplied agent id into the `409`. The id is no longer reflected (the available-member list — server data — is kept).
+- **Information exposure through an error message** (CodeQL, *Medium*): the delete-conflict `409` returned the raw `e.getMessage()`. Now a curated "busy, please retry" body with the detail logged server-side.
+
+### Observability & docs
+
+- **Metrics for the new operations** (CodeRabbit): `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` were uninstrumented, contrary to AGENTS.md. Added `eddi_group_followup_count`, `eddi_group_continue_count`, `eddi_group_close_count`. Instrumented in the **service** (not the MCP tools, as suggested) so the counters cover the REST *and* MCP surfaces.
+- **Authorization denials now log at WARN** (CodeRabbit) — a security-relevant event should be alertable.
+- **`getAvailableActions()` javadoc corrected** (Copilot, *Low*): it claimed "not persisted", but Jackson serializes it into stored documents. It is `READ_ONLY`, so the value is never read back and is always recomputed from `state` — the javadoc now says so rather than making a false claim.
+
+### Tests
+
+Post-CAS `IN_PROGRESS` read modelled so the `FAILED` recovery path is actually exercised; `close` now asserts a `CLOSED` result rather than `assertSame` on a stale instance; added the concurrent-terminal-transition conflict test, the SSE `cancelled` callback test, the admin-bypass tests (the other half of `requireOwnerOrAdmin` and the list-filter exemption), and assertions that neither the raw exception text nor the caller-supplied `groupId` reaches the client.
+
+### Not actioned (false positive)
+
+- CodeRabbit (*Major*) claimed `updateIfState` wrapping `ResourceNotFoundException` in the unchecked `GroupConversationGoneException` bypasses the REST layer's 404 handling and yields a 500. It does not: `RestGroupConversation` explicitly catches `GroupConversationGoneException` alongside `ResourceNotFoundException` in a multi-catch on every surface that exposes the operation (cancel / approve / approve-stream) and maps it to `404`. The unchecked type is a deliberate design from the HITL work (documented on the exception) so existing CAS call sites keep compiling; `compareAndSetState` converts it to `ResourceNotFoundException` for its own callers. No change made.
+
+---
+
+## 🔐 Group merge — third-pass review: MCP authz, CLOSED-blindness, atomic CAS (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A third critical review targeted what the earlier passes never looked at — the **auto-merged** files (git merged them without conflict, so nobody had reviewed them), the whole-branch PR surface, test coverage of the fixes, and security. 14 findings survived adversarial verification. All fixed:
+
+### Security — MCP was an authorization bypass (IDOR)
+- `McpGroupTools` gated the conversation-scoped tools on a **role check only** (`eddi-viewer` for `followup_with_member` / `continue_group_discussion` / `read_group_conversation`, `eddi-editor` for `close`/`delete`) with **no ownership check**, while the equivalent REST endpoints all enforce `requireOwnerOrAdmin` (403). Any authenticated viewer could read another user's full transcript, append to it, re-run every phase against their conversation (burning their LLM budget), and an editor could close or delete it. Injected `OwnershipValidator` and added a `requireConversationOwner()` gate to all five tools, with a uniform non-leaking denial. Main's own HITL MCP tools already enforced this via `HitlAccessGuard` — MCP is now consistent with REST.
+- **Owner resolution on creation** (found reviewing the gate above): MCP recorded the owner as the literal `"mcp-client"` (or any caller-supplied `userId`), so the new gate would have **locked the creator out of their own conversation** whenever auth was enabled — and let a caller create a conversation owned by someone else. `discuss_with_group` / `start_group_discussion` now resolve the owner via `validateAndResolveUserId` (the calling principal; impersonation rejected), falling back to `"mcp-client"` only when auth is off.
+- **`list_group_conversations` is now owner-filtered** (mirroring REST). It returns full conversation documents, so without this the per-conversation gate was pointless — a non-owner could simply list the group and read everyone's transcripts.
+
+### Correctness — a systemic `CLOSED`-blindness
+Ours introduced `CLOSED` as a new terminal state; theirs' HITL/cancel code predates it. A sweep of every terminal-state check found exactly two blind spots:
+- **`persistedTerminalOverride`** treated only `{CANCELLED, FAILED, COMPLETED}` as terminal, so a running leg that found the conversation `CLOSED` did **not** stop — it fell through to an unconditional whole-document write and **resurrected the closed conversation** to `IN_PROGRESS`→`COMPLETED` after its member conversations were ended and its ephemeral agents deleted. (The previous round's fix F — close-of-`CANCELLED` — made this materially more reachable.)
+- **`cancelDiscussion`** likewise ignored `CLOSED`, so a cancel could CAS `CLOSED → CANCELLED` and un-terminalize an irreversible state.
+
+### Correctness — the cross-process guard wasn't atomic
+- **`compareAndSetState` was a read-check-write**, not a CAS: it read, compared in Java, then wrote unconditionally, so two racing callers could both pass the check and both write. It is the *only* cross-process guard behind follow-up/continue/close (the original changelog admitted "single-node only… would require a conditional update at the storage layer"). The merge made the fix available — it now uses theirs' `storeIfFieldEquals`, returning `false` on a lost race.
+
+### Contract / robustness
+- `followUpWithMember` with a null/blank `targetAgentId` NPE'd into a **500**; now validated → **400** (service throws `IllegalArgumentException`, REST rejects up front). Same for a blank `question` on follow-up and continue.
+- `POST /continue` advertised `attachments` on its body but **silently dropped them**. Now **rejected with 400** rather than silently ignored. (A first attempt to *honour* them was reverted after review: attachments are granted and injected to a member only on its first-ever turn, and on a continuation every member conversation already exists — so the "fix" was a no-op that stored an orphaned blob and still returned 200. Actually sharing new files mid-conversation needs the attachment fan-out reworked — see *What's next*.)
+- `DELETE` during an in-flight follow-up/continue returned **500**; now a `GroupDiscussionException` → **409**.
+- OpenAPI updated for the new 400/409 responses and the `CANCELLED`-closeable state.
+
+### Tests
+Backfilled the previously untested fixes (they could each have been reverted with the suite still green): `resumeQuestion` persistence, control-token pre-registration + removal, `persistedTerminalOverride` state alignment across all four terminal states, cancel-of-`CLOSED`, conditional-CAS + lost-race, MCP ownership denial/allow, blank-input 400s, continue-attachment forwarding, delete 409, and the streaming listener forwarding HITL + `round_start` events.
+
+Also fixed a **latent broken test the merge introduced**: `GroupConversationHitlTest` still asserted 7 enum states (the merge made it 8 with `CLOSED`) — it was never in the narrower test selections and had been failing since the merge commit.
+
+### What's next (deliberately not done here)
+
+- **Attachments on a continuation round.** `grantAndInjectAttachments` runs only on a member's *first-ever* turn (`privateConvId == null`), so a continuation cannot share new files. Supporting it means reworking the fan-out to grant/inject per *round* (e.g. tracking which member conversations have been granted the current attachment set) — a change to shared attachment code, out of scope for a merge-response fix. Until then `/continue` rejects attachments with 400.
+- **Follow-up to a dynamically recruited agent.** `GroupConversation.dynamicMembers` has no production writer (sub-agent creation records only `createdAgentIds`), so recruited agents are not addressable as follow-up targets at all. A first attempt to resolve them by display name was reverted as dead code; the real fix is to register recruited agents as members (roster + `memberConversationIds`).
+
+Verified: `mvnw test` green — **758 group/MCP unit tests pass** (0 failures). The remaining full-suite failures are environmental only (Testcontainers/Docker and loopback-socket suites — Mongo/Postgres stores, HTTP tool tests); no group or MCP test fails. CI covers those.
+
+---
+
+## 🩹 Group merge — cross-feature review-response fixes (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A deep adversarial review of the merge (7 dimensions, 58 agents, each finding cross-examined by 3 skeptics) confirmed the conflict resolution was sound but surfaced **cross-feature interaction bugs** between *ours* (continue/follow-up/close) and *theirs* (HITL pause/cancel/resume) that neither branch could have had alone — none caught by the impl-level unit tests. Fixed:
+
+- **A — stale question on continuation resume:** a continuation round that paused at an HITL gate resumed with the round-1 question (`resumeDiscussion` read `originalQuestion`, which `continueDiscussion` never updated) — silent wrong multi-agent output. Added a dedicated `GroupConversation.resumeQuestion` field: `continueDiscussion` sets it, `resumeDiscussion` reads it (falling back to `originalQuestion` for round 1 / legacy docs). Kept separate from `originalQuestion` so the Manager conversation-list title (which renders `originalQuestion`) is not rewritten by continuations.
+- **B — continue/stream dropped HITL events:** `continueDiscussionStreaming` used a hand-rolled inline SSE listener predating theirs' HITL callbacks, so a continuation that paused/cancelled emitted no event and hung the client + leaked the sink. Unified it on the shared `createStreamingListener` (added an `onRoundStart` override there); removed ~55 lines of duplication.
+- **C — ephemeral-agent leak on cross-pod terminal race:** the merged `finally` cleans up only on `FAILED`/`CANCELLED` (to defer `COMPLETED` for follow-up reuse), but the cross-pod terminal-override and lost-completion-CAS exits left in-memory state stale (running/optimistic-`COMPLETED`), skipping cleanup. Both exits now align in-memory `state` to the actual persisted terminal value so the `finally` decides correctly.
+- **D — follow-up clobbered a racing cancel:** `followUpWithMember`'s success path used an unconditional `update()` that could overwrite a concurrent `CANCELLED`. Switched to `updateIfState(gc, IN_PROGRESS)` (matching its own error path); a concurrent cancel/delete now yields a `409` instead of resurrecting the conversation.
+- **E — cancel race + latency on continuation:** `continueDiscussion` didn't pre-register a `DiscussionControlToken`, so a cancel racing the CAS→`executeDiscussion` window took the DB branch and was overwritten, and cancel latency was a whole phase worse. Now pre-registers the token right after the CAS (mirrors `startAndDiscussAsync`/`resumeDiscussion`); removed on the pre-exec failure path.
+- **F — `CANCELLED` had no reclaim path:** a cancel landing in the follow-up/continue pre-exec window could reach `CANCELLED` with orphaned ephemeral agents and no recovery. `closeGroupConversation` now accepts `CANCELLED → CLOSED` and `getAvailableActions()` returns `["close"]` for `CANCELLED`, giving operators a reclaim path.
+
+Added regression tests (`CANCELLED` available-actions, close-of-`CANCELLED`); updated the follow-up success-write assertion. Verified: `mvnw test` green — 189 group-conversation unit tests pass (0 failures); each fix re-verified by an adversarial pass (5/6 clean first time; A refined from overloading `originalQuestion` to the dedicated field per that review).
+
+---
+
+## 🔀 Merge `origin/main` into `feat/group-followups` — conflict resolution (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Merged 170 commits of `origin/main` (HITL framework + multimodal-attachments group parity) into the group follow-up/continuation/close branch. Both sides evolved the group-conversation subsystem in parallel, so all 23 conflict hunks across 12 files were resolved as a **union** of the two feature sets. Key decisions:
+
+- **`GroupConversationService.executeDiscussion` setup (conflict):** interleaved ours' member-display-name population + round-aware start events (`onGroupStart` on round 1, `onRoundStart` on continuation rounds) with theirs' attachment re-hydration, resume-seeded turn counter (`pausedTurnCount`), HITL granularity, and control-token registration. The start-event now fires only on fresh execution (`startPhaseIndex == 0`), branching round-1 vs continuation.
+- **`executeDiscussion` finally-block cleanup (conflict):** reconciled ours' "defer ephemeral cleanup for COMPLETED rounds so follow-ups can reuse dynamic agents" with theirs' "keep agents alive while `AWAITING_APPROVAL`". Result: always remove the control token; drop the verification cursor unless paused; clean up ephemeral agents only on terminal states with no follow-up/close path (`FAILED`, `CANCELLED`). `COMPLETED` cleanup stays deferred to `close`/`delete`.
+- **`GroupConversationState` is now 8 values** (ours' `CLOSED` + theirs' `CANCELLED`). `getAvailableActions()` gained a `CANCELLED` arm (terminal, no actions — updated the exhaustive switch); the enum-count guard test was corrected 7 → 8.
+- **`executeDiscussion` signature:** theirs added `int startPhaseIndex`; ours' `continueDiscussion` call site now passes `0` (a continuation re-runs the full protocol from phase 0).
+- **Group-path guard unified on `loadInGroup()`:** all six endpoints (read, delete, followup, continue, continue/stream, close) route through ours' `loadInGroup()`; theirs' parallel `requireGroupMembership()` helper was removed as dead code. HITL endpoints keep theirs' `validateGroupConversationOwnership`.
+- **JAX-RS routing fix (would-be regression):** theirs flattened the class-level `@Path` from `/groups/{groupId}/conversations` to `/groups`, moving the `{groupId}/conversations` prefix onto each method. Ours' four methods (`followup`/`continue`/`continue/stream`/`close`) carried their old class-relative `@Path("/{groupConversationId}/…")`, so post-flatten they lost the `{groupId}` template segment while still declaring `@PathParam("groupId")` — `groupId` would bind `null` and every call would 404 (invisible to the unit tests, which call the impl directly). Each of the four method paths was prefixed with `/{groupId}/conversations`, restoring the original external URLs. Caught by an adversarial merge review.
+- **Both feature APIs preserved:** ours' `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` / `compareAndSetState` + theirs' `cancelDiscussion` / `resumeDiscussion` / `approveGroupPhase(/Streaming)` / `getGroupApprovalStatus` / `listGroup(All)PendingApprovals` / `updateIfState` / `findByState`; all SSE events and listener callbacks from both sides retained.
+- **Review nitpick:** `RestGroupConversationExtendedTest` now has an `@AfterEach` that invokes the package-private `RestGroupConversation.shutdown()`, so a full suite run no longer accumulates un-terminated virtual-thread executors.
+
+Verified: `mvnw clean test-compile` green; ~187 group-conversation unit tests pass (GroupConversation 25, Store 19, Rest 25, RestExtended 21, Service 68, Hitl 29 — 0 failures/errors).
+
+---
+
+## 🔒 Group Conversation Follow-Ups — review-response hardening (2026-07-13)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Addresses static-analysis and code-review findings on [PR #595](https://github.com/labsai/EDDI/pull/595) (CodeQL, Copilot, CodeRabbit, GitHub Code Quality).
+
+### Security & correctness
+
+- **Log injection (CWE-117)**: sanitized user-controlled `groupConversationId` in log statements via `LogSanitizer.sanitize()` (`GroupConversationService` follow-up recovery, close, delete-not-found, and timeout-resolution paths).
+- **Group-path validation**: `followup` / `continue` / `continue/stream` / `close` now verify the conversation belongs to the `{groupId}` in the path — mismatches return `404` (SSE `group_error` for the stream) via a shared `loadInGroup()` helper. Closes a "wrong group path" access gap **and** resolves the unused-`groupId` findings.
+- **403 on streaming continue**: `continueDiscussionStreaming` now rethrows `ForbiddenException` so ownership failures map to HTTP `403` instead of a `200` SSE error event.
+
+### Concurrency
+
+- **Per-conversation operation guard**: `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` acquire a fail-fast in-process guard (`ConcurrentHashMap.newKeySet()`) keyed by conversation ID; a second concurrent operation on the same conversation is rejected (`409`) rather than racing the `compareAndSetState` read-check-update. **NOTE:** single-node only — cluster-wide atomicity would require a conditional update at the storage layer (documented as future hardening, not built here).
+
+### Resource lifecycle
+
+- **`@PreDestroy` on `RestGroupConversation`**: the virtual-thread executor is now shut down on bean destroy.
+- **Ephemeral cleanup on delete**: `deleteGroupConversation` now reclaims dynamically-created agents. Deferred cleanup previously ran only on `close`, so deleting a `COMPLETED` conversation orphaned them — this regression is introduced-and-fixed within the same feature branch. Extracted `cleanupEphemeralAgentsForGroup()` shared by close + delete.
+- **Known limitations** (ephemeral-agent reclamation): (a) a `COMPLETED` conversation that is never closed *or* deleted still retains its ephemeral agents; (b) if cleanup fails on `delete` (group config already gone, or a transient undeploy error), the record is still hard-deleted, so the `createdAgentIds` mapping is lost and a future reaper cannot reclaim those agents (they remain operator-recoverable via the agent store). A TTL reaper (built on `ScheduleFireExecutor`) is the planned mitigation for (a) — tracked as a separate item.
+
+### API cleanup
+
+- **Removed dead `userId` param** from `followUpWithMember` / `continueDiscussion` (service interface, impl, REST, MCP tools). Ownership is validated via the stored conversation owner; the param was never used downstream.
+- **Configurable follow-up timeout**: the follow-up agent call now uses the group's `protocol.agentTimeoutSeconds()` (default 60, consistent with discussion turns) via `resolveAgentTimeoutSeconds()`, instead of a hardcoded 120s.
+- **Model encapsulation**: `GroupConversation.getMemberDisplayNames()` returns an unmodifiable view; population goes through the new `addMemberDisplayName()` method (the getter can no longer be mutated); the setter defensively copies.
+- **OpenAPI**: added `404` responses to `followup` / `continue`, and `200` / `404` + event listing (incl. `round_start`) to `continue/stream`.
+
+### Round 2 — multi-agent adversarial review + CI (2026-07-13)
+
+Second pass after an adversarial multi-dimension review (concurrency / security / REST / lifecycle / test-coverage) plus the CI test run.
+
+- **CI green**: updated the `GroupConversationState` (6→7, `CLOSED`) and `TranscriptEntryType` (14→15, `FOLLOW_UP`) enum-count guard tests. Added the three follow-up MCP tools (`followup_with_member`, `continue_group_discussion`, `close_group_conversation`) to `McpToolFilter` — they were **filtered out entirely** (never exposed to MCP clients) because the whitelist was never updated, so this is a functional fix, not just a test tweak.
+- **Delete race** (flagged by two review dimensions): `deleteGroupConversation` now participates in the per-conversation guard. Because deferred cleanup made delete a *terminal* operation, an unguarded delete could tear down member conversations / ephemeral agents while a `continue`/`follow-up` was mid-run and then be resurrected as a "zombie" document via the store's upsert-by-id `update()`.
+- **`close` status codes**: business conflicts (in-progress / wrong-state) now throw `GroupDiscussionException` → `409`; a genuine `ResourceStoreException` (DB failure) falls through to `500` via the global mapper, instead of every store error mapping to `409`. Aligns `close` with `followup`/`continue`.
+- **Consistent group-scoping**: `readGroupConversation` and `deleteGroupConversation` now also route through `loadInGroup()`, so *every* endpoint under `/groups/{groupId}/conversations/{id}` verifies the conversation belongs to the path group (404 on mismatch). Previously only the new endpoints did.
+- **CWE-117 in MCP tools**: the three new MCP follow-up tools now sanitize `e.getMessage()` before logging (`targetAgentId` is user-controlled and flows into exception messages).
+- **Test coverage**: added unit tests for `getAvailableActions()` (per state), `memberDisplayNames` encapsulation, the `round` default, `compareAndSetState()` (all branches), `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` service logic (display-name resolution, wrong-state, concurrency guard, state restore, round increment), and the new REST endpoints including the `loadInGroup` 404 guard.
+
+### Deliberately not done
+
+- **SSE listener factory extraction** (CodeRabbit nitpick): skipped — a pure DRY refactor of working, integration-only streaming code with no behavior gain.
+
+### What's next
+
+- TTL reaper for abandoned `COMPLETED` conversations (ephemeral-agent reclamation).
+- Optional cluster-wide atomic state transition at the storage layer if concurrent group operations become a real deployment concern.
+- Optional: sweep the remaining pre-existing `McpGroupTools` catch blocks for the same `LogSanitizer` treatment (≈11 older tools still use the unsanitized `errorf(..., e.getMessage())` pattern — lower priority, outside this PR's scope).
+
+---
+
+## ✨ Group Conversation Follow-Ups — member follow-up, continuation rounds, explicit close (2026-07-08)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+### Summary
+
+Adds three new interaction patterns for completed group conversations:
+1. **Follow up with any member** — ask a specific agent (including the moderator) a question; both the question and response are appended to the group transcript as `FOLLOW_UP` entries
+2. **Continue the full group** — re-run all discussion phases with a new question; agents retain conversation memory from prior rounds via reused private conversations; round counter increments
+3. **Explicit close** — end member conversations, run ephemeral agent cleanup, lock the conversation permanently (`CLOSED` state)
+
+### Changes
+
+**Model layer:**
+- `GroupConversation.java`: Added `round` field (1-based counter), `CLOSED` to `GroupConversationState`, `FOLLOW_UP` to `TranscriptEntryType`
+- `IGroupConversationStore.java`: Added `compareAndSetState()` for optimistic concurrency control
+- `GroupConversationStore.java`: Implemented `compareAndSetState()` (read-check-update pattern)
+
+**Service layer:**
+- `IGroupConversationService.java`: Added `followUpWithMember()`, `continueDiscussion()`, `closeGroupConversation()` + `onRoundStart()` listener method
+- `GroupConversationService.java`: Implemented all three methods; modified `executeDiscussion()` to emit `round_start` SSE event (instead of `group_start`) for continuation rounds; deferred ephemeral agent cleanup to `closeGroupConversation()` for successful rounds (only immediate cleanup on failure)
+- `GroupConversationEventSink.java`: Added `EVENT_ROUND_START` constant and `RoundStartEvent` record
+
+**REST + MCP layer:**
+- `IRestGroupConversation.java`: Added 4 endpoints (`POST /{gcId}/followup`, `POST /{gcId}/continue`, `POST /{gcId}/continue/stream`, `POST /{gcId}/close`) + `FollowUpRequest` record
+- `RestGroupConversation.java`: Implemented all 4 endpoints with ownership validation and SSE streaming support for continuation
+- `McpGroupTools.java`: Added `followup_with_member`, `continue_group_discussion`, `close_group_conversation` tools
+
+### Design decisions
+
+- **Concurrency**: `compareAndSetState(COMPLETED → IN_PROGRESS)` is a best-effort guard against overlapping follow-ups; state restored to `COMPLETED` on error. (Hardened on 2026-07-13 with a per-conversation in-process guard — see that entry.)
+- **Deferred cleanup**: Ephemeral agents survive until explicit close so follow-ups can use dynamically-created agents; immediate cleanup only on failure
+- **No TranscriptEntry.round field**: Round boundaries are inferred from `QUESTION` entries in the transcript — avoids churn on the 13-field record with 4 constructors
+- **Plain-text follow-up *input***: The follow-up **input** is the plain question; the full transcript is still provided via the `groupTranscript` **context** variable (not re-injected into the input text), and the agent's private conversation retains prior turns
+
+### Client experience improvements (follow-up commit)
+
+- **Consistent response shapes**: All endpoints (`followup`, `continue`, `close`) now return the full `GroupConversation` — same shape as the initial `discuss` endpoint
+- **Display name resolution**: `followUpWithMember` accepts either an agent ID or a display name (case-insensitive). Error messages list available members if target not found
+- **`memberDisplayNames` map**: New field on `GroupConversation` maps agentId → displayName, populated at discussion start from group config. Eliminates client-side transcript scanning
+- **`availableActions` computed property**: JSON response includes `["followup", "continue", "close"]` when COMPLETED, `["close"]` when FAILED, `[]` otherwise. Clients can discover available operations without reading docs
+- **Close returns body**: `/close` now returns the closed `GroupConversation` with `state: CLOSED` and `availableActions: []`
+- **Lifecycle documented in OpenAPI**: Close endpoint description includes `discuss → COMPLETED → [followup|continue]* → close → CLOSED (terminal)`
+
+---
+
 ## 🔭 Security — conversation-listing scan: enforce the budget per-descriptor + changelog accuracy (2026-07-15)
 
 **Repo:** EDDI (`fix/mcp-conversation-ownership`)

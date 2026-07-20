@@ -34,6 +34,7 @@ public final class GroupConversationEventSink {
     public static final String EVENT_GROUP_ERROR = "group_error";
     public static final String EVENT_TASK_PLAN_CREATED = "task_plan_created";
     public static final String EVENT_TASK_VERIFIED = "task_verified";
+    public static final String EVENT_ROUND_START = "round_start";
     public static final String EVENT_CANCELLED = "cancelled";
     public static final String EVENT_AWAITING_APPROVAL = "awaiting_approval";
     public static final String EVENT_HITL_RESUME = "hitl_resume";
@@ -87,6 +88,9 @@ public final class GroupConversationEventSink {
     }
 
     public record TaskSummary(String id, String subject, String assignedTo, int priority) {
+    }
+
+    public record RoundStartEvent(String groupConversationId, int round, String question, int phaseCount) {
     }
 
     public record CancelledEvent(String reason, String cancelledBy) {

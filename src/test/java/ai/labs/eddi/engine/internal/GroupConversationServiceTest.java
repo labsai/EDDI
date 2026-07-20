@@ -24,7 +24,9 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -45,6 +47,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -77,6 +80,8 @@ class GroupConversationServiceTest {
     private NonceCacheService nonceCacheService;
 
     private GroupConversationService service;
+    /** Real registry (not a mock) so the new operation counters can be asserted. */
+    private SimpleMeterRegistry meterRegistry;
 
     private static final int MAX_DEPTH = 3;
     private static final String DEFAULT_TENANT = "default";
@@ -84,10 +89,11 @@ class GroupConversationServiceTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        meterRegistry = new SimpleMeterRegistry();
         service = new GroupConversationService(
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
-                new SimpleMeterRegistry(), agentSigningService, agentStore,
+                meterRegistry, agentSigningService, agentStore,
                 mock(IScheduleStore.class), nonceCacheService, null, DEFAULT_TENANT, MAX_DEPTH);
     }
 
@@ -891,7 +897,11 @@ class GroupConversationServiceTest {
 
             assertEquals(GroupConversationState.FAILED, gc.getState());
             assertNotNull(gc.getLastModified());
-            verify(conversationStore).update(gc);
+            // Conditional write (CAS on the running state) — an unconditional update() is
+            // an upsert and would resurrect a conversation another pod deleted, or
+            // overwrite a terminal CANCELLED with FAILED.
+            verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+            verify(conversationStore, never()).update(gc);
         }
 
         @Test
@@ -900,12 +910,538 @@ class GroupConversationServiceTest {
             gc.setId("gc-1");
             gc.setState(GroupConversationState.IN_PROGRESS);
             doThrow(new IResourceStore.ResourceStoreException("DB error"))
-                    .when(conversationStore).update(gc);
+                    .when(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
 
             // Should not throw — logs warning instead
             assertDoesNotThrow(() -> failConversationMethod.invoke(service, gc));
 
             assertEquals(GroupConversationState.FAILED, gc.getState());
+        }
+
+        @Test
+        void failConversation_countsTheFailureEvenWhenTheCasIsLost() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            var persisted = new GroupConversation();
+            persisted.setId("gc-1");
+            persisted.setState(GroupConversationState.CANCELLED);
+            when(conversationStore.read("gc-1")).thenReturn(persisted);
+
+            failConversationMethod.invoke(service, gc);
+
+            // The metric must record the failure itself, not the outcome of the race —
+            // otherwise a lost CAS hides the failure from operators entirely.
+            assertEquals(1.0, meterRegistry.counter("eddi_group_discussion_failure_count").count());
+        }
+
+        @Test
+        void failConversation_casesOnThePersistedState_notTheStaleInMemoryOne() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            // executeDiscussion flips the conversation to SYNTHESIZING in memory BEFORE the
+            // synthesis phase runs, and only persists it afterwards. A CAS on the in-memory
+            // value would therefore expect SYNTHESIZING while the document still says
+            // IN_PROGRESS — it would lose, skip the write, and strand the conversation
+            // IN_PROGRESS forever.
+            gc.setState(GroupConversationState.SYNTHESIZING);
+            var persisted = new GroupConversation();
+            persisted.setId("gc-1");
+            persisted.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(persisted);
+
+            failConversationMethod.invoke(service, gc);
+
+            assertEquals(GroupConversationState.FAILED, gc.getState());
+            verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+        }
+
+        @Test
+        void failConversation_alreadyTerminalInStore_writesNothing() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            var persisted = new GroupConversation();
+            persisted.setId("gc-1");
+            persisted.setState(GroupConversationState.CANCELLED); // another pod cancelled it
+            when(conversationStore.read("gc-1")).thenReturn(persisted);
+
+            failConversationMethod.invoke(service, gc);
+
+            // Neither a conditional nor an unconditional write — the terminal state stands.
+            verify(conversationStore, never()).updateIfState(any(), any());
+            verify(conversationStore, never()).update(any());
+        }
+
+        @Test
+        void failConversation_doesNotResurrectATerminalOrDeletedConversation() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            // Another pod already cancelled (or deleted) it — the CAS must lose.
+            doThrow(new IResourceStore.ResourceModifiedException("cancelled elsewhere"))
+                    .when(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+
+            assertDoesNotThrow(() -> failConversationMethod.invoke(service, gc));
+
+            // Crucially: no unconditional write — update() upserts and would re-create a
+            // deleted document / clobber the terminal state.
+            verify(conversationStore, never()).update(any());
+        }
+    }
+
+    // =================================================================
+    // Post-discussion operations: follow-up / continue / close
+    // =================================================================
+
+    /** Reflectively access the private per-conversation concurrency guard set. */
+    @SuppressWarnings("unchecked")
+    private java.util.Set<String> operationsInProgress() throws Exception {
+        var field = GroupConversationService.class.getDeclaredField("operationsInProgress");
+        field.setAccessible(true);
+        return (java.util.Set<String>) field.get(service);
+    }
+
+    @Nested
+    class FollowUpWithMemberTests {
+
+        private GroupConversation completedGc() {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            gc.setMemberConversationIds(new LinkedHashMap<>(Map.of("agentA", "convA")));
+            gc.addMemberDisplayName("agentA", "Alice");
+            return gc;
+        }
+
+        @Test
+        void followUp_resolvesDisplayName_callsCorrectAgentAndRecordsTranscript() throws Exception {
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            var output = new ConversationOutput();
+            output.put("output", List.of("Sure, here is the answer"));
+            snapshot.setConversationOutputs(new LinkedList<>(List.of(output)));
+            doAnswer(inv -> {
+                IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(), eq("agentA"), eq("convA"),
+                    any(), any(), any(), any(), anyBoolean(), any());
+
+            // Address the member by display name (case-insensitive) rather than agent id
+            GroupConversation result = service.followUpWithMember("gc-1", "alice", "What now?");
+
+            verify(conversationService).say(any(), eq("agentA"), eq("convA"),
+                    any(), any(), any(), any(), anyBoolean(), any());
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            var transcript = result.getTranscript();
+            assertEquals(2, transcript.size());
+            assertEquals(TranscriptEntryType.FOLLOW_UP, transcript.get(0).type());
+            assertEquals("What now?", transcript.get(0).content());
+            assertEquals("agentA", transcript.get(1).speakerAgentId());
+            assertEquals("Sure, here is the answer", transcript.get(1).content());
+            // Success path now writes atomically (CAS on IN_PROGRESS) so a racing cancel
+            // cannot be clobbered — see followUpWithMember.
+            verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+            // New feature => must be observable (AGENTS.md).
+            assertEquals(1.0, meterRegistry.counter("eddi_group_followup_count").count());
+        }
+
+        @Test
+        void followUp_unknownMember_throwsAndDoesNotCallAgent() throws Exception {
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+
+            // Specific subtype so REST can map an unknown member to 404 (not a 409
+            // conflict).
+            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupMemberNotFoundException.class,
+                    () -> service.followUpWithMember("gc-1", "ghost", "hello"));
+            verify(conversationService, never())
+                    .say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        void followUp_agentCallFails_throwsGroupExecutionException() throws Exception {
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            // The agent call itself blows up (provider error) — an upstream failure, which
+            // REST must map to 5xx, not a 409 "conflict, retry".
+            doThrow(new RuntimeException("provider 500")).when(conversationService)
+                    .say(any(), eq("agentA"), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException.class,
+                    () -> service.followUpWithMember("gc-1", "agentA", "hello"));
+        }
+
+        @Test
+        void followUp_notCompleted_throwsAndDoesNotCallAgent() throws Exception {
+            var gc = completedGc();
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(false);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.followUpWithMember("gc-1", "Alice", "hello"));
+            verify(conversationService, never())
+                    .say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        void followUp_concurrentOperation_rejected() throws Exception {
+            operationsInProgress().add("gc-1");
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.followUpWithMember("gc-1", "Alice", "hello"));
+            verify(conversationStore, never()).compareAndSetState(any(), any(), any());
+        }
+
+        @Test
+        void followUp_agentCallFails_restoresCompletedState() throws Exception {
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            doThrow(new RuntimeException("agent boom")).when(conversationService)
+                    .say(any(), eq("agentA"), eq("convA"), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.followUpWithMember("gc-1", "Alice", "hello"));
+            // finally-block must restore COMPLETED so the conversation stays usable
+            verify(conversationStore).compareAndSetState("gc-1",
+                    GroupConversationState.IN_PROGRESS, GroupConversationState.COMPLETED);
+        }
+    }
+
+    @Nested
+    class ContinueDiscussionTests {
+
+        @Test
+        void continue_notCompleted_throws() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(false);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.continueDiscussion("gc-1", "next", null));
+        }
+
+        @Test
+        void continue_concurrentOperation_rejected() throws Exception {
+            operationsInProgress().add("gc-1");
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.continueDiscussion("gc-1", "q", null));
+            verify(conversationStore, never()).compareAndSetState(any(), any(), any());
+        }
+
+        @Test
+        void continue_incrementsRoundAndAppendsQuestion() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            gc.setRound(1);
+            // Model the real sequence: the pre-CAS read sees COMPLETED, the post-CAS
+            // re-read sees IN_PROGRESS. Without this the config-load failure would skip
+            // failConversation() and the FAILED recovery path would never be exercised.
+            var inProgress = new GroupConversation();
+            inProgress.setId("gc-1");
+            inProgress.setGroupId("group-1");
+            inProgress.setState(GroupConversationState.IN_PROGRESS);
+            inProgress.setRound(1);
+            when(conversationStore.read("gc-1")).thenReturn(gc, inProgress);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            // Fail fast right after the round/question mutation: group config not found.
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.continueDiscussion("gc-1", "round two question", null));
+
+            assertEquals(2, inProgress.getRound());
+            var transcript = inProgress.getTranscript();
+            assertFalse(transcript.isEmpty());
+            var last = transcript.get(transcript.size() - 1);
+            assertEquals(TranscriptEntryType.QUESTION, last.type());
+            assertEquals("round two question", last.content());
+            // The round/question mutation is persisted with a CAS on IN_PROGRESS so a
+            // racing cancel/close cannot be resurrected by an unconditional write.
+            // (failConversation below also CASes on IN_PROGRESS, hence atLeastOnce.)
+            verify(conversationStore, atLeastOnce()).updateIfState(inProgress, GroupConversationState.IN_PROGRESS);
+            verify(conversationStore, never()).update(inProgress);
+            // The round was committed, so the continuation is counted (AGENTS.md: new
+            // features must be observable).
+            assertEquals(1.0, meterRegistry.counter("eddi_group_continue_count").count());
+            // Config load failed after the transition — the conversation must be FAILED,
+            // not left stranded IN_PROGRESS.
+            assertEquals(GroupConversationState.FAILED, inProgress.getState());
+        }
+
+        @Test
+        void continue_concurrentTerminalTransition_isNotResurrected() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            var inProgress = new GroupConversation();
+            inProgress.setId("gc-1");
+            inProgress.setGroupId("group-1");
+            inProgress.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(gc, inProgress);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            // A cancel/close/delete on another node wins the window after our CAS.
+            doThrow(new IResourceStore.ResourceModifiedException("terminal elsewhere"))
+                    .when(conversationStore).updateIfState(inProgress, GroupConversationState.IN_PROGRESS);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.continueDiscussion("gc-1", "round two", null));
+
+            // Must NOT fall through to running the discussion on a terminal conversation.
+            verify(groupStore, never()).getCurrentResourceId(any());
+        }
+    }
+
+    /** Reflective access to the private control-token map. */
+    @SuppressWarnings("unchecked")
+    private Map<String, ?> activeTokens() throws Exception {
+        var field = GroupConversationService.class.getDeclaredField("activeTokens");
+        field.setAccessible(true);
+        return (Map<String, ?>) field.get(service);
+    }
+
+    /**
+     * Regression tests for the cross-feature defects found reviewing the
+     * origin/main merge (continue/follow-up/close vs HITL pause/cancel/resume).
+     */
+    @Nested
+    class MergeReviewFixTests {
+
+        private GroupConversation completedGc() {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            gc.setOriginalQuestion("round one");
+            gc.setRound(1);
+            return gc;
+        }
+
+        /**
+         * Arms the CAS and fails fast at config load, after the round/question
+         * mutation.
+         */
+        private GroupConversation armContinue() throws Exception {
+            var gc = completedGc();
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
+            return gc;
+        }
+
+        @Test
+        void continue_persistsResumeQuestion_andLeavesOriginalQuestionAlone() throws Exception {
+            var gc = armContinue();
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.continueDiscussion("gc-1", "round two", null));
+
+            // resumeDiscussion reads resumeQuestion — a paused continuation must resume
+            // with
+            // THIS question, while originalQuestion (the UI title) stays as round one.
+            assertEquals("round two", gc.getResumeQuestion());
+            assertEquals("round one", gc.getOriginalQuestion());
+        }
+
+        @Test
+        void continue_preRegistersControlToken_andRemovesItWhenExecutionNeverStarts() throws Exception {
+            armContinue();
+            var tokenPresentInWindow = new AtomicBoolean(false);
+            when(groupStore.getCurrentResourceId("group-1")).thenAnswer(inv -> {
+                tokenPresentInWindow.set(activeTokens().containsKey("gc-1"));
+                return null; // -> ResourceNotFoundException, so executeDiscussion is never reached
+            });
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.continueDiscussion("gc-1", "q", null));
+
+            assertTrue(tokenPresentInWindow.get(),
+                    "a cancel racing the CAS->execute window must find a signalable token");
+            assertFalse(activeTokens().containsKey("gc-1"),
+                    "the pre-registered token must not leak when execution never started");
+        }
+
+        @Test
+        void followUp_blankInput_rejectedBeforeAnyStateChange() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.followUpWithMember("gc-1", "   ", "question"));
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.followUpWithMember("gc-1", "agentA", null));
+            verifyNoInteractions(conversationStore);
+        }
+
+        @Test
+        void continue_blankQuestion_rejectedBeforeAnyStateChange() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.continueDiscussion("gc-1", "  ", null));
+            verifyNoInteractions(conversationStore);
+        }
+
+        @Test
+        void delete_whileAnotherOperationRuns_isAConflictNotAStoreError() throws Exception {
+            operationsInProgress().add("gc-1");
+
+            // GroupDiscussionException -> REST 409; a ResourceStoreException would be a
+            // 500.
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.deleteGroupConversation("gc-1"));
+        }
+
+        @Test
+        void cancel_closedConversation_isATerminalNoOp() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.CLOSED);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+
+            boolean cancelled = service.cancelDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL);
+
+            assertFalse(cancelled, "CLOSED is irreversible — a cancel must not un-terminalize it");
+            verify(conversationStore, never()).compareAndSetState(any(),
+                    eq(GroupConversationState.CLOSED), eq(GroupConversationState.CANCELLED));
+        }
+
+        @Test
+        void persistedTerminalOverride_stopsTheLegAndAlignsStateForEveryTerminalState() throws Exception {
+            var method = GroupConversationService.class.getDeclaredMethod(
+                    "persistedTerminalOverride", GroupConversation.class, GroupDiscussionEventListener.class);
+            method.setAccessible(true);
+
+            for (var terminal : List.of(GroupConversationState.CANCELLED, GroupConversationState.FAILED,
+                    GroupConversationState.COMPLETED, GroupConversationState.CLOSED)) {
+                var running = new GroupConversation();
+                running.setId("gc-1");
+                running.setState(GroupConversationState.IN_PROGRESS);
+
+                var persisted = new GroupConversation();
+                persisted.setId("gc-1");
+                persisted.setState(terminal);
+                when(conversationStore.read("gc-1")).thenReturn(persisted);
+
+                boolean stop = (boolean) method.invoke(service, running, null);
+
+                assertTrue(stop, "the leg must stop when another writer moved the state to " + terminal);
+                // Without the alignment the finally would decide cleanup on a stale running
+                // state (leaking ephemeral agents); CLOSED additionally prevents the leg's
+                // whole-document write from resurrecting a closed conversation.
+                assertEquals(terminal, running.getState(),
+                        "in-memory state must be aligned to the persisted terminal state: " + terminal);
+            }
+        }
+    }
+
+    @Nested
+    class CloseGroupConversationTests {
+
+        @Test
+        void close_completed_transitionsToClosedAndEndsMembers() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.COMPLETED);
+            gc.setMemberConversationIds(new LinkedHashMap<>(Map.of("agentA", "convA", "agentB", "convB")));
+            // close() re-reads the conversation to return the final state; the mocked CAS
+            // does not mutate gc, so model the post-transition read explicitly — otherwise
+            // asserting on the returned object would accept a stale, non-CLOSED response.
+            var closed = new GroupConversation();
+            closed.setId("gc-1");
+            closed.setGroupId("group-1");
+            closed.setState(GroupConversationState.CLOSED);
+            when(conversationStore.read("gc-1")).thenReturn(gc, closed);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.CLOSED)).thenReturn(true);
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null); // ephemeral cleanup no-op
+
+            GroupConversation result = service.closeGroupConversation("gc-1");
+
+            verify(conversationService).endConversation("convA");
+            verify(conversationService).endConversation("convB");
+            assertEquals(GroupConversationState.CLOSED, result.getState());
+            assertEquals(1.0, meterRegistry.counter("eddi_group_close_count").count());
+        }
+
+        @Test
+        void close_failedState_usesFallbackCas() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.FAILED);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.CLOSED)).thenReturn(false);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.FAILED, GroupConversationState.CLOSED)).thenReturn(true);
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null);
+
+            assertDoesNotThrow(() -> service.closeGroupConversation("gc-1"));
+            verify(conversationStore).compareAndSetState("gc-1",
+                    GroupConversationState.FAILED, GroupConversationState.CLOSED);
+        }
+
+        @Test
+        void close_cancelledState_usesCancelledCas() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setState(GroupConversationState.CANCELLED);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.COMPLETED, GroupConversationState.CLOSED)).thenReturn(false);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.FAILED, GroupConversationState.CLOSED)).thenReturn(false);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversationState.CANCELLED, GroupConversationState.CLOSED)).thenReturn(true);
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(null);
+
+            assertDoesNotThrow(() -> service.closeGroupConversation("gc-1"));
+            verify(conversationStore).compareAndSetState("gc-1",
+                    GroupConversationState.CANCELLED, GroupConversationState.CLOSED);
+        }
+
+        @Test
+        void close_wrongState_throwsGroupDiscussionException() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(conversationStore.compareAndSetState(eq("gc-1"), any(), eq(GroupConversationState.CLOSED)))
+                    .thenReturn(false);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.closeGroupConversation("gc-1"));
+        }
+
+        @Test
+        void close_concurrentOperation_rejected() throws Exception {
+            operationsInProgress().add("gc-1");
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.closeGroupConversation("gc-1"));
+            verify(conversationStore, never()).compareAndSetState(any(), any(), any());
         }
     }
 }

@@ -7,10 +7,12 @@ package ai.labs.eddi.configs.groups.model;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,12 +30,29 @@ public class GroupConversation {
     private String userId;
     private GroupConversationState state;
     private String originalQuestion;
+    /**
+     * The question driving the CURRENT run's phases. Equals
+     * {@link #originalQuestion} for the initial round; a continuation round sets it
+     * to the follow-up question so an HITL resume re-runs the remaining phases with
+     * the right question. Kept separate from {@code originalQuestion} (which the UI
+     * renders as the conversation title) so continuations don't rewrite that title.
+     * {@code null} on legacy documents — resume falls back to
+     * {@code originalQuestion}.
+     */
+    private String resumeQuestion;
     private List<TranscriptEntry> transcript = Collections.synchronizedList(new ArrayList<>());
     private Map<String, String> memberConversationIds = new ConcurrentHashMap<>();
+    /**
+     * Maps agentId → displayName for all group members. Populated at discussion
+     * start.
+     */
+    private Map<String, String> memberDisplayNames = new LinkedHashMap<>();
     private int currentPhaseIndex;
     private String currentPhaseName;
     private String synthesizedAnswer;
     private int depth;
+    /** Current discussion round (1-based). Incremented by continueDiscussion(). */
+    private int round = 1;
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
     private List<AgentGroupConfiguration.GroupMember> dynamicMembers = Collections.synchronizedList(new ArrayList<>());
@@ -155,7 +174,9 @@ public class GroupConversation {
         /** Task execution result from the EXECUTE phase. */
         TASK_RESULT,
         /** Verification assessment from the VERIFY phase. */
-        VERIFICATION
+        VERIFICATION,
+        /** User-to-member or member-to-user follow-up exchange between rounds. */
+        FOLLOW_UP
     }
 
     public enum GroupConversationState {
@@ -163,7 +184,12 @@ public class GroupConversation {
         /** Discussion was cancelled before completion — HITL foundation (Phase 9b). */
         CANCELLED,
         /** Paused for human approval — HITL foundation (Phase 9b). */
-        AWAITING_APPROVAL
+        AWAITING_APPROVAL,
+        /**
+         * Terminal — member conversations ended, ephemeral agents cleaned up, no
+         * further follow-ups.
+         */
+        CLOSED
     }
 
     public enum HitlPauseType {
@@ -210,6 +236,14 @@ public class GroupConversation {
 
     public void setOriginalQuestion(String originalQuestion) {
         this.originalQuestion = originalQuestion;
+    }
+
+    public String getResumeQuestion() {
+        return resumeQuestion;
+    }
+
+    public void setResumeQuestion(String resumeQuestion) {
+        this.resumeQuestion = resumeQuestion;
     }
 
     public List<TranscriptEntry> getTranscript() {
@@ -262,6 +296,14 @@ public class GroupConversation {
 
     public void setDepth(int depth) {
         this.depth = depth;
+    }
+
+    public int getRound() {
+        return round;
+    }
+
+    public void setRound(int round) {
+        this.round = round;
     }
 
     public Instant getCreated() {
@@ -335,6 +377,47 @@ public class GroupConversation {
 
     public void setDynamicAgentConfig(AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig) {
         this.dynamicAgentConfig = dynamicAgentConfig;
+    }
+
+    public Map<String, String> getMemberDisplayNames() {
+        return Collections.unmodifiableMap(memberDisplayNames);
+    }
+
+    public void setMemberDisplayNames(Map<String, String> memberDisplayNames) {
+        this.memberDisplayNames = memberDisplayNames != null
+                ? new LinkedHashMap<>(memberDisplayNames)
+                : new LinkedHashMap<>();
+    }
+
+    /**
+     * Register a member's display name (agentId → displayName). Used at discussion
+     * start to populate the map. This is the supported mutation path —
+     * {@link #getMemberDisplayNames()} returns an unmodifiable view.
+     */
+    public void addMemberDisplayName(String agentId, String displayName) {
+        this.memberDisplayNames.put(agentId, displayName);
+    }
+
+    /**
+     * Computed property derived from {@link #state} — tells clients which
+     * operations are available. It is serialized (so REST/MCP clients see it, and
+     * it therefore also lands in the stored document), but {@code READ_ONLY} access
+     * means it is never read back in: the value is always recomputed from
+     * {@code state}, so a stale value in an old document cannot be trusted or used.
+     */
+    @JsonProperty(value = "availableActions", access = JsonProperty.Access.READ_ONLY)
+    public List<String> getAvailableActions() {
+        if (state == null) {
+            return List.of();
+        }
+        return switch (state) {
+            case COMPLETED -> List.of("followup", "continue", "close");
+            // FAILED and CANCELLED are terminal but closeable — close ends member
+            // conversations and reclaims ephemeral agents.
+            case FAILED, CANCELLED -> List.of("close");
+            case IN_PROGRESS, SYNTHESIZING, CREATED, AWAITING_APPROVAL -> List.of();
+            case CLOSED -> List.of();
+        };
     }
 
     @JsonIgnore
