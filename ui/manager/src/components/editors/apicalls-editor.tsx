@@ -19,6 +19,7 @@ import {
   MessageCircle,
   Timer,
   Shield,
+  RotateCcw,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import {
@@ -76,11 +77,25 @@ export interface HttpPreRequest {
   delayBeforeExecutingInMillis?: number;
 }
 
+export interface RetryMatchingInfo {
+  valuePath?: string;
+  contains?: string;
+  equals?: string;
+  trueIfNoMatch?: boolean;
+}
+
+export interface RetryApiCallInstruction {
+  maxRetries?: number;
+  exponentialBackoffDelayInMillis?: number;
+  retryOnHttpCodes?: number[];
+  responseValuePathMatchers?: RetryMatchingInfo[];
+}
+
 export interface HttpPostResponse {
   propertyInstructions?: PropertyInstruction[];
   outputBuildInstructions?: OutputBuildingInstruction[];
   qrBuildInstructions?: QuickRepliesBuildingInstruction[];
-  retryApiCallInstruction?: unknown;
+  retryApiCallInstruction?: RetryApiCallInstruction;
 }
 
 export interface HttpRequest {
@@ -869,6 +884,241 @@ export function QrBuildInstructionsEditor({
   );
 }
 
+// ─── Retry & Backoff (RetryApiCallInstruction) editor ────────────────────────
+
+function parseIntList(raw: string): number[] {
+  return raw
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n));
+}
+
+export function RetryApiCallEditor({
+  retry,
+  onChange,
+  readOnly,
+}: {
+  retry?: RetryApiCallInstruction;
+  onChange: (r: RetryApiCallInstruction | undefined) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+
+  if (!retry) {
+    if (readOnly) {
+      return (
+        <p className="text-[10px] italic text-muted-foreground">
+          {t("apiCallsEditor.noRetryPolicy", "No retry policy")}
+        </p>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          onChange({
+            maxRetries: 3,
+            exponentialBackoffDelayInMillis: 1000,
+            retryOnHttpCodes: [502, 503],
+            responseValuePathMatchers: [],
+          })
+        }
+        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        data-testid="add-retry-instruction"
+      >
+        <RotateCcw className="h-3 w-3" />
+        {t("apiCallsEditor.addRetryPolicy", "Add Retry Policy")}
+      </button>
+    );
+  }
+
+  const matchers = retry.responseValuePathMatchers ?? [];
+
+  return (
+    <div
+      className="rounded-lg border border-border/60 bg-card/50 p-2.5 space-y-2.5"
+      data-testid="retry-apicall-editor"
+    >
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("apiCallsEditor.maxRetries", "Max Retries")}
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={retry.maxRetries ?? 3}
+            onChange={(e) =>
+              onChange({ ...retry, maxRetries: parseInt(e.target.value, 10) || 0 })
+            }
+            readOnly={readOnly}
+            data-testid="retry-max-retries"
+            className="h-6 w-full rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div>
+          <label className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("apiCallsEditor.backoffDelayMs", "Backoff Delay (ms)")}
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={retry.exponentialBackoffDelayInMillis ?? 1000}
+            onChange={(e) =>
+              onChange({
+                ...retry,
+                exponentialBackoffDelayInMillis: parseInt(e.target.value, 10) || 0,
+              })
+            }
+            readOnly={readOnly}
+            data-testid="retry-backoff-delay"
+            className="h-6 w-full rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+      </div>
+      <div>
+        <label className="mb-0.5 block text-[10px] text-muted-foreground">
+          {t("apiCallsEditor.retryOnHttpCodes", "Retry on HTTP Codes")}
+        </label>
+        <input
+          type="text"
+          value={(retry.retryOnHttpCodes ?? []).join(", ")}
+          onChange={(e) =>
+            onChange({ ...retry, retryOnHttpCodes: parseIntList(e.target.value) })
+          }
+          readOnly={readOnly}
+          placeholder="502, 503"
+          data-testid="retry-on-codes"
+          className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      </div>
+
+      {/* Value-path matchers */}
+      <div className="space-y-1.5">
+        <h6 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {t("apiCallsEditor.valuePathMatchers", "Value Path Matchers")}
+        </h6>
+        {matchers.length === 0 && (
+          <p className="text-[10px] italic text-muted-foreground">
+            {t("apiCallsEditor.noValuePathMatchers", "No value path matchers")}
+          </p>
+        )}
+        {matchers.map((m, i) => (
+          <div
+            key={i}
+            className="rounded-md border border-border/50 bg-background p-2 space-y-1.5"
+            data-testid="retry-matcher-row"
+          >
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={m.valuePath ?? ""}
+                onChange={(e) => {
+                  const list = [...matchers];
+                  list[i] = { ...m, valuePath: e.target.value };
+                  onChange({ ...retry, responseValuePathMatchers: list });
+                }}
+                readOnly={readOnly}
+                placeholder={t("apiCallsEditor.valuePath", "Value path")}
+                data-testid="retry-matcher-valuepath"
+                className="h-6 flex-1 rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange({
+                      ...retry,
+                      responseValuePathMatchers: matchers.filter((_, j) => j !== i),
+                    })
+                  }
+                  className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <input
+                type="text"
+                value={m.contains ?? ""}
+                onChange={(e) => {
+                  const list = [...matchers];
+                  list[i] = { ...m, contains: e.target.value };
+                  onChange({ ...retry, responseValuePathMatchers: list });
+                }}
+                readOnly={readOnly}
+                placeholder={t("apiCallsEditor.contains", "contains")}
+                data-testid="retry-matcher-contains"
+                className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <input
+                type="text"
+                value={m.equals ?? ""}
+                onChange={(e) => {
+                  const list = [...matchers];
+                  list[i] = { ...m, equals: e.target.value };
+                  onChange({ ...retry, responseValuePathMatchers: list });
+                }}
+                readOnly={readOnly}
+                placeholder={t("apiCallsEditor.equals", "equals")}
+                data-testid="retry-matcher-equals"
+                className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+            <label className="inline-flex items-center gap-1 text-[10px] text-foreground">
+              <input
+                type="checkbox"
+                checked={m.trueIfNoMatch ?? false}
+                onChange={(e) => {
+                  const list = [...matchers];
+                  list[i] = { ...m, trueIfNoMatch: e.target.checked };
+                  onChange({ ...retry, responseValuePathMatchers: list });
+                }}
+                disabled={readOnly}
+                data-testid="retry-matcher-trueifnomatch"
+                className="h-3 w-3 accent-primary"
+              />
+              {t("apiCallsEditor.trueIfNoMatch", "Retry if no match")}
+            </label>
+          </div>
+        ))}
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() =>
+              onChange({
+                ...retry,
+                responseValuePathMatchers: [
+                  ...matchers,
+                  { valuePath: "", contains: "", equals: "", trueIfNoMatch: false },
+                ],
+              })
+            }
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+            data-testid="add-retry-matcher"
+          >
+            <Plus className="h-3 w-3" />
+            {t("apiCallsEditor.addValuePathMatcher", "Add Value Path Matcher")}
+          </button>
+        )}
+      </div>
+
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={() => onChange(undefined)}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+          data-testid="remove-retry-instruction"
+        >
+          <Trash2 className="h-3 w-3" />
+          {t("apiCallsEditor.removeRetryPolicy", "Remove Retry Policy")}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── PreRequest editor ───────────────────────────────────────────────────────
 
 function PreRequestEditor({
@@ -968,6 +1218,19 @@ function PostResponseEditor({
         <QrBuildInstructionsEditor
           instructions={data.qrBuildInstructions ?? []}
           onChange={(list) => onChange({ ...data, qrBuildInstructions: list })}
+          readOnly={readOnly}
+        />
+      </div>
+
+      {/* Retry & Backoff */}
+      <div>
+        <h6 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <RotateCcw className="h-3 w-3" />
+          {t("apiCallsEditor.retryBackoff", "Retry & Backoff")}
+        </h6>
+        <RetryApiCallEditor
+          retry={data.retryApiCallInstruction}
+          onChange={(r) => onChange({ ...data, retryApiCallInstruction: r })}
           readOnly={readOnly}
         />
       </div>
@@ -1319,7 +1582,8 @@ function HttpCallEditor({
             defaultOpen={
               !!(call.postResponse?.propertyInstructions?.length ||
                 call.postResponse?.outputBuildInstructions?.length ||
-                call.postResponse?.qrBuildInstructions?.length)
+                call.postResponse?.qrBuildInstructions?.length ||
+                call.postResponse?.retryApiCallInstruction)
             }
           >
             <PostResponseEditor

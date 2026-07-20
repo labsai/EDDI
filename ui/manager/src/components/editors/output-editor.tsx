@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
@@ -11,6 +11,12 @@ import {
 
 // ─── Types matching OutputConfigurationSet backend model ─────────────────────
 
+export interface InputFieldValidation {
+  minLength?: number;
+  maxLength?: number;
+  validationErrorMessage?: string;
+}
+
 export interface OutputItem {
   type: string;
   // text (TextOutputItem: text, delay)
@@ -22,6 +28,14 @@ export interface OutputItem {
   // applicationLink (ApplicationLinkOutputItem: path, label, delay)
   path?: string;
   label?: string;
+  // button (ButtonOutputItem: buttonType, label, onPress)
+  buttonType?: string;
+  onPress?: Record<string, unknown>;
+  // inputField (InputFieldOutputItem: subType, placeholder, label, defaultValue, validation)
+  subType?: string;
+  placeholder?: string;
+  defaultValue?: string;
+  validation?: InputFieldValidation;
   [key: string]: unknown;
 }
 
@@ -55,6 +69,80 @@ const OUTPUT_TYPES = [
 ] as const;
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
+
+/**
+ * Editable single-line JSON input for object-valued output fields (e.g. the
+ * button `onPress` map, or the whole item for output types without a dedicated
+ * form). Parses on change and emits the object via onChange; marks itself
+ * invalid without emitting when the JSON cannot be parsed.
+ */
+function JsonFieldInput({
+  value, onChange, readOnly, placeholder, testId,
+}: {
+  value: Record<string, unknown> | undefined;
+  onChange: (v: Record<string, unknown> | undefined) => void;
+  readOnly?: boolean;
+  placeholder?: string;
+  testId?: string;
+}) {
+  const { t } = useTranslation();
+  const serialized = value && Object.keys(value).length > 0 ? JSON.stringify(value) : "";
+  const [text, setText] = useState(serialized);
+  const [focused, setFocused] = useState(false);
+  const [invalid, setInvalid] = useState(false);
+
+  // Re-sync from the external value only while the field is not being edited,
+  // so parent-driven updates are reflected without clobbering in-progress typing.
+  useEffect(() => {
+    if (!focused) {
+      setText(serialized);
+      setInvalid(false);
+    }
+  }, [serialized, focused]);
+
+  const handleChange = (raw: string) => {
+    setText(raw);
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      setInvalid(false);
+      onChange(undefined);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        setInvalid(false);
+        onChange(parsed as Record<string, unknown>);
+      } else {
+        setInvalid(true);
+      }
+    } catch {
+      setInvalid(true);
+    }
+  };
+
+  return (
+    <div className="flex flex-1 min-w-[140px] flex-col gap-0.5">
+      <input
+        type="text"
+        value={text}
+        onChange={(e) => handleChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        readOnly={readOnly}
+        placeholder={placeholder}
+        data-testid={testId}
+        aria-invalid={invalid}
+        className={`h-7 w-full rounded border bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${invalid ? "border-destructive" : "border-input"}`}
+      />
+      {invalid && (
+        <span className="text-[10px] text-destructive">
+          {t("outputEditor.invalidJson", "Invalid JSON")}
+        </span>
+      )}
+    </div>
+  );
+}
 
 function OutputItemEditor({
   item, onChange, onRemove, readOnly,
@@ -100,9 +188,49 @@ function OutputItemEditor({
             readOnly={readOnly} title={t("outputEditor.delayMs", "Delay (ms)")} data-testid="output-link-delay"
             className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         </>
+      ) : item.type === "button" ? (
+        <div className="flex flex-1 flex-wrap items-center gap-1.5" data-testid="output-button-fields">
+          <input type="text" value={item.buttonType ?? ""} onChange={(e) => onChange({ ...item, buttonType: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.buttonTypePlaceholder", "Button type (e.g. postback)")} data-testid="output-button-type"
+            className="h-7 w-40 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="text" value={item.label ?? ""} onChange={(e) => onChange({ ...item, label: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.buttonLabelPlaceholder", "Label...")} data-testid="output-button-label"
+            className="h-7 flex-1 min-w-[100px] rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <JsonFieldInput value={item.onPress} onChange={(v) => onChange({ ...item, onPress: v })}
+            readOnly={readOnly} placeholder={t("outputEditor.onPressPlaceholder", '{"action":"..."}')} testId="output-button-onpress" />
+        </div>
+      ) : item.type === "inputField" ? (
+        <div className="flex flex-1 flex-wrap items-center gap-1.5" data-testid="output-inputfield-fields">
+          <input type="text" value={item.subType ?? ""} onChange={(e) => onChange({ ...item, subType: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.subTypePlaceholder", "Sub type (e.g. text, email)")} data-testid="output-input-subtype"
+            className="h-7 w-32 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="text" value={item.placeholder ?? ""} onChange={(e) => onChange({ ...item, placeholder: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.inputPlaceholderPlaceholder", "Placeholder...")} data-testid="output-input-placeholder"
+            className="h-7 w-32 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="text" value={item.label ?? ""} onChange={(e) => onChange({ ...item, label: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.inputLabelPlaceholder", "Label...")} data-testid="output-input-label"
+            className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="text" value={item.defaultValue ?? ""} onChange={(e) => onChange({ ...item, defaultValue: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.defaultValuePlaceholder", "Default value...")} data-testid="output-input-default"
+            className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="number" value={item.validation?.minLength ?? ""} onChange={(e) => onChange({ ...item, validation: { ...item.validation, minLength: e.target.value === "" ? undefined : parseInt(e.target.value, 10) } })}
+            readOnly={readOnly} title={t("outputEditor.minLength", "Min length")} placeholder={t("outputEditor.minLengthShort", "min")} data-testid="output-input-minlength"
+            className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="number" value={item.validation?.maxLength ?? ""} onChange={(e) => onChange({ ...item, validation: { ...item.validation, maxLength: e.target.value === "" ? undefined : parseInt(e.target.value, 10) } })}
+            readOnly={readOnly} title={t("outputEditor.maxLength", "Max length")} placeholder={t("outputEditor.maxLengthShort", "max")} data-testid="output-input-maxlength"
+            className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="text" value={item.validation?.validationErrorMessage ?? ""} onChange={(e) => onChange({ ...item, validation: { ...item.validation, validationErrorMessage: e.target.value } })}
+            readOnly={readOnly} placeholder={t("outputEditor.validationMsgPlaceholder", "Validation error message...")} data-testid="output-input-validationmsg"
+            className="h-7 flex-1 min-w-[120px] rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+        </div>
       ) : (
-        <input type="text" readOnly value={JSON.stringify(Object.fromEntries(Object.entries(item).filter(([k]) => k !== "type")))}
-          className="h-7 flex-1 rounded border border-input bg-muted px-2 font-mono text-xs text-foreground" />
+        <JsonFieldInput
+          value={Object.fromEntries(Object.entries(item).filter(([k]) => k !== "type"))}
+          onChange={(v) => onChange({ type: item.type, ...(v ?? {}) })}
+          readOnly={readOnly}
+          placeholder={t("outputEditor.jsonPlaceholder", '{"key":"value"}')}
+          testId="output-json-fallback"
+        />
       )}
       {!readOnly && (
         <button type="button" onClick={onRemove} className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors">

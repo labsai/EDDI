@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { OutputEditor, type OutputConfig } from "@/components/editors/output-editor";
 
@@ -234,5 +234,197 @@ describe("OutputEditor", () => {
     const item = arg.outputSet[0].outputs[0].valueAlternatives[0];
     expect(item.path).toBe("y");
     expect(item).not.toHaveProperty("url");
+  });
+
+  // ─── button (ButtonOutputItem: buttonType, label, onPress) ─────────────────
+
+  const buttonConfig: OutputConfig = {
+    lang: "en",
+    outputSet: [
+      {
+        action: "menu",
+        timesOccurred: 0,
+        outputs: [
+          {
+            valueAlternatives: [
+              {
+                type: "button",
+                buttonType: "postback",
+                label: "Continue",
+                onPress: { action: "next" },
+              },
+            ],
+          },
+        ],
+        quickReplies: [],
+      },
+    ],
+  };
+
+  it("renders per-field button form with backend field names", () => {
+    renderWithProviders(<OutputEditor data={buttonConfig} onChange={onChange} />);
+    expect(screen.getByTestId("output-button-fields")).toBeInTheDocument();
+    expect(screen.getByTestId("output-button-type")).toHaveValue("postback");
+    expect(screen.getByTestId("output-button-label")).toHaveValue("Continue");
+    expect(screen.getByTestId("output-button-onpress")).toHaveValue(
+      '{"action":"next"}'
+    );
+  });
+
+  it("writes the button 'buttonType' field on edit", async () => {
+    const cfg: OutputConfig = {
+      lang: "",
+      outputSet: [
+        {
+          action: "a",
+          timesOccurred: 0,
+          outputs: [{ valueAlternatives: [{ type: "button" }] }],
+          quickReplies: [],
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderWithProviders(<OutputEditor data={cfg} onChange={onChange} />);
+    await user.type(screen.getByTestId("output-button-type"), "x");
+    const item = (onChange.mock.calls.at(-1)![0] as OutputConfig).outputSet[0]
+      .outputs[0].valueAlternatives[0];
+    expect(item.buttonType).toBe("x");
+    expect(item.type).toBe("button");
+  });
+
+  it("parses the button 'onPress' JSON into an object", () => {
+    const cfg: OutputConfig = {
+      lang: "",
+      outputSet: [
+        {
+          action: "a",
+          timesOccurred: 0,
+          outputs: [{ valueAlternatives: [{ type: "button" }] }],
+          quickReplies: [],
+        },
+      ],
+    };
+    renderWithProviders(<OutputEditor data={cfg} onChange={onChange} />);
+    fireEvent.change(screen.getByTestId("output-button-onpress"), {
+      target: { value: '{"action":"buy","id":3}' },
+    });
+    const item = (onChange.mock.calls.at(-1)![0] as OutputConfig).outputSet[0]
+      .outputs[0].valueAlternatives[0];
+    expect(item.onPress).toEqual({ action: "buy", id: 3 });
+  });
+
+  // ─── inputField (InputFieldOutputItem) ─────────────────────────────────────
+
+  const inputFieldConfig: OutputConfig = {
+    lang: "en",
+    outputSet: [
+      {
+        action: "ask",
+        timesOccurred: 0,
+        outputs: [
+          {
+            valueAlternatives: [
+              {
+                type: "inputField",
+                subType: "email",
+                placeholder: "you@example.com",
+                label: "Email",
+                defaultValue: "",
+                validation: {
+                  minLength: 3,
+                  maxLength: 50,
+                  validationErrorMessage: "Invalid",
+                },
+              },
+            ],
+          },
+        ],
+        quickReplies: [],
+      },
+    ],
+  };
+
+  it("renders per-field inputField form with backend field names", () => {
+    renderWithProviders(
+      <OutputEditor data={inputFieldConfig} onChange={onChange} />
+    );
+    expect(screen.getByTestId("output-inputfield-fields")).toBeInTheDocument();
+    expect(screen.getByTestId("output-input-subtype")).toHaveValue("email");
+    expect(screen.getByTestId("output-input-placeholder")).toHaveValue(
+      "you@example.com"
+    );
+    expect(screen.getByTestId("output-input-label")).toHaveValue("Email");
+    expect(screen.getByTestId("output-input-minlength")).toHaveValue(3);
+    expect(screen.getByTestId("output-input-maxlength")).toHaveValue(50);
+    expect(screen.getByTestId("output-input-validationmsg")).toHaveValue(
+      "Invalid"
+    );
+  });
+
+  it("writes the inputField 'subType' field on edit", async () => {
+    const cfg: OutputConfig = {
+      lang: "",
+      outputSet: [
+        {
+          action: "a",
+          timesOccurred: 0,
+          outputs: [{ valueAlternatives: [{ type: "inputField" }] }],
+          quickReplies: [],
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderWithProviders(<OutputEditor data={cfg} onChange={onChange} />);
+    await user.type(screen.getByTestId("output-input-subtype"), "z");
+    const item = (onChange.mock.calls.at(-1)![0] as OutputConfig).outputSet[0]
+      .outputs[0].valueAlternatives[0];
+    expect(item.subType).toBe("z");
+  });
+
+  it("writes nested inputField 'validation.minLength' on edit", () => {
+    const cfg: OutputConfig = {
+      lang: "",
+      outputSet: [
+        {
+          action: "a",
+          timesOccurred: 0,
+          outputs: [{ valueAlternatives: [{ type: "inputField" }] }],
+          quickReplies: [],
+        },
+      ],
+    };
+    renderWithProviders(<OutputEditor data={cfg} onChange={onChange} />);
+    fireEvent.change(screen.getByTestId("output-input-minlength"), {
+      target: { value: "5" },
+    });
+    const item = (onChange.mock.calls.at(-1)![0] as OutputConfig).outputSet[0]
+      .outputs[0].valueAlternatives[0];
+    expect(item.validation).toEqual({ minLength: 5 });
+  });
+
+  // ─── generic fallback is editable JSON (not read-only) ─────────────────────
+
+  it("renders an editable JSON fallback for types without a dedicated form", () => {
+    const cfg: OutputConfig = {
+      lang: "",
+      outputSet: [
+        {
+          action: "a",
+          timesOccurred: 0,
+          outputs: [
+            { valueAlternatives: [{ type: "agentFace", value: "smile" }] },
+          ],
+          quickReplies: [],
+        },
+      ],
+    };
+    renderWithProviders(<OutputEditor data={cfg} onChange={onChange} />);
+    const input = screen.getByTestId("output-json-fallback");
+    expect(input).not.toHaveAttribute("readonly");
+    fireEvent.change(input, { target: { value: '{"value":"wave"}' } });
+    const item = (onChange.mock.calls.at(-1)![0] as OutputConfig).outputSet[0]
+      .outputs[0].valueAlternatives[0];
+    expect(item.type).toBe("agentFace");
+    expect(item.value).toBe("wave");
   });
 });

@@ -1,15 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, within, fireEvent } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
   ApiCallsEditor,
   PropertyInstructionsEditor,
   OutputBuildInstructionsEditor,
   QrBuildInstructionsEditor,
+  RetryApiCallEditor,
   type HttpCallsConfig,
   type PropertyInstruction,
   type OutputBuildingInstruction,
   type QuickRepliesBuildingInstruction,
+  type RetryApiCallInstruction,
 } from "@/components/editors/apicalls-editor";
 
 // Mock monaco
@@ -904,5 +906,189 @@ describe("QrBuildInstructionsEditor", () => {
       <QrBuildInstructionsEditor instructions={[]} onChange={onChange} readOnly />
     );
     expect(screen.queryByText("Add Quick Reply Instruction")).not.toBeInTheDocument();
+  });
+});
+
+// ─── RetryApiCallEditor (standalone) — RetryApiCallInstruction backend model ──
+
+describe("RetryApiCallEditor", () => {
+  const onChange = vi.fn();
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it("shows the Add Retry Policy button when no retry is set", () => {
+    renderWithProviders(<RetryApiCallEditor onChange={onChange} />);
+    expect(screen.getByTestId("add-retry-instruction")).toBeInTheDocument();
+  });
+
+  it("seeds RetryApiCallInstruction defaults on add", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RetryApiCallEditor onChange={onChange} />);
+    await user.click(screen.getByTestId("add-retry-instruction"));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxRetries: 3,
+        exponentialBackoffDelayInMillis: 1000,
+        retryOnHttpCodes: [502, 503],
+      })
+    );
+  });
+
+  it("renders retry fields when a policy is present", () => {
+    const retry: RetryApiCallInstruction = {
+      maxRetries: 5,
+      exponentialBackoffDelayInMillis: 2000,
+      retryOnHttpCodes: [429, 503],
+    };
+    renderWithProviders(
+      <RetryApiCallEditor retry={retry} onChange={onChange} />
+    );
+    expect(screen.getByTestId("retry-max-retries")).toHaveValue(5);
+    expect(screen.getByTestId("retry-backoff-delay")).toHaveValue(2000);
+    expect(screen.getByTestId("retry-on-codes")).toHaveValue("429, 503");
+  });
+
+  it("writes 'maxRetries' on edit", () => {
+    const retry: RetryApiCallInstruction = { maxRetries: 3, retryOnHttpCodes: [502] };
+    renderWithProviders(
+      <RetryApiCallEditor retry={retry} onChange={onChange} />
+    );
+    fireEvent.change(screen.getByTestId("retry-max-retries"), {
+      target: { value: "7" },
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ maxRetries: 7 })
+    );
+  });
+
+  it("parses 'retryOnHttpCodes' from a comma list", () => {
+    const retry: RetryApiCallInstruction = { retryOnHttpCodes: [502, 503] };
+    renderWithProviders(
+      <RetryApiCallEditor retry={retry} onChange={onChange} />
+    );
+    fireEvent.change(screen.getByTestId("retry-on-codes"), {
+      target: { value: "429, 500, 503" },
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ retryOnHttpCodes: [429, 500, 503] })
+    );
+  });
+
+  it("adds a value-path matcher with the backend field names", async () => {
+    const user = userEvent.setup();
+    const retry: RetryApiCallInstruction = { responseValuePathMatchers: [] };
+    renderWithProviders(
+      <RetryApiCallEditor retry={retry} onChange={onChange} />
+    );
+    await user.click(screen.getByTestId("add-retry-matcher"));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        responseValuePathMatchers: [
+          expect.objectContaining({
+            valuePath: "",
+            contains: "",
+            equals: "",
+            trueIfNoMatch: false,
+          }),
+        ],
+      })
+    );
+  });
+
+  it("edits matcher fields (valuePath / trueIfNoMatch) round-tripping backend names", () => {
+    const retry: RetryApiCallInstruction = {
+      responseValuePathMatchers: [
+        { valuePath: "", contains: "", equals: "", trueIfNoMatch: false },
+      ],
+    };
+    renderWithProviders(
+      <RetryApiCallEditor retry={retry} onChange={onChange} />
+    );
+    fireEvent.change(screen.getByTestId("retry-matcher-valuepath"), {
+      target: { value: "$.status" },
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        responseValuePathMatchers: [
+          expect.objectContaining({ valuePath: "$.status" }),
+        ],
+      })
+    );
+    onChange.mockClear();
+    fireEvent.click(screen.getByTestId("retry-matcher-trueifnomatch"));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        responseValuePathMatchers: [
+          expect.objectContaining({ trueIfNoMatch: true }),
+        ],
+      })
+    );
+  });
+
+  it("removes the retry policy (emits undefined)", async () => {
+    const user = userEvent.setup();
+    const retry: RetryApiCallInstruction = { maxRetries: 3 };
+    renderWithProviders(
+      <RetryApiCallEditor retry={retry} onChange={onChange} />
+    );
+    await user.click(screen.getByTestId("remove-retry-instruction"));
+    expect(onChange).toHaveBeenCalledWith(undefined);
+  });
+
+  it("hides add/remove controls in readOnly mode", () => {
+    renderWithProviders(<RetryApiCallEditor onChange={onChange} readOnly />);
+    expect(screen.queryByTestId("add-retry-instruction")).not.toBeInTheDocument();
+    expect(screen.getByText("No retry policy")).toBeInTheDocument();
+  });
+});
+
+// ─── Post-Response retry integration ─────────────────────────────────────────
+
+describe("ApiCallsEditor — Post-Response retry section", () => {
+  const onChange = vi.fn();
+
+  beforeEach(() => vi.clearAllMocks());
+
+  const retryConfig: HttpCallsConfig = {
+    targetServerUrl: "https://api.example.com",
+    httpCalls: [
+      {
+        name: "call",
+        actions: [],
+        request: {
+          path: "/x",
+          method: "GET",
+          headers: {},
+          queryParams: {},
+          contentType: "application/json",
+          body: "",
+        },
+        postResponse: {
+          retryApiCallInstruction: {
+            maxRetries: 4,
+            exponentialBackoffDelayInMillis: 1500,
+            retryOnHttpCodes: [502, 503],
+          },
+        },
+      },
+    ],
+  };
+
+  it("opens the Post-Response section and shows Retry & Backoff when retry is set", () => {
+    renderWithProviders(<ApiCallsEditor data={retryConfig} onChange={onChange} />);
+    expect(screen.getByText("Retry & Backoff")).toBeInTheDocument();
+    expect(screen.getByTestId("retry-apicall-editor")).toBeInTheDocument();
+    expect(screen.getByTestId("retry-max-retries")).toHaveValue(4);
+  });
+
+  it("writes retryApiCallInstruction under postResponse on edit", () => {
+    renderWithProviders(<ApiCallsEditor data={retryConfig} onChange={onChange} />);
+    fireEvent.change(screen.getByTestId("retry-max-retries"), {
+      target: { value: "9" },
+    });
+    const arg = onChange.mock.calls.at(-1)![0] as HttpCallsConfig;
+    expect(arg.httpCalls[0]!.postResponse!.retryApiCallInstruction!.maxRetries).toBe(
+      9
+    );
   });
 });
