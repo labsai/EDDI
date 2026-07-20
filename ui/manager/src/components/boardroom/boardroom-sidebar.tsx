@@ -16,6 +16,7 @@ import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { useTheme } from "@/components/layout/theme-provider";
 import { STYLE_INFO, type DiscussionStyle } from "@/lib/api/groups";
+import { AdvisorAvatar } from "@/components/boardroom/advisor-avatar";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -274,9 +275,10 @@ function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?
                   collapsed && "justify-center ps-0 pe-0",
                 )}
               >
-                <span
-                  className="inline-block h-2 w-2 shrink-0 rounded-full bg-muted-foreground/40"
-                  aria-hidden
+                <AdvisorAvatar
+                  name={agent.name || agentId}
+                  agentId={agentId}
+                  size="xs"
                 />
                 {!collapsed && (
                   <span className="min-w-0 flex-1 truncate">

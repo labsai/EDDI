@@ -347,9 +347,6 @@ function BoardroomDashboard() {
       {/* ─── Pillar 1: Your Digital Workforce ────────────────── */}
       <WorkforceSection />
 
-      {/* ─── Knowledge Health ────────────────────────────────── */}
-      <KnowledgeHealthCard />
-
       {/* ─── Templates ────────────────────────────────────────── */}
       <TemplatesPanel
         onUseTemplate={(template: DiscussionTemplate) => {
@@ -587,6 +584,9 @@ function BoardroomDashboard() {
         </h2>
         <QuickActions />
       </section>
+
+      {/* ─── Knowledge Health ────────────────────────────────── */}
+      <KnowledgeHealthCard />
 
       {/* Mobile FAB */}
       <MobileFab />

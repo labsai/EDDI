@@ -1,4 +1,4 @@
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -56,20 +56,15 @@ export function BoardroomTopbar({
         </Button>
       )}
 
-      {/* Title */}
-      <div className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">
-        {title || (
-          <Link to="/workforce" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-            <img
-              src="/eddi-icon.svg"
-              alt=""
-              aria-hidden="true"
-              className="h-6 w-6 rounded-md"
-            />
-            {t("boardroom.title", "EDDI")}
-          </Link>
-        )}
-      </div>
+      {/* Title — only shown when a specific page title is set */}
+      {title && (
+        <div className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">
+          {title}
+        </div>
+      )}
+
+      {/* Spacer when no title */}
+      {!title && <div className="flex-1" />}
 
       {/* Right side: action slot */}
       {rightContent && (
