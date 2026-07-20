@@ -89,6 +89,11 @@
       "subtitle": "配置 Workflows 和扩展"
     },
     "conversations": {
+    "permanentDeleteSuccess": "已永久删除",
+    "softDeleteSuccess": "对话已删除",
+    "deletePermanentAction": "永久删除",
+    "deletePermanentLabel": "永久删除——同时清除附件、记忆快照和审批历史。此操作无法撤销。",
+    "confirmDeleteSoft": "默认情况下这是软删除——对话会从列表中隐藏，但其数据仍保留在服务器上。",
       "title": "对话",
       "subtitle": "查看和管理 Agent 会话"
     },

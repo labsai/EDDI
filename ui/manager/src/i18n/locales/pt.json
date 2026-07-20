@@ -89,6 +89,11 @@
       "subtitle": "Configure workflows e extensões de agents"
     },
     "conversations": {
+    "permanentDeleteSuccess": "Excluído permanentemente",
+    "softDeleteSuccess": "Conversa excluída",
+    "deletePermanentAction": "Excluir permanentemente",
+    "deletePermanentLabel": "Excluir permanentemente — também apaga anexos, o snapshot de memória e o histórico de aprovações. Não pode ser desfeito.",
+    "confirmDeleteSoft": "Por padrão, esta é uma exclusão reversível — a conversa é ocultada das listas, mas seus dados são mantidos no servidor.",
       "title": "Conversas",
       "subtitle": "Visualize e gerencie as conversas dos agents"
     },

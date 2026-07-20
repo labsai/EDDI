@@ -89,6 +89,11 @@
       "subtitle": "تكوين Workflows وإضافات Agents"
     },
     "conversations": {
+    "permanentDeleteSuccess": "تم الحذف نهائيًا",
+    "softDeleteSuccess": "تم حذف المحادثة",
+    "deletePermanentAction": "حذف نهائي",
+    "deletePermanentLabel": "حذف نهائي — يمحو أيضًا المرفقات ولقطة الذاكرة وسجل الموافقات. لا يمكن التراجع.",
+    "confirmDeleteSoft": "افتراضيًا هذا حذف مبدئي — تُخفى المحادثة من القوائم لكن تبقى بياناتها على الخادم.",
       "title": "محادثات",
       "subtitle": "عرض وإدارة محادثات Agents"
     },

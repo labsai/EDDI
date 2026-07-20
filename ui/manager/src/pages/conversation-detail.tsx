@@ -64,6 +64,7 @@ export function ConversationDetailPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deletePermanent, setDeletePermanent] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
   // i18n labels
@@ -92,16 +93,21 @@ export function ConversationDetailPage() {
 
   function handleDelete() {
     deleteMutation.mutate(
-      { id: id! },
+      { id: id!, permanent: deletePermanent },
       {
         onSuccess: () => {
-          toast.success(t("common.delete") + " \u2713");
+          toast.success(
+            deletePermanent
+              ? t("conversations.permanentDeleteSuccess", "Permanently deleted")
+              : t("conversations.softDeleteSuccess", "Conversation deleted")
+          );
           navigate("/manage/conversations");
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
     setShowDeleteDialog(false);
+    setDeletePermanent(false);
   }
 
   function handleExportMarkdown() {
@@ -347,14 +353,40 @@ export function ConversationDetailPage() {
       {/* Delete confirmation dialog */}
       <AlertDialog
         open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
+        onOpenChange={(open) => {
+          setShowDeleteDialog(open);
+          if (!open) setDeletePermanent(false);
+        }}
         title={t("conversations.confirmDelete", "Delete Conversation")}
-        description={t("conversations.confirmDeleteDescription", "This conversation and its history will be permanently removed.")}
-        confirmLabel={t("common.delete")}
+        description={t(
+          "conversations.confirmDeleteSoft",
+          "By default this is a soft delete — the conversation is hidden from listings but its stored data is kept on the server."
+        )}
+        confirmLabel={
+          deletePermanent
+            ? t("conversations.deletePermanentAction", "Delete permanently")
+            : t("common.delete")
+        }
         cancelLabel={t("common.cancel")}
         onConfirm={handleDelete}
         isPending={deleteMutation.isPending}
-      />
+      >
+        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 accent-destructive"
+            checked={deletePermanent}
+            onChange={(e) => setDeletePermanent(e.target.checked)}
+            data-testid="delete-permanent-checkbox"
+          />
+          <span className="text-muted-foreground">
+            {t(
+              "conversations.deletePermanentLabel",
+              "Permanently delete — also erases attachments, the memory snapshot and approval history. This cannot be undone."
+            )}
+          </span>
+        </label>
+      </AlertDialog>
     </div>
   );
 }

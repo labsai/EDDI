@@ -89,6 +89,11 @@
       "subtitle": "Configure agent workflows and task pipelines"
     },
     "conversations": {
+    "permanentDeleteSuccess": "Permanently deleted",
+    "softDeleteSuccess": "Conversation deleted",
+    "deletePermanentAction": "Delete permanently",
+    "deletePermanentLabel": "Permanently delete — also erases attachments, the memory snapshot and approval history. This cannot be undone.",
+    "confirmDeleteSoft": "By default this is a soft delete — the conversation is hidden from listings but its stored data is kept on the server.",
       "title": "Conversations",
       "subtitle": "View and manage agent conversations"
     },

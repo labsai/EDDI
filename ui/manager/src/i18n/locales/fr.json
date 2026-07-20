@@ -89,6 +89,11 @@
       "subtitle": "Configurez les workflows et extensions des agents"
     },
     "conversations": {
+    "permanentDeleteSuccess": "Supprimé définitivement",
+    "softDeleteSuccess": "Conversation supprimée",
+    "deletePermanentAction": "Supprimer définitivement",
+    "deletePermanentLabel": "Supprimer définitivement — efface aussi les pièces jointes, l’instantané mémoire et l’historique d’approbation. Irréversible.",
+    "confirmDeleteSoft": "Par défaut, il s’agit d’une suppression logique — la conversation est masquée des listes mais ses données restent sur le serveur.",
       "title": "Conversations",
       "subtitle": "Consultez et gérez les conversations des agents"
     },

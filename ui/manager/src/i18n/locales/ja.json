@@ -89,6 +89,11 @@
       "subtitle": "Workflows と拡張機能を設定"
     },
     "conversations": {
+    "permanentDeleteSuccess": "完全に削除しました",
+    "softDeleteSuccess": "会話を削除しました",
+    "deletePermanentAction": "完全に削除",
+    "deletePermanentLabel": "完全に削除 — 添付ファイル、メモリスナップショット、承認履歴も消去します。元に戻せません。",
+    "confirmDeleteSoft": "デフォルトではソフト削除です。会話は一覧から非表示になりますが、保存データはサーバーに残ります。",
       "title": "会話",
       "subtitle": "Agent の会話を確認・管理"
     },

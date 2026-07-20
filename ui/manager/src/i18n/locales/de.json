@@ -89,6 +89,11 @@
       "subtitle": "Workflows und Erweiterungen konfigurieren"
     },
     "conversations": {
+    "permanentDeleteSuccess": "Endgültig gelöscht",
+    "softDeleteSuccess": "Unterhaltung gelöscht",
+    "deletePermanentAction": "Endgültig löschen",
+    "deletePermanentLabel": "Endgültig löschen – entfernt auch Anhänge, den Speicher-Snapshot und den Genehmigungsverlauf. Dies kann nicht rückgängig gemacht werden.",
+    "confirmDeleteSoft": "Standardmäßig ist dies ein weiches Löschen – die Unterhaltung wird aus den Listen ausgeblendet, ihre gespeicherten Daten bleiben aber auf dem Server.",
       "title": "Gespräche",
       "subtitle": "Agent-Gespräche anzeigen und verwalten"
     },
