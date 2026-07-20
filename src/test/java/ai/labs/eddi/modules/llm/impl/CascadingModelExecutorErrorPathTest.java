@@ -58,7 +58,7 @@ class CascadingModelExecutorErrorPathTest {
             ChatModel slow = sleepingModel(500);
             when(registry.getOrCreate(eq("only"), anyMap())).thenReturn(slow);
 
-            var executor = executor(registry, null);
+            var executor = executor(registry);
 
             var ex = assertThrows(LifecycleException.class, () -> executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(),
                     mock(IConversationMemory.class), mock(AgentOrchestrator.class), Map.of(), false, false, false));
@@ -80,7 +80,7 @@ class CascadingModelExecutorErrorPathTest {
             when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(hedging);
             when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(slow);
 
-            var executor = executor(registry, null);
+            var executor = executor(registry);
             var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), mock(IConversationMemory.class),
                     mock(AgentOrchestrator.class), Map.of(), false, false, false);
 
@@ -100,7 +100,7 @@ class CascadingModelExecutorErrorPathTest {
             when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(good);
 
             var sink = mock(ConversationEventSink.class);
-            var executor = executor(registry, null);
+            var executor = executor(registry);
             var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(sink),
                     mock(AgentOrchestrator.class), Map.of(), false, false, false);
 
@@ -128,7 +128,7 @@ class CascadingModelExecutorErrorPathTest {
             when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(failing);
             when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(good);
 
-            var executor = executor(registry, null);
+            var executor = executor(registry);
             var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), mock(IConversationMemory.class),
                     mock(AgentOrchestrator.class), Map.of(), false, false, false);
 
@@ -150,7 +150,7 @@ class CascadingModelExecutorErrorPathTest {
             when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(failing);
             when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(good);
 
-            var executor = executor(registry, null);
+            var executor = executor(registry);
             var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), mock(IConversationMemory.class),
                     mock(AgentOrchestrator.class), Map.of(), false, false, false);
 
@@ -175,7 +175,7 @@ class CascadingModelExecutorErrorPathTest {
             when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(failingCheap);
             when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(failingExpensive);
 
-            var executor = executor(registry, null);
+            var executor = executor(registry);
 
             var ex = assertThrows(LifecycleException.class, () -> executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(),
                     mock(IConversationMemory.class), mock(AgentOrchestrator.class), Map.of(), false, false, false));
@@ -210,7 +210,7 @@ class CascadingModelExecutorErrorPathTest {
             assertTrue(task.isAgentMode(), "precondition: the task must be in agent mode for this test to mean anything");
 
             var orchestrator = mock(AgentOrchestrator.class);
-            var executor = executor(registry, null);
+            var executor = executor(registry);
             var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, mock(IConversationMemory.class),
                     orchestrator, Map.of(), false, false, false);
 
@@ -221,14 +221,14 @@ class CascadingModelExecutorErrorPathTest {
 
     // ==================== Helpers ====================
 
-    private static CascadingModelExecutor executor(ChatModelRegistry registry, ITemplatingEngineStub unused) {
+    /**
+     * Executor with a pass-through variable resolver and no templating engine or
+     * metrics.
+     */
+    private static CascadingModelExecutor executor(ChatModelRegistry registry) {
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         return new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
-    }
-
-    /** Marker type so the helper signature stays readable; never instantiated. */
-    private interface ITemplatingEngineStub {
     }
 
     private static ModelCascadeConfig enabledCascade(CascadeStep... steps) {

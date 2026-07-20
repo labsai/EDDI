@@ -5,11 +5,11 @@
 
 ---
 
-## 🔁 Fix: CodeRabbit review — interrupted streaming, FQN imports, changelog accuracy (2026-07-20)
+## 🔁 Fix: PR-review response — interrupted streaming, FQN imports, changelog accuracy (2026-07-20)
 
 **Repo:** EDDI (`feat/error-handling-recovery`)
 
-Three review comments on [PR #593](https://github.com/labsai/EDDI/pull/593); all three valid, all three fixed. Two turned out to be broader than reported.
+Four review comments on [PR #593](https://github.com/labsai/EDDI/pull/593) (CodeRabbit + github-code-quality); all valid, all fixed. Two turned out to be broader than reported.
 
 ### 1. An interrupted streaming attempt was reported as a success (Major)
 
@@ -28,6 +28,10 @@ Flagged on one line; the file actually had **eight** — four `IAuditEntryCollec
 Correct, and the fault was in the measurement rather than the prose: the categorisation was run over `target/surefire-reports` **without a preceding `clean`**, so it also swept up XML from earlier *targeted* runs. The per-bucket figures were therefore drawn from a superset of the run they were attributed to. The numbers have been withdrawn (with an explicit correction note in the merge entry) rather than quietly adjusted, since the original claim was already pushed.
 
 Re-measured from a genuinely clean run of the final code: **11,658 tests, 8 failures, 287 errors, and zero assertion failures.** Every failing test case in the surefire XML carries a blocked-loopback or socket-selector message; not one is a code assertion.
+
+### 4. Useless parameter in the new error-path test helper (Note)
+
+`executor(ChatModelRegistry, ITemplatingEngineStub)` never used its second argument, and the `ITemplatingEngineStub` marker interface existed only to make that argument look intentional — introduced in the previous commit as a "readability" device that conveyed nothing. Parameter and interface removed, all seven call sites simplified to `executor(registry)`.
 
 One caveat, stated rather than papered over: the XML yields 301 distinct failing test cases against the console's 295 failures+errors, and that ~6 gap is unexplained (it is not reruns, not suite-level entries, and not skipped-plus-failed). The load-bearing claim deliberately does not depend on the count — "no entry in this set is an assertion failure" is a property of the set, unaffected by how its members are tallied. CI remains the source of truth for the socket- and Docker-dependent suites.
 
