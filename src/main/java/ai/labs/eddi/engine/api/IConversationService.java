@@ -156,6 +156,20 @@ public interface IConversationService {
 
         void onToken(String token);
 
+        /**
+         * Called when a multi-model cascade step starts. Default no-op so handlers that
+         * do not care about cascade events are unaffected.
+         */
+        default void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
+        }
+
+        /**
+         * Called when a cascade step is evaluated and escalation is triggered. Default
+         * no-op.
+         */
+        default void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason, long durationMs) {
+        }
+
         void onComplete(SimpleConversationMemorySnapshot snapshot);
 
         void onError(Throwable error);

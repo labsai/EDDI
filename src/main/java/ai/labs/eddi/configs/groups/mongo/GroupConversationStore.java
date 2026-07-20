@@ -68,7 +68,7 @@ public class GroupConversationStore implements IGroupConversationStore {
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.read(id, SINGLE_VERSION);
             if (resource == null) {
-                throw new IResourceStore.ResourceNotFoundException("Group conversation not found: " + id);
+                throw new IResourceStore.ResourceNotFoundException("Group conversation not found.");
             }
             GroupConversation conversation = resource.getData();
             conversation.setId(id);
@@ -133,6 +133,34 @@ public class GroupConversationStore implements IGroupConversationStore {
     }
 
     @Override
+    public boolean compareAndSetState(String id, GroupConversation.GroupConversationState expectedState,
+                                      GroupConversation.GroupConversationState newState)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        GroupConversation gc = read(id);
+        if (gc.getState() != expectedState) {
+            // Fast path: clearly the wrong state — no need to attempt the write.
+            return false;
+        }
+        gc.setState(newState);
+        gc.setLastModified(java.time.Instant.now());
+        try {
+            // Conditional write — the persisted state must STILL be expectedState. The
+            // read-check above alone was a read-check-update (single-node only): two
+            // racing callers could both pass it and both write. storeIfFieldEquals makes
+            // the transition atomic across processes.
+            updateIfState(gc, expectedState);
+            return true;
+        } catch (IResourceStore.ResourceModifiedException e) {
+            // Another writer transitioned the conversation between our read and our
+            // write — this CAS lost the race.
+            return false;
+        } catch (GroupConversationGoneException e) {
+            throw new IResourceStore.ResourceNotFoundException(
+                    "Group conversation no longer exists.");
+        }
+    }
+
+    @Override
     public void updateIfState(GroupConversation gc, GroupConversation.GroupConversationState expectedState)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException {
         try {
@@ -142,7 +170,7 @@ public class GroupConversationStore implements IGroupConversationStore {
             // deleted-vs-mismatch distinction from the storage CAS: surface the
             // deletion as its own (unchecked) type so callers can answer 404
             throw new GroupConversationGoneException(
-                    "Group conversation " + gc.getId() + " no longer exists", e);
+                    "Group conversation no longer exists.", e);
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed conditional update: " + e.getMessage(), e);
         }

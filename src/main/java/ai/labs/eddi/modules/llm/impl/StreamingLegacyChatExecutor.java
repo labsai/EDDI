@@ -63,8 +63,32 @@ class StreamingLegacyChatExecutor {
     }
 
     /**
+     * Result of a streaming execution — the full text plus response metadata
+     * (finish reason, token usage) captured from the final response.
+     */
+    record StreamResult(String response, Map<String, Object> responseMetadata) {
+    }
+
+    /**
+     * Execute a streaming chat completion, emitting tokens via the event sink and
+     * capturing the final response metadata (token usage). Used by the cascade to
+     * stream the final step live without losing cost/token evidence.
+     * <p>
+     * Unlike
+     * {@link #execute(StreamingChatModel, List, ConversationEventSink, LlmConfiguration.Task)},
+     * a mid-stream error is <em>always</em> propagated here, even when tokens were
+     * already emitted: the cascade must see the failure to fall back to the best
+     * previous step. Salvaging the partial text would let a failed final step be
+     * accepted as a successful one.
+     */
+    StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
+        var result = execute(streamingModel, messages, eventSink, null, false);
+        return new StreamResult(result.response(), result.metadata());
+    }
+
+    /**
      * Execute a streaming chat completion with configurable timeout, retry on total
-     * failure, and finishReason metadata capture.
+     * failure, and response metadata capture (finish reason and token usage).
      *
      * @param streamingModel
      *            the streaming-capable chat model
@@ -78,6 +102,21 @@ class StreamingLegacyChatExecutor {
      */
     StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
                             ConversationEventSink eventSink, LlmConfiguration.Task task) {
+        return execute(streamingModel, messages, eventSink, task, true);
+    }
+
+    /**
+     * Core streaming execution.
+     *
+     * @param salvagePartialOnError
+     *            when {@code true}, a mid-stream error that already produced tokens
+     *            returns the partial text with a {@code streaming_error_partial}
+     *            warning instead of throwing — the turn keeps whatever the model
+     *            managed to produce. When {@code false}, any error is propagated so
+     *            the caller can treat the step as failed.
+     */
+    private StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
+                                    ConversationEventSink eventSink, LlmConfiguration.Task task, boolean salvagePartialOnError) {
 
         LOGGER.debug("Executing with streaming (legacy mode)");
 
@@ -96,7 +135,7 @@ class StreamingLegacyChatExecutor {
             var latch = new CountDownLatch(1);
             var fullResponse = new StringBuilder();
             var errorRef = new AtomicReference<Throwable>();
-            var finishReasonRef = new AtomicReference<String>();
+            var responseRef = new AtomicReference<ChatResponse>();
 
             var chatRequest = ChatRequest.builder().messages(messages).build();
 
@@ -113,10 +152,7 @@ class StreamingLegacyChatExecutor {
 
                 @Override
                 public void onCompleteResponse(ChatResponse completeResponse) {
-                    if (completeResponse != null && completeResponse.metadata() != null
-                            && completeResponse.metadata().finishReason() != null) {
-                        finishReasonRef.set(completeResponse.metadata().finishReason().toString());
-                    }
+                    responseRef.set(completeResponse);
                     latch.countDown();
                 }
 
@@ -139,10 +175,7 @@ class StreamingLegacyChatExecutor {
             }
 
             responseText = fullResponse.toString();
-
-            if (finishReasonRef.get() != null) {
-                metadata.put("finishReason", finishReasonRef.get());
-            }
+            metadata.putAll(buildMetadata(responseRef.get()));
 
             if (timedOut) {
                 metadata.put("streamingTimeout", true);
@@ -163,14 +196,15 @@ class StreamingLegacyChatExecutor {
             }
 
             if (errorRef.get() != null) {
-                if (!responseText.isEmpty()) {
+                if (salvagePartialOnError && !responseText.isEmpty()) {
                     // Error fired but we have partial content — return it with warning
                     metadata.put("warning", "streaming_error_partial");
                     metadata.put("errorMessage", errorRef.get().getMessage());
                     LOGGER.warnf("Streaming error with partial response (%d chars): %s", responseText.length(), errorRef.get().getMessage());
                     return new StreamingResult(responseText, metadata);
                 }
-                // Total failure with no content — retry if possible
+                // Nothing salvageable (no content, or the caller wants errors
+                // propagated) — retry if possible
                 if (attempt < maxAttempts) {
                     LOGGER.warnf("Streaming error with empty response, retrying (attempt %d/%d): %s",
                             attempt, maxAttempts, errorRef.get().getMessage());
@@ -186,5 +220,22 @@ class StreamingLegacyChatExecutor {
         }
 
         return new StreamingResult(responseText, metadata);
+    }
+
+    private static Map<String, Object> buildMetadata(ChatResponse response) {
+        Map<String, Object> metadata = new HashMap<>();
+        if (response != null && response.metadata() != null) {
+            var meta = response.metadata();
+            if (meta.finishReason() != null) {
+                metadata.put("finishReason", meta.finishReason().toString());
+            }
+            if (meta.tokenUsage() != null) {
+                var usage = meta.tokenUsage();
+                metadata.put("tokenUsage", Map.of("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0, "outputTokens",
+                        usage.outputTokenCount() != null ? usage.outputTokenCount() : 0, "totalTokens",
+                        usage.totalTokenCount() != null ? usage.totalTokenCount() : 0));
+            }
+        }
+        return metadata;
     }
 }

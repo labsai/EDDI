@@ -43,7 +43,7 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.model.chat.ChatModel;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -105,6 +105,7 @@ public class LlmTask implements ILifecycleTask {
     private final LegacyChatExecutor legacyChatExecutor;
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final AgentOrchestrator agentOrchestrator;
+    private final CascadingModelExecutor cascadingModelExecutor;
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
@@ -179,7 +180,7 @@ public class LlmTask implements ILifecycleTask {
             MemorySnapshotService memorySnapshotService, IAttachmentStore attachmentStore,
             AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
-            IHitlToolJournalStore hitlToolJournalStore) {
+            MeterRegistry meterRegistry, IHitlToolJournalStore hitlToolJournalStore) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -209,6 +210,8 @@ public class LlmTask implements ILifecycleTask {
         this.counterweightService = counterweightService;
         this.identityMaskingService = identityMaskingService;
         this.attachmentStore = attachmentStore;
+        this.cascadingModelExecutor = new CascadingModelExecutor(chatModelRegistry, globalVariableResolver, templatingEngine, legacyChatExecutor,
+                streamingLegacyChatExecutor, meterRegistry);
     }
 
     @Override
@@ -451,7 +454,16 @@ public class LlmTask implements ILifecycleTask {
             return;
         }
 
-        var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
+        // Determine whether the multi-model cascade will run. The base model is only
+        // needed outside the active-cascade branch, so create it lazily to avoid an
+        // unused model build when the cascade owns the request.
+        var cascadeConfig = task.getModelCascade();
+        boolean cascadeConfigured = cascadeConfig != null && cascadeConfig.isEnabled() && cascadeConfig.getSteps() != null
+                && !cascadeConfig.getSteps().isEmpty();
+        boolean skipCascade = cascadeConfigured && task.isAgentMode() && !cascadeConfig.isEnableInAgentMode();
+        boolean cascadeActive = cascadeConfigured && !skipCascade;
+
+        var chatModel = cascadeActive ? null : chatModelRegistry.getOrCreate(resolvedType, processedParams);
         prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 
         // Detect streaming mode — event sink is set when SSE endpoint is used
@@ -473,6 +485,8 @@ public class LlmTask implements ILifecycleTask {
         Map<String, Object> responseMetadata = new HashMap<>();
         List<Map<String, Object>> toolTrace = new ArrayList<>();
         boolean usedToolMode = false;
+        // Real model name of the cascade-selected step, for the audit ledger (#5).
+        String cascadeAuditModel = null;
 
         // Build chat messages without system message for agent mode
         // (agent orchestrator adds system message internally)
@@ -480,60 +494,79 @@ public class LlmTask implements ILifecycleTask {
                 .toList();
 
         // === Multi-Model Cascade Branch ===
-        var cascadeConfig = task.getModelCascade();
-        if (cascadeConfig != null && cascadeConfig.isEnabled() && cascadeConfig.getSteps() != null && !cascadeConfig.getSteps().isEmpty()) {
+        if (cascadeActive) {
+            boolean convertToObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+            boolean allowLiveStreaming = eventSink != null && !addToOutputExplicitlyFalse;
+            var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, systemMessage, processedParams, task, memory,
+                    agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
+                    effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
 
-            // In agent mode, cascade only runs if enableInAgentMode is true
-            boolean skipCascade = task.isAgentMode() && !cascadeConfig.isEnableInAgentMode();
+            responseContent = cascadeResult.response();
+            cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
 
-            if (!skipCascade) {
-                var cascadeResult = CascadingModelExecutor.execute(chatModelRegistry, cascadeConfig, messages, systemMessage, processedParams, task,
-                        memory, agentOrchestrator, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
+            // Propagate agent result's tool trace if agent mode was used
+            if (cascadeResult.agentResult() != null) {
+                toolTrace = cascadeResult.agentResult().trace();
+                usedToolMode = true;
+            }
 
-                responseContent = cascadeResult.response();
+            // Surface real token usage + cost as response metadata (#gap: cost/token
+            // evidence). Previously the cascade discarded these, so
+            // responseMetadataObjectName yielded {}.
+            if (cascadeResult.tokenUsage() != null && !cascadeResult.tokenUsage().isEmpty()) {
+                responseMetadata.put("tokenUsage", cascadeResult.tokenUsage());
+            }
+            responseMetadata.put("cascadeCostUsd", cascadeResult.runCostUsd());
+            responseMetadata.put("cascadeModel", cascadeAuditModel);
+            responseMetadata.put("cascadeStep", cascadeResult.stepUsed());
+            responseMetadata.put("cascadeConfidence", cascadeResult.confidence());
 
-                // Propagate agent result's tool trace if agent mode was used
-                if (cascadeResult.agentResult() != null) {
-                    toolTrace = cascadeResult.agentResult().trace();
-                    usedToolMode = true;
+            // Emit the final response to the stream unless the executor already streamed
+            // it live token-by-token (legacy final-step streaming). Agent-mode results are
+            // emitted here as a single chunk, matching the standard (non-cascade) agent
+            // path.
+            if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
+                eventSink.onToken(responseContent);
+            }
+
+            // Store cascade trace for audit
+            if (!cascadeResult.trace().isEmpty()) {
+                var cascadeTraceData = dataFactory.createData(KEY_LANGCHAIN + ":cascade:trace:" + task.getId(), cascadeResult.trace());
+                currentStep.storeData(cascadeTraceData);
+            }
+
+            // Store cascade metadata in audit — real model name + provider + step + cost
+            // (#5)
+            if (memory.getAuditCollector() != null) {
+                String cascadeModelDesc = cascadeAuditModel + " (step " + cascadeResult.stepUsed() + ")";
+                currentStep.storeData(dataFactory.createData("audit:cascade_model", cascadeModelDesc));
+                currentStep.storeData(dataFactory.createData("audit:cascade_confidence", String.valueOf(cascadeResult.confidence())));
+                currentStep.storeData(dataFactory.createData("audit:cascade_cost",
+                        String.format(java.util.Locale.ROOT, "%.6f", cascadeResult.runCostUsd())));
+                if (cascadeResult.tokenUsage() != null && !cascadeResult.tokenUsage().isEmpty()) {
+                    currentStep.storeData(dataFactory.createData("audit:cascade_token_usage", cascadeResult.tokenUsage()));
                 }
+            }
 
-                // Stream final response if streaming is active and no agent result (agent mode
-                // already streams)
-                if (eventSink != null && responseContent != null && cascadeResult.agentResult() == null && !addToOutputExplicitlyFalse) {
+        } else if (skipCascade) {
+            // Agent mode with cascade disabled — use normal agent flow
+            var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
+                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
+            if (agentResult != null) {
+                responseContent = agentResult.response();
+                toolTrace = agentResult.trace();
+                usedToolMode = true;
+                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
                     eventSink.onToken(responseContent);
                 }
-
-                // Store cascade trace for audit
-                if (!cascadeResult.trace().isEmpty()) {
-                    var cascadeTraceData = dataFactory.createData(KEY_LANGCHAIN + ":cascade:trace:" + task.getId(), cascadeResult.trace());
-                    currentStep.storeData(cascadeTraceData);
-                }
-
-                // Store cascade metadata in audit
-                if (memory.getAuditCollector() != null) {
-                    var cascadeModelData = dataFactory.createData("audit:cascade_model",
-                            cascadeResult.modelType() + " (step " + cascadeResult.stepUsed() + ")");
-                    currentStep.storeData(cascadeModelData);
-                    var cascadeConfidenceData = dataFactory.createData("audit:cascade_confidence", String.valueOf(cascadeResult.confidence()));
-                    currentStep.storeData(cascadeConfidenceData);
-                }
-
             } else {
-                // Agent mode with cascade disabled — use normal agent flow
-                var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                        memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
-                if (agentResult != null) {
-                    responseContent = agentResult.response();
-                    toolTrace = agentResult.trace();
-                    usedToolMode = true;
-                    if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
-                        eventSink.onToken(responseContent);
-                    }
-                } else {
-                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
-                    responseContent = chatResult.response();
-                    responseMetadata = chatResult.responseMetadata();
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
+                responseContent = chatResult.response();
+                responseMetadata = chatResult.responseMetadata();
+                // Forward the buffered response to the stream so an SSE client is not left
+                // empty.
+                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
+                    eventSink.onToken(responseContent);
                 }
             }
 
@@ -623,7 +656,10 @@ public class LlmTask implements ILifecycleTask {
                 currentStep.storeData(modelResponse);
             }
 
-            String modelName = processedParams.getOrDefault("model", task.getType());
+            // Under cascade, record the actual winning model (provider/model), not the
+            // task-level default — an auditor must be able to reconstruct which model
+            // produced the answer (#5).
+            String modelName = cascadeAuditModel != null ? cascadeAuditModel : processedParams.getOrDefault("model", task.getType());
             var modelNameData = dataFactory.createData("audit:model_name", modelName);
             currentStep.storeData(modelNameData);
         }
@@ -998,7 +1034,10 @@ public class LlmTask implements ILifecycleTask {
             URI uri = URI.create(uriObj.toString());
 
             try {
-                return resourceClientLibrary.getResource(uri, LlmConfiguration.class);
+                LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
+                // Fail fast on cascade misconfiguration at deploy time (#validation).
+                CascadeConfigValidator.validate(llmConfiguration);
+                return llmConfiguration;
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
                 throw new WorkflowConfigurationException(e.getLocalizedMessage(), e);

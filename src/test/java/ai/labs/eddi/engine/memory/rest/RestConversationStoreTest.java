@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +44,7 @@ class RestConversationStoreTest {
     private IConversationService conversationService;
     private IUserMemoryStore userMemoryStore;
     private IRuntime runtime;
+    private ConversationAccessGuard conversationAccessGuard;
     private Instance<IAttachmentStore> attachmentStorageInstance;
     private IAttachmentStore attachmentStorage;
     private RestConversationStore restConversationStore;
@@ -56,13 +58,17 @@ class RestConversationStoreTest {
         conversationService = mock(IConversationService.class);
         userMemoryStore = mock(IUserMemoryStore.class);
         runtime = mock(IRuntime.class);
+        conversationAccessGuard = mock(ConversationAccessGuard.class);
+        // These tests do not exercise ownership scoping — the caller sees everything,
+        // so listing behaves exactly as before this endpoint became owner-filtered.
+        when(conversationAccessGuard.seesAllConversations()).thenReturn(true);
         attachmentStorageInstance = mock(Instance.class);
         attachmentStorage = mock(IAttachmentStore.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
 
         restConversationStore = new RestConversationStore(
                 documentDescriptorStore, conversationDescriptorStore,
-                conversationMemoryStore, conversationService, userMemoryStore, runtime,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                 30, 90, attachmentStorageInstance);
     }
 
@@ -195,7 +201,7 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 90, attachmentStorageInstance);
 
             store.deleteConversationLog("conv-1", true);
@@ -213,7 +219,7 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 90, attachmentStorageInstance);
 
             // Should not throw — logs warning and continues
@@ -421,7 +427,7 @@ class RestConversationStoreTest {
         void skipsWhenZero() {
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 0, attachmentStorageInstance);
 
             // Should not throw
@@ -435,7 +441,7 @@ class RestConversationStoreTest {
         void skipsWhenNull() {
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, null, attachmentStorageInstance);
 
             store.cleanupOldUserMemories();
@@ -448,7 +454,7 @@ class RestConversationStoreTest {
         void submitsTaskWhenPositive() {
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 90, attachmentStorageInstance);
 
             store.cleanupOldUserMemories();
@@ -847,7 +853,7 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 90, attachmentStorageInstance);
 
             when(conversationMemoryStore.getEndedConversationIds())
@@ -1109,7 +1115,7 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 90, attachmentStorageInstance);
 
             store.deleteConversationLog("conv-1", false);

@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,7 +44,10 @@ class McpGroupToolsTest {
 
         var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
-        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, mockIdentity, false);
+        // authorization disabled — OwnershipValidator's checks are no-ops, matching the
+        // pre-existing tests. Ownership enforcement is covered separately below.
+        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, mockIdentity,
+                new OwnershipValidator(false), false);
     }
 
     // --- describe_discussion_styles ---
@@ -381,8 +386,20 @@ class McpGroupToolsTest {
 
     // --- delete_group_conversation ---
 
+    /**
+     * delete/followup/continue/close now load the conversation first to enforce the
+     * owner check (MCP parity with REST), so the read must be stubbed.
+     */
+    private void stubConversation(String id) throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId(id);
+        when(groupConversationService.readGroupConversation(id)).thenReturn(gc);
+    }
+
     @Test
     void deleteGroupConversation_success() throws Exception {
+        stubConversation("gc-del-1");
+
         tools.delete_group_conversation("gc-del-1");
 
         verify(groupConversationService).deleteGroupConversation("gc-del-1");
@@ -390,6 +407,8 @@ class McpGroupToolsTest {
 
     @Test
     void deleteGroupConversation_returnsConfirmation() throws Exception {
+        stubConversation("gc-del-1");
+
         String result = tools.delete_group_conversation("gc-del-1");
 
         assertEquals("Deleted group conversation gc-del-1", result);
@@ -397,6 +416,7 @@ class McpGroupToolsTest {
 
     @Test
     void deleteGroupConversation_handlesException() throws Exception {
+        stubConversation("gc-bad");
         doThrow(new RuntimeException("Not found")).when(groupConversationService).deleteGroupConversation("gc-bad");
 
         String result = tools.delete_group_conversation("gc-bad");
@@ -419,5 +439,251 @@ class McpGroupToolsTest {
         var method = McpGroupTools.class.getMethod("start_group_discussion", String.class, String.class, String.class);
         assertNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
                 "start_group_discussion is async and should NOT have @Blocking");
+    }
+
+    // --- ownership enforcement (MCP must match the REST surface) ---
+
+    /**
+     * Builds the tools with auth ON, acting as {@code callerId} with the given
+     * roles.
+     */
+    private McpGroupTools toolsAsUser(String callerId, String role) {
+        var identity = mock(SecurityIdentity.class);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        var principal = mock(java.security.Principal.class);
+        lenient().when(principal.getName()).thenReturn(callerId);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.hasRole(role)).thenReturn(true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
+                new OwnershipValidator(true), true);
+    }
+
+    /**
+     * An admin caller: holds eddi-admin (plus the baseline roles the tools
+     * require).
+     */
+    private McpGroupTools toolsAsAdmin(String callerId) {
+        var identity = mock(SecurityIdentity.class);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        var principal = mock(java.security.Principal.class);
+        lenient().when(principal.getName()).thenReturn(callerId);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.hasRole(anyString())).thenReturn(true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
+                new OwnershipValidator(true), true);
+    }
+
+    @Test
+    void admin_mayActOnAnotherUsersConversation() throws Exception {
+        GroupConversation gc = ownedBy("alice");
+        when(groupConversationService.followUpWithMember("gc1", "Analyst", "why?")).thenReturn(gc);
+        when(jsonSerialization.serialize(gc)).thenReturn("{\"id\":\"gc1\"}");
+
+        // The other half of requireOwnerOrAdmin: an admin is NOT the owner but must
+        // pass.
+        String result = toolsAsAdmin("root").followup_with_member("gc1", "Analyst", "why?");
+
+        assertFalse(result.contains("Access denied"));
+        verify(groupConversationService).followUpWithMember("gc1", "Analyst", "why?");
+    }
+
+    @Test
+    void admin_seesAllConversationsInTheGroupListing() throws Exception {
+        var mine = new GroupConversation();
+        mine.setId("gc-mine");
+        mine.setUserId("bob");
+        var theirs = new GroupConversation();
+        theirs.setId("gc-theirs");
+        theirs.setUserId("alice");
+        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(mine, theirs));
+
+        toolsAsAdmin("root").list_group_conversations("g1", null, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GroupConversation>> captor = ArgumentCaptor.forClass(List.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        assertEquals(2, captor.getValue().size(), "the owner filter must exempt admins");
+    }
+
+    private GroupConversation ownedBy(String userId) throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc1");
+        gc.setUserId(userId);
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+        return gc;
+    }
+
+    @Test
+    void followupWithMember_deniedForNonOwner() throws Exception {
+        ownedBy("alice");
+
+        String result = toolsAsUser("bob", "eddi-viewer").followup_with_member("gc1", "Analyst", "why?");
+
+        assertTrue(result.contains("Access denied"), "a non-owner must not follow up on someone else's conversation");
+        verify(groupConversationService, never()).followUpWithMember(any(), any(), any());
+    }
+
+    @Test
+    void continueGroupDiscussion_deniedForNonOwner() throws Exception {
+        ownedBy("alice");
+
+        String result = toolsAsUser("bob", "eddi-viewer").continue_group_discussion("gc1", "next?");
+
+        assertTrue(result.contains("Access denied"), "a non-owner must not continue someone else's conversation");
+        verify(groupConversationService, never()).continueDiscussion(any(), any(), any());
+    }
+
+    @Test
+    void closeGroupConversation_deniedForNonOwner() throws Exception {
+        ownedBy("alice");
+
+        String result = toolsAsUser("bob", "eddi-editor").close_group_conversation("gc1");
+
+        assertTrue(result.contains("Access denied"), "a non-owner must not close someone else's conversation");
+        verify(groupConversationService, never()).closeGroupConversation(any());
+    }
+
+    @Test
+    void readGroupConversation_deniedForNonOwner() throws Exception {
+        ownedBy("alice");
+
+        String result = toolsAsUser("bob", "eddi-viewer").read_group_conversation("gc1");
+
+        assertTrue(result.contains("Access denied"), "a non-owner must not read someone else's transcript");
+    }
+
+    @Test
+    void deleteGroupConversation_deniedForNonOwner() throws Exception {
+        ownedBy("alice");
+
+        String result = toolsAsUser("bob", "eddi-editor").delete_group_conversation("gc1");
+
+        assertTrue(result.contains("Access denied"), "a non-owner must not delete someone else's conversation");
+        verify(groupConversationService, never()).deleteGroupConversation(any());
+    }
+
+    // --- curated error contract for the post-discussion mutation tools ---
+    // The generic catch(Exception) must NOT echo the raw exception text to the MCP
+    // caller (info exposure); it returns a stable curated message + INTERNAL code
+    // and
+    // logs the full throwable server-side. These pin that contract against
+    // regression.
+
+    @Test
+    void followupWithMember_genericFailure_returnsCuratedErrorNotRawMessage() throws Exception {
+        stubConversation("gc1");
+        when(groupConversationService.followUpWithMember(eq("gc1"), any(), any()))
+                .thenThrow(new RuntimeException("boom-internal-detail-42"));
+
+        String result = tools.followup_with_member("gc1", "Analyst", "why?");
+
+        assertFalse(result.contains("boom-internal-detail-42"),
+                "the raw exception message must never reach the MCP caller");
+        assertTrue(result.contains("Failed to process follow-up with member"),
+                "a stable curated message is returned instead");
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""),
+                "the curated error carries an INTERNAL errorCode");
+    }
+
+    @Test
+    void continueGroupDiscussion_genericFailure_returnsCuratedErrorNotRawMessage() throws Exception {
+        stubConversation("gc1");
+        when(groupConversationService.continueDiscussion(eq("gc1"), any(), any()))
+                .thenThrow(new RuntimeException("boom-internal-detail-42"));
+
+        String result = tools.continue_group_discussion("gc1", "next?");
+
+        assertFalse(result.contains("boom-internal-detail-42"),
+                "the raw exception message must never reach the MCP caller");
+        assertTrue(result.contains("Failed to continue group discussion"),
+                "a stable curated message is returned instead");
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""),
+                "the curated error carries an INTERNAL errorCode");
+    }
+
+    @Test
+    void closeGroupConversation_genericFailure_returnsCuratedErrorNotRawMessage() throws Exception {
+        stubConversation("gc1");
+        when(groupConversationService.closeGroupConversation("gc1"))
+                .thenThrow(new RuntimeException("boom-internal-detail-42"));
+
+        String result = tools.close_group_conversation("gc1");
+
+        assertFalse(result.contains("boom-internal-detail-42"),
+                "the raw exception message must never reach the MCP caller");
+        assertTrue(result.contains("Failed to close group conversation"),
+                "a stable curated message is returned instead");
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""),
+                "the curated error carries an INTERNAL errorCode");
+    }
+
+    @Test
+    void followupWithMember_allowedForOwner() throws Exception {
+        GroupConversation gc = ownedBy("alice");
+        when(groupConversationService.followUpWithMember("gc1", "Analyst", "why?")).thenReturn(gc);
+        when(jsonSerialization.serialize(gc)).thenReturn("{\"id\":\"gc1\"}");
+
+        String result = toolsAsUser("alice", "eddi-viewer").followup_with_member("gc1", "Analyst", "why?");
+
+        assertEquals("{\"id\":\"gc1\"}", result);
+        verify(groupConversationService).followUpWithMember("gc1", "Analyst", "why?");
+    }
+
+    // --- owner resolution on creation (the gate must not lock out the creator) ---
+
+    @Test
+    void startGroupDiscussion_recordsTheCallerAsOwner_notMcpClient() throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc1");
+        when(groupConversationService.startAndDiscussAsync(eq("g1"), eq("Q?"), eq("alice"), isNull()))
+                .thenReturn(gc);
+
+        toolsAsUser("alice", "eddi-viewer").start_group_discussion("g1", "Q?", null);
+
+        // If the conversation were owned by the literal "mcp-client", the ownership
+        // gate
+        // would then deny the creator on every follow-up read/continue/close.
+        verify(groupConversationService).startAndDiscussAsync("g1", "Q?", "alice", null);
+    }
+
+    @Test
+    void startGroupDiscussion_cannotCreateAConversationOwnedByAnotherUser() throws Exception {
+        String result = toolsAsUser("bob", "eddi-viewer").start_group_discussion("g1", "Q?", "alice");
+
+        assertTrue(result.contains("Access denied"), "impersonating another owner must be rejected");
+        verify(groupConversationService, never()).startAndDiscussAsync(any(), any(), any(), any());
+    }
+
+    @Test
+    void discussWithGroup_recordsTheCallerAsOwner() throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc1");
+        when(groupConversationService.discuss("g1", "Q?", "alice", 0)).thenReturn(gc);
+
+        toolsAsUser("alice", "eddi-viewer").discuss_with_group("g1", "Q?", null);
+
+        verify(groupConversationService).discuss("g1", "Q?", "alice", 0);
+    }
+
+    // --- listing must be owner-filtered, else the per-conversation gate is
+    // pointless ---
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listGroupConversations_filtersToTheCallersOwnConversations() throws Exception {
+        var mine = new GroupConversation();
+        mine.setId("gc-mine");
+        mine.setUserId("bob");
+        var theirs = new GroupConversation();
+        theirs.setId("gc-theirs");
+        theirs.setUserId("alice");
+        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(mine, theirs));
+
+        toolsAsUser("bob", "eddi-viewer").list_group_conversations("g1", null, null);
+
+        ArgumentCaptor<List<GroupConversation>> captor = ArgumentCaptor.forClass(List.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        assertEquals(1, captor.getValue().size(), "a non-owner must not see another user's transcript via list");
+        assertEquals("gc-mine", captor.getValue().get(0).getId());
     }
 }

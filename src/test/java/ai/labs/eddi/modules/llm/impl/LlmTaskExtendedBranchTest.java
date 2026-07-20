@@ -123,7 +123,7 @@ class LlmTaskExtendedBranchTest {
                 identityMaskingService, toolResponseTruncator,
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
                 null, null,
-                null, null, null, null, null,
+                null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
                 mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
     }
 
@@ -498,7 +498,7 @@ class LlmTaskExtendedBranchTest {
                     snippetService, gvr, cws, ims, trt,
                     mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
                     null, null,
-                    null, null, null, null, null,
+                    null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
                     mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
 
             var memory = setupMemory(List.of("action1"));

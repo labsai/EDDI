@@ -129,7 +129,7 @@ class LlmTaskCoverageTest {
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, mock(ToolResponseTruncator.class),
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
                 mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
 
         // The orchestrator is created internally via `new` — inject the mock so

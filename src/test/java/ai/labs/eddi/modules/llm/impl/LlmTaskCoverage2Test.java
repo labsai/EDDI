@@ -34,6 +34,8 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.output.TokenUsage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -139,7 +141,7 @@ class LlmTaskCoverage2Test {
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, mock(ToolResponseTruncator.class),
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
                 mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
 
         // The orchestrator is created internally via `new` — inject the mock so the
@@ -641,6 +643,110 @@ class LlmTaskCoverage2Test {
     }
 
     // ============================================================
+    // skipCascade branch — agent mode with cascade disabled in agent mode
+    // (cascadeConfigured && isAgentMode && !enableInAgentMode): both the
+    // agent-result
+    // emit and the buffered legacy-fallback emit forward to the event sink
+    // ============================================================
+
+    @Test
+    @DisplayName("skipCascade + agent returns null → buffered legacy response streamed to the event sink once")
+    void skipCascade_legacyFallback_streamsBufferedResponse() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        // Agent orchestrator yields no tools → legacy fallback runs the ChatModel.
+        agentReturnsNull();
+        when(chatModel.chat(anyList())).thenReturn(chatResponse("legacy answer"));
+        var eventSink = mock(ConversationEventSink.class);
+        when(memory.getEventSink()).thenReturn(eventSink);
+
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEnableInAgentMode(false); // agent mode + this → skipCascade == true
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step));
+
+        var t = task("taskA", List.of("action1"), null);
+        t.setEnableBuiltInTools(true); // isAgentMode() true
+        t.setModelCascade(cascade);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        // Legacy fallback executed and its buffered response was forwarded once so an
+        // SSE client is not left empty.
+        verify(chatModel).chat(anyList());
+        verify(eventSink).onToken("legacy answer");
+    }
+
+    @Test
+    @DisplayName("skipCascade + agent result non-null → agent response streamed to the event sink once")
+    void skipCascade_agentResult_streamsResponse() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        agentReturns("agent answer");
+        var eventSink = mock(ConversationEventSink.class);
+        when(memory.getEventSink()).thenReturn(eventSink);
+
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEnableInAgentMode(false); // agent mode + this → skipCascade == true
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step));
+
+        var t = task("taskA", List.of("action1"), null);
+        t.setEnableBuiltInTools(true); // isAgentMode() true
+        t.setModelCascade(cascade);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        verify(eventSink).onToken("agent answer");
+    }
+
+    // ============================================================
+    // Cascade token-usage surfacing — non-empty tokenUsage reaches
+    // responseMetadata (responseMetadataObjectName) AND audit:cascade_token_usage
+    // ============================================================
+
+    @Test
+    @DisplayName("cascade legacy step with non-empty tokenUsage → surfaced in responseMetadata + audit:cascade_token_usage stored")
+    void cascadeEnabled_tokenUsageSurfaced() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        // The step's ChatResponse carries real token usage → LegacyChatExecutor emits a
+        // non-empty tokenUsage map, which the cascade result then surfaces.
+        when(chatModel.chat(anyList())).thenReturn(ChatResponse.builder().aiMessage(aiMessage("cascade answer"))
+                .metadata(ChatResponseMetadata.builder().tokenUsage(new TokenUsage(120, 30)).build()).build());
+        when(memory.getAuditCollector()).thenReturn(mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class));
+        var templateData = new HashMap<String, Object>();
+        when(memoryItemConverter.convert(memory)).thenReturn(templateData);
+
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step));
+
+        var t = task("taskA", List.of("action1"), null);
+        t.setResponseMetadataObjectName("meta");
+        t.setModelCascade(cascade);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        // (a) tokenUsage surfaced under the configured response-metadata object name.
+        var meta = (Map<String, Object>) templateData.get("meta");
+        assertNotNull(meta, "response metadata should be stored under the configured object name");
+        assertTrue(meta.containsKey("tokenUsage"), "non-empty cascade tokenUsage must be surfaced in responseMetadata");
+        // (b) audit token-usage key stored (mirrors audit:cascade_model /
+        // cascade_cost).
+        verify(dataFactory).createData(eq("audit:cascade_token_usage"), any());
+    }
+
+    // ============================================================
     // Resume mode — config drift with a NULL decision guard sibling + drift audit
     // warn
     // (drift already covered; here: resume with responseObjectName default + trace
@@ -742,6 +848,11 @@ class LlmTaskCoverage2Test {
         return s;
     }
 
+    private CascadingModelExecutor cascadeExecutor(ChatModelRegistry registry) {
+        return new CascadingModelExecutor(registry, globalVariableResolver, null, new LegacyChatExecutor(),
+                new StreamingLegacyChatExecutor(), null);
+    }
+
     @Test
     @DisplayName("cascade step-level parameters override base → trace records the step's model name")
     void cascade_stepParamsOverride_traceModelName() throws Exception {
@@ -755,9 +866,10 @@ class LlmTaskCoverage2Test {
         ChatModel model = mock(ChatModel.class);
         doReturn(cascadeResponse("answer")).when(model).chat(anyList());
 
-        var result = CascadingModelExecutor.execute(
-                cascadeRegistry(Map.of("openai", model)), cascade, cascadeMessages(), "system",
-                Map.of("apiKey", "key", "model", "base-model"), cascadeTask(), cascadeMemory(), cascadeOrchestrator());
+        var result = cascadeExecutor(cascadeRegistry(Map.of("openai", model))).execute(
+                cascade, cascadeMessages(), "system",
+                Map.of("apiKey", "key", "model", "base-model"), cascadeTask(), cascadeMemory(), cascadeOrchestrator(),
+                Map.of(), false, false, false);
 
         assertEquals("gpt-4o-mini", result.trace().get(0).get("model"),
                 "the merged step parameter model must win over the base model in the trace");
@@ -783,9 +895,10 @@ class LlmTaskCoverage2Test {
 
         var registry = cascadeRegistry(Map.of("openai", hedge1, "anthropic", hedge2, "mistral", finalModel));
 
-        var result = CascadingModelExecutor.execute(
-                registry, cascade, cascadeMessages(), "system",
-                Map.of("apiKey", "key"), cascadeTask(), cascadeMemory(), cascadeOrchestrator());
+        var result = cascadeExecutor(registry).execute(
+                cascade, cascadeMessages(), "system",
+                Map.of("apiKey", "key"), cascadeTask(), cascadeMemory(), cascadeOrchestrator(),
+                Map.of(), false, false, false);
 
         assertEquals(2, result.stepUsed(), "should land on the third (last) step");
         assertEquals("mistral", result.modelType());
@@ -809,9 +922,10 @@ class LlmTaskCoverage2Test {
         var msgCaptor = ArgumentCaptor.forClass(List.class);
         doReturn(cascadeResponse("{\"response\": \"final\", \"confidence\": 0.66}")).when(model).chat(anyList());
 
-        var result = CascadingModelExecutor.execute(
-                cascadeRegistry(Map.of("openai", model)), cascade, cascadeMessages(), "You are helpful",
-                Map.of("apiKey", "key"), cascadeTask(), cascadeMemory(), cascadeOrchestrator());
+        var result = cascadeExecutor(cascadeRegistry(Map.of("openai", model))).execute(
+                cascade, cascadeMessages(), "You are helpful",
+                Map.of("apiKey", "key"), cascadeTask(), cascadeMemory(), cascadeOrchestrator(),
+                Map.of(), false, false, false);
 
         assertEquals("final", result.response());
         assertEquals(0.66, result.confidence(), 0.01);
@@ -834,9 +948,10 @@ class LlmTaskCoverage2Test {
         ChatModel model = mock(ChatModel.class);
         doReturn(cascadeResponse("answer")).when(model).chat(anyList());
 
-        var result = CascadingModelExecutor.execute(
-                cascadeRegistry(Map.of("openai", model)), cascade, cascadeMessages(), "system",
-                Map.of("apiKey", "key"), cascadeTask(), cascadeMemory(), cascadeOrchestrator());
+        var result = cascadeExecutor(cascadeRegistry(Map.of("openai", model))).execute(
+                cascade, cascadeMessages(), "system",
+                Map.of("apiKey", "key"), cascadeTask(), cascadeMemory(), cascadeOrchestrator(),
+                Map.of(), false, false, false);
 
         assertEquals("openai", result.modelType(), "null step type resolves to the task type");
     }

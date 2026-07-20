@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -16,6 +17,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -79,9 +81,11 @@ class RestAgentEngineHitlTest {
         var hitlAccessGuard = new HitlAccessGuard(
                 identity, ownershipValidator, conversationDescriptorStore, conversationService,
                 mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
+        var conversationAccessGuard = new ConversationAccessGuard(
+                identity, ownershipValidator, conversationDescriptorStore);
         restAgentEngine = new RestAgentEngine(
-                conversationService, mock(ai.labs.eddi.engine.memory.IConversationMemoryStore.class), conversationDescriptorStore,
-                identity, ownershipValidator, hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
+                conversationService, mock(IConversationMemoryStore.class), identity, ownershipValidator,
+                conversationAccessGuard, hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
     }
 
     // =========================================================================

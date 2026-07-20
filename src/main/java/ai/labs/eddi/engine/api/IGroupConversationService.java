@@ -82,13 +82,56 @@ public interface IGroupConversationService {
 
     /**
      * Delete a group conversation and cascade-delete member conversations.
+     *
+     * @throws GroupDiscussionException
+     *             if another operation (follow-up / continue / close) is currently
+     *             in progress for this conversation — a retryable conflict (REST:
+     *             409), not a store failure.
      */
-    void deleteGroupConversation(String groupConversationId) throws IResourceStore.ResourceStoreException;
+    void deleteGroupConversation(String groupConversationId)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException;
 
     /**
      * List group conversations for a given group config.
      */
     List<GroupConversation> listGroupConversations(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Send a follow-up question to a specific member agent within a completed group
+     * conversation. The exchange (user question + agent response) is appended to
+     * the group transcript. The agent retains full context from its participation
+     * in prior rounds via its reused private conversation.
+     *
+     * <p>
+     * The {@code targetAgentId} can be either an agent ID or a display name.
+     * Display names are resolved against
+     * {@link GroupConversation#getMemberDisplayNames()}.
+     *
+     * @return the updated group conversation with the follow-up appended to the
+     *         transcript
+     */
+    GroupConversation followUpWithMember(String groupConversationId, String targetAgentId,
+                                         String question)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    /**
+     * Continue a completed group conversation with a new question. All phases
+     * re-execute with the new question; agents retain conversation memory from
+     * prior rounds via their reused private conversations. The round counter
+     * increments.
+     */
+    GroupConversation continueDiscussion(String groupConversationId, String question,
+                                         GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    /**
+     * Explicitly close a group conversation. Ends all member conversations,
+     * triggers ephemeral agent cleanup, and sets state to CLOSED. Irreversible.
+     *
+     * @return the closed group conversation
+     */
+    GroupConversation closeGroupConversation(String groupConversationId)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     /**
      * Cancel a running or paused group discussion.
@@ -151,6 +194,8 @@ public interface IGroupConversationService {
         }
         default void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
         }
+        default void onRoundStart(GroupConversationEventSink.RoundStartEvent event) {
+        }
         default void onHitlPause(GroupConversationEventSink.HitlPauseEvent event) {
         }
         default void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
@@ -176,6 +221,44 @@ public interface IGroupConversationService {
     class GroupDepthExceededException extends GroupDiscussionException {
         public GroupDepthExceededException(String message) {
             super(message);
+        }
+    }
+
+    /**
+     * The follow-up target agent is not a member of this group conversation — a
+     * client error (typically a typo'd agent id / display name). REST surfaces this
+     * as {@code 404}, distinct from the {@code 409} used for state/concurrency
+     * conflicts: retrying with the same target will never succeed.
+     */
+    class GroupMemberNotFoundException extends GroupDiscussionException {
+        public GroupMemberNotFoundException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * The operation could not be completed because a member agent or model call
+     * failed — an upstream-dependency failure, not a client or state error. REST
+     * surfaces this as {@code 502}, so clients do not mistake a provider outage for
+     * a retryable "conversation is busy" conflict.
+     */
+    class GroupExecutionException extends GroupDiscussionException {
+        public GroupExecutionException(String message) {
+            super(message);
+        }
+
+        public GroupExecutionException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * A member agent did not respond within the configured timeout. REST surfaces
+     * this as {@code 504}.
+     */
+    class GroupTimeoutException extends GroupExecutionException {
+        public GroupTimeoutException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 }

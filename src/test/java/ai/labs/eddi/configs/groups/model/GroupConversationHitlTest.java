@@ -49,8 +49,9 @@ class GroupConversationHitlTest {
         void valuesContainAllExpected() {
             var values = GroupConversationState.values();
             // CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED, CANCELLED,
-            // AWAITING_APPROVAL
-            assertEquals(7, values.length);
+            // AWAITING_APPROVAL, CLOSED (CLOSED added by the group follow-up feature)
+            assertEquals(8, values.length);
+            assertEquals(GroupConversationState.CLOSED, GroupConversationState.valueOf("CLOSED"));
         }
     }
 

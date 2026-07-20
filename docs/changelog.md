@@ -5,6 +5,617 @@
 
 ---
 
+## 🔀 Merge `origin/main` into `feat/error-handling-recovery` — conflict resolution (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Second merge of `main` into the error-handling branch ([PR #593](https://github.com/labsai/EDDI/pull/593)), bringing in 43 commits (group conversations, MCP/REST ownership hardening, multi-model cascade enterprise work). Seven files conflicted; beyond those, two files were silently mis-merged and one behavioural regression was introduced by the first resolution — both classes of problem are recorded below, since neither is visible in `git status`.
+
+### Conflicts resolved (7)
+
+- **`RestAgentEngine`** — main refactored the descriptor-based ownership check into `ConversationAccessGuard.requireConversationOwner()`; ours added `IConversationMemoryStore` for the new admin `resetState()` endpoint. Resolution keeps **both**: `conversationMemoryStore` stays (still used by `resetState`), `conversationDescriptorStore` is dropped (main removed its last usage — verified no remaining references). Constructor is now `(conversationService, conversationMemoryStore, identity, ownershipValidator, conversationAccessGuard, hitlAccessGuard, hitlToolJournalStore, agentTimeout)`.
+- **`RestAgentEngineTest` / `RestAgentEngineHitlTest` / `RestAgentEngineToolPauseDetailsTest`** — constructor-arity fallout from the above, updated to the merged signature. The HITL and tool-pause tests also swapped their inline `mock(ai.labs.…IConversationMemoryStore.class)` FQN for a top-level import per AGENTS.md §4.7.
+- **`CascadingModelExecutorCoverageTest`** — ours removed the `LlmConfiguration.RetryConfiguration` shim in favour of `ai.labs.eddi.configs.shared.RetryConfiguration`; main's newer version of the file still used the nested type. Resolved onto the shared type, keeping ours' `task.setParameters(...)` line.
+- **`StreamingLegacyChatExecutor`** — the substantive one; see below.
+- **`docs/changelog.md`** — both sides prepended entry blocks; both kept whole, main's block (which carries the newest entry) first.
+
+### `StreamingLegacyChatExecutor` — two overlapping features unified
+
+Both branches rewrote the same method for different reasons:
+
+- **ours** added a configurable timeout, a retry loop driven by `RetryConfiguration`, and `finishReason` metadata, returning `StreamingResult`;
+- **main** added `executeCapturing()` returning `StreamResult` with full `ChatResponse` metadata (token usage), so the cascade keeps cost evidence when it streams the final step live.
+
+Neither could be dropped — `LlmTask` calls the retry-aware overload, `CascadingModelExecutor` calls `executeCapturing`, and each has its own tests. The merged class keeps **one** core implementation (retry + configurable timeout) that now captures the whole `ChatResponse` and builds metadata via main's `buildMetadata()` (finishReason **and** tokenUsage); both public entry points delegate to it.
+
+**Regression caught during merge review:** the first resolution had `executeCapturing` delegate with ours' error semantics, which *salvage* partial text on a mid-stream error instead of throwing. `CascadingModelExecutor` has no try/catch at that call — it relies on the throw to fall back to the best previous step — so a failed final step was silently accepted as successful (`CascadingModelExecutorEnterpriseTest.streamingFinalStepFailsMidStream_fallbackMarkedStreamedLive`: `expected: <0> but was: <1>`). The core now takes a `salvagePartialOnError` flag: `true` for the `LlmTask` path (keep whatever the model produced rather than fail the turn), `false` for `executeCapturing` (always propagate, so the cascade can fall back). Timeout handling is unchanged — both sides already salvaged partial text there.
+
+### Silent auto-merge breakage (fixed)
+
+Ours deleted the nested `LlmConfiguration.RetryConfiguration` shim while main added **new** usages of it. Git merged both sides cleanly and the result did not compile:
+
+- `AgentOrchestratorExtendedTest` (2 usages) and `CascadingModelExecutorEnterpriseTest` (1 usage) — both moved to `ai.labs.eddi.configs.shared.RetryConfiguration`, import added.
+
+Only a clean `test-compile` surfaced these; they were not reported as conflicts.
+
+### Auto-merges verified, not assumed
+
+The five remaining files touched by both sides were diffed against **each** parent to confirm neither side's changes were dropped:
+
+- `IConversationService` / `ConversationService` / `RestAgentEngineStreaming` — ours' `onTaskFailed` callback and `resetConversationState` alongside main's `onCascadeStepStart` / `onCascadeEscalation`; orthogonal additions to the same interface and anonymous handler.
+- `LlmConfiguration` — ours' `responseValidation` + `streamingTimeoutSeconds` alongside main's `judgeModel` / `heuristic` / `maxTotalDurationMs`.
+- `LlmTask` — ours' retry-aware streaming call and `applyResponseValidation` alongside main's cascade wiring and `MeterRegistry`. Confirmed `applyResponseValidation` sits *outside* the `if (cascadeActive)` branch, so response validation still runs on every path including the cascade.
+
+### Design decisions
+
+- **Keep both streaming entry points rather than collapsing to one.** Their error contracts genuinely differ (salvage vs. propagate) and each has a real production caller; one core plus an explicit flag beats duplicating ~50 lines of streaming boilerplate or silently changing one caller's behaviour.
+- **`conversationDescriptorStore` dropped, not re-plumbed.** `ConversationAccessGuard` is the single ownership-check path now; keeping a second route to the descriptor store would reintroduce exactly the drift the guard exists to remove.
+- **Changelog blocks kept whole** rather than interleaved by date — the file is already organised in per-branch blocks, and re-sorting would produce a large, unreviewable diff.
+
+### Verification
+
+`mvnw clean test-compile` green — a *clean* build deliberately, since the `RestAgentEngine` signature change would be masked by a stale incremental one.
+
+Full unit suite: **11,409 tests run, no assertion failures.** The 8 reported failures and 304 errors were each inspected via the surefire XML and categorised by message: 297 `Unable to establish loopback connection`, 16 Docker/Testcontainers unavailable (Mongo + Postgres store tests), 5 socket-selector/event-loop creation errors. All are this sandbox's inability to open loopback sockets or run Docker — none is a code assertion. CI remains the source of truth for those suites.
+
+The 56 tests directly covering the merged paths pass locally: `StreamingLegacyChatExecutor{,Retry,Coverage}Test`, `CascadingModelExecutor{Coverage,Enterprise}Test`, `RestAgentEngine{,Hitl,ToolPauseDetails}Test`, `AgentOrchestratorExtendedTest`.
+
+### Next
+
+Merge-ready for PR #593. Remaining follow-up unrelated to the merge: ours' `onTaskFailed` SSE handler in `RestAgentEngineStreaming` still hand-builds its JSON via `String.format` + `escapeJson`, while main introduced a `sendJsonEvent(...)` Jackson helper on the same class and documents it as preferred. Correct as-is (the payload is escaped), but worth converting for consistency.
+
+---
+
+## 🔀 Merge `origin/main` into `feat/group-followups` — conflict resolution (2026-07-20)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Merged `origin/main` (multi-model cascade enterprise hardening + MCP/REST conversation-ownership security hardening) to resolve PR #595's merge conflicts against `main`. Two files conflicted, both non-substantive:
+
+- **`ToolExecutionTrace.java`:** both branches independently documented the same `synchronized` rationale on `addToolCall`/`addFailedToolCall` — ours as a Javadoc block above each method, `origin/main`'s as an inline comment restating it. Kept the existing Javadoc, dropped the redundant inline comment.
+- **`docs/changelog.md`:** both branches appended new entries directly below the file header. Resolved as a union, newest-first per branch: this branch's own entries (group follow-ups work, 2026-07-08 to 2026-07-15) kept first, followed by `origin/main`'s entries (MCP/REST conversation-ownership hardening + multi-model cascade, 2026-07-03 to 2026-07-15).
+
+---
+
+## 🧵 ToolExecutionTrace — thread-safe recording (fixes CI flake) (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`) — a **pre-existing** bug on `main`, unrelated to the group work, that surfaced as an intermittent full-suite CI failure on this branch: `ToolExecutionServiceBranchTest.executeMultipleInParallel` → `expected <Hello, Alice!> but was <Error executing tool: ConcurrentModificationException>`. Committed here to unblock this branch's CI (per decision), clearly scoped as an independent fix.
+
+**Root cause (systematic-debugging, root-caused before any fix):** `ToolExecutionService.executeToolsParallel` shares **one** `ToolExecutionTrace` across every concurrent task by design (it's the accumulator). But the trace's `addToolCall` / `addFailedToolCall` mutated a plain `ArrayList`, a plain `HashMap` (`toolMetrics`), and non-atomic counters with no synchronization. Under real parallelism, `HashMap.computeIfAbsent` detects concurrent structural modification and throws `ConcurrentModificationException`; `executeTool` catches it and returns `"Error executing tool: " + e.getClass().getSimpleName()` (CME's message is null) — the exact observed string. This is a genuine production bug: `executeToolsParallelAndWait` is a live API.
+
+**Fix:** `synchronized` on both trace mutators, serializing concurrent recording (covers the collection adds, the `computeIfAbsent`, and the primitive accumulations). `updateMetrics` is private and only called under those locks. Reads happen after `CompletableFuture.allOf(...).join()` (a happens-before edge), so writer synchronization is sufficient.
+
+**Coverage:** new `concurrentToolsShareTraceWithoutCorruption` stress test — 50 rounds × 32 parallel tasks sharing one trace, asserting no task returns an error string and every call is recorded exactly once (no lost `ArrayList` updates). It fails reliably on the unsynchronized version (reproduced the CME at round 41) and passes 5/5 with the fix. The original 2-task test had too small a race window to be a reliable regression guard.
+
+---
+
+## 🔍 Group conversations — Copilot PR-review response (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Copilot flagged 5 items on the pushed branch. Each was adversarially verified against the actual code (a 6-agent verification workflow plus independent reading) before implementing — external review is evaluated, not rubber-stamped. **All 5 confirmed**, all fixed:
+
+- **MCP raw-exception leak (×3, Medium)** — `followup_with_member`, `continue_group_discussion`, `close_group_conversation` returned `errorJson(e.getMessage())`, forwarding raw internal exception text to MCP callers (information exposure). Now each logs the full throwable server-side (`LOGGER.error(msg, e)`) and returns a stable curated `errorJson("Failed to …", "INTERNAL", null)` — matching the hardened `McpHitlTools` convention. (Verified the 3-arg `errorJson` overload exists, so this compiles; Copilot's suggested form was correct despite its own hedge.)
+- **REST 400 missing `TEXT_PLAIN` (Medium)** — `rejectAttachmentsOnContinue()` was the sole error response in `RestGroupConversation` not setting `.type(TEXT_PLAIN)`. Added, for content-type consistency with every sibling 400/404/409/504.
+- **Stale concurrency comment (Low)** — the `operationsInProgress` field comment called `compareAndSetState` a "best-effort read-check-update". That is now false: `GroupConversationStore.compareAndSetState` does a fast-path read then an **atomic** storage-layer conditional write (`storeIfFieldEquals` → single Mongo `updateOne` / Postgres `UPDATE` filtered on the current `state`). Corrected the comment: the in-memory `Set` is a single-node fast-fail optimization; the cluster-wide guard is the storage CAS.
+
+**Coverage (mutation-verified):** three new `McpGroupToolsTest` cases drive each tool's generic `catch` (service throws a recognizable `boom-internal-detail-42`) and assert the response does **not** contain the raw text and **does** contain the curated message + `"errorCode":"INTERNAL"`. Reverting all three curations fails exactly those three tests (and nothing else) — proving they pin the non-leak contract. 46 `McpGroupToolsTest` cases pass (was 43); full group/MCP suite green; Checkstyle clean.
+
+**Deliberately out of scope:** the same `errorJson(e.getMessage())` pattern exists in ~10 pre-existing catch blocks in `McpGroupTools` (and other MCP tool classes), and two existing tests *depend* on those messages (`start_group_discussion` → "Group not found", `delete` → "Not found"). A blanket sweep would break tested behaviour and expand well beyond this PR, so it is left as a separate follow-up rather than bundled here.
+
+---
+
+## 🌐 Group follow-up/continue — status-split completion: mid-round timeout → 504 (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+An adversarial re-review of the status-code split found one path the split had missed. `executeAgentTurn` (the per-member turn used by the *initial* discussion and re-run by every continuation) still threw a **base** `GroupDiscussionException` on an ABORT-policy member timeout — so a genuine member-agent timeout mid-round mapped to `502 Bad Gateway`, not the `504 Gateway Timeout` the split documents. Every other timeout site was already `GroupTimeoutException`; this was the last one.
+
+- **Fix:** `GroupConversationService.executeAgentTurn` now throws `GroupTimeoutException` on the `onAgentFailure=ABORT` timeout branch. `executeDiscussion`'s re-wrap preserves the subtype, so it surfaces as `504`.
+- **REST body hedge:** `continueDiscussion`'s `502` (`GroupExecutionException`) body previously claimed only "a member agent could not be reached". That catch also covers unrunnable-config failures, so the body now reads "a member agent or a required dependency could not be reached, or the group is misconfigured" — no longer asserting a single cause it cannot verify.
+- **Coverage (mutation-verified):** new `GroupConversationServiceExtendedTest.FailurePolicies#abortPolicy_agentTimesOut_throwsGroupTimeoutException` drives a real member timeout (a `doNothing()` say stub so the future never completes) under `ABORT` and asserts `GroupTimeoutException`. Reverting the fix to the parent `GroupExecutionException` flips exactly this one test to failing ("expected GroupTimeoutException but was GroupExecutionException") — proving it pins the 504-vs-502 distinction, not just "some 5xx".
+
+250 group/MCP unit tests pass (52 extended, 82 service, 39 REST, 3 routing, 31 HITL, 43 MCP); Checkstyle clean.
+
+---
+
+## 🌐 Group follow-up/continue — HTTP status-code split (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A final pre-review pass flagged that `followUpWithMember` / `continueDiscussion` mapped **every** `GroupDiscussionException` to `409 Conflict` — including an unknown target agent (a client error) and mid-round server/upstream failures (LLM/DB down, agent timeout). A `409` tells the client "retryable conflict", which is wrong for a typo'd agent or a provider outage. This was pre-existing feature behaviour, not a regression, but it is a real API-semantics issue a reviewer would raise, so it was fixed properly.
+
+- **Cause-differentiated exception subtypes** (all extend `GroupDiscussionException`, so existing `catch (GroupDiscussionException)` in the MCP tools and tests keeps working): `GroupMemberNotFoundException` (→ 404), `GroupExecutionException` (→ 502), `GroupTimeoutException extends GroupExecutionException` (→ 504). The base type now means **only** a state/concurrency conflict (→ 409).
+- **Single interception point** for execution failures: `executeDiscussion` re-throws every failure caught in its phase loop as `GroupExecutionException` (preserving `GroupTimeoutException`), so the many deep agent/quota/config throw sites did not each need editing. `followUpWithMember`'s own agent-call/timeout throws are re-typed directly.
+- **REST mapping** (most-specific catch first): unknown member → `404`, agent timeout → `504`, agent/model failure → `502` (Bad Gateway — an upstream dependency failed, logged with its stack trace), state/concurrency → `409`. The `@APIResponse` annotations now list the full set. `close` is unchanged (only ever a state conflict → 409).
+- Nits swept: the new `400` bodies now set `.type(TEXT_PLAIN)` for consistency; the follow-up `InterruptedException` path restores the interrupt flag.
+
+Coverage: added REST tests (`followUp`/`continue` → 404/502/504, and still-409 for a genuine conflict) and service tests asserting the specific subtypes are thrown (unknown member → `GroupMemberNotFoundException`, agent failure → `GroupExecutionException`, and the `executeDiscussion` failure-policy tests now assert `GroupExecutionException`). **Each new mapping was mutation-verified**: reverting the split makes the corresponding test fail (404/502/504 → 409; specific subtype → base). 654 group/MCP unit tests pass; Checkstyle clean.
+
+---
+
+## 🧬 Group conversations — mutation-audited regression coverage (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+The question "do we have coverage for everything we fixed?" was answered with **mutation testing** rather than by reading test names: each fix was reverted in turn and the suite re-run. A fix whose mutant *survives* (suite still green) has no coverage and can silently regress.
+
+### Mutants that survived — i.e. bugs with ZERO coverage
+
+| Fix | Why the tests could not see it |
+| --- | --- |
+| **JAX-RS routing** — the `/{groupId}/conversations` prefix on the four post-discussion endpoints | The unit tests invoke resource methods **directly** and never exercise JAX-RS path binding. This was the single highest-severity bug of the whole effort (every follow-up/continue/close would have 404'd), and it could be reintroduced with the suite still green. |
+| **SSE error curation** — the *service* pushing raw `e.getMessage()` into `GroupErrorEvent` | Nothing asserted what actually goes out over the wire to the browser. |
+| **Malformed-id reflected value** — Mongo's `ObjectId` parser echoing the raw caller string | No test drove an unparseable id. |
+| **Curated exception messages** (store + `loadInGroup`) | The existing test asserted the *response body*, which the REST layer curates anyway — so the message itself (which `read`/`delete` surface through the global mapper) was unguarded. |
+| **Continuation `startPhaseIndex = 0`** | Nothing asserted that a continuation re-runs from the FIRST phase; a mutant that skipped phase 0 passed. |
+| **`finally` cleanup condition** (defer `COMPLETED`, reclaim on `FAILED`/`CANCELLED`) | Nothing asserted that a COMPLETED round keeps its ephemeral agents for follow-ups. |
+| **`resumeQuestion` read side** | Only the *write* was tested; nothing asserted that `resumeDiscussion` actually uses it. |
+| **The three new metrics counters** | Never asserted. |
+
+### Coverage added (each verified to KILL its mutant)
+
+- **`IRestGroupConversationRoutingTest`** (new) — reflective assertions on the JAX-RS annotations: every `@PathParam` must have a matching `{template}` segment (a mismatch binds `null` — the exact production failure), every per-conversation route stays under `/groups/{groupId}/conversations/{groupConversationId}`, and the four endpoints resolve to their documented URLs. This is the invariant a direct-invocation test structurally cannot check.
+- **`GroupConversationServiceExtendedTest.MergeRegressionGuards`** (new) — a failed discussion streams a *curated* error (never the raw exception text); a continuation re-runs from phase 0 and emits `round_start` (not `group_start`); a COMPLETED round keeps its ephemeral agents.
+- **`GroupConversationServiceHitlTest`** — a paused *continuation* resumes with the follow-up question, not the stale round-1 one.
+- **`GroupConversationStoreTest` / `RestGroupConversationTest`** — the not-found message never embeds the caller id; a malformed id is answered 404 without reflecting the payload; the group-mismatch exception *message* is curated.
+- **`GroupConversationServiceTest`** — the three operation counters, and the failure counter incrementing even when the CAS is lost.
+
+Mutants **already killed** before this pass (genuinely covered): `failConversation`'s upsert, the MCP ownership gate, `CLOSED`-blindness in `persistedTerminalOverride`, `continueDiscussion`'s conditional write, the control-token pre-registration, `cancelDiscussion`'s `CLOSED` guard, `availableActions` for `CANCELLED`, and the MCP list owner-filter.
+
+647 group/MCP unit tests pass; Checkstyle clean. No production code changed in this commit.
+
+---
+
+## 🛡️ Group conversations — terminal-state integrity + error-body hardening (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`). Found by an adversarial review of the previous PR-review-response commit — which had hardened the *success* write in `continueDiscussion` while leaving the *failure* write, and the rest of the reflected-value surface, wide open.
+
+### Terminal states are now irreversible
+
+- **`failConversation` was an unconditional whole-document write — i.e. an UPSERT.** It could **re-create a group conversation another pod had deleted**, and could overwrite a terminal `CANCELLED` (committed by a cross-pod cancel) with `FAILED`, clobbering that writer's transcript. It is now a conditional write.
+- **The CAS expectation is taken from the PERSISTED state, not the in-memory one.** A first attempt CASed on `gc.getState()` and was itself a blocker: `executeDiscussion` flips the conversation to `SYNTHESIZING` **in memory** before the synthesis phase runs and only persists it afterwards, so a failure inside a synthesis phase would have CASed `SYNTHESIZING` against a persisted `IN_PROGRESS`, lost the race, skipped the write, and **stranded the conversation `IN_PROGRESS` forever** — worse than the bug being fixed. `failConversation` now re-reads the persisted state, skips the write when it is already terminal (aligning the in-memory state to it, so the `finally` makes the right ephemeral-agent decision), and counts the failure metric unconditionally so a lost race can never hide a failure from operators.
+
+### No exception text reaches the client (CodeQL: information exposure / reflected value)
+
+The previous commit curated one handler. This closes the class:
+
+- **Throw sites:** `GroupConversationStore` and `GroupConversationService` no longer embed caller-supplied ids in exception messages (`"Group conversation not found: {id}"`, `"Group not found: {groupId}"`, `"No phases defined for group: {groupId}"`).
+- **Sinks:** `RestGroupConversation` returns **no raw exception text in any body** — every 400/404/409 is a curated, deliberately non-committal message (these exceptions cover several causes, so the body must not assert one), with the detail logged via `LogSanitizer`.
+- **SSE:** the *service* was pushing raw `e.getMessage()` into `GroupErrorEvent`, which the streaming listener forwards to the browser — so LLM/DB/driver detail (and the caller's own input) reached the client even though the REST catch sites were curated. Those events are now curated too, and the raw cause is logged with its stack trace.
+- **Malformed ids:** a non-hex id reaches Mongo's `ObjectId` parser, whose message embeds the **raw caller string** — the most exploitable sink. It is caught **inside `loadInGroup`, scoped to the id lookup only**, and answered with a curated 404. It is deliberately *not* a blanket `catch (IllegalArgumentException)` around the whole operation: that would mask a genuine internal bug as a false "not found" and hide its stack trace.
+
+Verified: 636 group/MCP unit tests pass (incl. new regression tests for the persisted-state CAS and the already-terminal skip); Checkstyle clean. Remaining full-suite failures are environmental only (Testcontainers/Docker + loopback-socket suites).
+
+---
+
+## 🤖 Group follow-ups — automated PR review response (CodeQL / Copilot / CodeRabbit) (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`) — responses to the bot reviews on [PR #595](https://github.com/labsai/EDDI/pull/595).
+
+### Correctness
+
+- **Terminal-state resurrection in `continueDiscussion`** (Copilot, *High*): after the `COMPLETED → IN_PROGRESS` CAS, the round/question mutation was persisted with an **unconditional** whole-document `update()`. A cancel/close/delete winning the window would be overwritten and the conversation resurrected as `IN_PROGRESS`. Now a conditional write (`updateIfState(gc, IN_PROGRESS)`) → `409` on conflict. This is the same defect class already fixed in `followUpWithMember`; the continue path had been missed.
+
+### Security — reflected input & error exposure
+
+- **Reflected `groupId` in 404 bodies** (Copilot, *Medium*): `loadInGroup()` embedded the caller-supplied `groupId` in its exception message, which follow-up / continue / close echo verbatim into the `404` body (CodeQL reflected-value/XSS). Now a curated body; both ids are logged server-side via `LogSanitizer`.
+- **Reflected `targetAgentId` in 409 bodies**: `followUpWithMember`'s "not a member" message echoed the caller-supplied agent id into the `409`. The id is no longer reflected (the available-member list — server data — is kept).
+- **Information exposure through an error message** (CodeQL, *Medium*): the delete-conflict `409` returned the raw `e.getMessage()`. Now a curated "busy, please retry" body with the detail logged server-side.
+
+### Observability & docs
+
+- **Metrics for the new operations** (CodeRabbit): `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` were uninstrumented, contrary to AGENTS.md. Added `eddi_group_followup_count`, `eddi_group_continue_count`, `eddi_group_close_count`. Instrumented in the **service** (not the MCP tools, as suggested) so the counters cover the REST *and* MCP surfaces.
+- **Authorization denials now log at WARN** (CodeRabbit) — a security-relevant event should be alertable.
+- **`getAvailableActions()` javadoc corrected** (Copilot, *Low*): it claimed "not persisted", but Jackson serializes it into stored documents. It is `READ_ONLY`, so the value is never read back and is always recomputed from `state` — the javadoc now says so rather than making a false claim.
+
+### Tests
+
+Post-CAS `IN_PROGRESS` read modelled so the `FAILED` recovery path is actually exercised; `close` now asserts a `CLOSED` result rather than `assertSame` on a stale instance; added the concurrent-terminal-transition conflict test, the SSE `cancelled` callback test, the admin-bypass tests (the other half of `requireOwnerOrAdmin` and the list-filter exemption), and assertions that neither the raw exception text nor the caller-supplied `groupId` reaches the client.
+
+### Not actioned (false positive)
+
+- CodeRabbit (*Major*) claimed `updateIfState` wrapping `ResourceNotFoundException` in the unchecked `GroupConversationGoneException` bypasses the REST layer's 404 handling and yields a 500. It does not: `RestGroupConversation` explicitly catches `GroupConversationGoneException` alongside `ResourceNotFoundException` in a multi-catch on every surface that exposes the operation (cancel / approve / approve-stream) and maps it to `404`. The unchecked type is a deliberate design from the HITL work (documented on the exception) so existing CAS call sites keep compiling; `compareAndSetState` converts it to `ResourceNotFoundException` for its own callers. No change made.
+
+---
+
+## 🔐 Group merge — third-pass review: MCP authz, CLOSED-blindness, atomic CAS (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A third critical review targeted what the earlier passes never looked at — the **auto-merged** files (git merged them without conflict, so nobody had reviewed them), the whole-branch PR surface, test coverage of the fixes, and security. 14 findings survived adversarial verification. All fixed:
+
+### Security — MCP was an authorization bypass (IDOR)
+- `McpGroupTools` gated the conversation-scoped tools on a **role check only** (`eddi-viewer` for `followup_with_member` / `continue_group_discussion` / `read_group_conversation`, `eddi-editor` for `close`/`delete`) with **no ownership check**, while the equivalent REST endpoints all enforce `requireOwnerOrAdmin` (403). Any authenticated viewer could read another user's full transcript, append to it, re-run every phase against their conversation (burning their LLM budget), and an editor could close or delete it. Injected `OwnershipValidator` and added a `requireConversationOwner()` gate to all five tools, with a uniform non-leaking denial. Main's own HITL MCP tools already enforced this via `HitlAccessGuard` — MCP is now consistent with REST.
+- **Owner resolution on creation** (found reviewing the gate above): MCP recorded the owner as the literal `"mcp-client"` (or any caller-supplied `userId`), so the new gate would have **locked the creator out of their own conversation** whenever auth was enabled — and let a caller create a conversation owned by someone else. `discuss_with_group` / `start_group_discussion` now resolve the owner via `validateAndResolveUserId` (the calling principal; impersonation rejected), falling back to `"mcp-client"` only when auth is off.
+- **`list_group_conversations` is now owner-filtered** (mirroring REST). It returns full conversation documents, so without this the per-conversation gate was pointless — a non-owner could simply list the group and read everyone's transcripts.
+
+### Correctness — a systemic `CLOSED`-blindness
+Ours introduced `CLOSED` as a new terminal state; theirs' HITL/cancel code predates it. A sweep of every terminal-state check found exactly two blind spots:
+- **`persistedTerminalOverride`** treated only `{CANCELLED, FAILED, COMPLETED}` as terminal, so a running leg that found the conversation `CLOSED` did **not** stop — it fell through to an unconditional whole-document write and **resurrected the closed conversation** to `IN_PROGRESS`→`COMPLETED` after its member conversations were ended and its ephemeral agents deleted. (The previous round's fix F — close-of-`CANCELLED` — made this materially more reachable.)
+- **`cancelDiscussion`** likewise ignored `CLOSED`, so a cancel could CAS `CLOSED → CANCELLED` and un-terminalize an irreversible state.
+
+### Correctness — the cross-process guard wasn't atomic
+- **`compareAndSetState` was a read-check-write**, not a CAS: it read, compared in Java, then wrote unconditionally, so two racing callers could both pass the check and both write. It is the *only* cross-process guard behind follow-up/continue/close (the original changelog admitted "single-node only… would require a conditional update at the storage layer"). The merge made the fix available — it now uses theirs' `storeIfFieldEquals`, returning `false` on a lost race.
+
+### Contract / robustness
+- `followUpWithMember` with a null/blank `targetAgentId` NPE'd into a **500**; now validated → **400** (service throws `IllegalArgumentException`, REST rejects up front). Same for a blank `question` on follow-up and continue.
+- `POST /continue` advertised `attachments` on its body but **silently dropped them**. Now **rejected with 400** rather than silently ignored. (A first attempt to *honour* them was reverted after review: attachments are granted and injected to a member only on its first-ever turn, and on a continuation every member conversation already exists — so the "fix" was a no-op that stored an orphaned blob and still returned 200. Actually sharing new files mid-conversation needs the attachment fan-out reworked — see *What's next*.)
+- `DELETE` during an in-flight follow-up/continue returned **500**; now a `GroupDiscussionException` → **409**.
+- OpenAPI updated for the new 400/409 responses and the `CANCELLED`-closeable state.
+
+### Tests
+Backfilled the previously untested fixes (they could each have been reverted with the suite still green): `resumeQuestion` persistence, control-token pre-registration + removal, `persistedTerminalOverride` state alignment across all four terminal states, cancel-of-`CLOSED`, conditional-CAS + lost-race, MCP ownership denial/allow, blank-input 400s, continue-attachment forwarding, delete 409, and the streaming listener forwarding HITL + `round_start` events.
+
+Also fixed a **latent broken test the merge introduced**: `GroupConversationHitlTest` still asserted 7 enum states (the merge made it 8 with `CLOSED`) — it was never in the narrower test selections and had been failing since the merge commit.
+
+### What's next (deliberately not done here)
+
+- **Attachments on a continuation round.** `grantAndInjectAttachments` runs only on a member's *first-ever* turn (`privateConvId == null`), so a continuation cannot share new files. Supporting it means reworking the fan-out to grant/inject per *round* (e.g. tracking which member conversations have been granted the current attachment set) — a change to shared attachment code, out of scope for a merge-response fix. Until then `/continue` rejects attachments with 400.
+- **Follow-up to a dynamically recruited agent.** `GroupConversation.dynamicMembers` has no production writer (sub-agent creation records only `createdAgentIds`), so recruited agents are not addressable as follow-up targets at all. A first attempt to resolve them by display name was reverted as dead code; the real fix is to register recruited agents as members (roster + `memberConversationIds`).
+
+Verified: `mvnw test` green — **758 group/MCP unit tests pass** (0 failures). The remaining full-suite failures are environmental only (Testcontainers/Docker and loopback-socket suites — Mongo/Postgres stores, HTTP tool tests); no group or MCP test fails. CI covers those.
+
+---
+
+## 🩹 Group merge — cross-feature review-response fixes (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A deep adversarial review of the merge (7 dimensions, 58 agents, each finding cross-examined by 3 skeptics) confirmed the conflict resolution was sound but surfaced **cross-feature interaction bugs** between *ours* (continue/follow-up/close) and *theirs* (HITL pause/cancel/resume) that neither branch could have had alone — none caught by the impl-level unit tests. Fixed:
+
+- **A — stale question on continuation resume:** a continuation round that paused at an HITL gate resumed with the round-1 question (`resumeDiscussion` read `originalQuestion`, which `continueDiscussion` never updated) — silent wrong multi-agent output. Added a dedicated `GroupConversation.resumeQuestion` field: `continueDiscussion` sets it, `resumeDiscussion` reads it (falling back to `originalQuestion` for round 1 / legacy docs). Kept separate from `originalQuestion` so the Manager conversation-list title (which renders `originalQuestion`) is not rewritten by continuations.
+- **B — continue/stream dropped HITL events:** `continueDiscussionStreaming` used a hand-rolled inline SSE listener predating theirs' HITL callbacks, so a continuation that paused/cancelled emitted no event and hung the client + leaked the sink. Unified it on the shared `createStreamingListener` (added an `onRoundStart` override there); removed ~55 lines of duplication.
+- **C — ephemeral-agent leak on cross-pod terminal race:** the merged `finally` cleans up only on `FAILED`/`CANCELLED` (to defer `COMPLETED` for follow-up reuse), but the cross-pod terminal-override and lost-completion-CAS exits left in-memory state stale (running/optimistic-`COMPLETED`), skipping cleanup. Both exits now align in-memory `state` to the actual persisted terminal value so the `finally` decides correctly.
+- **D — follow-up clobbered a racing cancel:** `followUpWithMember`'s success path used an unconditional `update()` that could overwrite a concurrent `CANCELLED`. Switched to `updateIfState(gc, IN_PROGRESS)` (matching its own error path); a concurrent cancel/delete now yields a `409` instead of resurrecting the conversation.
+- **E — cancel race + latency on continuation:** `continueDiscussion` didn't pre-register a `DiscussionControlToken`, so a cancel racing the CAS→`executeDiscussion` window took the DB branch and was overwritten, and cancel latency was a whole phase worse. Now pre-registers the token right after the CAS (mirrors `startAndDiscussAsync`/`resumeDiscussion`); removed on the pre-exec failure path.
+- **F — `CANCELLED` had no reclaim path:** a cancel landing in the follow-up/continue pre-exec window could reach `CANCELLED` with orphaned ephemeral agents and no recovery. `closeGroupConversation` now accepts `CANCELLED → CLOSED` and `getAvailableActions()` returns `["close"]` for `CANCELLED`, giving operators a reclaim path.
+
+Added regression tests (`CANCELLED` available-actions, close-of-`CANCELLED`); updated the follow-up success-write assertion. Verified: `mvnw test` green — 189 group-conversation unit tests pass (0 failures); each fix re-verified by an adversarial pass (5/6 clean first time; A refined from overloading `originalQuestion` to the dedicated field per that review).
+
+---
+
+## 🔀 Merge `origin/main` into `feat/group-followups` — conflict resolution (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Merged 170 commits of `origin/main` (HITL framework + multimodal-attachments group parity) into the group follow-up/continuation/close branch. Both sides evolved the group-conversation subsystem in parallel, so all 23 conflict hunks across 12 files were resolved as a **union** of the two feature sets. Key decisions:
+
+- **`GroupConversationService.executeDiscussion` setup (conflict):** interleaved ours' member-display-name population + round-aware start events (`onGroupStart` on round 1, `onRoundStart` on continuation rounds) with theirs' attachment re-hydration, resume-seeded turn counter (`pausedTurnCount`), HITL granularity, and control-token registration. The start-event now fires only on fresh execution (`startPhaseIndex == 0`), branching round-1 vs continuation.
+- **`executeDiscussion` finally-block cleanup (conflict):** reconciled ours' "defer ephemeral cleanup for COMPLETED rounds so follow-ups can reuse dynamic agents" with theirs' "keep agents alive while `AWAITING_APPROVAL`". Result: always remove the control token; drop the verification cursor unless paused; clean up ephemeral agents only on terminal states with no follow-up/close path (`FAILED`, `CANCELLED`). `COMPLETED` cleanup stays deferred to `close`/`delete`.
+- **`GroupConversationState` is now 8 values** (ours' `CLOSED` + theirs' `CANCELLED`). `getAvailableActions()` gained a `CANCELLED` arm (terminal, no actions — updated the exhaustive switch); the enum-count guard test was corrected 7 → 8.
+- **`executeDiscussion` signature:** theirs added `int startPhaseIndex`; ours' `continueDiscussion` call site now passes `0` (a continuation re-runs the full protocol from phase 0).
+- **Group-path guard unified on `loadInGroup()`:** all six endpoints (read, delete, followup, continue, continue/stream, close) route through ours' `loadInGroup()`; theirs' parallel `requireGroupMembership()` helper was removed as dead code. HITL endpoints keep theirs' `validateGroupConversationOwnership`.
+- **JAX-RS routing fix (would-be regression):** theirs flattened the class-level `@Path` from `/groups/{groupId}/conversations` to `/groups`, moving the `{groupId}/conversations` prefix onto each method. Ours' four methods (`followup`/`continue`/`continue/stream`/`close`) carried their old class-relative `@Path("/{groupConversationId}/…")`, so post-flatten they lost the `{groupId}` template segment while still declaring `@PathParam("groupId")` — `groupId` would bind `null` and every call would 404 (invisible to the unit tests, which call the impl directly). Each of the four method paths was prefixed with `/{groupId}/conversations`, restoring the original external URLs. Caught by an adversarial merge review.
+- **Both feature APIs preserved:** ours' `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` / `compareAndSetState` + theirs' `cancelDiscussion` / `resumeDiscussion` / `approveGroupPhase(/Streaming)` / `getGroupApprovalStatus` / `listGroup(All)PendingApprovals` / `updateIfState` / `findByState`; all SSE events and listener callbacks from both sides retained.
+- **Review nitpick:** `RestGroupConversationExtendedTest` now has an `@AfterEach` that invokes the package-private `RestGroupConversation.shutdown()`, so a full suite run no longer accumulates un-terminated virtual-thread executors.
+
+Verified: `mvnw clean test-compile` green; ~187 group-conversation unit tests pass (GroupConversation 25, Store 19, Rest 25, RestExtended 21, Service 68, Hitl 29 — 0 failures/errors).
+
+---
+
+## 🔒 Group Conversation Follow-Ups — review-response hardening (2026-07-13)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Addresses static-analysis and code-review findings on [PR #595](https://github.com/labsai/EDDI/pull/595) (CodeQL, Copilot, CodeRabbit, GitHub Code Quality).
+
+### Security & correctness
+
+- **Log injection (CWE-117)**: sanitized user-controlled `groupConversationId` in log statements via `LogSanitizer.sanitize()` (`GroupConversationService` follow-up recovery, close, delete-not-found, and timeout-resolution paths).
+- **Group-path validation**: `followup` / `continue` / `continue/stream` / `close` now verify the conversation belongs to the `{groupId}` in the path — mismatches return `404` (SSE `group_error` for the stream) via a shared `loadInGroup()` helper. Closes a "wrong group path" access gap **and** resolves the unused-`groupId` findings.
+- **403 on streaming continue**: `continueDiscussionStreaming` now rethrows `ForbiddenException` so ownership failures map to HTTP `403` instead of a `200` SSE error event.
+
+### Concurrency
+
+- **Per-conversation operation guard**: `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` acquire a fail-fast in-process guard (`ConcurrentHashMap.newKeySet()`) keyed by conversation ID; a second concurrent operation on the same conversation is rejected (`409`) rather than racing the `compareAndSetState` read-check-update. **NOTE:** single-node only — cluster-wide atomicity would require a conditional update at the storage layer (documented as future hardening, not built here).
+
+### Resource lifecycle
+
+- **`@PreDestroy` on `RestGroupConversation`**: the virtual-thread executor is now shut down on bean destroy.
+- **Ephemeral cleanup on delete**: `deleteGroupConversation` now reclaims dynamically-created agents. Deferred cleanup previously ran only on `close`, so deleting a `COMPLETED` conversation orphaned them — this regression is introduced-and-fixed within the same feature branch. Extracted `cleanupEphemeralAgentsForGroup()` shared by close + delete.
+- **Known limitations** (ephemeral-agent reclamation): (a) a `COMPLETED` conversation that is never closed *or* deleted still retains its ephemeral agents; (b) if cleanup fails on `delete` (group config already gone, or a transient undeploy error), the record is still hard-deleted, so the `createdAgentIds` mapping is lost and a future reaper cannot reclaim those agents (they remain operator-recoverable via the agent store). A TTL reaper (built on `ScheduleFireExecutor`) is the planned mitigation for (a) — tracked as a separate item.
+
+### API cleanup
+
+- **Removed dead `userId` param** from `followUpWithMember` / `continueDiscussion` (service interface, impl, REST, MCP tools). Ownership is validated via the stored conversation owner; the param was never used downstream.
+- **Configurable follow-up timeout**: the follow-up agent call now uses the group's `protocol.agentTimeoutSeconds()` (default 60, consistent with discussion turns) via `resolveAgentTimeoutSeconds()`, instead of a hardcoded 120s.
+- **Model encapsulation**: `GroupConversation.getMemberDisplayNames()` returns an unmodifiable view; population goes through the new `addMemberDisplayName()` method (the getter can no longer be mutated); the setter defensively copies.
+- **OpenAPI**: added `404` responses to `followup` / `continue`, and `200` / `404` + event listing (incl. `round_start`) to `continue/stream`.
+
+### Round 2 — multi-agent adversarial review + CI (2026-07-13)
+
+Second pass after an adversarial multi-dimension review (concurrency / security / REST / lifecycle / test-coverage) plus the CI test run.
+
+- **CI green**: updated the `GroupConversationState` (6→7, `CLOSED`) and `TranscriptEntryType` (14→15, `FOLLOW_UP`) enum-count guard tests. Added the three follow-up MCP tools (`followup_with_member`, `continue_group_discussion`, `close_group_conversation`) to `McpToolFilter` — they were **filtered out entirely** (never exposed to MCP clients) because the whitelist was never updated, so this is a functional fix, not just a test tweak.
+- **Delete race** (flagged by two review dimensions): `deleteGroupConversation` now participates in the per-conversation guard. Because deferred cleanup made delete a *terminal* operation, an unguarded delete could tear down member conversations / ephemeral agents while a `continue`/`follow-up` was mid-run and then be resurrected as a "zombie" document via the store's upsert-by-id `update()`.
+- **`close` status codes**: business conflicts (in-progress / wrong-state) now throw `GroupDiscussionException` → `409`; a genuine `ResourceStoreException` (DB failure) falls through to `500` via the global mapper, instead of every store error mapping to `409`. Aligns `close` with `followup`/`continue`.
+- **Consistent group-scoping**: `readGroupConversation` and `deleteGroupConversation` now also route through `loadInGroup()`, so *every* endpoint under `/groups/{groupId}/conversations/{id}` verifies the conversation belongs to the path group (404 on mismatch). Previously only the new endpoints did.
+- **CWE-117 in MCP tools**: the three new MCP follow-up tools now sanitize `e.getMessage()` before logging (`targetAgentId` is user-controlled and flows into exception messages).
+- **Test coverage**: added unit tests for `getAvailableActions()` (per state), `memberDisplayNames` encapsulation, the `round` default, `compareAndSetState()` (all branches), `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` service logic (display-name resolution, wrong-state, concurrency guard, state restore, round increment), and the new REST endpoints including the `loadInGroup` 404 guard.
+
+### Deliberately not done
+
+- **SSE listener factory extraction** (CodeRabbit nitpick): skipped — a pure DRY refactor of working, integration-only streaming code with no behavior gain.
+
+### What's next
+
+- TTL reaper for abandoned `COMPLETED` conversations (ephemeral-agent reclamation).
+- Optional cluster-wide atomic state transition at the storage layer if concurrent group operations become a real deployment concern.
+- Optional: sweep the remaining pre-existing `McpGroupTools` catch blocks for the same `LogSanitizer` treatment (≈11 older tools still use the unsanitized `errorf(..., e.getMessage())` pattern — lower priority, outside this PR's scope).
+
+---
+
+## ✨ Group Conversation Follow-Ups — member follow-up, continuation rounds, explicit close (2026-07-08)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+### Summary
+
+Adds three new interaction patterns for completed group conversations:
+1. **Follow up with any member** — ask a specific agent (including the moderator) a question; both the question and response are appended to the group transcript as `FOLLOW_UP` entries
+2. **Continue the full group** — re-run all discussion phases with a new question; agents retain conversation memory from prior rounds via reused private conversations; round counter increments
+3. **Explicit close** — end member conversations, run ephemeral agent cleanup, lock the conversation permanently (`CLOSED` state)
+
+### Changes
+
+**Model layer:**
+- `GroupConversation.java`: Added `round` field (1-based counter), `CLOSED` to `GroupConversationState`, `FOLLOW_UP` to `TranscriptEntryType`
+- `IGroupConversationStore.java`: Added `compareAndSetState()` for optimistic concurrency control
+- `GroupConversationStore.java`: Implemented `compareAndSetState()` (read-check-update pattern)
+
+**Service layer:**
+- `IGroupConversationService.java`: Added `followUpWithMember()`, `continueDiscussion()`, `closeGroupConversation()` + `onRoundStart()` listener method
+- `GroupConversationService.java`: Implemented all three methods; modified `executeDiscussion()` to emit `round_start` SSE event (instead of `group_start`) for continuation rounds; deferred ephemeral agent cleanup to `closeGroupConversation()` for successful rounds (only immediate cleanup on failure)
+- `GroupConversationEventSink.java`: Added `EVENT_ROUND_START` constant and `RoundStartEvent` record
+
+**REST + MCP layer:**
+- `IRestGroupConversation.java`: Added 4 endpoints (`POST /{gcId}/followup`, `POST /{gcId}/continue`, `POST /{gcId}/continue/stream`, `POST /{gcId}/close`) + `FollowUpRequest` record
+- `RestGroupConversation.java`: Implemented all 4 endpoints with ownership validation and SSE streaming support for continuation
+- `McpGroupTools.java`: Added `followup_with_member`, `continue_group_discussion`, `close_group_conversation` tools
+
+### Design decisions
+
+- **Concurrency**: `compareAndSetState(COMPLETED → IN_PROGRESS)` is a best-effort guard against overlapping follow-ups; state restored to `COMPLETED` on error. (Hardened on 2026-07-13 with a per-conversation in-process guard — see that entry.)
+- **Deferred cleanup**: Ephemeral agents survive until explicit close so follow-ups can use dynamically-created agents; immediate cleanup only on failure
+- **No TranscriptEntry.round field**: Round boundaries are inferred from `QUESTION` entries in the transcript — avoids churn on the 13-field record with 4 constructors
+- **Plain-text follow-up *input***: The follow-up **input** is the plain question; the full transcript is still provided via the `groupTranscript` **context** variable (not re-injected into the input text), and the agent's private conversation retains prior turns
+
+### Client experience improvements (follow-up commit)
+
+- **Consistent response shapes**: All endpoints (`followup`, `continue`, `close`) now return the full `GroupConversation` — same shape as the initial `discuss` endpoint
+- **Display name resolution**: `followUpWithMember` accepts either an agent ID or a display name (case-insensitive). Error messages list available members if target not found
+- **`memberDisplayNames` map**: New field on `GroupConversation` maps agentId → displayName, populated at discussion start from group config. Eliminates client-side transcript scanning
+- **`availableActions` computed property**: JSON response includes `["followup", "continue", "close"]` when COMPLETED, `["close"]` when FAILED, `[]` otherwise. Clients can discover available operations without reading docs
+- **Close returns body**: `/close` now returns the closed `GroupConversation` with `state: CLOSED` and `availableActions: []`
+- **Lifecycle documented in OpenAPI**: Close endpoint description includes `discuss → COMPLETED → [followup|continue]* → close → CLOSED (terminal)`
+
+---
+
+## 🔭 Security — conversation-listing scan: enforce the budget per-descriptor + changelog accuracy (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+Second CodeRabbit pass on this branch (its first pass predated the metrics/doc commit and was already moot). Two valid, current items:
+
+- **Enforce `MAX_OWNER_SCAN` per-descriptor, not per-page.** The budget was only checked in the `do-while` condition (after a full page), so a non-admin scan could reach `MAX_OWNER_SCAN + limit - 1` before stopping — over the documented bound. Added an in-loop `break`. Impact is small (the overrun rows are within an already-fetched page, and foreign rows skip the snapshot load either way), but it makes the bound exact and the `owner_scan_exhausted` metric fire at 500 rather than up to a page late. Not separately unit-tested: with all-foreign pages the store returns the same empty list and the same page-read count with or without the break, so the tightening isn't observable through the store interface; the existing bounded-scan tests guard against regression.
+- **Changelog accuracy.** The `009ca0f20` entry's "Fix" paragraph said the ownership check "runs **after** `populateDataToDescriptor`" — stale since `8bb304b4c` split it (common case decides *before* the snapshot load; only a legacy null-owner row is re-checked after). Corrected. Also dropped a second stale "mirroring the MCP twin's budget" reference (MCP has no scan cap since `009ca0f20`).
+
+---
+
+## 🔭 Security — MCP/REST conversation ownership: PR-review response (metrics + doc accuracy) (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+Triaged the Copilot + CodeRabbit review of this branch. Most bot findings targeted the MCP-side `list_conversations` over-fetch/scan loop that `009ca0f20` already **deleted** (its page-index bug was the reason for the delete), so they were moot against current HEAD. The substantive, still-valid items:
+
+- **Observability (Micrometer).** Per the project convention "always add metrics to new features", the new authorization paths were operationally invisible. Added two counters via field-injected `MeterRegistry` (AGENTS.md metrics pattern, `SimpleMeterRegistry` default so unit tests that construct the bean directly stay non-null): `eddi.mcp.conversation.access.denied{tool}` incremented on every MCP ownership denial (the six gated read/drive tools via `accessDenied`, plus `chat_managed`'s impersonation denial — MCP denials return a 200 error-body, so unlike REST 403s they are not visible in `http.server.requests`); and `eddi.conversations.listing.owner_scan_exhausted` incremented when a non-admin listing stops on the `MAX_OWNER_SCAN` budget with fewer than `limit` results, so a persistently-truncated user is not invisible.
+- **Fail-open on a missing descriptor — kept, documented.** CodeRabbit flagged that `requireConversationOwner` returns `null` (operation proceeds → 404) rather than denying when a descriptor is absent. Kept deliberately: a missing descriptor means the conversation is genuinely not found, and 404 is correct; flipping the *shared* guard to deny would change REST 404→403 and contradict its documented "let the operation handle the 404" contract. The only residual is orphaned memory with no descriptor — a deletion-path integrity concern, not something the read gate should mask. Softened `accessDenied`'s javadoc, which had over-claimed that a denial is indistinguishable from "does not exist".
+- **Doc accuracy.** `RestConversationStore.MAX_OWNER_SCAN` javadoc no longer says it "mirrors the MCP owner-scan cap" (MCP has none since `009ca0f20`; this is now the sole budget); the previous entry's "never starved" line is qualified to "within the scan budget".
+
+**Declined:** the suggestion to take `userId` out of `chat_managed`. The cited rule exempts "external interfaces (MCP, REST) that operate outside a conversation", which is exactly what `chat_managed` is (it routes to a per-`intent+userId` managed conversation rather than running inside one); `resolveOwnerUserId` already rejects impersonation.
+
+---
+
+## 🔒 Security — `RestConversationStore` listing: owner-filter the conversation store enumeration (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+**Closes the first residual gap filed two entries below.** `RestConversationStore.readConversationDescriptors` — the `GET /conversationstore/conversations` endpoint declared on `IRestConversationStore` — carried no `@RolesAllowed` and no ownership filter, so it fell through to the global `authenticated` policy. With `authorization.enabled=true`, any authenticated caller could enumerate **every** user's conversation descriptors (id, agent, state, and the descriptor's `userId`). It is the REST twin of the MCP `list_conversations` gap fixed in the entry two below.
+
+**Fix (`RestConversationStore`):** inject the existing `ConversationAccessGuard` and filter the listing inside the endpoint's existing paging `do-while`. `seesAllConversations()` is resolved once up front (admins, and any caller when authorization is disabled, skip filtering entirely); otherwise each descriptor is dropped unless `canAccessConversation(descriptor.getUserId())` admits it. The check runs **before** `populateDataToDescriptor` for the common case (every conversation since v5.1.6 records its owner on the descriptor), and only **after** populate for a legacy null-owner row, where populate resolves the owner from the snapshot (the pre-v5.1.6 fallback) — see the *bounded back-fill* note below. An unowned/legacy conversation stays visible, matching `OwnershipValidator.requireOwnerOrAdmin`.
+
+**Design decisions**
+- **Owner-filter, not admin-only.** The endpoint backs the **EDDI-Manager** conversation views (its bundled UI calls `conversationstore/conversations`). Owner-filtering keeps admins' full visibility and still lets a non-admin Manager user see *their own* conversations; a blanket `@RolesAllowed("eddi-admin")` would 403 the listing for every non-admin and diverge from the MCP twin, which chose owner-filtering. The `ConversationAccessGuard` was purpose-built for a listing (`canAccessConversation` / `seesAllConversations`), so this reuses it rather than adding a check.
+- **No starvation, no dedup needed.** The store's `readDescriptors` treats its `index` as a **page number** (`ResourceFilter`: `skip = index * limit`), and the endpoint's `do-while` already re-pages (`index++`) until it fills `limit` or the store is exhausted. So a filtered-out row is naturally back-filled from a later, non-overlapping page — a caller's own conversations are not starved just because newer pages belong to others (bounded by the scan budget in the next bullet), and (unlike the MCP over-fetch) no resource-URI dedup is required.
+- **Bounded, cheap back-fill (self-review fix).** Two costs had to be contained before that back-fill was safe on a large multi-tenant store, since this is the default EDDI-Manager list view: (1) the ownership check is split around `populateDataToDescriptor` — for the common case (every conversation since v5.1.6 records its owner on the descriptor) the decision is made on `descriptor.getUserId()` **before** the snapshot load, so a foreign row is skipped without loading its full memory document; only a legacy null-owner row falls through to the post-populate re-check that resolves the owner from the snapshot. (2) the back-fill is capped at `MAX_OWNER_SCAN = 500` descriptors — the sole owner-scan budget in the system, since the MCP listing delegates here rather than scanning itself — so a caller who owns few/none of a huge store cannot force a full-collection scan. Admins / auth-disabled callers are never filtered and never reach the budget. **Tradeoff:** for a non-admin, a very old owned conversation buried beyond the 500-descriptor (most-recent-first) window may not appear; the `List` return type can't signal truncation the way the MCP tool's `incomplete` flag did. The proper long-term fix is an owner-scoped descriptor query (index on `userId`) rather than in-memory filtering of a global scan — filed as a follow-up; the same unbounded-scan shape pre-existed for the `agentId`/`state`/`viewState` filters.
+
+**MCP `list_conversations` simplified (same branch).** `McpConversationTools.listConversations` now issues a **single** store call and relays the result, dropping its per-caller `seesAll`/over-fetch branch, the 100-row chunking, the resource-URI dedup, and the `incomplete`/`note` signal. This is safe once the reality of the internal hop is accounted for — and that reality is why the removed loop was effectively dead code:
+- **The MCP→store call is an unauthenticated loopback.** `RestInterfaceFactory` builds a bare REST client to `http://127.0.0.1:<port>` with no `ClientHeadersFactory` and no header propagation anywhere, so the caller's identity does **not** cross that hop.
+- **Auth off (the default):** `DisabledAuthController` reports authorization disabled, so the loopback is allowed and the store's `seesAllConversations()` is `true` — it returns everything and the tool relays it. This matches the prior behavior exactly (the tool's own guard also admitted everything with auth off), so the simplification is **behavior-neutral** here.
+- **Auth on:** the `authenticated` HTTP policy rejects the token-less loopback with **401 before the endpoint method runs**, so the tool's internal listing is non-functional under `authorization.enabled=true` — and was **already** so, independently of this change. That is also why the removed scan-loop is safe to delete: its only runtime path (auth-on, non-admin) 401s upstream and never executes. (For the record, that loop also carried a latent bug — it passed `scanned += page.size()`, a row count, as the store's page `index`, so a second page would `skip = 100 * 100`; the ownership unit test masked it by mocking `IRestConversationStore` directly.)
+
+**Tests**
+- New `RestConversationStoreOwnershipTest` (real guard over a mocked `SecurityIdentity`, `authorization.enabled=true`): a caller sees only their own conversations and never another user's; a non-owner enumerating the store gets nothing of the owner's; an admin sees all; an unowned/legacy (null-owner) conversation stays visible; a personal list is **back-filled across foreign pages** (first page all-foreign, the caller's own on the next) rather than starved; a foreign row is **skipped without loading its memory snapshot** (guards the cheap pre-check); a legacy null-owner descriptor whose snapshot resolves to a **foreign** owner is filtered out (guards the post-populate ordering — added per self-review, so a reorder that moved the check above `populateDataToDescriptor` would fail); and a sparse owner's scan is **bounded at `MAX_OWNER_SCAN`** (5 page reads, no snapshot loads) rather than scanning the whole store.
+- `RestConversationStoreTest` and `RestConversationStoreFilterTest` updated to construct with the guard (stubbed `seesAllConversations() → true`, so their filter/paging assertions are unchanged).
+- `McpConversationToolsOwnershipTest.ListConversations` reduced to a single delegation test (one store call, no scan loop); the ownership-filtering assertions moved to `RestConversationStoreOwnershipTest`. `McpConversationToolsExtendedTest`'s `list_conversations` cases already exercised the single-call path (its guard has auth disabled) and are unchanged.
+
+**Remaining residual gaps** (deliberately out of scope): the single-conversation REST reads (`readRawConversationLog` / `readSimpleConversationLog`) and `getActiveConversations` carry no ownership check; **internal loopback REST calls via `RestInterfaceFactory` do not authenticate**, so MCP tools that call them are non-functional under `authorization.enabled=true` (a pre-existing, cross-cutting gap affecting every internal REST caller and the auth model, not just this endpoint — filed as a follow-up); `read_agent_logs` without a `conversationId` was closed in the entry immediately below.
+
+---
+
+## 🔒 Security — `read_agent_logs`: admin-gate unscoped/agent-only log reads (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+**Closes the residual gap filed by the entry below.** The ownership pass gated `read_agent_logs` only when a `conversationId` was supplied; **without** one (unfiltered, or filtered by `agentId` alone) it still returned `BoundedLogStore` entries — workflow execution logs, LLM provider errors, internal diagnostics that can quote other users' conversation data — to any caller holding the coarse `eddi-viewer` role. That unscoped read pulls from a single shared server-side ring buffer that mixes every user's activity: an **operator surface**, not one user's data.
+
+**Why this is the same class of bug the ownership pass fixed:** the REST equivalent, `IRestLogAdmin` (`/administration/logs` — recent, `/history`, and `/stream`), is `@RolesAllowed("eddi-admin")` at the interface level. Every log read over REST already requires admin; the MCP tool was the more permissive door. This aligns MCP with REST.
+
+**Fix (`McpConversationTools.readAgentLogs`):** require `eddi-admin` when no `conversationId` filter is present; the conversation-scoped path is unchanged (`ConversationAccessGuard.requireConversationOwner` → owner-or-admin). The admin check is placed **before** the `try` so a role denial surfaces as an honest role error, not the ownership `accessDenied(...)` "you do not own this conversation" message (there is no conversation to own).
+
+**Design decisions**
+- **Owner-or-admin kept for the conversation-scoped path, rather than admin-only parity with REST.** `BoundedLogStore.getEntries` filters by **exact** `conversationId`, so a scoped read returns only that one conversation's log lines — no cross-user leakage. That preserves the self-service diagnostics the ownership pass deliberately added for `read_conversation` / `read_audit_trail`. The cross-user exposure was only ever in the *unscoped* path, and that is what is now closed. (An admin-only-for-all-log-reads posture was considered and rejected as an unnecessary regression of that self-service capability.)
+- **`agentId`-only counts as unscoped.** An agent filter still spans every user of that agent, so it is admin-gated too — only a `conversationId` narrows the read to a single owner's data.
+
+**Tests:** extended `McpConversationToolsOwnershipTest.ReadAgentLogs` — a viewer is denied the unscoped buffer and the agent-only buffer (`ForbiddenException`, and `BoundedLogStore` is never reached); owning one conversation does **not** grant the unscoped firehose; an admin may read both the unscoped and agent-scoped buffers; the existing owner/non-owner conversation-scoped cases still pass.
+
+---
+
+## 🔒 Security — MCP conversation tools had no ownership check (2026-07-14)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`, from `main`)
+
+**Gap (pre-existing on `main`):** every conversation-scoped tool in `McpConversationTools` was gated on the coarse `eddi-viewer` role and nothing else, while the equivalent REST endpoints on `RestAgentEngine` all enforce `requireOwnerOrAdmin` (403). With `authorization.enabled=true`, any caller holding `eddi-viewer` could — over MCP — read **any** user's conversation memory (`read_conversation`) and transcript (`read_conversation_log`), enumerate conversations across all users (`list_conversations`), read another conversation's prompts/tool-calls/costs (`read_audit_trail`, whose REST surface is `@RolesAllowed("eddi-admin")`) and its server logs (`read_agent_logs`), **inject turns into** someone else's conversation and read the agent's reply (`talk_to_agent`, `chat_with_agent` with a foreign `conversationId`), and take over another user's managed conversation by simply naming their `userId` (`chat_managed`). The read half also defeats the group-conversation ownership gate: group members' conversations are ordinary conversations, so `list_conversations` + `read_conversation_log` reached transcripts that `read_group_conversation` denies.
+
+**Two findings that shaped the fix:**
+
+1. **A naive ownership gate would have broken MCP outright.** MCP created conversations with `userId = null`, and `ConversationSetup.computeAnonymousUserIdIfEmpty` turns that into a generated `anonymous-<uuid>` — a *non-blank* owner matching no principal. Gating reads on `requireOwnerOrAdmin` alone would therefore have locked every MCP-created conversation away from its own creator (admins only). REST never had this problem because it resolves the owner at creation. So the fix has to **stamp the caller as owner at MCP conversation creation** — that is what makes the gate both effective and non-regressive.
+2. **The read gap had a write-side twin** (`talk_to_agent` / `chat_with_agent` / `chat_managed`), which is strictly worse than reading and lives in the same file, so it is closed here too.
+
+**Fix — new `ConversationAccessGuard` (`engine.security`), the non-HITL sibling of `HitlAccessGuard`:**
+- `requireConversationOwner(conversationId)` — owner-or-admin via the conversation descriptor; skips when the descriptor is absent (the operation itself 404s); fail-closed on a store error. This is `RestAgentEngine`'s private `validateConversationOwnership` lifted out verbatim.
+- `canAccessConversation(ownerId)` / `seesAllConversations()` — non-throwing predicates for listings; admit exactly what the read gate admits (admin, owner, or unowned legacy data), so a caller never lists what they cannot read, nor reads what they cannot list.
+- `resolveOwnerUserId(requestedUserId)` — delegates to `validateAndResolveUserId`, stamping the caller and rejecting impersonation.
+
+`RestAgentEngine` now delegates to the guard (behavior identical; its `IConversationDescriptorStore` dependency became dead and was dropped). `McpConversationTools` gates all eight conversation-scoped tools, each catching `ForbiddenException` ahead of its generic catch and returning a uniform, non-leaking `accessDenied(...)` that never distinguishes "not yours" from "does not exist".
+
+**`list_conversations` owner-filtering (reworked after self-review).** The first cut filtered a single 100-row page, which silently starves a personal list: on a shared agent the newest page is often entirely other users' conversations, so the caller would get `count: 0` — indistinguishable from "you have none" — and the requested `limit` stopped meaning anything. It now scans forward page by page until the limit is filled or a 500-descriptor budget is spent, dedupes by resource URI (the store's own paging skips deleted rows, so its cursor can outrun the rows it returns and an offset scan can re-read one), and sets `incomplete: true` with a note when it stops on the budget rather than on the store running out — per AGENTS.md "no silent caps".
+
+**Design decisions**
+- **Shared guard, not a third copy.** `McpGroupTools` (on `feat/group-followups`) had already duplicated this logic once; a third copy in the MCP conversation tools would guarantee drift. One `@ApplicationScoped` guard is now the single answer to "who may read or drive a conversation", exactly as `HitlAccessGuard` is for "who may decide an approval".
+- **No auth-disabled short-circuit inside the guard.** It reads the descriptor unconditionally, as `RestAgentEngine` always has; `OwnershipValidator` already no-ops when authorization is off. Short-circuiting would have quietly changed REST semantics (and its tests mock `OwnershipValidator`).
+- **`read_audit_trail` gets the ownership gate, not admin-only.** REST's audit surface is admin-only; matching that would have been a role-policy change beyond this fix. The ownership gate is a strict tightening either way.
+
+**Behavior change (auth on only).** With `authorization.enabled=false` — the default — nothing changes: every check no-ops and new conversations still get their `anonymous-*` id. With auth on, pre-existing `anonymous-*` conversations become invisible and unreadable to non-admins over MCP: they provably belong to nobody. That is the intended tightening.
+
+**Residual gaps, deliberately out of scope** (filed as follow-ups): `RestConversationStore.readConversationDescriptors` — the REST store listing — is unfiltered for every caller, and `read_agent_logs` *without* a conversationId still returns cross-user server logs to any viewer.
+
+**Tests:** new `ConversationAccessGuardTest` (owner / non-owner / admin / missing descriptor / store error / unowned / auth-off, plus the listing predicates) and `McpConversationToolsOwnershipTest`, which asserts for every gated tool that a non-owner is denied **and** the underlying service is never reached — no data leaves, not even inside an error message — while owner and admin pass. Existing `McpConversationTools*Test` and `RestAgentEngine*Test` constructors updated to wire a real guard from the same mocks.
+
+---
+
+## 🔬 Multi-Model Cascade — Merge-readiness review: fixes + coverage backfill (2026-07-14)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+
+A critical whole-branch review (6 parallel high-effort reviewers, then adversarial confirm/refute on each finding) declared the branch **merge-ready** — every unit "ready-with-nits", no blockers. Acted on the confirmed nits and backfilled test coverage for new/adapted paths the existing suite missed.
+
+### Fixes
+
+- **Validator ↔ runtime parity (`CascadeConfigValidator`).** The `convertToObject`-incompatibility warning now uses `EvaluationStrategy.fromConfigOrDefault`, so an *unknown* `evaluationStrategy` — which `resolveEffectiveStrategy` also resolves to `structured_output` and then downgrades at runtime — warns too (previously only `null`/`structured_output` warned).
+- **Live-stream mid-failure de-dup (`CascadingModelExecutor`).** If the live-streamed final step fails *after* emitting partial tokens, the fallback to the buffered best is now marked `streamedLive=true`, so `LlmTask` does not re-emit the best's (different) text as a duplicate token stream after the partial tokens the client already received — the correct full response still arrives via the final `done` snapshot. Added a `withRun(…, streamedLive)` overload and a per-step `stepStreamedLive` flag read in the catch.
+
+### Coverage backfill (new tests; all green)
+
+- **AgentOrchestrator:** token accumulation into `ExecutionResult.responseMetadata` (the cascade-cost feed — previously 0% exercised because every test mocked null response metadata), direct `sumTokens`/`tokenUsageMap` unit tests (helpers made package-private), and the before-tool cooperative-cancellation check.
+- **CascadingModelExecutor:** step-param templating + credential skip (`TEMPLATE_SKIP_PARAMS` — previously 0%, all tests used a null templating engine), a deterministic duration-ceiling test (replacing a timing-flaky one), and the streaming mid-failure de-dup above.
+- **LlmTask:** the skipCascade legacy-fallback SSE emit and cascade token-usage surfacing (`responseMetadata` + `audit:cascade_token_usage`).
+- **ConfidenceEvaluator:** `stripJsonWrapper` fallback, `extractFirstBalancedObject` backslash-escaped-quote handling, and the judge-model readTree-throw → regex-fallback path.
+- **CascadeConfigValidator:** cascade-level negative-pricing hard-fail and the `convertToObject` + unknown-strategy warn path.
+
+### Flagged (pre-existing, out of scope)
+
+- A HITL tool-approval pause originating *inside* an agent-mode cascade step resumes on the base model, not the cascade step's (cheaper) model — misattributing cost/audit. Confirmed real but pre-existing (baseline already threaded the tool-approval params; the resume path predates cascade-step pauses and stores only the outer task's model). Tracked as a follow-up.
+
+---
+
+## 🧊 Multi-Model Cascade — PR-review follow-ups: type-safe SSE events + strategy enums (2026-07-14)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+
+Addressed two @niedch review comments on PR #587, after merging `origin/main` (tool-level HITL) into the branch.
+
+- **Typed SSE cascade events (comment #1).** `RestAgentEngineStreaming` built the `cascade_step_start` / `cascade_escalation` SSE payloads with hand-written `String.format` JSON (manual escaping, `%.4f` formatting). Replaced with two `record` payloads serialized through the existing Jackson `MAPPER` via a new `sendJsonEvent` helper (graceful `{}` fallback on the unexpected serialization failure). Non-finite `confidence`/`threshold` are still sanitized via `finite()` before serialization. The `escapeJson`/`finite` helpers remain (still used by the task/error events).
+- **Strategy enums (comment #2).** Introduced `EvaluationStrategy` (`structured_output` / `heuristic` / `judge_model` / `none`) and `CascadingStrategy` (`cascade` / `parallel`) as the **single source of truth** for the recognized strategy tokens. `ConfidenceEvaluator` (exhaustive enum switch), `CascadingModelExecutor` (`resolveEffectiveStrategy` + gating checks), and `CascadeConfigValidator` (valid-set + warn logic) now resolve to these enums instead of scattered magic strings.
+  - **Design note (answers "is there a reason it's a String?"):** the config *wire* fields (`ModelCascadeConfig.strategy` / `.evaluationStrategy`) deliberately stay lenient `String`s. An unrecognized value (a typo, or one written by a newer engine) still loads, the validator warns, the runtime falls back to the enum `DEFAULT`, and the original token round-trips unchanged through export/import — behavior a strict enum field would regress. Parsing to the enum happens at the boundary via `fromConfig` / `fromConfigOrDefault`. If the field type itself should become an enum, that's a separate contract decision (see the HITL enums for the pattern).
+  - Behavior is byte-for-byte preserved (verified: `ConfidenceEvaluator*Test`, `CascadeConfigValidatorTest`, `CascadingModelExecutor*Test`, `LlmTask*Test` — 324 tests green); new `StrategyEnumsTest` locks the lenient `fromConfig` contract (case-insensitive, trimmed, unknown→null, default fallback).
+
+---
+
+## 🚀 Multi-Model Cascade — Enterprise Hardening (2026-07-03)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+**What changed:** Full enterprise pass over the multi-model cascading feature. A review found two documented-but-dead capabilities (SSE events, judge model), a compliance bug (audit recorded the wrong model), and discarded token/cost/metrics that made the cost-savings pitch unmeasurable. This lands all of it. Plan: [`planning/model-cascade-enterprise-hardening-plan.md`](../planning/model-cascade-enterprise-hardening-plan.md).
+
+### Correctness / compliance
+
+- **Audit records the real model (#5).** `LlmTask` now writes `audit:model_name` and `audit:cascade_model` from the cascade-selected step (`provider/model (step N)`), not the task-level default. Added `audit:cascade_cost` and `audit:cascade_token_usage`. An auditor can now reconstruct which model produced an answer.
+- **Agent-mode confidence (#6).** `structured_output` cannot be injected around the tool-loop, so agent mode auto-routes to `judge_model` (if configured) else `heuristic`. A single deploy-time warning replaces the previous per-turn WARN.
+- **convertToObject + cascade (#7).** The cascade now honors native `jsonMode`, and forces a non-wrapper confidence strategy when `convertToObject=true` (the wrapper contradicts the raw-JSON instruction).
+- **Global-var / Qute consistency (#8).** Step `type` is resolved through `GlobalVariableResolver` and step param values are run through the template engine — parity with the standard path.
+
+### Broken promises made real
+
+- **SSE cascade events (#1).** `StreamingResponseHandler` gained default `onCascadeStepStart`/`onCascadeEscalation`; the anonymous sink in `ConversationService.sayStreaming` forwards them; `RestAgentEngineStreaming` emits `cascade_step_start` / `cascade_escalation` SSE events. The plumbing is now live end-to-end.
+- **judge_model implemented (#2).** New `judgeModel: {type, parameters}` config block, built once via `ChatModelRegistry` (vault + global-var resolution), passed into `ConfidenceEvaluator`. `evaluationStrategy: judge_model` without a judge logs a deploy-time warning and falls back to heuristic at runtime.
+- **`strategy: parallel` (#3) / budget javadoc (#4).** Unknown/`parallel` strategy logs a deploy-time warning and runs sequentially; the false "budget exhausted" javadoc replaced with real ceiling docs.
+
+### Observability & guardrails
+
+- **Token + cost evidence.** Per-step `tokenUsage` and `costUsd` in the trace; aggregate run cost + token usage surfaced via `responseMetadataObjectName` (was `{}`). Agent-mode token usage is accumulated across tool-loop iterations.
+- **Micrometer metrics** under `eddi.llm.cascade.*`: executions, escalations (tag `reason`), accepted step, step latency, confidence distribution, step errors (tags `provider`,`type`), tokens, cost, ceiling exceeded (tag `kind`).
+- **Cascade ceilings.** `maxTotalDurationMs` (wall-clock) and `maxCostPerRun` (dollars, from configurable per-step `inputPricePer1M`/`outputPricePer1M`) stop escalation and return the best response so far. Per-step timeout is capped by the remaining duration budget for **buffered** steps only — a live-streamed step is exempt (see the "Live-stream timeout" fix below).
+- **Configure-time validation** (`CascadeConfigValidator`): invalid *new* numeric fields (negative pricing, non-positive `maxTotalDurationMs`, negative `maxCostPerRun`) fail fast at deploy; legacy conditions (empty steps, unknown `evaluationStrategy`/`strategy`, `judge_model` without a judge, thresholds ∉ [0,1], dead non-last null thresholds, non-positive `timeoutMs`) emit deploy-time warnings but still load (backward-compatible).
+
+### Robustness
+
+- **Confidence parsing** tries a real Jackson parse first (only reads `confidence` from an identified wrapper object, so a stray `"confidence":` in answer content is ignored), regex as fallback.
+- **Heuristic i18n.** `heuristicConfig` makes phrases/thresholds config-driven (English defaults); the no-phrase-match fallback is language-agnostic (keeps the default score rather than mis-scoring).
+- **Cancellation safety (#9).** `AgentOrchestrator` checks interruption between tool-loop iterations and before each tool, so a timed-out cascade step stops launching further side-effectful tools. Residual risk: a tool already in-flight when the timeout fires may complete.
+- **Streaming the final step live.** The always-accepted final step (legacy mode, non-wrapper strategy, streaming-capable provider) streams token-by-token via the event sink instead of buffering. `StreamingLegacyChatExecutor.executeCapturing` preserves token usage while streaming.
+- **`returnBestAcrossSteps`** (opt-in): return an earlier step's response if it scored strictly higher than the finally-accepted step.
+- **Base-model laziness.** The base `ChatModel` is no longer built when the active-cascade branch owns the request.
+
+### Architecture
+
+- `CascadingModelExecutor` converted from a static utility to an instance (constructed by `LlmTask`) holding `ChatModelRegistry`, `GlobalVariableResolver`, `ITemplatingEngine`, `LegacyChatExecutor`, `StreamingLegacyChatExecutor`, and `MeterRegistry`. `AgentOrchestrator.ExecutionResult` gained a `responseMetadata` field (2-arg constructor retained for compatibility).
+- Backward compatible: all new config fields optional with today's defaults; configs without `modelCascade` and `enabled:false` are unaffected; `StreamingResponseHandler` cascade methods are `default`.
+
+### Cross-provider credentials
+
+- Because step/judge parameters are merged **over** the task parameters, a step (or judge) targeting a **different provider** than the task would silently inherit the task's `apiKey` — wrong for that provider, failing at runtime as a 401 that looks like an escalation. `CascadeConfigValidator` now emits a **deploy-time warning** for a different-provider step/judge that omits its own `apiKey`. Not a hard error (Ollama/Bedrock don't use `apiKey`); documented in `docs/model-cascade.md`.
+
+### Tests & coverage
+
+- Updated the 3 executor test classes to the instance API and the 6 `LlmTask` test classes to the new constructor. Removed the backward-incompatible `languageAgnosticScore` band that regressed the default heuristic score.
+- New coverage: `CascadingModelExecutorEnterpriseTest`, `CascadingModelExecutorCoverageTest` (agent mode, live streaming, cost/duration ceilings, timeout + retryable escalation, convertToObject downgrade), `ConfidenceEvaluatorEnterpriseTest`, `StreamingLegacyChatExecutorCoverageTest`, and expanded `CascadeConfigValidatorTest`. New-code coverage ≈ **92% instruction / 78% branch** (residual branches are the 120s streaming-timeout guard and typed-exception variants); the project aggregate stays above the 90%/80% gate.
+- `CascadingModelExecutor.isRetryableError` message matching collapsed to a single regex (fewer branches, same behavior).
+
+### Adversarial-review fixes
+
+A multi-lens adversarial review (7 reviewers → independent skeptics) surfaced several real defects, now fixed:
+
+- **`returnBestAcrossSteps` vs. live streaming (high):** a final step already streamed live is no longer superseded by an earlier higher-scoring step — that would have replaced text the client had already received. The trace marks the superseded step accordingly.
+- **Agent-mode cascade streaming (medium):** the cascade now emits the agent-mode final response to the SSE stream as a single chunk, matching the standard (non-cascade) agent path (it was silently dropped before); docs corrected.
+- **Validator backward-compat (medium):** `CascadeConfigValidator` now **warns** (instead of hard-failing) for conditions older releases tolerated at load — unknown strategy/evaluationStrategy, out-of-range thresholds, dead non-last steps, judge_model without a judge, empty steps — so upgrading cannot stop a previously-loading agent from deploying. Only the new pricing/ceiling fields hard-fail on an invalid value.
+- **Heuristic clamping (medium):** config-supplied heuristic scores are clamped to [0,1] so a mis-set value can't produce an out-of-range confidence.
+- **`unescapeJsonString` (low):** rewritten as a single-pass scanner so an escaped backslash is consumed before the following char (chained `replace` corrupted `\\n`). Judge regex fallback scoped to the extracted object.
+- **Streaming-timeout caveat** documented (partial tokens of an abandoned final step).
+- New regression tests for all of the above, plus the previously-missing SSE-forwarding and cooperative-cancellation tests. New-code coverage ≈ **92% instruction / 79% branch**.
+
+### Second-pass review fixes
+
+A lean second adversarial pass (5 reviewers → synthesizer) found five more real issues, now fixed:
+
+- **Live-stream timeout (high):** a live-streamed step is no longer subject to the per-step/duration timeout — cancelling it couldn't stop the provider's callback thread, so tokens leaked to the client while the cascade re-emitted a different response (concurrent SSE writes). A streamed step now runs under the streaming executor's own ~120 s bound and its result (even if partial) is the accepted answer; no re-emit, no mid-stream cancel. `streamLive` also tightened to *guaranteed-accept* steps only (last, null-threshold, or `none`≤1.0).
+- **Judge confidence regression (medium):** the judge regex fallback runs over the full judge text again (scoping it to the first balanced object dropped the score when a reasoning object preceded the rating).
+- **Docs vs. validator (medium):** the Configure-time Validation section now states the real two tiers (hard-error only for new pricing/ceiling fields; warnings for legacy conditions).
+- **Single-line code fence (low):** `stripCodeFences` now unwraps ```` ```{...}``` ```` (no newline), which was being discarded.
+- **`returnBestAcrossSteps` trace (low):** the earlier winning step's trace entry is relabeled `accepted_as_best` so the trace agrees with `stepUsed`.
+
+Regression tests added for each. Full touched-area suite green.
+
+### PR-review fixes (bots)
+
+CodeRabbit + Copilot + github-code-quality on PR #587 flagged further items, now addressed: retry token usage accumulated across *all* attempts (not just the last); the cancellation interrupt flag is cleared (`Thread.interrupted()`) so it can't leak; the `accepted.step` metric + trace status name the *actual* returned step under `returnBestAcrossSteps`; unknown `evaluationStrategy` normalized to `structured_output` at runtime (matches the validator + evaluator default); SSE `cascade_escalation` guards non-finite `confidence`/`threshold`; the structured-output regex fallback uses the fence-stripped text; the cascade-disabled agent path forwards its buffered response to the stream; an unused parameter removed; a dead `@Disabled` test deleted; and the docs/changelog/plan corrected to say the validator *warns* (not "rejects/fails fast") on legacy conditions.
+
+### Status
+
+Complete and merged-ready on `feat/model-cascade-enterprise-hardening` (PR #587). No open items; the branch is the terminal state of this feature — next planned work is unrelated (see Section 3 of AGENTS.md).
+
+---
+
 ## 🔒 Fix: CodeRabbit review — LifecycleManager failure-path hardening (2026-07-16)
 
 **Repo:** EDDI (`feat/error-handling-recovery`)

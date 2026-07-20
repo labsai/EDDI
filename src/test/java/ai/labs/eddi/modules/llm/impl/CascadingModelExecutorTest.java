@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
@@ -100,6 +101,17 @@ class CascadingModelExecutorTest {
                 .build();
     }
 
+    /** Build an executor instance and run the cascade with the new signature. */
+    private static CascadingModelExecutor.CascadeResult runCascade(ChatModelRegistry registry, ModelCascadeConfig cascade, List<ChatMessage> messages,
+                                                                   String systemMessage, Map<String, String> params, LlmConfiguration.Task task,
+                                                                   IConversationMemory memory, AgentOrchestrator orchestrator)
+            throws LifecycleException {
+        GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
+        when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+        return executor.execute(cascade, messages, systemMessage, params, task, memory, orchestrator, Map.of(), false, false, false);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // 1. execute — null/empty steps
     // ═══════════════════════════════════════════════════════════════
@@ -115,7 +127,7 @@ class CascadingModelExecutorTest {
             cascade.setEnabled(true);
             cascade.setSteps(null);
 
-            var ex = assertThrows(LifecycleException.class, () -> CascadingModelExecutor.execute(
+            var ex = assertThrows(LifecycleException.class, () -> runCascade(
                     mock(ChatModelRegistry.class), cascade,
                     createMessages(), "system", Map.of(),
                     createTask(), mockMemory(), mockOrchestrator()));
@@ -131,7 +143,7 @@ class CascadingModelExecutorTest {
             cascade.setEnabled(true);
             cascade.setSteps(List.of());
 
-            var ex = assertThrows(LifecycleException.class, () -> CascadingModelExecutor.execute(
+            var ex = assertThrows(LifecycleException.class, () -> runCascade(
                     mock(ChatModelRegistry.class), cascade,
                     createMessages(), "system", Map.of(),
                     createTask(), mockMemory(), mockOrchestrator()));
@@ -166,7 +178,7 @@ class CascadingModelExecutorTest {
             doReturn(chatResponseOf("The answer is 42"))
                     .when(model).chat(anyList());
 
-            var result = CascadingModelExecutor.execute(
+            var result = runCascade(
                     mockRegistry(model), cascade, createMessages(), "system",
                     Map.of("apiKey", "key"), createTask(), mockMemory(), mockOrchestrator());
 
@@ -195,7 +207,7 @@ class CascadingModelExecutorTest {
             doReturn(chatResponseOf("{\"response\": \"Paris is the capital\", \"confidence\": 0.92}"))
                     .when(model).chat(anyList());
 
-            var result = CascadingModelExecutor.execute(
+            var result = runCascade(
                     mockRegistry(model), cascade, createMessages(), "system",
                     Map.of("apiKey", "key"), createTask(), mockMemory(), mockOrchestrator());
 
@@ -247,7 +259,7 @@ class CascadingModelExecutorTest {
             doReturn(cheapModel).when(registry).getOrCreate(eq("openai"), anyMap());
             doReturn(expensiveModel).when(registry).getOrCreate(eq("anthropic"), anyMap());
 
-            var result = CascadingModelExecutor.execute(
+            var result = runCascade(
                     registry, cascade, createMessages(), "system",
                     Map.of("apiKey", "key"), createTask(), mockMemory(), mockOrchestrator());
 
@@ -286,7 +298,7 @@ class CascadingModelExecutorTest {
             doReturn(chatResponseOf("I'm not sure about this, could you clarify?"))
                     .when(model).chat(anyList());
 
-            var result = CascadingModelExecutor.execute(
+            var result = runCascade(
                     mockRegistry(model), cascade, createMessages(), "system",
                     Map.of("apiKey", "key"), createTask(), mockMemory(), mockOrchestrator());
 
@@ -337,7 +349,7 @@ class CascadingModelExecutorTest {
             doReturn(failModel).when(registry).getOrCreate(eq("openai"), anyMap());
             doReturn(goodModel).when(registry).getOrCreate(eq("anthropic"), anyMap());
 
-            var result = CascadingModelExecutor.execute(
+            var result = runCascade(
                     registry, cascade, createMessages(), "system",
                     Map.of("apiKey", "key"), createTask(), mockMemory(), mockOrchestrator());
 
@@ -390,7 +402,7 @@ class CascadingModelExecutorTest {
                 throw new RuntimeException(e);
             }
 
-            var ex = assertThrows(LifecycleException.class, () -> CascadingModelExecutor.execute(
+            var ex = assertThrows(LifecycleException.class, () -> runCascade(
                     registry, cascade, createMessages(), "system",
                     Map.of("apiKey", "key"), createTask(), mockMemory(), mockOrchestrator()));
 
@@ -439,7 +451,7 @@ class CascadingModelExecutorTest {
             doReturn(cheapModel).when(registry).getOrCreate(eq("openai"), anyMap());
             doReturn(failModel).when(registry).getOrCreate(eq("anthropic"), anyMap());
 
-            var result = CascadingModelExecutor.execute(
+            var result = runCascade(
                     registry, cascade, createMessages(), "system",
                     Map.of("apiKey", "key"), createTask(), mockMemory(), mockOrchestrator());
 

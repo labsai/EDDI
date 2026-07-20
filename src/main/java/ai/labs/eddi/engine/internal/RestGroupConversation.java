@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -29,6 +30,9 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -48,6 +52,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
+    private final ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
     private final HitlAccessGuard hitlAccessGuard;
 
     @Inject
@@ -63,6 +68,49 @@ public class RestGroupConversation implements IRestGroupConversation {
         this.hitlAccessGuard = hitlAccessGuard;
     }
 
+    @PreDestroy
+    void shutdown() {
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Load a group conversation and verify it belongs to the group in the path.
+     * Throws {@link IResourceStore.ResourceNotFoundException} on mismatch so each
+     * caller's existing not-found handling (404 or SSE error) applies uniformly.
+     */
+    private GroupConversation loadInGroup(String groupId, String gcId)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        GroupConversation gc;
+        try {
+            gc = groupConversationService.readGroupConversation(gcId);
+        } catch (IllegalArgumentException e) {
+            // Scoped deliberately to the id lookup ONLY. A malformed id reaches the
+            // storage layer's ObjectId parser, whose message embeds the raw caller string
+            // ("invalid hexadecimal representation of an ObjectId: [...]") and would be
+            // echoed by the global mapper — a reflected-value sink. A malformed id cannot
+            // name a conversation, so "not found" is the honest answer. Catching this any
+            // wider would mask a genuine internal IllegalArgumentException as a 404.
+            LOGGER.infof("Malformed group conversation id: %s", sanitize(gcId));
+            throw new IResourceStore.ResourceNotFoundException("Group conversation not found.");
+        }
+        if (gc.getGroupId() == null || !gc.getGroupId().equals(groupId)) {
+            // Curated body: the caller-supplied groupId/gcId are never reflected back
+            // (CodeQL reflected-value/XSS) — several callers echo e.getMessage() into the
+            // 404. The detail is logged server-side with both ids sanitized.
+            LOGGER.infof("Group conversation %s does not belong to group %s", sanitize(gcId), sanitize(groupId));
+            throw new IResourceStore.ResourceNotFoundException("Group conversation not found.");
+        }
+        return gc;
+    }
+
     @Override
     public Response discuss(String groupId, DiscussRequest request) {
         try {
@@ -76,9 +124,27 @@ public class RestGroupConversation implements IRestGroupConversation {
             URI location = URI.create("/groups/" + groupId + "/conversations/" + gc.getId());
             return Response.created(location).entity(gc).build();
         } catch (IGroupConversationService.GroupDepthExceededException e) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
+            // Curated bodies throughout this class: the raw exception text is never
+            // returned to the caller (CodeQL: information exposure / reflected value —
+            // several of these messages used to embed the caller-supplied groupId/gcId).
+            // The detail is logged server-side with the ids sanitized.
+            LOGGER.infof("Group discussion rejected (depth) for group %s", sanitize(groupId));
+            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                    .entity("Maximum group nesting depth exceeded.").build();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+            LOGGER.infof("Group discussion → not found for group %s", sanitize(groupId));
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group not found.").build();
+        } catch (IllegalArgumentException e) {
+            // Usually a malformed groupId: it reaches the storage layer's ObjectId parser,
+            // whose message embeds the raw caller string and would be echoed by the global
+            // mapper. discuss() has no loadInGroup to scope this to the id lookup, so log
+            // the full exception — a genuine internal IllegalArgumentException must stay
+            // diagnosable rather than vanish behind a "not found".
+            LOGGER.error("Group discussion rejected for group " + sanitize(groupId)
+                    + " (malformed id, or an internal IllegalArgumentException)", e);
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group not found.").build();
         } catch (Exception e) {
             LOGGER.errorf("Group discussion failed: %s", e.getMessage());
             throw sneakyThrow(e);
@@ -101,13 +167,14 @@ public class RestGroupConversation implements IRestGroupConversation {
             }
 
         } catch (IResourceStore.ResourceNotFoundException e) {
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
-                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
+            // Curated event text: the SSE body is rendered by the chat UI, so never push
+            // the raw message (it used to embed the caller-supplied groupId).
+            LOGGER.infof("Group streaming discussion → not found for group %s: %s", sanitize(groupId), e.getMessage());
+            sendErrorEvent(eventSink, sse, "Group not found.");
             closeQuietly(eventSink);
         } catch (Exception e) {
             LOGGER.errorf("Group streaming discussion failed: %s", e.getMessage());
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
-                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
+            sendErrorEvent(eventSink, sse, "Group discussion could not be started.");
             closeQuietly(eventSink);
         }
     }
@@ -149,8 +216,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public GroupConversation readGroupConversation(String groupId, String groupConversationId) {
         try {
-            GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
-            requireGroupMembership(groupId, groupConversationId, gc);
+            GroupConversation gc = loadInGroup(groupId, groupConversationId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
             return gc;
         } catch (ForbiddenException e) {
@@ -163,31 +229,24 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public Response deleteGroupConversation(String groupId, String groupConversationId) {
         try {
-            GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
-            requireGroupMembership(groupId, groupConversationId, gc);
+            GroupConversation gc = loadInGroup(groupId, groupConversationId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
             groupConversationService.deleteGroupConversation(groupConversationId);
             return Response.ok().build();
         } catch (ForbiddenException e) {
             throw e;
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            // Another operation (follow-up / continue / close) is mid-flight — a retryable
+            // conflict, not a server error. Curated body: never surface the raw exception
+            // text to the client (CodeQL: information exposure through an error message);
+            // the detail is logged server-side with the id sanitized.
+            LOGGER.infof("Delete of group conversation %s conflicted: %s",
+                    sanitize(groupConversationId), sanitize(e.getMessage()));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("Group conversation is busy — another operation is in progress. Please retry.")
+                    .build();
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
-        }
-    }
-
-    /**
-     * Guards against a wrong-group path: the target conversation must belong to
-     * {groupId}, else 404 — so the {groupId} path parameter is meaningful and
-     * read/delete cannot act on a conversation under an arbitrary group.
-     */
-    private void requireGroupMembership(String groupId, String gcId, GroupConversation gc) {
-        if (groupId != null && gc != null && !groupId.equals(gc.getGroupId())) {
-            // Curated body: the caller-supplied gcId/groupId are never reflected
-            // (CodeQL reflected-value/XSS — there is no ExceptionMapper for jakarta
-            // NotFoundException, so RESTEasy would echo the message verbatim); the
-            // detail is logged server-side with both ids sanitized.
-            LOGGER.infof("Group conversation %s does not belong to group %s", sanitize(gcId), sanitize(groupId));
-            throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
         }
     }
 
@@ -205,6 +264,60 @@ public class RestGroupConversation implements IRestGroupConversation {
             }
             return conversations;
         } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    /** True when the string is absent or whitespace-only. */
+    private static boolean blank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    @Override
+    public Response followUpWithMember(String groupId, String gcId, FollowUpRequest request) {
+        // Reject an incomplete body up front: without this a missing targetAgentId NPEs
+        // during member resolution and surfaces as a 500 rather than a 400.
+        if (request == null || blank(request.question()) || blank(request.targetAgentId())) {
+            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                    .entity("Both 'question' and 'targetAgentId' are required.").build();
+        }
+        try {
+            GroupConversation gc = loadInGroup(groupId, gcId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            GroupConversation result = groupConversationService.followUpWithMember(gcId, request.targetAgentId(), request.question());
+            return Response.ok(result).build();
+        } catch (ForbiddenException e) {
+            throw e;
+        } catch (IGroupConversationService.GroupMemberNotFoundException e) {
+            // A typo'd / non-member agent — a client error, not a conflict. 404, curated:
+            // the exception text carries the member list (server data), never the caller
+            // id.
+            LOGGER.infof("Follow-up on %s → target not a member: %s", sanitize(gcId), sanitize(e.getMessage()));
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("The target agent is not a member of this group conversation.").build();
+        } catch (IGroupConversationService.GroupTimeoutException e) {
+            LOGGER.warn("Follow-up on " + sanitize(gcId) + " timed out", e);
+            return Response.status(Response.Status.GATEWAY_TIMEOUT).type(TEXT_PLAIN)
+                    .entity("The member agent did not respond in time. Try again.").build();
+        } catch (IGroupConversationService.GroupExecutionException e) {
+            // A member agent / model call failed — an upstream-dependency failure, 5xx, not
+            // a retryable "conflict". Log the full cause; the client gets a curated body.
+            LOGGER.error("Follow-up on " + sanitize(gcId) + " failed to execute", e);
+            return Response.status(Response.Status.BAD_GATEWAY).type(TEXT_PLAIN)
+                    .entity("The follow-up could not be completed because the member agent could not be reached.")
+                    .build();
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            // Base type now means only a state / concurrency conflict.
+            LOGGER.infof("Follow-up on %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The follow-up could not be applied: the conversation must be COMPLETED and have no "
+                            + "other operation in progress.")
+                    .build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group conversation not found.").build();
+        } catch (Exception e) {
+            LOGGER.errorf("Follow-up with member failed: %s", e.getMessage());
             throw sneakyThrow(e);
         }
     }
@@ -295,6 +408,117 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
     }
 
+    /**
+     * A continuation round cannot share NEW files: attachments are granted and
+     * injected to a member only on its first-ever turn, and on a continuation every
+     * member conversation already exists. Rather than accept them and silently drop
+     * them (or store an orphaned blob), reject them explicitly. Honouring them
+     * requires reworking the attachment fan-out — tracked as follow-up work.
+     */
+    private static Response rejectAttachmentsOnContinue() {
+        return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                .entity("Attachments cannot be added on a continuation round — they are only "
+                        + "shared with member agents when the discussion starts. Start a new "
+                        + "discussion to share new files.")
+                .build();
+    }
+
+    @Override
+    public Response continueDiscussion(String groupId, String gcId, DiscussRequest request) {
+        if (request == null || blank(request.question())) {
+            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                    .entity("'question' is required.").build();
+        }
+        if (request.attachments() != null && !request.attachments().isEmpty()) {
+            return rejectAttachmentsOnContinue();
+        }
+        try {
+            GroupConversation gc = loadInGroup(groupId, gcId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            GroupConversation result = groupConversationService.continueDiscussion(gcId, request.question(), null);
+            return Response.ok(result).build();
+        } catch (ForbiddenException e) {
+            throw e;
+        } catch (IGroupConversationService.GroupTimeoutException e) {
+            LOGGER.warn("Continue on " + sanitize(gcId) + " timed out", e);
+            return Response.status(Response.Status.GATEWAY_TIMEOUT).type(TEXT_PLAIN)
+                    .entity("A member agent did not respond in time. Try again.").build();
+        } catch (IGroupConversationService.GroupExecutionException e) {
+            // The round could not be executed — a member agent / model call failed, or the
+            // group config is unrunnable. An upstream/server failure (5xx), not a retryable
+            // conflict. Hedged body: this catch covers both the agent-call and config
+            // paths.
+            LOGGER.error("Continue on " + sanitize(gcId) + " failed to execute", e);
+            return Response.status(Response.Status.BAD_GATEWAY).type(TEXT_PLAIN)
+                    .entity("The continuation round could not be completed: a member agent or a required "
+                            + "dependency could not be reached, or the group is misconfigured.")
+                    .build();
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            // Base type now means only a state / concurrency conflict.
+            LOGGER.infof("Continue on %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The continuation could not be applied: the conversation must be COMPLETED and have no "
+                            + "other operation in progress.")
+                    .build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group conversation not found.").build();
+        } catch (Exception e) {
+            LOGGER.errorf("Continue discussion failed: %s", e.getMessage());
+            throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public void continueDiscussionStreaming(String groupId, String gcId, DiscussRequest request,
+                                            SseEventSink eventSink, Sse sse) {
+        if (request == null || blank(request.question())) {
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+                    toJson(new GroupConversationEventSink.GroupErrorEvent("'question' is required")));
+            closeQuietly(eventSink);
+            return;
+        }
+        if (request.attachments() != null && !request.attachments().isEmpty()) {
+            // See rejectAttachmentsOnContinue — a continuation cannot share new files.
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+                    toJson(new GroupConversationEventSink.GroupErrorEvent(
+                            "Attachments cannot be added on a continuation round.")));
+            closeQuietly(eventSink);
+            return;
+        }
+        try {
+            GroupConversation gc = loadInGroup(groupId, gcId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+
+            // Reuse the shared streaming listener so a continuation that pauses or is
+            // cancelled for HITL streams the awaiting_approval / cancelled /
+            // member_pause_skipped events (and round_start) instead of silently
+            // swallowing them and hanging the client.
+            var listener = createStreamingListener(eventSink, sse);
+
+            executorService.submit(() -> {
+                try {
+                    groupConversationService.continueDiscussion(gcId, request.question(), listener);
+                } catch (Exception e) {
+                    // Curated event text — never forward the raw message over SSE.
+                    LOGGER.errorf("Continue discussion streaming failed: %s", e.getMessage());
+                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
+                            "The continuation could not be completed."));
+                }
+            });
+
+        } catch (ForbiddenException e) {
+            throw e;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            sendErrorEvent(eventSink, sse, "Group conversation not found.");
+            closeQuietly(eventSink);
+        } catch (Exception e) {
+            LOGGER.errorf("Continue discussion streaming setup failed: %s", e.getMessage());
+            sendErrorEvent(eventSink, sse, "The continuation could not be started.");
+            closeQuietly(eventSink);
+        }
+    }
+
     @Override
     public void approveGroupPhaseStreaming(String groupId, String gcId, GroupApprovalRequest request,
                                            SseEventSink eventSink, Sse sse) {
@@ -354,6 +578,32 @@ public class RestGroupConversation implements IRestGroupConversation {
             sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
                     toJson(new GroupConversationEventSink.GroupErrorEvent("Failed to process group approval.")));
             closeQuietly(eventSink);
+        }
+    }
+
+    @Override
+    public Response closeGroupConversation(String groupId, String gcId) {
+        try {
+            GroupConversation gc = loadInGroup(groupId, gcId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            GroupConversation result = groupConversationService.closeGroupConversation(gcId);
+            return Response.ok(result).build();
+        } catch (ForbiddenException e) {
+            throw e;
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            LOGGER.infof("Close of %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("Close not possible: the conversation must be COMPLETED, FAILED or CANCELLED "
+                            + "(it may still be running or already closed), and no other operation may be in progress.")
+                    .build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group conversation not found.").build();
+        } catch (Exception e) {
+            // Genuine store/DB failures (ResourceStoreException) map to 500 via the
+            // global mapper — only business conflicts above are 409.
+            LOGGER.errorf("Close group conversation failed: %s", e.getMessage());
+            throw sneakyThrow(e);
         }
     }
 
@@ -472,6 +722,11 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     private GroupDiscussionEventListener createStreamingListener(SseEventSink eventSink, Sse sse) {
         return new GroupDiscussionEventListener() {
+            @Override
+            public void onRoundStart(GroupConversationEventSink.RoundStartEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ROUND_START, toJson(event));
+            }
+
             @Override
             public void onGroupStart(GroupConversationEventSink.GroupStartEvent event) {
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_START, toJson(event));

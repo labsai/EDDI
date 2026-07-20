@@ -19,9 +19,13 @@ import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.*;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
@@ -63,6 +67,8 @@ class McpConversationToolsExtendedTest {
     private IRestAgentEngine restAgentEngine;
     private IRestConversationStore convStore;
     private IRestDocumentDescriptorStore descriptorStore;
+    private SecurityIdentity mockIdentity;
+    private ConversationAccessGuard conversationAccessGuard;
     private McpConversationTools tools;
 
     @BeforeEach
@@ -84,13 +90,16 @@ class McpConversationToolsExtendedTest {
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
+        // Authorization disabled: the guard admits every caller.
+        conversationAccessGuard = new ConversationAccessGuard(mockIdentity, new OwnershipValidator(false),
+                mock(IConversationDescriptorStore.class));
 
         tools = new McpConversationTools(conversationService, agentAdmin, agentStore,
                 restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore,
                 agentTriggerStore, userConversationStore, restAgentEngine,
-                mockIdentity, false);
+                mockIdentity, conversationAccessGuard, false);
     }
 
     // ==================== listConversations ====================
@@ -178,7 +187,7 @@ class McpConversationToolsExtendedTest {
         var localTools = new McpConversationTools(conversationService, agentAdmin, agentStore,
                 failingFactory, jsonSerialization, boundedLogStore, auditStore,
                 agentTriggerStore, userConversationStore, restAgentEngine,
-                mockIdentity, false);
+                mockIdentity, conversationAccessGuard, false);
 
         String result = localTools.listConversations(AGENT_ID, null, null, null);
 
