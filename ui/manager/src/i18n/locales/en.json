@@ -585,6 +585,9 @@
     "invalidJson": "Invalid JSON — switch to the JSON tab to fix."
   },
   "rulesEditor": {
+    "strategy_executeAll": "Execute all",
+    "strategy_executeUntilFirstSuccess": "Until first success",
+    "invalidValue": "(invalid)",
     "appendActions": "Append Actions",
     "expressionsAsActions": "Expressions as Actions",
     "groups": "Rules Groups",

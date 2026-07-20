@@ -549,6 +549,9 @@
     "invalidJson": "JSON が無効です — JSON タブに切り替えて修正してください。"
   },
   "rulesEditor": {
+    "strategy_executeAll": "すべて実行",
+    "strategy_executeUntilFirstSuccess": "最初の成功まで",
+    "invalidValue": "(無効)",
     "appendActions": "アクションを追加",
     "expressionsAsActions": "式をアクションとして",
     "groups": "動作グループ",

@@ -549,6 +549,9 @@
     "invalidJson": "JSON ไม่ถูกต้อง — เปลี่ยนไปแท็บ JSON เพื่อแก้ไข"
   },
   "rulesEditor": {
+    "strategy_executeAll": "ดำเนินการทั้งหมด",
+    "strategy_executeUntilFirstSuccess": "จนกว่าจะสำเร็จครั้งแรก",
+    "invalidValue": "(ไม่ถูกต้อง)",
     "appendActions": "เพิ่มการดำเนินการ",
     "expressionsAsActions": "นิพจน์เป็นการดำเนินการ",
     "groups": "กลุ่มพฤติกรรม",

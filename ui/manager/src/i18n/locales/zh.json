@@ -549,6 +549,9 @@
     "invalidJson": "JSON 无效 — 切换到 JSON 标签页修复。"
   },
   "rulesEditor": {
+    "strategy_executeAll": "全部执行",
+    "strategy_executeUntilFirstSuccess": "直到首次成功",
+    "invalidValue": "(无效)",
     "appendActions": "附加操作",
     "expressionsAsActions": "表达式作为操作",
     "groups": "行为组",

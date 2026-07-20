@@ -549,6 +549,9 @@
     "invalidJson": "Ungültiges JSON — wechseln Sie zum JSON-Tab zur Korrektur."
   },
   "rulesEditor": {
+    "strategy_executeAll": "Alle ausführen",
+    "strategy_executeUntilFirstSuccess": "Bis zum ersten Treffer",
+    "invalidValue": "(ungültig)",
     "appendActions": "Aktionen anhängen",
     "expressionsAsActions": "Ausdrücke als Aktionen",
     "groups": "Verhaltensgruppen",

@@ -549,6 +549,9 @@
     "invalidJson": "JSON غير صالح — انتقل إلى علامة تبويب JSON للإصلاح."
   },
   "rulesEditor": {
+    "strategy_executeAll": "تنفيذ الكل",
+    "strategy_executeUntilFirstSuccess": "حتى أول نجاح",
+    "invalidValue": "(غير صالح)",
     "appendActions": "إلحاق إجراءات",
     "expressionsAsActions": "تعبيرات كإجراءات",
     "groups": "مجموعات السلوك",

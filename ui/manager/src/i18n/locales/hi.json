@@ -549,6 +549,9 @@
     "invalidJson": "अमान्य JSON — ठीक करने के लिए JSON टैब पर जाएं।"
   },
   "rulesEditor": {
+    "strategy_executeAll": "सभी निष्पादित करें",
+    "strategy_executeUntilFirstSuccess": "पहली सफलता तक",
+    "invalidValue": "(अमान्य)",
     "appendActions": "कार्य जोड़ें",
     "expressionsAsActions": "अभिव्यक्तियां कार्य के रूप में",
     "groups": "व्यवहार समूह",

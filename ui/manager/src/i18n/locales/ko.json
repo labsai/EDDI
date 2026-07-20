@@ -549,6 +549,9 @@
     "invalidJson": "잘못된 JSON — JSON 탭으로 전환하여 수정하세요."
   },
   "rulesEditor": {
+    "strategy_executeAll": "모두 실행",
+    "strategy_executeUntilFirstSuccess": "첫 성공까지",
+    "invalidValue": "(유효하지 않음)",
     "appendActions": "작업 추가",
     "expressionsAsActions": "표현식을 작업으로",
     "groups": "동작 그룹",

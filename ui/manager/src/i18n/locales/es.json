@@ -549,6 +549,9 @@
     "invalidJson": "JSON no válido — cambie a la pestaña JSON para corregir."
   },
   "rulesEditor": {
+    "strategy_executeAll": "Ejecutar todas",
+    "strategy_executeUntilFirstSuccess": "Hasta el primer acierto",
+    "invalidValue": "(no válido)",
     "appendActions": "Añadir acciones",
     "expressionsAsActions": "Expresiones como acciones",
     "groups": "Grupos de comportamiento",
