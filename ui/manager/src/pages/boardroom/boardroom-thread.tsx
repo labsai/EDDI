@@ -652,7 +652,8 @@ function BoardroomThread() {
               <p className="mt-1 text-sm text-muted-foreground">
                 {t(
                   "boardroom.thread.emptySubtitle",
-                  "Start a private conversation with this expert.",
+                  "Send a message to begin chatting with {{name}}.",
+                  { name: memberName },
                 )}
               </p>
             </div>
