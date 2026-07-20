@@ -9,13 +9,17 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -48,6 +52,12 @@ class McpConversationToolsHitlTest {
         agentTriggerStore = mock(IRestAgentTriggerStore.class);
         userConversationStore = mock(IUserConversationStore.class);
 
+        var identity = mock(SecurityIdentity.class);
+        // Authorization disabled — the guard admits every caller, so these tests
+        // exercise the HITL pause paths rather than ownership.
+        var conversationAccessGuard = new ConversationAccessGuard(identity, new OwnershipValidator(false),
+                mock(IConversationDescriptorStore.class));
+
         tools = new McpConversationTools(
                 conversationService, mock(ai.labs.eddi.engine.api.IRestAgentAdministration.class),
                 mock(ai.labs.eddi.configs.agents.IRestAgentStore.class),
@@ -56,7 +66,7 @@ class McpConversationToolsHitlTest {
                 mock(ai.labs.eddi.engine.runtime.BoundedLogStore.class),
                 mock(ai.labs.eddi.engine.audit.rest.IRestAuditStore.class),
                 agentTriggerStore, userConversationStore, restAgentEngine,
-                mock(io.quarkus.security.identity.SecurityIdentity.class), false);
+                identity, conversationAccessGuard, false);
     }
 
     @Test

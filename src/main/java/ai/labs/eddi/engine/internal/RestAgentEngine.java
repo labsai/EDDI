@@ -13,7 +13,6 @@ import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
-import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
@@ -26,8 +25,8 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
-import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -63,9 +62,9 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 public class RestAgentEngine implements IRestAgentEngine {
 
     private final IConversationService conversationService;
-    private final IConversationDescriptorStore conversationDescriptorStore;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
+    private final ConversationAccessGuard conversationAccessGuard;
     private final HitlAccessGuard hitlAccessGuard;
     private final IHitlToolJournalStore hitlToolJournalStore;
     private final int agentTimeout;
@@ -74,16 +73,16 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Inject
     public RestAgentEngine(IConversationService conversationService,
-            IConversationDescriptorStore conversationDescriptorStore,
             SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
+            ConversationAccessGuard conversationAccessGuard,
             HitlAccessGuard hitlAccessGuard,
             IHitlToolJournalStore hitlToolJournalStore,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.conversationService = conversationService;
-        this.conversationDescriptorStore = conversationDescriptorStore;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
+        this.conversationAccessGuard = conversationAccessGuard;
         this.hitlAccessGuard = hitlAccessGuard;
         this.hitlToolJournalStore = hitlToolJournalStore;
         this.agentTimeout = agentTimeout;
@@ -554,20 +553,9 @@ public class RestAgentEngine implements IRestAgentEngine {
             // descriptor) is shared with the MCP surface via HitlAccessGuard.
             return hitlAccessGuard.requireConversationHitlAccess(conversationId);
         }
-        try {
-            var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
-            ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), "conversation");
-            return descriptor.getUserId();
-        } catch (ForbiddenException e) {
-            throw e;
-        } catch (ResourceNotFoundException e) {
-            // Descriptor not found — let the actual operation handle it
-            LOGGER.debugf("Conversation descriptor not found for %s", sanitize(conversationId));
-            return null;
-        } catch (ResourceStoreException e) {
-            // Fail-closed: cannot verify ownership → deny access
-            LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));
-            throw new ForbiddenException("Access denied: unable to verify conversation ownership");
-        }
+        // Plain owner-or-admin access is shared with the MCP surface via
+        // ConversationAccessGuard, so REST and MCP cannot drift apart on who may
+        // read or drive a conversation.
+        return conversationAccessGuard.requireConversationOwner(conversationId);
     }
 }

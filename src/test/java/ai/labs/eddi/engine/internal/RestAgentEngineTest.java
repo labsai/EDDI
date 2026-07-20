@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -58,9 +59,10 @@ class RestAgentEngineTest {
                 .thenThrow(new ResourceNotFoundException("test default"));
         var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService,
                 mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
+        var conversationAccessGuard = new ConversationAccessGuard(identity, ownershipValidator, descriptorStore);
         var hitlToolJournalStore = mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class);
-        restAgentEngine = new RestAgentEngine(conversationService, descriptorStore, identity, ownershipValidator,
-                hitlAccessGuard, hitlToolJournalStore, 30);
+        restAgentEngine = new RestAgentEngine(conversationService, identity, ownershipValidator,
+                conversationAccessGuard, hitlAccessGuard, hitlToolJournalStore, 30);
     }
 
     @Nested
