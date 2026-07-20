@@ -16,11 +16,11 @@ export function BoardroomShortcuts() {
       switch (e.key) {
         case "n":
           if (
-            location.pathname === "/boardroom" ||
-            location.pathname === "/boardroom/"
+            location.pathname === "/workforce" ||
+            location.pathname === "/workforce/"
           ) {
             e.preventDefault();
-            navigate("/boardroom/new");
+            navigate("/workforce/new");
           }
           break;
         case "?":

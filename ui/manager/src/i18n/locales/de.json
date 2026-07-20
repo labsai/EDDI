@@ -47,7 +47,9 @@
     "approvals": "Genehmigungen",
     "userConversations": "Nutzer-Konversationen",
     "userData": "Nutzerdaten",
-    "variables": "Variablen"
+    "variables": "Variablen",
+    "workforce": "Workforce",
+    "sectionExternal": "External"
   },
   "theme": {
     "light": "Hell",
@@ -2291,7 +2293,7 @@
       "themeToggle": "Design umschalten"
     },
     "onboarding": {
-      "welcome": "Willkommen im Boardroom",
+      "welcome": "Willkommen im Workforce",
       "subtitle": "Stellen Sie spezialisierte KI-Agenten zu Teams zusammen, die gemeinsam debattieren, analysieren und komplexe Herausforderungen lösen.",
       "howItWorks": "So funktioniert's",
       "step1Title": "Agenten bereitstellen",
@@ -2445,5 +2447,24 @@
     "noResults": "No matching discussions",
     "noResultsHint": "Try adjusting your filters or clear them to see all data.",
     "clearFilters": "Clear filters"
+  },
+  "landing": {
+    "title": "Welcome to EDDI",
+    "subtitle": "Choose your workspace to get started.",
+    "hint": "We'll remember your choice and take you there automatically next time.",
+    "manager": {
+      "title": "Manager",
+      "description": "Build, configure, and deploy your AI agents. Manage workflows, resources, and integrations.",
+      "feature1": "Create & deploy agents",
+      "feature2": "Configure workflows & pipelines",
+      "feature3": "Manage resources & extensions"
+    },
+    "workforce": {
+      "title": "Workforce",
+      "description": "Assemble AI teams that debate, analyze, and solve complex challenges together.",
+      "feature1": "Assemble agent task forces",
+      "feature2": "Run collaborative discussions",
+      "feature3": "Get synthesized answers"
+    }
   }
 }

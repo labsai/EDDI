@@ -119,7 +119,7 @@ function MembersSheet({
                 className="text-primary shrink-0"
                 asChild
               >
-                <Link to={`/boardroom/${boardId}/thread/${member.agentId}`}>
+                <Link to={`/workforce/${boardId}/thread/${member.agentId}`}>
                   {t("boardroom.board.chatOneOnOne", "Chat 1:1")}
                 </Link>
               </Button>

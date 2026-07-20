@@ -268,7 +268,7 @@ function BoardroomWizard() {
       setIsCreating(false);
       creatingRef.current = false;
 
-      navigate(`/boardroom/${newGroupId}?version=1`);
+      navigate(`/workforce/${newGroupId}?version=1`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       updateProgress(BOARDROOM_PROGRESS_ID, {
@@ -303,7 +303,7 @@ function BoardroomWizard() {
       {/* Close / cancel wizard — back to dashboard */}
       <div className="flex items-center justify-end mb-4">
         <Link
-          to="/boardroom"
+          to="/workforce"
           className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           aria-label={t("boardroom.wizard.cancel", "Cancel")}
         >
@@ -384,7 +384,7 @@ function BoardroomWizard() {
             variant="outline"
             onClick={() =>
               currentStep === 0
-                ? navigate("/boardroom")
+                ? navigate("/workforce")
                 : setCurrentStep((s) => s - 1)
             }
           >

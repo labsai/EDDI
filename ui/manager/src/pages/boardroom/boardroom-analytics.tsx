@@ -233,7 +233,7 @@ function BoardroomAnalytics() {
                 )}
           </p>
           <Link
-            to="/boardroom/new"
+            to="/workforce/new"
             className="inline-flex items-center gap-2 rounded-lg bg-primary ps-4 pe-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           >
             {t("analyticsPage.createFirst", "Assemble Task Force")}
@@ -256,7 +256,7 @@ function BoardroomAnalytics() {
         style={{ "--enter-delay": "0ms" } as React.CSSProperties}
       >
         <Link
-          to="/boardroom"
+          to="/workforce"
           className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           aria-label={t("boardroom.back", "Back")}
         >

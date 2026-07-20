@@ -159,7 +159,7 @@ function NewTaskForceCard() {
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         "min-h-48",
       )}
-      to="/boardroom/new"
+      to="/workforce/new"
       aria-label={t("boardroom.dashboard.assembleTaskForce", "Assemble Task Force")}
     >
       <Plus className="h-8 w-8" />
@@ -176,7 +176,7 @@ function MobileFab() {
   const { t } = useTranslation();
   return (
     <Link
-      to="/boardroom/new"
+      to="/workforce/new"
       className={cn(
         "fixed bottom-24 z-40",
         "end-5",
@@ -355,7 +355,7 @@ function BoardroomDashboard() {
       {/* ─── Templates ────────────────────────────────────────── */}
       <TemplatesPanel
         onUseTemplate={(template: DiscussionTemplate) => {
-          navigate(`/boardroom/new?template=${template.id}`);
+          navigate(`/workforce/new?template=${template.id}`);
         }}
       />
 
@@ -454,7 +454,7 @@ function BoardroomDashboard() {
             </Button>
             <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
             <Button asChild variant="primary" size="sm" className="hidden sm:inline-flex">
-              <Link to="/boardroom/new">
+              <Link to="/workforce/new">
                 <UsersRound className="h-4 w-4" />
                 {t("boardroom.dashboard.assembleTaskForce", "Assemble Task Force")}
               </Link>

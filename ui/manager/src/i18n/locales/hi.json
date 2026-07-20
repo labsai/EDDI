@@ -47,7 +47,9 @@
     "approvals": "अनुमोदन",
     "userConversations": "उपयोगकर्ता वार्तालाप",
     "userData": "उपयोगकर्ता डेटा",
-    "variables": "चर"
+    "variables": "चर",
+    "workforce": "Workforce",
+    "sectionExternal": "External"
   },
   "theme": {
     "light": "लाइट",
@@ -2106,7 +2108,7 @@
       "deleteBoardroom": "बोर्डरूम हटाएं",
       "deleteConfirm": "क्या आप वाकई इस बोर्डरूम को हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",
       "duplicateBoardroom": "बोर्डरूम की प्रतिलिपि बनाएं",
-      "error": "Failed to load boardrooms",
+      "error": "Failed to load workforces",
       "retry": "Retry",
       "welcomeTitle": "आपका AI सलाहकार बोर्ड इंतज़ार कर रहा है",
       "welcomeDesc": "बेहतर निर्णय लेने में मदद के लिए AI सलाहकारों की एक टीम बनाएं, विचार-मंथन करें और बहस करें।",
@@ -2445,5 +2447,24 @@
     "noResults": "No matching discussions",
     "noResultsHint": "Try adjusting your filters or clear them to see all data.",
     "clearFilters": "Clear filters"
+  },
+  "landing": {
+    "title": "Welcome to EDDI",
+    "subtitle": "Choose your workspace to get started.",
+    "hint": "We'll remember your choice and take you there automatically next time.",
+    "manager": {
+      "title": "Manager",
+      "description": "Build, configure, and deploy your AI agents. Manage workflows, resources, and integrations.",
+      "feature1": "Create & deploy agents",
+      "feature2": "Configure workflows & pipelines",
+      "feature3": "Manage resources & extensions"
+    },
+    "workforce": {
+      "title": "Workforce",
+      "description": "Assemble AI teams that debate, analyze, and solve complex challenges together.",
+      "feature1": "Assemble agent task forces",
+      "feature2": "Run collaborative discussions",
+      "feature3": "Get synthesized answers"
+    }
   }
 }

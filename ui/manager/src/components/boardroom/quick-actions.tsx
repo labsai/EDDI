@@ -29,7 +29,7 @@ export function QuickActions({ className }: QuickActionsProps) {
         "quickActions.assembleTaskForceDesc",
         "Bring experts together to solve complex challenges",
       ),
-      to: "/boardroom/new",
+      to: "/workforce/new",
     },
     {
       icon: MessageSquareText,
@@ -47,7 +47,7 @@ export function QuickActions({ className }: QuickActionsProps) {
         "quickActions.viewInsightsDesc",
         "Track your workforce's knowledge coverage",
       ),
-      to: "/boardroom/analytics",
+      to: "/workforce/analytics",
     },
     {
       icon: Cog,

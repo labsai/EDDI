@@ -63,7 +63,7 @@ function TopDiscussions({ discussions, emptyMessage }: TopDiscussionsProps) {
           {discussions.map((d) => (
             <Link
               key={d.id}
-              to={`/boardroom/${d.groupId}/history`}
+              to={`/workforce/${d.groupId}/history`}
               className={cn(
                 "flex items-start gap-3 rounded-lg p-2.5",
                 "transition-colors hover:bg-muted/50",

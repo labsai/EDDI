@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { DashboardPage } from "@/pages/dashboard";
@@ -35,6 +35,7 @@ import { SyncPage } from "@/pages/sync-page";
 import { ChannelsPage } from "@/pages/channels";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 import { ApprovalsPage } from "@/pages/approvals";
+import { LandingPage } from "@/pages/landing-page";
 
 import { BoardroomLayout } from "@/components/boardroom/boardroom-layout";
 import { BoardroomDashboard } from "@/pages/boardroom/boardroom-dashboard";
@@ -45,16 +46,26 @@ import { BoardroomSettings } from "@/pages/boardroom/boardroom-settings";
 import { BoardroomHistory } from "@/pages/boardroom/boardroom-history";
 import { BoardroomAnalytics } from "@/pages/boardroom/boardroom-analytics";
 
+/** Redirect /boardroom/* → /workforce/* preserving sub-paths */
+function BoardroomRedirect() {
+  const { "*": rest } = useParams();
+  const sub = rest ? `/${rest}` : "";
+  return <Navigate to={`/workforce${sub}`} replace />;
+}
+
 export function App() {
   const location = useLocation();
   return (
     <ErrorBoundary resetKey={location.key}>
     <Routes>
+      {/* Landing — workspace chooser */}
+      <Route path="/" element={<LandingPage />} />
+
       {/* Studio — full-screen breakout, no sidebar/topbar chrome */}
       <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />
 
-      {/* Boardroom — standalone app, no Manager chrome */}
-      <Route path="/boardroom" element={<BoardroomLayout />}>
+      {/* Workforce — standalone app, no Manager chrome */}
+      <Route path="/workforce" element={<BoardroomLayout />}>
         <Route index element={<BoardroomDashboard />} />
         <Route path="new" element={<BoardroomWizard />} />
         <Route path="analytics" element={<BoardroomAnalytics />} />
@@ -63,6 +74,10 @@ export function App() {
         <Route path=":boardId/settings" element={<BoardroomSettings />} />
         <Route path=":boardId/history" element={<BoardroomHistory />} />
       </Route>
+
+      {/* Legacy /boardroom redirect → /workforce */}
+      <Route path="/boardroom/*" element={<BoardroomRedirect />} />
+      <Route path="/boardroom" element={<Navigate to="/workforce" replace />} />
 
       <Route element={<AppLayout />}>
         <Route path="/manage" element={<DashboardPage />} />
@@ -106,11 +121,13 @@ export function App() {
           path="/manage/resources/:type/:id"
           element={<ResourceDetailPage />}
         />
-        <Route path="/" element={<Navigate to="/manage" replace />} />
-        <Route path="*" element={<Navigate to="/manage" replace />} />
       </Route>
+
+      {/* Catch-all → landing */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     <CommandPalette />
     </ErrorBoundary>
   );
 }
+

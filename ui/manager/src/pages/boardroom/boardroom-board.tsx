@@ -228,7 +228,7 @@ function BoardroomBoard() {
       <div className="flex items-center justify-between ps-4 pe-4 py-2 border-b border-border">
         <div className="flex items-center gap-2">
           <Link
-            to="/boardroom"
+            to="/workforce"
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             aria-label={t("boardroom.back", "Back")}
           >
@@ -284,7 +284,7 @@ function BoardroomBoard() {
             <ClockIcon />
           </Button>
           <Link
-            to={`/boardroom/${boardId}/history`}
+            to={`/workforce/${boardId}/history`}
             className={cn(
               "inline-flex items-center justify-center rounded-md h-8 w-8 transition-colors",
               "hover:bg-muted text-muted-foreground",
@@ -299,7 +299,7 @@ function BoardroomBoard() {
               groupName={groupConfig?.name}
             />
             <Link
-              to={`/boardroom/${boardId}/settings?version=${version}`}
+              to={`/workforce/${boardId}/settings?version=${version}`}
               className={cn(
                 "inline-flex items-center justify-center rounded-md h-8 w-8 transition-colors",
                 "hover:bg-muted text-muted-foreground",

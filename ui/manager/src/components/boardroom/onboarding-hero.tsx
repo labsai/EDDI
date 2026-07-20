@@ -96,7 +96,7 @@ function TemplateCard({
 
   return (
     <Link
-      to={`/boardroom/new?template=${template.key}`}
+      to={`/workforce/new?template=${template.key}`}
       className={cn(
         "group relative flex flex-col rounded-2xl border border-border bg-card overflow-hidden",
         "transition-all duration-200 hover:shadow-lg hover:-translate-y-1 hover:border-primary/30",
@@ -160,7 +160,7 @@ function CustomCard({ hasAgents }: { hasAgents: boolean }) {
 
   return (
     <Link
-      to="/boardroom/new?template=custom"
+      to="/workforce/new?template=custom"
       className={cn(
         "group flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8",
         "text-muted-foreground transition-all duration-200",
@@ -401,7 +401,7 @@ function OnboardingHero() {
             size="lg"
             className="gap-2"
           >
-            <Link to="/boardroom/new">
+            <Link to="/workforce/new">
               <UsersRound className="h-5 w-5" />
               {t(
                 "boardroom.onboarding.assembleNow",

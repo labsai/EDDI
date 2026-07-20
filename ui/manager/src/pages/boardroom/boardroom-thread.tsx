@@ -603,7 +603,7 @@ function BoardroomThread() {
       {/* Back header */}
       <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card/80 backdrop-blur-sm ps-2 pe-4">
         <Link
-          to={`/boardroom/${boardId}?version=${version}`}
+          to={`/workforce/${boardId}?version=${version}`}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           aria-label={t("boardroom.back", "Back")}
         >

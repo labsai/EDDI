@@ -9,6 +9,7 @@ import {
   X,
   Users,
   BarChart3,
+  Settings2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -62,7 +63,7 @@ export function BoardroomSidebar({
       {/* ── Header ────────────────────────────────────────────── */}
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border ps-3 pe-3">
         {!collapsed && (
-          <Link to="/boardroom" className="flex flex-1 items-center gap-2 truncate">
+          <Link to="/workforce" className="flex flex-1 items-center gap-2 truncate">
             <img
               src="/logo_eddi.png"
               alt="EDDI"
@@ -71,7 +72,7 @@ export function BoardroomSidebar({
           </Link>
         )}
         {collapsed && (
-          <Link to="/boardroom" className="flex items-center justify-center mx-auto" aria-label="EDDI">
+          <Link to="/workforce" className="flex items-center justify-center mx-auto" aria-label="EDDI">
             <img
               src="/eddi-icon.svg"
               alt="EDDI"
@@ -117,7 +118,7 @@ export function BoardroomSidebar({
           )}
           size={collapsed ? "icon" : "md"}
         >
-          <Link to="/boardroom/new">
+          <Link to="/workforce/new">
             <Plus className="h-4 w-4" />
             {!collapsed && (
               <span>{t("boardroom.newBoard", "Assemble Task Force")}</span>
@@ -129,12 +130,12 @@ export function BoardroomSidebar({
       {/* ── Insights Link ─────────────────────────────────────── */}
       <div className="shrink-0 ps-3 pe-3 pb-1">
         <Link
-          to="/boardroom/analytics"
+          to="/workforce/analytics"
           className={cn(
             "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-sm transition-colors",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             collapsed && "justify-center ps-0 pe-0",
-            location.pathname === "/boardroom/analytics"
+            location.pathname === "/workforce/analytics"
               ? "bg-muted text-foreground font-medium"
               : "text-muted-foreground hover:bg-muted hover:text-foreground",
           )}
@@ -169,7 +170,7 @@ export function BoardroomSidebar({
                 <button
                   type="button"
                   onClick={() =>
-                    navigate(`/boardroom/${board.id}?version=${board.version ?? 1}`)
+                    navigate(`/workforce/${board.id}?version=${board.version ?? 1}`)
                   }
                   title={collapsed ? board.name : undefined}
                   aria-current={isActive ? "page" : undefined}
@@ -204,8 +205,23 @@ export function BoardroomSidebar({
         </ul>
       </nav>
 
-      {/* ── Footer: Theme Toggle ──────────────────────────────── */}
-      <div className="shrink-0 border-t border-border ps-3 pe-3 py-2">
+      {/* ── Footer: Manager Link + Theme Toggle ────────────────── */}
+      <div className="shrink-0 border-t border-border ps-3 pe-3 py-2 space-y-1">
+        <Link
+          to="/manage"
+          className={cn(
+            "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-sm transition-colors",
+            "text-muted-foreground hover:bg-muted hover:text-foreground",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            collapsed && "justify-center ps-0 pe-0",
+          )}
+          title={collapsed ? t("boardroom.goToManager", "Manager") : undefined}
+        >
+          <Settings2 className="h-4 w-4 shrink-0" />
+          {!collapsed && (
+            <span>{t("boardroom.goToManager", "Manager")}</span>
+          )}
+        </Link>
         <Button
           variant="ghost"
           size={collapsed ? "icon" : "sm"}
@@ -263,7 +279,7 @@ function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?
                 type="button"
                 onClick={() =>
                   boardId
-                    ? navigate(`/boardroom/${boardId}/thread/${agentId}`)
+                    ? navigate(`/workforce/${boardId}/thread/${agentId}`)
                     : navigate(`/manage/chat?agentId=${agentId}`)
                 }
                 title={collapsed ? agent.name : undefined}

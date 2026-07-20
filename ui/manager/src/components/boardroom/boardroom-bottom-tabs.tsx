@@ -10,7 +10,7 @@ export function BoardroomBottomTabs() {
   const navigate = useNavigate();
   const { t } = useTranslation();
 
-  const isHome = location.pathname === "/boardroom";
+  const isHome = location.pathname === "/workforce";
   const isThreads = location.pathname.includes("/thread/");
 
   const tabs = [
@@ -19,23 +19,23 @@ export function BoardroomBottomTabs() {
       label: t("boardroom.tabHome", "Home"),
       icon: Home,
       active: isHome,
-      to: "/boardroom",
+      to: "/workforce",
     },
     {
       key: "threads" as const,
       label: t("boardroom.tabThreads", "Threads"),
       icon: MessageSquare,
       active: isThreads,
-      to: location.pathname.match(/\/boardroom\/[^/]+/)?.[0]
-        ? `${location.pathname.match(/\/boardroom\/[^/]+/)![0]}/thread/`
-        : "/boardroom",
+      to: location.pathname.match(/\/workforce\/[^/]+/)?.[0]
+        ? `${location.pathname.match(/\/workforce\/[^/]+/)![0]}/thread/`
+        : "/workforce",
     },
     {
       key: "insights" as const,
       label: t("boardroom.tabInsights", "Insights"),
       icon: BarChart3,
-      active: location.pathname === "/boardroom/analytics",
-      to: "/boardroom/analytics",
+      active: location.pathname === "/workforce/analytics",
+      to: "/workforce/analytics",
     },
   ] as const;
 

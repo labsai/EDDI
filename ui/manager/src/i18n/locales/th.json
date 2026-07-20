@@ -47,7 +47,9 @@
     "approvals": "การอนุมัติ",
     "userConversations": "การสนทนาของผู้ใช้",
     "userData": "ข้อมูลผู้ใช้",
-    "variables": "ตัวแปร"
+    "variables": "ตัวแปร",
+    "workforce": "Workforce",
+    "sectionExternal": "External"
   },
   "theme": {
     "light": "สว่าง",
@@ -2105,7 +2107,7 @@
       "deleteBoardroom": "ลบห้องประชุม",
       "deleteConfirm": "คุณแน่ใจหรือไม่ว่าต้องการลบห้องประชุมนี้? การกระทำนี้ไม่สามารถย้อนกลับได้",
       "duplicateBoardroom": "ทำสำเนาห้องประชุม",
-      "error": "Failed to load boardrooms",
+      "error": "Failed to load workforces",
       "retry": "Retry",
       "welcomeTitle": "คณะที่ปรึกษา AI ของคุณรอคุณอยู่",
       "welcomeDesc": "รวบรวมทีมที่ปรึกษา AI เพื่อช่วยคุณระดมความคิด ถกเถียง และตัดสินใจได้ดีขึ้น",
@@ -2445,5 +2447,24 @@
     "noResults": "No matching discussions",
     "noResultsHint": "Try adjusting your filters or clear them to see all data.",
     "clearFilters": "Clear filters"
+  },
+  "landing": {
+    "title": "Welcome to EDDI",
+    "subtitle": "Choose your workspace to get started.",
+    "hint": "We'll remember your choice and take you there automatically next time.",
+    "manager": {
+      "title": "Manager",
+      "description": "Build, configure, and deploy your AI agents. Manage workflows, resources, and integrations.",
+      "feature1": "Create & deploy agents",
+      "feature2": "Configure workflows & pipelines",
+      "feature3": "Manage resources & extensions"
+    },
+    "workforce": {
+      "title": "Workforce",
+      "description": "Assemble AI teams that debate, analyze, and solve complex challenges together.",
+      "feature1": "Assemble agent task forces",
+      "feature2": "Run collaborative discussions",
+      "feature3": "Get synthesized answers"
+    }
   }
 }

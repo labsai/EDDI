@@ -132,7 +132,7 @@ function BoardroomCard({
               {
                 action: {
                   label: t("boardroom.card.openSettings", "Open Settings"),
-                  onClick: () => navigate(`/boardroom/${newId}/settings`),
+                  onClick: () => navigate(`/workforce/${newId}/settings`),
                 },
               },
             );
@@ -173,7 +173,7 @@ function BoardroomCard({
   return (
     <>
       <Link
-        to={`/boardroom/${id}?version=${currentVersion}`}
+        to={`/workforce/${id}?version=${currentVersion}`}
         className={cn(
           "block rounded-xl border p-5 transition-all duration-200 br-card-premium",
           "bg-card border-border hover:shadow-lg hover:-translate-y-1",
@@ -231,7 +231,7 @@ function BoardroomCard({
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(`/boardroom/${id}/settings?version=${currentVersion}`);
+                      navigate(`/workforce/${id}/settings?version=${currentVersion}`);
                     }}
                   >
                     <Settings className="h-4 w-4" />
@@ -240,7 +240,7 @@ function BoardroomCard({
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(`/boardroom/${id}/history`);
+                      navigate(`/workforce/${id}/history`);
                     }}
                   >
                     <History className="h-4 w-4" />
@@ -417,7 +417,7 @@ function BoardroomCard({
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigate(`/boardroom/${id}/settings?version=${currentVersion}`);
+                    navigate(`/workforce/${id}/settings?version=${currentVersion}`);
                   }}
                 >
                   <Settings className="h-4 w-4" />
@@ -426,7 +426,7 @@ function BoardroomCard({
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigate(`/boardroom/${id}/history`);
+                    navigate(`/workforce/${id}/history`);
                   }}
                 >
                   <History className="h-4 w-4" />

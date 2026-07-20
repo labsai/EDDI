@@ -354,7 +354,7 @@ function BoardroomHistory() {
           className="gap-1.5 text-muted-foreground"
           asChild
         >
-          <Link to={`/boardroom/${boardId}`}>
+          <Link to={`/workforce/${boardId}`}>
             <ArrowLeft className="h-4 w-4" />
             {t("boardroom.history.backToBoard", "Back to Task Force")}
           </Link>

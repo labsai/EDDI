@@ -47,7 +47,9 @@
     "approvals": "승인",
     "userConversations": "사용자 대화",
     "userData": "사용자 데이터",
-    "variables": "변수"
+    "variables": "변수",
+    "workforce": "Workforce",
+    "sectionExternal": "External"
   },
   "theme": {
     "light": "라이트",
@@ -2103,7 +2105,7 @@
       "deleteBoardroom": "보드룸 삭제",
       "deleteConfirm": "이 보드룸을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
       "duplicateBoardroom": "보드룸 복제",
-      "error": "Failed to load boardrooms",
+      "error": "Failed to load workforces",
       "retry": "Retry",
       "welcomeTitle": "AI 자문위원회가 기다리고 있습니다",
       "welcomeDesc": "AI 자문위원 팀을 구성하여 브레인스토밍, 토론 및 더 나은 의사결정을 도와드립니다.",
@@ -2445,5 +2447,24 @@
     "noResults": "No matching discussions",
     "noResultsHint": "Try adjusting your filters or clear them to see all data.",
     "clearFilters": "Clear filters"
+  },
+  "landing": {
+    "title": "Welcome to EDDI",
+    "subtitle": "Choose your workspace to get started.",
+    "hint": "We'll remember your choice and take you there automatically next time.",
+    "manager": {
+      "title": "Manager",
+      "description": "Build, configure, and deploy your AI agents. Manage workflows, resources, and integrations.",
+      "feature1": "Create & deploy agents",
+      "feature2": "Configure workflows & pipelines",
+      "feature3": "Manage resources & extensions"
+    },
+    "workforce": {
+      "title": "Workforce",
+      "description": "Assemble AI teams that debate, analyze, and solve complex challenges together.",
+      "feature1": "Assemble agent task forces",
+      "feature2": "Run collaborative discussions",
+      "feature3": "Get synthesized answers"
+    }
   }
 }

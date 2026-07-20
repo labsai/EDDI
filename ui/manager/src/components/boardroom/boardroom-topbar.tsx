@@ -59,7 +59,7 @@ export function BoardroomTopbar({
       {/* Title */}
       <div className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">
         {title || (
-          <Link to="/boardroom" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+          <Link to="/workforce" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <img
               src="/eddi-icon.svg"
               alt=""

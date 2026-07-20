@@ -47,7 +47,9 @@
     "approvals": "Approbations",
     "userConversations": "Conversations utilisateur",
     "userData": "Données utilisateur",
-    "variables": "Variables"
+    "variables": "Variables",
+    "workforce": "Workforce",
+    "sectionExternal": "External"
   },
   "theme": {
     "light": "Clair",
@@ -2108,24 +2110,24 @@
     "dashboard": {
       "title": "Groupes de travail actifs",
       "subtitle": "Groupes d'agents collaboratifs résolvant des défis complexes.",
-      "createFirst": "Créez votre premier boardroom",
+      "createFirst": "Créez votre premier workforce",
       "createFirstDesc": "Mettez en place un comité consultatif IA avec des conseillers experts pour vous aider à prendre de meilleures décisions.",
-      "newBoardroom": "Nouveau Boardroom",
+      "newBoardroom": "Nouveau Workforce",
       "sessions": "sessions",
       "advisors": "conseillers",
       "lastActive": "Dernière activité",
       "noActivity": "Aucune activité pour le moment",
-      "deleteBoardroom": "Supprimer le Boardroom",
-      "deleteConfirm": "Êtes-vous sûr de vouloir supprimer ce boardroom ? Cette action est irréversible.",
-      "duplicateBoardroom": "Dupliquer le Boardroom",
-      "error": "Échec du chargement des boardrooms",
+      "deleteBoardroom": "Supprimer le Workforce",
+      "deleteConfirm": "Êtes-vous sûr de vouloir supprimer ce workforce ? Cette action est irréversible.",
+      "duplicateBoardroom": "Dupliquer le Workforce",
+      "error": "Échec du chargement des workforces",
       "retry": "Réessayer",
       "welcomeTitle": "Construisez votre main-d'œuvre numérique",
       "welcomeDesc": "Transformez l'expertise de votre équipe en experts numériques permanents qui collaborent, débattent et protègent l'ADN organisationnel.",
-      "duplicateSuccess": "Boardroom dupliqué",
-      "duplicateError": "Échec de la duplication du boardroom",
-      "deleteSuccess": "Boardroom supprimé",
-      "deleteError": "Échec de la suppression du boardroom",
+      "duplicateSuccess": "Workforce dupliqué",
+      "duplicateError": "Échec de la duplication du workforce",
+      "deleteSuccess": "Workforce supprimé",
+      "deleteError": "Échec de la suppression du workforce",
       "gridView": "Vue grille",
       "listView": "Vue liste",
       "assembleTaskForce": "Constituer un groupe de travail",
@@ -2155,7 +2157,7 @@
       "step2Subtitle": "Configurez vos conseillers",
       "step3Title": "Vérifier & Lancer",
       "step3Subtitle": "Tout semble bon ?",
-      "boardName": "Nom du boardroom",
+      "boardName": "Nom du workforce",
       "boardDescription": "Description (facultatif)",
       "addAdvisor": "Ajouter un conseiller",
       "removeAdvisor": "Retirer le conseiller",
@@ -2167,9 +2169,9 @@
       "creating": "Création en cours...",
       "creatingAdvisor": "Création de {{name}}...",
       "advisorReady": "{{name}} est prêt",
-      "settingUp": "Configuration du boardroom...",
+      "settingUp": "Configuration du workforce...",
       "success": "Groupe de travail constitué !",
-      "enterBoardroom": "Entrer dans votre Boardroom",
+      "enterBoardroom": "Entrer dans votre Workforce",
       "back": "Retour",
       "next": "Suivant",
       "customTemplate": "Personnalisé",
@@ -2198,7 +2200,7 @@
       "yourAdvisors": "Vos Conseillers"
     },
     "board": {
-      "askYourBoard": "Posez une question à votre boardroom...",
+      "askYourBoard": "Posez une question à votre workforce...",
       "askMore": "Poser plus de questions à {{name}}",
       "newSession": "Nouvelle session",
       "sessions": "Sessions",
@@ -2207,7 +2209,7 @@
       "typing": "Réflexion en cours...",
       "chat1on1": "Chat 1:1",
       "noSessions": "Aucune session pour le moment",
-      "noSessionsDesc": "Posez une question à votre boardroom pour lancer une discussion",
+      "noSessionsDesc": "Posez une question à votre workforce pour lancer une discussion",
       "streaming": "Diffusion en cours...",
       "completed": "Terminé",
       "failed": "Échoué",
@@ -2291,7 +2293,7 @@
       "themeToggle": "Changer de thème"
     },
     "onboarding": {
-      "welcome": "Bienvenue dans le Boardroom",
+      "welcome": "Bienvenue dans le Workforce",
       "subtitle": "Assemblez des agents IA spécialisés en équipes collaboratives qui débattent, analysent et résolvent des défis complexes ensemble.",
       "howItWorks": "Comment ça marche",
       "step1Title": "Déployer des agents",
@@ -2445,5 +2447,24 @@
     "noResults": "No matching discussions",
     "noResultsHint": "Try adjusting your filters or clear them to see all data.",
     "clearFilters": "Clear filters"
+  },
+  "landing": {
+    "title": "Welcome to EDDI",
+    "subtitle": "Choose your workspace to get started.",
+    "hint": "We'll remember your choice and take you there automatically next time.",
+    "manager": {
+      "title": "Manager",
+      "description": "Build, configure, and deploy your AI agents. Manage workflows, resources, and integrations.",
+      "feature1": "Create & deploy agents",
+      "feature2": "Configure workflows & pipelines",
+      "feature3": "Manage resources & extensions"
+    },
+    "workforce": {
+      "title": "Workforce",
+      "description": "Assemble AI teams that debate, analyze, and solve complex challenges together.",
+      "feature1": "Assemble agent task forces",
+      "feature2": "Run collaborative discussions",
+      "feature3": "Get synthesized answers"
+    }
   }
 }

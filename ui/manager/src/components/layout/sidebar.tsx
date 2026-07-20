@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
@@ -30,6 +30,7 @@ import {
   RefreshCw,
   ChevronRight,
   Users,
+  UsersRound,
   Cable,
   Variable,
   HandMetal,
@@ -247,6 +248,25 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </div>
         ))}
       </nav>
+
+      {/* Workforce link */}
+      <div className="border-t border-sidebar-border p-1.5">
+        <Link
+          to="/workforce"
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all",
+            "border-s-2 border-primary/30 bg-primary/5 text-primary",
+            "hover:bg-primary/10",
+            collapsed && "justify-center px-2 border-s-0",
+          )}
+          title={collapsed ? t("nav.workforce", "Workforce") : undefined}
+        >
+          <UsersRound className="h-5 w-5 shrink-0" aria-hidden="true" />
+          {!collapsed && (
+            <span>{t("nav.workforce", "Workforce")}</span>
+          )}
+        </Link>
+      </div>
 
       {/* External links */}
       <div className="border-t border-sidebar-border p-1.5">

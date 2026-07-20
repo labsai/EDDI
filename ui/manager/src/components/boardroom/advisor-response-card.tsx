@@ -274,7 +274,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
               asChild
             >
               <Link
-                to={`/boardroom/${boardId}/thread/${agentId}`}
+                to={`/workforce/${boardId}/thread/${agentId}`}
                 state={{ fromGroup: true, question: "", response: content }}
               >
                 <MessageCircle className="h-3 w-3" />

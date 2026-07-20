@@ -303,7 +303,7 @@ function BoardroomSettings() {
                 "Task force and all agents deleted"
               )
             );
-            navigate("/boardroom");
+            navigate("/workforce");
           },
           onError: () => {
             toast.error(
@@ -320,7 +320,7 @@ function BoardroomSettings() {
             toast.success(
               t("boardroom.settings.deleteSuccess", "Task force deleted")
             );
-            navigate("/boardroom");
+            navigate("/workforce");
           },
           onError: () => {
             toast.error(
@@ -391,7 +391,7 @@ function BoardroomSettings() {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
         <p>{t("boardroom.settings.loadError", "Failed to load settings")}</p>
-        <Button onClick={() => navigate('/boardroom')}>
+        <Button onClick={() => navigate('/workforce')}>
           {t('boardroom.back', 'Back')}
         </Button>
       </div>
@@ -405,7 +405,7 @@ function BoardroomSettings() {
     <div className="max-w-3xl ms-auto me-auto p-5 sm:p-8 pb-24">
       {/* ── Back link ───────────────────────────────────────────── */}
       <Link
-        to={`/boardroom/${boardId}?version=${version}`}
+        to={`/workforce/${boardId}?version=${version}`}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group"
       >
         <ArrowLeft className="h-4 w-4" />

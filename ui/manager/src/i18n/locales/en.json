@@ -47,7 +47,28 @@
     "sectionDevelopment": "Development",
     "sectionOperations": "Operations",
     "mainNavigation": "Main navigation",
-    "openMenu": "Open navigation menu"
+    "openMenu": "Open navigation menu",
+    "workforce": "Workforce",
+    "sectionExternal": "External"
+  },
+  "landing": {
+    "title": "Welcome to EDDI",
+    "subtitle": "Choose your workspace to get started.",
+    "hint": "We'll remember your choice and take you there automatically next time.",
+    "manager": {
+      "title": "Manager",
+      "description": "Build, configure, and deploy your AI agents. Manage workflows, resources, and integrations.",
+      "feature1": "Create & deploy agents",
+      "feature2": "Configure workflows & pipelines",
+      "feature3": "Manage resources & extensions"
+    },
+    "workforce": {
+      "title": "Workforce",
+      "description": "Assemble AI teams that debate, analyze, and solve complex challenges together.",
+      "feature1": "Assemble agent task forces",
+      "feature2": "Run collaborative discussions",
+      "feature3": "Get synthesized answers"
+    }
   },
   "theme": {
     "light": "Light",
@@ -2165,7 +2186,7 @@
       "viewToggle": "View mode"
     },
     "onboarding": {
-      "welcome": "Welcome to the Boardroom",
+      "welcome": "Welcome to the Workforce",
       "subtitle": "Assemble specialized AI agents into collaborative teams that debate, analyze, and solve complex challenges together.",
       "howItWorks": "How it works",
       "step1Title": "Deploy Agents",
