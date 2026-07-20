@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -812,7 +813,7 @@ class AgentOrchestratorExtendedTest {
             task.setBuiltInToolsWhitelist(List.of("calculator"));
             task.setEnableHttpCallTools(false);
             task.setEnableMcpCallTools(false);
-            var retry = new LlmConfiguration.RetryConfiguration();
+            var retry = new RetryConfiguration();
             retry.setMaxAttempts(1);
             task.setRetry(retry);
 
@@ -1159,7 +1160,7 @@ class AgentOrchestratorExtendedTest {
             task.setBuiltInToolsWhitelist(List.of("calculator"));
             task.setEnableHttpCallTools(false);
             task.setEnableMcpCallTools(false);
-            var retry = new LlmConfiguration.RetryConfiguration();
+            var retry = new RetryConfiguration();
             retry.setMaxAttempts(1);
             task.setRetry(retry);
 

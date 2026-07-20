@@ -21,6 +21,7 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ConversationSummaryConfig;
@@ -817,7 +818,7 @@ class LlmTaskCoverage2Test {
         task.setId("test-task");
         task.setType("openai");
         task.setParameters(Map.of("apiKey", "test-key"));
-        var retry = new LlmConfiguration.RetryConfiguration();
+        var retry = new RetryConfiguration();
         retry.setMaxAttempts(1);
         retry.setBackoffDelayMs(10L);
         task.setRetry(retry);

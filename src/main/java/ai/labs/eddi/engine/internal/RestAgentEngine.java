@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
@@ -62,6 +63,7 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 public class RestAgentEngine implements IRestAgentEngine {
 
     private final IConversationService conversationService;
+    private final IConversationMemoryStore conversationMemoryStore;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
     private final ConversationAccessGuard conversationAccessGuard;
@@ -73,6 +75,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Inject
     public RestAgentEngine(IConversationService conversationService,
+            IConversationMemoryStore conversationMemoryStore,
             SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
             ConversationAccessGuard conversationAccessGuard,
@@ -80,6 +83,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             IHitlToolJournalStore hitlToolJournalStore,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.conversationService = conversationService;
+        this.conversationMemoryStore = conversationMemoryStore;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
         this.conversationAccessGuard = conversationAccessGuard;
@@ -557,5 +561,39 @@ public class RestAgentEngine implements IRestAgentEngine {
         // ConversationAccessGuard, so REST and MCP cannot drift apart on who may
         // read or drive a conversation.
         return conversationAccessGuard.requireConversationOwner(conversationId);
+    }
+
+    @Override
+    public Response resetState(String conversationId, String targetState) {
+        if (!"READY".equalsIgnoreCase(targetState)) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Only READY is supported as target state"))
+                    .build();
+        }
+        try {
+            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var currentState = snapshot.getConversationState();
+            if (currentState == ConversationState.IN_PROGRESS) {
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(Map.of("error", "Cannot reset while conversation is IN_PROGRESS"))
+                        .build();
+            }
+            if (currentState == ConversationState.ENDED) {
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(Map.of("error", "Cannot reset an ENDED conversation"))
+                        .build();
+            }
+            if (currentState == ConversationState.READY) {
+                return Response.ok(Map.of("message", "Conversation already in READY state")).build();
+            }
+            conversationService.resetConversationState(conversationId, ConversationState.READY);
+            LOGGER.infof("Admin reset conversation %s from %s to READY", conversationId, currentState);
+            return Response.ok(Map.of("message", "State reset from " + currentState + " to READY")).build();
+        } catch (ResourceStoreException e) {
+            LOGGER.errorf(e, "Failed to reset conversation state for %s", conversationId);
+            throw new InternalServerErrorException("Failed to reset state");
+        } catch (ResourceNotFoundException e) {
+            throw new NotFoundException("Conversation not found: " + conversationId);
+        }
     }
 }

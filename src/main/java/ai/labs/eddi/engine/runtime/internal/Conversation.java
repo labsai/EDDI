@@ -180,6 +180,13 @@ public class Conversation implements IConversation {
     private void runStep(String message, Map<String, Context> contexts, boolean startNewStep, List<String> lifecycleTaskTypes)
             throws ConversationNotReadyException, LifecycleException {
 
+        // Auto-recover from transient interrupted state
+        if (getConversationState() == ConversationState.EXECUTION_INTERRUPTED) {
+            LOGGER.infof("Auto-recovering conversation %s from EXECUTION_INTERRUPTED",
+                    conversationMemory.getConversationId());
+            setConversationState(ConversationState.READY);
+        }
+
         checkIfConversationInProgress();
 
         try {

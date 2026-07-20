@@ -129,6 +129,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
                             String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
                             LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
                             LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
+
+                            // Store error body in memory so downstream templates / rules can inspect it
+                            if (call.getSaveResponse()) {
+                                String errorBody = response.getContentAsString();
+                                String errorObjectName = call.getResponseObjectName() + "Error";
+                                if (errorBody != null && !errorBody.isBlank()) {
+                                    String truncatedError = errorBody.length() > 2000
+                                            ? errorBody.substring(0, 2000)
+                                            : errorBody;
+                                    prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
+                                    templateDataObjects.put(errorObjectName, truncatedError);
+                                }
+                                prePostUtils.createMemoryEntry(currentStep, response.getHttpCode(),
+                                        call.getResponseObjectName() + "HttpCode", KEY_HTTP_CALLS);
+                                templateDataObjects.put(call.getResponseObjectName() + "HttpCode", response.getHttpCode());
+                            }
                         }
 
                         var responseHeaderObjectName = call.getResponseHeaderObjectName();
@@ -150,7 +166,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
                             Object responseObject;
                             if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
-                                responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                                try {
+                                    responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                                } catch (java.io.IOException jsonEx) {
+                                    LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s",
+                                            call.getName(), jsonEx.getMessage());
+                                    responseObject = responseBody;
+                                }
                             } else {
                                 if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
                                     var message = "ApiCall (%s) didn't return application/json, text/plain nor text/html "

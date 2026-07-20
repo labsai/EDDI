@@ -180,6 +180,20 @@ public interface IRestAgentEngine {
     @APIResponse(responseCode = "200", description = "Redo successful.")
     Response redo(@PathParam("conversationId") String conversationId);
 
+    // --- Admin: state reset ---
+
+    @PATCH
+    @Path("/{conversationId}/state")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed("eddi-admin")
+    @Operation(summary = "Reset conversation state",
+               description = "Resets a stuck conversation (ERROR or EXECUTION_INTERRUPTED) to READY. Admin-only.")
+    @APIResponse(responseCode = "200", description = "State reset successful.")
+    @APIResponse(responseCode = "409", description = "Cannot reset from current state.")
+    Response resetState(@PathParam("conversationId") String conversationId,
+                        @QueryParam("state")
+                        @DefaultValue("READY") String targetState);
+
     // --- Cancel ---
 
     @POST
@@ -229,5 +243,6 @@ public interface IRestAgentEngine {
     @Operation(summary = "List pending approvals",
                description = "Lists conversations currently awaiting human approval (bounded by limit, max 1000).")
     @APIResponse(responseCode = "200", description = "List of pending approvals.")
-    List<PendingApprovalSummary> listPendingApprovals(@QueryParam("limit") @DefaultValue("200") Integer limit);
+    List<PendingApprovalSummary> listPendingApprovals(@QueryParam("limit")
+    @DefaultValue("200") Integer limit);
 }

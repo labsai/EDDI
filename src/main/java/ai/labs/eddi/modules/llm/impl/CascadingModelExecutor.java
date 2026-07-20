@@ -116,9 +116,15 @@ class CascadingModelExecutor {
      * @param streamedLive
      *            true if this response was already streamed to the client
      *            token-by-token (so the caller must not re-emit it)
+     * @param responseMetadata
+     *            the winning step's raw response metadata (finishReason, warning,
+     *            streamingTimeout). Carried so the caller can apply response
+     *            validation — without it, policies like {@code onTruncation} and
+     *            {@code onContentFilter} are unreachable whenever the cascade runs.
      */
     record CascadeResult(String response, double confidence, int stepUsed, String modelType, String modelName, Map<String, Object> tokenUsage,
-            double runCostUsd, List<Map<String, Object>> trace, AgentOrchestrator.ExecutionResult agentResult, boolean streamedLive) {
+            double runCostUsd, List<Map<String, Object>> trace, AgentOrchestrator.ExecutionResult agentResult, boolean streamedLive,
+            Map<String, Object> responseMetadata) {
     }
 
     /**
@@ -317,9 +323,39 @@ class CascadingModelExecutor {
 
                 recordStepMetrics(modelType, durationMs, stepResult.confidence, stepResult.tokenUsage, stepCost);
 
-                if (bestSoFar == null || stepResult.confidence > bestSoFar.confidence()) {
+                // A live-streamed step that hit its timeout is a failed step, not a
+                // candidate. executeCapturing returns the (possibly empty) partial text
+                // rather than throwing, so without this it competes on equal footing with
+                // a real answer — and being the last step it would be accepted outright,
+                // beating a good earlier response.
+                boolean stepTimedOut = stepResult.responseMetadata != null
+                        && Boolean.TRUE.equals(stepResult.responseMetadata.get("streamingTimeout"));
+
+                if (!stepTimedOut && (bestSoFar == null || stepResult.confidence > bestSoFar.confidence())) {
                     bestSoFar = new CascadeResult(stepResult.response, stepResult.confidence, i, modelType, modelName, stepResult.tokenUsage, 0.0,
-                            trace, stepResult.agentResult, stepResult.streamedLive);
+                            trace, stepResult.agentResult, stepResult.streamedLive, stepResult.responseMetadata);
+                }
+
+                if (stepTimedOut && bestSoFar != null) {
+                    stepTrace.put("status", "timeout");
+                    trace.add(stepTrace);
+                    increment("eddi.llm.cascade.escalations", "reason", "timeout");
+                    increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "timeout");
+
+                    if (isLastStep) {
+                        LOGGER.warnf("Cascade step %d timed out mid-stream (last step), returning best response", i);
+                        // The client may already have seen partial tokens from the timed-out
+                        // stream — mark the fallback streamedLive so LlmTask does not re-emit
+                        // best's (different) text as a duplicate token stream.
+                        return withRun(bestSoFar, runCostUsd, trace, bestSoFar.streamedLive() || stepResult.streamedLive);
+                    }
+
+                    LOGGER.warnf("Cascade step %d timed out mid-stream, escalating", i);
+                    if (eventSink != null) {
+                        eventSink.onCascadeEscalation(i, i + 1, 0.0, step.getConfidenceThreshold() != null ? step.getConfidenceThreshold() : 0.0,
+                                "timeout", durationMs);
+                    }
+                    continue;
                 }
 
                 if (isLastStep || step.getConfidenceThreshold() == null || stepResult.confidence >= step.getConfidenceThreshold()) {
@@ -349,7 +385,7 @@ class CascadingModelExecutor {
                     stepTrace.put("status", "accepted");
                     increment("eddi.llm.cascade.accepted.step", "step", String.valueOf(i));
                     return new CascadeResult(stepResult.response, stepResult.confidence, i, modelType, modelName, stepResult.tokenUsage, runCostUsd,
-                            trace, stepResult.agentResult, stepResult.streamedLive);
+                            trace, stepResult.agentResult, stepResult.streamedLive, stepResult.responseMetadata);
                 }
 
                 // Escalate.
@@ -398,11 +434,12 @@ class CascadingModelExecutor {
                 }
                 long durationMs = System.currentTimeMillis() - stepStart;
                 String errorType = isRetryableError(e) ? "retryable_error" : "error";
+                String failureDescription = describeFailure(e);
                 stepTrace.put("status", errorType);
-                stepTrace.put("error", e.getMessage());
+                stepTrace.put("error", failureDescription);
                 stepTrace.put("durationMs", durationMs);
                 trace.add(stepTrace);
-                errors.add(String.format("Step %d (%s): %s", i, modelName, e.getMessage()));
+                errors.add(String.format("Step %d (%s): %s", i, modelName, failureDescription));
                 increment("eddi.llm.cascade.escalations", "reason", errorType);
                 increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", errorType);
 
@@ -529,21 +566,24 @@ class CascadingModelExecutor {
 
         String responseText;
         Map<String, Object> tokenUsage;
+        Map<String, Object> responseMetadata;
         boolean streamedLive = false;
         if (streamingModel != null && eventSink != null) {
             // Stream the always-accepted final step live — tokens emitted via the sink.
-            var streamResult = streamingLegacyChatExecutor.executeCapturing(streamingModel, messages, eventSink);
+            var streamResult = streamingLegacyChatExecutor.executeCapturing(streamingModel, messages, eventSink, task);
             responseText = streamResult.response() != null ? streamResult.response() : "";
-            tokenUsage = extractTokenUsage(streamResult.responseMetadata());
+            responseMetadata = streamResult.responseMetadata();
+            tokenUsage = extractTokenUsage(responseMetadata);
             streamedLive = true;
         } else {
             var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
             responseText = chatResult.response() != null ? chatResult.response() : "";
-            tokenUsage = extractTokenUsage(chatResult.responseMetadata());
+            responseMetadata = chatResult.responseMetadata();
+            tokenUsage = extractTokenUsage(responseMetadata);
         }
 
         var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
-        return new StepResult(evalResult.response(), evalResult.confidence(), null, tokenUsage, streamedLive);
+        return new StepResult(evalResult.response(), evalResult.confidence(), null, tokenUsage, streamedLive, responseMetadata);
     }
 
     /**
@@ -567,7 +607,7 @@ class CascadingModelExecutor {
             String responseText = agentResult.response();
             Map<String, Object> tokenUsage = extractTokenUsage(agentResult.responseMetadata());
             var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
-            return new StepResult(evalResult.response(), evalResult.confidence(), agentResult, tokenUsage, false);
+            return new StepResult(evalResult.response(), evalResult.confidence(), agentResult, tokenUsage, false, agentResult.responseMetadata());
         }
 
         // Agent mode returned null (no tools enabled) — fall back to legacy (no live
@@ -688,6 +728,30 @@ class CascadingModelExecutor {
         return fallbackType;
     }
 
+    /**
+     * Describe a step failure so it can actually be diagnosed.
+     * <p>
+     * The retry wrapper reports a generic "… failed after N attempts", which reads
+     * identically for a rate limit, an auth failure and a network outage — the
+     * provider's own message survives only on the cause chain. Both the audit trace
+     * and the aggregated cascade error use this, so append the root cause whenever
+     * it says something the wrapper message does not.
+     */
+    private static String describeFailure(Throwable e) {
+        String message = e.getMessage();
+        Throwable root = e;
+        // Bounded walk — a self-referential or cyclic cause chain must not hang the
+        // error path that exists to report a failure.
+        for (int depth = 0; depth < 10 && root.getCause() != null && root.getCause() != root; depth++) {
+            root = root.getCause();
+        }
+        String rootMessage = root.getMessage();
+        if (rootMessage != null && !rootMessage.equals(message)) {
+            return message == null ? rootMessage : message + " (cause: " + rootMessage + ")";
+        }
+        return message;
+    }
+
     /** Rebuild the best-so-far result with the final aggregate run cost + trace. */
     private static CascadeResult withRun(CascadeResult best, double runCostUsd, List<Map<String, Object>> trace) {
         return withRun(best, runCostUsd, trace, best.streamedLive());
@@ -695,7 +759,7 @@ class CascadingModelExecutor {
 
     private static CascadeResult withRun(CascadeResult best, double runCostUsd, List<Map<String, Object>> trace, boolean streamedLive) {
         return new CascadeResult(best.response(), best.confidence(), best.stepUsed(), best.modelType(), best.modelName(), best.tokenUsage(),
-                runCostUsd, trace, best.agentResult(), streamedLive);
+                runCostUsd, trace, best.agentResult(), streamedLive, best.responseMetadata());
     }
 
     private static CascadeResult finalizeBest(CascadeResult bestSoFar, double runCostUsd, List<Map<String, Object>> trace, List<String> errors)
@@ -757,6 +821,6 @@ class CascadingModelExecutor {
      * Internal result of a single cascade step execution.
      */
     private record StepResult(String response, double confidence, AgentOrchestrator.ExecutionResult agentResult, Map<String, Object> tokenUsage,
-            boolean streamedLive) {
+            boolean streamedLive, Map<String, Object> responseMetadata) {
     }
 }

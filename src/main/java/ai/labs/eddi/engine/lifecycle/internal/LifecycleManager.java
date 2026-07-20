@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.ConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
@@ -35,6 +36,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -354,21 +356,67 @@ public class LifecycleManager implements ILifecycleManager {
                 taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
                 taskSpan.recordException(e);
 
-                // Record error counter for dashboards & alerting
+                // Classify error for metrics, audit, and admin dashboards
+                String errorType = classifyError(e);
+                String errorSummary = summarizeForAudit(e);
+                long failDurationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+
+                // Record error counter for dashboards & alerting (tagged by error.type)
                 String errTaskId = task.getId().name();
                 String errTaskType = task.getType() != null ? task.getType() : "unknown";
-                String errMeterKey = errTaskId + "|" + errTaskType;
+                String errMeterKey = errTaskId + "|" + errTaskType + "|" + errorType;
                 TASK_ERROR_COUNTERS.computeIfAbsent(errMeterKey, k -> Counter.builder("eddi.pipeline.task.errors")
                         .tag("task.id", errTaskId)
                         .tag("task.type", errTaskType)
+                        .tag("error.type", errorType)
                         .description("Pipeline task execution errors")
                         .register(Metrics.globalRegistry)).increment();
 
+                // Emit SSE task_failed event for real-time admin monitoring
+                var eventSinkRef = conversationMemory.getEventSink();
+                if (eventSinkRef != null) {
+                    try {
+                        eventSinkRef.onTaskFailed(task.getId(), task.getType(),
+                                failDurationMs, errorType, errorSummary);
+                    } catch (Exception sseEx) {
+                        LOGGER.warnf(sseEx, "SSE task_failed emission failed for conversation '%s', task '%s'",
+                                sanitize(conversationMemory.getConversationId()), errTaskId);
+                    }
+                }
+
+                // Strict-write recovery runs before reporting: it is integrity-critical
+                // and must not be skipped by an audit failure.
                 if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                     // === Strict Write Discipline: handle task failure ===
                     String onFailureMode = resolveOnFailureMode(memoryPolicy);
                     handleTaskFailure(cs, task, e, dataIdentitiesBefore,
                             outputKeysBefore, actionsBefore, onFailureMode);
+                }
+
+                // Collect failure audit entry. Best-effort: an audit failure must not
+                // replace the original task exception, so it is attached as suppressed.
+                var auditCollector = conversationMemory.getAuditCollector();
+                if (auditCollector != null) {
+                    try {
+                        var failureOutput = new LinkedHashMap<String, Object>();
+                        failureOutput.put("status", "TASK_FAILED");
+                        failureOutput.put("errorType", errorType);
+                        failureOutput.put("errorMessage", errorSummary);
+                        failureOutput.put("strictWriteApplied", strictWriteEnabled);
+
+                        AuditEntry failureEntry = new AuditEntry(
+                                UUID.randomUUID().toString(), conversationMemory.getConversationId(),
+                                conversationMemory.getAgentId(), conversationMemory.getAgentVersion(),
+                                conversationMemory.getUserId(), null, conversationMemory.size() - 1,
+                                errTaskId, errTaskType, index, failDurationMs,
+                                null, failureOutput, null, null, null, 0.0,
+                                Instant.now(), null, null);
+                        auditCollector.collect(failureEntry);
+                    } catch (Exception auditEx) {
+                        LOGGER.warnf(auditEx, "Failure audit collection failed for conversation '%s', task '%s'",
+                                sanitize(conversationMemory.getConversationId()), errTaskId);
+                        e.addSuppressed(auditEx);
+                    }
                 }
 
                 // Re-throw — pipeline stops (current behavior preserved).
@@ -752,5 +800,65 @@ public class LifecycleManager implements ILifecycleManager {
             tracer = GlobalOpenTelemetry.getTracer("eddi.pipeline");
         }
         return tracer;
+    }
+
+    // ========================== Error Classification ==========================
+
+    /**
+     * Classifies the root cause of an error for metrics, audit, and dashboards.
+     * Typed causes are matched across the whole chain first — they are
+     * authoritative, so a wrapper's message can never outrank them. Message
+     * heuristics are only consulted when no typed cause matches.
+     *
+     * @return one of: "timeout", "transport", "rate_limit", "content_filter",
+     *         "unknown"
+     */
+    static String classifyError(Throwable e) {
+        for (Throwable current = e; current != null; current = current.getCause()) {
+            if (current instanceof java.net.SocketTimeoutException
+                    || current instanceof java.util.concurrent.TimeoutException) {
+                return "timeout";
+            }
+            if (current instanceof java.net.ConnectException
+                    || current instanceof java.net.UnknownHostException) {
+                return "transport";
+            }
+        }
+        // Substring matching is easily fooled (e.g. "failed after 429ms"), so it only
+        // runs once the chain is known to hold no typed cause.
+        for (Throwable current = e; current != null; current = current.getCause()) {
+            String msg = current.getMessage();
+            if (msg == null) {
+                continue;
+            }
+            String lower = msg.toLowerCase();
+            if (lower.contains("rate limit") || lower.contains("429") || lower.contains("too many")) {
+                return "rate_limit";
+            }
+            if (lower.contains("content_filter") || lower.contains("content filter")) {
+                return "content_filter";
+            }
+        }
+        return "unknown";
+    }
+
+    /**
+     * Creates a redacted, truncated summary of an exception for audit and SSE
+     * events. Unlike {@link #summarizeException(Exception)} (which sanitizes for
+     * LLM consumption at 200 chars), this preserves full detail at 500 chars for
+     * admin visibility — URLs and class names are deliberately kept, since the
+     * audience is privileged and needs them to diagnose. Credentials are not: they
+     * are scrubbed via {@link SecretRedactionFilter}.
+     */
+    static String summarizeForAudit(Throwable e) {
+        String msg = e.getMessage();
+        if (msg == null || msg.isBlank()) {
+            msg = e.getClass().getSimpleName();
+        }
+        // Redact before truncating — cutting first can split a secret so the
+        // pattern no longer matches, leaving a fragment behind.
+        msg = SecretRedactionFilter.redact(msg);
+        // Truncate to 500 chars for safe embedding in JSON/SSE payloads
+        return msg.length() > 500 ? msg.substring(0, 500) + "..." : msg;
     }
 }

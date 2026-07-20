@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -55,7 +56,8 @@ class CascadingModelExecutorCoverageTest {
         var task = new LlmConfiguration.Task();
         task.setId("t");
         task.setType("openai");
-        var retry = new LlmConfiguration.RetryConfiguration();
+        task.setParameters(Map.of("apiKey", "test-key"));
+        var retry = new RetryConfiguration();
         retry.setMaxAttempts(1);
         retry.setBackoffDelayMs(1L);
         task.setRetry(retry);

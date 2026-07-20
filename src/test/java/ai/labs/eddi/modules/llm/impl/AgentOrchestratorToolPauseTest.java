@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -357,7 +358,7 @@ class AgentOrchestratorToolPauseTest {
         var task = new LlmConfiguration.Task();
         // A retry config that WOULD retry (3 attempts, long backoff) — the guard
         // must bypass it so no retry sleep occurs.
-        var retry = new LlmConfiguration.RetryConfiguration();
+        var retry = new RetryConfiguration();
         retry.setMaxAttempts(3);
         retry.setBackoffDelayMs(60_000L);
         task.setRetry(retry);

@@ -127,6 +127,15 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                                 closeQuietly(eventSink);
                             }
                         }
+
+                        @Override
+                        public void onTaskFailed(TaskId taskId, String taskType, long durationMs,
+                                                 String errorType, String errorSummary) {
+                            sendEvent(eventSink, sse, "task_failed",
+                                    String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d,\"errorType\":\"%s\",\"error\":\"%s\"}",
+                                            escapeJson(taskId.getIdentifier()), escapeJson(taskType), durationMs,
+                                            escapeJson(errorType), escapeJson(errorSummary)));
+                        }
                     });
         } catch (Exception e) {
             LOGGER.errorf("Failed to start streaming for conversation %s: %s", safeConversationId, e.getMessage());

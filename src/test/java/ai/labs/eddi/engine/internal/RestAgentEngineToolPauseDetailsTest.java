@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -77,8 +78,8 @@ class RestAgentEngineToolPauseDetailsTest {
         var conversationAccessGuard = new ConversationAccessGuard(
                 identity, ownershipValidator, conversationDescriptorStore);
         restAgentEngine = new RestAgentEngine(
-                conversationService, identity, ownershipValidator, conversationAccessGuard,
-                hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
+                conversationService, mock(IConversationMemoryStore.class), identity, ownershipValidator,
+                conversationAccessGuard, hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
     }
 
     private ConversationMemorySnapshot snapshotInState(ConversationState state) throws Exception {

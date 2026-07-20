@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -80,9 +81,16 @@ class ConversationExtendedTest {
         @Test
         @DisplayName("say succeeds when state is READY and sets state back to READY after")
         void saySucceeds() throws Exception {
-            when(memory.getConversationState())
-                    .thenReturn(ConversationState.READY)
-                    .thenReturn(ConversationState.IN_PROGRESS);
+            // Mirror real memory: return whatever was last set. Stubbing consecutive
+            // returns would couple this test to how many times runStep reads the
+            // state, and the EXECUTION_INTERRUPTED auto-recovery adds a read before
+            // the in-progress guard.
+            var state = new AtomicReference<>(ConversationState.READY);
+            when(memory.getConversationState()).thenAnswer(invocation -> state.get());
+            doAnswer(invocation -> {
+                state.set(invocation.getArgument(0));
+                return null;
+            }).when(memory).setConversationState(any(ConversationState.class));
 
             when(propertiesHandler.getUserMemoryStore()).thenReturn(null);
 

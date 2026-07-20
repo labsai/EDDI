@@ -5,6 +5,172 @@
 
 ---
 
+## 🔁 Fix: PR-review response — interrupted streaming, FQN imports, changelog accuracy (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Four review comments on [PR #593](https://github.com/labsai/EDDI/pull/593) (CodeRabbit + github-code-quality); all valid, all fixed. Two turned out to be broader than reported.
+
+### 1. An interrupted streaming attempt was reported as a success (Major)
+
+When `latch.await(...)` threw `InterruptedException`, neither `timedOut` nor `errorRef` was set, so execution fell through both guards to `break` and returned `new StreamingResult(responseText, metadata)` — an empty string presented as a completed answer, with no signal to the caller.
+
+Corroborating evidence the review did not cite: `AgentOrchestrator` already treats a set interrupt flag as a **hard abort** (its test describes the scenario as "simulate a cascade per-step timeout cancel"). The streaming executor was therefore contradicting an established convention inside the same subsystem — a cancelled step could be accepted as a real, empty answer, and on the cascade's last step it would win outright.
+
+Interruption is now a distinct outcome: `streamingInterrupted` is recorded in the metadata, the salvaging (`LlmTask`) path returns whatever text arrived with a `streaming_interrupted_partial` warning, and every other path throws. It is **never retried** — a retry would ignore the very cancellation being signalled. Four tests, each observed failing first.
+
+### 2. Inline fully-qualified names in `LifecycleManagerTest` (Minor)
+
+Flagged on one line; the file actually had **eight** — four `IAuditEntryCollector` and four `ConversationEventSink`. All replaced with two top-level imports per AGENTS.md §4.7.
+
+### 3. The full-suite failure totals did not add up (Minor)
+
+Correct, and the fault was in the measurement rather than the prose: the categorisation was run over `target/surefire-reports` **without a preceding `clean`**, so it also swept up XML from earlier *targeted* runs. The per-bucket figures were therefore drawn from a superset of the run they were attributed to. The numbers have been withdrawn (with an explicit correction note in the merge entry) rather than quietly adjusted, since the original claim was already pushed.
+
+Re-measured from a genuinely clean run of the final code: **11,658 tests, 8 failures, 287 errors, and zero assertion failures.** Every failing test case in the surefire XML carries a blocked-loopback or socket-selector message; not one is a code assertion.
+
+### 4. Useless parameter in the new error-path test helper (Note)
+
+`executor(ChatModelRegistry, ITemplatingEngineStub)` never used its second argument, and the `ITemplatingEngineStub` marker interface existed only to make that argument look intentional — introduced in the previous commit as a "readability" device that conveyed nothing. Parameter and interface removed, all seven call sites simplified to `executor(registry)`.
+
+One caveat, stated rather than papered over: the XML yields 301 distinct failing test cases against the console's 295 failures+errors, and that ~6 gap is unexplained (it is not reruns, not suite-level entries, and not skipped-plus-failed). The load-bearing claim deliberately does not depend on the count — "no entry in this set is an assertion failure" is a property of the set, unaffected by how its members are tallied. CI remains the source of truth for the socket- and Docker-dependent suites.
+
+---
+
+## 🔧 Fix: close the response-validation gaps between streaming, cascade and validation (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Clears the four follow-ups recorded in the entry below. Each was pre-existing, and together they meant `responseValidation` — a headline feature of this PR — silently did nothing on the paths users are most likely to run it on. Every fix is TDD'd: the test was written first and observed failing.
+
+### 1. Streaming now derives `warning` from `finishReason`
+
+`LegacyChatExecutor` maps `LENGTH` → `truncated` and `CONTENT_FILTER` → `content_filter`; the streaming executor captured `finishReason` but never derived the warning, so `onTruncation` and `onContentFilter` could **never** fire on a streaming task. `buildMetadata` now mirrors the buffered executor. A later timeout/error warning deliberately overwrites it — a transport failure is the more urgent signal.
+
+### 2. The cascade now carries the winning step's validation metadata
+
+`CascadeResult` and the internal `StepResult` carried only `tokenUsage`; the producing executor's `warning`/`streamingTimeout`/`finishReason` were dropped on the floor. With `modelCascade` **and** `responseValidation` both enabled, only `onEmpty` and `onRefusal` could fire — a truncated or content-filtered cascade answer reached the user even with `action: "error"` configured. Both records gained a `responseMetadata` component, threaded from the legacy, streaming and agent-mode step paths, and merged into `responseMetadata` in `LlmTask`.
+
+### 3. A timed-out live-streamed final step no longer wins
+
+`executeCapturing` returns the (possibly empty) partial text on timeout instead of throwing, so a timed-out final step was accepted on the same footing as a real answer — and being last, it beat a good earlier response. A mid-stream *error* already fell back correctly; a *timeout* did not. A step whose metadata reports `streamingTimeout` is now treated as failed: it never becomes `bestSoFar`, it escalates when it is not the last step, and on the last step it falls back to `bestSoFar` (marked `streamedLive` so `LlmTask` does not re-emit different text over tokens the client already received).
+
+Enabling this required `executeCapturing` to honour the task's `streamingTimeoutSeconds`, which it previously ignored by passing `task = null` — so the cascade was always pinned to the 120s default. The task's **retry** config is still deliberately not applied on the cascade path: the cascade owns escalation, and retrying inside a step would multiply spend against the very model it is about to escalate away from.
+
+### 4. Restored the lapsed cascade error-path coverage
+
+New `CascadingModelExecutorErrorPathTest` — written against the current implementation rather than restored verbatim — covering what was lost when `CascadingModelExecutorExtendedTest` was deleted and `CascadingModelExecutorCoverageTest` was rewritten on `main`: last-step timeout with and without a `bestSoFar`, timeout escalation firing `onCascadeEscalation("timeout")`, `LifecycleException` and plain-`RuntimeException` cause handling, aggregated all-steps-failed errors, and `enableInAgentMode=false` never consulting the orchestrator.
+
+### 5. Cascade failures are now diagnosable (found while writing #4)
+
+Two of the restored tests failed for a reason the tests were right about: the retry wrapper throws a generic `"Chat model execution failed after N attempts"`, and the cascade recorded only `e.getMessage()`. So a fully failed cascade reported `Step 0 (cheap): Chat model execution failed after 1 attempts; Step 1 (expensive): …` — byte-identical whether the cause was a rate limit, an auth failure, a malformed request or a network outage, in both the thrown message and the audit trace. A new `describeFailure()` appends the root-cause message (bounded cause-chain walk, so a cyclic chain cannot hang the error path).
+
+### Verification
+
+Full LLM module: 2,260 tests, **zero assertion failures** — every reported failure/error message is a blocked-loopback or socket-resource error from this sandbox, none a code assertion. All 73 cascade tests and 33 streaming-executor tests green. (Counts of each bucket are deliberately not quoted here; see the correction note in the merge entry below for why the earlier per-bucket figures were unreliable.)
+
+### Design decisions
+
+- **Metadata threaded as a record component, not a side channel.** `CascadeResult` is the cascade's public contract with `LlmTask`; anything the caller must validate belongs on it rather than in a mutable out-parameter.
+- **A timed-out step is a failed step, not a low-confidence one.** Demoting it via confidence would still let it win when no earlier step scored higher; excluding it from `bestSoFar` outright is what makes the fallback correct.
+- **Retry stays off inside cascade steps.** Escalation is the cascade's retry mechanism; stacking both multiplies cost in a way no config expresses.
+
+---
+
+## 🐛 Fix: two latent retry-loop defects in `StreamingLegacyChatExecutor` (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Surfaced by an adversarial post-merge review of the streaming executor (see the merge entry below). Both defects pre-date the merge — they came in with this branch's retry loop, not with the conflict resolution — but both live inside the method the merge rewrote, and both are squarely in this PR's own subject area (error handling and recovery), so they are fixed here rather than deferred.
+
+### 1. A failed attempt's metadata leaked into a successful retry
+
+`metadata` is declared outside the retry loop and mutated inside it. If attempt 1 timed out with no tokens (setting `streamingTimeout=true`) and attempt 2 succeeded, the successful response was returned **with the stale `streamingTimeout` flag still attached**. `LlmTask.applyResponseValidation` reads that flag and fires `responseValidation.onStreamingTimeout` — so with `action: "fallback"` a perfectly good answer was silently replaced by the "I wasn't able to generate a complete response" string, and with `action: "error"` the turn threw. The loop body now clears the map at the start of each attempt, so each attempt reports only its own outcome.
+
+### 2. `maxAttempts <= 0` skipped the model entirely and returned a null response
+
+`RetryConfiguration.setMaxAttempts` does no clamping, so a config of `retry: {maxAttempts: 0}` — a natural way to write "don't retry" — made `for (attempt = 1; attempt <= 0; …)` never execute. The model was never invoked, `responseText` stayed null, and `StreamingResult(null, …)` propagated into `LlmTask` and on into a `TextOutputItem(null, 0)`: no exception, no log, a completely silent turn. Now clamped with `Math.max(1, …)` — "no retries" means one attempt.
+
+Deliberately **not** clamped in `RetryConfiguration.setMaxAttempts` itself: the shared `executeWithRetry` already fails *loudly* on `maxAttempts=0` (throws `LifecycleException`), and changing the setter would silently alter that contract for the MCP and HTTP-call consumers and their existing tests. The clamp belongs at the streaming call site, which is the one that was failing silently.
+
+### Tests
+
+Three regression tests added to `StreamingLegacyChatExecutorRetryTest`, each confirmed to fail before the fix and pass after: `timeoutThenSuccess_doesNotLeakTimeoutMetadata`, `zeroMaxAttempts_stillRunsOnce`, `negativeMaxAttempts_stillRunsOnce`. A fourth, `executeCapturing_propagatesErrorDespitePartialTokens`, pins the merge's central contract at the executor level — until now it was guarded only indirectly, by a cascade-level test.
+
+155 tests green across the streaming, cascade, orchestrator and LlmTask suites.
+
+### Known follow-ups (not fixed here — pre-existing, out of scope for this PR)
+
+- **Cascade drops the validation-signal metadata.** `CascadeResult` carries only `tokenUsage`, not the producing executor's `warning`/`streamingTimeout`. With `modelCascade` *and* `responseValidation` both enabled, only `onEmpty` and `onRefusal` can fire; `onTruncation`, `onContentFilter` and `onStreamingTimeout` are unreachable. Coverage was worse before the merge (the cascade path left the metadata map empty), so this is an exposure, not a regression.
+- **Streaming never derives `warning` from `finishReason`.** `LegacyChatExecutor` maps `LENGTH` → `truncated` and `CONTENT_FILTER` → `content_filter`; `buildMetadata` does not, so those two policies are inert on the streaming path even without the cascade.
+- **A timed-out live-streamed final cascade step is accepted as the winner** rather than falling back to `bestSoFar` — a mid-stream *error* falls back correctly, a *timeout* does not.
+- **~500 lines of cascade error-path tests lapsed on `main`** before this merge (`CascadingModelExecutorExtendedTest` deleted; 15 of 16 tests in `CascadingModelExecutorCoverageTest` replaced), covering exception-unwrapping and timeout-escalation. Worth re-adding against the current implementation.
+
+---
+
+## 🔀 Merge `origin/main` into `feat/error-handling-recovery` — conflict resolution (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Second merge of `main` into the error-handling branch ([PR #593](https://github.com/labsai/EDDI/pull/593)), bringing in 43 commits (group conversations, MCP/REST ownership hardening, multi-model cascade enterprise work). Seven files conflicted; beyond those, two files were silently mis-merged and one behavioural regression was introduced by the first resolution — both classes of problem are recorded below, since neither is visible in `git status`.
+
+### Conflicts resolved (7)
+
+- **`RestAgentEngine`** — main refactored the descriptor-based ownership check into `ConversationAccessGuard.requireConversationOwner()`; ours added `IConversationMemoryStore` for the new admin `resetState()` endpoint. Resolution keeps **both**: `conversationMemoryStore` stays (still used by `resetState`), `conversationDescriptorStore` is dropped (main removed its last usage — verified no remaining references). Constructor is now `(conversationService, conversationMemoryStore, identity, ownershipValidator, conversationAccessGuard, hitlAccessGuard, hitlToolJournalStore, agentTimeout)`.
+- **`RestAgentEngineTest` / `RestAgentEngineHitlTest` / `RestAgentEngineToolPauseDetailsTest`** — constructor-arity fallout from the above, updated to the merged signature. The HITL and tool-pause tests also swapped their inline `mock(ai.labs.…IConversationMemoryStore.class)` FQN for a top-level import per AGENTS.md §4.7.
+- **`CascadingModelExecutorCoverageTest`** — ours removed the `LlmConfiguration.RetryConfiguration` shim in favour of `ai.labs.eddi.configs.shared.RetryConfiguration`; main's newer version of the file still used the nested type. Resolved onto the shared type, keeping ours' `task.setParameters(...)` line.
+- **`StreamingLegacyChatExecutor`** — the substantive one; see below.
+- **`docs/changelog.md`** — both sides prepended entry blocks; both kept whole, main's block (which carries the newest entry) first.
+
+### `StreamingLegacyChatExecutor` — two overlapping features unified
+
+Both branches rewrote the same method for different reasons:
+
+- **ours** added a configurable timeout, a retry loop driven by `RetryConfiguration`, and `finishReason` metadata, returning `StreamingResult`;
+- **main** added `executeCapturing()` returning `StreamResult` with full `ChatResponse` metadata (token usage), so the cascade keeps cost evidence when it streams the final step live.
+
+Neither could be dropped — `LlmTask` calls the retry-aware overload, `CascadingModelExecutor` calls `executeCapturing`, and each has its own tests. The merged class keeps **one** core implementation (retry + configurable timeout) that now captures the whole `ChatResponse` and builds metadata via main's `buildMetadata()` (finishReason **and** tokenUsage); both public entry points delegate to it.
+
+**Regression caught during merge review:** the first resolution had `executeCapturing` delegate with ours' error semantics, which *salvage* partial text on a mid-stream error instead of throwing. `CascadingModelExecutor` has no try/catch at that call — it relies on the throw to fall back to the best previous step — so a failed final step was silently accepted as successful (`CascadingModelExecutorEnterpriseTest.streamingFinalStepFailsMidStream_fallbackMarkedStreamedLive`: `expected: <0> but was: <1>`). The core now takes a `salvagePartialOnError` flag: `true` for the `LlmTask` path (keep whatever the model produced rather than fail the turn), `false` for `executeCapturing` (always propagate, so the cascade can fall back). Timeout handling is unchanged — both sides already salvaged partial text there.
+
+### Silent auto-merge breakage (fixed)
+
+Ours deleted the nested `LlmConfiguration.RetryConfiguration` shim while main added **new** usages of it. Git merged both sides cleanly and the result did not compile:
+
+- `AgentOrchestratorExtendedTest` (2 usages) and `CascadingModelExecutorEnterpriseTest` (1 usage) — both moved to `ai.labs.eddi.configs.shared.RetryConfiguration`, import added.
+
+Only a clean `test-compile` surfaced these; they were not reported as conflicts.
+
+### Auto-merges verified, not assumed
+
+The five remaining files touched by both sides were diffed against **each** parent to confirm neither side's changes were dropped:
+
+- `IConversationService` / `ConversationService` / `RestAgentEngineStreaming` — ours' `onTaskFailed` callback and `resetConversationState` alongside main's `onCascadeStepStart` / `onCascadeEscalation`; orthogonal additions to the same interface and anonymous handler.
+- `LlmConfiguration` — ours' `responseValidation` + `streamingTimeoutSeconds` alongside main's `judgeModel` / `heuristic` / `maxTotalDurationMs`.
+- `LlmTask` — ours' retry-aware streaming call and `applyResponseValidation` alongside main's cascade wiring and `MeterRegistry`. Confirmed `applyResponseValidation` sits *outside* the `if (cascadeActive)` branch, so response validation still runs on every path including the cascade.
+
+### Design decisions
+
+- **Keep both streaming entry points rather than collapsing to one.** Their error contracts genuinely differ (salvage vs. propagate) and each has a real production caller; one core plus an explicit flag beats duplicating ~50 lines of streaming boilerplate or silently changing one caller's behaviour.
+- **`conversationDescriptorStore` dropped, not re-plumbed.** `ConversationAccessGuard` is the single ownership-check path now; keeping a second route to the descriptor store would reintroduce exactly the drift the guard exists to remove.
+- **Changelog blocks kept whole** rather than interleaved by date — the file is already organised in per-branch blocks, and re-sorting would produce a large, unreviewable diff.
+
+### Verification
+
+`mvnw clean test-compile` green — a *clean* build deliberately, since the `RestAgentEngine` signature change would be masked by a stale incremental one.
+
+Full unit suite: **11,409 tests run, 8 failures and 304 errors, none of them an assertion failure.** Every failure/error message in the surefire XML falls into one of three buckets — `Unable to establish loopback connection`, Docker/Testcontainers unavailable (the Mongo + Postgres store tests), and socket-selector/event-loop creation errors — i.e. this sandbox's inability to open loopback sockets or run Docker. CI remains the source of truth for those suites.
+
+> **Correction (post-review):** an earlier draft of this entry gave a per-bucket breakdown (297/16/5 = 318) that did not reconcile with the run's 312 failures+errors. The categorisation had been run over `target/surefire-reports` without a preceding `clean`, so it also counted XML left behind by earlier *targeted* runs — a superset of the full run. The conclusion is unaffected (a superset containing zero assertion failures still contains zero), but the counts were not defensible as stated and have been removed rather than quietly adjusted.
+
+The 56 tests directly covering the merged paths pass locally: `StreamingLegacyChatExecutor{,Retry,Coverage}Test`, `CascadingModelExecutor{Coverage,Enterprise}Test`, `RestAgentEngine{,Hitl,ToolPauseDetails}Test`, `AgentOrchestratorExtendedTest`.
+
+### Next
+
+Merge-ready for PR #593. Remaining follow-up unrelated to the merge: ours' `onTaskFailed` SSE handler in `RestAgentEngineStreaming` still hand-builds its JSON via `String.format` + `escapeJson`, while main introduced a `sendJsonEvent(...)` Jackson helper on the same class and documents it as preferred. Correct as-is (the payload is escaped), but worth converting for consistency.
+
+---
+
 ## 🔀 Merge `origin/main` into `feat/group-followups` — conflict resolution (2026-07-20)
 
 **Repo:** EDDI (`feat/group-followups`)
@@ -552,6 +718,96 @@ CodeRabbit + Copilot + github-code-quality on PR #587 flagged further items, now
 ### Status
 
 Complete and merged-ready on `feat/model-cascade-enterprise-hardening` (PR #587). No open items; the branch is the terminal state of this feature — next planned work is unrelated (see Section 3 of AGENTS.md).
+
+---
+
+## 🔒 Fix: CodeRabbit review — LifecycleManager failure-path hardening (2026-07-16)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+Addressed four CodeRabbit findings on the error-handling PR's own `LifecycleManager` failure path (PR #593). All four verified as valid against the code; each fix reuses existing infrastructure rather than adding a new utility.
+
+### Key Changes
+
+- **Audit must not bypass strict-write recovery (Major).** If `auditCollector.collect()` threw, the strict-write rollback was skipped — leaving the partial task writes it exists to remove — *and* the audit exception propagated out of the catch, replacing the original task failure. Strict-write recovery now runs **first** (it is integrity-critical), and audit collection is shielded in a try/catch that attaches any reporting error to the original exception via `addSuppressed` instead of masking it.
+- **Redact credentials from audit/SSE summaries (Major).** `summarizeForAudit()` only truncated; its output is persisted to the audit ledger and streamed to admins over `task_failed` SSE. It now applies the existing `SecretRedactionFilter.redact()` **before** truncating — cutting first can split a secret so the pattern no longer matches, leaving a fragment behind. URLs and class names are deliberately retained: the audience is privileged and needs them to diagnose (this is what distinguishes it from `summarizeException`, the LLM-facing path).
+- **Typed causes outrank wrapper messages (Minor).** `classifyError()` checked each level's message before descending, so a `"429"` wrapper around a `SocketTimeoutException` classified as `rate_limit`. It now scans the whole chain for typed causes first (authoritative), and only then falls back to message heuristics — substring matching is easily fooled (e.g. `"failed after 429ms"`).
+- **SSE failure logging (Minor).** The `task_failed` emission catch logged at DEBUG and dropped the throwable plus all context. Now WARN, with the throwable, the sanitized conversation id (`LogSanitizer`, CWE-117) and the task id.
+
+### Tests
+
+Four regression tests added, each of which fails under the previous behavior: typed-cause precedence, credential redaction, redact-before-truncate ordering, and audit-failure-does-not-mask-the-original.
+
+---
+
+## 🐛 Fix: two stale tests red since the error-handling PR (2026-07-16)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+CI on this branch had been red since 2026-07-08 (commit `c054b430`, "Tests run: 9776, Failures: 1, Errors: 1") — both failures pre-date the `origin/main` merge and were surfaced again by it. Each is a stale test asserting a contract the error-handling PR itself deliberately superseded. Test-only changes; no production behavior altered.
+
+### Key Changes
+
+- **`StreamingLegacyChatExecutorTest.execute_error_throwsRuntimeException`** — asserted that a streaming error *always* throws. The PR intentionally changed this: an error arriving *after* partial tokens now returns the partial text with a `streaming_error_partial` warning, and only a zero-content error throws. Retargeted the test at the zero-content case (matching its name) and added `execute_errorAfterPartial_returnsPartialContent` to cover the partial contract, preserving the original token-forwarding assertion.
+- **`ConversationExtendedTest.saySucceeds`** — stubbed `getConversationState()` with a call-count-sensitive consecutive-return sequence (`READY`, then `IN_PROGRESS`). The PR's `EXECUTION_INTERRUPTED` auto-recovery added a state read at the top of `runStep`, consuming the `READY`, so the in-progress guard saw `IN_PROGRESS` and threw `ConversationNotReadyException`. The mock now tracks state like real memory (returns whatever was last set), making it robust to how often production reads it.
+
+### Design Decisions
+
+- Fixed the **tests**, not the production code: both behaviors (partial-response salvage, interrupted-state auto-recovery) are intentional, documented features of this PR and are covered by `StreamingLegacyChatExecutorRetryTest`. The tests simply encoded the pre-feature contract.
+
+---
+
+## 🧹 Refactor: Remove duplicate `RetryConfiguration` shim in LlmConfiguration (2026-07-16)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+Follow-up to the error-handling PR (#593): resolved a code-quality finding (nested class with the same simple name as its superclass). The `LlmConfiguration.RetryConfiguration` nested class was an empty subclass of the extracted `ai.labs.eddi.configs.shared.RetryConfiguration`, kept as a backward-compat shim. It overrode nothing and shadowed the imported shared type within `LlmConfiguration`'s body.
+
+### Key Changes
+
+- **`LlmConfiguration.java`**: Deleted the empty nested `RetryConfiguration` subclass. The `retry` field, getter, and setter now bind directly to the imported shared `RetryConfiguration` (import already present).
+- **9 test files**: Replaced `new LlmConfiguration.RetryConfiguration()` with the shared `RetryConfiguration` (added the `configs.shared` import). Includes `LlmConfigurationTest`, which had pulled the nested type in via a `LlmConfiguration.*` wildcard import.
+
+### Design Decisions
+
+- **Deleted the shim rather than renaming it** (a reviewer suggested `LegacyRetryConfiguration`). The subclass added zero fields/overrides, so a rename would keep a misleadingly-named dead class for the same test churn. Per project philosophy, internal-API removal is safe — the only backward-compat concern is stored JSON, and because the removed subclass added no fields, the `retry` JSON structure is byte-for-byte identical (existing MongoDB/ZIP configs deserialize unchanged).
+
+### Verification
+
+- `mvnw clean test-compile` clean; 123 affected unit tests pass (0 failures).
+- Repo-wide grep confirms zero remaining references to the nested type (dotted, JVM binary-name, reflection strings, or wildcard imports).
+
+---
+
+## ⚡ Feat: Holistic Error Handling and Recovery Infrastructure (2026-07-07)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+Complete overhaul of error handling across LLM, HTTP, and MCP call subsystems plus cross-cutting infrastructure for admin visibility, recovery, and monitoring. 19 source files changed, 7 test files added (83+ new tests). Code-reviewed and all review findings addressed before commit.
+
+### Key Changes
+
+- **Shared RetryConfiguration**: Extracted reusable retry logic with exponential backoff, retryable error classification, configurable per subsystem.
+- **LifecycleManager**: Error classification, failure audit entries, SSE `task_failed` events, Micrometer counters tagged by `error.type`.
+- **Admin state reset**: `PATCH /{conversationId}/state` endpoint to recover stuck conversations.
+- **HTTP error body storage**: 4xx/5xx response bodies stored in memory; JSON parse softened.
+- **MCP continueOnError + retry + circuit breaker**: Config-driven error resilience per MCP call.
+- **LLM ResponseValidation**: Config-driven policies for empty/truncated/filtered responses.
+- **Streaming retry**: Zero-token failures retried; partial responses returned with metadata.
+
+### Design Decisions
+
+- Retry at call site (not pipeline level) per user directive.
+- Strict-write default kept as `false` (opt-in) to avoid breaking existing agents.
+- No `"retry"` validation action — retry handled by RetryConfiguration at call level.
 
 ---
 

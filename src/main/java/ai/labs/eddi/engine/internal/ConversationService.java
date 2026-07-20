@@ -603,6 +603,12 @@ public class ConversationService implements IConversationService {
                 public void onError(Throwable error) {
                     streamingHandler.onError(error);
                 }
+
+                @Override
+                public void onTaskFailed(TaskId taskId, String taskType, long durationMs,
+                                         String errorType, String errorSummary) {
+                    streamingHandler.onTaskFailed(taskId, taskType, durationMs, errorType, errorSummary);
+                }
             };
 
             // Set the event sink on memory so LifecycleManager and tasks can use it
@@ -1161,6 +1167,11 @@ public class ConversationService implements IConversationService {
     private void setConversationState(String conversationId, ConversationState conversationState) {
         conversationMemoryStore.setConversationState(conversationId, conversationState);
         cacheConversationState(conversationId, conversationState);
+    }
+
+    @Override
+    public void resetConversationState(String conversationId, ConversationState targetState) {
+        setConversationState(conversationId, targetState);
     }
 
     private void cacheConversationState(String conversationId, ConversationState conversationState) {

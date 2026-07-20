@@ -50,6 +50,13 @@ public interface IConversationService {
     void endConversation(String conversationId);
 
     /**
+     * Reset the state of a stuck conversation (ERROR or EXECUTION_INTERRUPTED) to
+     * READY. Updates both persistent storage and the in-memory cache atomically.
+     * Admin-only operation.
+     */
+    void resetConversationState(String conversationId, ConversationState targetState);
+
+    /**
      * End a conversation with actor attribution. When the conversation was
      * {@code AWAITING_HUMAN}, ending it terminally resolves the pending approval:
      * the timeout schedule is disarmed, the bookmark cleared, an
@@ -166,6 +173,10 @@ public interface IConversationService {
         void onComplete(SimpleConversationMemorySnapshot snapshot);
 
         void onError(Throwable error);
+
+        default void onTaskFailed(TaskId taskId, String taskType, long durationMs,
+                                  String errorType, String errorSummary) {
+        }
 
         /**
          * The turn was dropped without consuming the input (see

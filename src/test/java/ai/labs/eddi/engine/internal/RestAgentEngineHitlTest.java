@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -83,8 +84,8 @@ class RestAgentEngineHitlTest {
         var conversationAccessGuard = new ConversationAccessGuard(
                 identity, ownershipValidator, conversationDescriptorStore);
         restAgentEngine = new RestAgentEngine(
-                conversationService, identity, ownershipValidator, conversationAccessGuard,
-                hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
+                conversationService, mock(IConversationMemoryStore.class), identity, ownershipValidator,
+                conversationAccessGuard, hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
     }
 
     // =========================================================================

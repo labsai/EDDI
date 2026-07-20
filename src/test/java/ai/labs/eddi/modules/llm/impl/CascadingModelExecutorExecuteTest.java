@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
@@ -58,7 +59,7 @@ class CascadingModelExecutorExecuteTest {
         task.setType("openai");
         task.setParameters(Map.of("apiKey", "key"));
         // Set retry to 1 attempt to avoid slow tests
-        var retry = new LlmConfiguration.RetryConfiguration();
+        var retry = new RetryConfiguration();
         retry.setMaxAttempts(1);
         task.setRetry(retry);
         return task;

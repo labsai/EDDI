@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.model;
 
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
@@ -225,7 +226,9 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private String httpCallRag;
 
         /**
-         * Retry configuration for API calls
+         * Retry configuration for LLM calls.
+         *
+         * @see ai.labs.eddi.configs.shared.RetryConfiguration
          */
         private RetryConfiguration retry;
 
@@ -297,6 +300,23 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.0.0
          */
         private IdentityMaskingConfig identityMasking;
+
+        // === Response Validation ===
+
+        /**
+         * Response validation configuration. When enabled, validates LLM responses
+         * against configurable policies (empty, truncation, content filter, refusal,
+         * streaming timeout) and applies the configured remediation action.
+         *
+         * @since 6.0.0
+         */
+        private ResponseValidation responseValidation;
+
+        /**
+         * Timeout in seconds for streaming chat completions. Overrides the default
+         * (120s). Only applies when streaming is active.
+         */
+        private Integer streamingTimeoutSeconds;
 
         /**
          * Per-task multimodal capability overrides. Each of {@code vision},
@@ -655,6 +675,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.identityMasking = identityMasking;
         }
 
+        public ResponseValidation getResponseValidation() {
+            return responseValidation;
+        }
+
+        public void setResponseValidation(ResponseValidation responseValidation) {
+            this.responseValidation = responseValidation;
+        }
+
+        public Integer getStreamingTimeoutSeconds() {
+            return streamingTimeoutSeconds;
+        }
+
+        public void setStreamingTimeoutSeconds(Integer streamingTimeoutSeconds) {
+            this.streamingTimeoutSeconds = streamingTimeoutSeconds;
+        }
+
         public MultimodalOverride getMultimodal() {
             return multimodal;
         }
@@ -663,6 +699,96 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.multimodal = multimodal;
         }
 
+    }
+
+    /**
+     * Response validation policies for LLM outputs. Each policy field controls how
+     * the engine reacts to a specific anomaly in the LLM response.
+     * <p>
+     * Supported actions per policy:
+     * <ul>
+     * <li>{@code "ignore"} — do nothing (default for most signals)</li>
+     * <li>{@code "warn"} — log a warning, store metadata, continue</li>
+     * <li>{@code "fallback"} — substitute a static fallback message</li>
+     * <li>{@code "error"} — throw a LifecycleException (triggers strict-write +
+     * error digest)</li>
+     * </ul>
+     *
+     * @since 6.0.0
+     */
+    public static class ResponseValidation {
+
+        /** Master switch — validation is only applied when enabled. */
+        private boolean enabled = false;
+
+        /** Action when the LLM returns an empty or null response. Default: "warn". */
+        private String onEmpty = "warn";
+
+        /**
+         * Action when the response was truncated (finishReason=LENGTH). Default:
+         * "warn".
+         */
+        private String onTruncation = "warn";
+
+        /** Action when the response was blocked by content filter. Default: "warn". */
+        private String onContentFilter = "warn";
+
+        /**
+         * Action when the LLM refused to respond (detected by heuristic). Default:
+         * "ignore".
+         */
+        private String onRefusal = "ignore";
+
+        /** Action when a streaming response timed out. Default: "warn". */
+        private String onStreamingTimeout = "warn";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getOnEmpty() {
+            return onEmpty;
+        }
+
+        public void setOnEmpty(String onEmpty) {
+            this.onEmpty = onEmpty;
+        }
+
+        public String getOnTruncation() {
+            return onTruncation;
+        }
+
+        public void setOnTruncation(String onTruncation) {
+            this.onTruncation = onTruncation;
+        }
+
+        public String getOnContentFilter() {
+            return onContentFilter;
+        }
+
+        public void setOnContentFilter(String onContentFilter) {
+            this.onContentFilter = onContentFilter;
+        }
+
+        public String getOnRefusal() {
+            return onRefusal;
+        }
+
+        public void setOnRefusal(String onRefusal) {
+            this.onRefusal = onRefusal;
+        }
+
+        public String getOnStreamingTimeout() {
+            return onStreamingTimeout;
+        }
+
+        public void setOnStreamingTimeout(String onStreamingTimeout) {
+            this.onStreamingTimeout = onStreamingTimeout;
+        }
     }
 
     /**
@@ -893,48 +1019,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setTimeoutMs(Long timeoutMs) {
             this.timeoutMs = timeoutMs;
-        }
-    }
-
-    /**
-     * Configuration for API call retries
-     */
-    public static class RetryConfiguration {
-        private Integer maxAttempts = 3;
-        private Long backoffDelayMs = 1000L;
-        private Double backoffMultiplier = 2.0;
-        private Long maxBackoffDelayMs = 10000L;
-
-        public Integer getMaxAttempts() {
-            return maxAttempts;
-        }
-
-        public void setMaxAttempts(Integer maxAttempts) {
-            this.maxAttempts = maxAttempts;
-        }
-
-        public Long getBackoffDelayMs() {
-            return backoffDelayMs;
-        }
-
-        public void setBackoffDelayMs(Long backoffDelayMs) {
-            this.backoffDelayMs = backoffDelayMs;
-        }
-
-        public Double getBackoffMultiplier() {
-            return backoffMultiplier;
-        }
-
-        public void setBackoffMultiplier(Double backoffMultiplier) {
-            this.backoffMultiplier = backoffMultiplier;
-        }
-
-        public Long getMaxBackoffDelayMs() {
-            return maxBackoffDelayMs;
-        }
-
-        public void setMaxBackoffDelayMs(Long maxBackoffDelayMs) {
-            this.maxBackoffDelayMs = maxBackoffDelayMs;
         }
     }
 
