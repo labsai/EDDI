@@ -225,7 +225,7 @@ function BoardroomBoard() {
   }
 
   return (
-    <div className="flex h-full flex-col relative">
+    <div className="flex flex-1 min-h-0 flex-col relative">
       {/* Action bar */}
       <div className="flex items-center justify-between ps-4 pe-4 py-2 border-b border-border">
         <div className="flex items-center gap-2">

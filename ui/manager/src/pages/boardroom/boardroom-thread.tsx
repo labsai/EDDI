@@ -621,7 +621,7 @@ function BoardroomThread() {
 
   // ─── Render ──────────────────────────────────────────────────
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-1 min-h-0 overflow-hidden">
       <div className="flex flex-1 min-w-0 flex-col">
         {/* Back header */}
         <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card/80 backdrop-blur-sm ps-2 pe-4">

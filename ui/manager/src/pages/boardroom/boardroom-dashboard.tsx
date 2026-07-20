@@ -26,7 +26,7 @@ import { OnboardingHero } from "@/components/boardroom/onboarding-hero";
 import { usePinnedGroups } from "@/hooks/use-pinned-groups";
 import { TemplatesPanel } from "@/components/boardroom/templates-panel";
 import type { DiscussionTemplate } from "@/hooks/use-templates";
-import { AgentEditorSheet } from "@/components/boardroom/agent-editor-sheet";
+
 import { toast } from "sonner";
 
 // ─── View mode persistence ───────────────────────────────────────
@@ -197,9 +197,10 @@ function MobileFab() {
 
 // ─── Workforce Section ───────────────────────────────────────────
 
-function WorkforceSection({ onEditAgent }: { onEditAgent: (id: string) => void }) {
+function WorkforceSection() {
   const { t } = useTranslation();
   const { data: agentsRaw } = useAgentDescriptors(50);
+  const navigate = useNavigate();
 
   const agents = useMemo(
     () => (agentsRaw ? groupAgentsByName(agentsRaw).slice(0, 10) : []),
@@ -238,7 +239,7 @@ function WorkforceSection({ onEditAgent }: { onEditAgent: (id: string) => void }
               name={agent.name || t("workforce.unnamed", "Unnamed Agent")}
               agentId={agentId}
               description={agent.description}
-              onClick={() => onEditAgent(agentId)}
+              onClick={() => navigate(`/workforce/chat?agentId=${agentId}`)}
             />
           );
         })}
@@ -260,7 +261,6 @@ function BoardroomDashboard() {
   const [viewMode, setViewMode] = useState<"grid" | "list">(getStoredViewMode);
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
 
   const pinnedBoards = useMemo(
     () => boards?.filter((b) => pinned.has(b.id)) ?? [],
@@ -344,10 +344,9 @@ function BoardroomDashboard() {
 
   // Populated — 3-pillar Intelligence Dashboard
   return (
-    <div className="flex h-full overflow-hidden">
-      <div className="flex-1 overflow-auto p-5 md:p-8 space-y-8">
+    <div className="p-5 md:p-8 space-y-8">
       {/* ─── Pillar 1: Your Digital Workforce ────────────────── */}
-      <WorkforceSection onEditAgent={setEditingAgentId} />
+      <WorkforceSection />
 
       {/* ─── Templates ────────────────────────────────────────── */}
       <TemplatesPanel
@@ -595,14 +594,6 @@ function BoardroomDashboard() {
 
       {/* Mobile FAB */}
       <MobileFab />
-    </div>
-
-    {/* Inline agent editor panel */}
-    <AgentEditorSheet
-      agentId={editingAgentId}
-      onClose={() => setEditingAgentId(null)}
-      inline
-    />
     </div>
   );
 }
