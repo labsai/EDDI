@@ -1,4 +1,18 @@
 {
+  "attachments": {
+    "title": "Adjuntos",
+    "empty": "Esta conversación no tiene adjuntos.",
+    "loadError": "No se pudieron cargar los adjuntos.",
+    "deleteAll": "Eliminar todo",
+    "delete": "Eliminar adjunto",
+    "download": "Descargar",
+    "deleted": "Adjunto eliminado",
+    "deletedAll": "{{count}} adjuntos eliminados",
+    "confirmDeleteTitle": "¿Eliminar adjunto?",
+    "confirmDeleteDesc": "Elimina este archivo permanentemente. No se puede deshacer.",
+    "confirmDeleteAllTitle": "¿Eliminar todos los adjuntos?",
+    "confirmDeleteAllDesc": "Elimina permanentemente todos los archivos de esta conversación. No se puede deshacer."
+  },
   "app": {
     "title": "EDDI Manager",
     "description": "Panel de administración de la plataforma de IA EDDI"
@@ -81,6 +95,12 @@
       "noRecentAgents": "Aún no hay agents. ¡Cree su primer agent!"
     },
     "agents": {
+    "undeployPreviousVersionsHint": "También elimina del entorno todas las versiones anteriores de este agente.",
+    "undeployPreviousVersionsLabel": "Retirar esta y todas las versiones anteriores",
+    "undeployEndConversationsHint": "Termina de inmediato todas las conversaciones en curso de este despliegue. No se puede deshacer.",
+    "undeployEndConversationsLabel": "Finalizar todas las conversaciones activas",
+    "confirmUndeployDescription": "La versión {{version}} se retirará de {{environment}}.",
+    "confirmUndeploy": "¿Retirar el despliegue del agente?",
       "title": "Agentes",
       "subtitle": "Gestione sus agents de IA conversacional"
     },
@@ -900,6 +920,8 @@
     }
   },
   "coordinator": {
+    "confirmDiscardDescription": "Elimina permanentemente la tarea en cola de fallidos. No podrá reproducirse después. No se puede deshacer.",
+    "confirmDiscardTitle": "¿Descartar la entrada de la cola de fallidos?",
     "title": "Panel del coordinador",
     "subtitle": "Supervisar el procesamiento de conversaciones y gestionar entradas dead-letter",
     "type": "Tipo de coordinador",
@@ -1432,6 +1454,10 @@
         "step3Desc": "Controle sus tareas automáticamente: pause, reanude, edite o fuerce su ejecución en cualquier momento."
       },
       "quotas": {
+    "saveSuccess": "Cuota guardada",
+    "resetSuccess": "Contadores de uso restablecidos",
+    "resetConfirmDesc": "Pone a cero de inmediato todos los contadores de uso (conversaciones, llamadas API, coste mensual) del inquilino «default». No se puede deshacer.",
+    "resetConfirmTitle": "¿Restablecer los contadores de uso?",
         "title": "Tour de Cuotas",
         "step1Title": "Límites de uso",
         "step1Desc": "Defina restricciones como máximo de agentes, conversaciones u otros límites de token para este Tenant.",

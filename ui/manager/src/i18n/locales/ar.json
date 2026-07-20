@@ -1,4 +1,18 @@
 {
+  "attachments": {
+    "title": "المرفقات",
+    "empty": "لا تحتوي هذه المحادثة على مرفقات.",
+    "loadError": "تعذّر تحميل المرفقات.",
+    "deleteAll": "حذف الكل",
+    "delete": "حذف المرفق",
+    "download": "تنزيل",
+    "deleted": "تم حذف المرفق",
+    "deletedAll": "تم حذف {{count}} مرفقات",
+    "confirmDeleteTitle": "حذف المرفق؟",
+    "confirmDeleteDesc": "يحذف هذا الملف نهائيًا. لا يمكن التراجع.",
+    "confirmDeleteAllTitle": "حذف جميع المرفقات؟",
+    "confirmDeleteAllDesc": "يحذف نهائيًا كل ملفات هذه المحادثة. لا يمكن التراجع."
+  },
   "app": {
     "title": "مدير EDDI",
     "description": "لوحة تحكم منصة EDDI للذكاء الاصطناعي"
@@ -81,6 +95,12 @@
       "noRecentAgents": "لا توجد Agents بعد. أنشئ أول Agent!"
     },
     "agents": {
+    "undeployPreviousVersionsHint": "يزيل أيضًا كل إصدار سابق لهذا الوكيل من البيئة.",
+    "undeployPreviousVersionsLabel": "إلغاء نشر هذا الإصدار وجميع الإصدارات السابقة",
+    "undeployEndConversationsHint": "ينهي فورًا كل محادثة جارية على هذا النشر. لا يمكن التراجع.",
+    "undeployEndConversationsLabel": "إنهاء جميع المحادثات النشطة",
+    "confirmUndeployDescription": "سيتم إلغاء نشر الإصدار {{version}} من {{environment}}.",
+    "confirmUndeploy": "إلغاء نشر الوكيل؟",
       "title": "الوكلاء",
       "subtitle": "إدارة Agents الذكاء الاصطناعي"
     },
@@ -900,6 +920,8 @@
     }
   },
   "coordinator": {
+    "confirmDiscardDescription": "يزيل نهائيًا المهمة المُرسَلة إلى الرسائل الميتة. لا يمكن إعادة تشغيلها بعد ذلك. لا يمكن التراجع.",
+    "confirmDiscardTitle": "تجاهل إدخال الرسائل الميتة؟",
     "title": "لوحة تحكم المنسق",
     "subtitle": "مراقبة معالجة المحادثات وإدارة إدخالات Dead-Letter",
     "type": "نوع Coordinator",
@@ -1432,6 +1454,10 @@
         "step3Desc": "راقب مشغليك ذاتيا واوقف تشغيلها وأكمل او حتى احذف منها للتحذير الخاص بك كاختبار فعلي لها."
       },
       "quotas": {
+    "saveSuccess": "تم حفظ الحصة",
+    "resetSuccess": "تمت إعادة تعيين عدّادات الاستخدام",
+    "resetConfirmDesc": "يصفّر فورًا جميع عدّادات الاستخدام (المحادثات، طلبات API، التكلفة الشهرية) للمستأجر \"default\". لا يمكن التراجع.",
+    "resetConfirmTitle": "إعادة تعيين عدّادات الاستخدام؟",
         "title": "جولة الحصص",
         "step1Title": "معوقات البناء",
         "step1Desc": "حدد قيوداً صريحة على استهلاك وكلاءك يومياً أو في المحادثات للحصص المضافة أو الرموز من هذا الحساب.",

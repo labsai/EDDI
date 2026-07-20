@@ -1,4 +1,18 @@
 {
+  "attachments": {
+    "title": "Anhänge",
+    "empty": "Diese Unterhaltung hat keine Anhänge.",
+    "loadError": "Anhänge konnten nicht geladen werden.",
+    "deleteAll": "Alle löschen",
+    "delete": "Anhang löschen",
+    "download": "Herunterladen",
+    "deleted": "Anhang gelöscht",
+    "deletedAll": "{{count}} Anhänge gelöscht",
+    "confirmDeleteTitle": "Anhang löschen?",
+    "confirmDeleteDesc": "Löscht diese Datei dauerhaft. Dies kann nicht rückgängig gemacht werden.",
+    "confirmDeleteAllTitle": "Alle Anhänge löschen?",
+    "confirmDeleteAllDesc": "Löscht dauerhaft alle Dateien dieser Unterhaltung. Dies kann nicht rückgängig gemacht werden."
+  },
   "app": {
     "title": "EDDI Manager",
     "description": "Admin-Dashboard für die EDDI KI-Plattform"
@@ -81,6 +95,12 @@
       "noRecentAgents": "Noch keine Agents. Erstellen Sie Ihren ersten Agent!"
     },
     "agents": {
+    "undeployPreviousVersionsHint": "Entfernt außerdem jede frühere Version dieses Agenten aus der Umgebung.",
+    "undeployPreviousVersionsLabel": "Diese und alle vorherigen Versionen zurückziehen",
+    "undeployEndConversationsHint": "Beendet sofort jede laufende Unterhaltung dieses Deployments. Dies kann nicht rückgängig gemacht werden.",
+    "undeployEndConversationsLabel": "Alle aktiven Unterhaltungen beenden",
+    "confirmUndeployDescription": "Version {{version}} wird aus {{environment}} zurückgezogen.",
+    "confirmUndeploy": "Agent zurückziehen?",
       "title": "Agenten",
       "subtitle": "Verwalten Sie Ihre KI-Agents"
     },
@@ -900,6 +920,8 @@
     }
   },
   "coordinator": {
+    "confirmDiscardDescription": "Entfernt die Dead-Letter-Aufgabe dauerhaft. Sie kann danach nicht erneut ausgeführt werden. Dies kann nicht rückgängig gemacht werden.",
+    "confirmDiscardTitle": "Dead-Letter-Eintrag verwerfen?",
     "title": "Koordinator-Dashboard",
     "subtitle": "Konversationsverarbeitung überwachen und Dead-Letter-Einträge verwalten",
     "type": "Coordinator-Typ",
@@ -1432,6 +1454,10 @@
         "step3Desc": "Jobs pausieren, reaktivieren oder testen."
       },
       "quotas": {
+    "saveSuccess": "Kontingent gespeichert",
+    "resetSuccess": "Nutzungszähler zurückgesetzt",
+    "resetConfirmDesc": "Setzt sofort alle Nutzungszähler (Unterhaltungen, API-Aufrufe, monatliche Kosten) für den Mandanten „default“ auf null. Dies kann nicht rückgängig gemacht werden.",
+    "resetConfirmTitle": "Nutzungszähler zurücksetzen?",
         "title": "Quota-Tour",
         "step1Title": "Sicherheitslimits",
         "step1Desc": "Setzen Sie harte Obergrenzen für Kosten, Logs oder Chat-Durchsatz.",

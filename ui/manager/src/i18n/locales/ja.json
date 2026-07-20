@@ -1,4 +1,18 @@
 {
+  "attachments": {
+    "title": "添付ファイル",
+    "empty": "この会話には添付ファイルがありません。",
+    "loadError": "添付ファイルを読み込めませんでした。",
+    "deleteAll": "すべて削除",
+    "delete": "添付ファイルを削除",
+    "download": "ダウンロード",
+    "deleted": "添付ファイルを削除しました",
+    "deletedAll": "{{count}} 件の添付ファイルを削除しました",
+    "confirmDeleteTitle": "添付ファイルを削除しますか？",
+    "confirmDeleteDesc": "このファイルを完全に削除します。元に戻せません。",
+    "confirmDeleteAllTitle": "すべての添付ファイルを削除しますか？",
+    "confirmDeleteAllDesc": "この会話が保有するすべてのファイルを完全に削除します。元に戻せません。"
+  },
   "app": {
     "title": "EDDI Manager",
     "description": "EDDI 会話型AIプラットフォーム管理ダッシュボード"
@@ -81,6 +95,12 @@
       "noRecentAgents": "Agent がまだありません。最初の Agent を作成しましょう！"
     },
     "agents": {
+    "undeployPreviousVersionsHint": "この環境からこのエージェントの以前のすべてのバージョンも削除します。",
+    "undeployPreviousVersionsLabel": "このバージョンと以前のすべてのバージョンをアンデプロイ",
+    "undeployEndConversationsHint": "このデプロイの進行中の会話をすべて直ちに終了します。元に戻せません。",
+    "undeployEndConversationsLabel": "アクティブな会話をすべて終了",
+    "confirmUndeployDescription": "バージョン {{version}} を {{environment}} からアンデプロイします。",
+    "confirmUndeploy": "エージェントをアンデプロイしますか？",
       "title": "エージェント",
       "subtitle": "会話型 AI Agents を管理"
     },
@@ -900,6 +920,8 @@
     }
   },
   "coordinator": {
+    "confirmDiscardDescription": "デッドレター化されたタスクを完全に削除します。以後リプレイできません。元に戻せません。",
+    "confirmDiscardTitle": "デッドレターエントリを破棄しますか？",
     "title": "コーディネーターダッシュボード",
     "subtitle": "会話処理を監視し Dead-Letter エントリを管理",
     "type": "Coordinator タイプ",
@@ -1432,6 +1454,10 @@
         "step3Desc": "一時停止、再開、編集、テスト実行など、自動化トリガーを直接管理します。"
       },
       "quotas": {
+    "saveSuccess": "クォータを保存しました",
+    "resetSuccess": "使用カウンターをリセットしました",
+    "resetConfirmDesc": "テナント「default」のすべての使用カウンター（会話、API 呼び出し、月間コスト）を直ちにゼロにします。元に戻せません。",
+    "resetConfirmTitle": "使用カウンターをリセットしますか？",
         "title": "クォータ ツアー",
         "step1Title": "構成の制限",
         "step1Desc": "このテナントの合計エージェント数、1日の会話数、トークンコストに対するハードリミットを定義します。",

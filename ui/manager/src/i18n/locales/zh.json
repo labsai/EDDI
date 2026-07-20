@@ -1,4 +1,18 @@
 {
+  "attachments": {
+    "title": "附件",
+    "empty": "此对话没有附件。",
+    "loadError": "无法加载附件。",
+    "deleteAll": "全部删除",
+    "delete": "删除附件",
+    "download": "下载",
+    "deleted": "附件已删除",
+    "deletedAll": "已删除 {{count}} 个附件",
+    "confirmDeleteTitle": "删除附件？",
+    "confirmDeleteDesc": "永久删除此文件。此操作无法撤销。",
+    "confirmDeleteAllTitle": "删除所有附件？",
+    "confirmDeleteAllDesc": "永久删除此对话拥有的所有文件。此操作无法撤销。"
+  },
   "app": {
     "title": "EDDI Manager",
     "description": "EDDI 会话式 AI 平台管理面板"
@@ -81,6 +95,12 @@
       "noRecentAgents": "暂无 Agent，创建您的第一个 Agent！"
     },
     "agents": {
+    "undeployPreviousVersionsHint": "同时从环境中移除此代理的所有早期版本。",
+    "undeployPreviousVersionsLabel": "取消部署此版本及所有先前版本",
+    "undeployEndConversationsHint": "立即终止此部署上所有进行中的对话。此操作无法撤销。",
+    "undeployEndConversationsLabel": "结束所有活动对话",
+    "confirmUndeployDescription": "版本 {{version}} 将从 {{environment}} 取消部署。",
+    "confirmUndeploy": "取消部署此代理？",
       "title": "代理",
       "subtitle": "管理您的会话式 AI Agents"
     },
@@ -900,6 +920,8 @@
     }
   },
   "coordinator": {
+    "confirmDiscardDescription": "永久删除该死信任务，之后无法重放。此操作无法撤销。",
+    "confirmDiscardTitle": "丢弃死信条目？",
     "title": "协调器仪表盘",
     "subtitle": "监控会话处理并管理 Dead-Letter 条目",
     "type": "Coordinator 类型",
@@ -1432,6 +1454,10 @@
         "step3Desc": "在界面上原生处理所有配置触发任务：暂停、重新执行并模拟检验。"
       },
       "quotas": {
+    "saveSuccess": "配额已保存",
+    "resetSuccess": "使用计数器已重置",
+    "resetConfirmDesc": "立即将租户“default”的所有使用计数器（对话、API 调用、每月费用）清零。此操作无法撤销。",
+    "resetConfirmTitle": "重置使用计数器？",
         "title": "配额导览",
         "step1Title": "硬性限制配置",
         "step1Desc": "对每个租户指定最大的每日限制、请求、智能体数和财务上限阈值，以保持安全性。",

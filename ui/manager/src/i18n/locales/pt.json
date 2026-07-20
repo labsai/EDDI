@@ -1,4 +1,18 @@
 {
+  "attachments": {
+    "title": "Anexos",
+    "empty": "Esta conversa não tem anexos.",
+    "loadError": "Não foi possível carregar os anexos.",
+    "deleteAll": "Excluir tudo",
+    "delete": "Excluir anexo",
+    "download": "Baixar",
+    "deleted": "Anexo excluído",
+    "deletedAll": "{{count}} anexos excluídos",
+    "confirmDeleteTitle": "Excluir anexo?",
+    "confirmDeleteDesc": "Exclui este arquivo permanentemente. Não pode ser desfeito.",
+    "confirmDeleteAllTitle": "Excluir todos os anexos?",
+    "confirmDeleteAllDesc": "Exclui permanentemente todos os arquivos desta conversa. Não pode ser desfeito."
+  },
   "app": {
     "title": "EDDI Manager",
     "description": "Painel de administração da plataforma de IA conversacional EDDI"
@@ -81,6 +95,12 @@
       "noRecentAgents": "Nenhum agent ainda. Crie seu primeiro agent!"
     },
     "agents": {
+    "undeployPreviousVersionsHint": "Também remove do ambiente todas as versões anteriores deste agente.",
+    "undeployPreviousVersionsLabel": "Remover esta e todas as versões anteriores",
+    "undeployEndConversationsHint": "Encerra imediatamente todas as conversas em andamento desta implantação. Não pode ser desfeito.",
+    "undeployEndConversationsLabel": "Encerrar todas as conversas ativas",
+    "confirmUndeployDescription": "A versão {{version}} será removida de {{environment}}.",
+    "confirmUndeploy": "Cancelar a implantação do agente?",
       "title": "Agentes",
       "subtitle": "Gerencie seus agents de IA conversacional"
     },
@@ -900,6 +920,8 @@
     }
   },
   "coordinator": {
+    "confirmDiscardDescription": "Remove permanentemente a tarefa em fila morta. Não poderá ser reexecutada depois. Não pode ser desfeito.",
+    "confirmDiscardTitle": "Descartar a entrada da fila de mensagens mortas?",
     "title": "Painel do coordenador",
     "subtitle": "Monitorar processamento de conversas e gerenciar entradas dead-letter",
     "type": "Tipo de coordinador",
@@ -1432,6 +1454,10 @@
         "step3Desc": "Edite, reative ou teste a aplicação instantaneamente livre lógico seguro."
       },
       "quotas": {
+    "saveSuccess": "Cota salva",
+    "resetSuccess": "Contadores de uso redefinidos",
+    "resetConfirmDesc": "Zera imediatamente todos os contadores de uso (conversas, chamadas de API, custo mensal) do tenant \"default\". Não pode ser desfeito.",
+    "resetConfirmTitle": "Redefinir os contadores de uso?",
         "title": "Tour de Cotas",
         "step1Title": "Limite Tarifário",
         "step1Desc": "Construção de faturamento sem abusos ou gastos exponenciais Cloud atreladas.",

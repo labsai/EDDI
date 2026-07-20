@@ -1,4 +1,18 @@
 {
+  "attachments": {
+    "title": "Attachments",
+    "empty": "This conversation has no attachments.",
+    "loadError": "Could not load attachments.",
+    "deleteAll": "Delete all",
+    "delete": "Delete attachment",
+    "download": "Download",
+    "deleted": "Attachment deleted",
+    "deletedAll": "Deleted {{count}} attachments",
+    "confirmDeleteTitle": "Delete attachment?",
+    "confirmDeleteDesc": "Permanently deletes this file. This cannot be undone.",
+    "confirmDeleteAllTitle": "Delete all attachments?",
+    "confirmDeleteAllDesc": "Permanently deletes every file this conversation owns. This cannot be undone."
+  },
   "app": {
     "title": "EDDI Manager",
     "description": "Admin dashboard for the EDDI conversational AI platform"
@@ -81,6 +95,12 @@
       "noRecentAgents": "No agents yet. Create your first agent!"
     },
     "agents": {
+    "undeployPreviousVersionsHint": "Also removes every earlier version of this agent from the environment.",
+    "undeployPreviousVersionsLabel": "Undeploy this and all previous versions",
+    "undeployEndConversationsHint": "Immediately terminates every in-progress conversation on this deployment. This cannot be undone.",
+    "undeployEndConversationsLabel": "End all active conversations",
+    "confirmUndeployDescription": "Version {{version}} will be undeployed from {{environment}}.",
+    "confirmUndeploy": "Undeploy agent?",
       "title": "Agents",
       "subtitle": "Manage your conversational AI agents"
     },
@@ -936,6 +956,8 @@
     }
   },
   "coordinator": {
+    "confirmDiscardDescription": "This permanently removes the dead-lettered task. It cannot be replayed afterwards. This cannot be undone.",
+    "confirmDiscardTitle": "Discard dead-letter entry?",
     "title": "Coordinator Dashboard",
     "subtitle": "Monitor conversation processing and manage dead-letter entries",
     "type": "Coordinator Type",
@@ -1501,6 +1523,10 @@
         "step3Desc": "Manage your automated triggers natively: pause, resume, edit, or test-fire them."
       },
       "quotas": {
+    "saveSuccess": "Quota saved",
+    "resetSuccess": "Usage counters reset",
+    "resetConfirmDesc": "This immediately zeroes all usage counters (conversations, API calls, monthly cost) for tenant \"default\". This cannot be undone.",
+    "resetConfirmTitle": "Reset usage counters?",
         "title": "Quotas Tour",
         "step1Title": "Configuration Constraints",
         "step1Desc": "Define hard limits on total agents, daily conversations, and token costs for this tenant.",

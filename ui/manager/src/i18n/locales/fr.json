@@ -1,4 +1,18 @@
 {
+  "attachments": {
+    "title": "Pièces jointes",
+    "empty": "Cette conversation n’a aucune pièce jointe.",
+    "loadError": "Impossible de charger les pièces jointes.",
+    "deleteAll": "Tout supprimer",
+    "delete": "Supprimer la pièce jointe",
+    "download": "Télécharger",
+    "deleted": "Pièce jointe supprimée",
+    "deletedAll": "{{count}} pièces jointes supprimées",
+    "confirmDeleteTitle": "Supprimer la pièce jointe ?",
+    "confirmDeleteDesc": "Supprime définitivement ce fichier. Irréversible.",
+    "confirmDeleteAllTitle": "Supprimer toutes les pièces jointes ?",
+    "confirmDeleteAllDesc": "Supprime définitivement tous les fichiers de cette conversation. Irréversible."
+  },
   "app": {
     "title": "EDDI Manager",
     "description": "Tableau de bord d'administration de la plateforme IA EDDI"
@@ -81,6 +95,12 @@
       "noRecentAgents": "Aucun agent pour l'instant. Créez votre premier agent !"
     },
     "agents": {
+    "undeployPreviousVersionsHint": "Retire également toutes les versions antérieures de cet agent de l’environnement.",
+    "undeployPreviousVersionsLabel": "Retirer cette version et toutes les précédentes",
+    "undeployEndConversationsHint": "Termine immédiatement toute conversation en cours sur ce déploiement. Irréversible.",
+    "undeployEndConversationsLabel": "Terminer toutes les conversations actives",
+    "confirmUndeployDescription": "La version {{version}} sera retirée de {{environment}}.",
+    "confirmUndeploy": "Retirer l’agent du déploiement ?",
       "title": "Agents",
       "subtitle": "Gérez vos agents d'IA conversationnelle"
     },
@@ -900,6 +920,8 @@
     }
   },
   "coordinator": {
+    "confirmDiscardDescription": "Supprime définitivement la tâche en file morte. Elle ne pourra plus être rejouée. Irréversible.",
+    "confirmDiscardTitle": "Supprimer l’entrée de la file morte ?",
     "title": "Tableau de bord du coordinateur",
     "subtitle": "Surveiller le traitement des conversations et gérer les entrées dead-letter",
     "type": "Type de coordinateur",
@@ -1432,6 +1454,10 @@
         "step3Desc": "Démarrez et interrompez une activité en direct aux horaires des serveurs intégrés."
       },
       "quotas": {
+    "saveSuccess": "Quota enregistré",
+    "resetSuccess": "Compteurs d’usage réinitialisés",
+    "resetConfirmDesc": "Met immédiatement à zéro tous les compteurs d’usage (conversations, appels API, coût mensuel) pour le locataire « default ». Irréversible.",
+    "resetConfirmTitle": "Réinitialiser les compteurs d’usage ?",
         "title": "Visite des Quotas",
         "step1Title": "Règlements limites",
         "step1Desc": "Plafonnez de potentielles brèches financières en plafonnant un compte Agent spécifique.",
