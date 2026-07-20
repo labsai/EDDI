@@ -1062,6 +1062,9 @@
     "automated": "自動"
   },
   "schedules": {
+    "fireDeadLettered": "デッドレター",
+    "fireFailed": "失敗",
+    "fireCompleted": "完了",
     "title": "スケジュール",
     "subtitle": "Agent のスケジュールトリガーを管理 — Cron と Heartbeats",
     "create": "スケジュールを作成",

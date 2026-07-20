@@ -1062,6 +1062,9 @@
     "automated": "automatisiert"
   },
   "schedules": {
+    "fireDeadLettered": "Endgültig fehlgeschlagen",
+    "fireFailed": "Fehlgeschlagen",
+    "fireCompleted": "Abgeschlossen",
     "title": "Zeitpläne",
     "subtitle": "Geplante Agent-Trigger verwalten — Cron-Jobs und Heartbeats",
     "create": "Zeitplan erstellen",

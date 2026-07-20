@@ -1062,6 +1062,9 @@
     "automated": "อัตโนมัติ"
   },
   "schedules": {
+    "fireDeadLettered": "เดดเลตเตอร์",
+    "fireFailed": "ล้มเหลว",
+    "fireCompleted": "เสร็จสมบูรณ์",
     "title": "การกำหนดเวลา",
     "subtitle": "จัดการทริกเกอร์ที่กำหนดเวลาของ Agent — Cron และ Heartbeats",
     "create": "สร้างการกำหนดเวลา",

@@ -1135,6 +1135,9 @@
     "automated": "automated"
   },
   "schedules": {
+    "fireDeadLettered": "Dead-lettered",
+    "fireFailed": "Failed",
+    "fireCompleted": "Completed",
     "title": "Schedules",
     "subtitle": "Manage scheduled agent triggers — cron jobs and heartbeats",
     "create": "Create Schedule",

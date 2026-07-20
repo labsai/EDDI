@@ -1062,6 +1062,9 @@
     "automated": "automatizado"
   },
   "schedules": {
+    "fireDeadLettered": "Descartado",
+    "fireFailed": "Falhou",
+    "fireCompleted": "Concluído",
     "title": "Agendamentos",
     "subtitle": "Gerenciar gatilhos programados de agents — Cron e Heartbeats",
     "create": "Criar agendamento",

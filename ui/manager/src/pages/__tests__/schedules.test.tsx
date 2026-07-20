@@ -569,22 +569,30 @@ describe("SchedulesPage", () => {
   // ── Fire history expansion ────────────────────────────────────────────
 
   it("expands fire history and shows log entries", async () => {
+    const now = Date.now();
     server.use(
       http.get("*/schedulestore/schedules/:id/fires", () =>
         HttpResponse.json([
           {
             id: "fire-1",
-            firedAt: Date.now() - 60000,
-            durationMs: 250,
-            success: true,
-            error: null,
+            scheduleId: "sched-1",
+            fireTime: new Date(now - 60000).toISOString(),
+            startedAt: new Date(now - 60000).toISOString(),
+            completedAt: new Date(now - 60000 + 250).toISOString(),
+            status: "COMPLETED",
+            attemptNumber: 1,
+            cost: 0,
           },
           {
             id: "fire-2",
-            firedAt: Date.now() - 120000,
-            durationMs: 1500,
-            success: false,
-            error: "Agent timeout",
+            scheduleId: "sched-1",
+            fireTime: new Date(now - 120000).toISOString(),
+            startedAt: new Date(now - 120000).toISOString(),
+            completedAt: new Date(now - 120000 + 1500).toISOString(),
+            status: "FAILED",
+            errorMessage: "Agent timeout",
+            attemptNumber: 2,
+            cost: 0,
           },
         ])
       )
@@ -600,9 +608,46 @@ describe("SchedulesPage", () => {
     await user.click(screen.getAllByText("Fire History")[0]!);
 
     await waitFor(() => {
+      // duration is computed from startedAt/completedAt, not a durationMs field
       expect(screen.getByText("250ms")).toBeInTheDocument();
       expect(screen.getByText("Agent timeout")).toBeInTheDocument();
+      // status badges (symboled text avoids colliding with a "Failed Report" name)
+      expect(screen.getByText("✓ Completed")).toBeInTheDocument();
+      expect(screen.getByText("✗ Failed")).toBeInTheDocument();
     });
+  });
+
+  // Regression: the backend ScheduleFireLog uses fireTime (ISO Instant) / status /
+  // errorMessage — never firedAt/success/durationMs. The old shape rendered
+  // "Invalid Date" and always-failed for every row against a real EDDI.
+  it("renders the real backend fire-log shape without Invalid Date", async () => {
+    server.use(
+      http.get("*/schedulestore/schedules/:id/fires", () =>
+        HttpResponse.json([
+          {
+            id: "f",
+            scheduleId: "sched-1",
+            fireTime: "2026-07-01T09:00:00.000Z",
+            startedAt: "2026-07-01T09:00:00.000Z",
+            completedAt: "2026-07-01T09:00:02.000Z",
+            status: "COMPLETED",
+            attemptNumber: 1,
+            cost: 0,
+          },
+        ])
+      )
+    );
+    renderSchedules();
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getAllByText("Fire History").length).toBeGreaterThanOrEqual(1);
+    });
+    await user.click(screen.getAllByText("Fire History")[0]!);
+    await waitFor(() => {
+      expect(screen.getByText("2000ms")).toBeInTheDocument();
+      expect(screen.getByText("✓ Completed")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Invalid Date")).not.toBeInTheDocument();
   });
 
   it("shows no fire history message for empty logs", async () => {

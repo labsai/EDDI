@@ -1062,6 +1062,9 @@
     "automated": "آلي"
   },
   "schedules": {
+    "fireDeadLettered": "رسالة ميتة",
+    "fireFailed": "فشل",
+    "fireCompleted": "مكتمل",
     "title": "الجداول",
     "subtitle": "إدارة مشغلات Agent المجدولة — Cron وHeartbeats",
     "create": "إنشاء جدول",

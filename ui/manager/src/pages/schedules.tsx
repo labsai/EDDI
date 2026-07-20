@@ -28,9 +28,11 @@ import {
   useRetryDeadLetter,
   useFireLogs,
 } from "@/hooks/use-schedules";
+import { fireLogDurationMs } from "@/lib/api/schedules";
 import type {
   ScheduleConfiguration,
   ScheduleFireLog,
+  FireLogStatus,
   TriggerType,
 } from "@/lib/api/schedules";
 
@@ -122,6 +124,31 @@ function TypeBadge({ type }: { type: TriggerType }) {
   );
 }
 
+// ==================== Fire Status Badge ====================
+
+function FireStatusBadge({ status }: { status: FireLogStatus }) {
+  const { t } = useTranslation();
+  if (status === "COMPLETED") {
+    return (
+      <span className="inline-flex items-center gap-1 text-emerald-500">
+        ✓ {t("schedules.fireCompleted", "Completed")}
+      </span>
+    );
+  }
+  if (status === "DEAD_LETTERED") {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-500">
+        ⚠ {t("schedules.fireDeadLettered", "Dead-lettered")}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-red-400">
+      ✗ {t("schedules.fireFailed", "Failed")}
+    </span>
+  );
+}
+
 // ==================== Fire Logs Expandable ====================
 
 function FireLogsRow({ scheduleId }: { scheduleId: string }) {
@@ -170,32 +197,33 @@ function FireLogsRow({ scheduleId }: { scheduleId: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {logs.map((log: ScheduleFireLog, i: number) => (
-                    <tr
-                      key={log.id ?? i}
-                      className="border-b border-border/30"
-                    >
-                      <td className="px-3 py-1.5 tabular-nums text-foreground">
-                        {new Date(log.firedAt).toLocaleString()}
-                      </td>
-                      <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
-                        {log.durationMs != null ? `${log.durationMs}ms` : "—"}
-                      </td>
-                      <td className="px-3 py-1.5">
-                        {log.success ? (
-                          <span className="text-emerald-500">✓</span>
-                        ) : (
-                          <span className="text-red-400">✗</span>
-                        )}
-                      </td>
-                      <td
-                        className="max-w-[300px] truncate px-3 py-1.5 text-red-400"
-                        title={log.error}
+                  {logs.map((log: ScheduleFireLog, i: number) => {
+                    const durationMs = fireLogDurationMs(log);
+                    return (
+                      <tr
+                        key={log.id ?? i}
+                        className="border-b border-border/30"
                       >
-                        {log.error ?? "—"}
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="px-3 py-1.5 tabular-nums text-foreground">
+                          {log.fireTime
+                            ? new Date(log.fireTime).toLocaleString()
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
+                          {durationMs != null ? `${durationMs}ms` : "—"}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <FireStatusBadge status={log.status} />
+                        </td>
+                        <td
+                          className="max-w-[300px] truncate px-3 py-1.5 text-red-400"
+                          title={log.errorMessage}
+                        >
+                          {log.errorMessage ?? "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}

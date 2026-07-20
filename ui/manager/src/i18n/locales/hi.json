@@ -1062,6 +1062,9 @@
     "automated": "स्वचालित"
   },
   "schedules": {
+    "fireDeadLettered": "डेड-लेटर",
+    "fireFailed": "विफल",
+    "fireCompleted": "पूर्ण",
     "title": "शेड्यूल",
     "subtitle": "Agent शेड्यूल ट्रिगर प्रबंधित करें — Cron और Heartbeats",
     "create": "शेड्यूल बनाएं",

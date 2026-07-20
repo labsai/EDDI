@@ -1062,6 +1062,9 @@
     "automated": "automatisé"
   },
   "schedules": {
+    "fireDeadLettered": "Échec définitif",
+    "fireFailed": "Échoué",
+    "fireCompleted": "Terminé",
     "title": "Planifications",
     "subtitle": "Gérer les déclencheurs programmés — Cron et Heartbeats",
     "create": "Créer une planification",

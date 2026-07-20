@@ -1062,6 +1062,9 @@
     "automated": "automatizado"
   },
   "schedules": {
+    "fireDeadLettered": "Cola de fallidos",
+    "fireFailed": "Fallido",
+    "fireCompleted": "Completado",
     "title": "Programaciones",
     "subtitle": "Gestionar disparadores programados de agents — Cron y Heartbeats",
     "create": "Crear programación",

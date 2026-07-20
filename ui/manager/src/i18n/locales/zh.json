@@ -1062,6 +1062,9 @@
     "automated": "自动"
   },
   "schedules": {
+    "fireDeadLettered": "死信",
+    "fireFailed": "失败",
+    "fireCompleted": "已完成",
     "title": "定时任务",
     "subtitle": "管理 Agent 定时触发器 — Cron 和 Heartbeats",
     "create": "创建定时任务",

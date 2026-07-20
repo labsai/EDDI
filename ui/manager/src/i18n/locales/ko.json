@@ -1062,6 +1062,9 @@
     "automated": "자동화됨"
   },
   "schedules": {
+    "fireDeadLettered": "데드레터",
+    "fireFailed": "실패",
+    "fireCompleted": "완료",
     "title": "스케줄",
     "subtitle": "에이전트 스케줄 트리거 관리 — Cron 작업 및 하트비트",
     "create": "스케줄 생성",

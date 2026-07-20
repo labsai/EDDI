@@ -62,18 +62,39 @@ export interface ScheduleConfiguration {
   cronDescription?: string;
 }
 
+/** Terminal outcome of a fire, mirroring the backend ScheduleFireLog.status. */
+export type FireLogStatus = "COMPLETED" | "FAILED" | "DEAD_LETTERED";
+
+/**
+ * One fire-execution record. Mirrors the backend `ScheduleFireLog` record
+ * exactly — its JSON keys are the record component names, and the three
+ * timestamps are ISO-8601 strings (Jackson-serialized `Instant`), NOT epoch
+ * millis. (The previous shape — firedAt/success/durationMs/error — was never
+ * emitted by the backend and rendered "Invalid Date"/always-failed for every
+ * row against a real EDDI; only the wrong mocks hid it.)
+ */
 export interface ScheduleFireLog {
   id?: string;
   scheduleId: string;
-  scheduleName?: string;
-  agentId: string;
-  conversationId?: string;
-  firedAt: number;
-  completedAt?: number;
-  durationMs?: number;
-  success: boolean;
-  error?: string;
+  fireId?: string;
+  fireTime: string;
+  startedAt?: string;
+  completedAt?: string;
+  status: FireLogStatus;
   instanceId?: string;
+  conversationId?: string;
+  errorMessage?: string;
+  attemptNumber?: number;
+  cost?: number;
+}
+
+/** Duration in ms between startedAt and completedAt, or null if unavailable. */
+export function fireLogDurationMs(log: ScheduleFireLog): number | null {
+  if (!log.startedAt || !log.completedAt) return null;
+  const start = Date.parse(log.startedAt);
+  const end = Date.parse(log.completedAt);
+  if (Number.isNaN(start) || Number.isNaN(end)) return null;
+  return Math.max(0, end - start);
 }
 
 // ==================== API Functions ====================
