@@ -68,6 +68,7 @@ const navSections = [
     items: [
       { path: "/manage/logs", icon: ScrollText, labelKey: "nav.logs" },
       { path: "/manage/conversations", icon: MessagesSquare, labelKey: "nav.conversations" },
+      { path: "/manage/conversations/monitoring", icon: Activity, labelKey: "nav.activeConversations", fallback: "Active Conversations" },
       { path: "/manage/coordinator", icon: Activity, labelKey: "nav.coordinator" },
       { path: "/manage/approvals", icon: HandMetal, labelKey: "nav.approvals" },
       { path: "/manage/audit", icon: ShieldCheck, labelKey: "nav.audit" },
@@ -223,11 +224,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             {/* Section items — hidden when section is collapsed (only in expanded sidebar) */}
             {(!collapsed ? !collapsedSections.has(idx) : true) && (
               <div id={`sidebar-section-${idx}`} className="space-y-0.5">
-                {section.items.map((item) => (
+                {section.items.map((item) => {
+                  const label = t(
+                    item.labelKey,
+                    "fallback" in item ? (item.fallback as string) : undefined
+                  );
+                  return (
                   <NavLink
                     key={item.path}
                     to={item.path}
-                    end={item.path === "/manage"}
+                    // `end` on the parent conversations route so it isn't kept
+                    // active on the /monitoring child route.
+                    end={item.path === "/manage" || item.path === "/manage/conversations"}
                     className={({ isActive }) =>
                       cn(
                         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all",
@@ -238,13 +246,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                         collapsed && "justify-center px-2"
                       )
                     }
-                    aria-label={collapsed ? t(item.labelKey) : undefined}
-                    title={collapsed ? t(item.labelKey) : undefined}
+                    aria-label={collapsed ? label : undefined}
+                    title={collapsed ? label : undefined}
                   >
                     <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-                    {!collapsed && <span>{t(item.labelKey)}</span>}
+                    {!collapsed && <span>{label}</span>}
                   </NavLink>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
@@ -14,6 +14,9 @@ import {
   Filter,
   Bot,
   HandMetal,
+  ChevronLeft,
+  ChevronRight,
+  Activity,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
@@ -23,8 +26,9 @@ import {
   useDeleteConversation,
   useConversationStepCount,
 } from "@/hooks/use-conversations";
-import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
-import { parseConversationUri, type ConversationState } from "@/lib/api/conversations";
+import { useAgentDescriptors, groupAgentsByName, useAgentVersions } from "@/hooks/use-agents";
+import { parseConversationUri, MAX_CONVERSATION_LIMIT, type ConversationState } from "@/lib/api/conversations";
+import { AgentPicker } from "@/components/shared/agent-picker";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -50,8 +54,11 @@ const stateIcons: Record<
 };
 
 const STATE_FILTER_VALUES: (ConversationState | "ALL")[] = [
-  "ALL", "READY", "IN_PROGRESS", "ENDED", "ERROR", "AWAITING_HUMAN",
+  "ALL", "READY", "IN_PROGRESS", "ENDED", "EXECUTION_INTERRUPTED", "ERROR", "AWAITING_HUMAN",
 ];
+
+/** Page-size options offered to the user (backend clamps `limit` to 100). */
+const PAGE_SIZE_OPTIONS = [25, 50, MAX_CONVERSATION_LIMIT];
 
 export function ConversationsPage() {
   const { t } = useTranslation();
@@ -75,16 +82,54 @@ export function ConversationsPage() {
   const [deletePermanent, setDeletePermanent] = useState(false);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("conversations"));
 
-  const { data: conversations, isLoading, isError, refetch } =
+  // Filters + pagination. `page` maps directly to the backend `index` (a page
+  // index, not a row offset); `pageSize` maps to `limit`.
+  const [agentFilter, setAgentFilter] = useState("");
+  const [versionFilter, setVersionFilter] = useState<number | undefined>(undefined);
+  const [pageSize, setPageSize] = useState(50);
+  const [page, setPage] = useState(0);
+
+  // Any change to the query criteria must reset to the first page, otherwise a
+  // stale high page index yields an empty result on the new criteria.
+  useEffect(() => {
+    setPage(0);
+  }, [search, stateFilter, agentFilter, versionFilter, pageSize]);
+
+  // Reset the version sub-filter whenever the agent changes (versions belong to
+  // a specific agent).
+  useEffect(() => {
+    setVersionFilter(undefined);
+  }, [agentFilter]);
+
+  const { data: versions } = useAgentVersions(agentFilter);
+  // Dedupe by version number — one <option> per distinct version.
+  const versionOptions = useMemo(
+    () => (versions ? [...new Map(versions.map((v) => [v.version, v])).values()] : []),
+    [versions]
+  );
+
+  const { data: conversations, isLoading, isFetching, isError, refetch } =
     useConversationDescriptors(
-      50,
-      0,
+      pageSize,
+      page,
       search,
-      "",
-      stateFilter === "ALL" ? undefined : stateFilter
+      agentFilter,
+      stateFilter === "ALL" ? undefined : stateFilter,
+      versionFilter
     );
   const { data: agents = [] } = useAgentDescriptors(50);
   const deleteMutation = useDeleteConversation();
+
+  const hasActiveFilters =
+    !!search || stateFilter !== "ALL" || !!agentFilter || versionFilter != null;
+
+  const pageCount = conversations?.length ?? 0;
+  const rangeStart = pageCount > 0 ? page * pageSize + 1 : 0;
+  const rangeEnd = page * pageSize + pageCount;
+  // Offset pagination without a total count: a full page implies more may
+  // follow; a short page is the last one.
+  const hasNextPage = pageCount === pageSize;
+  const hasPrevPage = page > 0;
 
   function confirmDelete() {
     if (deleteTarget) {
@@ -114,14 +159,24 @@ export function ConversationsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-          <MessageSquare className="h-8 w-8 text-primary" />
-          {t("pages.conversations.title")}
-        </h1>
-        <p className="mt-1 text-muted-foreground">
-          {t("pages.conversations.subtitle")}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
+            <MessageSquare className="h-8 w-8 text-primary" />
+            {t("pages.conversations.title")}
+          </h1>
+          <p className="mt-1 text-muted-foreground">
+            {t("pages.conversations.subtitle")}
+          </p>
+        </div>
+        <Link
+          to="/manage/conversations/monitoring"
+          className="inline-flex items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/50"
+          data-testid="monitor-active-link"
+        >
+          <Activity className="h-4 w-4 text-primary" />
+          {t("conversations.monitorActive", "Monitor active")}
+        </Link>
       </div>
 
       {/* Search + Filter bar */}
@@ -159,6 +214,36 @@ export function ConversationsPage() {
         </div>
       </div>
 
+      {/* Agent + version filter row */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center" data-testid="agent-filter">
+        <div className="flex items-center gap-1.5 sm:w-80">
+          <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <AgentPicker
+            value={agentFilter}
+            onChange={setAgentFilter}
+            placeholder={t("conversations.filterByAgent", "Filter by agent")}
+          />
+        </div>
+        {agentFilter && versionOptions.length > 0 && (
+          <select
+            value={versionFilter ?? ""}
+            onChange={(e) =>
+              setVersionFilter(e.target.value ? Number(e.target.value) : undefined)
+            }
+            aria-label={t("conversations.filterByVersion", "Filter by agent version")}
+            data-testid="version-filter"
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">{t("conversations.allVersions", "All versions")}</option>
+            {versionOptions.map((v) => (
+              <option key={v.version} value={v.version}>
+                {t("conversations.version", "v{{version}}", { version: v.version })}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
       {/* Content */}
       <div data-tour="conversations-content">
       {isLoading && (
@@ -189,24 +274,27 @@ export function ConversationsPage() {
         <EmptyState
           icon={MessageSquare}
           title={
-            search || stateFilter !== "ALL"
+            hasActiveFilters
               ? t("common.noResults")
               : t("conversations.empty")
           }
           description={
-            !search && stateFilter === "ALL"
+            !hasActiveFilters
               ? t("conversations.emptyDescription", "Deploy an agent and start a conversation from the Chat page.")
               : undefined
           }
-          actionLabel={!search && stateFilter === "ALL" ? t("nav.chat") : undefined}
-          onAction={!search && stateFilter === "ALL" ? () => navigate("/manage/chat") : undefined}
+          actionLabel={!hasActiveFilters ? t("nav.chat") : undefined}
+          onAction={!hasActiveFilters ? () => navigate("/manage/chat") : undefined}
         />
       )}
 
       {!isLoading && !isError && conversations && conversations.length > 0 && (
         <>
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {t("conversations.count", { count: conversations.length })}
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" data-testid="pagination-range">
+            {t("conversations.showingRange", "Showing {{from}}–{{to}}", {
+              from: rangeStart,
+              to: rangeEnd,
+            })}
           </p>
 
           {view === "card" ? (
@@ -395,6 +483,61 @@ export function ConversationsPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Pagination controls */}
+      {!isLoading && !isError && (pageCount > 0 || page > 0) && (
+        <div
+          className="mt-4 flex flex-wrap items-center justify-between gap-3"
+          data-testid="conversation-pagination"
+        >
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <label htmlFor="page-size-select">
+              {t("conversations.perPage", "Per page")}
+            </label>
+            <select
+              id="page-size-select"
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              data-testid="page-size-select"
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground" data-testid="page-indicator">
+              {t("conversations.pageNumber", "Page {{page}}", { page: page + 1 })}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={!hasPrevPage || isFetching}
+              data-testid="pagination-prev"
+              aria-label={t("common.previous", "Previous")}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              {t("common.previous", "Previous")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => p + 1)}
+              disabled={!hasNextPage || isFetching}
+              data-testid="pagination-next"
+              aria-label={t("common.next", "Next")}
+            >
+              {t("common.next", "Next")}
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
       )}
 
       </div>

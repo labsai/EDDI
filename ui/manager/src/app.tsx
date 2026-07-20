@@ -7,6 +7,7 @@ import { AgentDetailPage } from "@/pages/agent-detail";
 import { WorkflowsPage } from "@/pages/workflows";
 import { WorkflowDetailPage } from "@/pages/workflow-detail";
 import { ConversationsPage } from "@/pages/conversations";
+import { ConversationMonitoringPage } from "@/pages/conversation-monitoring";
 import { ConversationDetailPage } from "@/pages/conversation-detail";
 import { ChatPage } from "@/pages/chat";
 import { ResourcesPage } from "@/pages/resources";
@@ -52,6 +53,7 @@ export function App() {
         <Route path="/manage/workflows" element={<WorkflowsPage />} />
         <Route path="/manage/workflowview/:id" element={<WorkflowDetailPage />} />
         <Route path="/manage/conversations" element={<ConversationsPage />} />
+        <Route path="/manage/conversations/monitoring" element={<ConversationMonitoringPage />} />
         <Route path="/manage/coordinator" element={<CoordinatorPage />} />
         <Route path="/manage/schedules" element={<SchedulesPage />} />
         <Route path="/manage/logs" element={<LogsPage />} />
