@@ -61,22 +61,22 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
       {/* 4 Stat Cards */}
       <div className="grid grid-cols-4 gap-2">
         <StatCard
-          icon={<Coins className="h-3 w-3" />}
+          icon={<Coins className="h-3 w-3" aria-hidden="true" />}
           label={t("costDashboard.totalCost", "Total Cost")}
           value={fmtCost(tokenMetrics?.totalCost ?? costs?.totalCost ?? 0)}
         />
         <StatCard
-          icon={<Database className="h-3 w-3" />}
+          icon={<Database className="h-3 w-3" aria-hidden="true" />}
           label={t("costDashboard.totalTokens", "Total Tokens")}
           value={fmtNum(totalTokens)}
         />
         <StatCard
-          icon={<Activity className="h-3 w-3" />}
+          icon={<Activity className="h-3 w-3" aria-hidden="true" />}
           label={t("costDashboard.turns", "Turns")}
           value={turnsCount.toString()}
         />
         <StatCard
-          icon={<Clock className="h-3 w-3" />}
+          icon={<Clock className="h-3 w-3" aria-hidden="true" />}
           label={t("costDashboard.avgLatency", "Avg Latency")}
           value={formatDuration(avgLatency)}
         />
@@ -87,15 +87,21 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
         <div className="rounded-lg border border-border bg-card p-2 space-y-1.5">
           <div className="flex justify-between text-[10px] font-medium">
             <span className="text-muted-foreground flex items-center gap-1">
-              <ArrowUp className="h-3 w-3" />
+              <ArrowUp className="h-3 w-3" aria-hidden="true" />
               {t("costDashboard.input", "Input")}: {fmtNum(totalIn)}
             </span>
             <span className="text-primary flex items-center gap-1">
               {t("costDashboard.output", "Output")}: {fmtNum(totalOut)}
-              <ArrowDown className="h-3 w-3" />
+              <ArrowDown className="h-3 w-3" aria-hidden="true" />
             </span>
           </div>
-          <div className="h-2 w-full rounded-full flex overflow-hidden bg-muted">
+          <div
+            className="h-2 w-full rounded-full flex overflow-hidden bg-muted"
+            role="meter"
+            aria-label={t("costDashboard.tokenDistribution", "Token distribution")}
+            aria-valuenow={totalTokens}
+            aria-valuemin={0}
+          >
             <div className="bg-muted-foreground/40 transition-all" style={{ width: `${inPct}%` }} />
             <div className="bg-primary transition-all" style={{ width: `${outPct}%` }} />
           </div>

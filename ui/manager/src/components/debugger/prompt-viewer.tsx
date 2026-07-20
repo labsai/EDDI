@@ -256,10 +256,10 @@ function PromptDetail({
 // ==================== Message Card ====================
 
 const ROLE_CONFIG = {
-  system: { labelKey: "promptViewer.roleSystem", fallback: "SYSTEM", color: "border-primary text-primary" },
-  user: { labelKey: "promptViewer.roleUser", fallback: "USER", color: "border-blue-500 text-blue-500" },
-  assistant: { labelKey: "promptViewer.roleAssistant", fallback: "ASSISTANT", color: "border-emerald-500 text-emerald-500" },
-  tool: { labelKey: "promptViewer.roleTool", fallback: "TOOL", color: "border-amber-500 text-amber-500" },
+  system: { labelKey: "promptViewer.roleSystem", fallback: "SYSTEM", borderClass: "border-primary", textClass: "text-primary" },
+  user: { labelKey: "promptViewer.roleUser", fallback: "USER", borderClass: "border-blue-500", textClass: "text-blue-500" },
+  assistant: { labelKey: "promptViewer.roleAssistant", fallback: "ASSISTANT", borderClass: "border-emerald-500", textClass: "text-emerald-500" },
+  tool: { labelKey: "promptViewer.roleTool", fallback: "TOOL", borderClass: "border-amber-500", textClass: "text-amber-500" },
 } as const;
 
 function MessageCard({ role, content }: { role: string; content: string }) {
@@ -282,9 +282,9 @@ function MessageCard({ role, content }: { role: string; content: string }) {
   };
 
   return (
-    <div className={cn("flex flex-col border-s-2 bg-card/30 ps-3 py-2 mb-2", config.color.split(' ')[0])}>
+    <div className={cn("flex flex-col border-s-2 bg-card/30 ps-3 py-2 mb-2", config.borderClass)}>
       <div className="flex items-center justify-between">
-        <span className={cn("text-[10px] font-bold tracking-wider", config.color.split(' ')[1])}>
+        <span className={cn("text-[10px] font-bold tracking-wider", config.textClass)}>
           {label}
         </span>
         <button
