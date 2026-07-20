@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   Users, Trash2, MessageSquareQuote, Clock, Settings2,
   PanelRightOpen, PanelRightClose,
@@ -20,6 +20,7 @@ import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { useCancelGroupDiscussion } from "@/hooks/use-hitl";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { DiscussionInput } from "@/components/groups/discussion-input";
+import { DiscussionActions } from "@/components/groups/discussion-actions";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,8 +29,15 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { BackLink } from "@/components/shared/back-link";
 import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
-import { getErrorMessage } from "@/lib/api-client";
-import { STYLE_INFO, type DiscussionStyle, type AgentGroupConfiguration } from "@/lib/api/groups";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
+import {
+  STYLE_INFO,
+  continueGroupDiscussion,
+  followupGroupMember,
+  closeGroupConversation,
+  type DiscussionStyle,
+  type AgentGroupConfiguration,
+} from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
 import { STYLE_THEME } from "@/components/groups/discussion-transcript";
 import { safeFormatDate } from "@/components/groups/group-utils";
@@ -46,6 +54,38 @@ const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }
   CANCELLED: { label: "Cancelled", color: "text-muted-foreground", dot: "bg-muted-foreground" },
   ERROR: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
 };
+
+/**
+ * Map a lifecycle-action failure (followup / continue / close) to a friendly,
+ * actionable message. The backend uses distinct HTTP codes: 409 = a concurrent
+ * operation is in progress or the conversation left the state that accepts the
+ * action (retry), 502 = a member agent could not be reached (unreachable),
+ * 504 = a member agent did not respond in time (timeout). Everything else falls
+ * back to the generic extracted message.
+ */
+function friendlyGroupActionError(
+  err: unknown,
+  t: (key: string, fallback: string) => string,
+): string {
+  if (isApiError(err)) {
+    if (err.status === 409)
+      return t(
+        "groups.actionConflict",
+        "Another operation is still in progress, or this discussion no longer accepts that action. Please retry.",
+      );
+    if (err.status === 502)
+      return t(
+        "groups.actionUnreachable",
+        "A member agent could not be reached. Please try again.",
+      );
+    if (err.status === 504)
+      return t(
+        "groups.actionTimeout",
+        "A member agent did not respond in time. Please try again.",
+      );
+  }
+  return getErrorMessage(err);
+}
 
 export function GroupDetailPage() {
   const { id: groupId } = useParams<{ id: string }>();
@@ -170,6 +210,81 @@ export function GroupDetailPage() {
     },
     [groupId, cancelDiscussionMutation, queryClient, t],
   );
+
+  // ─── Post-COMPLETED lifecycle: continue / follow-up / close ───────
+  // These act on a persisted (selected) conversation, not the live stream.
+  // Each returns the updated GroupConversation (with recomputed availableActions);
+  // we invalidate both the list and the single-conversation query so the action
+  // bar and transcript reflect the new state (a new round, a follow-up exchange,
+  // or the terminal CLOSED state that hides the bar entirely).
+  const invalidateConversations = useCallback(() => {
+    if (groupId) {
+      queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
+    }
+  }, [groupId, queryClient]);
+
+  const continueMutation = useMutation({
+    mutationFn: ({ gcId, question }: { gcId: string; question: string }) =>
+      continueGroupDiscussion(groupId!, gcId, question),
+    onSuccess: () => {
+      toast.success(t("groups.continueStarted", "New round started"));
+      invalidateConversations();
+    },
+    onError: (err) => toast.error(friendlyGroupActionError(err, t)),
+  });
+
+  const followupMutation = useMutation({
+    mutationFn: ({
+      gcId,
+      targetAgentId,
+      question,
+    }: {
+      gcId: string;
+      targetAgentId: string;
+      question: string;
+    }) => followupGroupMember(groupId!, gcId, question, targetAgentId),
+    onSuccess: () => {
+      toast.success(t("groups.followupSent", "Follow-up sent"));
+      invalidateConversations();
+    },
+    onError: (err) => toast.error(friendlyGroupActionError(err, t)),
+  });
+
+  const closeMutation = useMutation({
+    mutationFn: ({ gcId }: { gcId: string }) =>
+      closeGroupConversation(groupId!, gcId),
+    onSuccess: () => {
+      toast.success(t("groups.discussionClosed", "Discussion closed"));
+      invalidateConversations();
+    },
+    onError: (err) => toast.error(friendlyGroupActionError(err, t)),
+  });
+
+  const handleContinueDiscussion = useCallback(
+    (question: string) => {
+      if (!groupId || !selectedConvId) return;
+      continueMutation.mutate({ gcId: selectedConvId, question });
+    },
+    [groupId, selectedConvId, continueMutation],
+  );
+
+  const handleFollowupMember = useCallback(
+    (targetAgentId: string, question: string) => {
+      if (!groupId || !selectedConvId) return;
+      followupMutation.mutate({ gcId: selectedConvId, targetAgentId, question });
+    },
+    [groupId, selectedConvId, followupMutation],
+  );
+
+  const handleCloseConversation = useCallback(() => {
+    if (!groupId || !selectedConvId) return;
+    closeMutation.mutate({ gcId: selectedConvId });
+  }, [groupId, selectedConvId, closeMutation]);
+
+  const actionPending =
+    continueMutation.isPending ||
+    followupMutation.isPending ||
+    closeMutation.isPending;
 
   // Invalidate conversation list when stream starts (so the new entry appears in sidebar)
   // AND when it completes (so the state updates to COMPLETED)
@@ -499,6 +614,24 @@ export function GroupDetailPage() {
               isDeciding={cancelDiscussionMutation.isPending}
             />
           </div>
+          {/* Post-COMPLETED lifecycle action bar — driven entirely by the
+              backend's availableActions (never hardcoded). Hidden while a live
+              stream is active and absent once the conversation is CLOSED (empty
+              availableActions). Distinct from the DiscussionInput below, which
+              always starts a brand-new discussion. */}
+          {!isStreamActive &&
+            selectedConversation &&
+            (selectedConversation.availableActions?.length ?? 0) > 0 && (
+              <DiscussionActions
+                availableActions={selectedConversation.availableActions!}
+                members={safeConfig.members}
+                round={selectedConversation.round}
+                isPending={actionPending}
+                onContinue={handleContinueDiscussion}
+                onFollowup={handleFollowupMember}
+                onCloseDiscussion={handleCloseConversation}
+              />
+            )}
           {/* Input always at the bottom of the transcript panel */}
           <DiscussionInput
             onSubmit={handleStartDiscussion}
