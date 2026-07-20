@@ -5,6 +5,14 @@
 
 ---
 
+## 🔎 Auto-approve workflow — Copilot pagination review comment is a false positive (2026-07-20)
+
+**Repo:** EDDI (`chore/auto-approve-copilot`)
+
+Copilot flagged the CI-gate's `github.paginate(github.rest.checks.listForRef, …)` call, claiming it returns page objects rather than check-runs (so the gate would never approve) and suggested adding a `(response) => response.data.check_runs` map function. Verified against the **exact** runtime this workflow pins (`actions/github-script@v7.1.0` → `@octokit/plugin-paginate-rest@9.2.2`): the claim is backwards. Octokit auto-normalizes list responses that carry `total_count` (check-runs do), so `paginate()` already returns the flattened `check_runs` array — the current code is correct and yields `APPROVE`. The suggested map function would read `.check_runs` off that already-flattened array → `undefined` → `TypeError: Cannot read properties of undefined (reading 'name')`, crashing the job. Both outcomes were reproduced with a mocked-HTTP harness on the pinned versions. Left the call unchanged and added an inline comment documenting why no map function is used, so the concern isn't re-raised.
+
+---
+
 ## 🔀 Merge `origin/main` into `chore/auto-approve-copilot` — conflict resolution (2026-07-20)
 
 **Repo:** EDDI (`chore/auto-approve-copilot`)

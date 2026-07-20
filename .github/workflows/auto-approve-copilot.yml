@@ -186,6 +186,12 @@ jobs:
                 // completed and successful. Only check-runs are gated (EDDI's CI emits
                 // check-runs); any status-based required checks remain enforced by
                 // branch protection, which is the actual merge gate.
+                //
+                // NOTE: this paginate() call intentionally takes NO map function.
+                // Octokit auto-normalizes list responses that carry `total_count`
+                // (check-runs do), so paginate() already returns the flattened
+                // `check_runs` array. Adding `(r) => r.data.check_runs` would read
+                // `.check_runs` off that array → undefined → a TypeError below.
                 const checkRuns = await github.paginate(github.rest.checks.listForRef, {
                   owner, repo, ref: headSha, per_page: 100,
                 });
