@@ -116,7 +116,7 @@ class LlmTaskConfigureTest {
                 identityMaskingService, toolResponseTruncator,
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
                 null, null,
-                null, null, null, null, null,
+                null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
                 mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
     }
 

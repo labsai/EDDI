@@ -78,7 +78,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IScheduleStore scheduleStore;
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
 
-    private static final Logger log = Logger.getLogger(RestExportService.class);
+    private static final Logger LOGGER = Logger.getLogger(RestExportService.class);
     private static final String SCHEDULE_EXT = "schedule";
 
     /**
@@ -278,7 +278,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             return new ExportPreview(agentId, agentName, agentVersion, resources);
 
         } catch (Exception e) {
-            log.error("Export preview failed: " + e.getMessage(), e);
+            LOGGER.error("Export preview failed: " + e.getMessage(), e);
             throw sneakyThrow(e);
         }
     }
@@ -312,7 +312,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 resources.add(new ExportableResource(resId.getId(), resId.getVersion(), typeLabel, name, parentWorkflowId, -1, false));
             }
         } catch (Exception e) {
-            log.debugf("Could not extract %s resources from workflow: %s", typeLabel, e.getMessage());
+            LOGGER.debugf("Could not extract %s resources from workflow: %s", typeLabel, e.getMessage());
         }
     }
 
@@ -331,7 +331,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 allConfigs.add(jsonSerialization.serialize(outputStore.read(resId.getId(), resId.getVersion())));
             }
         } catch (Exception e) {
-            log.debugf("Could not scan extension content for snippets: %s", e.getMessage());
+            LOGGER.debugf("Could not scan extension content for snippets: %s", e.getMessage());
         }
     }
 
@@ -345,7 +345,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             try {
                 config = store.readIncludingDeleted(resourceIdUnused.getId(), versionToExport);
             } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-                log.error(e.getLocalizedMessage(), e);
+                LOGGER.error(e.getLocalizedMessage(), e);
             }
             while (versionToExport < 10000) {
                 try {
@@ -391,7 +391,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 // Scrub secrets before export (defense-in-depth)
                 return secretScrubber.scrubJson(json);
             } catch (IOException ex) {
-                log.error(ex.getLocalizedMessage(), ex);
+                LOGGER.error(ex.getLocalizedMessage(), ex);
                 return "";
             }
         }));
@@ -408,7 +408,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     writeDocumentDescriptor(path, resourceId.getId(), resourceId.getVersion());
                 }
             } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-                log.error(e.getLocalizedMessage(), e);
+                LOGGER.error(e.getLocalizedMessage(), e);
             }
         });
     }
@@ -470,7 +470,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     writeDocumentDescriptor(path, resourceId.getId(), resourceId.getVersion());
                 }
             } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-                log.error(e.getLocalizedMessage(), e);
+                LOGGER.error(e.getLocalizedMessage(), e);
             }
         });
     }
@@ -623,14 +623,14 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     }
                     exportedCount++;
                 } catch (IResourceStore.ResourceNotFoundException e) {
-                    log.debugf("Snippet descriptor references missing resource: %s", descriptor.getResource());
+                    LOGGER.debugf("Snippet descriptor references missing resource: %s", descriptor.getResource());
                 }
             }
             if (exportedCount > 0) {
-                log.infof("Exported %d snippet(s) (referenced: %s)", exportedCount, referencedNames);
+                LOGGER.infof("Exported %d snippet(s) (referenced: %s)", exportedCount, referencedNames);
             }
         } catch (Exception e) {
-            log.warnf("Failed to export snippets: %s", e.getMessage());
+            LOGGER.warnf("Failed to export snippets: %s", e.getMessage());
         }
     }
 
@@ -652,9 +652,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     writer.write(json);
                 }
             }
-            log.infof("Exported %d schedule(s) for Agent %s", schedules.size(), agentId);
+            LOGGER.infof("Exported %d schedule(s) for Agent %s", schedules.size(), agentId);
         } catch (Exception e) {
-            log.warnf("Failed to export schedules for Agent %s: %s", agentId, e.getMessage());
+            LOGGER.warnf("Failed to export schedules for Agent %s: %s", agentId, e.getMessage());
         }
     }
 }

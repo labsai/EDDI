@@ -176,6 +176,39 @@ class RestAgentEngineStreamingTest {
         }
 
         @Test
+        @DisplayName("cascade handler methods emit cascade_step_start and cascade_escalation SSE events")
+        void forwardsCascadeEvents() throws Exception {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var eventBuilder = mock(OutboundSseEvent.Builder.class);
+            var sseEvent = mock(OutboundSseEvent.class);
+            var inputData = new InputData();
+            inputData.setInput("Hi");
+
+            when(eventSink.isClosed()).thenReturn(false);
+            when(sse.newEventBuilder()).thenReturn(eventBuilder);
+            when(eventBuilder.name(anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.data(any(Class.class), anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.build()).thenReturn(sseEvent);
+
+            streaming.sayStreaming("conv-1", false, false, List.of(), inputData, eventSink, sse);
+
+            // Capture the handler the streaming endpoint wired up, then drive its cascade
+            // callbacks.
+            var cap = org.mockito.ArgumentCaptor.forClass(IConversationService.StreamingResponseHandler.class);
+            verify(conversationService).sayStreaming(eq("conv-1"), any(), any(), any(), any(), cap.capture());
+            var handler = cap.getValue();
+
+            handler.onCascadeStepStart(0, "openai", "gpt-4o-mini", 2);
+            verify(eventBuilder).name("cascade_step_start");
+            verify(eventSink).send(sseEvent);
+
+            handler.onCascadeEscalation(0, 1, 0.4, 0.7, "low_confidence", 42L);
+            verify(eventBuilder).name("cascade_escalation");
+            verify(eventSink, times(2)).send(sseEvent);
+        }
+
+        @Test
         @DisplayName("should handle closed sink gracefully")
         void handleClosedSink() throws Exception {
             var eventSink = mock(SseEventSink.class);
