@@ -38,7 +38,7 @@ export function QuickActions({ className }: QuickActionsProps) {
         "quickActions.chatWithAgentDesc",
         "Have a 1:1 conversation with any digital expert",
       ),
-      to: "/manage/agents",
+      to: "/workforce/chat",
     },
     {
       icon: TrendingUp,
@@ -56,7 +56,7 @@ export function QuickActions({ className }: QuickActionsProps) {
         "quickActions.manageWorkforceDesc",
         "Configure and deploy digital experts",
       ),
-      to: "/manage/agents",
+      to: "/workforce",
     },
   ];
 

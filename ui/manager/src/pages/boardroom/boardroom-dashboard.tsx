@@ -19,7 +19,7 @@ import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BoardroomCard } from "@/components/boardroom/boardroom-card";
-import { AgentWorkforceCard, AddAgentCard } from "@/components/boardroom/agent-workforce-card";
+import { AgentWorkforceCard } from "@/components/boardroom/agent-workforce-card";
 import { KnowledgeHealthCard } from "@/components/boardroom/knowledge-health-card";
 import { QuickActions } from "@/components/boardroom/quick-actions";
 import { OnboardingHero } from "@/components/boardroom/onboarding-hero";
@@ -198,7 +198,6 @@ function MobileFab() {
 function WorkforceSection() {
   const { t } = useTranslation();
   const { data: agentsRaw } = useAgentDescriptors(50);
-  const navigate = useNavigate();
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
 
   const agents = useMemo(
@@ -242,7 +241,6 @@ function WorkforceSection() {
             />
           );
         })}
-        <AddAgentCard onClick={() => navigate("/manage/agents/wizard")} />
       </div>
       <AgentEditorSheet agentId={editingAgentId} onClose={() => setEditingAgentId(null)} />
     </section>

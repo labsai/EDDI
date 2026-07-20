@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, PanelRightOpen, PanelRightClose } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGroup, useGroupConversations, useGroupConversation } from "@/hooks/use-groups";
 import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
@@ -12,6 +12,8 @@ import { MembersSheet } from "@/components/boardroom/members-sheet";
 import { ExportMenu } from "@/components/boardroom/export-menu";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { GroupConfigPanel } from "@/components/groups/group-config-panel";
+import type { AgentGroupConfiguration } from "@/lib/api/groups";
 
 // ─── Icons ───────────────────────────────────────────────────────
 
@@ -101,6 +103,7 @@ function BoardroomBoard() {
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
   const membersRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const panelTriggerRef = useRef<HTMLElement | null>(null);
@@ -309,11 +312,24 @@ function BoardroomBoard() {
             >
               <SettingsIcon />
             </Link>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowConfig((v) => !v)}
+              className={cn("h-8 w-8 max-xl:hidden", showConfig && "bg-primary/10")}
+              aria-label={t("boardroom.board.toggleConfig", "Toggle details panel")}
+              aria-expanded={showConfig}
+            >
+              {showConfig ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+            </Button>
           </div>
       </div>
 
-      {/* Transcript area */}
-      <div className="flex-1 overflow-y-auto ps-4 pe-4 pt-4 pb-4">
+      <div className="flex flex-1 min-h-0">
+        {/* Main content — transcript + input */}
+        <div className="flex flex-1 min-h-0 flex-col">
+          {/* Transcript area */}
+          <div className="flex-1 overflow-y-auto ps-4 pe-4 pt-4 pb-4">
         {displayTranscript.length > 0 ? (
           <BoardTranscript
             transcript={displayTranscript}
@@ -356,6 +372,31 @@ function BoardroomBoard() {
 
       {/* Input bar */}
       <BoardInput onSend={handleSend} disabled={isStreaming} />
+        </div>
+
+        {/* Config panel — right sidebar, read-only */}
+        {showConfig && groupConfig && (
+          <div className="w-72 shrink-0 border-s border-border bg-card overflow-hidden flex flex-col max-xl:hidden">
+            <div className="p-3 border-b border-border flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("boardroom.board.details", "Details")}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowConfig(false)}
+                className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label={t("boardroom.board.hideConfig", "Hide details panel")}
+              >
+                <PanelRightClose className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <GroupConfigPanel
+              config={groupConfig as unknown as AgentGroupConfiguration}
+              className="flex-1 min-h-0"
+            />
+          </div>
+        )}
+      </div>
 
       {/* Members sheet slide-over */}
       {showMembers && (

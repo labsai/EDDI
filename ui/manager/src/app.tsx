@@ -45,6 +45,7 @@ import { BoardroomThread } from "@/pages/boardroom/boardroom-thread";
 import { BoardroomSettings } from "@/pages/boardroom/boardroom-settings";
 import { BoardroomHistory } from "@/pages/boardroom/boardroom-history";
 import { BoardroomAnalytics } from "@/pages/boardroom/boardroom-analytics";
+import { WorkforceChat } from "@/pages/boardroom/workforce-chat";
 
 /** Redirect /boardroom/* → /workforce/* preserving sub-paths */
 function BoardroomRedirect() {
@@ -69,6 +70,7 @@ export function App() {
         <Route index element={<BoardroomDashboard />} />
         <Route path="new" element={<BoardroomWizard />} />
         <Route path="analytics" element={<BoardroomAnalytics />} />
+        <Route path="chat" element={<WorkforceChat />} />
         <Route path=":boardId" element={<BoardroomBoard />} />
         <Route path=":boardId/thread/:memberId" element={<BoardroomThread />} />
         <Route path=":boardId/settings" element={<BoardroomSettings />} />

@@ -9,7 +9,6 @@ import {
   X,
   Users,
   BarChart3,
-  Settings2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -205,23 +204,8 @@ export function BoardroomSidebar({
         </ul>
       </nav>
 
-      {/* ── Footer: Manager Link + Theme Toggle ────────────────── */}
-      <div className="shrink-0 border-t border-border ps-3 pe-3 py-2 space-y-1">
-        <Link
-          to="/manage"
-          className={cn(
-            "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-sm transition-colors",
-            "text-muted-foreground hover:bg-muted hover:text-foreground",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            collapsed && "justify-center ps-0 pe-0",
-          )}
-          title={collapsed ? t("boardroom.goToManager", "Manager") : undefined}
-        >
-          <Settings2 className="h-4 w-4 shrink-0" />
-          {!collapsed && (
-            <span>{t("boardroom.goToManager", "Manager")}</span>
-          )}
-        </Link>
+      {/* ── Footer: Theme Toggle ─────────────────────────────────── */}
+      <div className="shrink-0 border-t border-border ps-3 pe-3 py-2">
         <Button
           variant="ghost"
           size={collapsed ? "icon" : "sm"}
@@ -280,7 +264,7 @@ function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?
                 onClick={() =>
                   boardId
                     ? navigate(`/workforce/${boardId}/thread/${agentId}`)
-                    : navigate(`/manage/chat?agentId=${agentId}`)
+                    : navigate(`/workforce/chat?agentId=${agentId}`)
                 }
                 title={collapsed ? agent.name : undefined}
                 className={cn(

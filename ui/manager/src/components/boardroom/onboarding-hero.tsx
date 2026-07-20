@@ -222,7 +222,7 @@ function DeployAgentBanner() {
         </p>
       </div>
       <Button asChild variant="primary" size="sm" className="shrink-0">
-        <Link to="/manage/agents/wizard">
+        <Link to="/workforce/new">
           <Bot className="h-4 w-4" />
           {t("boardroom.onboarding.deployAgent", "Deploy Agent")}
         </Link>
@@ -307,7 +307,7 @@ function OnboardingHero() {
                   size="sm"
                   className="text-xs"
                 >
-                  <Link to="/manage/agents/wizard">
+                  <Link to="/workforce/new">
                     {t(
                       "boardroom.onboarding.deployFirst2",
                       "Deploy your first →",

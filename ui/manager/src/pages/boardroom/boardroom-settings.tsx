@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   Plus,
   X,
-  ExternalLink,
   Settings,
   Trash2,
   Bookmark,
@@ -647,15 +646,6 @@ function BoardroomSettings() {
                       ? t("boardroom.settings.typeAgent", "Agent")
                       : t("boardroom.settings.typeModerator", "Moderator")}
                   </Badge>
-                  <a
-                    href={`/manage/agents?id=${member.agentId}`}
-                    className="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <ExternalLink className="h-3 w-3" />
-                    {t("boardroom.settings.openInManager", "Open in Manager")}
-                  </a>
                 </div>
               </div>
 

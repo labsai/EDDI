@@ -6,7 +6,6 @@ import {
   MessageSquare,
   AlertTriangle,
   Type,
-  ExternalLink,
   Pencil,
   GitCompareArrows,
 } from "lucide-react";
@@ -292,14 +291,12 @@ function AgentPerformanceSheet({
           )}
           <Button variant="ghost" className="w-full" asChild>
             <a
-              href={`/manage/agents?id=${agent.agentId}`}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={`/workforce/chat?agentId=${agent.agentId}`}
             >
-              <ExternalLink className="h-4 w-4" />
+              <MessageSquare className="h-4 w-4" />
               {t(
-                "boardroom.analytics.viewInManager",
-                "View in Manager",
+                "boardroom.analytics.chatWithAgent",
+                "Chat with Agent",
               )}
             </a>
           </Button>
