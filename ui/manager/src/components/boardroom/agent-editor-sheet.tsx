@@ -18,8 +18,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 interface AgentEditorSheetProps {
   agentId: string | null;
   onClose: () => void;
-  /** When true, renders as an inline panel instead of a fixed overlay */
-  inline?: boolean;
 }
 
 // ─── Confidence helpers ──────────────────────────────────────────
@@ -41,7 +39,7 @@ function confidenceBadgeVariant(
 
 // ─── Component ───────────────────────────────────────────────────
 
-function AgentEditorSheet({ agentId, onClose, inline = false }: AgentEditorSheetProps) {
+function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
@@ -260,37 +258,31 @@ function AgentEditorSheet({ agentId, onClose, inline = false }: AgentEditorSheet
 
   return (
     <>
-      {/* Backdrop overlay — only for non-inline mode */}
-      {!inline && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300"
-          onClick={() => {
-            if (isDirty) {
-              if (!window.confirm(t("boardroom.agentEditor.discardChanges", "You have unsaved changes. Discard?"))) {
-                return;
-              }
+      {/* Backdrop overlay */}
+      <div
+        className="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300"
+        onClick={() => {
+          if (isDirty) {
+            if (!window.confirm(t("boardroom.agentEditor.discardChanges", "You have unsaved changes. Discard?"))) {
+              return;
             }
-            onClose();
-          }}
-          aria-hidden="true"
-        />
-      )}
+          }
+          onClose();
+        }}
+        aria-hidden="true"
+      />
 
       {/* Panel */}
       <div
         className={cn(
-          inline
-            ? "w-[400px] shrink-0 border-s border-border bg-background flex flex-col overflow-hidden max-lg:hidden"
-            : cn(
-                "fixed top-0 end-0 bottom-0 w-[480px] max-w-full",
-                "bg-background border-s border-border z-50",
-                "flex flex-col",
-                "transition-transform duration-300",
-                "shadow-2xl",
-              ),
+          "fixed top-0 end-0 bottom-0 w-[480px] max-w-full",
+          "bg-background border-s border-border z-50",
+          "flex flex-col",
+          "transition-transform duration-300",
+          "shadow-2xl",
         )}
-        role={inline ? "region" : "dialog"}
-        aria-modal={inline ? undefined : true}
+        role="dialog"
+        aria-modal={true}
         aria-label={t("boardroom.agentEditor.title", "Edit Agent")}
       >
         {/* ── Header ──────────────────────────────────────── */}

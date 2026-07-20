@@ -131,7 +131,7 @@ export function BoardroomLayout() {
         <BoardroomTopbar />
         <main
           id="boardroom-main"
-          className="flex flex-1 flex-col min-h-0 overflow-auto"
+          className="flex flex-1 flex-col min-h-0 overflow-hidden pb-20"
           style={{ backgroundColor: "var(--br-bg)" }}
         >
           <Outlet />
@@ -157,7 +157,7 @@ export function BoardroomLayout() {
 
         <main
           id="boardroom-main"
-          className="flex flex-1 flex-col min-h-0 overflow-auto"
+          className="flex flex-1 flex-col min-h-0 overflow-hidden"
           style={{ backgroundColor: "var(--br-bg)" }}
         >
           <Outlet />
@@ -216,7 +216,7 @@ export function BoardroomLayout() {
         <BoardroomTopbar />
         <main
           id="boardroom-main"
-          className="flex flex-1 flex-col min-h-0 overflow-auto"
+          className="flex flex-1 flex-col min-h-0 overflow-hidden"
           style={{ backgroundColor: "var(--br-bg)" }}
         >
           <Outlet />

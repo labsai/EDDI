@@ -20,6 +20,7 @@ export interface AgentWorkforceCardProps {
 
 export function AgentWorkforceCard({
   name,
+  agentId,
   description,
   onClick,
   className,
@@ -40,22 +41,30 @@ export function AgentWorkforceCard({
       )}
       title={description ?? name}
     >
-      {/* Avatar */}
+      {/* Avatar — color-hashed by agentId */}
       <div
-        className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold bg-muted text-muted-foreground transition-transform duration-200 group-hover:scale-105"
+        className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold transition-transform duration-200 group-hover:scale-105"
+        style={{
+          backgroundColor: `hsl(${[...agentId].reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 40%, 25%)`,
+          color: `hsl(${[...agentId].reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 50%, 75%)`,
+        }}
         aria-hidden
       >
         {getInitials(name)}
       </div>
 
       {/* Name */}
-      <p className="w-full text-xs font-medium text-foreground truncate">{name}</p>
+      <p className="w-full text-sm font-medium text-foreground truncate">{name}</p>
 
-      {/* Status dot */}
-      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/60" />
-        {t("workforce.ready", "Ready")}
-      </span>
+      {/* Description or status */}
+      {description ? (
+        <p className="w-full text-[10px] text-muted-foreground truncate">{description}</p>
+      ) : (
+        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/60" />
+          {t("workforce.ready", "Ready")}
+        </span>
+      )}
     </button>
   );
 }

@@ -648,7 +648,7 @@ function BoardroomThread() {
             type="button"
             onClick={() => setShowDetails((v) => !v)}
             className={cn(
-              "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-lg:hidden",
               showDetails
                 ? "bg-primary/10 text-primary"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -657,6 +657,7 @@ function BoardroomThread() {
               "boardroom.chat.toggleDetails",
               showDetails ? "Hide agent details" : "Show agent details"
             )}
+            aria-expanded={showDetails}
           >
             {showDetails ? (
               <PanelRightClose className="h-4 w-4" />
@@ -804,7 +805,7 @@ function BoardroomThread() {
 
       {/* Right details panel */}
       {showDetails && (
-        <div className="w-80 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden">
+        <div className="w-72 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden">
           <div className="p-3 border-b border-border flex items-center justify-between shrink-0">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {t("boardroom.chat.agentDetails", "Agent Details")}

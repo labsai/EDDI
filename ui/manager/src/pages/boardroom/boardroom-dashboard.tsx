@@ -344,7 +344,7 @@ function BoardroomDashboard() {
 
   // Populated — 3-pillar Intelligence Dashboard
   return (
-    <div className="p-5 md:p-8 space-y-8">
+    <div className="flex-1 overflow-auto p-5 md:p-8 space-y-8">
       {/* ─── Pillar 1: Your Digital Workforce ────────────────── */}
       <WorkforceSection />
 

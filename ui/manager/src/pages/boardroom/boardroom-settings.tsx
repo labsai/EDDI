@@ -401,7 +401,7 @@ function BoardroomSettings() {
     deleteMutation.isPending || deleteWithMembersMutation.isPending;
 
   return (
-    <div className="max-w-3xl ms-auto me-auto p-5 sm:p-8 pb-24">
+    <div className="flex-1 overflow-auto max-w-3xl ms-auto me-auto p-5 sm:p-8 pb-24">
       {/* ── Back link ───────────────────────────────────────────── */}
       <Link
         to={`/workforce/${boardId}?version=${version}`}

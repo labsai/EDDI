@@ -64,7 +64,7 @@ export function WorkforceChat() {
             type="button"
             onClick={() => setShowDetails((v) => !v)}
             className={cn(
-              "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+              "flex h-7 w-7 items-center justify-center rounded-md transition-colors max-lg:hidden",
               showDetails
                 ? "bg-primary/10 text-primary"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -74,6 +74,7 @@ export function WorkforceChat() {
               "boardroom.chat.toggleDetails",
               showDetails ? "Hide agent details" : "Show agent details",
             )}
+            aria-expanded={showDetails}
           >
             {showDetails ? (
               <PanelRightClose className="h-4 w-4" />
