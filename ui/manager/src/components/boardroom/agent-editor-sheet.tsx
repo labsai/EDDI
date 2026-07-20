@@ -401,7 +401,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                     <Skeleton className="h-4 w-3/4" />
                     <Skeleton className="h-24 w-full" />
                   </div>
-                ) : promptData ? (
+                ) : (
                   <textarea
                     id="agent-system-prompt"
                     className={cn(
@@ -419,13 +419,6 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
                   />
-                ) : (
-                  <p className="text-xs text-muted-foreground italic">
-                    {t(
-                      "boardroom.agentEditor.noPrompt",
-                      "This agent has no configurable system prompt."
-                    )}
-                  </p>
                 )}
               </section>
 
@@ -596,7 +589,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                         className={cn(
                           "absolute top-0.5 h-4 w-4 rounded-full bg-background shadow",
                           "transition-all duration-200",
-                          a2aEnabled ? "inset-inline-start-[18px]" : "inset-inline-start-0.5"
+                          a2aEnabled ? "start-[18px]" : "start-0.5"
                         )}
                       />
                     </div>
@@ -633,8 +626,8 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                           "absolute top-0.5 h-4 w-4 rounded-full bg-background shadow",
                           "transition-all duration-200",
                           enableMemoryTools
-                            ? "inset-inline-start-[18px]"
-                            : "inset-inline-start-0.5"
+                            ? "start-[18px]"
+                            : "start-0.5"
                         )}
                       />
                     </div>
