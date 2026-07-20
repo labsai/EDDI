@@ -368,6 +368,58 @@ describe("useUndeployAgent", () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
+
+  it("appends the destructive query flags when the options are passed", async () => {
+    let captured: URL | null = null;
+    server.use(
+      http.post("*/administration/:env/undeploy/:id", ({ request }) => {
+        captured = new URL(request.url);
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    const { result } = renderHook(() => useUndeployAgent(), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      result.current.mutate({
+        agentId: "agent1",
+        version: 3,
+        endAllActiveConversations: true,
+        undeployAllPreviousVersions: true,
+      });
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(captured).not.toBeNull();
+    expect(captured!.searchParams.get("version")).toBe("3");
+    expect(captured!.searchParams.get("endAllActiveConversations")).toBe("true");
+    expect(captured!.searchParams.get("undeployAllPreviousVersions")).toBe("true");
+  });
+
+  it("omits the destructive query flags when the options are not passed", async () => {
+    let captured: URL | null = null;
+    server.use(
+      http.post("*/administration/:env/undeploy/:id", ({ request }) => {
+        captured = new URL(request.url);
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    const { result } = renderHook(() => useUndeployAgent(), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      result.current.mutate({ agentId: "agent1", version: 3 });
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(captured).not.toBeNull();
+    expect(captured!.searchParams.has("endAllActiveConversations")).toBe(false);
+    expect(captured!.searchParams.has("undeployAllPreviousVersions")).toBe(false);
+  });
 });
 
 describe("groupAgentsByName", () => {

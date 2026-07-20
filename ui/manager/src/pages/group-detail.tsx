@@ -24,6 +24,7 @@ import { GroupConfigPanel } from "@/components/groups/group-config-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { BackLink } from "@/components/shared/back-link";
 import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,10 @@ export function GroupDetailPage() {
   const [showDiscussions, setShowDiscussions] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Discussion id awaiting a cancel confirmation. The hover "X" sits right next
+  // to the Delete trash icon, so a mis-click must not abort a live discussion —
+  // route it through a confirmation before the cancel mutation fires.
+  const [cancelTarget, setCancelTarget] = useState<string | null>(null);
 
   const {
     data: groupConfig,
@@ -324,7 +329,7 @@ export function GroupDetailPage() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleCancelDiscussion(conv.id);
+                      setCancelTarget(conv.id);
                     }}
                     className="opacity-0 group-hover/item:opacity-100 rounded p-0.5 text-muted-foreground hover:text-destructive transition-all"
                     title={t("hitl.cancelDiscussion", "Cancel discussion")}
@@ -523,6 +528,25 @@ export function GroupDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Cancel confirmation — the hover "X" must not abort a discussion on a
+          single (mis-)click next to the Delete icon. */}
+      <AlertDialog
+        open={cancelTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setCancelTarget(null);
+        }}
+        title={t("hitl.confirmCancelGroupTitle", "Cancel discussion?")}
+        description={t("hitl.confirmCancelGroupDescription", "Cancel this discussion? Any in-progress work is aborted.")}
+        confirmLabel={t("hitl.confirmCancelGroupButton", "Cancel discussion")}
+        cancelLabel={t("hitl.confirmDismiss", "Go back")}
+        variant="destructive"
+        isPending={cancelDiscussionMutation.isPending}
+        onConfirm={() => {
+          if (cancelTarget) handleCancelDiscussion(cancelTarget);
+          setCancelTarget(null);
+        }}
+      />
     </div>
   );
 }

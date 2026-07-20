@@ -202,11 +202,19 @@ export function useUndeployAgent() {
       environment = "production",
       agentId,
       version,
+      endAllActiveConversations,
+      undeployAllPreviousVersions,
     }: {
       environment?: string;
       agentId: string;
       version: number;
-    }) => undeployAgent(environment, agentId, version),
+      endAllActiveConversations?: boolean;
+      undeployAllPreviousVersions?: boolean;
+    }) =>
+      undeployAgent(environment, agentId, version, {
+        endAllActiveConversations,
+        undeployAllPreviousVersions,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
       queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });

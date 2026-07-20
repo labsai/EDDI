@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import {
   usePendingApprovals,
   useAllGroupPendingApprovals,
@@ -27,9 +28,16 @@ import { timeoutPolicyLabel } from "@/lib/hitl-labels";
 import { useHasRole } from "@/hooks/use-auth";
 import type { PendingApprovalSummary, HitlVerdict } from "@/lib/api/hitl";
 
+/** A pending confirmation for an irreversible queue action. */
+type PendingConfirm = { item: PendingApprovalSummary; action: HitlVerdict | "CANCEL" };
+
 export function ApprovalsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
+  // Approve/Reject/Cancel from the queue are irreversible (resume executes the
+  // gated tools / rejection can't be undone / cancel aborts the run), so each
+  // routes through this confirmation before the mutation fires.
+  const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
   // The backend scopes the inbox by role: admins/approvers see every pending
   // approval, everyone else sees only their own conversations. Communicate
   // which scope the list reflects so an owner-scoped empty queue isn't mistaken
@@ -71,7 +79,7 @@ export function ApprovalsPage() {
     );
   });
 
-  const handleQuickAction = (item: PendingApprovalSummary, verdict: HitlVerdict) => {
+  const doQuickAction = (item: PendingApprovalSummary, verdict: HitlVerdict) => {
     if (!item.groupId) {
       // Regular conversation
       resumeMutation.mutate(
@@ -84,7 +92,7 @@ export function ApprovalsPage() {
     }
   };
 
-  const handleCancel = (item: PendingApprovalSummary) => {
+  const doCancel = (item: PendingApprovalSummary) => {
     if (!item.groupId) {
       cancelMutation.mutate(item.conversationId, {
         onSuccess: () => toast.success(t("hitl.cancelled", "Cancelled")),
@@ -92,6 +100,45 @@ export function ApprovalsPage() {
       });
     }
   };
+
+  // Only fired after the reviewer confirms in the AlertDialog.
+  const runConfirmedAction = () => {
+    if (!confirm) return;
+    const { item, action } = confirm;
+    setConfirm(null);
+    if (action === "CANCEL") doCancel(item);
+    else doQuickAction(item, action);
+  };
+
+  const confirmDialog = (() => {
+    if (!confirm) return null;
+    switch (confirm.action) {
+      case "APPROVED":
+        return {
+          title: t("hitl.confirmApproveTitle", "Approve request?"),
+          description: t("hitl.confirmApproveDescription", "Approve and resume this conversation?"),
+          confirmLabel: t("hitl.approve", "Approve"),
+          variant: "warning" as const,
+          isPending: resumeMutation.isPending,
+        };
+      case "REJECTED":
+        return {
+          title: t("hitl.confirmRejectTitle", "Reject request?"),
+          description: t("hitl.confirmRejectDescription", "Reject this request? The conversation will not proceed."),
+          confirmLabel: t("hitl.reject", "Reject"),
+          variant: "destructive" as const,
+          isPending: resumeMutation.isPending,
+        };
+      case "CANCEL":
+        return {
+          title: t("hitl.confirmCancelTitle", "Cancel conversation?"),
+          description: t("hitl.confirmCancelDescription", "Cancel this conversation? Any in-progress work is aborted."),
+          confirmLabel: t("hitl.confirmCancelButton", "Cancel conversation"),
+          variant: "destructive" as const,
+          isPending: cancelMutation.isPending,
+        };
+    }
+  })();
 
   // Loading state — wait for BOTH the regular and cross-group queries so an
   // empty regular list doesn't flash "No pending approvals" before group items load.
@@ -296,7 +343,7 @@ export function ApprovalsPage() {
                             {t("hitl.review", "Review")}
                           </Link>
                           <button
-                            onClick={() => handleCancel(item)}
+                            onClick={() => setConfirm({ item, action: "CANCEL" })}
                             disabled={cancelMutation.isPending && cancelMutation.variables === item.conversationId}
                             className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                             data-testid={`cancel-${item.conversationId}`}
@@ -308,7 +355,7 @@ export function ApprovalsPage() {
                       {!item.groupId && item.pauseType !== "TOOL_CALL" && (
                         <>
                           <button
-                            onClick={() => handleQuickAction(item, "APPROVED")}
+                            onClick={() => setConfirm({ item, action: "APPROVED" })}
                             disabled={resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId}
                             className="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
                             data-testid={`approve-${item.conversationId}`}
@@ -316,7 +363,7 @@ export function ApprovalsPage() {
                             {t("hitl.approve", "Approve")}
                           </button>
                           <button
-                            onClick={() => handleQuickAction(item, "REJECTED")}
+                            onClick={() => setConfirm({ item, action: "REJECTED" })}
                             disabled={resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId}
                             className="rounded-md bg-destructive px-2.5 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
                             data-testid={`reject-${item.conversationId}`}
@@ -324,7 +371,7 @@ export function ApprovalsPage() {
                             {t("hitl.reject", "Reject")}
                           </button>
                           <button
-                            onClick={() => handleCancel(item)}
+                            onClick={() => setConfirm({ item, action: "CANCEL" })}
                             disabled={cancelMutation.isPending && cancelMutation.variables === item.conversationId}
                             className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                             data-testid={`cancel-${item.conversationId}`}
@@ -348,6 +395,23 @@ export function ApprovalsPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Confirmation gate — no queue action fires on a single click. */}
+      {confirmDialog && (
+        <AlertDialog
+          open={confirm !== null}
+          onOpenChange={(open) => {
+            if (!open) setConfirm(null);
+          }}
+          title={confirmDialog.title}
+          description={confirmDialog.description}
+          confirmLabel={confirmDialog.confirmLabel}
+          cancelLabel={t("hitl.confirmDismiss", "Go back")}
+          variant={confirmDialog.variant}
+          isPending={confirmDialog.isPending}
+          onConfirm={runConfirmedAction}
+        />
       )}
     </div>
   );

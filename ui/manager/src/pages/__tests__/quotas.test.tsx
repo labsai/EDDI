@@ -1,13 +1,22 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
+import { toast } from "sonner";
 
 import { QuotasPage } from "@/pages/quotas";
+
+// Mock sonner toast so we can assert on toast calls
+vi.mock("sonner", () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
+}));
 
 function renderQuotas() {
   const queryClient = new QueryClient({
@@ -28,6 +37,10 @@ function renderQuotas() {
 }
 
 describe("QuotasPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   // ─── Rendering ────────────────────────────────────────────────
 
   it("renders the page header and description", async () => {
@@ -185,7 +198,9 @@ describe("QuotasPage", () => {
     });
   });
 
-  it("calls reset usage endpoint on reset button click", async () => {
+  // Regression: POST /usage/reset is semi-destructive (zeroes ALL live usage
+  // counters) with no confirmation at the API level, so the UI must gate it.
+  it("does NOT call the reset endpoint immediately — it opens a confirm dialog first", async () => {
     const user = userEvent.setup();
     const resetFn = vi.fn();
     server.use(
@@ -203,8 +218,68 @@ describe("QuotasPage", () => {
 
     await user.click(screen.getByTestId("quotas-reset-usage"));
 
+    // The confirmation dialog appears instead of firing the request.
+    expect(
+      await screen.findByText("Reset usage counters?"),
+    ).toBeInTheDocument();
+    expect(resetFn).not.toHaveBeenCalled();
+  });
+
+  it("resets usage counters only after confirming in the dialog", async () => {
+    const user = userEvent.setup();
+    const resetFn = vi.fn();
+    server.use(
+      http.post("*/administration/quotas/:tenantId/usage/reset", () => {
+        resetFn();
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+
+    renderQuotas();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quotas-reset-usage")).toBeInTheDocument();
+    });
+
+    // Open the confirmation dialog.
+    await user.click(screen.getByTestId("quotas-reset-usage"));
+    const dialog = await screen.findByRole("dialog");
+
+    // Confirm — this is what actually triggers POST .../usage/reset.
+    await user.click(
+      within(dialog).getByRole("button", { name: "Reset Counters" }),
+    );
+
     await waitFor(() => {
       expect(resetFn).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalled();
+    });
+  });
+
+  it("surfaces an error toast when the reset request fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("*/administration/quotas/:tenantId/usage/reset", () => {
+        return new HttpResponse(null, { status: 500 });
+      }),
+    );
+
+    renderQuotas();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quotas-reset-usage")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId("quotas-reset-usage"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Reset Counters" }),
+    );
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled();
     });
   });
 

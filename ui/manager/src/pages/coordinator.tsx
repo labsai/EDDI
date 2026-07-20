@@ -20,6 +20,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { StreamBadge } from "@/components/ui/stream-badge";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   useCoordinatorStatus,
@@ -59,6 +60,7 @@ export function CoordinatorPage() {
   const discardMutation = useDiscardDeadLetter();
   const purgeMutation = usePurgeDeadLetters();
   const [confirmPurge, setConfirmPurge] = useState(false);
+  const [discardTarget, setDiscardTarget] = useState<string | null>(null);
   const [refreshInterval, setRefreshInterval] = useState(10);
   const [expandedPayloads, setExpandedPayloads] = useState<Set<string>>(new Set());
 
@@ -146,9 +148,13 @@ export function CoordinatorPage() {
     });
   };
 
-  const handleDiscard = (id: string) => {
-    discardMutation.mutate(id, {
-      onSuccess: () => toast.success(t("coordinator.discardSuccess", "Dead-letter discarded")),
+  const confirmDiscard = () => {
+    if (!discardTarget) return;
+    discardMutation.mutate(discardTarget, {
+      onSuccess: () => {
+        toast.success(t("coordinator.discardSuccess", "Dead-letter discarded"));
+        setDiscardTarget(null);
+      },
       onError: () => toast.error(t("coordinator.discardError", "Failed to discard")),
     });
   };
@@ -500,7 +506,7 @@ export function CoordinatorPage() {
                           <RotateCcw className="h-4 w-4" />
                         </button>
                         <button
-                          onClick={() => handleDiscard(entry.id)}
+                          onClick={() => setDiscardTarget(entry.id)}
                           disabled={discardMutation.isPending}
                           title={t("coordinator.discard", "Discard")}
                           className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
@@ -517,6 +523,24 @@ export function CoordinatorPage() {
           </div>
         )}
       </div>
+
+      {/* Single dead-letter discard confirmation */}
+      <AlertDialog
+        open={discardTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDiscardTarget(null);
+        }}
+        title={t("coordinator.confirmDiscardTitle", "Discard dead-letter entry?")}
+        description={t(
+          "coordinator.confirmDiscardDescription",
+          "This permanently removes the dead-lettered task. It cannot be replayed afterwards. This cannot be undone."
+        )}
+        confirmLabel={t("coordinator.discard", "Discard")}
+        cancelLabel={t("coordinator.cancel", "Cancel")}
+        onConfirm={confirmDiscard}
+        variant="destructive"
+        isPending={discardMutation.isPending}
+      />
     </div>
   );
 }

@@ -250,13 +250,34 @@ export function deployAgent(
   );
 }
 
+/**
+ * Undeploy an agent from an environment.
+ *
+ * The backend `IRestDeploymentStore` undeploy endpoint accepts two optional
+ * destructive query flags (both default to `false`):
+ *   - `endAllActiveConversations` — terminate every in-progress conversation
+ *     on this deployment (irreversible).
+ *   - `undeployAllPreviousVersions` — also undeploy every earlier version of
+ *     this agent from the environment.
+ */
 export function undeployAgent(
   environment: string,
   agentId: string,
-  version: number
+  version: number,
+  options?: {
+    endAllActiveConversations?: boolean;
+    undeployAllPreviousVersions?: boolean;
+  }
 ): Promise<void> {
+  const params = new URLSearchParams({ version: String(version) });
+  if (options?.endAllActiveConversations) {
+    params.set("endAllActiveConversations", "true");
+  }
+  if (options?.undeployAllPreviousVersions) {
+    params.set("undeployAllPreviousVersions", "true");
+  }
   return api.post(
-    `/administration/${environment}/undeploy/${agentId}?version=${version}`
+    `/administration/${environment}/undeploy/${agentId}?${params.toString()}`
   );
 }
 
