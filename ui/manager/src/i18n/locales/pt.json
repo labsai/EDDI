@@ -1445,6 +1445,7 @@
         "step3Desc": "Ataques de rotinas travadas prontas ao descarte rápido seguro de banco relacional livre local seguro autônomo limpo virtual lógico dinâmico veloz."
       },
       "orphans": {
+    "confirmPurgeAll": "Excluir permanentemente TODOS os {{count}} recursos órfãos? O servidor limpa todos — sua seleção não é aplicada. Isso não pode ser desfeito.",
         "title": "Tour de Órfãos",
         "step1Title": "Caçador Virtual Aberto",
         "step1Desc": "Mapeia esquemas isolados de ligações diretas a cadeias vitais seguras.",

@@ -1445,6 +1445,7 @@
         "step3Desc": "Abgestützte Tasks überprüfen, wieder einreihen (replay) oder löschen."
       },
       "orphans": {
+    "confirmPurgeAll": "ALLE {{count}} verwaisten Ressourcen dauerhaft löschen? Der Server löscht alle — Ihre Auswahl wird nicht angewendet. Dies kann nicht rückgängig gemacht werden.",
         "title": "Orphans-Tour",
         "step1Title": "Scan-Tool",
         "step1Desc": "Entfernen Sie unverlinkte Fragmente der Konfiguration.",

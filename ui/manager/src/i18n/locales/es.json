@@ -1445,6 +1445,7 @@
         "step3Desc": "Inspeccione las tareas fallidas en la cola de dead-letter, descártelas o reinténtelas para mantener la plataforma estable."
       },
       "orphans": {
+    "confirmPurgeAll": "¿Eliminar permanentemente TODOS los {{count}} recursos huérfanos? El servidor purga todos — tu selección no se aplica. Esto no se puede deshacer.",
         "title": "Tour de Huérfanos",
         "step1Title": "Escaneo de sistema",
         "step1Desc": "Active el escaneo para buscar recursos o configuraciones que ya no estén conectadas ni utilizadas.",

@@ -1445,6 +1445,7 @@
         "step3Desc": "Restituez d'anciennes interruptions, retirez-les ou soumettez-les à un exécuteur pour validation."
       },
       "orphans": {
+    "confirmPurgeAll": "Supprimer définitivement TOUTES les {{count}} ressources orphelines ? Le serveur purge tout — votre sélection n’est pas appliquée. Action irréversible.",
         "title": "Visite des Objets Orphelins",
         "step1Title": "Exploration complète",
         "step1Desc": "Localisez instantanément vos données devenues errantes au sein des configurations.",
