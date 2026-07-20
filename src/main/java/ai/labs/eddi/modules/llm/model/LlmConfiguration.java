@@ -1061,6 +1061,48 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Ordered list of cascade steps (cheap → expensive) */
         private List<CascadeStep> steps;
 
+        /**
+         * Optional judge model for the {@code judge_model} evaluation strategy. Built
+         * lazily via {@code ChatModelRegistry} (with vault + global-variable
+         * resolution). Required when {@code evaluationStrategy = "judge_model"}.
+         */
+        private JudgeModelConfig judgeModel;
+
+        /**
+         * Optional overrides for the {@code heuristic} evaluation strategy. When null,
+         * the built-in English defaults are used. Enables per-deployment localization
+         * of hedging/refusal phrases and thresholds.
+         */
+        private HeuristicConfig heuristic;
+
+        /**
+         * Optional wall-clock ceiling (milliseconds) across the whole cascade. When the
+         * accumulated duration reaches this ceiling, the cascade stops escalating and
+         * returns the best response seen so far. Null = unlimited.
+         */
+        private Long maxTotalDurationMs;
+
+        /**
+         * Optional dollar ceiling for a single cascade run. Computed from captured
+         * token usage and per-step pricing. When the accumulated cost reaches this
+         * ceiling, the cascade stops escalating and returns the best response so far.
+         * Null = unlimited. Steps without configured pricing contribute $0.
+         */
+        private Double maxCostPerRun;
+
+        /** Cascade-level default input price per 1M tokens (steps may override). */
+        private Double inputPricePer1M;
+
+        /** Cascade-level default output price per 1M tokens (steps may override). */
+        private Double outputPricePer1M;
+
+        /**
+         * When true, if an earlier (escalated) step scored strictly higher than the
+         * finally-accepted step, the earlier step's response is returned instead.
+         * Default false preserves the last-step-wins behavior.
+         */
+        private boolean returnBestAcrossSteps = false;
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -1100,6 +1142,62 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public void setSteps(List<CascadeStep> steps) {
             this.steps = steps;
         }
+
+        public JudgeModelConfig getJudgeModel() {
+            return judgeModel;
+        }
+
+        public void setJudgeModel(JudgeModelConfig judgeModel) {
+            this.judgeModel = judgeModel;
+        }
+
+        public HeuristicConfig getHeuristic() {
+            return heuristic;
+        }
+
+        public void setHeuristic(HeuristicConfig heuristic) {
+            this.heuristic = heuristic;
+        }
+
+        public Long getMaxTotalDurationMs() {
+            return maxTotalDurationMs;
+        }
+
+        public void setMaxTotalDurationMs(Long maxTotalDurationMs) {
+            this.maxTotalDurationMs = maxTotalDurationMs;
+        }
+
+        public Double getMaxCostPerRun() {
+            return maxCostPerRun;
+        }
+
+        public void setMaxCostPerRun(Double maxCostPerRun) {
+            this.maxCostPerRun = maxCostPerRun;
+        }
+
+        public Double getInputPricePer1M() {
+            return inputPricePer1M;
+        }
+
+        public void setInputPricePer1M(Double inputPricePer1M) {
+            this.inputPricePer1M = inputPricePer1M;
+        }
+
+        public Double getOutputPricePer1M() {
+            return outputPricePer1M;
+        }
+
+        public void setOutputPricePer1M(Double outputPricePer1M) {
+            this.outputPricePer1M = outputPricePer1M;
+        }
+
+        public boolean isReturnBestAcrossSteps() {
+            return returnBestAcrossSteps;
+        }
+
+        public void setReturnBestAcrossSteps(boolean returnBestAcrossSteps) {
+            this.returnBestAcrossSteps = returnBestAcrossSteps;
+        }
     }
 
     /**
@@ -1127,6 +1225,19 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /** Per-step timeout in milliseconds. Default: 30000 */
         private Long timeoutMs = 30000L;
+
+        /**
+         * Input price per 1M tokens for this step's model. Overrides the cascade-level
+         * default. Used only for the cost ceiling / cost reporting. Null = no price
+         * (contributes $0 to the run cost).
+         */
+        private Double inputPricePer1M;
+
+        /**
+         * Output price per 1M tokens for this step's model. Overrides the cascade-level
+         * default. Null = no price (contributes $0 to the run cost).
+         */
+        private Double outputPricePer1M;
 
         public String getType() {
             return type;
@@ -1158,6 +1269,137 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setTimeoutMs(Long timeoutMs) {
             this.timeoutMs = timeoutMs;
+        }
+
+        public Double getInputPricePer1M() {
+            return inputPricePer1M;
+        }
+
+        public void setInputPricePer1M(Double inputPricePer1M) {
+            this.inputPricePer1M = inputPricePer1M;
+        }
+
+        public Double getOutputPricePer1M() {
+            return outputPricePer1M;
+        }
+
+        public void setOutputPricePer1M(Double outputPricePer1M) {
+            this.outputPricePer1M = outputPricePer1M;
+        }
+    }
+
+    /**
+     * Judge model for the {@code judge_model} confidence evaluation strategy. A
+     * separate (typically cheap) model rates the confidence of a step's response.
+     */
+    public static class JudgeModelConfig {
+        /** Provider type (e.g. "openai", "anthropic"). */
+        private String type;
+
+        /** Model-specific parameters (model name, apiKey, etc.). */
+        private Map<String, String> parameters;
+
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type;
+        }
+
+        public Map<String, String> getParameters() {
+            return parameters;
+        }
+
+        public void setParameters(Map<String, String> parameters) {
+            this.parameters = parameters;
+        }
+    }
+
+    /**
+     * Optional overrides for the {@code heuristic} confidence evaluation strategy.
+     * Any null field falls back to the built-in English default. Phrase matching is
+     * case-insensitive. When no configured phrase matches a response, the evaluator
+     * falls back to language-agnostic scoring (length + JSON-structure signals).
+     */
+    public static class HeuristicConfig {
+        /** Phrases indicating hedging/uncertainty (scored {@code hedgingScore}). */
+        private List<String> lowConfidencePhrases;
+
+        /** Phrases indicating refusal (scored {@code refusalScore}). */
+        private List<String> refusalPhrases;
+
+        /** Responses shorter than this many characters score {@code shortScore}. */
+        private Integer shortLengthThreshold;
+
+        /** Score assigned to very short responses. Default 0.3. */
+        private Double shortScore;
+
+        /** Score assigned when a refusal phrase matches. Default 0.2. */
+        private Double refusalScore;
+
+        /** Score assigned when a hedging phrase matches. Default 0.4. */
+        private Double hedgingScore;
+
+        /**
+         * Score assigned to a decent-length response with no red flags. Default 0.8.
+         */
+        private Double defaultScore;
+
+        public List<String> getLowConfidencePhrases() {
+            return lowConfidencePhrases;
+        }
+
+        public void setLowConfidencePhrases(List<String> lowConfidencePhrases) {
+            this.lowConfidencePhrases = lowConfidencePhrases;
+        }
+
+        public List<String> getRefusalPhrases() {
+            return refusalPhrases;
+        }
+
+        public void setRefusalPhrases(List<String> refusalPhrases) {
+            this.refusalPhrases = refusalPhrases;
+        }
+
+        public Integer getShortLengthThreshold() {
+            return shortLengthThreshold;
+        }
+
+        public void setShortLengthThreshold(Integer shortLengthThreshold) {
+            this.shortLengthThreshold = shortLengthThreshold;
+        }
+
+        public Double getShortScore() {
+            return shortScore;
+        }
+
+        public void setShortScore(Double shortScore) {
+            this.shortScore = shortScore;
+        }
+
+        public Double getRefusalScore() {
+            return refusalScore;
+        }
+
+        public void setRefusalScore(Double refusalScore) {
+            this.refusalScore = refusalScore;
+        }
+
+        public Double getHedgingScore() {
+            return hedgingScore;
+        }
+
+        public void setHedgingScore(Double hedgingScore) {
+            this.hedgingScore = hedgingScore;
+        }
+
+        public Double getDefaultScore() {
+            return defaultScore;
+        }
+
+        public void setDefaultScore(Double defaultScore) {
+            this.defaultScore = defaultScore;
         }
     }
 

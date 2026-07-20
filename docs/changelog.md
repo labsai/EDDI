@@ -5,6 +5,127 @@
 
 ---
 
+## 🔬 Multi-Model Cascade — Merge-readiness review: fixes + coverage backfill (2026-07-14)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+
+A critical whole-branch review (6 parallel high-effort reviewers, then adversarial confirm/refute on each finding) declared the branch **merge-ready** — every unit "ready-with-nits", no blockers. Acted on the confirmed nits and backfilled test coverage for new/adapted paths the existing suite missed.
+
+### Fixes
+
+- **Validator ↔ runtime parity (`CascadeConfigValidator`).** The `convertToObject`-incompatibility warning now uses `EvaluationStrategy.fromConfigOrDefault`, so an *unknown* `evaluationStrategy` — which `resolveEffectiveStrategy` also resolves to `structured_output` and then downgrades at runtime — warns too (previously only `null`/`structured_output` warned).
+- **Live-stream mid-failure de-dup (`CascadingModelExecutor`).** If the live-streamed final step fails *after* emitting partial tokens, the fallback to the buffered best is now marked `streamedLive=true`, so `LlmTask` does not re-emit the best's (different) text as a duplicate token stream after the partial tokens the client already received — the correct full response still arrives via the final `done` snapshot. Added a `withRun(…, streamedLive)` overload and a per-step `stepStreamedLive` flag read in the catch.
+
+### Coverage backfill (new tests; all green)
+
+- **AgentOrchestrator:** token accumulation into `ExecutionResult.responseMetadata` (the cascade-cost feed — previously 0% exercised because every test mocked null response metadata), direct `sumTokens`/`tokenUsageMap` unit tests (helpers made package-private), and the before-tool cooperative-cancellation check.
+- **CascadingModelExecutor:** step-param templating + credential skip (`TEMPLATE_SKIP_PARAMS` — previously 0%, all tests used a null templating engine), a deterministic duration-ceiling test (replacing a timing-flaky one), and the streaming mid-failure de-dup above.
+- **LlmTask:** the skipCascade legacy-fallback SSE emit and cascade token-usage surfacing (`responseMetadata` + `audit:cascade_token_usage`).
+- **ConfidenceEvaluator:** `stripJsonWrapper` fallback, `extractFirstBalancedObject` backslash-escaped-quote handling, and the judge-model readTree-throw → regex-fallback path.
+- **CascadeConfigValidator:** cascade-level negative-pricing hard-fail and the `convertToObject` + unknown-strategy warn path.
+
+### Flagged (pre-existing, out of scope)
+
+- A HITL tool-approval pause originating *inside* an agent-mode cascade step resumes on the base model, not the cascade step's (cheaper) model — misattributing cost/audit. Confirmed real but pre-existing (baseline already threaded the tool-approval params; the resume path predates cascade-step pauses and stores only the outer task's model). Tracked as a follow-up.
+
+---
+
+## 🧊 Multi-Model Cascade — PR-review follow-ups: type-safe SSE events + strategy enums (2026-07-14)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+
+Addressed two @niedch review comments on PR #587, after merging `origin/main` (tool-level HITL) into the branch.
+
+- **Typed SSE cascade events (comment #1).** `RestAgentEngineStreaming` built the `cascade_step_start` / `cascade_escalation` SSE payloads with hand-written `String.format` JSON (manual escaping, `%.4f` formatting). Replaced with two `record` payloads serialized through the existing Jackson `MAPPER` via a new `sendJsonEvent` helper (graceful `{}` fallback on the unexpected serialization failure). Non-finite `confidence`/`threshold` are still sanitized via `finite()` before serialization. The `escapeJson`/`finite` helpers remain (still used by the task/error events).
+- **Strategy enums (comment #2).** Introduced `EvaluationStrategy` (`structured_output` / `heuristic` / `judge_model` / `none`) and `CascadingStrategy` (`cascade` / `parallel`) as the **single source of truth** for the recognized strategy tokens. `ConfidenceEvaluator` (exhaustive enum switch), `CascadingModelExecutor` (`resolveEffectiveStrategy` + gating checks), and `CascadeConfigValidator` (valid-set + warn logic) now resolve to these enums instead of scattered magic strings.
+  - **Design note (answers "is there a reason it's a String?"):** the config *wire* fields (`ModelCascadeConfig.strategy` / `.evaluationStrategy`) deliberately stay lenient `String`s. An unrecognized value (a typo, or one written by a newer engine) still loads, the validator warns, the runtime falls back to the enum `DEFAULT`, and the original token round-trips unchanged through export/import — behavior a strict enum field would regress. Parsing to the enum happens at the boundary via `fromConfig` / `fromConfigOrDefault`. If the field type itself should become an enum, that's a separate contract decision (see the HITL enums for the pattern).
+  - Behavior is byte-for-byte preserved (verified: `ConfidenceEvaluator*Test`, `CascadeConfigValidatorTest`, `CascadingModelExecutor*Test`, `LlmTask*Test` — 324 tests green); new `StrategyEnumsTest` locks the lenient `fromConfig` contract (case-insensitive, trimmed, unknown→null, default fallback).
+
+---
+
+## 🚀 Multi-Model Cascade — Enterprise Hardening (2026-07-03)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+**What changed:** Full enterprise pass over the multi-model cascading feature. A review found two documented-but-dead capabilities (SSE events, judge model), a compliance bug (audit recorded the wrong model), and discarded token/cost/metrics that made the cost-savings pitch unmeasurable. This lands all of it. Plan: [`planning/model-cascade-enterprise-hardening-plan.md`](../planning/model-cascade-enterprise-hardening-plan.md).
+
+### Correctness / compliance
+
+- **Audit records the real model (#5).** `LlmTask` now writes `audit:model_name` and `audit:cascade_model` from the cascade-selected step (`provider/model (step N)`), not the task-level default. Added `audit:cascade_cost` and `audit:cascade_token_usage`. An auditor can now reconstruct which model produced an answer.
+- **Agent-mode confidence (#6).** `structured_output` cannot be injected around the tool-loop, so agent mode auto-routes to `judge_model` (if configured) else `heuristic`. A single deploy-time warning replaces the previous per-turn WARN.
+- **convertToObject + cascade (#7).** The cascade now honors native `jsonMode`, and forces a non-wrapper confidence strategy when `convertToObject=true` (the wrapper contradicts the raw-JSON instruction).
+- **Global-var / Qute consistency (#8).** Step `type` is resolved through `GlobalVariableResolver` and step param values are run through the template engine — parity with the standard path.
+
+### Broken promises made real
+
+- **SSE cascade events (#1).** `StreamingResponseHandler` gained default `onCascadeStepStart`/`onCascadeEscalation`; the anonymous sink in `ConversationService.sayStreaming` forwards them; `RestAgentEngineStreaming` emits `cascade_step_start` / `cascade_escalation` SSE events. The plumbing is now live end-to-end.
+- **judge_model implemented (#2).** New `judgeModel: {type, parameters}` config block, built once via `ChatModelRegistry` (vault + global-var resolution), passed into `ConfidenceEvaluator`. `evaluationStrategy: judge_model` without a judge logs a deploy-time warning and falls back to heuristic at runtime.
+- **`strategy: parallel` (#3) / budget javadoc (#4).** Unknown/`parallel` strategy logs a deploy-time warning and runs sequentially; the false "budget exhausted" javadoc replaced with real ceiling docs.
+
+### Observability & guardrails
+
+- **Token + cost evidence.** Per-step `tokenUsage` and `costUsd` in the trace; aggregate run cost + token usage surfaced via `responseMetadataObjectName` (was `{}`). Agent-mode token usage is accumulated across tool-loop iterations.
+- **Micrometer metrics** under `eddi.llm.cascade.*`: executions, escalations (tag `reason`), accepted step, step latency, confidence distribution, step errors (tags `provider`,`type`), tokens, cost, ceiling exceeded (tag `kind`).
+- **Cascade ceilings.** `maxTotalDurationMs` (wall-clock) and `maxCostPerRun` (dollars, from configurable per-step `inputPricePer1M`/`outputPricePer1M`) stop escalation and return the best response so far. Per-step timeout is capped by the remaining duration budget for **buffered** steps only — a live-streamed step is exempt (see the "Live-stream timeout" fix below).
+- **Configure-time validation** (`CascadeConfigValidator`): invalid *new* numeric fields (negative pricing, non-positive `maxTotalDurationMs`, negative `maxCostPerRun`) fail fast at deploy; legacy conditions (empty steps, unknown `evaluationStrategy`/`strategy`, `judge_model` without a judge, thresholds ∉ [0,1], dead non-last null thresholds, non-positive `timeoutMs`) emit deploy-time warnings but still load (backward-compatible).
+
+### Robustness
+
+- **Confidence parsing** tries a real Jackson parse first (only reads `confidence` from an identified wrapper object, so a stray `"confidence":` in answer content is ignored), regex as fallback.
+- **Heuristic i18n.** `heuristicConfig` makes phrases/thresholds config-driven (English defaults); the no-phrase-match fallback is language-agnostic (keeps the default score rather than mis-scoring).
+- **Cancellation safety (#9).** `AgentOrchestrator` checks interruption between tool-loop iterations and before each tool, so a timed-out cascade step stops launching further side-effectful tools. Residual risk: a tool already in-flight when the timeout fires may complete.
+- **Streaming the final step live.** The always-accepted final step (legacy mode, non-wrapper strategy, streaming-capable provider) streams token-by-token via the event sink instead of buffering. `StreamingLegacyChatExecutor.executeCapturing` preserves token usage while streaming.
+- **`returnBestAcrossSteps`** (opt-in): return an earlier step's response if it scored strictly higher than the finally-accepted step.
+- **Base-model laziness.** The base `ChatModel` is no longer built when the active-cascade branch owns the request.
+
+### Architecture
+
+- `CascadingModelExecutor` converted from a static utility to an instance (constructed by `LlmTask`) holding `ChatModelRegistry`, `GlobalVariableResolver`, `ITemplatingEngine`, `LegacyChatExecutor`, `StreamingLegacyChatExecutor`, and `MeterRegistry`. `AgentOrchestrator.ExecutionResult` gained a `responseMetadata` field (2-arg constructor retained for compatibility).
+- Backward compatible: all new config fields optional with today's defaults; configs without `modelCascade` and `enabled:false` are unaffected; `StreamingResponseHandler` cascade methods are `default`.
+
+### Cross-provider credentials
+
+- Because step/judge parameters are merged **over** the task parameters, a step (or judge) targeting a **different provider** than the task would silently inherit the task's `apiKey` — wrong for that provider, failing at runtime as a 401 that looks like an escalation. `CascadeConfigValidator` now emits a **deploy-time warning** for a different-provider step/judge that omits its own `apiKey`. Not a hard error (Ollama/Bedrock don't use `apiKey`); documented in `docs/model-cascade.md`.
+
+### Tests & coverage
+
+- Updated the 3 executor test classes to the instance API and the 6 `LlmTask` test classes to the new constructor. Removed the backward-incompatible `languageAgnosticScore` band that regressed the default heuristic score.
+- New coverage: `CascadingModelExecutorEnterpriseTest`, `CascadingModelExecutorCoverageTest` (agent mode, live streaming, cost/duration ceilings, timeout + retryable escalation, convertToObject downgrade), `ConfidenceEvaluatorEnterpriseTest`, `StreamingLegacyChatExecutorCoverageTest`, and expanded `CascadeConfigValidatorTest`. New-code coverage ≈ **92% instruction / 78% branch** (residual branches are the 120s streaming-timeout guard and typed-exception variants); the project aggregate stays above the 90%/80% gate.
+- `CascadingModelExecutor.isRetryableError` message matching collapsed to a single regex (fewer branches, same behavior).
+
+### Adversarial-review fixes
+
+A multi-lens adversarial review (7 reviewers → independent skeptics) surfaced several real defects, now fixed:
+
+- **`returnBestAcrossSteps` vs. live streaming (high):** a final step already streamed live is no longer superseded by an earlier higher-scoring step — that would have replaced text the client had already received. The trace marks the superseded step accordingly.
+- **Agent-mode cascade streaming (medium):** the cascade now emits the agent-mode final response to the SSE stream as a single chunk, matching the standard (non-cascade) agent path (it was silently dropped before); docs corrected.
+- **Validator backward-compat (medium):** `CascadeConfigValidator` now **warns** (instead of hard-failing) for conditions older releases tolerated at load — unknown strategy/evaluationStrategy, out-of-range thresholds, dead non-last steps, judge_model without a judge, empty steps — so upgrading cannot stop a previously-loading agent from deploying. Only the new pricing/ceiling fields hard-fail on an invalid value.
+- **Heuristic clamping (medium):** config-supplied heuristic scores are clamped to [0,1] so a mis-set value can't produce an out-of-range confidence.
+- **`unescapeJsonString` (low):** rewritten as a single-pass scanner so an escaped backslash is consumed before the following char (chained `replace` corrupted `\\n`). Judge regex fallback scoped to the extracted object.
+- **Streaming-timeout caveat** documented (partial tokens of an abandoned final step).
+- New regression tests for all of the above, plus the previously-missing SSE-forwarding and cooperative-cancellation tests. New-code coverage ≈ **92% instruction / 79% branch**.
+
+### Second-pass review fixes
+
+A lean second adversarial pass (5 reviewers → synthesizer) found five more real issues, now fixed:
+
+- **Live-stream timeout (high):** a live-streamed step is no longer subject to the per-step/duration timeout — cancelling it couldn't stop the provider's callback thread, so tokens leaked to the client while the cascade re-emitted a different response (concurrent SSE writes). A streamed step now runs under the streaming executor's own ~120 s bound and its result (even if partial) is the accepted answer; no re-emit, no mid-stream cancel. `streamLive` also tightened to *guaranteed-accept* steps only (last, null-threshold, or `none`≤1.0).
+- **Judge confidence regression (medium):** the judge regex fallback runs over the full judge text again (scoping it to the first balanced object dropped the score when a reasoning object preceded the rating).
+- **Docs vs. validator (medium):** the Configure-time Validation section now states the real two tiers (hard-error only for new pricing/ceiling fields; warnings for legacy conditions).
+- **Single-line code fence (low):** `stripCodeFences` now unwraps ```` ```{...}``` ```` (no newline), which was being discarded.
+- **`returnBestAcrossSteps` trace (low):** the earlier winning step's trace entry is relabeled `accepted_as_best` so the trace agrees with `stepUsed`.
+
+Regression tests added for each. Full touched-area suite green.
+
+### PR-review fixes (bots)
+
+CodeRabbit + Copilot + github-code-quality on PR #587 flagged further items, now addressed: retry token usage accumulated across *all* attempts (not just the last); the cancellation interrupt flag is cleared (`Thread.interrupted()`) so it can't leak; the `accepted.step` metric + trace status name the *actual* returned step under `returnBestAcrossSteps`; unknown `evaluationStrategy` normalized to `structured_output` at runtime (matches the validator + evaluator default); SSE `cascade_escalation` guards non-finite `confidence`/`threshold`; the structured-output regex fallback uses the fence-stripped text; the cascade-disabled agent path forwards its buffered response to the stream; an unused parameter removed; a dead `@Disabled` test deleted; and the docs/changelog/plan corrected to say the validator *warns* (not "rejects/fails fast") on legacy conditions.
+
+### Status
+
+Complete and merged-ready on `feat/model-cascade-enterprise-hardening` (PR #587). No open items; the branch is the terminal state of this feature — next planned work is unrelated (see Section 3 of AGENTS.md).
+
+---
+
 ## 🧹 Multimodal Attachments Completion — Remove dead config knob `reattachTurns` (2026-07-13)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)
