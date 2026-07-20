@@ -348,4 +348,87 @@ class CascadingModelExecutorEnterpriseTest {
         assertEquals(0, result.stepUsed(), "best (step0) must be returned");
         assertTrue(result.streamedLive(), "a fallback after a failed live-streamed step must be marked streamedLive");
     }
+
+    @Test
+    @DisplayName("streamed final step that times out falls back to best, like a mid-stream error does")
+    void streamingFinalStepTimesOut_fallsBackToBest() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("heuristic");
+        var step0 = new CascadeStep();
+        step0.setType("cheap");
+        step0.setConfidenceThreshold(0.9); // hedges → escalates, becomes buffered best
+        var step1 = new CascadeStep();
+        step1.setType("expensive"); // last step → streamed live
+        cascade.setSteps(List.of(step0, step1));
+
+        ChatModel cheap = modelReturning("I'm not sure, I don't know.");
+
+        // step1 streams nothing and never completes → the executor's internal timeout
+        // fires and returns empty text rather than throwing.
+        StreamingChatModel expensiveStream = mock(StreamingChatModel.class);
+        doAnswer(inv -> null).when(expensiveStream).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
+
+        ChatModel expensiveBuffered = modelReturning("unused-buffered");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheap);
+        when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(expensiveBuffered);
+        when(registry.getOrCreateStreaming(eq("expensive"), anyMap())).thenReturn(expensiveStream);
+
+        var sink = mock(ConversationEventSink.class);
+        IConversationMemory memory = mock(IConversationMemory.class);
+        when(memory.getEventSink()).thenReturn(sink);
+
+        GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
+        when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+
+        // 1s streaming timeout so the test does not wait for the 120s default.
+        var task = task();
+        task.setStreamingTimeoutSeconds(1);
+
+        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+        var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory, mock(AgentOrchestrator.class),
+                Map.of(), false, false, /* allowLiveStreaming */ true);
+
+        // A timed-out final step must not beat a real earlier answer just because
+        // executeCapturing returns text instead of throwing on timeout.
+        assertEquals(0, result.stepUsed(), "best (step0) must be returned when the final streamed step times out");
+        assertEquals("I'm not sure, I don't know.", result.response());
+    }
+
+    @Test
+    @DisplayName("cascade carries the winning step's validation metadata (truncation) to the caller")
+    void winningStepValidationMetadata_isPropagated() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("heuristic");
+        var step0 = new CascadeStep();
+        step0.setType("cheap"); // single step → always accepted
+        cascade.setSteps(List.of(step0));
+
+        // A confident-sounding but token-limit-truncated response.
+        ChatModel cheap = mock(ChatModel.class);
+        when(cheap.chat(anyList())).thenReturn(ChatResponse.builder()
+                .aiMessage(AiMessage.from("The full answer is definitely that we should"))
+                .metadata(dev.langchain4j.model.chat.response.ChatResponseMetadata.builder()
+                        .finishReason(dev.langchain4j.model.output.FinishReason.LENGTH).build())
+                .build());
+
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheap);
+
+        GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
+        when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+
+        var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), mock(IConversationMemory.class),
+                mock(AgentOrchestrator.class), Map.of(), false, false, false);
+
+        // Without this, responseValidation.onTruncation is unreachable whenever
+        // modelCascade is enabled — a truncated answer reaches the user silently
+        // even with action "error" configured.
+        assertNotNull(result.responseMetadata(), "cascade must expose the winning step's response metadata");
+        assertEquals("truncated", result.responseMetadata().get("warning"));
+        assertEquals("LENGTH", result.responseMetadata().get("finishReason"));
+    }
 }

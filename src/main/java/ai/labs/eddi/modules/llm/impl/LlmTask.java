@@ -516,6 +516,23 @@ public class LlmTask implements ILifecycleTask {
             if (cascadeResult.tokenUsage() != null && !cascadeResult.tokenUsage().isEmpty()) {
                 responseMetadata.put("tokenUsage", cascadeResult.tokenUsage());
             }
+
+            // Carry the winning step's validation signals through. Without these,
+            // responseValidation's onTruncation / onContentFilter / onStreamingTimeout
+            // policies are unreachable whenever the cascade is enabled — a truncated or
+            // filtered answer would reach the user even with action "error" configured.
+            var cascadeMetadata = cascadeResult.responseMetadata();
+            if (cascadeMetadata != null) {
+                if (cascadeMetadata.get("warning") != null) {
+                    responseMetadata.put("warning", cascadeMetadata.get("warning"));
+                }
+                if (cascadeMetadata.get("finishReason") != null) {
+                    responseMetadata.put("finishReason", cascadeMetadata.get("finishReason"));
+                }
+                if (Boolean.TRUE.equals(cascadeMetadata.get("streamingTimeout"))) {
+                    responseMetadata.put("streamingTimeout", true);
+                }
+            }
             responseMetadata.put("cascadeCostUsd", cascadeResult.runCostUsd());
             responseMetadata.put("cascadeModel", cascadeAuditModel);
             responseMetadata.put("cascadeStep", cascadeResult.stepUsed());

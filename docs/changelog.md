@@ -5,6 +5,74 @@
 
 ---
 
+## 🔁 Fix: CodeRabbit review — interrupted streaming, FQN imports, changelog accuracy (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Three review comments on [PR #593](https://github.com/labsai/EDDI/pull/593); all three valid, all three fixed. Two turned out to be broader than reported.
+
+### 1. An interrupted streaming attempt was reported as a success (Major)
+
+When `latch.await(...)` threw `InterruptedException`, neither `timedOut` nor `errorRef` was set, so execution fell through both guards to `break` and returned `new StreamingResult(responseText, metadata)` — an empty string presented as a completed answer, with no signal to the caller.
+
+Corroborating evidence the review did not cite: `AgentOrchestrator` already treats a set interrupt flag as a **hard abort** (its test describes the scenario as "simulate a cascade per-step timeout cancel"). The streaming executor was therefore contradicting an established convention inside the same subsystem — a cancelled step could be accepted as a real, empty answer, and on the cascade's last step it would win outright.
+
+Interruption is now a distinct outcome: `streamingInterrupted` is recorded in the metadata, the salvaging (`LlmTask`) path returns whatever text arrived with a `streaming_interrupted_partial` warning, and every other path throws. It is **never retried** — a retry would ignore the very cancellation being signalled. Four tests, each observed failing first.
+
+### 2. Inline fully-qualified names in `LifecycleManagerTest` (Minor)
+
+Flagged on one line; the file actually had **eight** — four `IAuditEntryCollector` and four `ConversationEventSink`. All replaced with two top-level imports per AGENTS.md §4.7.
+
+### 3. The full-suite failure totals did not add up (Minor)
+
+Correct, and the fault was in the measurement rather than the prose: the categorisation was run over `target/surefire-reports` **without a preceding `clean`**, so it also swept up XML from earlier *targeted* runs. The per-bucket figures were therefore drawn from a superset of the run they were attributed to. The numbers have been withdrawn (with an explicit correction note in the merge entry) rather than quietly adjusted, since the original claim was already pushed.
+
+Re-measured from a genuinely clean run of the final code: **11,658 tests, 8 failures, 287 errors, and zero assertion failures.** Every failing test case in the surefire XML carries a blocked-loopback or socket-selector message; not one is a code assertion.
+
+One caveat, stated rather than papered over: the XML yields 301 distinct failing test cases against the console's 295 failures+errors, and that ~6 gap is unexplained (it is not reruns, not suite-level entries, and not skipped-plus-failed). The load-bearing claim deliberately does not depend on the count — "no entry in this set is an assertion failure" is a property of the set, unaffected by how its members are tallied. CI remains the source of truth for the socket- and Docker-dependent suites.
+
+---
+
+## 🔧 Fix: close the response-validation gaps between streaming, cascade and validation (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Clears the four follow-ups recorded in the entry below. Each was pre-existing, and together they meant `responseValidation` — a headline feature of this PR — silently did nothing on the paths users are most likely to run it on. Every fix is TDD'd: the test was written first and observed failing.
+
+### 1. Streaming now derives `warning` from `finishReason`
+
+`LegacyChatExecutor` maps `LENGTH` → `truncated` and `CONTENT_FILTER` → `content_filter`; the streaming executor captured `finishReason` but never derived the warning, so `onTruncation` and `onContentFilter` could **never** fire on a streaming task. `buildMetadata` now mirrors the buffered executor. A later timeout/error warning deliberately overwrites it — a transport failure is the more urgent signal.
+
+### 2. The cascade now carries the winning step's validation metadata
+
+`CascadeResult` and the internal `StepResult` carried only `tokenUsage`; the producing executor's `warning`/`streamingTimeout`/`finishReason` were dropped on the floor. With `modelCascade` **and** `responseValidation` both enabled, only `onEmpty` and `onRefusal` could fire — a truncated or content-filtered cascade answer reached the user even with `action: "error"` configured. Both records gained a `responseMetadata` component, threaded from the legacy, streaming and agent-mode step paths, and merged into `responseMetadata` in `LlmTask`.
+
+### 3. A timed-out live-streamed final step no longer wins
+
+`executeCapturing` returns the (possibly empty) partial text on timeout instead of throwing, so a timed-out final step was accepted on the same footing as a real answer — and being last, it beat a good earlier response. A mid-stream *error* already fell back correctly; a *timeout* did not. A step whose metadata reports `streamingTimeout` is now treated as failed: it never becomes `bestSoFar`, it escalates when it is not the last step, and on the last step it falls back to `bestSoFar` (marked `streamedLive` so `LlmTask` does not re-emit different text over tokens the client already received).
+
+Enabling this required `executeCapturing` to honour the task's `streamingTimeoutSeconds`, which it previously ignored by passing `task = null` — so the cascade was always pinned to the 120s default. The task's **retry** config is still deliberately not applied on the cascade path: the cascade owns escalation, and retrying inside a step would multiply spend against the very model it is about to escalate away from.
+
+### 4. Restored the lapsed cascade error-path coverage
+
+New `CascadingModelExecutorErrorPathTest` — written against the current implementation rather than restored verbatim — covering what was lost when `CascadingModelExecutorExtendedTest` was deleted and `CascadingModelExecutorCoverageTest` was rewritten on `main`: last-step timeout with and without a `bestSoFar`, timeout escalation firing `onCascadeEscalation("timeout")`, `LifecycleException` and plain-`RuntimeException` cause handling, aggregated all-steps-failed errors, and `enableInAgentMode=false` never consulting the orchestrator.
+
+### 5. Cascade failures are now diagnosable (found while writing #4)
+
+Two of the restored tests failed for a reason the tests were right about: the retry wrapper throws a generic `"Chat model execution failed after N attempts"`, and the cascade recorded only `e.getMessage()`. So a fully failed cascade reported `Step 0 (cheap): Chat model execution failed after 1 attempts; Step 1 (expensive): …` — byte-identical whether the cause was a rate limit, an auth failure, a malformed request or a network outage, in both the thrown message and the audit trace. A new `describeFailure()` appends the root-cause message (bounded cause-chain walk, so a cyclic chain cannot hang the error path).
+
+### Verification
+
+Full LLM module: 2,260 tests, **zero assertion failures** — every reported failure/error message is a blocked-loopback or socket-resource error from this sandbox, none a code assertion. All 73 cascade tests and 33 streaming-executor tests green. (Counts of each bucket are deliberately not quoted here; see the correction note in the merge entry below for why the earlier per-bucket figures were unreliable.)
+
+### Design decisions
+
+- **Metadata threaded as a record component, not a side channel.** `CascadeResult` is the cascade's public contract with `LlmTask`; anything the caller must validate belongs on it rather than in a mutable out-parameter.
+- **A timed-out step is a failed step, not a low-confidence one.** Demoting it via confidence would still let it win when no earlier step scored higher; excluding it from `bestSoFar` outright is what makes the fallback correct.
+- **Retry stays off inside cascade steps.** Escalation is the cascade's retry mechanism; stacking both multiplies cost in a way no config expresses.
+
+---
+
 ## 🐛 Fix: two latent retry-loop defects in `StreamingLegacyChatExecutor` (2026-07-20)
 
 **Repo:** EDDI (`feat/error-handling-recovery`)
@@ -87,7 +155,9 @@ The five remaining files touched by both sides were diffed against **each** pare
 
 `mvnw clean test-compile` green — a *clean* build deliberately, since the `RestAgentEngine` signature change would be masked by a stale incremental one.
 
-Full unit suite: **11,409 tests run, no assertion failures.** The 8 reported failures and 304 errors were each inspected via the surefire XML and categorised by message: 297 `Unable to establish loopback connection`, 16 Docker/Testcontainers unavailable (Mongo + Postgres store tests), 5 socket-selector/event-loop creation errors. All are this sandbox's inability to open loopback sockets or run Docker — none is a code assertion. CI remains the source of truth for those suites.
+Full unit suite: **11,409 tests run, 8 failures and 304 errors, none of them an assertion failure.** Every failure/error message in the surefire XML falls into one of three buckets — `Unable to establish loopback connection`, Docker/Testcontainers unavailable (the Mongo + Postgres store tests), and socket-selector/event-loop creation errors — i.e. this sandbox's inability to open loopback sockets or run Docker. CI remains the source of truth for those suites.
+
+> **Correction (post-review):** an earlier draft of this entry gave a per-bucket breakdown (297/16/5 = 318) that did not reconcile with the run's 312 failures+errors. The categorisation had been run over `target/surefire-reports` without a preceding `clean`, so it also counted XML left behind by earlier *targeted* runs — a superset of the full run. The conclusion is unaffected (a superset containing zero assertion failures still contains zero), but the counts were not defensible as stated and have been removed rather than quietly adjusted.
 
 The 56 tests directly covering the merged paths pass locally: `StreamingLegacyChatExecutor{,Retry,Coverage}Test`, `CascadingModelExecutor{Coverage,Enterprise}Test`, `RestAgentEngine{,Hitl,ToolPauseDetails}Test`, `AgentOrchestratorExtendedTest`.
 

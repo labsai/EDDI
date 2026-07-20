@@ -9,6 +9,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -373,7 +375,7 @@ class LifecycleManagerTest {
             when(memory.getConversationId()).thenReturn("conv1");
             when(memory.getAgentId()).thenReturn("agent1");
 
-            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
+            var eventSink = mock(ConversationEventSink.class);
             when(memory.getEventSink()).thenReturn(eventSink);
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
@@ -406,7 +408,7 @@ class LifecycleManagerTest {
             when(memory.getAgentVersion()).thenReturn(1);
             when(memory.size()).thenReturn(1);
 
-            var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+            var auditCollector = mock(IAuditEntryCollector.class);
             when(memory.getAuditCollector()).thenReturn(auditCollector);
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
@@ -435,7 +437,7 @@ class LifecycleManagerTest {
             when(memory.getAgentVersion()).thenReturn(1);
             when(memory.size()).thenReturn(1);
 
-            var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+            var auditCollector = mock(IAuditEntryCollector.class);
             doThrow(new RuntimeException("audit ledger unavailable"))
                     .when(auditCollector).collect(any());
             when(memory.getAuditCollector()).thenReturn(auditCollector);
@@ -1025,7 +1027,7 @@ class LifecycleManagerTest {
             when(memory.getConversationId()).thenReturn("conv1");
             when(memory.getAgentId()).thenReturn("agent1");
 
-            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
+            var eventSink = mock(ConversationEventSink.class);
             when(memory.getEventSink()).thenReturn(eventSink);
 
             // Set up actions data
@@ -1056,7 +1058,7 @@ class LifecycleManagerTest {
             when(memory.getConversationId()).thenReturn("conv1");
             when(memory.getAgentId()).thenReturn("agent1");
 
-            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
+            var eventSink = mock(ConversationEventSink.class);
             when(memory.getEventSink()).thenReturn(eventSink);
 
             // Set up tool trace data
@@ -1087,7 +1089,7 @@ class LifecycleManagerTest {
             when(memory.getConversationId()).thenReturn("conv1");
             when(memory.getAgentId()).thenReturn("agent1");
 
-            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
+            var eventSink = mock(ConversationEventSink.class);
             when(memory.getEventSink()).thenReturn(eventSink);
 
             // Set up confidence data
@@ -1135,7 +1137,7 @@ class LifecycleManagerTest {
             when(outputData.getResult()).thenReturn(List.of("Hi there!"));
             doReturn(outputData).when(currentStep).getLatestData("output");
 
-            var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+            var auditCollector = mock(IAuditEntryCollector.class);
             when(memory.getAuditCollector()).thenReturn(auditCollector);
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
@@ -1183,7 +1185,7 @@ class LifecycleManagerTest {
             when(tokenData.getResult()).thenReturn(java.util.Map.of("input", 10, "output", 20));
             doReturn(tokenData).when(currentStep).getLatestData("audit:token_usage");
 
-            var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+            var auditCollector = mock(IAuditEntryCollector.class);
             when(memory.getAuditCollector()).thenReturn(auditCollector);
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());

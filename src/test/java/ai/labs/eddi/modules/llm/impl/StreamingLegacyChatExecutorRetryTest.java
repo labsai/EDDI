@@ -228,6 +228,155 @@ class StreamingLegacyChatExecutorRetryTest {
         }
     }
 
+    // ==================== Interruption ====================
+
+    @Nested
+    @DisplayName("interruption")
+    class InterruptionTests {
+
+        /** A model that abandons the stream after marking the thread interrupted. */
+        private StreamingChatModel interruptingModel(String partialBeforeInterrupt) {
+            return new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    if (partialBeforeInterrupt != null) {
+                        handler.onPartialResponse(partialBeforeInterrupt);
+                    }
+                    // Never completes; the awaiting thread is asked to stop instead.
+                    Thread.currentThread().interrupt();
+                }
+            };
+        }
+
+        @Test
+        @DisplayName("interrupt with no content must fail, not return an empty success")
+        void interruptWithNoContent_throws() {
+            try {
+                var ex = assertThrows(RuntimeException.class,
+                        () -> executor.execute(interruptingModel(null), createMessages("Hi"), eventSink, createTask()));
+                assertTrue(ex.getMessage().contains("interrupted"), "the failure must name the interruption: " + ex.getMessage());
+            } finally {
+                Thread.interrupted(); // clear so the flag does not leak into other tests
+            }
+        }
+
+        @Test
+        @DisplayName("interrupt must not be retried — cancellation is not a transient failure")
+        void interruptIsNotRetried() {
+            var callCount = new AtomicInteger(0);
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    callCount.incrementAndGet();
+                    Thread.currentThread().interrupt();
+                }
+            };
+
+            try {
+                var task = createTaskWithRetry(3, 1L);
+                assertThrows(RuntimeException.class, () -> executor.execute(model, createMessages("Hi"), eventSink, task));
+                assertEquals(1, callCount.get(), "a cancelled call must not be retried against the provider");
+            } finally {
+                Thread.interrupted();
+            }
+        }
+
+        @Test
+        @DisplayName("executeCapturing propagates an interrupt so the cascade can fall back")
+        void executeCapturing_propagatesInterrupt() {
+            try {
+                assertThrows(RuntimeException.class,
+                        () -> executor.executeCapturing(interruptingModel("partial "), createMessages("Hi"), eventSink));
+            } finally {
+                Thread.interrupted();
+            }
+        }
+
+        @Test
+        @DisplayName("interrupt with partial content keeps the text on the salvaging path, flagged")
+        void interruptWithPartialContent_salvagesWithWarning() {
+            try {
+                var result = executor.execute(interruptingModel("Half an answer"), createMessages("Hi"), eventSink, createTask());
+
+                assertEquals("Half an answer", result.response());
+                assertEquals("streaming_interrupted_partial", result.metadata().get("warning"));
+                assertTrue((Boolean) result.metadata().get("streamingInterrupted"));
+            } finally {
+                Thread.interrupted();
+            }
+        }
+    }
+
+    // ==================== finishReason-derived Warnings ====================
+
+    @Nested
+    @DisplayName("finishReason-derived warnings")
+    class FinishReasonWarningTests {
+
+        private StreamingChatModel modelFinishingWith(FinishReason finishReason) {
+            return new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    handler.onPartialResponse("Some answer");
+                    handler.onCompleteResponse(ChatResponse.builder()
+                            .aiMessage(AiMessage.from("Some answer"))
+                            .metadata(ChatResponseMetadata.builder().finishReason(finishReason).build())
+                            .build());
+                }
+            };
+        }
+
+        @Test
+        @DisplayName("should flag warning=truncated when finishReason is LENGTH")
+        void lengthFinishReason_flagsTruncated() {
+            var result = executor.execute(modelFinishingWith(FinishReason.LENGTH), createMessages("Hi"), eventSink, createTask());
+
+            // Without this, responseValidation.onTruncation can never fire on the
+            // streaming path even though finishReason=LENGTH is right there.
+            assertEquals("truncated", result.metadata().get("warning"));
+            assertEquals("LENGTH", result.metadata().get("finishReason"));
+        }
+
+        @Test
+        @DisplayName("should flag warning=content_filter when finishReason is CONTENT_FILTER")
+        void contentFilterFinishReason_flagsContentFilter() {
+            var result = executor.execute(modelFinishingWith(FinishReason.CONTENT_FILTER), createMessages("Hi"), eventSink, createTask());
+
+            assertEquals("content_filter", result.metadata().get("warning"));
+            assertEquals("CONTENT_FILTER", result.metadata().get("finishReason"));
+        }
+
+        @Test
+        @DisplayName("should not flag any warning on a normal STOP finish")
+        void stopFinishReason_noWarning() {
+            var result = executor.execute(modelFinishingWith(FinishReason.STOP), createMessages("Hi"), eventSink, createTask());
+
+            assertFalse(result.metadata().containsKey("warning"));
+            assertEquals("STOP", result.metadata().get("finishReason"));
+        }
+
+        @Test
+        @DisplayName("a mid-stream error warning should win over a finishReason warning")
+        void errorWarningTakesPrecedenceOverFinishReason() {
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    handler.onPartialResponse("Truncated then broke");
+                    handler.onCompleteResponse(ChatResponse.builder()
+                            .aiMessage(AiMessage.from("Truncated then broke"))
+                            .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.LENGTH).build())
+                            .build());
+                    handler.onError(new RuntimeException("boom"));
+                }
+            };
+
+            var result = executor.execute(model, createMessages("Hi"), eventSink, createTask());
+
+            // The transport failure is the more urgent signal for the operator.
+            assertEquals("streaming_error_partial", result.metadata().get("warning"));
+        }
+    }
+
     // ==================== Per-Attempt Metadata Isolation ====================
 
     @Nested

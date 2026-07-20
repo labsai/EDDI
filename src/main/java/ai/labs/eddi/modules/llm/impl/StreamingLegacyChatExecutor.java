@@ -82,7 +82,22 @@ class StreamingLegacyChatExecutor {
      * accepted as a successful one.
      */
     StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
-        var result = execute(streamingModel, messages, eventSink, null, false);
+        return executeCapturing(streamingModel, messages, eventSink, null);
+    }
+
+    /**
+     * As
+     * {@link #executeCapturing(StreamingChatModel, List, ConversationEventSink)},
+     * but honouring the task's {@code streamingTimeoutSeconds}.
+     * <p>
+     * The task's retry config is deliberately <em>not</em> applied: the cascade
+     * owns escalation, and retrying inside a step would multiply spend against the
+     * very model the cascade is about to escalate away from. Each step gets one
+     * attempt.
+     */
+    StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink,
+                                  LlmConfiguration.Task task) {
+        var result = execute(streamingModel, messages, eventSink, task, false, 1);
         return new StreamResult(result.response(), result.metadata());
     }
 
@@ -102,7 +117,19 @@ class StreamingLegacyChatExecutor {
      */
     StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
                             ConversationEventSink eventSink, LlmConfiguration.Task task) {
-        return execute(streamingModel, messages, eventSink, task, true);
+        return execute(streamingModel, messages, eventSink, task, true, resolveMaxAttempts(task));
+    }
+
+    /**
+     * Resolve the attempt count from the task's retry config, clamped to at least
+     * one: {@code maxAttempts <= 0} means "don't retry", not "never call the
+     * model". Without the clamp the retry loop body never runs and the caller gets
+     * a null response indistinguishable from silence.
+     */
+    private static int resolveMaxAttempts(LlmConfiguration.Task task) {
+        RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
+        int configured = retryConfig != null && retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 1;
+        return Math.max(1, configured);
     }
 
     /**
@@ -114,9 +141,11 @@ class StreamingLegacyChatExecutor {
      *            warning instead of throwing — the turn keeps whatever the model
      *            managed to produce. When {@code false}, any error is propagated so
      *            the caller can treat the step as failed.
+     * @param maxAttempts
+     *            number of attempts; already clamped to >= 1 by the caller.
      */
     private StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
-                                    ConversationEventSink eventSink, LlmConfiguration.Task task, boolean salvagePartialOnError) {
+                                    ConversationEventSink eventSink, LlmConfiguration.Task task, boolean salvagePartialOnError, int maxAttempts) {
 
         LOGGER.debug("Executing with streaming (legacy mode)");
 
@@ -126,11 +155,6 @@ class StreamingLegacyChatExecutor {
         }
 
         RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
-        // Clamp to at least one attempt: a config of maxAttempts <= 0 means "don't
-        // retry", not "never call the model". Without this the loop body never runs
-        // and we hand back a null response that is indistinguishable from silence.
-        int configuredAttempts = retryConfig != null && retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 1;
-        int maxAttempts = Math.max(1, configuredAttempts);
 
         Map<String, Object> metadata = new HashMap<>();
         String responseText = null;
@@ -174,6 +198,7 @@ class StreamingLegacyChatExecutor {
             });
 
             boolean timedOut = false;
+            boolean interrupted = false;
             try {
                 if (!latch.await(timeoutSeconds, TimeUnit.SECONDS)) {
                     LOGGER.warn("Streaming chat timed out");
@@ -182,10 +207,26 @@ class StreamingLegacyChatExecutor {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 LOGGER.warn("Streaming chat was interrupted");
+                interrupted = true;
             }
 
             responseText = fullResponse.toString();
             metadata.putAll(buildMetadata(responseRef.get()));
+
+            // An interrupt is a cancellation request — the cascade cancelling a step, or
+            // the request being aborted. Never retry it (that would ignore the
+            // cancellation) and never report it as a successful empty response, which
+            // would let a cancelled step be accepted as a real answer. This matches how
+            // AgentOrchestrator treats a set interrupt flag.
+            if (interrupted) {
+                metadata.put("streamingInterrupted", true);
+                if (salvagePartialOnError && !responseText.isEmpty()) {
+                    metadata.put("warning", "streaming_interrupted_partial");
+                    LOGGER.warnf("Streaming interrupted with partial response (%d chars)", responseText.length());
+                    return new StreamingResult(responseText, metadata);
+                }
+                throw new RuntimeException("Streaming chat interrupted");
+            }
 
             if (timedOut) {
                 metadata.put("streamingTimeout", true);
@@ -237,7 +278,21 @@ class StreamingLegacyChatExecutor {
         if (response != null && response.metadata() != null) {
             var meta = response.metadata();
             if (meta.finishReason() != null) {
-                metadata.put("finishReason", meta.finishReason().toString());
+                var finishReason = meta.finishReason().toString();
+                metadata.put("finishReason", finishReason);
+
+                // Flag non-normal finish reasons for downstream validation, matching
+                // LegacyChatExecutor. Without this, responseValidation.onTruncation and
+                // onContentFilter are unreachable on the streaming path. A later
+                // timeout/error warning deliberately overwrites this — a transport
+                // failure is the more urgent signal.
+                if ("CONTENT_FILTER".equalsIgnoreCase(finishReason)) {
+                    metadata.put("warning", "content_filter");
+                    LOGGER.warnf("Streaming response was filtered by content policy (finishReason=%s)", finishReason);
+                } else if ("LENGTH".equalsIgnoreCase(finishReason)) {
+                    metadata.put("warning", "truncated");
+                    LOGGER.warnf("Streaming response was truncated due to token limit (finishReason=%s)", finishReason);
+                }
             }
             if (meta.tokenUsage() != null) {
                 var usage = meta.tokenUsage();
