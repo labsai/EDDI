@@ -43,7 +43,7 @@ export function TemplatesPanel({ onUseTemplate }: TemplatesPanelProps) {
 
       {/* Template cards */}
       {templates.length > 0 && (
-        <div className="flex overflow-x-auto gap-3 pb-2">
+        <div className="flex flex-wrap gap-3 pb-2">
           {templates.map((template) => (
             <div
               key={template.id}

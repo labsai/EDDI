@@ -224,7 +224,7 @@ function WorkforceSection() {
         </span>
       </div>
 
-      <div className="flex gap-3 overflow-x-auto pb-2 -ms-1 -me-1 ps-1 pe-1 scrollbar-thin">
+      <div className="flex flex-wrap gap-3 pb-2">
         {agents.map((agent) => {
           const idMatch = agent.resource?.match(
             /\/agentstore\/agents\/([^?]+)/,
