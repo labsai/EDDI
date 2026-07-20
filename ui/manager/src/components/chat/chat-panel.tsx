@@ -646,36 +646,36 @@ export function ChatPanel() {
           </div>
         )}
 
-        {/* Undo / Redo action bar — near the input */}
-        {conversationId && (
-          <div className="flex items-center gap-1 border-t border-border px-4 py-1">
+        {/* Undo / Redo — compact inline buttons */}
+        {conversationId && (undoAvailable || redoAvailable) && (
+          <div className="flex items-center gap-0.5 border-t border-border px-3 py-0.5">
             <button
               onClick={() => undoConversation.mutate()}
               disabled={!undoAvailable || isProcessing}
               className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+                "flex h-6 w-6 items-center justify-center rounded transition-colors",
                 undoAvailable && !isProcessing
                   ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  : "text-muted-foreground/30 cursor-not-allowed"
+                  : "text-muted-foreground/20 cursor-not-allowed"
               )}
               title={t("chat.undo")}
               data-testid="undo-btn"
             >
-              <Undo2 className="h-3.5 w-3.5" />
+              <Undo2 className="h-3 w-3" />
             </button>
             <button
               onClick={() => redoConversation.mutate()}
               disabled={!redoAvailable || isProcessing}
               className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+                "flex h-6 w-6 items-center justify-center rounded transition-colors",
                 redoAvailable && !isProcessing
                   ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  : "text-muted-foreground/30 cursor-not-allowed"
+                  : "text-muted-foreground/20 cursor-not-allowed"
               )}
               title={t("chat.redo")}
               data-testid="redo-btn"
             >
-              <Redo2 className="h-3.5 w-3.5" />
+              <Redo2 className="h-3 w-3" />
             </button>
           </div>
         )}

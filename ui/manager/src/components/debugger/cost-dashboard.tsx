@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
-import { useConversationCosts, useCacheStats } from "@/hooks/use-tool-metrics";
+import { useConversationCosts } from "@/hooks/use-tool-metrics";
 import { cn, formatDuration } from "@/lib/utils";
-import { Coins, Zap, TrendingUp, Server, BarChart3, AlertTriangle } from "lucide-react";
+import { Coins, Clock, Activity, Database, ArrowUp, ArrowDown } from "lucide-react";
 import { useMemo } from "react";
 
 // ==================== Component ====================
@@ -15,14 +15,8 @@ interface CostDashboardProps {
 
 export function CostDashboard({ conversationId, isActive = false }: CostDashboardProps) {
   const { t } = useTranslation();
-
-  // Fetch costs from the tool metrics API
   const { data: costs, isError: costsError } = useConversationCosts(conversationId, isActive);
 
-  // Fetch cache stats
-  const { data: cacheStats } = useCacheStats(isActive);
-
-  // Fetch audit entries for token-level detail
   const { data: auditEntries } = useQuery({
     queryKey: ["audit", "costDash", conversationId],
     queryFn: () => getAuditTrail(conversationId!, 0, 200),
@@ -30,192 +24,142 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
     staleTime: 10_000,
   });
 
-  // Compute token metrics from audit entries
   const tokenMetrics = useMemo(() => {
     if (!auditEntries?.length) return null;
     return computeTokenMetrics(auditEntries);
   }, [auditEntries]);
 
-  const latestTurn = tokenMetrics?.turns[tokenMetrics.turns.length - 1];
+  if (costsError && !costs) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="cost-dashboard-error">
+        <Activity className="h-8 w-8 text-destructive/50" />
+        <p className="text-sm text-muted-foreground">{t("costDashboard.error", "Unable to load cost data")}</p>
+      </div>
+    );
+  }
+
+  if (!tokenMetrics && !costs) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-6 text-center">
+        <Coins className="h-8 w-8 text-muted-foreground/30" />
+        <p className="text-sm text-muted-foreground">{t("costDashboard.empty", "Send a message to see cost metrics")}</p>
+      </div>
+    );
+  }
+
+  const turnsCount = tokenMetrics?.turns.length ?? 0;
+  const avgLatency = turnsCount > 0 ? (tokenMetrics?.turns.reduce((sum, tr) => sum + tr.durationMs, 0) ?? 0) / turnsCount : 0;
+  
+  const totalIn = tokenMetrics?.totalInput ?? 0;
+  const totalOut = tokenMetrics?.totalOutput ?? 0;
+  const totalTokens = totalIn + totalOut;
+  const inPct = totalTokens > 0 ? (totalIn / totalTokens) * 100 : 0;
+  const outPct = totalTokens > 0 ? (totalOut / totalTokens) * 100 : 0;
 
   return (
     <div className="flex flex-col gap-3 p-3" data-testid="cost-dashboard">
-      {/* This Turn */}
-      {latestTurn && (
-        <MetricSection
-          title={t("costDashboard.thisTurn", "This Turn")}
-          icon={<Zap className="h-3.5 w-3.5" />}
-        >
-          <MetricRow
-            label={t("costDashboard.tokens", "Tokens")}
-            value={`${fmtNum(latestTurn.inputTokens)} ${t("costDashboard.in", "in")} · ${fmtNum(latestTurn.outputTokens)} ${t("costDashboard.out", "out")} · ${fmtNum(latestTurn.totalTokens)} ${t("costDashboard.total", "total")}`}
-          />
-          {latestTurn.cost > 0 && (
-            <MetricRow
-              label={t("costDashboard.cost", "Cost")}
-              value={fmtCost(latestTurn.cost)}
-            />
-          )}
-          <MetricRow
-            label={t("costDashboard.duration", "Duration")}
-            value={formatDuration(latestTurn.durationMs)}
-          />
-          {latestTurn.modelName && (
-            <MetricRow
-              label={t("costDashboard.model", "Model")}
-              value={latestTurn.modelName}
-            />
-          )}
-        </MetricSection>
-      )}
-
-      {/* Conversation Total */}
-      {tokenMetrics && (
-        <MetricSection
-          title={t("costDashboard.conversationTotal", "Conversation Total")}
-          icon={<TrendingUp className="h-3.5 w-3.5" />}
-        >
-          <MetricRow
-            label={t("costDashboard.tokens", "Tokens")}
-            value={`${fmtNum(tokenMetrics.totalInput)} ${t("costDashboard.in", "in")} · ${fmtNum(tokenMetrics.totalOutput)} ${t("costDashboard.out", "out")} · ${fmtNum(tokenMetrics.totalTokens)} ${t("costDashboard.total", "total")}`}
-          />
-          <MetricRow
-            label={t("costDashboard.cost", "Cost")}
-            value={fmtCost(tokenMetrics.totalCost)}
-          />
-          {costs?.toolCallCount != null && costs.toolCallCount > 0 && (
-            <MetricRow
-              label={t("costDashboard.toolCalls", "Tool Calls")}
-              value={`${costs.toolCallCount}`}
-            />
-          )}
-        </MetricSection>
-      )}
-
-      {/* Rate Limits / Quota Gauges */}
-      {costs?.toolUsage && Object.keys(costs.toolUsage).length > 0 && (
-        <MetricSection
-          title={t("costDashboard.toolUsage", "Tool Usage")}
-          icon={<BarChart3 className="h-3.5 w-3.5" />}
-        >
-          {Object.entries(costs.toolUsage).map(([tool, callCount]) => (
-            <div key={tool} className="space-y-0.5">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="font-medium text-foreground truncate">{tool}</span>
-                <span className="text-muted-foreground font-mono">
-                  {callCount} {t("costDashboard.calls", "calls")}
-                </span>
-              </div>
-            </div>
-          ))}
-        </MetricSection>
-      )}
-
-      {/* Cache Stats */}
-      {cacheStats && cacheStats.hitRate > 0 && (
-        <MetricSection
-          title={t("costDashboard.cacheStats", "Cache")}
-          icon={<Server className="h-3.5 w-3.5" />}
-        >
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-foreground">{t("costDashboard.hitRate", "Hit Rate")}</span>
-              <span className="font-mono text-muted-foreground">
-                {(cacheStats.hitRate * 100).toFixed(1)}%
-              </span>
-            </div>
-            <ProgressBar
-              value={cacheStats.hitRate}
-              variant="success"
-            />
-          </div>
-        </MetricSection>
-      )}
-
-      {/* Error state */}
-      {costsError && !costs && (
-        <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="cost-dashboard-error">
-          <AlertTriangle className="h-8 w-8 text-destructive/50" />
-          <p className="text-sm text-muted-foreground">
-            {t("costDashboard.error", "Unable to load cost data from server")}
-          </p>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!tokenMetrics && !costs && !costsError && (
-        <div className="flex flex-col items-center gap-2 py-6 text-center">
-          <Coins className="h-8 w-8 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">
-            {t("costDashboard.empty", "Send a message to see cost metrics")}
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ==================== Sub-components ====================
-
-function MetricSection({
-  title,
-  icon,
-  children,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-card/50 p-2.5 space-y-1.5">
-      <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground/80">
-        {icon}
-        {title}
+      {/* 4 Stat Cards */}
+      <div className="grid grid-cols-4 gap-2">
+        <StatCard
+          icon={<Coins className="h-3 w-3" />}
+          label={t("costDashboard.totalCost", "Total Cost")}
+          value={fmtCost(tokenMetrics?.totalCost ?? costs?.totalCost ?? 0)}
+        />
+        <StatCard
+          icon={<Database className="h-3 w-3" />}
+          label={t("costDashboard.totalTokens", "Total Tokens")}
+          value={fmtNum(totalTokens)}
+        />
+        <StatCard
+          icon={<Activity className="h-3 w-3" />}
+          label={t("costDashboard.turns", "Turns")}
+          value={turnsCount.toString()}
+        />
+        <StatCard
+          icon={<Clock className="h-3 w-3" />}
+          label={t("costDashboard.avgLatency", "Avg Latency")}
+          value={formatDuration(avgLatency)}
+        />
       </div>
-      <div className="space-y-1">{children}</div>
+
+      {/* Token Distribution Bar */}
+      {totalTokens > 0 && (
+        <div className="rounded-lg border border-border bg-card p-2 space-y-1.5">
+          <div className="flex justify-between text-[10px] font-medium">
+            <span className="text-muted-foreground flex items-center gap-1">
+              <ArrowUp className="h-3 w-3" />
+              {t("costDashboard.input", "Input")}: {fmtNum(totalIn)}
+            </span>
+            <span className="text-primary flex items-center gap-1">
+              {t("costDashboard.output", "Output")}: {fmtNum(totalOut)}
+              <ArrowDown className="h-3 w-3" />
+            </span>
+          </div>
+          <div className="h-2 w-full rounded-full flex overflow-hidden bg-muted">
+            <div className="bg-muted-foreground/40 transition-all" style={{ width: `${inPct}%` }} />
+            <div className="bg-primary transition-all" style={{ width: `${outPct}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/* Per-Turn Table */}
+      {turnsCount > 0 && (
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <table className="w-full text-start border-collapse">
+            <thead>
+              <tr className="border-b border-border bg-muted/20">
+                <th className="py-1.5 px-2 text-start text-[10px] font-medium text-muted-foreground w-8">#</th>
+                <th className="py-1.5 px-2 text-start text-[10px] font-medium text-muted-foreground">{t("costDashboard.model", "Model")}</th>
+                <th className="py-1.5 px-2 text-end text-[10px] font-medium text-muted-foreground">{t("costDashboard.tokens", "Tokens")}</th>
+                <th className="py-1.5 px-2 text-end text-[10px] font-medium text-muted-foreground">{t("costDashboard.cost", "Cost")}</th>
+                <th className="py-1.5 px-2 text-end text-[10px] font-medium text-muted-foreground">{t("costDashboard.duration", "Time")}</th>
+              </tr>
+            </thead>
+            <tbody className="text-xs font-mono">
+              {tokenMetrics!.turns.map((turn, i) => {
+                const isLatest = i === turnsCount - 1;
+                return (
+                  <tr
+                    key={i}
+                    className={cn(
+                      "border-b border-border/50 last:border-0 hover:bg-muted/10 transition-colors",
+                      isLatest && "bg-primary/5 border-primary/20"
+                    )}
+                  >
+                    <td className="py-1.5 px-2 text-muted-foreground">{i + 1}</td>
+                    <td className="py-1.5 px-2 truncate max-w-[100px]" title={turn.modelName ?? ""}>
+                      {turn.modelName ? turn.modelName.replace(/^(gpt-|claude-)/, "") : "-"}
+                    </td>
+                    <td className="py-1.5 px-2 text-end text-[10px]">
+                      <span className="text-muted-foreground">↑{turn.inputTokens}</span>{" "}
+                      <span className="text-primary/80">↓{turn.outputTokens}</span>
+                    </td>
+                    <td className="py-1.5 px-2 text-end">{turn.cost > 0 ? fmtCost(turn.cost) : "-"}</td>
+                    <td className="py-1.5 px-2 text-end text-muted-foreground">{formatDuration(turn.durationMs)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
 
-function MetricRow({ label, value }: { label: string; value: string }) {
+function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between text-[11px]">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono text-foreground">{value}</span>
+    <div className="rounded-lg border border-border bg-card p-2 flex flex-col gap-1">
+      <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium">
+        {icon}
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="text-sm font-mono font-semibold text-foreground truncate">
+        {value}
+      </div>
     </div>
   );
 }
-
-function ProgressBar({
-  value,
-  max = 1,
-  variant = "default",
-}: {
-  value: number;
-  max?: number;
-  variant?: "default" | "success" | "warning" | "critical";
-}) {
-  const pct = Math.min((value / max) * 100, 100);
-  const colorClass =
-    variant === "critical"
-      ? "bg-destructive"
-      : variant === "warning"
-        ? "bg-amber-500"
-        : variant === "success"
-          ? "bg-emerald-500"
-          : "bg-primary";
-
-  return (
-    <div className="h-1.5 w-full rounded-full bg-muted/40 overflow-hidden">
-      <div
-        className={cn("h-full rounded-full transition-all duration-500", colorClass)}
-        style={{ width: `${pct}%` }}
-      />
-    </div>
-  );
-}
-
-// ==================== Helpers ====================
 
 interface TurnMetrics {
   inputTokens: number;
@@ -235,7 +179,6 @@ interface TokenMetricsResult {
 }
 
 function computeTokenMetrics(entries: AuditEntry[]): TokenMetricsResult {
-  // Group by stepIndex
   const byStep = new Map<number, AuditEntry[]>();
   for (const entry of entries) {
     const step = entry.stepIndex ?? 0;
