@@ -44,7 +44,7 @@ export function WorkforceChat() {
   });
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+    <div className="flex flex-col overflow-hidden" style={{ height: "calc(100dvh - 3.5rem)" }}>
       {/* Header bar */}
       <div className="flex items-center gap-2 border-b border-border ps-4 pe-4 py-2 shrink-0">
         <Link
