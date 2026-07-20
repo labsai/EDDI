@@ -972,6 +972,49 @@ class ChannelTargetRouterRefreshTest {
         }
     }
 
+    // ─── getIntegrationByName (HITL decision binding, H1/H2) ─────────────────────
+
+    @Nested
+    @DisplayName("getIntegrationByName — deterministic integration binding")
+    class GetIntegrationByNameTests {
+
+        @Test
+        @DisplayName("returns the named integration")
+        void resolvesByName() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "signing123"); // name "Test Slack Channel"
+
+            var result = router.getIntegrationByName("slack", "Test Slack Channel");
+
+            assertTrue(result.isPresent());
+            assertEquals("Test Slack Channel", result.get().getName());
+        }
+
+        @Test
+        @DisplayName("returns empty for an unknown name")
+        void unknownName() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "signing123");
+
+            assertTrue(router.getIntegrationByName("slack", "does-not-exist").isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty for null/blank name")
+        void nullOrBlankName() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "signing123");
+
+            assertTrue(router.getIntegrationByName("slack", null).isEmpty());
+            assertTrue(router.getIntegrationByName("slack", "  ").isEmpty());
+        }
+
+        @Test
+        @DisplayName("scoped by channel type — a name in another type is not matched")
+        void scopedByType() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "signing123");
+
+            assertTrue(router.getIntegrationByName("teams", "Test Slack Channel").isEmpty());
+        }
+    }
+
     // ─── Test helper: simple ConcurrentHashMap-based ICache ─────────────────
 
     private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {

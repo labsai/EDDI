@@ -50,11 +50,23 @@ public class McpToolFilter implements ToolFilter {
             // Group Conversations (Phase 10)
             "describe_discussion_styles", "list_groups", "read_group", "create_group", "update_group", "delete_group", "discuss_with_group",
             "read_group_conversation", "list_group_conversations", "start_group_discussion", "delete_group_conversation",
+            // Group Conversation Follow-Ups
+            "followup_with_member", "continue_group_discussion", "close_group_conversation",
             // Schedule Management
             "create_schedule", "list_schedules", "read_schedule", "delete_schedule", "fire_schedule_now", "retry_failed_schedule",
             // Channel Integrations
             "list_channel_integrations", "read_channel_integration", "create_channel_integration", "update_channel_integration",
-            "delete_channel_integration");
+            "delete_channel_integration",
+            // HITL approval surface (McpHitlTools) — mirrors the REST HITL endpoints
+            "list_pending_approvals", "get_approval_status", "resume_conversation", "cancel_conversation",
+            "list_group_pending_approvals", "list_all_group_pending_approvals", "get_group_approval_status",
+            "approve_group_phase", "cancel_group_discussion",
+            // Persistent user memory (McpMemoryTools) — role-guarded (viewer read / admin
+            // write) + per-user ownership
+            "list_user_memories", "get_visible_memories", "search_user_memories", "get_memory_by_key",
+            "upsert_user_memory", "delete_user_memory", "delete_all_user_memories", "count_user_memories",
+            // GDPR/CCPA data-subject operations (McpGdprTools) — admin-only
+            "delete_user_data", "export_user_data");
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {

@@ -5,6 +5,14 @@
 
 ---
 
+## 🔀 Merge `origin/main` into `chore/auto-approve-copilot` — conflict resolution (2026-07-20)
+
+**Repo:** EDDI (`chore/auto-approve-copilot`)
+
+Brought the auto-approve-workflow branch up to date with `main` to clear the open PR's merge conflict. The branch adds a single new file (`.github/workflows/auto-approve-copilot.yml`), so the merge pulled in all of main's post-branch work — including the HITL framework, multi-model cascade enterprise hardening, error-handling recovery, and group-conversation follow-ups — with a single textual conflict: `docs/changelog.md`. Both sides had prepended entry blocks; both kept whole — this merge entry plus the branch's auto-approve entry on top, main's newer history below. No source files conflicted: the branch modifies no `.java` that main also touched, so the merged tree's source is byte-identical to `origin/main`.
+
+---
+
 ## ⚙️ Chore: Auto-approve workflow for Copilot-reviewed PRs (2026-07-08)
 
 **Repo:** EDDI (`chore/auto-approve-copilot`)
@@ -46,6 +54,1918 @@ New GitHub Actions workflow (`.github/workflows/auto-approve-copilot.yml`) that 
 ### One-Time Manual Setup Required
 
 A repo admin must: (1) create/designate a bot GitHub account with write access, (2) generate a fine-grained PAT scoped to this repo with `Pull requests: R/W`, `Checks: Read`, `Metadata: Read`, (3) store it as repo secret `AUTO_APPROVE_BOT_TOKEN`, (4) set repo variable `AUTO_APPROVE_BOT_LOGIN` to the bot's username.
+
+---
+
+## 🔁 Fix: PR-review response — interrupted streaming, FQN imports, changelog accuracy (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Four review comments on [PR #593](https://github.com/labsai/EDDI/pull/593) (CodeRabbit + github-code-quality); all valid, all fixed. Two turned out to be broader than reported.
+
+### 1. An interrupted streaming attempt was reported as a success (Major)
+
+When `latch.await(...)` threw `InterruptedException`, neither `timedOut` nor `errorRef` was set, so execution fell through both guards to `break` and returned `new StreamingResult(responseText, metadata)` — an empty string presented as a completed answer, with no signal to the caller.
+
+Corroborating evidence the review did not cite: `AgentOrchestrator` already treats a set interrupt flag as a **hard abort** (its test describes the scenario as "simulate a cascade per-step timeout cancel"). The streaming executor was therefore contradicting an established convention inside the same subsystem — a cancelled step could be accepted as a real, empty answer, and on the cascade's last step it would win outright.
+
+Interruption is now a distinct outcome: `streamingInterrupted` is recorded in the metadata, the salvaging (`LlmTask`) path returns whatever text arrived with a `streaming_interrupted_partial` warning, and every other path throws. It is **never retried** — a retry would ignore the very cancellation being signalled. Four tests, each observed failing first.
+
+### 2. Inline fully-qualified names in `LifecycleManagerTest` (Minor)
+
+Flagged on one line; the file actually had **eight** — four `IAuditEntryCollector` and four `ConversationEventSink`. All replaced with two top-level imports per AGENTS.md §4.7.
+
+### 3. The full-suite failure totals did not add up (Minor)
+
+Correct, and the fault was in the measurement rather than the prose: the categorisation was run over `target/surefire-reports` **without a preceding `clean`**, so it also swept up XML from earlier *targeted* runs. The per-bucket figures were therefore drawn from a superset of the run they were attributed to. The numbers have been withdrawn (with an explicit correction note in the merge entry) rather than quietly adjusted, since the original claim was already pushed.
+
+Re-measured from a genuinely clean run of the final code: **11,658 tests, 8 failures, 287 errors, and zero assertion failures.** Every failing test case in the surefire XML carries a blocked-loopback or socket-selector message; not one is a code assertion.
+
+### 4. Useless parameter in the new error-path test helper (Note)
+
+`executor(ChatModelRegistry, ITemplatingEngineStub)` never used its second argument, and the `ITemplatingEngineStub` marker interface existed only to make that argument look intentional — introduced in the previous commit as a "readability" device that conveyed nothing. Parameter and interface removed, all seven call sites simplified to `executor(registry)`.
+
+One caveat, stated rather than papered over: the XML yields 301 distinct failing test cases against the console's 295 failures+errors, and that ~6 gap is unexplained (it is not reruns, not suite-level entries, and not skipped-plus-failed). The load-bearing claim deliberately does not depend on the count — "no entry in this set is an assertion failure" is a property of the set, unaffected by how its members are tallied. CI remains the source of truth for the socket- and Docker-dependent suites.
+
+---
+
+## 🔧 Fix: close the response-validation gaps between streaming, cascade and validation (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Clears the four follow-ups recorded in the entry below. Each was pre-existing, and together they meant `responseValidation` — a headline feature of this PR — silently did nothing on the paths users are most likely to run it on. Every fix is TDD'd: the test was written first and observed failing.
+
+### 1. Streaming now derives `warning` from `finishReason`
+
+`LegacyChatExecutor` maps `LENGTH` → `truncated` and `CONTENT_FILTER` → `content_filter`; the streaming executor captured `finishReason` but never derived the warning, so `onTruncation` and `onContentFilter` could **never** fire on a streaming task. `buildMetadata` now mirrors the buffered executor. A later timeout/error warning deliberately overwrites it — a transport failure is the more urgent signal.
+
+### 2. The cascade now carries the winning step's validation metadata
+
+`CascadeResult` and the internal `StepResult` carried only `tokenUsage`; the producing executor's `warning`/`streamingTimeout`/`finishReason` were dropped on the floor. With `modelCascade` **and** `responseValidation` both enabled, only `onEmpty` and `onRefusal` could fire — a truncated or content-filtered cascade answer reached the user even with `action: "error"` configured. Both records gained a `responseMetadata` component, threaded from the legacy, streaming and agent-mode step paths, and merged into `responseMetadata` in `LlmTask`.
+
+### 3. A timed-out live-streamed final step no longer wins
+
+`executeCapturing` returns the (possibly empty) partial text on timeout instead of throwing, so a timed-out final step was accepted on the same footing as a real answer — and being last, it beat a good earlier response. A mid-stream *error* already fell back correctly; a *timeout* did not. A step whose metadata reports `streamingTimeout` is now treated as failed: it never becomes `bestSoFar`, it escalates when it is not the last step, and on the last step it falls back to `bestSoFar` (marked `streamedLive` so `LlmTask` does not re-emit different text over tokens the client already received).
+
+Enabling this required `executeCapturing` to honour the task's `streamingTimeoutSeconds`, which it previously ignored by passing `task = null` — so the cascade was always pinned to the 120s default. The task's **retry** config is still deliberately not applied on the cascade path: the cascade owns escalation, and retrying inside a step would multiply spend against the very model it is about to escalate away from.
+
+### 4. Restored the lapsed cascade error-path coverage
+
+New `CascadingModelExecutorErrorPathTest` — written against the current implementation rather than restored verbatim — covering what was lost when `CascadingModelExecutorExtendedTest` was deleted and `CascadingModelExecutorCoverageTest` was rewritten on `main`: last-step timeout with and without a `bestSoFar`, timeout escalation firing `onCascadeEscalation("timeout")`, `LifecycleException` and plain-`RuntimeException` cause handling, aggregated all-steps-failed errors, and `enableInAgentMode=false` never consulting the orchestrator.
+
+### 5. Cascade failures are now diagnosable (found while writing #4)
+
+Two of the restored tests failed for a reason the tests were right about: the retry wrapper throws a generic `"Chat model execution failed after N attempts"`, and the cascade recorded only `e.getMessage()`. So a fully failed cascade reported `Step 0 (cheap): Chat model execution failed after 1 attempts; Step 1 (expensive): …` — byte-identical whether the cause was a rate limit, an auth failure, a malformed request or a network outage, in both the thrown message and the audit trace. A new `describeFailure()` appends the root-cause message (bounded cause-chain walk, so a cyclic chain cannot hang the error path).
+
+### Verification
+
+Full LLM module: 2,260 tests, **zero assertion failures** — every reported failure/error message is a blocked-loopback or socket-resource error from this sandbox, none a code assertion. All 73 cascade tests and 33 streaming-executor tests green. (Counts of each bucket are deliberately not quoted here; see the correction note in the merge entry below for why the earlier per-bucket figures were unreliable.)
+
+### Design decisions
+
+- **Metadata threaded as a record component, not a side channel.** `CascadeResult` is the cascade's public contract with `LlmTask`; anything the caller must validate belongs on it rather than in a mutable out-parameter.
+- **A timed-out step is a failed step, not a low-confidence one.** Demoting it via confidence would still let it win when no earlier step scored higher; excluding it from `bestSoFar` outright is what makes the fallback correct.
+- **Retry stays off inside cascade steps.** Escalation is the cascade's retry mechanism; stacking both multiplies cost in a way no config expresses.
+
+---
+
+## 🐛 Fix: two latent retry-loop defects in `StreamingLegacyChatExecutor` (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Surfaced by an adversarial post-merge review of the streaming executor (see the merge entry below). Both defects pre-date the merge — they came in with this branch's retry loop, not with the conflict resolution — but both live inside the method the merge rewrote, and both are squarely in this PR's own subject area (error handling and recovery), so they are fixed here rather than deferred.
+
+### 1. A failed attempt's metadata leaked into a successful retry
+
+`metadata` is declared outside the retry loop and mutated inside it. If attempt 1 timed out with no tokens (setting `streamingTimeout=true`) and attempt 2 succeeded, the successful response was returned **with the stale `streamingTimeout` flag still attached**. `LlmTask.applyResponseValidation` reads that flag and fires `responseValidation.onStreamingTimeout` — so with `action: "fallback"` a perfectly good answer was silently replaced by the "I wasn't able to generate a complete response" string, and with `action: "error"` the turn threw. The loop body now clears the map at the start of each attempt, so each attempt reports only its own outcome.
+
+### 2. `maxAttempts <= 0` skipped the model entirely and returned a null response
+
+`RetryConfiguration.setMaxAttempts` does no clamping, so a config of `retry: {maxAttempts: 0}` — a natural way to write "don't retry" — made `for (attempt = 1; attempt <= 0; …)` never execute. The model was never invoked, `responseText` stayed null, and `StreamingResult(null, …)` propagated into `LlmTask` and on into a `TextOutputItem(null, 0)`: no exception, no log, a completely silent turn. Now clamped with `Math.max(1, …)` — "no retries" means one attempt.
+
+Deliberately **not** clamped in `RetryConfiguration.setMaxAttempts` itself: the shared `executeWithRetry` already fails *loudly* on `maxAttempts=0` (throws `LifecycleException`), and changing the setter would silently alter that contract for the MCP and HTTP-call consumers and their existing tests. The clamp belongs at the streaming call site, which is the one that was failing silently.
+
+### Tests
+
+Three regression tests added to `StreamingLegacyChatExecutorRetryTest`, each confirmed to fail before the fix and pass after: `timeoutThenSuccess_doesNotLeakTimeoutMetadata`, `zeroMaxAttempts_stillRunsOnce`, `negativeMaxAttempts_stillRunsOnce`. A fourth, `executeCapturing_propagatesErrorDespitePartialTokens`, pins the merge's central contract at the executor level — until now it was guarded only indirectly, by a cascade-level test.
+
+155 tests green across the streaming, cascade, orchestrator and LlmTask suites.
+
+### Known follow-ups (not fixed here — pre-existing, out of scope for this PR)
+
+- **Cascade drops the validation-signal metadata.** `CascadeResult` carries only `tokenUsage`, not the producing executor's `warning`/`streamingTimeout`. With `modelCascade` *and* `responseValidation` both enabled, only `onEmpty` and `onRefusal` can fire; `onTruncation`, `onContentFilter` and `onStreamingTimeout` are unreachable. Coverage was worse before the merge (the cascade path left the metadata map empty), so this is an exposure, not a regression.
+- **Streaming never derives `warning` from `finishReason`.** `LegacyChatExecutor` maps `LENGTH` → `truncated` and `CONTENT_FILTER` → `content_filter`; `buildMetadata` does not, so those two policies are inert on the streaming path even without the cascade.
+- **A timed-out live-streamed final cascade step is accepted as the winner** rather than falling back to `bestSoFar` — a mid-stream *error* falls back correctly, a *timeout* does not.
+- **~500 lines of cascade error-path tests lapsed on `main`** before this merge (`CascadingModelExecutorExtendedTest` deleted; 15 of 16 tests in `CascadingModelExecutorCoverageTest` replaced), covering exception-unwrapping and timeout-escalation. Worth re-adding against the current implementation.
+
+---
+
+## 🔀 Merge `origin/main` into `feat/error-handling-recovery` — conflict resolution (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Second merge of `main` into the error-handling branch ([PR #593](https://github.com/labsai/EDDI/pull/593)), bringing in 43 commits (group conversations, MCP/REST ownership hardening, multi-model cascade enterprise work). Seven files conflicted; beyond those, two files were silently mis-merged and one behavioural regression was introduced by the first resolution — both classes of problem are recorded below, since neither is visible in `git status`.
+
+### Conflicts resolved (7)
+
+- **`RestAgentEngine`** — main refactored the descriptor-based ownership check into `ConversationAccessGuard.requireConversationOwner()`; ours added `IConversationMemoryStore` for the new admin `resetState()` endpoint. Resolution keeps **both**: `conversationMemoryStore` stays (still used by `resetState`), `conversationDescriptorStore` is dropped (main removed its last usage — verified no remaining references). Constructor is now `(conversationService, conversationMemoryStore, identity, ownershipValidator, conversationAccessGuard, hitlAccessGuard, hitlToolJournalStore, agentTimeout)`.
+- **`RestAgentEngineTest` / `RestAgentEngineHitlTest` / `RestAgentEngineToolPauseDetailsTest`** — constructor-arity fallout from the above, updated to the merged signature. The HITL and tool-pause tests also swapped their inline `mock(ai.labs.…IConversationMemoryStore.class)` FQN for a top-level import per AGENTS.md §4.7.
+- **`CascadingModelExecutorCoverageTest`** — ours removed the `LlmConfiguration.RetryConfiguration` shim in favour of `ai.labs.eddi.configs.shared.RetryConfiguration`; main's newer version of the file still used the nested type. Resolved onto the shared type, keeping ours' `task.setParameters(...)` line.
+- **`StreamingLegacyChatExecutor`** — the substantive one; see below.
+- **`docs/changelog.md`** — both sides prepended entry blocks; both kept whole, main's block (which carries the newest entry) first.
+
+### `StreamingLegacyChatExecutor` — two overlapping features unified
+
+Both branches rewrote the same method for different reasons:
+
+- **ours** added a configurable timeout, a retry loop driven by `RetryConfiguration`, and `finishReason` metadata, returning `StreamingResult`;
+- **main** added `executeCapturing()` returning `StreamResult` with full `ChatResponse` metadata (token usage), so the cascade keeps cost evidence when it streams the final step live.
+
+Neither could be dropped — `LlmTask` calls the retry-aware overload, `CascadingModelExecutor` calls `executeCapturing`, and each has its own tests. The merged class keeps **one** core implementation (retry + configurable timeout) that now captures the whole `ChatResponse` and builds metadata via main's `buildMetadata()` (finishReason **and** tokenUsage); both public entry points delegate to it.
+
+**Regression caught during merge review:** the first resolution had `executeCapturing` delegate with ours' error semantics, which *salvage* partial text on a mid-stream error instead of throwing. `CascadingModelExecutor` has no try/catch at that call — it relies on the throw to fall back to the best previous step — so a failed final step was silently accepted as successful (`CascadingModelExecutorEnterpriseTest.streamingFinalStepFailsMidStream_fallbackMarkedStreamedLive`: `expected: <0> but was: <1>`). The core now takes a `salvagePartialOnError` flag: `true` for the `LlmTask` path (keep whatever the model produced rather than fail the turn), `false` for `executeCapturing` (always propagate, so the cascade can fall back). Timeout handling is unchanged — both sides already salvaged partial text there.
+
+### Silent auto-merge breakage (fixed)
+
+Ours deleted the nested `LlmConfiguration.RetryConfiguration` shim while main added **new** usages of it. Git merged both sides cleanly and the result did not compile:
+
+- `AgentOrchestratorExtendedTest` (2 usages) and `CascadingModelExecutorEnterpriseTest` (1 usage) — both moved to `ai.labs.eddi.configs.shared.RetryConfiguration`, import added.
+
+Only a clean `test-compile` surfaced these; they were not reported as conflicts.
+
+### Auto-merges verified, not assumed
+
+The five remaining files touched by both sides were diffed against **each** parent to confirm neither side's changes were dropped:
+
+- `IConversationService` / `ConversationService` / `RestAgentEngineStreaming` — ours' `onTaskFailed` callback and `resetConversationState` alongside main's `onCascadeStepStart` / `onCascadeEscalation`; orthogonal additions to the same interface and anonymous handler.
+- `LlmConfiguration` — ours' `responseValidation` + `streamingTimeoutSeconds` alongside main's `judgeModel` / `heuristic` / `maxTotalDurationMs`.
+- `LlmTask` — ours' retry-aware streaming call and `applyResponseValidation` alongside main's cascade wiring and `MeterRegistry`. Confirmed `applyResponseValidation` sits *outside* the `if (cascadeActive)` branch, so response validation still runs on every path including the cascade.
+
+### Design decisions
+
+- **Keep both streaming entry points rather than collapsing to one.** Their error contracts genuinely differ (salvage vs. propagate) and each has a real production caller; one core plus an explicit flag beats duplicating ~50 lines of streaming boilerplate or silently changing one caller's behaviour.
+- **`conversationDescriptorStore` dropped, not re-plumbed.** `ConversationAccessGuard` is the single ownership-check path now; keeping a second route to the descriptor store would reintroduce exactly the drift the guard exists to remove.
+- **Changelog blocks kept whole** rather than interleaved by date — the file is already organised in per-branch blocks, and re-sorting would produce a large, unreviewable diff.
+
+### Verification
+
+`mvnw clean test-compile` green — a *clean* build deliberately, since the `RestAgentEngine` signature change would be masked by a stale incremental one.
+
+Full unit suite: **11,409 tests run, 8 failures and 304 errors, none of them an assertion failure.** Every failure/error message in the surefire XML falls into one of three buckets — `Unable to establish loopback connection`, Docker/Testcontainers unavailable (the Mongo + Postgres store tests), and socket-selector/event-loop creation errors — i.e. this sandbox's inability to open loopback sockets or run Docker. CI remains the source of truth for those suites.
+
+> **Correction (post-review):** an earlier draft of this entry gave a per-bucket breakdown (297/16/5 = 318) that did not reconcile with the run's 312 failures+errors. The categorisation had been run over `target/surefire-reports` without a preceding `clean`, so it also counted XML left behind by earlier *targeted* runs — a superset of the full run. The conclusion is unaffected (a superset containing zero assertion failures still contains zero), but the counts were not defensible as stated and have been removed rather than quietly adjusted.
+
+The 56 tests directly covering the merged paths pass locally: `StreamingLegacyChatExecutor{,Retry,Coverage}Test`, `CascadingModelExecutor{Coverage,Enterprise}Test`, `RestAgentEngine{,Hitl,ToolPauseDetails}Test`, `AgentOrchestratorExtendedTest`.
+
+### Next
+
+Merge-ready for PR #593. Remaining follow-up unrelated to the merge: ours' `onTaskFailed` SSE handler in `RestAgentEngineStreaming` still hand-builds its JSON via `String.format` + `escapeJson`, while main introduced a `sendJsonEvent(...)` Jackson helper on the same class and documents it as preferred. Correct as-is (the payload is escaped), but worth converting for consistency.
+
+---
+
+## 🔀 Merge `origin/main` into `feat/group-followups` — conflict resolution (2026-07-20)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Merged `origin/main` (multi-model cascade enterprise hardening + MCP/REST conversation-ownership security hardening) to resolve PR #595's merge conflicts against `main`. Two files conflicted, both non-substantive:
+
+- **`ToolExecutionTrace.java`:** both branches independently documented the same `synchronized` rationale on `addToolCall`/`addFailedToolCall` — ours as a Javadoc block above each method, `origin/main`'s as an inline comment restating it. Kept the existing Javadoc, dropped the redundant inline comment.
+- **`docs/changelog.md`:** both branches appended new entries directly below the file header. Resolved as a union, newest-first per branch: this branch's own entries (group follow-ups work, 2026-07-08 to 2026-07-15) kept first, followed by `origin/main`'s entries (MCP/REST conversation-ownership hardening + multi-model cascade, 2026-07-03 to 2026-07-15).
+
+---
+
+## 🧵 ToolExecutionTrace — thread-safe recording (fixes CI flake) (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`) — a **pre-existing** bug on `main`, unrelated to the group work, that surfaced as an intermittent full-suite CI failure on this branch: `ToolExecutionServiceBranchTest.executeMultipleInParallel` → `expected <Hello, Alice!> but was <Error executing tool: ConcurrentModificationException>`. Committed here to unblock this branch's CI (per decision), clearly scoped as an independent fix.
+
+**Root cause (systematic-debugging, root-caused before any fix):** `ToolExecutionService.executeToolsParallel` shares **one** `ToolExecutionTrace` across every concurrent task by design (it's the accumulator). But the trace's `addToolCall` / `addFailedToolCall` mutated a plain `ArrayList`, a plain `HashMap` (`toolMetrics`), and non-atomic counters with no synchronization. Under real parallelism, `HashMap.computeIfAbsent` detects concurrent structural modification and throws `ConcurrentModificationException`; `executeTool` catches it and returns `"Error executing tool: " + e.getClass().getSimpleName()` (CME's message is null) — the exact observed string. This is a genuine production bug: `executeToolsParallelAndWait` is a live API.
+
+**Fix:** `synchronized` on both trace mutators, serializing concurrent recording (covers the collection adds, the `computeIfAbsent`, and the primitive accumulations). `updateMetrics` is private and only called under those locks. Reads happen after `CompletableFuture.allOf(...).join()` (a happens-before edge), so writer synchronization is sufficient.
+
+**Coverage:** new `concurrentToolsShareTraceWithoutCorruption` stress test — 50 rounds × 32 parallel tasks sharing one trace, asserting no task returns an error string and every call is recorded exactly once (no lost `ArrayList` updates). It fails reliably on the unsynchronized version (reproduced the CME at round 41) and passes 5/5 with the fix. The original 2-task test had too small a race window to be a reliable regression guard.
+
+---
+
+## 🔍 Group conversations — Copilot PR-review response (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Copilot flagged 5 items on the pushed branch. Each was adversarially verified against the actual code (a 6-agent verification workflow plus independent reading) before implementing — external review is evaluated, not rubber-stamped. **All 5 confirmed**, all fixed:
+
+- **MCP raw-exception leak (×3, Medium)** — `followup_with_member`, `continue_group_discussion`, `close_group_conversation` returned `errorJson(e.getMessage())`, forwarding raw internal exception text to MCP callers (information exposure). Now each logs the full throwable server-side (`LOGGER.error(msg, e)`) and returns a stable curated `errorJson("Failed to …", "INTERNAL", null)` — matching the hardened `McpHitlTools` convention. (Verified the 3-arg `errorJson` overload exists, so this compiles; Copilot's suggested form was correct despite its own hedge.)
+- **REST 400 missing `TEXT_PLAIN` (Medium)** — `rejectAttachmentsOnContinue()` was the sole error response in `RestGroupConversation` not setting `.type(TEXT_PLAIN)`. Added, for content-type consistency with every sibling 400/404/409/504.
+- **Stale concurrency comment (Low)** — the `operationsInProgress` field comment called `compareAndSetState` a "best-effort read-check-update". That is now false: `GroupConversationStore.compareAndSetState` does a fast-path read then an **atomic** storage-layer conditional write (`storeIfFieldEquals` → single Mongo `updateOne` / Postgres `UPDATE` filtered on the current `state`). Corrected the comment: the in-memory `Set` is a single-node fast-fail optimization; the cluster-wide guard is the storage CAS.
+
+**Coverage (mutation-verified):** three new `McpGroupToolsTest` cases drive each tool's generic `catch` (service throws a recognizable `boom-internal-detail-42`) and assert the response does **not** contain the raw text and **does** contain the curated message + `"errorCode":"INTERNAL"`. Reverting all three curations fails exactly those three tests (and nothing else) — proving they pin the non-leak contract. 46 `McpGroupToolsTest` cases pass (was 43); full group/MCP suite green; Checkstyle clean.
+
+**Deliberately out of scope:** the same `errorJson(e.getMessage())` pattern exists in ~10 pre-existing catch blocks in `McpGroupTools` (and other MCP tool classes), and two existing tests *depend* on those messages (`start_group_discussion` → "Group not found", `delete` → "Not found"). A blanket sweep would break tested behaviour and expand well beyond this PR, so it is left as a separate follow-up rather than bundled here.
+
+---
+
+## 🌐 Group follow-up/continue — status-split completion: mid-round timeout → 504 (2026-07-15)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+An adversarial re-review of the status-code split found one path the split had missed. `executeAgentTurn` (the per-member turn used by the *initial* discussion and re-run by every continuation) still threw a **base** `GroupDiscussionException` on an ABORT-policy member timeout — so a genuine member-agent timeout mid-round mapped to `502 Bad Gateway`, not the `504 Gateway Timeout` the split documents. Every other timeout site was already `GroupTimeoutException`; this was the last one.
+
+- **Fix:** `GroupConversationService.executeAgentTurn` now throws `GroupTimeoutException` on the `onAgentFailure=ABORT` timeout branch. `executeDiscussion`'s re-wrap preserves the subtype, so it surfaces as `504`.
+- **REST body hedge:** `continueDiscussion`'s `502` (`GroupExecutionException`) body previously claimed only "a member agent could not be reached". That catch also covers unrunnable-config failures, so the body now reads "a member agent or a required dependency could not be reached, or the group is misconfigured" — no longer asserting a single cause it cannot verify.
+- **Coverage (mutation-verified):** new `GroupConversationServiceExtendedTest.FailurePolicies#abortPolicy_agentTimesOut_throwsGroupTimeoutException` drives a real member timeout (a `doNothing()` say stub so the future never completes) under `ABORT` and asserts `GroupTimeoutException`. Reverting the fix to the parent `GroupExecutionException` flips exactly this one test to failing ("expected GroupTimeoutException but was GroupExecutionException") — proving it pins the 504-vs-502 distinction, not just "some 5xx".
+
+250 group/MCP unit tests pass (52 extended, 82 service, 39 REST, 3 routing, 31 HITL, 43 MCP); Checkstyle clean.
+
+---
+
+## 🌐 Group follow-up/continue — HTTP status-code split (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A final pre-review pass flagged that `followUpWithMember` / `continueDiscussion` mapped **every** `GroupDiscussionException` to `409 Conflict` — including an unknown target agent (a client error) and mid-round server/upstream failures (LLM/DB down, agent timeout). A `409` tells the client "retryable conflict", which is wrong for a typo'd agent or a provider outage. This was pre-existing feature behaviour, not a regression, but it is a real API-semantics issue a reviewer would raise, so it was fixed properly.
+
+- **Cause-differentiated exception subtypes** (all extend `GroupDiscussionException`, so existing `catch (GroupDiscussionException)` in the MCP tools and tests keeps working): `GroupMemberNotFoundException` (→ 404), `GroupExecutionException` (→ 502), `GroupTimeoutException extends GroupExecutionException` (→ 504). The base type now means **only** a state/concurrency conflict (→ 409).
+- **Single interception point** for execution failures: `executeDiscussion` re-throws every failure caught in its phase loop as `GroupExecutionException` (preserving `GroupTimeoutException`), so the many deep agent/quota/config throw sites did not each need editing. `followUpWithMember`'s own agent-call/timeout throws are re-typed directly.
+- **REST mapping** (most-specific catch first): unknown member → `404`, agent timeout → `504`, agent/model failure → `502` (Bad Gateway — an upstream dependency failed, logged with its stack trace), state/concurrency → `409`. The `@APIResponse` annotations now list the full set. `close` is unchanged (only ever a state conflict → 409).
+- Nits swept: the new `400` bodies now set `.type(TEXT_PLAIN)` for consistency; the follow-up `InterruptedException` path restores the interrupt flag.
+
+Coverage: added REST tests (`followUp`/`continue` → 404/502/504, and still-409 for a genuine conflict) and service tests asserting the specific subtypes are thrown (unknown member → `GroupMemberNotFoundException`, agent failure → `GroupExecutionException`, and the `executeDiscussion` failure-policy tests now assert `GroupExecutionException`). **Each new mapping was mutation-verified**: reverting the split makes the corresponding test fail (404/502/504 → 409; specific subtype → base). 654 group/MCP unit tests pass; Checkstyle clean.
+
+---
+
+## 🧬 Group conversations — mutation-audited regression coverage (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+The question "do we have coverage for everything we fixed?" was answered with **mutation testing** rather than by reading test names: each fix was reverted in turn and the suite re-run. A fix whose mutant *survives* (suite still green) has no coverage and can silently regress.
+
+### Mutants that survived — i.e. bugs with ZERO coverage
+
+| Fix | Why the tests could not see it |
+| --- | --- |
+| **JAX-RS routing** — the `/{groupId}/conversations` prefix on the four post-discussion endpoints | The unit tests invoke resource methods **directly** and never exercise JAX-RS path binding. This was the single highest-severity bug of the whole effort (every follow-up/continue/close would have 404'd), and it could be reintroduced with the suite still green. |
+| **SSE error curation** — the *service* pushing raw `e.getMessage()` into `GroupErrorEvent` | Nothing asserted what actually goes out over the wire to the browser. |
+| **Malformed-id reflected value** — Mongo's `ObjectId` parser echoing the raw caller string | No test drove an unparseable id. |
+| **Curated exception messages** (store + `loadInGroup`) | The existing test asserted the *response body*, which the REST layer curates anyway — so the message itself (which `read`/`delete` surface through the global mapper) was unguarded. |
+| **Continuation `startPhaseIndex = 0`** | Nothing asserted that a continuation re-runs from the FIRST phase; a mutant that skipped phase 0 passed. |
+| **`finally` cleanup condition** (defer `COMPLETED`, reclaim on `FAILED`/`CANCELLED`) | Nothing asserted that a COMPLETED round keeps its ephemeral agents for follow-ups. |
+| **`resumeQuestion` read side** | Only the *write* was tested; nothing asserted that `resumeDiscussion` actually uses it. |
+| **The three new metrics counters** | Never asserted. |
+
+### Coverage added (each verified to KILL its mutant)
+
+- **`IRestGroupConversationRoutingTest`** (new) — reflective assertions on the JAX-RS annotations: every `@PathParam` must have a matching `{template}` segment (a mismatch binds `null` — the exact production failure), every per-conversation route stays under `/groups/{groupId}/conversations/{groupConversationId}`, and the four endpoints resolve to their documented URLs. This is the invariant a direct-invocation test structurally cannot check.
+- **`GroupConversationServiceExtendedTest.MergeRegressionGuards`** (new) — a failed discussion streams a *curated* error (never the raw exception text); a continuation re-runs from phase 0 and emits `round_start` (not `group_start`); a COMPLETED round keeps its ephemeral agents.
+- **`GroupConversationServiceHitlTest`** — a paused *continuation* resumes with the follow-up question, not the stale round-1 one.
+- **`GroupConversationStoreTest` / `RestGroupConversationTest`** — the not-found message never embeds the caller id; a malformed id is answered 404 without reflecting the payload; the group-mismatch exception *message* is curated.
+- **`GroupConversationServiceTest`** — the three operation counters, and the failure counter incrementing even when the CAS is lost.
+
+Mutants **already killed** before this pass (genuinely covered): `failConversation`'s upsert, the MCP ownership gate, `CLOSED`-blindness in `persistedTerminalOverride`, `continueDiscussion`'s conditional write, the control-token pre-registration, `cancelDiscussion`'s `CLOSED` guard, `availableActions` for `CANCELLED`, and the MCP list owner-filter.
+
+647 group/MCP unit tests pass; Checkstyle clean. No production code changed in this commit.
+
+---
+
+## 🛡️ Group conversations — terminal-state integrity + error-body hardening (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`). Found by an adversarial review of the previous PR-review-response commit — which had hardened the *success* write in `continueDiscussion` while leaving the *failure* write, and the rest of the reflected-value surface, wide open.
+
+### Terminal states are now irreversible
+
+- **`failConversation` was an unconditional whole-document write — i.e. an UPSERT.** It could **re-create a group conversation another pod had deleted**, and could overwrite a terminal `CANCELLED` (committed by a cross-pod cancel) with `FAILED`, clobbering that writer's transcript. It is now a conditional write.
+- **The CAS expectation is taken from the PERSISTED state, not the in-memory one.** A first attempt CASed on `gc.getState()` and was itself a blocker: `executeDiscussion` flips the conversation to `SYNTHESIZING` **in memory** before the synthesis phase runs and only persists it afterwards, so a failure inside a synthesis phase would have CASed `SYNTHESIZING` against a persisted `IN_PROGRESS`, lost the race, skipped the write, and **stranded the conversation `IN_PROGRESS` forever** — worse than the bug being fixed. `failConversation` now re-reads the persisted state, skips the write when it is already terminal (aligning the in-memory state to it, so the `finally` makes the right ephemeral-agent decision), and counts the failure metric unconditionally so a lost race can never hide a failure from operators.
+
+### No exception text reaches the client (CodeQL: information exposure / reflected value)
+
+The previous commit curated one handler. This closes the class:
+
+- **Throw sites:** `GroupConversationStore` and `GroupConversationService` no longer embed caller-supplied ids in exception messages (`"Group conversation not found: {id}"`, `"Group not found: {groupId}"`, `"No phases defined for group: {groupId}"`).
+- **Sinks:** `RestGroupConversation` returns **no raw exception text in any body** — every 400/404/409 is a curated, deliberately non-committal message (these exceptions cover several causes, so the body must not assert one), with the detail logged via `LogSanitizer`.
+- **SSE:** the *service* was pushing raw `e.getMessage()` into `GroupErrorEvent`, which the streaming listener forwards to the browser — so LLM/DB/driver detail (and the caller's own input) reached the client even though the REST catch sites were curated. Those events are now curated too, and the raw cause is logged with its stack trace.
+- **Malformed ids:** a non-hex id reaches Mongo's `ObjectId` parser, whose message embeds the **raw caller string** — the most exploitable sink. It is caught **inside `loadInGroup`, scoped to the id lookup only**, and answered with a curated 404. It is deliberately *not* a blanket `catch (IllegalArgumentException)` around the whole operation: that would mask a genuine internal bug as a false "not found" and hide its stack trace.
+
+Verified: 636 group/MCP unit tests pass (incl. new regression tests for the persisted-state CAS and the already-terminal skip); Checkstyle clean. Remaining full-suite failures are environmental only (Testcontainers/Docker + loopback-socket suites).
+
+---
+
+## 🤖 Group follow-ups — automated PR review response (CodeQL / Copilot / CodeRabbit) (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`) — responses to the bot reviews on [PR #595](https://github.com/labsai/EDDI/pull/595).
+
+### Correctness
+
+- **Terminal-state resurrection in `continueDiscussion`** (Copilot, *High*): after the `COMPLETED → IN_PROGRESS` CAS, the round/question mutation was persisted with an **unconditional** whole-document `update()`. A cancel/close/delete winning the window would be overwritten and the conversation resurrected as `IN_PROGRESS`. Now a conditional write (`updateIfState(gc, IN_PROGRESS)`) → `409` on conflict. This is the same defect class already fixed in `followUpWithMember`; the continue path had been missed.
+
+### Security — reflected input & error exposure
+
+- **Reflected `groupId` in 404 bodies** (Copilot, *Medium*): `loadInGroup()` embedded the caller-supplied `groupId` in its exception message, which follow-up / continue / close echo verbatim into the `404` body (CodeQL reflected-value/XSS). Now a curated body; both ids are logged server-side via `LogSanitizer`.
+- **Reflected `targetAgentId` in 409 bodies**: `followUpWithMember`'s "not a member" message echoed the caller-supplied agent id into the `409`. The id is no longer reflected (the available-member list — server data — is kept).
+- **Information exposure through an error message** (CodeQL, *Medium*): the delete-conflict `409` returned the raw `e.getMessage()`. Now a curated "busy, please retry" body with the detail logged server-side.
+
+### Observability & docs
+
+- **Metrics for the new operations** (CodeRabbit): `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` were uninstrumented, contrary to AGENTS.md. Added `eddi_group_followup_count`, `eddi_group_continue_count`, `eddi_group_close_count`. Instrumented in the **service** (not the MCP tools, as suggested) so the counters cover the REST *and* MCP surfaces.
+- **Authorization denials now log at WARN** (CodeRabbit) — a security-relevant event should be alertable.
+- **`getAvailableActions()` javadoc corrected** (Copilot, *Low*): it claimed "not persisted", but Jackson serializes it into stored documents. It is `READ_ONLY`, so the value is never read back and is always recomputed from `state` — the javadoc now says so rather than making a false claim.
+
+### Tests
+
+Post-CAS `IN_PROGRESS` read modelled so the `FAILED` recovery path is actually exercised; `close` now asserts a `CLOSED` result rather than `assertSame` on a stale instance; added the concurrent-terminal-transition conflict test, the SSE `cancelled` callback test, the admin-bypass tests (the other half of `requireOwnerOrAdmin` and the list-filter exemption), and assertions that neither the raw exception text nor the caller-supplied `groupId` reaches the client.
+
+### Not actioned (false positive)
+
+- CodeRabbit (*Major*) claimed `updateIfState` wrapping `ResourceNotFoundException` in the unchecked `GroupConversationGoneException` bypasses the REST layer's 404 handling and yields a 500. It does not: `RestGroupConversation` explicitly catches `GroupConversationGoneException` alongside `ResourceNotFoundException` in a multi-catch on every surface that exposes the operation (cancel / approve / approve-stream) and maps it to `404`. The unchecked type is a deliberate design from the HITL work (documented on the exception) so existing CAS call sites keep compiling; `compareAndSetState` converts it to `ResourceNotFoundException` for its own callers. No change made.
+
+---
+
+## 🔐 Group merge — third-pass review: MCP authz, CLOSED-blindness, atomic CAS (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A third critical review targeted what the earlier passes never looked at — the **auto-merged** files (git merged them without conflict, so nobody had reviewed them), the whole-branch PR surface, test coverage of the fixes, and security. 14 findings survived adversarial verification. All fixed:
+
+### Security — MCP was an authorization bypass (IDOR)
+- `McpGroupTools` gated the conversation-scoped tools on a **role check only** (`eddi-viewer` for `followup_with_member` / `continue_group_discussion` / `read_group_conversation`, `eddi-editor` for `close`/`delete`) with **no ownership check**, while the equivalent REST endpoints all enforce `requireOwnerOrAdmin` (403). Any authenticated viewer could read another user's full transcript, append to it, re-run every phase against their conversation (burning their LLM budget), and an editor could close or delete it. Injected `OwnershipValidator` and added a `requireConversationOwner()` gate to all five tools, with a uniform non-leaking denial. Main's own HITL MCP tools already enforced this via `HitlAccessGuard` — MCP is now consistent with REST.
+- **Owner resolution on creation** (found reviewing the gate above): MCP recorded the owner as the literal `"mcp-client"` (or any caller-supplied `userId`), so the new gate would have **locked the creator out of their own conversation** whenever auth was enabled — and let a caller create a conversation owned by someone else. `discuss_with_group` / `start_group_discussion` now resolve the owner via `validateAndResolveUserId` (the calling principal; impersonation rejected), falling back to `"mcp-client"` only when auth is off.
+- **`list_group_conversations` is now owner-filtered** (mirroring REST). It returns full conversation documents, so without this the per-conversation gate was pointless — a non-owner could simply list the group and read everyone's transcripts.
+
+### Correctness — a systemic `CLOSED`-blindness
+Ours introduced `CLOSED` as a new terminal state; theirs' HITL/cancel code predates it. A sweep of every terminal-state check found exactly two blind spots:
+- **`persistedTerminalOverride`** treated only `{CANCELLED, FAILED, COMPLETED}` as terminal, so a running leg that found the conversation `CLOSED` did **not** stop — it fell through to an unconditional whole-document write and **resurrected the closed conversation** to `IN_PROGRESS`→`COMPLETED` after its member conversations were ended and its ephemeral agents deleted. (The previous round's fix F — close-of-`CANCELLED` — made this materially more reachable.)
+- **`cancelDiscussion`** likewise ignored `CLOSED`, so a cancel could CAS `CLOSED → CANCELLED` and un-terminalize an irreversible state.
+
+### Correctness — the cross-process guard wasn't atomic
+- **`compareAndSetState` was a read-check-write**, not a CAS: it read, compared in Java, then wrote unconditionally, so two racing callers could both pass the check and both write. It is the *only* cross-process guard behind follow-up/continue/close (the original changelog admitted "single-node only… would require a conditional update at the storage layer"). The merge made the fix available — it now uses theirs' `storeIfFieldEquals`, returning `false` on a lost race.
+
+### Contract / robustness
+- `followUpWithMember` with a null/blank `targetAgentId` NPE'd into a **500**; now validated → **400** (service throws `IllegalArgumentException`, REST rejects up front). Same for a blank `question` on follow-up and continue.
+- `POST /continue` advertised `attachments` on its body but **silently dropped them**. Now **rejected with 400** rather than silently ignored. (A first attempt to *honour* them was reverted after review: attachments are granted and injected to a member only on its first-ever turn, and on a continuation every member conversation already exists — so the "fix" was a no-op that stored an orphaned blob and still returned 200. Actually sharing new files mid-conversation needs the attachment fan-out reworked — see *What's next*.)
+- `DELETE` during an in-flight follow-up/continue returned **500**; now a `GroupDiscussionException` → **409**.
+- OpenAPI updated for the new 400/409 responses and the `CANCELLED`-closeable state.
+
+### Tests
+Backfilled the previously untested fixes (they could each have been reverted with the suite still green): `resumeQuestion` persistence, control-token pre-registration + removal, `persistedTerminalOverride` state alignment across all four terminal states, cancel-of-`CLOSED`, conditional-CAS + lost-race, MCP ownership denial/allow, blank-input 400s, continue-attachment forwarding, delete 409, and the streaming listener forwarding HITL + `round_start` events.
+
+Also fixed a **latent broken test the merge introduced**: `GroupConversationHitlTest` still asserted 7 enum states (the merge made it 8 with `CLOSED`) — it was never in the narrower test selections and had been failing since the merge commit.
+
+### What's next (deliberately not done here)
+
+- **Attachments on a continuation round.** `grantAndInjectAttachments` runs only on a member's *first-ever* turn (`privateConvId == null`), so a continuation cannot share new files. Supporting it means reworking the fan-out to grant/inject per *round* (e.g. tracking which member conversations have been granted the current attachment set) — a change to shared attachment code, out of scope for a merge-response fix. Until then `/continue` rejects attachments with 400.
+- **Follow-up to a dynamically recruited agent.** `GroupConversation.dynamicMembers` has no production writer (sub-agent creation records only `createdAgentIds`), so recruited agents are not addressable as follow-up targets at all. A first attempt to resolve them by display name was reverted as dead code; the real fix is to register recruited agents as members (roster + `memberConversationIds`).
+
+Verified: `mvnw test` green — **758 group/MCP unit tests pass** (0 failures). The remaining full-suite failures are environmental only (Testcontainers/Docker and loopback-socket suites — Mongo/Postgres stores, HTTP tool tests); no group or MCP test fails. CI covers those.
+
+---
+
+## 🩹 Group merge — cross-feature review-response fixes (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+A deep adversarial review of the merge (7 dimensions, 58 agents, each finding cross-examined by 3 skeptics) confirmed the conflict resolution was sound but surfaced **cross-feature interaction bugs** between *ours* (continue/follow-up/close) and *theirs* (HITL pause/cancel/resume) that neither branch could have had alone — none caught by the impl-level unit tests. Fixed:
+
+- **A — stale question on continuation resume:** a continuation round that paused at an HITL gate resumed with the round-1 question (`resumeDiscussion` read `originalQuestion`, which `continueDiscussion` never updated) — silent wrong multi-agent output. Added a dedicated `GroupConversation.resumeQuestion` field: `continueDiscussion` sets it, `resumeDiscussion` reads it (falling back to `originalQuestion` for round 1 / legacy docs). Kept separate from `originalQuestion` so the Manager conversation-list title (which renders `originalQuestion`) is not rewritten by continuations.
+- **B — continue/stream dropped HITL events:** `continueDiscussionStreaming` used a hand-rolled inline SSE listener predating theirs' HITL callbacks, so a continuation that paused/cancelled emitted no event and hung the client + leaked the sink. Unified it on the shared `createStreamingListener` (added an `onRoundStart` override there); removed ~55 lines of duplication.
+- **C — ephemeral-agent leak on cross-pod terminal race:** the merged `finally` cleans up only on `FAILED`/`CANCELLED` (to defer `COMPLETED` for follow-up reuse), but the cross-pod terminal-override and lost-completion-CAS exits left in-memory state stale (running/optimistic-`COMPLETED`), skipping cleanup. Both exits now align in-memory `state` to the actual persisted terminal value so the `finally` decides correctly.
+- **D — follow-up clobbered a racing cancel:** `followUpWithMember`'s success path used an unconditional `update()` that could overwrite a concurrent `CANCELLED`. Switched to `updateIfState(gc, IN_PROGRESS)` (matching its own error path); a concurrent cancel/delete now yields a `409` instead of resurrecting the conversation.
+- **E — cancel race + latency on continuation:** `continueDiscussion` didn't pre-register a `DiscussionControlToken`, so a cancel racing the CAS→`executeDiscussion` window took the DB branch and was overwritten, and cancel latency was a whole phase worse. Now pre-registers the token right after the CAS (mirrors `startAndDiscussAsync`/`resumeDiscussion`); removed on the pre-exec failure path.
+- **F — `CANCELLED` had no reclaim path:** a cancel landing in the follow-up/continue pre-exec window could reach `CANCELLED` with orphaned ephemeral agents and no recovery. `closeGroupConversation` now accepts `CANCELLED → CLOSED` and `getAvailableActions()` returns `["close"]` for `CANCELLED`, giving operators a reclaim path.
+
+Added regression tests (`CANCELLED` available-actions, close-of-`CANCELLED`); updated the follow-up success-write assertion. Verified: `mvnw test` green — 189 group-conversation unit tests pass (0 failures); each fix re-verified by an adversarial pass (5/6 clean first time; A refined from overloading `originalQuestion` to the dedicated field per that review).
+
+---
+
+## 🔀 Merge `origin/main` into `feat/group-followups` — conflict resolution (2026-07-14)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Merged 170 commits of `origin/main` (HITL framework + multimodal-attachments group parity) into the group follow-up/continuation/close branch. Both sides evolved the group-conversation subsystem in parallel, so all 23 conflict hunks across 12 files were resolved as a **union** of the two feature sets. Key decisions:
+
+- **`GroupConversationService.executeDiscussion` setup (conflict):** interleaved ours' member-display-name population + round-aware start events (`onGroupStart` on round 1, `onRoundStart` on continuation rounds) with theirs' attachment re-hydration, resume-seeded turn counter (`pausedTurnCount`), HITL granularity, and control-token registration. The start-event now fires only on fresh execution (`startPhaseIndex == 0`), branching round-1 vs continuation.
+- **`executeDiscussion` finally-block cleanup (conflict):** reconciled ours' "defer ephemeral cleanup for COMPLETED rounds so follow-ups can reuse dynamic agents" with theirs' "keep agents alive while `AWAITING_APPROVAL`". Result: always remove the control token; drop the verification cursor unless paused; clean up ephemeral agents only on terminal states with no follow-up/close path (`FAILED`, `CANCELLED`). `COMPLETED` cleanup stays deferred to `close`/`delete`.
+- **`GroupConversationState` is now 8 values** (ours' `CLOSED` + theirs' `CANCELLED`). `getAvailableActions()` gained a `CANCELLED` arm (terminal, no actions — updated the exhaustive switch); the enum-count guard test was corrected 7 → 8.
+- **`executeDiscussion` signature:** theirs added `int startPhaseIndex`; ours' `continueDiscussion` call site now passes `0` (a continuation re-runs the full protocol from phase 0).
+- **Group-path guard unified on `loadInGroup()`:** all six endpoints (read, delete, followup, continue, continue/stream, close) route through ours' `loadInGroup()`; theirs' parallel `requireGroupMembership()` helper was removed as dead code. HITL endpoints keep theirs' `validateGroupConversationOwnership`.
+- **JAX-RS routing fix (would-be regression):** theirs flattened the class-level `@Path` from `/groups/{groupId}/conversations` to `/groups`, moving the `{groupId}/conversations` prefix onto each method. Ours' four methods (`followup`/`continue`/`continue/stream`/`close`) carried their old class-relative `@Path("/{groupConversationId}/…")`, so post-flatten they lost the `{groupId}` template segment while still declaring `@PathParam("groupId")` — `groupId` would bind `null` and every call would 404 (invisible to the unit tests, which call the impl directly). Each of the four method paths was prefixed with `/{groupId}/conversations`, restoring the original external URLs. Caught by an adversarial merge review.
+- **Both feature APIs preserved:** ours' `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` / `compareAndSetState` + theirs' `cancelDiscussion` / `resumeDiscussion` / `approveGroupPhase(/Streaming)` / `getGroupApprovalStatus` / `listGroup(All)PendingApprovals` / `updateIfState` / `findByState`; all SSE events and listener callbacks from both sides retained.
+- **Review nitpick:** `RestGroupConversationExtendedTest` now has an `@AfterEach` that invokes the package-private `RestGroupConversation.shutdown()`, so a full suite run no longer accumulates un-terminated virtual-thread executors.
+
+Verified: `mvnw clean test-compile` green; ~187 group-conversation unit tests pass (GroupConversation 25, Store 19, Rest 25, RestExtended 21, Service 68, Hitl 29 — 0 failures/errors).
+
+---
+
+## 🔒 Group Conversation Follow-Ups — review-response hardening (2026-07-13)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Addresses static-analysis and code-review findings on [PR #595](https://github.com/labsai/EDDI/pull/595) (CodeQL, Copilot, CodeRabbit, GitHub Code Quality).
+
+### Security & correctness
+
+- **Log injection (CWE-117)**: sanitized user-controlled `groupConversationId` in log statements via `LogSanitizer.sanitize()` (`GroupConversationService` follow-up recovery, close, delete-not-found, and timeout-resolution paths).
+- **Group-path validation**: `followup` / `continue` / `continue/stream` / `close` now verify the conversation belongs to the `{groupId}` in the path — mismatches return `404` (SSE `group_error` for the stream) via a shared `loadInGroup()` helper. Closes a "wrong group path" access gap **and** resolves the unused-`groupId` findings.
+- **403 on streaming continue**: `continueDiscussionStreaming` now rethrows `ForbiddenException` so ownership failures map to HTTP `403` instead of a `200` SSE error event.
+
+### Concurrency
+
+- **Per-conversation operation guard**: `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` acquire a fail-fast in-process guard (`ConcurrentHashMap.newKeySet()`) keyed by conversation ID; a second concurrent operation on the same conversation is rejected (`409`) rather than racing the `compareAndSetState` read-check-update. **NOTE:** single-node only — cluster-wide atomicity would require a conditional update at the storage layer (documented as future hardening, not built here).
+
+### Resource lifecycle
+
+- **`@PreDestroy` on `RestGroupConversation`**: the virtual-thread executor is now shut down on bean destroy.
+- **Ephemeral cleanup on delete**: `deleteGroupConversation` now reclaims dynamically-created agents. Deferred cleanup previously ran only on `close`, so deleting a `COMPLETED` conversation orphaned them — this regression is introduced-and-fixed within the same feature branch. Extracted `cleanupEphemeralAgentsForGroup()` shared by close + delete.
+- **Known limitations** (ephemeral-agent reclamation): (a) a `COMPLETED` conversation that is never closed *or* deleted still retains its ephemeral agents; (b) if cleanup fails on `delete` (group config already gone, or a transient undeploy error), the record is still hard-deleted, so the `createdAgentIds` mapping is lost and a future reaper cannot reclaim those agents (they remain operator-recoverable via the agent store). A TTL reaper (built on `ScheduleFireExecutor`) is the planned mitigation for (a) — tracked as a separate item.
+
+### API cleanup
+
+- **Removed dead `userId` param** from `followUpWithMember` / `continueDiscussion` (service interface, impl, REST, MCP tools). Ownership is validated via the stored conversation owner; the param was never used downstream.
+- **Configurable follow-up timeout**: the follow-up agent call now uses the group's `protocol.agentTimeoutSeconds()` (default 60, consistent with discussion turns) via `resolveAgentTimeoutSeconds()`, instead of a hardcoded 120s.
+- **Model encapsulation**: `GroupConversation.getMemberDisplayNames()` returns an unmodifiable view; population goes through the new `addMemberDisplayName()` method (the getter can no longer be mutated); the setter defensively copies.
+- **OpenAPI**: added `404` responses to `followup` / `continue`, and `200` / `404` + event listing (incl. `round_start`) to `continue/stream`.
+
+### Round 2 — multi-agent adversarial review + CI (2026-07-13)
+
+Second pass after an adversarial multi-dimension review (concurrency / security / REST / lifecycle / test-coverage) plus the CI test run.
+
+- **CI green**: updated the `GroupConversationState` (6→7, `CLOSED`) and `TranscriptEntryType` (14→15, `FOLLOW_UP`) enum-count guard tests. Added the three follow-up MCP tools (`followup_with_member`, `continue_group_discussion`, `close_group_conversation`) to `McpToolFilter` — they were **filtered out entirely** (never exposed to MCP clients) because the whitelist was never updated, so this is a functional fix, not just a test tweak.
+- **Delete race** (flagged by two review dimensions): `deleteGroupConversation` now participates in the per-conversation guard. Because deferred cleanup made delete a *terminal* operation, an unguarded delete could tear down member conversations / ephemeral agents while a `continue`/`follow-up` was mid-run and then be resurrected as a "zombie" document via the store's upsert-by-id `update()`.
+- **`close` status codes**: business conflicts (in-progress / wrong-state) now throw `GroupDiscussionException` → `409`; a genuine `ResourceStoreException` (DB failure) falls through to `500` via the global mapper, instead of every store error mapping to `409`. Aligns `close` with `followup`/`continue`.
+- **Consistent group-scoping**: `readGroupConversation` and `deleteGroupConversation` now also route through `loadInGroup()`, so *every* endpoint under `/groups/{groupId}/conversations/{id}` verifies the conversation belongs to the path group (404 on mismatch). Previously only the new endpoints did.
+- **CWE-117 in MCP tools**: the three new MCP follow-up tools now sanitize `e.getMessage()` before logging (`targetAgentId` is user-controlled and flows into exception messages).
+- **Test coverage**: added unit tests for `getAvailableActions()` (per state), `memberDisplayNames` encapsulation, the `round` default, `compareAndSetState()` (all branches), `followUpWithMember` / `continueDiscussion` / `closeGroupConversation` service logic (display-name resolution, wrong-state, concurrency guard, state restore, round increment), and the new REST endpoints including the `loadInGroup` 404 guard.
+
+### Deliberately not done
+
+- **SSE listener factory extraction** (CodeRabbit nitpick): skipped — a pure DRY refactor of working, integration-only streaming code with no behavior gain.
+
+### What's next
+
+- TTL reaper for abandoned `COMPLETED` conversations (ephemeral-agent reclamation).
+- Optional cluster-wide atomic state transition at the storage layer if concurrent group operations become a real deployment concern.
+- Optional: sweep the remaining pre-existing `McpGroupTools` catch blocks for the same `LogSanitizer` treatment (≈11 older tools still use the unsanitized `errorf(..., e.getMessage())` pattern — lower priority, outside this PR's scope).
+
+---
+
+## ✨ Group Conversation Follow-Ups — member follow-up, continuation rounds, explicit close (2026-07-08)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+### Summary
+
+Adds three new interaction patterns for completed group conversations:
+1. **Follow up with any member** — ask a specific agent (including the moderator) a question; both the question and response are appended to the group transcript as `FOLLOW_UP` entries
+2. **Continue the full group** — re-run all discussion phases with a new question; agents retain conversation memory from prior rounds via reused private conversations; round counter increments
+3. **Explicit close** — end member conversations, run ephemeral agent cleanup, lock the conversation permanently (`CLOSED` state)
+
+### Changes
+
+**Model layer:**
+- `GroupConversation.java`: Added `round` field (1-based counter), `CLOSED` to `GroupConversationState`, `FOLLOW_UP` to `TranscriptEntryType`
+- `IGroupConversationStore.java`: Added `compareAndSetState()` for optimistic concurrency control
+- `GroupConversationStore.java`: Implemented `compareAndSetState()` (read-check-update pattern)
+
+**Service layer:**
+- `IGroupConversationService.java`: Added `followUpWithMember()`, `continueDiscussion()`, `closeGroupConversation()` + `onRoundStart()` listener method
+- `GroupConversationService.java`: Implemented all three methods; modified `executeDiscussion()` to emit `round_start` SSE event (instead of `group_start`) for continuation rounds; deferred ephemeral agent cleanup to `closeGroupConversation()` for successful rounds (only immediate cleanup on failure)
+- `GroupConversationEventSink.java`: Added `EVENT_ROUND_START` constant and `RoundStartEvent` record
+
+**REST + MCP layer:**
+- `IRestGroupConversation.java`: Added 4 endpoints (`POST /{gcId}/followup`, `POST /{gcId}/continue`, `POST /{gcId}/continue/stream`, `POST /{gcId}/close`) + `FollowUpRequest` record
+- `RestGroupConversation.java`: Implemented all 4 endpoints with ownership validation and SSE streaming support for continuation
+- `McpGroupTools.java`: Added `followup_with_member`, `continue_group_discussion`, `close_group_conversation` tools
+
+### Design decisions
+
+- **Concurrency**: `compareAndSetState(COMPLETED → IN_PROGRESS)` is a best-effort guard against overlapping follow-ups; state restored to `COMPLETED` on error. (Hardened on 2026-07-13 with a per-conversation in-process guard — see that entry.)
+- **Deferred cleanup**: Ephemeral agents survive until explicit close so follow-ups can use dynamically-created agents; immediate cleanup only on failure
+- **No TranscriptEntry.round field**: Round boundaries are inferred from `QUESTION` entries in the transcript — avoids churn on the 13-field record with 4 constructors
+- **Plain-text follow-up *input***: The follow-up **input** is the plain question; the full transcript is still provided via the `groupTranscript` **context** variable (not re-injected into the input text), and the agent's private conversation retains prior turns
+
+### Client experience improvements (follow-up commit)
+
+- **Consistent response shapes**: All endpoints (`followup`, `continue`, `close`) now return the full `GroupConversation` — same shape as the initial `discuss` endpoint
+- **Display name resolution**: `followUpWithMember` accepts either an agent ID or a display name (case-insensitive). Error messages list available members if target not found
+- **`memberDisplayNames` map**: New field on `GroupConversation` maps agentId → displayName, populated at discussion start from group config. Eliminates client-side transcript scanning
+- **`availableActions` computed property**: JSON response includes `["followup", "continue", "close"]` when COMPLETED, `["close"]` when FAILED, `[]` otherwise. Clients can discover available operations without reading docs
+- **Close returns body**: `/close` now returns the closed `GroupConversation` with `state: CLOSED` and `availableActions: []`
+- **Lifecycle documented in OpenAPI**: Close endpoint description includes `discuss → COMPLETED → [followup|continue]* → close → CLOSED (terminal)`
+
+---
+
+## 🔭 Security — conversation-listing scan: enforce the budget per-descriptor + changelog accuracy (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+Second CodeRabbit pass on this branch (its first pass predated the metrics/doc commit and was already moot). Two valid, current items:
+
+- **Enforce `MAX_OWNER_SCAN` per-descriptor, not per-page.** The budget was only checked in the `do-while` condition (after a full page), so a non-admin scan could reach `MAX_OWNER_SCAN + limit - 1` before stopping — over the documented bound. Added an in-loop `break`. Impact is small (the overrun rows are within an already-fetched page, and foreign rows skip the snapshot load either way), but it makes the bound exact and the `owner_scan_exhausted` metric fire at 500 rather than up to a page late. Not separately unit-tested: with all-foreign pages the store returns the same empty list and the same page-read count with or without the break, so the tightening isn't observable through the store interface; the existing bounded-scan tests guard against regression.
+- **Changelog accuracy.** The `009ca0f20` entry's "Fix" paragraph said the ownership check "runs **after** `populateDataToDescriptor`" — stale since `8bb304b4c` split it (common case decides *before* the snapshot load; only a legacy null-owner row is re-checked after). Corrected. Also dropped a second stale "mirroring the MCP twin's budget" reference (MCP has no scan cap since `009ca0f20`).
+
+---
+
+## 🔭 Security — MCP/REST conversation ownership: PR-review response (metrics + doc accuracy) (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+Triaged the Copilot + CodeRabbit review of this branch. Most bot findings targeted the MCP-side `list_conversations` over-fetch/scan loop that `009ca0f20` already **deleted** (its page-index bug was the reason for the delete), so they were moot against current HEAD. The substantive, still-valid items:
+
+- **Observability (Micrometer).** Per the project convention "always add metrics to new features", the new authorization paths were operationally invisible. Added two counters via field-injected `MeterRegistry` (AGENTS.md metrics pattern, `SimpleMeterRegistry` default so unit tests that construct the bean directly stay non-null): `eddi.mcp.conversation.access.denied{tool}` incremented on every MCP ownership denial (the six gated read/drive tools via `accessDenied`, plus `chat_managed`'s impersonation denial — MCP denials return a 200 error-body, so unlike REST 403s they are not visible in `http.server.requests`); and `eddi.conversations.listing.owner_scan_exhausted` incremented when a non-admin listing stops on the `MAX_OWNER_SCAN` budget with fewer than `limit` results, so a persistently-truncated user is not invisible.
+- **Fail-open on a missing descriptor — kept, documented.** CodeRabbit flagged that `requireConversationOwner` returns `null` (operation proceeds → 404) rather than denying when a descriptor is absent. Kept deliberately: a missing descriptor means the conversation is genuinely not found, and 404 is correct; flipping the *shared* guard to deny would change REST 404→403 and contradict its documented "let the operation handle the 404" contract. The only residual is orphaned memory with no descriptor — a deletion-path integrity concern, not something the read gate should mask. Softened `accessDenied`'s javadoc, which had over-claimed that a denial is indistinguishable from "does not exist".
+- **Doc accuracy.** `RestConversationStore.MAX_OWNER_SCAN` javadoc no longer says it "mirrors the MCP owner-scan cap" (MCP has none since `009ca0f20`; this is now the sole budget); the previous entry's "never starved" line is qualified to "within the scan budget".
+
+**Declined:** the suggestion to take `userId` out of `chat_managed`. The cited rule exempts "external interfaces (MCP, REST) that operate outside a conversation", which is exactly what `chat_managed` is (it routes to a per-`intent+userId` managed conversation rather than running inside one); `resolveOwnerUserId` already rejects impersonation.
+
+---
+
+## 🔒 Security — `RestConversationStore` listing: owner-filter the conversation store enumeration (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+**Closes the first residual gap filed two entries below.** `RestConversationStore.readConversationDescriptors` — the `GET /conversationstore/conversations` endpoint declared on `IRestConversationStore` — carried no `@RolesAllowed` and no ownership filter, so it fell through to the global `authenticated` policy. With `authorization.enabled=true`, any authenticated caller could enumerate **every** user's conversation descriptors (id, agent, state, and the descriptor's `userId`). It is the REST twin of the MCP `list_conversations` gap fixed in the entry two below.
+
+**Fix (`RestConversationStore`):** inject the existing `ConversationAccessGuard` and filter the listing inside the endpoint's existing paging `do-while`. `seesAllConversations()` is resolved once up front (admins, and any caller when authorization is disabled, skip filtering entirely); otherwise each descriptor is dropped unless `canAccessConversation(descriptor.getUserId())` admits it. The check runs **before** `populateDataToDescriptor` for the common case (every conversation since v5.1.6 records its owner on the descriptor), and only **after** populate for a legacy null-owner row, where populate resolves the owner from the snapshot (the pre-v5.1.6 fallback) — see the *bounded back-fill* note below. An unowned/legacy conversation stays visible, matching `OwnershipValidator.requireOwnerOrAdmin`.
+
+**Design decisions**
+- **Owner-filter, not admin-only.** The endpoint backs the **EDDI-Manager** conversation views (its bundled UI calls `conversationstore/conversations`). Owner-filtering keeps admins' full visibility and still lets a non-admin Manager user see *their own* conversations; a blanket `@RolesAllowed("eddi-admin")` would 403 the listing for every non-admin and diverge from the MCP twin, which chose owner-filtering. The `ConversationAccessGuard` was purpose-built for a listing (`canAccessConversation` / `seesAllConversations`), so this reuses it rather than adding a check.
+- **No starvation, no dedup needed.** The store's `readDescriptors` treats its `index` as a **page number** (`ResourceFilter`: `skip = index * limit`), and the endpoint's `do-while` already re-pages (`index++`) until it fills `limit` or the store is exhausted. So a filtered-out row is naturally back-filled from a later, non-overlapping page — a caller's own conversations are not starved just because newer pages belong to others (bounded by the scan budget in the next bullet), and (unlike the MCP over-fetch) no resource-URI dedup is required.
+- **Bounded, cheap back-fill (self-review fix).** Two costs had to be contained before that back-fill was safe on a large multi-tenant store, since this is the default EDDI-Manager list view: (1) the ownership check is split around `populateDataToDescriptor` — for the common case (every conversation since v5.1.6 records its owner on the descriptor) the decision is made on `descriptor.getUserId()` **before** the snapshot load, so a foreign row is skipped without loading its full memory document; only a legacy null-owner row falls through to the post-populate re-check that resolves the owner from the snapshot. (2) the back-fill is capped at `MAX_OWNER_SCAN = 500` descriptors — the sole owner-scan budget in the system, since the MCP listing delegates here rather than scanning itself — so a caller who owns few/none of a huge store cannot force a full-collection scan. Admins / auth-disabled callers are never filtered and never reach the budget. **Tradeoff:** for a non-admin, a very old owned conversation buried beyond the 500-descriptor (most-recent-first) window may not appear; the `List` return type can't signal truncation the way the MCP tool's `incomplete` flag did. The proper long-term fix is an owner-scoped descriptor query (index on `userId`) rather than in-memory filtering of a global scan — filed as a follow-up; the same unbounded-scan shape pre-existed for the `agentId`/`state`/`viewState` filters.
+
+**MCP `list_conversations` simplified (same branch).** `McpConversationTools.listConversations` now issues a **single** store call and relays the result, dropping its per-caller `seesAll`/over-fetch branch, the 100-row chunking, the resource-URI dedup, and the `incomplete`/`note` signal. This is safe once the reality of the internal hop is accounted for — and that reality is why the removed loop was effectively dead code:
+- **The MCP→store call is an unauthenticated loopback.** `RestInterfaceFactory` builds a bare REST client to `http://127.0.0.1:<port>` with no `ClientHeadersFactory` and no header propagation anywhere, so the caller's identity does **not** cross that hop.
+- **Auth off (the default):** `DisabledAuthController` reports authorization disabled, so the loopback is allowed and the store's `seesAllConversations()` is `true` — it returns everything and the tool relays it. This matches the prior behavior exactly (the tool's own guard also admitted everything with auth off), so the simplification is **behavior-neutral** here.
+- **Auth on:** the `authenticated` HTTP policy rejects the token-less loopback with **401 before the endpoint method runs**, so the tool's internal listing is non-functional under `authorization.enabled=true` — and was **already** so, independently of this change. That is also why the removed scan-loop is safe to delete: its only runtime path (auth-on, non-admin) 401s upstream and never executes. (For the record, that loop also carried a latent bug — it passed `scanned += page.size()`, a row count, as the store's page `index`, so a second page would `skip = 100 * 100`; the ownership unit test masked it by mocking `IRestConversationStore` directly.)
+
+**Tests**
+- New `RestConversationStoreOwnershipTest` (real guard over a mocked `SecurityIdentity`, `authorization.enabled=true`): a caller sees only their own conversations and never another user's; a non-owner enumerating the store gets nothing of the owner's; an admin sees all; an unowned/legacy (null-owner) conversation stays visible; a personal list is **back-filled across foreign pages** (first page all-foreign, the caller's own on the next) rather than starved; a foreign row is **skipped without loading its memory snapshot** (guards the cheap pre-check); a legacy null-owner descriptor whose snapshot resolves to a **foreign** owner is filtered out (guards the post-populate ordering — added per self-review, so a reorder that moved the check above `populateDataToDescriptor` would fail); and a sparse owner's scan is **bounded at `MAX_OWNER_SCAN`** (5 page reads, no snapshot loads) rather than scanning the whole store.
+- `RestConversationStoreTest` and `RestConversationStoreFilterTest` updated to construct with the guard (stubbed `seesAllConversations() → true`, so their filter/paging assertions are unchanged).
+- `McpConversationToolsOwnershipTest.ListConversations` reduced to a single delegation test (one store call, no scan loop); the ownership-filtering assertions moved to `RestConversationStoreOwnershipTest`. `McpConversationToolsExtendedTest`'s `list_conversations` cases already exercised the single-call path (its guard has auth disabled) and are unchanged.
+
+**Remaining residual gaps** (deliberately out of scope): the single-conversation REST reads (`readRawConversationLog` / `readSimpleConversationLog`) and `getActiveConversations` carry no ownership check; **internal loopback REST calls via `RestInterfaceFactory` do not authenticate**, so MCP tools that call them are non-functional under `authorization.enabled=true` (a pre-existing, cross-cutting gap affecting every internal REST caller and the auth model, not just this endpoint — filed as a follow-up); `read_agent_logs` without a `conversationId` was closed in the entry immediately below.
+
+---
+
+## 🔒 Security — `read_agent_logs`: admin-gate unscoped/agent-only log reads (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+**Closes the residual gap filed by the entry below.** The ownership pass gated `read_agent_logs` only when a `conversationId` was supplied; **without** one (unfiltered, or filtered by `agentId` alone) it still returned `BoundedLogStore` entries — workflow execution logs, LLM provider errors, internal diagnostics that can quote other users' conversation data — to any caller holding the coarse `eddi-viewer` role. That unscoped read pulls from a single shared server-side ring buffer that mixes every user's activity: an **operator surface**, not one user's data.
+
+**Why this is the same class of bug the ownership pass fixed:** the REST equivalent, `IRestLogAdmin` (`/administration/logs` — recent, `/history`, and `/stream`), is `@RolesAllowed("eddi-admin")` at the interface level. Every log read over REST already requires admin; the MCP tool was the more permissive door. This aligns MCP with REST.
+
+**Fix (`McpConversationTools.readAgentLogs`):** require `eddi-admin` when no `conversationId` filter is present; the conversation-scoped path is unchanged (`ConversationAccessGuard.requireConversationOwner` → owner-or-admin). The admin check is placed **before** the `try` so a role denial surfaces as an honest role error, not the ownership `accessDenied(...)` "you do not own this conversation" message (there is no conversation to own).
+
+**Design decisions**
+- **Owner-or-admin kept for the conversation-scoped path, rather than admin-only parity with REST.** `BoundedLogStore.getEntries` filters by **exact** `conversationId`, so a scoped read returns only that one conversation's log lines — no cross-user leakage. That preserves the self-service diagnostics the ownership pass deliberately added for `read_conversation` / `read_audit_trail`. The cross-user exposure was only ever in the *unscoped* path, and that is what is now closed. (An admin-only-for-all-log-reads posture was considered and rejected as an unnecessary regression of that self-service capability.)
+- **`agentId`-only counts as unscoped.** An agent filter still spans every user of that agent, so it is admin-gated too — only a `conversationId` narrows the read to a single owner's data.
+
+**Tests:** extended `McpConversationToolsOwnershipTest.ReadAgentLogs` — a viewer is denied the unscoped buffer and the agent-only buffer (`ForbiddenException`, and `BoundedLogStore` is never reached); owning one conversation does **not** grant the unscoped firehose; an admin may read both the unscoped and agent-scoped buffers; the existing owner/non-owner conversation-scoped cases still pass.
+
+---
+
+## 🔒 Security — MCP conversation tools had no ownership check (2026-07-14)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`, from `main`)
+
+**Gap (pre-existing on `main`):** every conversation-scoped tool in `McpConversationTools` was gated on the coarse `eddi-viewer` role and nothing else, while the equivalent REST endpoints on `RestAgentEngine` all enforce `requireOwnerOrAdmin` (403). With `authorization.enabled=true`, any caller holding `eddi-viewer` could — over MCP — read **any** user's conversation memory (`read_conversation`) and transcript (`read_conversation_log`), enumerate conversations across all users (`list_conversations`), read another conversation's prompts/tool-calls/costs (`read_audit_trail`, whose REST surface is `@RolesAllowed("eddi-admin")`) and its server logs (`read_agent_logs`), **inject turns into** someone else's conversation and read the agent's reply (`talk_to_agent`, `chat_with_agent` with a foreign `conversationId`), and take over another user's managed conversation by simply naming their `userId` (`chat_managed`). The read half also defeats the group-conversation ownership gate: group members' conversations are ordinary conversations, so `list_conversations` + `read_conversation_log` reached transcripts that `read_group_conversation` denies.
+
+**Two findings that shaped the fix:**
+
+1. **A naive ownership gate would have broken MCP outright.** MCP created conversations with `userId = null`, and `ConversationSetup.computeAnonymousUserIdIfEmpty` turns that into a generated `anonymous-<uuid>` — a *non-blank* owner matching no principal. Gating reads on `requireOwnerOrAdmin` alone would therefore have locked every MCP-created conversation away from its own creator (admins only). REST never had this problem because it resolves the owner at creation. So the fix has to **stamp the caller as owner at MCP conversation creation** — that is what makes the gate both effective and non-regressive.
+2. **The read gap had a write-side twin** (`talk_to_agent` / `chat_with_agent` / `chat_managed`), which is strictly worse than reading and lives in the same file, so it is closed here too.
+
+**Fix — new `ConversationAccessGuard` (`engine.security`), the non-HITL sibling of `HitlAccessGuard`:**
+- `requireConversationOwner(conversationId)` — owner-or-admin via the conversation descriptor; skips when the descriptor is absent (the operation itself 404s); fail-closed on a store error. This is `RestAgentEngine`'s private `validateConversationOwnership` lifted out verbatim.
+- `canAccessConversation(ownerId)` / `seesAllConversations()` — non-throwing predicates for listings; admit exactly what the read gate admits (admin, owner, or unowned legacy data), so a caller never lists what they cannot read, nor reads what they cannot list.
+- `resolveOwnerUserId(requestedUserId)` — delegates to `validateAndResolveUserId`, stamping the caller and rejecting impersonation.
+
+`RestAgentEngine` now delegates to the guard (behavior identical; its `IConversationDescriptorStore` dependency became dead and was dropped). `McpConversationTools` gates all eight conversation-scoped tools, each catching `ForbiddenException` ahead of its generic catch and returning a uniform, non-leaking `accessDenied(...)` that never distinguishes "not yours" from "does not exist".
+
+**`list_conversations` owner-filtering (reworked after self-review).** The first cut filtered a single 100-row page, which silently starves a personal list: on a shared agent the newest page is often entirely other users' conversations, so the caller would get `count: 0` — indistinguishable from "you have none" — and the requested `limit` stopped meaning anything. It now scans forward page by page until the limit is filled or a 500-descriptor budget is spent, dedupes by resource URI (the store's own paging skips deleted rows, so its cursor can outrun the rows it returns and an offset scan can re-read one), and sets `incomplete: true` with a note when it stops on the budget rather than on the store running out — per AGENTS.md "no silent caps".
+
+**Design decisions**
+- **Shared guard, not a third copy.** `McpGroupTools` (on `feat/group-followups`) had already duplicated this logic once; a third copy in the MCP conversation tools would guarantee drift. One `@ApplicationScoped` guard is now the single answer to "who may read or drive a conversation", exactly as `HitlAccessGuard` is for "who may decide an approval".
+- **No auth-disabled short-circuit inside the guard.** It reads the descriptor unconditionally, as `RestAgentEngine` always has; `OwnershipValidator` already no-ops when authorization is off. Short-circuiting would have quietly changed REST semantics (and its tests mock `OwnershipValidator`).
+- **`read_audit_trail` gets the ownership gate, not admin-only.** REST's audit surface is admin-only; matching that would have been a role-policy change beyond this fix. The ownership gate is a strict tightening either way.
+
+**Behavior change (auth on only).** With `authorization.enabled=false` — the default — nothing changes: every check no-ops and new conversations still get their `anonymous-*` id. With auth on, pre-existing `anonymous-*` conversations become invisible and unreadable to non-admins over MCP: they provably belong to nobody. That is the intended tightening.
+
+**Residual gaps, deliberately out of scope** (filed as follow-ups): `RestConversationStore.readConversationDescriptors` — the REST store listing — is unfiltered for every caller, and `read_agent_logs` *without* a conversationId still returns cross-user server logs to any viewer.
+
+**Tests:** new `ConversationAccessGuardTest` (owner / non-owner / admin / missing descriptor / store error / unowned / auth-off, plus the listing predicates) and `McpConversationToolsOwnershipTest`, which asserts for every gated tool that a non-owner is denied **and** the underlying service is never reached — no data leaves, not even inside an error message — while owner and admin pass. Existing `McpConversationTools*Test` and `RestAgentEngine*Test` constructors updated to wire a real guard from the same mocks.
+
+---
+
+## 🔬 Multi-Model Cascade — Merge-readiness review: fixes + coverage backfill (2026-07-14)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+
+A critical whole-branch review (6 parallel high-effort reviewers, then adversarial confirm/refute on each finding) declared the branch **merge-ready** — every unit "ready-with-nits", no blockers. Acted on the confirmed nits and backfilled test coverage for new/adapted paths the existing suite missed.
+
+### Fixes
+
+- **Validator ↔ runtime parity (`CascadeConfigValidator`).** The `convertToObject`-incompatibility warning now uses `EvaluationStrategy.fromConfigOrDefault`, so an *unknown* `evaluationStrategy` — which `resolveEffectiveStrategy` also resolves to `structured_output` and then downgrades at runtime — warns too (previously only `null`/`structured_output` warned).
+- **Live-stream mid-failure de-dup (`CascadingModelExecutor`).** If the live-streamed final step fails *after* emitting partial tokens, the fallback to the buffered best is now marked `streamedLive=true`, so `LlmTask` does not re-emit the best's (different) text as a duplicate token stream after the partial tokens the client already received — the correct full response still arrives via the final `done` snapshot. Added a `withRun(…, streamedLive)` overload and a per-step `stepStreamedLive` flag read in the catch.
+
+### Coverage backfill (new tests; all green)
+
+- **AgentOrchestrator:** token accumulation into `ExecutionResult.responseMetadata` (the cascade-cost feed — previously 0% exercised because every test mocked null response metadata), direct `sumTokens`/`tokenUsageMap` unit tests (helpers made package-private), and the before-tool cooperative-cancellation check.
+- **CascadingModelExecutor:** step-param templating + credential skip (`TEMPLATE_SKIP_PARAMS` — previously 0%, all tests used a null templating engine), a deterministic duration-ceiling test (replacing a timing-flaky one), and the streaming mid-failure de-dup above.
+- **LlmTask:** the skipCascade legacy-fallback SSE emit and cascade token-usage surfacing (`responseMetadata` + `audit:cascade_token_usage`).
+- **ConfidenceEvaluator:** `stripJsonWrapper` fallback, `extractFirstBalancedObject` backslash-escaped-quote handling, and the judge-model readTree-throw → regex-fallback path.
+- **CascadeConfigValidator:** cascade-level negative-pricing hard-fail and the `convertToObject` + unknown-strategy warn path.
+
+### Flagged (pre-existing, out of scope)
+
+- A HITL tool-approval pause originating *inside* an agent-mode cascade step resumes on the base model, not the cascade step's (cheaper) model — misattributing cost/audit. Confirmed real but pre-existing (baseline already threaded the tool-approval params; the resume path predates cascade-step pauses and stores only the outer task's model). Tracked as a follow-up.
+
+---
+
+## 🧊 Multi-Model Cascade — PR-review follow-ups: type-safe SSE events + strategy enums (2026-07-14)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+
+Addressed two @niedch review comments on PR #587, after merging `origin/main` (tool-level HITL) into the branch.
+
+- **Typed SSE cascade events (comment #1).** `RestAgentEngineStreaming` built the `cascade_step_start` / `cascade_escalation` SSE payloads with hand-written `String.format` JSON (manual escaping, `%.4f` formatting). Replaced with two `record` payloads serialized through the existing Jackson `MAPPER` via a new `sendJsonEvent` helper (graceful `{}` fallback on the unexpected serialization failure). Non-finite `confidence`/`threshold` are still sanitized via `finite()` before serialization. The `escapeJson`/`finite` helpers remain (still used by the task/error events).
+- **Strategy enums (comment #2).** Introduced `EvaluationStrategy` (`structured_output` / `heuristic` / `judge_model` / `none`) and `CascadingStrategy` (`cascade` / `parallel`) as the **single source of truth** for the recognized strategy tokens. `ConfidenceEvaluator` (exhaustive enum switch), `CascadingModelExecutor` (`resolveEffectiveStrategy` + gating checks), and `CascadeConfigValidator` (valid-set + warn logic) now resolve to these enums instead of scattered magic strings.
+  - **Design note (answers "is there a reason it's a String?"):** the config *wire* fields (`ModelCascadeConfig.strategy` / `.evaluationStrategy`) deliberately stay lenient `String`s. An unrecognized value (a typo, or one written by a newer engine) still loads, the validator warns, the runtime falls back to the enum `DEFAULT`, and the original token round-trips unchanged through export/import — behavior a strict enum field would regress. Parsing to the enum happens at the boundary via `fromConfig` / `fromConfigOrDefault`. If the field type itself should become an enum, that's a separate contract decision (see the HITL enums for the pattern).
+  - Behavior is byte-for-byte preserved (verified: `ConfidenceEvaluator*Test`, `CascadeConfigValidatorTest`, `CascadingModelExecutor*Test`, `LlmTask*Test` — 324 tests green); new `StrategyEnumsTest` locks the lenient `fromConfig` contract (case-insensitive, trimmed, unknown→null, default fallback).
+
+---
+
+## 🚀 Multi-Model Cascade — Enterprise Hardening (2026-07-03)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+**What changed:** Full enterprise pass over the multi-model cascading feature. A review found two documented-but-dead capabilities (SSE events, judge model), a compliance bug (audit recorded the wrong model), and discarded token/cost/metrics that made the cost-savings pitch unmeasurable. This lands all of it. Plan: [`planning/model-cascade-enterprise-hardening-plan.md`](../planning/model-cascade-enterprise-hardening-plan.md).
+
+### Correctness / compliance
+
+- **Audit records the real model (#5).** `LlmTask` now writes `audit:model_name` and `audit:cascade_model` from the cascade-selected step (`provider/model (step N)`), not the task-level default. Added `audit:cascade_cost` and `audit:cascade_token_usage`. An auditor can now reconstruct which model produced an answer.
+- **Agent-mode confidence (#6).** `structured_output` cannot be injected around the tool-loop, so agent mode auto-routes to `judge_model` (if configured) else `heuristic`. A single deploy-time warning replaces the previous per-turn WARN.
+- **convertToObject + cascade (#7).** The cascade now honors native `jsonMode`, and forces a non-wrapper confidence strategy when `convertToObject=true` (the wrapper contradicts the raw-JSON instruction).
+- **Global-var / Qute consistency (#8).** Step `type` is resolved through `GlobalVariableResolver` and step param values are run through the template engine — parity with the standard path.
+
+### Broken promises made real
+
+- **SSE cascade events (#1).** `StreamingResponseHandler` gained default `onCascadeStepStart`/`onCascadeEscalation`; the anonymous sink in `ConversationService.sayStreaming` forwards them; `RestAgentEngineStreaming` emits `cascade_step_start` / `cascade_escalation` SSE events. The plumbing is now live end-to-end.
+- **judge_model implemented (#2).** New `judgeModel: {type, parameters}` config block, built once via `ChatModelRegistry` (vault + global-var resolution), passed into `ConfidenceEvaluator`. `evaluationStrategy: judge_model` without a judge logs a deploy-time warning and falls back to heuristic at runtime.
+- **`strategy: parallel` (#3) / budget javadoc (#4).** Unknown/`parallel` strategy logs a deploy-time warning and runs sequentially; the false "budget exhausted" javadoc replaced with real ceiling docs.
+
+### Observability & guardrails
+
+- **Token + cost evidence.** Per-step `tokenUsage` and `costUsd` in the trace; aggregate run cost + token usage surfaced via `responseMetadataObjectName` (was `{}`). Agent-mode token usage is accumulated across tool-loop iterations.
+- **Micrometer metrics** under `eddi.llm.cascade.*`: executions, escalations (tag `reason`), accepted step, step latency, confidence distribution, step errors (tags `provider`,`type`), tokens, cost, ceiling exceeded (tag `kind`).
+- **Cascade ceilings.** `maxTotalDurationMs` (wall-clock) and `maxCostPerRun` (dollars, from configurable per-step `inputPricePer1M`/`outputPricePer1M`) stop escalation and return the best response so far. Per-step timeout is capped by the remaining duration budget for **buffered** steps only — a live-streamed step is exempt (see the "Live-stream timeout" fix below).
+- **Configure-time validation** (`CascadeConfigValidator`): invalid *new* numeric fields (negative pricing, non-positive `maxTotalDurationMs`, negative `maxCostPerRun`) fail fast at deploy; legacy conditions (empty steps, unknown `evaluationStrategy`/`strategy`, `judge_model` without a judge, thresholds ∉ [0,1], dead non-last null thresholds, non-positive `timeoutMs`) emit deploy-time warnings but still load (backward-compatible).
+
+### Robustness
+
+- **Confidence parsing** tries a real Jackson parse first (only reads `confidence` from an identified wrapper object, so a stray `"confidence":` in answer content is ignored), regex as fallback.
+- **Heuristic i18n.** `heuristicConfig` makes phrases/thresholds config-driven (English defaults); the no-phrase-match fallback is language-agnostic (keeps the default score rather than mis-scoring).
+- **Cancellation safety (#9).** `AgentOrchestrator` checks interruption between tool-loop iterations and before each tool, so a timed-out cascade step stops launching further side-effectful tools. Residual risk: a tool already in-flight when the timeout fires may complete.
+- **Streaming the final step live.** The always-accepted final step (legacy mode, non-wrapper strategy, streaming-capable provider) streams token-by-token via the event sink instead of buffering. `StreamingLegacyChatExecutor.executeCapturing` preserves token usage while streaming.
+- **`returnBestAcrossSteps`** (opt-in): return an earlier step's response if it scored strictly higher than the finally-accepted step.
+- **Base-model laziness.** The base `ChatModel` is no longer built when the active-cascade branch owns the request.
+
+### Architecture
+
+- `CascadingModelExecutor` converted from a static utility to an instance (constructed by `LlmTask`) holding `ChatModelRegistry`, `GlobalVariableResolver`, `ITemplatingEngine`, `LegacyChatExecutor`, `StreamingLegacyChatExecutor`, and `MeterRegistry`. `AgentOrchestrator.ExecutionResult` gained a `responseMetadata` field (2-arg constructor retained for compatibility).
+- Backward compatible: all new config fields optional with today's defaults; configs without `modelCascade` and `enabled:false` are unaffected; `StreamingResponseHandler` cascade methods are `default`.
+
+### Cross-provider credentials
+
+- Because step/judge parameters are merged **over** the task parameters, a step (or judge) targeting a **different provider** than the task would silently inherit the task's `apiKey` — wrong for that provider, failing at runtime as a 401 that looks like an escalation. `CascadeConfigValidator` now emits a **deploy-time warning** for a different-provider step/judge that omits its own `apiKey`. Not a hard error (Ollama/Bedrock don't use `apiKey`); documented in `docs/model-cascade.md`.
+
+### Tests & coverage
+
+- Updated the 3 executor test classes to the instance API and the 6 `LlmTask` test classes to the new constructor. Removed the backward-incompatible `languageAgnosticScore` band that regressed the default heuristic score.
+- New coverage: `CascadingModelExecutorEnterpriseTest`, `CascadingModelExecutorCoverageTest` (agent mode, live streaming, cost/duration ceilings, timeout + retryable escalation, convertToObject downgrade), `ConfidenceEvaluatorEnterpriseTest`, `StreamingLegacyChatExecutorCoverageTest`, and expanded `CascadeConfigValidatorTest`. New-code coverage ≈ **92% instruction / 78% branch** (residual branches are the 120s streaming-timeout guard and typed-exception variants); the project aggregate stays above the 90%/80% gate.
+- `CascadingModelExecutor.isRetryableError` message matching collapsed to a single regex (fewer branches, same behavior).
+
+### Adversarial-review fixes
+
+A multi-lens adversarial review (7 reviewers → independent skeptics) surfaced several real defects, now fixed:
+
+- **`returnBestAcrossSteps` vs. live streaming (high):** a final step already streamed live is no longer superseded by an earlier higher-scoring step — that would have replaced text the client had already received. The trace marks the superseded step accordingly.
+- **Agent-mode cascade streaming (medium):** the cascade now emits the agent-mode final response to the SSE stream as a single chunk, matching the standard (non-cascade) agent path (it was silently dropped before); docs corrected.
+- **Validator backward-compat (medium):** `CascadeConfigValidator` now **warns** (instead of hard-failing) for conditions older releases tolerated at load — unknown strategy/evaluationStrategy, out-of-range thresholds, dead non-last steps, judge_model without a judge, empty steps — so upgrading cannot stop a previously-loading agent from deploying. Only the new pricing/ceiling fields hard-fail on an invalid value.
+- **Heuristic clamping (medium):** config-supplied heuristic scores are clamped to [0,1] so a mis-set value can't produce an out-of-range confidence.
+- **`unescapeJsonString` (low):** rewritten as a single-pass scanner so an escaped backslash is consumed before the following char (chained `replace` corrupted `\\n`). Judge regex fallback scoped to the extracted object.
+- **Streaming-timeout caveat** documented (partial tokens of an abandoned final step).
+- New regression tests for all of the above, plus the previously-missing SSE-forwarding and cooperative-cancellation tests. New-code coverage ≈ **92% instruction / 79% branch**.
+
+### Second-pass review fixes
+
+A lean second adversarial pass (5 reviewers → synthesizer) found five more real issues, now fixed:
+
+- **Live-stream timeout (high):** a live-streamed step is no longer subject to the per-step/duration timeout — cancelling it couldn't stop the provider's callback thread, so tokens leaked to the client while the cascade re-emitted a different response (concurrent SSE writes). A streamed step now runs under the streaming executor's own ~120 s bound and its result (even if partial) is the accepted answer; no re-emit, no mid-stream cancel. `streamLive` also tightened to *guaranteed-accept* steps only (last, null-threshold, or `none`≤1.0).
+- **Judge confidence regression (medium):** the judge regex fallback runs over the full judge text again (scoping it to the first balanced object dropped the score when a reasoning object preceded the rating).
+- **Docs vs. validator (medium):** the Configure-time Validation section now states the real two tiers (hard-error only for new pricing/ceiling fields; warnings for legacy conditions).
+- **Single-line code fence (low):** `stripCodeFences` now unwraps ```` ```{...}``` ```` (no newline), which was being discarded.
+- **`returnBestAcrossSteps` trace (low):** the earlier winning step's trace entry is relabeled `accepted_as_best` so the trace agrees with `stepUsed`.
+
+Regression tests added for each. Full touched-area suite green.
+
+### PR-review fixes (bots)
+
+CodeRabbit + Copilot + github-code-quality on PR #587 flagged further items, now addressed: retry token usage accumulated across *all* attempts (not just the last); the cancellation interrupt flag is cleared (`Thread.interrupted()`) so it can't leak; the `accepted.step` metric + trace status name the *actual* returned step under `returnBestAcrossSteps`; unknown `evaluationStrategy` normalized to `structured_output` at runtime (matches the validator + evaluator default); SSE `cascade_escalation` guards non-finite `confidence`/`threshold`; the structured-output regex fallback uses the fence-stripped text; the cascade-disabled agent path forwards its buffered response to the stream; an unused parameter removed; a dead `@Disabled` test deleted; and the docs/changelog/plan corrected to say the validator *warns* (not "rejects/fails fast") on legacy conditions.
+
+### Status
+
+Complete and merged-ready on `feat/model-cascade-enterprise-hardening` (PR #587). No open items; the branch is the terminal state of this feature — next planned work is unrelated (see Section 3 of AGENTS.md).
+
+---
+
+## 🔒 Fix: CodeRabbit review — LifecycleManager failure-path hardening (2026-07-16)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+Addressed four CodeRabbit findings on the error-handling PR's own `LifecycleManager` failure path (PR #593). All four verified as valid against the code; each fix reuses existing infrastructure rather than adding a new utility.
+
+### Key Changes
+
+- **Audit must not bypass strict-write recovery (Major).** If `auditCollector.collect()` threw, the strict-write rollback was skipped — leaving the partial task writes it exists to remove — *and* the audit exception propagated out of the catch, replacing the original task failure. Strict-write recovery now runs **first** (it is integrity-critical), and audit collection is shielded in a try/catch that attaches any reporting error to the original exception via `addSuppressed` instead of masking it.
+- **Redact credentials from audit/SSE summaries (Major).** `summarizeForAudit()` only truncated; its output is persisted to the audit ledger and streamed to admins over `task_failed` SSE. It now applies the existing `SecretRedactionFilter.redact()` **before** truncating — cutting first can split a secret so the pattern no longer matches, leaving a fragment behind. URLs and class names are deliberately retained: the audience is privileged and needs them to diagnose (this is what distinguishes it from `summarizeException`, the LLM-facing path).
+- **Typed causes outrank wrapper messages (Minor).** `classifyError()` checked each level's message before descending, so a `"429"` wrapper around a `SocketTimeoutException` classified as `rate_limit`. It now scans the whole chain for typed causes first (authoritative), and only then falls back to message heuristics — substring matching is easily fooled (e.g. `"failed after 429ms"`).
+- **SSE failure logging (Minor).** The `task_failed` emission catch logged at DEBUG and dropped the throwable plus all context. Now WARN, with the throwable, the sanitized conversation id (`LogSanitizer`, CWE-117) and the task id.
+
+### Tests
+
+Four regression tests added, each of which fails under the previous behavior: typed-cause precedence, credential redaction, redact-before-truncate ordering, and audit-failure-does-not-mask-the-original.
+
+---
+
+## 🐛 Fix: two stale tests red since the error-handling PR (2026-07-16)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+CI on this branch had been red since 2026-07-08 (commit `c054b430`, "Tests run: 9776, Failures: 1, Errors: 1") — both failures pre-date the `origin/main` merge and were surfaced again by it. Each is a stale test asserting a contract the error-handling PR itself deliberately superseded. Test-only changes; no production behavior altered.
+
+### Key Changes
+
+- **`StreamingLegacyChatExecutorTest.execute_error_throwsRuntimeException`** — asserted that a streaming error *always* throws. The PR intentionally changed this: an error arriving *after* partial tokens now returns the partial text with a `streaming_error_partial` warning, and only a zero-content error throws. Retargeted the test at the zero-content case (matching its name) and added `execute_errorAfterPartial_returnsPartialContent` to cover the partial contract, preserving the original token-forwarding assertion.
+- **`ConversationExtendedTest.saySucceeds`** — stubbed `getConversationState()` with a call-count-sensitive consecutive-return sequence (`READY`, then `IN_PROGRESS`). The PR's `EXECUTION_INTERRUPTED` auto-recovery added a state read at the top of `runStep`, consuming the `READY`, so the in-progress guard saw `IN_PROGRESS` and threw `ConversationNotReadyException`. The mock now tracks state like real memory (returns whatever was last set), making it robust to how often production reads it.
+
+### Design Decisions
+
+- Fixed the **tests**, not the production code: both behaviors (partial-response salvage, interrupted-state auto-recovery) are intentional, documented features of this PR and are covered by `StreamingLegacyChatExecutorRetryTest`. The tests simply encoded the pre-feature contract.
+
+---
+
+## 🧹 Refactor: Remove duplicate `RetryConfiguration` shim in LlmConfiguration (2026-07-16)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+Follow-up to the error-handling PR (#593): resolved a code-quality finding (nested class with the same simple name as its superclass). The `LlmConfiguration.RetryConfiguration` nested class was an empty subclass of the extracted `ai.labs.eddi.configs.shared.RetryConfiguration`, kept as a backward-compat shim. It overrode nothing and shadowed the imported shared type within `LlmConfiguration`'s body.
+
+### Key Changes
+
+- **`LlmConfiguration.java`**: Deleted the empty nested `RetryConfiguration` subclass. The `retry` field, getter, and setter now bind directly to the imported shared `RetryConfiguration` (import already present).
+- **9 test files**: Replaced `new LlmConfiguration.RetryConfiguration()` with the shared `RetryConfiguration` (added the `configs.shared` import). Includes `LlmConfigurationTest`, which had pulled the nested type in via a `LlmConfiguration.*` wildcard import.
+
+### Design Decisions
+
+- **Deleted the shim rather than renaming it** (a reviewer suggested `LegacyRetryConfiguration`). The subclass added zero fields/overrides, so a rename would keep a misleadingly-named dead class for the same test churn. Per project philosophy, internal-API removal is safe — the only backward-compat concern is stored JSON, and because the removed subclass added no fields, the `retry` JSON structure is byte-for-byte identical (existing MongoDB/ZIP configs deserialize unchanged).
+
+### Verification
+
+- `mvnw clean test-compile` clean; 123 affected unit tests pass (0 failures).
+- Repo-wide grep confirms zero remaining references to the nested type (dotted, JVM binary-name, reflection strings, or wildcard imports).
+
+---
+
+## ⚡ Feat: Holistic Error Handling and Recovery Infrastructure (2026-07-07)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+### Summary
+
+Complete overhaul of error handling across LLM, HTTP, and MCP call subsystems plus cross-cutting infrastructure for admin visibility, recovery, and monitoring. 19 source files changed, 7 test files added (83+ new tests). Code-reviewed and all review findings addressed before commit.
+
+### Key Changes
+
+- **Shared RetryConfiguration**: Extracted reusable retry logic with exponential backoff, retryable error classification, configurable per subsystem.
+- **LifecycleManager**: Error classification, failure audit entries, SSE `task_failed` events, Micrometer counters tagged by `error.type`.
+- **Admin state reset**: `PATCH /{conversationId}/state` endpoint to recover stuck conversations.
+- **HTTP error body storage**: 4xx/5xx response bodies stored in memory; JSON parse softened.
+- **MCP continueOnError + retry + circuit breaker**: Config-driven error resilience per MCP call.
+- **LLM ResponseValidation**: Config-driven policies for empty/truncated/filtered responses.
+- **Streaming retry**: Zero-token failures retried; partial responses returned with metadata.
+
+### Design Decisions
+
+- Retry at call site (not pipeline level) per user directive.
+- Strict-write default kept as `false` (opt-in) to avoid breaking existing agents.
+- No `"retry"` validation action — retry handled by RetryConfiguration at call level.
+
+---
+
+## 🧹 Multimodal Attachments Completion — Remove dead config knob `reattachTurns` (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+`LlmConfiguration.Task.reattachTurns` (`@since 6.1.0`, added on this branch) was a no-op: `getReattachTurns()` is called nowhere in `src/main`, so setting it changed nothing at runtime. Past-turn PDFs/docs already reach the model via text-extract stitching (`attachments:extracts`), never native re-attachment. Removed the field, getter/setter, and its round-trip test.
+
+Surfaced by a codebase-wide dead-config audit (adversarial multi-agent sweep). The audit flagged ~26 other candidate no-op knobs; rather than mass-delete, they were **triaged** and tracked as follow-ups:
+- **Genuinely dead** — `ModelCascadeConfig.strategy` ("parallel = future", never built), `dream.batchSize`.
+- **Feature exists but knob unwired** — `enableParallelExecution` + `parallelExecutionTimeoutMs` (orphaned `ToolExecutionService` parallel machinery), RAG `injectionStrategy`/`contextTemplate`, `McpServerConfig.transport`, `autoRecallCategories`, `dream.schedule`/`maxUsersPerRun`.
+- **⚠️ Unenforced guardrails** — `DynamicAgentConfig.allowRecruitment`/`allowDelegation`/`maxRecruitedAgentsPerDiscussion`/`maxDelegationsPerTask`/`inheritParentModel` are read nowhere; the guardrails silently don't apply (tracked as its own security/cost fix).
+- **Roadmap scaffolding — keep** — `sessionManagement`/`autoSnapshot`/`maxCheckpointsPerConversation` (Session Forking is in-progress per roadmap).
+- **Audit blind spot** — operator knobs selected via Quarkus `@IfBuildProfile`/`@LookupIfProperty` (e.g. `eddi.messaging.type`) are *not* dead; a getter-grep can't see build-time bean selection. Those need per-item verification, not deletion.
+
+---
+
+## 🔍 Multimodal Attachments Completion — PR #588 review-comment fixes (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Addressed CodeRabbit + Copilot review comments.
+
+**Correctness**
+- **Download 404-vs-500 (High):** `IAttachmentStore.load`/`getMetadata` threw a bare `AttachmentStoreException` for *both* a missing blob and an internal store failure, so `RestAttachmentUpload.downloadAttachment` mapped SQL/backend errors to 404 (at DEBUG) — hiding outages. Added a typed `AttachmentNotFoundException` (symmetric with `AttachmentAccessDeniedException`); both stores throw it for genuinely-missing blobs; the endpoint returns 404 for it and 500 (ERROR log, `ATTACHMENT_STORE_ERROR`) for any other store exception. +regression test.
+- **GDPR export isolation (Major):** the attachment-metadata export wrapped the whole conversation loop in one try/catch, so one failing `listByConversation` truncated the export for every remaining conversation. Each conversation is now isolated (mirrors the conversation-snapshot block above it).
+- **URL group attachment without mimeType (Medium):** `RestGroupConversation.toAttachments` kept URL refs with null/blank mimeType that `AttachmentContextExtractor` silently drops later; now skipped up front so the loss is explicit.
+
+**Observability**
+- `AttachmentForwarder`: reusable `Counter`s initialized once (in the constructor — the registry is constructor-injected, so `@PostConstruct` wouldn't fire in the direct-construction unit tests) instead of resolved per `forward()`; `MeterRegistry`/`Counter` imported.
+- `AttachmentTextExtractor`: per-extraction PDF logs lowered INFO → DEBUG (they run on every user turn / tool call).
+- `Conversation`: the attachment-issue warning now includes the conversation id.
+
+**Style** (the import guideline just added to AGENTS.md §4.7)
+- `LlmTask` (`@jakarta.inject.Inject` → `@Inject`), `GroupConversation` (`Attachment` imported), `GroupConversationServiceTest` (`Context` imported), and the FQN `MeterRegistry` in `AttachmentForwarder`.
+- `GridFsAttachmentStoreTest.whenFindIterate` generalized to any file count (was hardcoded to the 0/1/2-file cases).
+
+**Declined / documented**
+- `LlmConfiguration.MultimodalOverride` kept as a mutable Jackson POJO (not a record) for consistency with every sibling nested config type in the file — converting only one would be inconsistent and need `@JsonCreator` wiring.
+- URL-only group attachments still aren't recovered after a HITL resume — a deliberate, documented limitation (the blob store is the durable source; URLs aren't blob-backed). The PR description should note this.
+
+All affected unit tests green.
+
+---
+
+## 🐛 Multimodal Attachments Completion — Fix: group attachments lost on HITL resume (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Found by a critical adversarial re-review of the `origin/main` merge (10-dimension workflow + per-finding refutation). A **merge-emergent** bug — neither parent could exhibit it alone: our branch added group-shared attachments; `origin/main` added group HITL pause/resume; combined, they interact badly.
+
+**Bug:** `GroupConversation.attachments` is `@JsonIgnore` transient (the durable copy is the blob store). `resumeDiscussion()` reloads a fresh GC from the store, so `getAttachments()` is null; `executeDiscussion()` re-seeded the sibling transient field `dynamicAgentConfig` but **not** `attachments`. Result: a member speaking for the first time *after* a HITL resume got neither the blob-store grant nor the `attachment_*` context — blind to the shared files. Compiles cleanly; runtime-only.
+
+**Fix:** new package-private `rehydrateAttachmentsFromStore(gc)`, called in `executeDiscussion` right after the `dynamicAgentConfig` re-seed (so the two transient fields are handled symmetrically in one place). It rebuilds the metadata list from `IAttachmentStore.listByConversation(gc.getId())` when the in-memory list is empty — keeping the blob store as the single source of truth (no dangling refs after erasure) with **no persistence-schema change**. Guarded by null/empty (not `startPhaseIndex`, since a task-level pause in phase 0 resumes at index 0). **Known limitation:** URL-only attachments are not blob-backed and are not recovered on resume (documented in code; a follow-up can persist those if it becomes a real need).
+
+4 unit tests added (`rehydrate_*`); `GroupConversationServiceTest` + `RestGroupConversationTest` green. The rest of the merge review came back clean — 9/10 dimensions no findings, and the integration sweep confirmed the conflict resolutions themselves are correct (clean unions, no mis-picked sides, consistent call sites).
+
+---
+
+## 📎 Multimodal Attachments Completion — Human review fixes: FQN → imports (2026-07-13)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Addressed @niedch's human review comments on PR #588:
+
+1. **`GroupConversationService`** — the field-injected attachment store used a fully-qualified `@jakarta.inject.Inject` and `ai.labs.eddi.engine.attachments.IAttachmentStore` type. `jakarta.inject.Inject` was already imported, so the annotation is now `@Inject`; added an `IAttachmentStore` import and the field reads `IAttachmentStore attachmentStore;`.
+2. **`ConversationService`** — same FQN smell on the injected field **and** the anonymous `getAttachmentStore()` override (reviewer flagged the override; the field had it too). Added the `IAttachmentStore` import and simplified both usages.
+
+Compile clean (`mvnw compile` → exit 0). No behavior change — pure import hygiene.
+
+Also codified the convention in `AGENTS.md` §4.7 (new **Imports** subsection): always import types/annotations and reference them by simple name; the only acceptable inline FQN is disambiguating two same-named classes used in one file. Prevents this review comment from recurring.
+
+**Deferred (tracked separately):** @niedch also suggested a "general solution for the authorization to avoid duplicating it in multiple places" on `PostgresAttachmentStore.authorize`. Verified as a real duplication — the access policy is copy-pasted across **4 sites** (read owner-or-grant + delete owner-only, in both the Postgres and GridFS stores) with an identical denial message, and the **read** path has already drifted for the null-owner edge case (Postgres denies, Mongo allows; the delete path stays consistent). Because the reviewer framed it as future work and unifying the read path is a security-behavior change that deserves its own tested PR, it was **not** folded into this PR — spun off as a dedicated follow-up (extract a shared `AttachmentAccessPolicy`, standardize null-owner reads to deny-by-default, add a two-backend regression test).
+
+---
+
+## 📎 Multimodal Attachments Completion — Automated review fixes (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Addressed the GitHub code-quality / Copilot review of PR #588:
+
+1. **(High) `readAttachment` couldn't see group-shared blobs.** `listByConversation` returns only *owned* blobs, so a group member — whose shared attachments are owned by the group conversation and merely *granted* to it — got an empty list and couldn't recall them via the tool. Added `IAttachmentStore.listAccessible(conversationId)` (owned **OR** granted) in both backends (GridFS `metadata.grants` array match / Postgres `? = ANY(grants)`), and `ReadAttachmentTool` now lists/resolves through it.
+2. **(Medium) URL attachments dropped when no store configured.** `GroupConversationService.materializeAttachments` returned early on a null store, discarding hosted-`url` attachments that don't need a store. Restructured to skip only the inline-base64 (store-requiring) path.
+3. **(Medium) Brittle access-denied detection.** The download endpoint keyed 403-vs-404 off `message.contains("denied")`. Added a typed `IAttachmentStore.AttachmentAccessDeniedException` (thrown by both backends' authz/delete paths); the REST layer catches it for 403 and treats other store exceptions as 404/500.
+4. **(Note) Unused local variable** removed from a GridFS test.
+
+Tests updated + added (grant-aware listing, url-without-store materialize, typed-exception 403 paths); 277 green across the affected classes, coverage gate still met.
+
+---
+
+## 📎 Multimodal Attachments Completion — Adversarial review + fixes (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+A multi-agent adversarial review of the whole implementation surfaced **two real high-severity defects** (both verified by an independent refutation pass, both missed by the unit tests because they stubbed `getLatestData` directly and used single-turn memories):
+
+1. **Prefix-collision silent data loss.** `IConversationStep.getLatestData` is a *prefix* scan, and the `ATTACHMENTS` key `"attachments"` is a prefix of the `attachments:extracts` / `attachments:errors` keys the forwarder `persist()`s. A second forwarder (or `readAttachment` auto-add, or `ContentTypeMatcher`) read in the same step reverse-scanned and returned a `List<String>` instead of the `List<Attachment>` → **zero attachments forwarded, no error note**. Reachable with two langchain tasks sharing an action or two langchain workflow steps. Fixed by reading the exact key via `getData(MemoryKey)` in `AttachmentForwarder`, `AgentOrchestrator`, and `ContentTypeMatcher`.
+2. **Mirror-inverted history stitching.** `ConversationLogGenerator.withAttachmentExtracts` passed the *forward* conversation-output index into `IConversationStepStack.get()`, which is *reverse*-ordered (`get(0)` = newest). In a 3-turn conversation, turn 1's extract surfaced on turn 3 and turn 1 lost it; only the middle turn aligned. Fixed by converting the forward index to the reverse accessor index (`size-1-index`).
+
+Regression tests added for both (a real `ConversationMemory` with persisted extract/error keys proving the forwarder still forwards; a 3-turn stitching test proving extracts land on the correct turn). All new/changed classes remain above the >90% instruction / >80% branch gate; 654 tests green across the touched surface.
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 6 (partial): Metrics + GDPR portability (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 6 of 6, partial).
+
+### What changed
+
+- **Forwarder metrics** — `AttachmentForwarder` now takes a `MeterRegistry` and records `eddi.attachment.forwarded` (content items sent to the LLM) and `eddi.attachment.errors` (dropped/gated/failed) per turn, satisfying AGENTS.md's "always add metrics" rule for the multimodal hot path.
+- **GDPR portability** — `UserDataExport` gains an `attachments` list (`AttachmentExportEntry` = conversationId/storageRef/fileName/mimeType/sizeBytes, **metadata only, never bytes**) plus a backward-compatible constructor. `GdprComplianceService.exportUserData` collects attachment metadata across the user's conversations via `IAttachmentStore.listByConversation`, and the compliance audit event records `attachmentsExported`.
+
+### Deferred (documented follow-ups)
+
+Still open in Phase 6: nightly reaper (orphaned blobs / stale grants via `ScheduleFireExecutor`), `CostTracker` multimodal token estimates, and an `attachmentsForwarded` audit-ledger entry. Phase 5 (multipart 1:1 `say`, SSE/output chips, and the EDDI-Manager / eddi-chat-ui frontend in their own repos) is likewise a follow-up — the two-step upload→say flow already works end-to-end.
+
+### Tests
+
+Forwarder metrics assertion + GDPR attachment-metadata export test. Both green.
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 3: Group parity (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 3 of 6).
+
+### What changed
+
+- **`DiscussRequest` carries attachments** — `IRestGroupConversation.DiscussRequest` gains an optional `List<AttachmentRef> attachments` (`AttachmentRef = {mimeType, data, url, fileName}`) plus a two-argument compat constructor, so existing JSON clients and call sites are unaffected. `IGroupConversationService.discuss(...)` and `startAndDiscussAsync(...)` gain attachment-carrying overloads (default methods → real impl overrides).
+- **Materialize + bind at fan-out** — `GroupConversationService.materializeAttachments` stores inline base64 files in `IAttachmentStore` **bound to the group conversation id** (so they can be granted and reaped with it) and passes hosted `url` refs through, stashing the result on the (transient) `GroupConversation.attachments`.
+- **Grant + inject per member** — on each member's **first** turn, `grantAndInjectAttachments` calls `IAttachmentStore.grantAccess(storageRef, memberConversationId)` (the only place grants are minted — trusted server code, D2) and injects `attachment_*` context into the member's `InputData`. Stored refs are granted; URL refs are forwarded without a grant. Later phases rely on the Phase-2 extract-stitching and the Phase-4 `readAttachment` tool. Nested groups receive the parent's attachments and re-grant down the chain.
+- **REST routing** — `RestGroupConversation` converts `AttachmentRef → Attachment` and routes through the attachment overload only when attachments are present (so the no-attachment path — and its existing mock-based tests — is untouched).
+
+### Design note
+
+Group members run in their **own** conversations, so strict per-conversation ownership would block them from reading a group-uploaded blob — grants are exactly the primitive that makes this safe without opening cross-conversation access generally. Transport is JSON inline (base64/url); a multipart file-part variant of the endpoint is a thin follow-up (the capability and service path are complete).
+
+### Tests
+
+7 service tests (materialize base64/url/no-store/empty; grant+inject stored-ref/url/grant-failure/none) + 2 REST routing tests (attachment overload vs plain). Group ITs (member observes content, grant-before-turn, nested) stay CI-only.
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 4: readAttachment tool (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 4 of 6).
+
+### What changed
+
+- **`ReadAttachmentTool`** (`modules/llm/tools/impl`, `@Vetoed`) — the multi-turn recall path. Two `@Tool`s: `listAttachments()` (name/type/size/ref of every attachment in the conversation) and `readAttachment(nameOrRef, page)` (loads one attachment, extracts text — 1-based PDF page or 0 for whole doc — else a "no extractable text" note). The conversation id is implicit (constructor-injected), so the LLM never supplies a userId/conversationId and can only reach its own (or granted) attachments — enforced by `IAttachmentStore`.
+- **Auto-add wiring** — `AgentOrchestrator` gains `setAttachmentServices(store, extractor)` (wired by `LlmTask` in a new `@PostConstruct`, after CDI injection, so the long constructor + its six direct-construction tests are untouched). `addReadAttachmentToolIfEnabled` adds the tool in the no-whitelist branch when the turn has attachments, and in the whitelist branch under key `readattachment`; skipped when the services are unset (isolated tests) or the turn has no attachments. The forwarder's fallback notes already point the model at this tool.
+
+### Tests
+
+`ReadAttachmentToolTest` (11 — list/read by name & ref, case-insensitive, PDF page, not-found, non-extractable, denied load, empty text, blank ref) + 5 orchestrator auto-add branch tests (no-whitelist, whitelisted, whitelist-excluded, services-unset, no-attachments). Existing orchestrator/LlmTask tests unchanged.
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 2: Unified forwarder (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 2 of 6). Forwarder core.
+
+### What changed
+
+- **`AttachmentForwarder`** (`modules/llm/impl`, new) — the single place attachments become langchain4j `Content` on the outgoing user message. Replaces the image-only `MultimodalMessageEnhancer` (deleted, with its tests). Per attachment it resolves bytes from any source (stored blob → `store.load`, URL → `SafeHttpClient` download, base64 → decode) under **uniform per-file (10 MB) and aggregate (20 MB) byte caps across all sources** (the base64 path was previously unguarded), gates on `ModelCapabilityService(provider, model)`, and emits:
+  - `image/*` → `ImageContent` when vision-capable (URL passed through when the provider fetches URLs, else **downloaded and inlined** — provider URL normalization, D7), else a note;
+  - `application/pdf` → **hybrid**: native `PdfFileContent` when the model supports documents, else PDFBox text extraction inlined as `TextContent`;
+  - text-like (`text/*`, JSON, XML, CSV, YAML) → decoded + inlined, **no capability required** (always works);
+  - `audio/*` → `AudioContent` when supported, else a note;
+  - everything else → a metadata note pointing at the (Phase 4) `readAttachment` tool.
+- Extracted text is persisted to `attachments:extracts` (for Phase-2 history stitching) and every drop/skip/gate is appended to `attachments:errors` — **never silent**; each also leaves a note the LLM can relay.
+- **`LlmTask`** now calls the forwarder with the resolved `(provider, model)` instead of the static enhancer (field-injected + null-guarded so the six direct-construction `LlmTask` tests are untouched).
+
+### Design decisions
+
+- **Capability service uses the real defaults, not mocks, in tests** — the forwarder test drives the true `ModelCapabilityService` matrix (OpenAI URL-image fast path, Gemini download-and-inline, Anthropic native PDF, OpenAI PDF text-fallback, jlama no-vision note).
+- **Skip ≠ silence** — a per-file/aggregate cap hit, store-load failure, or download failure records to `attachments:errors` *and* emits a `TextContent` note so the model can tell the user, rather than dropping the attachment invisibly.
+
+### Tests
+
+`AttachmentForwarderTest` (18) covers the full branch matrix incl. URL-passthrough vs download-inline, base64/stored images, PDF native vs text-fallback (with extract persistence), text inline, audio on/off, unsupported note, per-file cap, store-load failure, and no-source skip. Enhancer tests removed.
+
+### Phase 2 tail (completed same branch)
+
+- **Per-task multimodal override + reattachTurns** — `LlmConfiguration.Task` gains an optional `multimodal { vision|documents|audio: auto|on|off }` block and `reattachTurns` (default 0). Old JSON configs deserialize cleanly (`FAIL_ON_UNKNOWN_PROPERTIES=false`). `AttachmentForwarder.forward` gains a `Support`-parameterized overload; `LlmTask` parses the task block and passes the overrides (per-task > deployment > default precedence).
+- **History stitching** — `ConversationLogGenerator.generate` gains an opt-in `stitchAttachmentExtracts` flag (only the LLM-facing `ConversationHistoryBuilder` path passes `true`, so the visible transcript stays clean). Per turn it appends that step's `attachments:extracts` to the rebuilt user message; verified aligned 1:1 with conversation outputs and that non-public step data survives snapshot persistence/reload, so a turn-2 follow-up sees turn-1's PDF/text extracts. `reattachTurns` is schema-ready; extract-stitching + the `readAttachment` tool (Phase 4) are the primary multi-turn continuity mechanisms.
+
+### What's next (Phases 3–6)
+
+Phase 3 (group parity), 4 (`readAttachment` tool), 5 (UX), 6 (ops).
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 1: Storage unification + secure upload (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 1 of 6).
+
+### What changed
+
+1. **One blob store.** Collapsed the two parallel abstractions onto `IAttachmentStore`. Uploads already wrote to it (GridFS / Postgres `*Store`), but conversation-deletion and GDPR erasure cascaded through a *different* store (`IAttachmentStorage` → `Mongo`/`PostgresAttachmentStorage`), so uploaded blobs were never actually deleted. Ported both consumers (`RestConversationStore` delete cascade, `GdprComplianceService` erasure) to `IAttachmentStore`, then deleted `IAttachmentStorage` + both impls + their 4 tests (verified write-dead — only the delete cascades referenced them).
+2. **Grants + owner-or-grant authz.** New `IAttachmentStore.getMetadata()` (server-validated metadata, no bytes), `grantAccess()` (trusted-caller-only cross-conversation read grant), single-item `delete()` (owner-only). `load()`/`getMetadata()` authorize owner **OR** an explicit grant; grants die with the blob. This is what lets group members read a blob uploaded to the group conversation (Phase 3) without opening cross-conversation access generally.
+3. **UUID ref hardening (open decision #4).** GridFS now returns an unguessable random-UUID `storageRef` held in file metadata (legacy ObjectId-hex refs still resolve); Postgres already used UUIDs. Both backends unified on one opaque ref format.
+4. **Quotas.** Per-conversation count + total-byte caps enforced in `store()` (`eddi.attachments.max-per-conversation` = 50, `eddi.attachments.max-total-bytes-per-conversation` = 100 MB; non-positive disables).
+5. **`storageRef` extraction branch (defect #2 — upload was orphaned).** `AttachmentContextExtractor` now parses `{storageRef}` (precedence storageRef > url > data) and `resolveAndGuard()` resolves each stored ref's authoritative MIME/size via `getMetadata` (owner/grant authorized) **before** behavior rules run, enforces the per-turn cap (`eddi.attachments.max-per-turn` = 5), and records every drop/failure to `attachments:errors` — never silent. Wired into `Conversation` init via `IPropertiesHandler.getAttachmentStore()`/`getMaxAttachmentsPerTurn()` (populated by `ConversationService`).
+6. **Secure REST surface.** `RestAttachmentUpload` gains a `forwardableInline` hint on upload (upload cap 20 MB > forward cap 10 MB — warn at upload, not silently at forward), a single-item download endpoint (`GET /conversations/{id}/attachments/{storageRef}`, owner/grant-checked, Content-Disposition sanitized) and single-item `DELETE`.
+
+### Design decisions
+
+- **Auth model fits EDDI's anonymous-capable conversations.** No other conversation endpoint uses `@RolesAllowed` (only admin endpoints do), and anonymous deployments must keep working (D2). Enforcement is therefore store-level owner-or-grant authorization on every `load`/`getMetadata`/`delete`, plus unguessable UUID refs — not an OIDC role gate. `@RolesAllowed` can be layered on when a deployment makes OIDC mandatory. `tenantId` stays advisory (sanitized, not an access boundary).
+- **Field injection for the two new `ConversationService` deps** (attachment store + per-turn cap) so the numerous direct-construction unit tests need no change.
+
+### Tests
+
+161 unit tests across the affected classes: `GridFsAttachmentStoreTest` rewritten for UUID refs + grants + quota (26), `AttachmentContextExtractorTest` +storageRef/resolveAndGuard (27), `RestAttachmentUploadTest` +download/delete-one/forwardableInline/CD-sanitization (21), re-typed consumer tests. Postgres store IT and full ITs stay CI-only.
+
+### What's next
+
+Phase 2 — the unified `AttachmentForwarder` (replaces `MultimodalMessageEnhancer` + `convertMessage`): hybrid PDF (native `PdfFileContent` vs PDFBox text), universal text inline, uniform per-file/aggregate caps across all sources, provider image-URL normalization, capability gating via `ModelCapabilityService`, and extracts-in-history stitching.
+
+---
+
+## 📎 Multimodal Attachments Completion — Phase 0: Foundations & bug fixes (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 0 of 6). Low-risk foundations that ship alone.
+
+### What changed
+
+1. **`@JsonIgnore` on `Attachment.getBase64Data()`** (`engine/memory/model/Attachment.java`) — the `transient` keyword did **not** stop Jackson (getter-based serialization, no `PROPAGATE_TRANSIENT_MARKER`), so inline base64 payloads were being serialized into Mongo conversation documents. Now excluded; metadata still persists. Serialization tests prove the payload never reaches persisted JSON.
+2. **Scrub inline base64 from persisted context copies** (`engine/memory/AttachmentContextExtractor.java` + `engine/runtime/internal/Conversation.java`) — new `AttachmentContextExtractor.scrubInlinePayload()` returns a metadata-only copy of an `attachment_*` context when it carries a `data` payload. `Conversation.createContextData()` builds the persisted copy (step data + `context.*` conversation output) through it, so the raw base64 (~1.33× file size/turn against the 16 MB doc limit) never lands in Mongo and is never exposed via `{context.attachment_*.data}`. The live payload still rides ATTACHMENTS memory for the turn. Mirrors secret-input scrubbing.
+3. **`AttachmentTextExtractor`** (`modules/llm/tools/impl/`, new) — shared PDFBox + plain-text extraction behind a uniform, configurable cap (`eddi.attachments.extraction.max-chars`, default 10k). `extractText(bytes, mime[, maxChars])` dispatches PDF + text-like (text/*, JSON, XML, CSV, YAML); PDF full/page-range/info methods; `canExtractText()`. `PdfReaderTool` now delegates all extraction to it (download/SSRF/formatting unchanged). Reused by the Phase 2 forwarder and Phase 4 readAttachment tool.
+4. **`ModelCapabilityService`** (`modules/llm/capability/`, new) — resolves vision/documents/audio/image-by-URL support for a `(provider, model)` pair. Precedence: per-task override > deployment override (`eddi.multimodal.<provider>.<cap>` then `eddi.multimodal.<cap>`) > conservative model-aware defaults (plan §5). Unknown ⇒ unsupported ⇒ fallback. Injectable via MicroProfile Config; Function-based constructor keeps it unit-testable.
+5. **Body-size alignment** (`application.properties`) — added `quarkus.http.limits.max-body-size=25M` (was Quarkus' 10 MB default, below the 20 MB attachment cap → 10–20 MB uploads died with a bare 413), plus documented `eddi.attachments.max-size-bytes` and `eddi.attachments.extraction.max-chars`.
+
+### Design decisions
+
+- **Scrub is a copy, not a mutation** — the original context map keeps its payload so the current turn's extraction/forwarding is unaffected; only the persisted derivative is stripped.
+- **Extractor owns extraction, tool owns presentation** — `PdfReaderTool.getPdfInfo` still formats the human-readable string; the extractor returns a structured `PdfInfo`, so the shared service stays presentation-free and reusable by the forwarder.
+- **Capability defaults are conservative and model-aware** — vision-first providers (OpenAI/Anthropic/Gemini/Mistral) default on but downgrade for known text-only models; model-dependent providers (Ollama/Bedrock/Oracle) default off but upgrade for known vision models; image-by-URL only for OpenAI/Azure (everything else inlines).
+
+### Tests
+
+146 new/covered unit tests: `AttachmentTest` (serialization no-payload), `AttachmentContextExtractorTest` (scrub matrix), `AttachmentTextExtractorTest` (PDF/text/caps/corrupt), `ModelCapabilityServiceTest` (74 — default matrix across 11 providers + override precedence). `PdfReaderToolTest` remains CI-only (SafeHttpClient opens a loopback selector local JVMs may block).
+
+### What's next
+
+Phase 1 — storage unification (collapse `IAttachmentStorage` into `IAttachmentStore`, port conversation-delete + GDPR cascades), grants (`grantAccess`/grant-aware `load`), authenticated upload/list/download/delete, quotas, `storageRef` extraction branch, UUID ref hardening.
+
+---
+
+## 🐛 schedule — correct poll-batch-size comment (at-least-once, not exactly-once) (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Copilot PR review flagged that the `eddi.schedule.poll-batch-size` comment in `application.properties` claimed "cluster-wide CAS still guarantees exactly-once" — which **contradicts `IScheduleStore`'s documented contract**: firing is *at-least-once*, not exactly-once (an expired lease can be stolen, so schedule targets must be idempotent). Corrected the comment to state that per-lease CAS gives a single claimant but delivery is at-least-once, and the HITL timeout handler (resumes/cancels via CAS on conversation state) is idempotent.
+
+Two other Copilot nits were **declined** as inconsistent with established codebase convention: (a) the exact `GroupConversationState.values().length == 7` assertion is a deliberate tripwire matching its sibling `TranscriptEntryType` test — a lower-bound guard would lose the "did you mean to change the state set?" protection; (b) the `// MINOR-2:` label on `OwnershipValidator` is consistent with a pervasive plan-reference convention (9 `MINOR-/MAJOR-` labels plus hundreds of `#NN`/`Hn`/`Task N` markers) — a one-off removal would be inconsistent.
+
+---
+
+## 📝 HITL enum refactor — documentation audit (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Audited all documentation for the enum refactor (changelog accuracy, user-doc coverage, code comments). **User-facing docs correctly need no change**: `README.md`, `AGENTS.md`, and `docs/hitl.md` reference `timeoutPolicy` only at the config/REST layer (the JSON string values `AUTO_APPROVE`/`AUTO_REJECT`/`ABORT`/`WAIT_INDEFINITELY`), which the internal `String → enum` retype leaves byte-identical — no config-schema or wire-format change to document. Two accuracy fixes made:
+- **`HitlCrashRecoveryObserver` comment** (group re-arm site): the comment claimed the inline null-default avoids "the String overload the regular surface shares" — stale after the regular surface also became an enum. Corrected to state that **both** bookmarks are now enum and `parsePolicy(String)` survives only for the `PendingApprovalSummary` projection scan (still `String`).
+- **Changelog** (regular-surface entry): it listed the `McpHitlTools` regular read site among the sites updated to `.name()`, but that site was the one **missed** in that commit and fixed in the follow-up — corrected to say so.
+
+Also re-verified `HitlTimeoutPolicySerializationTest` passes directly (`Tests run: 15, Failures: 0`).
+
+---
+
+## ✅ HITL enum refactor — round-2 review clean + serialization regression guard (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+After the round-1 review caught `McpHitlTools:185`, ran a **second, deeper adversarial review** (4 orthogonal angles: complete call-site re-inventory, runtime serialization across both stores, end-to-end timeout-fire path, and an explicit "find one more bug" hunt — each finding verify-gated, plus a completeness critic). Result: **zero findings**, verdict `CORRECT_AND_COMPLETE`. Every remaining `String` touchpoint is a deliberate guarded boundary conversion (`PendingApprovalSummary` stays `String` via guarded `.name()`; schedule metadata stays `String` and `HitlTimeoutHandler` parses it back via `valueOf`; REST/MCP/Slack summaries via `.name()`); crash-recovery null-defaults faithfully mirror the old `parsePolicy`; `parsePolicy(String)` remains live for the projection-scan path.
+
+Added **`HitlTimeoutPolicySerializationTest`** (pure-unit, no Testcontainers) as a permanent regression guard for the invariant the whole refactor rests on. It replicates BOTH production mappers — the JSON mapper (Postgres JSONB + REST) and the BSON mapper (MongoDB, built like `PersistenceModule`) — across BOTH surfaces (`ConversationMemorySnapshot`, `GroupConversation`) and asserts: enum ⇄ `name()`-string round-trip for all four values; BSON encodes a **string, not an ordinal**; a null policy is omitted (NON_NULL) and round-trips to null; and **legacy pre-refactor documents** (policy as a bare JSON string) still deserialize into the enum. 15/15 pass locally — closing the residual runtime/persistence risk that the CI-only Testcontainer store tests would otherwise be the sole coverage for.
+
+---
+
+## 🐛 HITL enum refactor — fix missed McpHitlTools read site (clean-compile break) (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A thorough adversarial code review (5 dimensions + verify + completeness critic) of the two enum-refactor commits below found **one real, CRITICAL defect**: the regular-surface MCP read site `McpHitlTools.getApprovalStatus` (`McpHitlTools.java:185`) still put `snapshot.getHitlTimeoutPolicy()` (now the enum) into a `Map<String,String>` **without `.name()`**. Because that map's value type is `String` (unlike the `Map<String,Object>` sibling at `:359`), the mixed `enum : ""` ternary is a **hard javac error** (`bad type in conditional expression: HitlTimeoutPolicy cannot be converted to String`). The group twin (`:359`) and `RestAgentEngine:407` were fixed; this regular twin was missed.
+
+**Why it slipped past verification:** the earlier `./mvnw test` runs reported BUILD SUCCESS because Maven **incremental compilation reused a stale `McpHitlTools.class`** — the source file wasn't edited, so it wasn't recompiled even though its dependency (`ConversationMemorySnapshot`) changed type. A `./mvnw clean compile` fails. The prior changelog claim that "the full main + test tree compiles" was therefore based on a false pass and is corrected here. **Lesson: verify type-signature refactors with `clean compile`, not incremental.**
+
+**Fix:** append the guarded `.name()` to match its three siblings — `summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "")`. Wire output is byte-identical (`"AUTO_REJECT"` / `""`).
+
+Verified with a **clean** build: `./mvnw clean test` compiles the whole main + test tree from scratch and the affected suites pass (`Tests run: 258, Failures: 0, Errors: 0`). The review's other four dimensions (serialization/persistence, null-safety, behavior-preservation, test-fidelity) and the completeness critic returned **no other defects** — the refactor is otherwise correct and complete.
+
+---
+
+## 🎯 Regular surface — type hitlTimeoutPolicy as the HitlTimeoutPolicy enum (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Follow-up to the group-surface enum change (below): applied the same `String → HitlTimeoutPolicy` retype to the **regular (agent) conversation surface** so both surfaces are consistent. The `hitlApprovalTimeout` field stays `String` on both, for the same reasons documented in the group entry (uniform convention + `Duration` would serialize as a number under `write-dates-as-timestamps=true`).
+
+**Model layer** (`IConversationMemory` default methods, `ConversationMemory` impl field + accessors, `ConversationMemorySnapshot` field + accessors) now carry the enum. `ConversationMemoryUtilities` copies memory ↔ snapshot unchanged (both enum). **Consumer** (`ConversationService`): the four bookmark set-sites drop `.name()` (the source `AgentConfiguration.HitlConfig.getTimeoutPolicy()` / `ToolApprovalsConfig.getTimeoutPolicy()` / the computed `effectivePolicy` are all already the enum); `scheduleHitlTimeout` compares `== WAIT_INDEFINITELY` and emits `.name()` only into the `Map<String,Object>` schedule metadata. **Read/display sites** call `.name()`: the `RestAgentEngine` summary map, `ConversationMemoryStore.collectPendingSummaries` (feeds the `String`-typed `PendingApprovalSummary`), and `SlackEventHandler.formatTimeoutInfo`. (The parity `McpHitlTools:185` regular read site was **missed here** and fixed in the follow-up above.) **Crash recovery** (`HitlCrashRecoveryObserver`): the regular `IN_PROGRESS`-recovery site inlines the `null → WAIT_INDEFINITELY` default; `parsePolicy(String)` stays intact for its remaining caller (the `PendingApprovalSummary` projection, still `String`).
+
+**Persistence — verified wire-safe.** `ConversationMemorySnapshot` is stored as a JSONB/BSON blob (Jackson serializes the enum as its `name()`), so already-persisted `AWAITING_HUMAN` bookmarks deserialize unchanged. The Postgres bounded projection (`data->>'hitlTimeoutPolicy' AS timeout_policy` → `rs.getString(...)` → `PendingApprovalSummary`) reads the raw JSON name string and is unaffected by the model type change. The REST `awaitingApproval` summary and Manager UI contract are byte-identical.
+
+Scope: 9 main files + 12 test files (setters/asserts moved to enum constants; `String`-param helpers convert via `valueOf`; store-test call-sites retyped). `SimpleConversationMemorySnapshot` does not carry this field, so it is untouched. Verified: `Tests run: 258, Failures: 0, Errors: 0` across the regular + group HITL unit suites; full main + test tree compiles (the Testcontainer store tests compile and run in CI). `IRestAgentEngine.java` (formatter oscillation) restored/excluded again. Nothing pushed.
+
+---
+
+## 🎯 GroupConversation — type hitlTimeoutPolicy as the HitlTimeoutPolicy enum (2026-07-13)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A PR review comment (@niedch) on `GroupConversation`'s HITL bookmark getters/setters said: *"I would prefer to go with the actual enum type and Duration for this."* Analyzed both halves (4-way investigation + adversarial verify) and **split the decision**: did the enum, deliberately skipped the `Duration`.
+
+**Enum — done.** `hitlTimeoutPolicy` was a raw `String` copied from config at pause time, but the `HitlTimeoutPolicy` enum (`WAIT_INDEFINITELY, AUTO_APPROVE, AUTO_REJECT, ABORT`) already exists and is the *declared* type in all three HITL config POJOs (`AgentConfiguration.HitlConfig`, `AgentGroupConfiguration.HitlConfig`, `ToolApprovalsConfig.timeoutPolicy`) — `GroupConversation` was the lone raw-`String` outlier for the policy. The field is control-flow-relevant (gates/arms `scheduleGroupHitlTimeout`, drives crash re-arm in `HitlCrashRecoveryObserver`), so typing it removes stringly-typed `valueOf`/`.name()`/`parsePolicy` juggling. It is **wire-safe**: Jackson serializes enums by `name()`, so `"AUTO_REJECT"` round-trips identically in Mongo/Postgres JSON, over REST, and to the Manager UI — exactly how the sibling `GroupConversationState state` field already persists. Every set-site only ever wrote a valid `name()` or `null`, so deserializing already-persisted `AWAITING_APPROVAL` transcripts cannot throw.
+
+Files:
+- **`GroupConversation.java`** — field + getter/setter → `HitlTimeoutPolicy` (import added).
+- **`GroupConversationService.java`** — `commitPause` / `restoreGroupPause` pass the enum directly (dropped `.name()`); `restoreGroupPause`'s `fallbackTimeoutPolicy` param + `resumeDiscussion`'s `savedTimeoutPolicy` local retyped to the enum; `scheduleGroupHitlTimeout` compares `== WAIT_INDEFINITELY` and calls `.name()` only when writing the schedule-metadata `Map<String,Object>`; `listGroupPendingApprovals` null-guards `.name()` for the `String`-typed `PendingApprovalSummary`.
+- **`HitlCrashRecoveryObserver.java`** — the group site inlines the `null → WAIT_INDEFINITELY` default instead of routing through the shared `parsePolicy(String)`, which stays intact for its two **regular-surface** callers (`PendingApprovalSummary`, `ConversationMemorySnapshot`).
+- **`RestGroupConversation.java` / `McpHitlTools.java`** — the summary map puts `.name()` (identical wire value, keeps the value a `String`).
+- Tests (`GroupConversationServiceHitlCoverage2Test`, `…CoverageTest`, `HitlCrashRecoveryObserverTest`, `…CoverageTest`) — reflective `restoreGroupPause` signature + args updated to the enum, assertions compare the enum, `gc.` helpers convert.
+
+**Duration — skipped (deliberate).** `hitlApprovalTimeout` stays `String`. Unlike the policy, `approvalTimeout` is uniformly `String` across every carrier (all three configs, the memory bookmark, `PendingApprovalSummary`, the transcript), so the convention favors `String`. And it is **not** wire-safe: the deployment sets `quarkus.jackson.write-dates-as-timestamps=true` with no `WRITE_DURATIONS_AS_TIMESTAMPS` override, so a `java.time.Duration` would serialize to a bare number (`900.0`) instead of `"PT15M"`, breaking the raw-over-REST OpenAPI/Manager-UI contract (the frontend reads it as an ISO-8601 string with a `PT15M` placeholder). A correct migration would need a whole-surface change + a custom ISO-8601 serializer + coordinated frontend work — a separate cross-cutting effort, out of scope for a review nit.
+
+**The `ConversationMemorySnapshot` regular surface keeps `String`** for both fields — it is a separate class with its own `parsePolicy(String)` path; only the group transcript was retyped. (A parallel enum change there is a possible follow-up but was left out to keep this diff scoped.)
+
+Verified: the four affected unit-test classes pass (`Tests run: 149, Failures: 0, Errors: 0`); surefire compiled the entire main + test tree first, so all call-sites type-check. Neither change is a correctness bug and the comment was a *"prefer"*, so this does not block the branch. `IRestAgentEngine.java` (reformatted by `formatter-maven-plugin` during the build, unrelated to this task) was restored and excluded. Nothing pushed.
+
+---
+
+## 🧹 ChannelTargetRouter — drop dead getPlatformConfig() null-checks + duplicate allocations (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A Copilot review of the HITL PR flagged one site in `ChannelTargetRouter.getIntegrationByApprovalChannel` where `getPlatformConfig()` was called twice behind a redundant `!= null` guard. Verified against `ChannelIntegrationConfiguration.getPlatformConfig()`: it returns `new HashMap<>(platformConfig)` — a fresh defensive copy, with the field initialized non-null and the setter null-guarded — so it **never returns null**. That makes every `getPlatformConfig() != null` sub-check dead code, and each doubled call allocates a throwaway map per invocation.
+
+The same pattern existed in **five other methods** Copilot did not flag; fixed all six for consistency:
+- `getIntegrationByApprovalChannel` (the flagged one) — cache the copy once, drop the dead guard
+- `getBotToken`, the config-load loop, `ResolvedTarget.botToken`, `ResolvedTarget.signingSecret` — drop the redundant `&& getPlatformConfig() != null` clause
+- `deepCopyConfig` — drop the always-true `if` wrapper, single call
+
+Every **genuine** guard is preserved (`integration != null`, `config != null`, `getChannelType() != null`); only the provably-dead `getPlatformConfig() != null` sub-checks and the duplicate allocations were removed. Behavior is identical because the getter cannot return null.
+
+**Copilot's second comment — rejected (verified against tooling):** it wanted `IRestAgentEngine.listPendingApprovals` collapsed to one line. The `formatter-maven-plugin` (Eclipse formatter, bound to the build) produces exactly the two-line split it objects to and auto-reverts the single-line form on every `mvnw compile`, so the nit conflicts with the project's enforced format — no change made.
+
+Verified: `./mvnw compile` exits 0 (checkstyle at `validate`, formatter at `process-sources`, javac all clean). Change isolated to `ChannelTargetRouter.java`. Nothing pushed.
+
+---
+
+## 🐛 mcpcalls — register McpCallsTask via startup module (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+`McpCallsTask` (the MCP-client httpcall lifecycle task) was tracked and committed, but its bootstrap registration was not — so on a fresh checkout the task was never inserted into the lifecycle-task provider map (`@LifecycleExtensions`) and the mcpcalls feature silently failed to wire into the pipeline. Added `McpCallsModule` (`@Startup(1000)` + `@PostConstruct`), mirroring the seven sibling bootstraps (`ApiCallsModule`, `LlmModule`, `OutputGenerationModule`, `PropertySetterModule`, `RulesModule`, `SemanticParserModule`, `TemplateEngineModule`), which registers `McpCallsTask.ID`. The file existed but was untracked in the working tree; surfaced while auditing the tree during the MCP-whitelist review and committed here as a wiring bug relevant to this branch. Compiles clean.
+
+---
+
+## 🔌 MCP tool filter — expose HITL/memory/GDPR tools + build-time regression guard (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+A client reported that new HITL MCP tools were "implemented but not available." Confirmed: `McpToolFilter` is a **name whitelist** (`ToolFilter` SPI — quarkus-MCP only surfaces a tool's *name*, not its declaring class/annotation, so filtering must be by name), and it exposes only the intended MCP tools while hiding the langchain4j built-in agent tools (calculator, websearch, etc.) that leak into the same scan. Three `Mcp*Tools` classes had shipped `@Tool`s that were **never added to the whitelist**, making them unreachable dead code — a quarkus-MCP `@Tool` has no other invocation path:
+
+- **`McpHitlTools`** (9): `list_pending_approvals`, `get_approval_status`, `resume_conversation`, `cancel_conversation`, `list_group_pending_approvals`, `list_all_group_pending_approvals`, `get_group_approval_status`, `approve_group_phase`, `cancel_group_discussion` — documented as the MCP HITL surface in `docs/hitl.md` but invisible.
+- **`McpMemoryTools`** (8): `list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`, `count_user_memories`.
+- **`McpGdprTools`** (2): `delete_user_data`, `export_user_data`.
+
+**Why it slipped through:** the existing regression test (`McpToolFilterTest.test_allMcpToolMethods_areWhitelisted`) scanned only a **hardcoded array of 4** `Mcp*Tools` classes — HITL, memory, and GDPR were not in it, so CI stayed green.
+
+**Fix:**
+- **`McpToolFilter.java`** — added all 19 names to `MCP_TOOLS` (whitelist 55 → 74 = every declared quarkus-MCP `@Tool`). Verified there is **no name collision** with any langchain4j built-in tool (effective names cross-checked), so whitelisting a name cannot accidentally expose an internal agent tool. All three classes already enforce their own authz (`requireRole` viewer/admin + per-user `OwnershipValidator`; GDPR delete is admin-only + `CONFIRM` arg), identical to their REST counterparts — MCP is a transport, not new authority.
+- **`McpToolFilterTest.java`** — rewrote the guard to **auto-discover** every class in the `ai.labs.eddi.engine.mcp` package by scanning the compiled-classes directory (no hardcoded class list), resolve each `@Tool`'s effective name (explicit `name`, else method name — the `McpGroupTools` convention), and fail the build if any is not whitelisted. Anchor tools (one per `Mcp*Tools` class) guard against a broken scan passing vacuously. Any *future* MCP tool that isn't whitelisted now turns CI red.
+- **`docs/mcp-server.md`** — corrected the stale tool count (63 → 74), documented the name-only `ToolFilter` constraint and the new build-time guard.
+
+**Decision:** whitelist (not delete) memory/GDPR — they were intended MCP tools (Phase 11a persistent memory, GDPR/CCPA framework) that were simply never wired into the filter; the annotation encodes intent to expose.
+
+**Follow-up — adversarial code review + fixes:** the commit was then put through a 4-dimension adversarial review (whitelist-correctness, test-robustness, security/authz, docs-completeness), each finding skeptic-verified. Whitelist-correctness and test-robustness came back **clean**; 3 low-severity findings survived and 2 were addressed here:
+- **Doc role-name fix** (`docs/mcp-server.md`): the "Recommended Role Mapping" table named non-existent roles `mcp-user`/`mcp-admin` and cited `@RolesAllowed`; the code actually enforces `eddi-viewer`/`eddi-editor`/`eddi-admin` (via `requireRole`) and `eddi-approver`/owner (via `HitlAccessGuard`). Rewrote the section with the real role strings and mechanism; this became load-bearing now that 10 role-guarded memory/GDPR tools are reachable.
+- **Collision-guard test** (`McpToolFilterTest.test_noLangchain4jBuiltinToolIsWhitelisted`): the "no name collision with langchain4j built-ins" property was a one-time manual check. Added the **inverse** build-time guard — auto-discovers every `dev.langchain4j.agent.tool.Tool` under `modules.llm.tools` and fails if any effective name is whitelisted (would leak an internal agent tool to MCP). Also hardened both discovery helpers to load classes **without static init** (`Class.forName(name, false, …)`).
+- **Not fixed (decision deferred):** the memory/GDPR mutation tools lack an independent MCP mutation kill-switch like HITL's `eddi.mcp.hitl.mutations.enabled` — flagged low, consistent with the pre-existing posture of other whitelisted destructive tools (`delete_agent`, etc.); left for the maintainer to decide whether to add symmetric kill-switches across the MCP mutation surface.
+
+**Method:** verified the whole diagnosis against source (annotation imports, `ToolInfo`/langchain4j `@Tool` APIs via `javap`, collision analysis) before changing anything; both regression guards were proven to fail on an injected regression, then restored. `./mvnw -o test -Dtest=McpToolFilterTest` → 90 green; `./mvnw -o validate` clean. **Nothing pushed** — that stays the maintainer's call.
+
+---
+
+## 🔧 Dependency bumps — Quarkus 3.37.1, quarkus-mcp-server 1.13.1 (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Patch bumps in `pom.xml`: `quarkus.platform.version` `3.37.0` → `3.37.1` and `quarkus-mcp-server.version` `1.13.0` → `1.13.1` (used by `io.quarkiverse.mcp:quarkus-mcp-server-http`). Both are single-property changes; the version is defined only in `pom.xml`, so no other current-state reference needed updating (historical changelog/release-note mentions left as-is). Verified locally with `./mvnw -B compile` — BUILD SUCCESS against the new BOM (`quarkus:3.37.1:generate-code` ran) and `quarkus-mcp-server-http:1.13.1` resolved into the local repo; full test suite runs in CI.
+
+---
+
+## 📝 AI-agent docs audit — AGENTS.md overhaul + linked-doc consistency fixes (2026-07-06)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Audited `AGENTS.md` (the instruction file AI coding assistants load; `CLAUDE.md` just delegates to it) against every authoritative source it relies on, then rewrote it for correctness and frictionless cold-checkout onboarding. Verification ran as five parallel research agents cross-checking claims against `pom.xml`, `ci.yml`, `Dockerfile`, `README.md`, `docs/project-philosophy.md`, `docs/architecture.md`, `docs/hitl.md`, and the Agent Father config, plus an independent "fresh contributor" friction review.
+
+**AGENTS.md — factual fixes:** Quarkus `3.34.1` de-pinned (versions now reference `pom.xml` as the single source of truth, per the file's own rule 7); MCP `33 tools` → `60+`; `CostTracker` → `ToolCostTracker` (real class name); `SafeMathParser` clarified as a static inner class of `CalculatorTool`; HITL tool-source count `8` → `7` (verified against `ToolApprovalPatterns.KNOWN_SOURCES`); §5.6 corrected (Agent Father uses `scope: "conversation"`, not `secret`); HITL moved Upcoming → Completed with residual work (Manager approvals UI, `inGroupTurns: INBOX`) kept in Upcoming; Multi-Channel narrowed to Teams (Slack ships via HITL); five broken `docs/planning/` → `planning/` links.
+
+**AGENTS.md — onboarding & policy:** added a table of contents, a Build & Test Commands section (Windows `.\mvnw.cmd` note, sandbox/IT caveat, `mise.toml` toolchain, prerequisites → README, pre-push hook activation), an external-contributor fork-model pointer, and a pillar cross-reference. Codified two team policies: **no AI co-authorship trailers or tool-advertising footers on commits/PRs** (§2 rule 5) and **ask before pushing** (§2 rule 4).
+
+**Linked-doc consistency fixes:** `docs/hitl.md` `eight` → `seven` tool sources; `docs/architecture.md` retired stale v5 `package` terminology across the Agent Composition section (`packagestore` → `workflowstore`, `.package.json` → `.workflow.json`, `packageExtensions`/`WorkflowExtension` → `workflowSteps`/`WorkflowStep`, `configs.packages.model` → `configs.workflows.model`, `"packages"` → `"workflows"`) and fixed the LLM URI `llmstore/llmconfigs` → `llmstore/llms` — all verified against `WorkflowConfiguration.java` and the Agent Father config; `CONTRIBUTING.md` reconciled "squash fixup commits" with the never-rewrite-pushed-history rule.
+
+**Decisions:** kept all content inline in AGENTS.md (no extraction to new files) per maintainer preference and because the architecture audit confirmed AGENTS.md's prescriptive content is high-value and, on workflow-vs-package naming, *more* current than `architecture.md` was; prefer referencing canonical sources over restating drift-prone numbers/versions; committed to `feat/hitl-framework` rather than a new branch off `origin/main` because `docs/hitl.md` exists only on this branch.
+
+**Method:** six delegated research/critique agents, each finding verified against source before acceptance. **Nothing pushed** — that stays the maintainer's call.
+
+---
+
+## 🧭 HITL — whole-branch merge review (round 2) + all 22 findings fixed + fix-batch review (2026-07-05)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+The **entire** branch (111 commits, 242 files, base `6f5f5dd68` → `a5df6afd2`) — including the ~90 commits of MCP-HITL pre-work the earlier 15-commit review never covered, plus the composition of the five follow-up fixes below — was put through a **second whole-branch adversarial review** (11 dimension reviewers → per-finding skeptic verification → gap round). It surfaced **25 confirmed defects (3 high, 6 medium, 13 low after de-dup)** that the narrower per-task and 15-commit reviews had missed because they are cross-cutting. The two most safety-critical dimensions (**durability/at-most-once**, **backward-compat**) again came back clean. Verdict: **not merge-ready until the 3 highs were fixed**; the user chose to **fix all 22**. All are now fixed across **10 commits** (`b9a6c1263..499095fa4`), each build+test-gated:
+
+**Blockers (high):**
+- **`b9a6c1263` — `EXECUTION_INTERRUPTED` no longer bricks input (H1).** The queued-say guard skipped `EXECUTION_INTERRUPTED`, but nothing returns that state to READY except a running turn — so an ordinary 60s `agentTimeout` watchdog expiry or a `HitlCrashRecoveryObserver` "unlock say()" recovery permanently locked the conversation's input (a non-HITL-scoped regression). It is a *recoverable* marker, not terminal: dropped from the guard so a fresh say re-runs and self-heals. Same commit fixes **M1** (pause-commit CAS now from the actual pre-turn state, not hard-coded READY, so an ERROR/interrupted-retry pause commits), **M2** (post-commit `isCancelled()` re-check converts a cancel-raced pause to `EXECUTION_INTERRUPTED` instead of stranding it with an armed timer), and two lows (undo/redo now CAS from the loaded state; the 2-min re-arm grace clamps only past-due deadlines, honoring sub-2min `approvalTimeout`).
+- **`056a02e13` — tool-approval gate honored on the `CONVERSATION_START` init turn (H2).** The agent-level `toolApprovals` carrier was populated only on say/resume, never at conversation start, so a gated tool invoked by a greeting-turn LLM task executed **without approval** (fail-open). The `Agent` now carries the config (like `memoryPolicy`) and sets it on memory before `init()`; also covers scheduled and group-member conversations.
+- **`6e4474552` — PostgreSQL journal store + working TTL + GDPR erasure (H3, M4, M5, M6).** `IHitlToolJournalStore` had no Postgres impl, so on `eddi.datastore.type=postgres` every tool-approval resume/approval-status read dialed a nonexistent Mongo — tool-level HITL was unusable on a first-class backend. Added `PostgresHitlToolJournalStore` (`INSERT … ON CONFLICT DO NOTHING` preserves at-most-once) + a `DataStoreProducers` selector matching the 16 sibling stores. **M4:** the Mongo TTL was inert (`executedAt` stored as int64, which the TTL monitor ignores) — now `claimedAt`/`executedAt` are BSON Dates, the TTL is anchored on `claimedAt` (so orphaned EXECUTING claims also expire), with `IndexOptionsConflict` drop+recreate. **M5:** GDPR erasure now cascades to the journal (before conversation deletion, so ids resolve). **M6:** the vacuous unique-index test and tautological `differentPauseEpoch` test are now genuine assertions.
+
+**Medium/low (other commits):** `dcfe2c2f7` (M3 — the raw conversation-read REST endpoint no longer leaks `argumentsRaw`+transcript; names-only projection reused from fix #4), `e7da12f8f` (gate lows: null-tool-name NPE, resume kill-switch threading, null-id callId normalization at AiMessage reception, cascade/watchdog abandoned-thread guard), `a7d0df601` (RULE-pause `hitl:status` output marker), `c6745b6ae` (MCP `approve_group_phase` returns BAD_REQUEST not INTERNAL for non-string values), `d76b84869` (group cancel-signal remove-window + sub-2min timeout parity), `50c97387f` (doc: `outcome_unknown` is WARN-logged not audited; errorCode set += CONFLICT/INTERNAL), `499095fa4` (LlmTask→orchestrator transcript-cap threading test).
+
+**Fix-batch critical review.** The 10 fix commits were then themselves put through an adversarial review (4 concern reviewers — state-machine, gate, journal, cross-cutting — each finding skeptic-verified). The **journal batch came back fully clean** (CDI producer pattern verified byte-identical to the 16 siblings; Postgres at-most-once and Mongo TTL-anchor correctness confirmed). The gate abandoned-thread concern was **refuted** (fail-safe holds). Two low, fix-introduced defects were **confirmed and fixed** in **`8ebf5b691`**: (a) `storeConversationMemorySnapshotIfState` could NPE on a null `expectedState` (M1/undo/redo now pass a live-looked-up state that is null if the conversation was deleted concurrently) — guarded to a clean CAS-miss in both stores; (b) the RULE-pause `hitl:status` marker was never cleared on resume, so a resolved turn kept advertising "awaiting approval" — now removed on resume via a new `removeConversationOutput` step API, with the key/value extracted to shared constants.
+
+**Method:** two deterministic multi-agent review workflows (11 + 4 reviewers, each finding adversarially verified before acceptance); the large Postgres-journal batch was implemented by a delegated agent whose diff was reviewed against spec before commit. Full clean compile green; every batch's targeted tests green. **Nothing pushed** — that stays the maintainer's call.
+
+---
+
+## 🔬 Tool-level HITL — adversarial final review + follow-up fixes (2026-07-04)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+After Tasks 5–17 landed (see the entry below), the whole tool-level HITL change (15 commits, `3e5da4345..dda7c644e`) was put through a **whole-branch adversarial review**: six independent dimension reviewers (correctness, concurrency, security, backward-compat, durability/at-most-once, spec-completeness), each finding then handed to an independent skeptic instructed to *refute* it, then a synthesis pass. Verdict: **merge-ready, no blockers** — the two most safety-critical dimensions, **durability/at-most-once** and **backward-compat**, came back clean (no double-execution of an approved tool across crash/re-approval; null-config / RULE-pause / legacy-snapshot paths byte-identical). Five fail-safe defects survived verification and are now all fixed (each via a TDD fix + independent review gate):
+
+- **`fix(hitl)` `6413db97a` — generic read surface no longer leaks raw tool args + transcript.** `SimpleConversationMemorySnapshot` (the generic conversation-read DTO behind e.g. MCP `read_conversation` and the REST simple log) carried the full `PendingToolCallBatch` including `argumentsRaw` and `chatTranscriptJson` with no `@JsonIgnore`, so any `eddi-viewer` could read unredacted tool arguments + the whole transcript of a paused conversation — broader than the deliberately approver-only `detail=full` gate. Fixed with a **names-only projection** at the Simple-snapshot boundary (fresh `PendingToolCall` objects carrying only `callId`/`toolName`/`source`/`gateReason`/`argsTruncated`); the persisted full `ConversationMemorySnapshot` is untouched, so the at-most-once resume path still round-trips. (Introduced by the Task-13 Simple-snapshot extension.)
+- **`fix(hitl)` `1d7ca72e7` — say-path pause commit guarded by a state-CAS.** The say-path fresh-pause persistence was an unconditional full-document store guarded only by an up-front `isCancelled()` check; a concurrent `end`/`cancel` landing in the TOCTOU window could be lost, **resurrecting an ENDED/cancelled conversation** as `AWAITING_HUMAN` with an armed timeout. Now uses `storeConversationMemorySnapshotIfState` (compare-and-store from the running `READY` state); a miss discards the pause (no store, no counter, no schedule), mirroring the resume path's existing guard. Covers both RULE and TOOL_CALL pauses.
+- **`fix(hitl)` `30e495b88` — tool-pause policy resolved from the task-scoped effective config.** Post-pause resolution of timeout policy, no-progress policy, auto-approval cap, and pending message read only the *agent-level* `hitlConfig.toolApprovals`, ignoring the per-task `LlmConfiguration.Task.toolApprovals` override that the gate itself honors — so a task-scoped finite `timeoutPolicy=AUTO_REJECT`/`approvalTimeout` silently degraded to `WAIT_INDEFINITELY` (waited forever instead of auto-rejecting). The gate's resolved effective config is now stamped onto the `PendingToolCallBatch` and read back by all four resolvers (agent-level fallback for legacy/RULE/null batches); Task 10's inherit-from-outer + `AUTO_APPROVE`-demotion semantics are unchanged.
+- **`fix(hitl)` `69143a799` — resumed tool-pause turn renders only the final answer.** On a same-index TOOL_CALL resume the final answer was appended to the same step's `"output"` list that still held the "awaiting approval" placeholder, so the turn rendered both stacked. Resume now removes exactly the deterministic placeholder (identified via `resolvePendingMessage`, stable across pause→resume through the persisted batch) plus its mirror `Data<>`; the placeholder still shows while `AWAITING_HUMAN`, earlier multi-task output is preserved, and the RULE path is unchanged.
+- **`fix(hitl)` `9d07c525d` — `eddi.hitl.tool.transcript-max-bytes` wired.** The plan-mandated transcript-cap override property was never wired (hard-coded 2 MB). Now injected in `LlmTask` (the CDI seam, like `eddi.hitl.tool.enabled`) and threaded through the standard + cascade branches to `buildPendingBatch`; an absent property reproduces the unchanged 2 MB default.
+
+**Method:** the review ran as a deterministic multi-agent workflow (12 agents); every finding was adversarially verified against HEAD before acceptance, and every fix was independently re-reviewed before landing. The full local suite is ~10,500 tests green with no logic regression (only the pre-existing Docker/Testcontainers/loopback-socket classes fail in the sandbox — they run in CI).
+
+**Tracked follow-ups (fail-safe, non-blocking):** (a) `resumeToolLoop`'s rare re-pause-during-continuation still caps the transcript at the 2 MB default rather than the configured value (commented at the call site); (b) no validation of a pathological `0`/negative `transcript-max-bytes` (fail-safe always-omit). The Testcontainers ITs and the BSON/JSONB round-trip of the new `effectiveToolApprovals` batch field are CI-verified only.
+
+---
+
+## 🛠️ Tool-level HITL — complete feature + documentation (Tasks 5–17 of 17) (2026-07-04)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Completes and documents **tool-level HITL approval gating**: the conversation pauses for human approval when the LLM invokes a *gated tool* (any of the 8 sources — built-in `@Tool`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`), gated *before* the tool executes (fail-safe), configured via allow/exempt glob patterns, coexisting with the behavior-rule `PAUSE_CONVERSATION` turn gate. Builds on the Tasks 1–4 foundation (see the earlier 2026-07-03 entry — do not duplicate). Full plan: [`planning/hitl-tool-approval-plan.md`](../planning/hitl-tool-approval-plan.md).
+
+**Task 17 — documentation (this entry).** No production code changed. Docs/markdown only:
+- **`docs/hitl.md`** — removed the now-false "Tool-level HITL … is deferred" from *Known Limitations* (it contradicted the rest of the same doc) and replaced it with an *implemented* note; scoped the Slack data-minimization sentence to **RULE** pauses and documented the **TOOL_CALL** exception (the approval channel renders redacted, 300-char-truncated tool arguments so a reviewer can see what they are approving; the in-thread notice stays pause-reason-only); added a **Tool-Level Approval Gating** section (config schema + defaults, pattern language, precedence, effective-timeout-policy rule, per-call verdict/amendment REST bodies with a JSON example, `pauseDetails` reference, the write-ahead journal + outcome-unknown contract, Slack all-or-nothing buttons, group-member REJECT, frozen-transcript semantics, and the `eddi.hitl.tool.enabled` rolling-upgrade note). Reconciled with the existing tool-level content earlier tasks had already added (the `pauseDetails` shapes, MCP Surface table, `eddi.mcp.hitl.mutations.enabled` kill-switch) — no duplicate sections.
+- **`AGENTS.md` §5.3** — extended the HITL note: behavior rules gate *turns* (`PAUSE_CONVERSATION`); `hitlConfig.toolApprovals` gates *individual LLM tool calls* (`hitlPauseType: "TOOL_CALL"`); both share the same pause/timeout/audit/Slack machinery; link to `docs/hitl.md`.
+- **`planning/hitl-framework-plan.md`** — flipped the decision-table line "Tool-level HITL: Deferred" to "Implemented — see `planning/hitl-tool-approval-plan.md`".
+
+**The 5 product decisions (from the plan's decision record), now locked and documented:**
+1. **`AUTO_APPROVE` never applies to tool pauses implicitly** — explicit opt-in only. Agent-level `AUTO_APPROVE` covers RULE pauses; for a tool pause it is demoted to `WAIT_INDEFINITELY` unless `toolApprovals.timeoutPolicy` sets `AUTO_APPROVE` explicitly (a silent timeout must never auto-execute a gated tool).
+2. **Crash inside an approved tool yields an honest `EXECUTION_OUTCOME_UNKNOWN`** — never silent re-execution. The write-ahead journal (`IHitlToolJournalStore`, keyed by `conversationId + pauseEpoch + callId`) replays `EXECUTED` results and reports `EXECUTING` (crashed mid-tool) as genuinely unknown, audited and surfaced in `pauseDetails.outcomeUnknown`.
+3. **Group-member tool pauses auto-reject gracefully** (`system:group`) — a group has no reviewer, so the member's gated call is REJECTED through the normal resume path and its LLM produces a coherent tool-less contribution (fallback: SKIP + auto-cancel). `inGroupTurns: "INBOX"` is reserved (400 in v1).
+4. **Ungated calls in a mixed batch execute before the human sees the pause** — the approver is then shown which ones already ran via `pauseDetails.executedUngatedCalls`.
+5. **A multi-day pause resumes against pause-time prompt state** — the exact in-flight langchain4j transcript is frozen at pause time and replayed on resume (same task index), never rebuilt from current memory.
+
+**Cross-checked every documented fact against source** (`ToolApprovalsConfig`, `ToolApprovalPatterns`, `ToolApprovalGate`, `HitlDecision`/`ToolCallDecision`, `HitlConfigValidation`, `ConversationService.applyEffectiveToolTimeoutPolicy` + `validateToolDecisions`, `RestAgentEngine.buildToolCallPauseDetails`, `AgentOrchestrator.resumeToolLoop`, `IHitlToolJournalStore`, `SlackHitlSupport`, `GroupConversationService.tryResolveMemberToolPause`, and the `eddi.hitl.tool.enabled` flag in `LlmTask`/`application.properties`) — field names, defaults (`maxPausesPerTurn` 3/1..10, `maxAutoApprovalsPerTurn` 2/0..10), ranges, note caps (top-level 4096, per-call 1024), the 300-char Slack display truncation, and the precedence/timeout rules all match the implementation.
+
+**Next:** the tool-level HITL feature (Tasks 1–17) is complete on `feat/hitl-framework`. Remaining HITL roadmap items: EDDI-Manager approvals UI (separate repo/PR) and the reserved `inGroupTurns: "INBOX"` mode.
+
+---
+
+## 🔐 MCP HITL surface — resolve approval gates over MCP (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Exposes the HITL approval operations over the MCP server so an external MCP client (agent / orchestrator / ops console) can list, read, resume/approve, and cancel paused conversations and group discussions — at full parity with the REST endpoints, for both the regular (1:1) and group surfaces. Closes the loop `chat_managed`/`talk_to_agent` already open: they return `PAUSED_FOR_APPROVAL` but, until now, the client had to drop to REST to resolve it. Full plan: [`planning/mcp-hitl-surface-plan.md`](../planning/mcp-hitl-surface-plan.md).
+
+**Design — human authority preserved:** MCP is a transport, not a new authority; no tool lets an agent approve its own gate. Authorization mirrors REST exactly via a new shared `HitlAccessGuard` (extracted from `RestAgentEngine`/`RestGroupConversation`, so *who may decide* lives in exactly one place): per-conversation owner / `eddi-admin` / `eddi-approver`, owner-scoped listings, fail-closed on a missing descriptor. Decisions are attributed server-side as `mcp:<principal>` (mirroring the existing `system:timeout` convention). A global kill-switch `eddi.mcp.hitl.mutations.enabled` (default `true`) can make MCP a read-only HITL surface without touching REST.
+
+**Method:** brainstorm → adversarial design critique (four subagent workflows: verify-assumptions + security + architecture + completeness; 28/28 code assumptions verified, ~26 findings triaged — folded in owner-scoped **group** listings, structured error codes, the discoverability hint, and metrics; **rejected** agent-level config, dev-mode fail-closed mutations, and a by-intent resume variant, each with reasons) → TDD execution, one commit per task. All new tests are plain Mockito (locally runnable, no Quarkus boot).
+
+**Landed (each task = its own commit, all tests green locally):**
+- `McpToolUtils.errorJson(msg, code, details)` — structured error JSON (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`), manual construction so it never throws on the error path.
+- `HitlAccessGuard` — shared HITL ownership check + owner-scoped pending-approval listing (regular + group). `RestAgentEngine`/`RestGroupConversation` refactored to delegate the `hitlOperation=true` path (non-HITL paths untouched); existing REST HITL tests pass unchanged via a real guard wired with the same mocks.
+- `McpHitlTools` — 9 `@Tool`s: `list_pending_approvals`, `get_approval_status`, `resume_conversation`, `cancel_conversation`, `list_group_pending_approvals`, `list_all_group_pending_approvals`, `get_group_approval_status`, `approve_group_phase` (optional `taskApprovals` JSON for TASK granularity), `cancel_group_discussion`. `@Blocking`, JSON returns, `eddi.mcp.hitl.*` metrics (verdict-tagged).
+- `chat_managed`/`talk_to_agent` `PAUSED_FOR_APPROVAL` payload now names `"suggestNextTool": "resume_conversation"` so an LLM client can chain the approval over MCP.
+
+**Pause-type-agnostic:** because the tool-level HITL layer (see below) reuses the same `AWAITING_HUMAN` state + `/resume` + single-verdict `HitlDecision`, the regular tools resolve **both** `RULE` and `TOOL_CALL` pauses unchanged; `get_approval_status` reports `pauseType` and exposes the pending tool-call batch via `detail=full`. No SSE/streaming variant over MCP, no autonomous approver, no new realm role.
+
+**Docs:** `docs/hitl.md` (new *MCP Surface* section), `docs/mcp-server.md` (new *HITL Tools* category).
+
+---
+
+## 🛠️ Tool-level HITL — foundational layer (Tasks 1–4 of 17) (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Implementing **tool-level HITL approval gating**: pausing a conversation for human approval when the LLM invokes a *gated tool* (any source — built-in `@Tool`, MCP, A2A, httpcall, dynamic-agent, memory, recall), configured via allow/disallow pattern lists, co-existing with the behavior-rule `PAUSE_CONVERSATION` mechanism. Full plan: [`planning/hitl-tool-approval-plan.md`](../planning/hitl-tool-approval-plan.md). This closes the deferred "Tool-level HITL" limitation (`docs/hitl.md` Known Limitations).
+
+**Architecture — Durable Re-entry (ToolGate-DR):** a batch gate in `AgentOrchestrator.executeWithTools()` intercepts gated calls *before execution* (fail-safe), serializes the exact in-flight langchain4j message list, persists it + pending-call metadata on `ConversationMemorySnapshot`, and aborts the LLM loop with an unchecked `ToolApprovalRequiredException` that `LifecycleManager` converts into the existing `ConversationPauseException` (new `pauseOrigin=TOOL_CALL`). Resume re-enters the **same** task index, replays the transcript, applies verdicts (write-ahead journal → at-most-once), and continues the loop. Chosen over a turn-completing "pending result" design after a 3-way design panel + 2 adversarial judges: durable replay uniquely preserves *exactly the state the human is approving against* (a multi-iteration turn that rebuilds from memory loses intermediate tool results).
+
+**Method:** two adversarial subagent workflows (design-judge, then fact-verification against the codebase); 20 verification findings (1 blocker, 5 major) folded back into the plan before execution.
+
+**Landed (each task = its own commit, TDD, all tests green locally):**
+- **Task 1 — the architectural gate.** `ChatTranscriptCodec` wraps langchain4j 1.17.0 `ChatMessageSerializer`/`Deserializer` with a size cap + typed failure. Its test **empirically proves** the round-trip the whole design depends on (`AiMessage`+`ToolExecutionRequest`+`ToolExecutionResultMessage`+multimodal content survive serialize→deserialize). 6 tests. *If this had failed, execution was gated to stop-and-escalate — it passed.*
+- **Task 2 — pattern engine + gate.** `ToolApprovalPatterns` (ReDoS-safe `*`-only glob, source-prefix validation with typo suggestions), `ToolApprovalGate` (batch classify; precedence exempt-beats-require; `source:name` then bare-name matching = fail-safe), `ToolApprovalsConfig` POJO. 9 tests.
+- **Task 3 — config homes + validation.** `toolApprovals` on `AgentConfiguration.HitlConfig` (agent-level default) and `LlmConfiguration.Task` (per-task full-replace override). `HitlConfigValidation.validateToolApprovals` (actionable 400s: bad pattern w/ index, both-lists conflict, duplicates, exempt-without-require, range checks, reserved `INBOX`, timeout/reason length); wired into `LlmStore` create/update; agent-level `AUTO_APPROVE`-inheritance WARN. 15 tests + all existing validation suites still green.
+- **Task 4 — memory model.** `PendingToolCallBatch` (+ `PendingToolCall`, size caps); `ConversationPauseException.PauseOrigin` (RULE default / TOOL_CALL, backward-compatible 3-arg ctor); transient `hitlPauseType`/`hitlPendingToolCalls`/`agentToolApprovalsConfig`/`hitlResumeDecision` on `ConversationMemory`+`IConversationMemory`; persisted mirrors on `ConversationMemorySnapshot`; both-directions copy in `ConversationMemoryUtilities`. Round-trips through Jackson; legacy documents (null pauseType) treated as RULE. 4 tests + all existing HITL/resume/lifecycle suites green.
+
+**Design decisions locked for the remaining tasks (flag if wrong):** (1) `AUTO_APPROVE` never applies to tool pauses implicitly — explicit per-gate opt-in only; (2) crash-inside-an-approved-tool yields honest `EXECUTION_OUTCOME_UNKNOWN`, never silent re-execution; (3) group-member tool pauses auto-reject gracefully (`system:group`); (4) ungated calls in a mixed batch execute before the human sees the pause (approver is shown which ran); (5) a multi-day pause resumes against pause-time prompt state.
+
+**Adversarial review of the foundation (5 dimensions → per-finding verification):** 14 raw findings → 9 refuted, 5 survived, all minor. Fixes applied: (a) reject leading/trailing-colon patterns (`:foo`, `mcp:`) at save time — previously accepted but inert; (b) terminal cleanup (`ConversationMemoryStore` + `PostgresConversationMemoryStore` `clearHitlBookmark`) now also drops `hitlPauseType`/`hitlPendingToolCalls` so no stale tool-pause state lingers on ended/cancelled docs; (c) `ConversationMemoryUtilitiesHitlTest` extended to assert the two new fields round-trip both directions; (d) `PendingToolCallBatchSnapshotTest` doc clarified as a *structural* proxy (production uses BSON-backed `JacksonCodec`) with the real BSON round-trip routed to a CI Testcontainers IT (added to Task 14). No blockers, no majors.
+
+**Next:** Task 5 (the gate hook + signal plumbing + pause commit in `AgentOrchestrator`/`LifecycleManager`/`Conversation` — the heaviest single task), then 6 (journal store), 7 (per-call verdict REST model), 8 (same-index re-entry), 9 (`resumeToolLoop`), 10 (timeout/no-progress), 11–13 (approver surfaces, Slack, delegated/group parity), 14 (crash recovery), 15 (lints), 16 (ITs), 17 (docs). Tasks 8→9 share a `resumeToolLoop` stub to keep each commit building.
+
+---
+
+## 🐰 CodeRabbit review triage — 21 fixes, adversarially verified (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+CodeRabbit posted 23 actionable findings (16 inline + 7 outside-diff) plus observability nitpicks. Each was **adversarially re-verified against HEAD** (two parallel review passes) before any change — several overlapped fixes already made, some were stale/unreachable, and one CRITICAL-tagged item turned out already-mitigated-or-worse than described. Fixed the 21 that survived verification; skipped 2 as INVALID; deferred 1 as a scoped follow-up. **No PR threads were replied to or resolved** (standing instruction).
+
+**Scheduler / crash-recovery:**
+- **(HIGH) Lease-expired `CLAIMED` schedules were never reclaimable.** `findDueSchedules` returns lease-expired `CLAIMED` rows, but both `tryClaim` impls only matched `PENDING`/`FAILED` — so a crashed/wedged pod's claim was fetched every poll and never re-fired. `tryClaim` now takes a `leaseExpiry` and steals a `CLAIMED` row with `claimedAt <= leaseExpiry` (Mongo + Postgres, mirroring `findDueSchedules`).
+- **(MEDIUM) `dispatchClaimed` per-future timeout could stack to N×leaseTimeout.** Now bounded by one shared batch deadline.
+- **(MEDIUM) Retention sweep ignored group conversations.** `HitlCrashRecoveryObserver.sweepExpiredPendingApprovals` now also cancels expired group `AWAITING_APPROVAL` pauses (new `IGroupConversationService` dependency).
+- **(MEDIUM) Crash-recovery re-arm could keep a stale timeout across pause→resume→pause.** The re-arm re-check now compares the pause bookmark (`pausedAt`), not just the awaiting state, at all three sites.
+- **(HIGH) `PostgresScheduleStore` metadata (de)serialization failed open** (returned `null`, silently stripping the HITL contract). Now fails closed with `ResourceStoreException`.
+- **(HIGH) `RestScheduleStore.requireAdminForHitl` failed open** on any read error. Now only `ResourceNotFoundException` falls through; other failures return 500 and stop the mutation.
+- **(doc) "exactly-once" was an overclaim** — the design is at-least-once with idempotent HITL fire targets (the lease-steal above makes this explicit). Corrected `SchedulePollerService`/`IScheduleStore` javadoc + `docs/hitl.md`.
+
+**Engine / conversation:**
+- **(LOW) `endConversation` only disarmed the timeout when `AWAITING_HUMAN`** — a resume-in-flight `IN_PROGRESS` window could leave a stale timer. Now disarms unconditionally (idempotent).
+- **(nitpick) `ConversationMemoryStore.compareAndSetState`** now uses `getMatchedCount()` (consistency with `storeConversationMemorySnapshotIfState`; avoids a no-op-CAS false negative).
+
+**Group surface:**
+- **(MEDIUM) Synchronous member-pause exception stranded the member approval.** `executeAgentTurn` now catches `ConversationAwaitingApprovalException` and routes to `handleMemberPause` (cancel + SKIPPED) instead of `handleAgentFailure`.
+- **(MEDIUM) Cancel window between the resume CAS and control-token registration.** The `DiscussionControlToken` is now registered immediately after the CAS, so a concurrent cancel takes the signal path and stops before any phase runs.
+- **(LOW) `RestGroupConversation` reflected raw ids** in `requireGroupMembership`/`validateGroupConversationOwnership` `NotFoundException` messages, and **(MEDIUM)** the streaming approve endpoint echoed raw exception text over SSE. Both now curated (generic message + sanitized server-side log), matching the non-streaming hardening.
+- **(MEDIUM) `GroupConversationStore.findByState` aborted the whole batch** on one record's `ResourceStoreException`. Now logged-and-skipped per record (mirrors `listByGroupId`).
+
+**Slack / MCP tools:**
+- **(HIGH) Slack approval-notification idempotency was too coarse** (keyed by `conversationId`, marked before the post). Now keyed per-pause (`hitlPausedAt`) and cleared on failed delivery, so retries deliver and a second distinct pause is not suppressed.
+- **(HIGH) Slack HITL `resolveOwningIntegration` fell back to a by-approval-channel lookup** for unbindable (bare) action values, reintroducing shared-channel cross-integration ambiguity. Removed — bare values now resolve to empty and are rejected (403).
+- **(HIGH) MCP `talk_to_agent`/`chat_with_agent` reported a deliberate `AWAITING_HUMAN` pause as BUSY** (and `chat_with_agent` lost a freshly-created conversation id on skip). Both now return a structured `PAUSED_FOR_APPROVAL` and preserve the created id.
+- **(MEDIUM) `CreateSubAgentTool`** treated a skipped initial turn as a real reply. Now mirrors `ConverseWithAgentTool`'s `onSkipped` handling.
+- **(LOW) `RestSlackWebhook`** malformed percent-encoding threw → 500 before signature check. Now caught → 400.
+- **(HIGH) `SecretRedactionFilter`** Bearer rule only matched dotted JWTs; opaque tokens leaked. Now redacts opaque tokens too (possessive, ReDoS-safe).
+
+**Skipped/deferred (with reason):**
+- **INVALID:** F9 (fractional-second read compat) — moot for unreleased/disposable schedule rows and would reintroduce the seconds-heuristic the epoch-millis fix removed; F14 (`ConverseWithAgentTool` ERROR-skip) — `onSkipped` provably never receives `ERROR`.
+- **DEFERRED (follow-up task):** owner-scoped group pending-approvals query (owner filter applied after the limit → possible starvation). The safe fix needs a DB-agnostic exact-match for `userId` (the query layer treats string filters as regex on both backends; `Pattern.quote` is Postgres-incompatible), so it warrants its own focused change rather than a rushed regex that could over-match.
+- Observability nitpicks (Micrometer counters, `SafeHttpClient` for the fixed Slack host, managed executor for one-shot startup recovery, `CREATE INDEX CONCURRENTLY`, test-style suggestions) — intentionally out of scope for this correctness/security pass.
+
+Every fix has a regression test; all touched unit suites are green locally (Testcontainers ITs run in CI).
+
+---
+
+## 🔬 Critical adversarial re-review — 7 findings fixed (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+A final 6-reviewer / adversarial-verify pass over the HITL branch surfaced seven confirmed defects (1 CRITICAL, 1 HIGH, 4 MEDIUM, 1 LOW). All fixed with regression tests:
+
+- **CRITICAL — `MongoScheduleStore` truncated every `Instant` to epoch-SECONDS (1000× too small).** `toDocument()` round-trips through the shared Jackson mapper, which (with `write-dates-as-timestamps=true` + `JavaTimeModule`, default `WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS`) serializes an `Instant` as fractional **seconds** (`1719964800.123`). Deserialized into a `Document` that's a `Double`; `convertInstantField`'s `num.longValue()` then stored epoch **seconds** (~1.7e9), not millis (~1.7e12). Since `findDueSchedules` compares `nextFire <= nowMs` (millis), **every future-armed schedule looked immediately due** — HITL approval timeouts (and Dream/maintenance) fired on the very next poll instead of after their configured duration, and it diverged from `PostgresScheduleStore` (which stores millis). This is why the earlier ISO-string "defence in depth" (commit `dc117cddc`) never actually fixed it: the numeric `Number` branch's millis assumption was the real bug, and no test asserted a *future* `nextFire`. Fix: `MongoScheduleStore` now writes every date field as an epoch-millis `Long` straight from the getters (`writeScheduleInstants`/`writeFireLogInstants`) and reads them back via `readEpochMillis` (`Instant.ofEpochMilli`), stripping them before the Jackson build — **both directions are now independent of the mapper's date format** (the seconds-based `convertInstantField` and its ISO branch are gone), mirroring `PostgresScheduleStore.setNullableEpoch`/`instantFromEpoch`. New `MongoScheduleStoreInstantRoundTripTest` exercises the REAL serialization (the sibling test mocks it, which is why the bug hid) and asserts a future `nextFire` is stored as millis and round-trips; the Mongo/Postgres store ITs gain an epoch-millis assertion; branch-coverage tests rewritten for the new helpers.
+- **HIGH — `SchedulePollerService.dispatchClaimed` could still pin the poll thread forever.** The per-fire `future.get(leaseTimeout)` bound was undermined by the try-with-resources `ExecutorService.close()`, which awaits termination indefinitely; `future.cancel(true)` only unblocks tasks that honor interruption, but the real fire path can stall on a NON-interruptible synchronous DB socket read. Replaced try-with-resources with an explicit `finally { executor.shutdownNow(); }` (no `awaitTermination`) so a wedged fire leaks a single cheap virtual thread instead of freezing all scheduling. New regression test uses a fire stub that swallows interruption and asserts the poll cycle still returns.
+- **MEDIUM — resume `onComplete` could clobber a terminal state (lost update / resurrection).** The resume persist was an unconditional full-document store guarded only by a single up-front `isCancelled()` check; a concurrent `end`/`cancel` landing between the check and the store overwrote `ENDED`/`EXECUTION_INTERRUPTED` with `READY`, resurrecting a terminated conversation that then accepted new `say()` input. Added `IConversationMemoryStore.storeConversationMemorySnapshotIfState(snapshot, expectedState)` — an atomic compare-and-store (Mongo: `replaceOne` with a state predicate; Postgres: `UPDATE … WHERE conversation_state = ?`) — and the resume `onComplete` now persists only while it still owns `IN_PROGRESS`, discarding its outcome (no schedule/notify) when a terminal writer won.
+- **MEDIUM — a transient snapshot-load failure during resume permanently dropped the finite-timeout schedule.** `resumeConversation` deleted the HITL timeout schedule *before* loading the snapshot; a transient load failure then restored `AWAITING_HUMAN` without re-arming, so an `AUTO_REJECT`/`AUTO_APPROVE`/`ABORT` policy silently degraded to wait-forever until the next restart. The delete now runs only *after* the snapshot loads and the agent is confirmed deployed — a pre-execution failure leaves the original timer armed. (The `AWAITING_HUMAN→IN_PROGRESS` CAS already prevents the timeout firing concurrently, so nothing races on the deferred window.)
+- **MEDIUM — Slack group HITL pause leaked a parked virtual thread per paused discussion.** `SlackGroupDiscussionListener.completionLatch` was counted down only in the terminal callbacks; `onHitlPause` (a pause is terminal for *this* listener — resume flows through a different instance) did not, so `SlackEventHandler.registerAgentThreadMappings` parked on `awaitCompletion(300s)` for every paused expanded-mode discussion and follow-up thread routing was unavailable for that window. `onHitlPause` now counts the latch down in a `finally`.
+- **MEDIUM — dead-letter endpoints bypassed the HITL admin guard.** `RestScheduleStore.dismissDeadLetter`/`retryDeadLetter` were the only schedule-by-id mutations lacking `requireAdminForHitl()`, so a non-admin editor could disarm an `ABORT`/`AUTO_REJECT` safety timeout (`dismissDeadLetter` on a one-shot → `markCompleted(id, null)` → disabled). Both now carry the guard; regression tests assert 403 for a non-admin on a HITL timeout schedule.
+- **LOW — group HITL REST error bodies reflected raw ids/exception text.** The CodeQL XSS/info-exposure hardening applied to `RestAgentEngine` was not mirrored on `RestGroupConversation`; `cancelDiscussion`/`approveGroupPhase`/`getGroupApprovalStatus` echoed `e.getMessage()` (which embeds the caller-supplied `gcId` for the gone/404 case). Now curated `text/plain` bodies with the detail logged server-side (id sanitized), same HTTP status codes.
+
+---
+
+## 🔍 Copilot PR review — 5 findings (2026-07-03, post-push)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+Automated PR review (`copilot-pull-request-reviewer`) flagged 5 issues in the already-pushed HITL work; all fixed:
+
+- **`SchedulePollerService.dispatchClaimed`**: each claimed fire's `Future#get()` had no timeout — one stalled downstream call (e.g. a hung LLM call inside a fired schedule) could block the `@Scheduled` poll loop forever, stopping this instance from claiming or firing *any* further schedule. Now bounded by `leaseTimeout` (the same window after which another instance may reclaim the schedule anyway) — a timeout cancels the future (best-effort interrupt) and logs, instead of hanging. New regression test asserts the poll cycle returns promptly under a stalled fire.
+- **`SchedulePollerService.claimSchedule`**: after a successful CAS claim, the in-memory `ScheduleConfiguration` still carried its pre-claim `fireId` (often `null`) — both `tryClaim()` implementations (Mongo, Postgres) persist a fresh `fireId` (`scheduleId + "_" + now`) but only return a `boolean`, so the caller never saw it. `ScheduleFireExecutor` uses this field for fire-log correlation and injects it into the agent context, so every claimed fire's correlation id was wrong. The poller now derives the identical value and sets it on the in-memory object after a successful claim. New regression test asserts the fired schedule carries a non-null, correctly-derived `fireId`.
+- **`ConversationPauseException`**: the exception message was built as `"Conversation paused: " + pauseReason`, producing the confusing `"Conversation paused: null"` in logs/clients when no `pauseReason` was configured (the common case, since `pauseReason` is optional). Now falls back to `"human approval required"` for the message only — `getPauseReason()` still returns the raw (possibly null) value for callers that need it.
+- **`GroupConversationStore.listByGroupId`**: called `SAFE_ID.matcher(groupId)` without a null guard — a `null` groupId (a defensive REST layer, or an internal caller) threw NPE instead of returning an honest empty list. Fixed; regression test added. (The sibling `findByState` already guarded this correctly.)
+- **`UserConversationStore`/`PostgresUserConversationStore`**: `readUserConversationByConversationId` (added by the Slack HITL continuation-push work) queried by `conversationId` with no supporting index — a full collection/table scan on every reverse lookup (which happens on every HITL resume that needs to notify a Slack thread). Added a dedicated index on both backends (Mongo: ascending index; Postgres: expression index on the JSONB field) and a regression test asserting the Mongo index is created on construction.
+
+---
+
+## 🛡️ CI gate fixes — CodeQL (XSS/ReDoS) + Postgres Instant serialization (2026-07-03, final gate)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+**CodeQL (high-severity) — both blockers fixed:**
+- `RestAgentEngine` HITL error bodies reflected the raw `conversationId` path param (`java/xss`) and echoed internal exception messages to the client — now `text/plain` with curated, non-reflecting messages; detail logged server-side (id sanitized). New-in-PR, HITL-introduced.
+- `SecretRedactionFilter` ReDoS (`java/polynomial-redos`, pre-existing on `main`): the redaction patterns used ambiguous/unbounded backtracking quantifiers, quadratic on adversarial inputs (long `${vault:` repetitions). Made the quantifiers **possessive** (`++`/`*+`/`{n,}+`) — behavior-preserving (every quantified class is followed by a literal outside the class, so no backtrack is ever needed for a correct match) and linear-time. `SecretRedactionFilterTest` 6/6 still green. Addressed here because it was the sole remaining CodeQL gate blocker.
+
+
+
+Final full-suite verification surfaced a latent Postgres-only defect: the JSONB-backed resource storage serializes snapshots through the shared Jackson mapper (`SerializationCustomizer.configureObjectMapper`), which did **not** explicitly register `JavaTimeModule` — it relied on Quarkus auto-registration. The HITL bookmark carries an `Instant` (`hitlPausedAt`); a **non-null** `Instant` (i.e. an actual pause) would fail serialization ("Java 8 date/time type not supported") on the Postgres backend, so HITL pause persistence was one module-registration-order change away from breaking on Postgres (Mongo was unaffected — its BSON codec handles `Instant`; null `Instant`s serialize fine, which is why it stayed latent). `SerializationCustomizer` now registers `JavaTimeModule` explicitly — the date **format is deliberately left at the default numeric timestamps** (an initial attempt to also switch to ISO-8601 strings was reverted: `MongoScheduleStore` normalizes date fields to epoch-millis for numeric range queries and expects numbers, so an ISO string silently broke `findDueSchedules`). As defence in depth, `MongoScheduleStore.convertInstantField` now also parses ISO-8601 strings → epoch-millis, so schedule storage is correct regardless of the mapper's date format. The Postgres store tests (and the MCP HITL test) now build their mapper via `configureObjectMapper` instead of a bare `new ObjectMapper()`, so they exercise the production serialization path — `PostgresConversationMemoryStoreTest` goes 20/22 → 22/22.
+
+---
+
+## 🛠️ HITL Round-2 Engine-Core Remediation (2026-07-03, WS-G)
+
+**Repo:** EDDI (`fix/hitl-r2-engine`, branched from `feat/hitl-framework`)
+**Scope:** Confirmed findings from a second adversarial review of the HITL remediation, engine-core only (no `integrations/slack/**`, no tool/mcp bridges).
+
+- **G1 (HIGH) — queued say resurrecting a terminated conversation:** `ConversationService.processConversationStep`'s queued-turn skip set only covered AWAITING_HUMAN/IN_PROGRESS. Added ENDED and EXECUTION_INTERRUPTED so a say queued behind a running turn that terminates (endConversation / cancel) before it runs is routed through `onSkipped` with the persisted terminal state instead of executing the pipeline and persisting READY over the terminal state.
+- **G2 (HIGH) — say-path onComplete ignoring cooperative-cancel (group member-pause stranded approval):** `runGuardedConversationStep`'s onComplete now checks `memory.isCancelled()` (parity with the resume path). A concurrent cancel/end (e.g. group `handleMemberPause → cancelConversation` that loses both state CAS races because the pause isn't persisted yet) makes the completing turn skip pause persistence/schedule/counter and CAS the running state to EXECUTION_INTERRUPTED — the approval is never stranded.
+- **G3 (HIGH) — approval gate bypass via schedule create/update:** `RestScheduleStore.createSchedule`/`updateSchedule` now reject any request BODY whose metadata is a `hitl_timeout` (via `HitlSchedules.isHitlTimeout`) for EVERYONE (even admin) with 400 — these schedules are minted internally only. Closes the forge/convert path that let an editor mint a timeout schedule the poller would fire to force-resume/abort a victim's approval unauthenticated.
+- **G4 (MEDIUM) — endConversation terminating a pause with no audit/actor:** added `endConversation(String, String endedBy)`; the AWAITING_HUMAN branch now writes the `hitl.approval` cancellation audit with the actor. Callers attribute: RestAgentEngine → principal, RestConversationStore delete/bulk-end paths → `system:admin-end`, 1-arg overload → `system:end`. AgentDeploymentManagement already SKIPs paused conversations (verified — no change).
+- **G5 (MEDIUM) — cancel/end never fired HitlResumeCompletedEvent:** cancelConversation's pauseCancelled branch and endConversation's AWAITING_HUMAN branch now fire `HitlResumeCompletedEvent` with `verdict=null`, the cancelling/ending actor, and the terminal snapshot (new `fireHitlResumeCompletedTerminal` helper, async + fully isolated). The Slack observer renders these; the event's fields/signature are unchanged.
+- **G6 (MEDIUM) — retention sweep attributed to "unknown":** `HitlCrashRecoveryObserver.sweepExpiredPendingApprovals` now calls the 3-arg `cancelConversation(id, CANCEL_GRACEFUL, "system:retention")`.
+- **G7 (LOW) — restored pause re-armed at now+timeout:** `ConversationService.scheduleHitlTimeout` and `GroupConversationService.scheduleGroupHitlTimeout` now anchor `fireAt` to `pausedAt + timeout` (clamped to `now + 2m` grace, mirroring crash recovery) so restore-after-failed-resume re-arms at the original deadline instead of extending it.
+- **G8 (test) — vacuous Postgres zombie regression:** added `loadReportsColumnStateOverForgedDivergentDocument` (Testcontainers, CI-only) that forges TRUE document/column divergence via raw SQL and asserts both `loadConversationMemorySnapshot` and `loadActiveConversationMemorySnapshot` report the COLUMN state — deleting `applyStateColumn` now fails a test.
+- **Cheap extras:** `RestAgentEngine.resumeConversation` null-guards `identity.getPrincipal()` (parity with cancel/end — no NPE for anonymous). The resume `catch (IllegalStateException)` carve-out is narrowed via a private `AgentNotDeployedForResumeException` sentinel so ONLY the deliberate agent-not-deployed ISE re-throws without a double restore; any other ISE (e.g. from continueConversation) now restores the pause and maps to 500.
+
+Verification: `./mvnw -q compile test-compile` clean. Plain-Mockito tests for all touched classes run green locally (G1/G2 in ConversationServiceSayHitlTest, G4/G5 end in ConversationServiceTest, G5 cancel in ConversationServiceHitlTest, G3 in RestScheduleStoreTest, G6 in HitlCrashRecoveryObserverTest, plus reconciled RestAgentEngineTest/RestConversationStoreTest). The G8 Postgres test is Testcontainers → CI-only.
+
+---
+
+## 🔐 HITL Slack round-2 remediation — IDOR fix + approval-flow correctness (2026-07-03, WS-H r2)
+
+**Repo:** EDDI (`fix/hitl-r2-slack-impl`, branched from `feat/hitl-framework`)
+**Scope:** Ten confirmed re-review findings (H1–H10) plus cancellation-rendering (H-consume) on the new Slack HITL surface + tool bridges. Ownership: `integrations/slack/**`, `integrations/channels/ChannelTargetRouter.java`, `modules/llm/tools/ConverseWithAgentTool.java`, `engine/mcp/McpConversationTools.java`, and their tests. No `engine/internal/*` or `engine/api/*` touched.
+
+### H1 (HIGH, security) — cross-integration IDOR on `/interactive`
+
+`/interactive` previously verified the raw-body signature against the **pooled** set of all Slack signing secrets (incl. legacy per-agent ChannelConnector secrets) and only checked authz afterward — so a holder of ANY one Slack secret could forge an approval on another integration's paused conversation. **Fix:** the decision is now **bound to the integration that owns it**, carried explicitly in the button value. New `SlackSignatureVerifier.verifyWithSecret(ts, body, sig, secret)` verifies against exactly ONE secret. `RestSlackWebhook.handleInteractive` resolves the owning integration's secret from the payload first (`SlackInteractivityHandler.resolveSigningSecretForDecision`), then verifies against only that; an unbindable decision (legacy/unknown → no owning new-style integration) is rejected. `/events` keeps pooled verification (unchanged).
+
+### H2 (MEDIUM) — shared-approval-channel nondeterminism
+
+The approval button `value` format changed from `<subject>` to **`<integrationName>|<subject>`** (`<integrationName>|<conversationId>` and `<integrationName>|group:<gcId>`). The handler resolves the owning integration by NAME (`ChannelTargetRouter.getIntegrationByName`), not by an arbitrary-first channel lookup — so authz + verification are deterministic even when integrations share one `hitlApprovalChannel`. New `SlackHitlSupport.buildActionValue`/`parseActionValue` (+ `ActionValue` record). Legacy bare values (no name) parse with a null integration and are rejected up-front (acceptable per spec).
+
+### H3 (MEDIUM) — group double-click idempotency
+
+`SlackInteractivityHandler.resolveGroup` caught only `IllegalStateException`; `resumeDiscussion` signals a non-paused group with the CHECKED `GroupDiscussionException`, a race with `ResourceModifiedException`, and a deleted group with the unchecked `GroupConversationGoneException` — all fell into the generic catch (warn-spam + live buttons). Now all four route to `finalizeAlreadyResolved`.
+
+### H4/H7 — dropped-turn (onSkipped) discrimination
+
+`SlackEventHandler.sendAndWait` now uses a full `ConversationResponseHandler` overriding `onSkipped`, mapping a skip to sentinel snapshots: `AWAITING_HUMAN` → STILL_AWAITING notice (no second approval card, H4); else → new `CONVERSATION_NOT_ACTIVE_NOTICE` (H7). `ConverseWithAgentTool` and `McpConversationTools` (talk_to_agent/chat_with_agent/chat_managed) detect `onSkipped` and return busy/not-active (chat_managed: AWAITING_HUMAN-skip → PAUSED_FOR_APPROVAL) instead of replaying the previous turn's output (mirrors RestAgentEngine's 409 discrimination).
+
+### H5 + H-consume — resume ERROR / cancellation rendering (defensive)
+
+`SlackHitlResumeObserver.decisionSummary` now takes the snapshot: an approved resume that ended in `ERROR` renders a failure ("continuation failed…") not "continuing" (H5), and a null-verdict event (cancel/timeout-abort/end, terminal `EXECUTION_INTERRUPTED`/`ENDED`) renders "⛔ cancelled or expired" — the previously-dead branch is now live and correct (H-consume). Implemented **defensively**: works whether or not the engine's parallel change to fire `HitlResumeCompletedEvent` with `verdict==null` on cancel/end has landed. (Approval-card button-removal on cancel is not done — the approval card's message ts is not resolvable from the conversationId in the current data model; the thread message, which IS resolvable, is delivered.)
+
+### H6 — "Bearer null" guard
+
+`notifyApprovers` now skips the call and logs an explicit "no bot token — HITL approval notification NOT delivered for <id>" error when neither the resolved integration token nor the approval-channel lookup yields a non-blank token (mirrors `postMessage`'s guard).
+
+### H8 — init-turn (CONVERSATION_START) pause never notified approvers
+
+An init-turn pause happens inside `getOrCreateConversation → startConversation`; the first user say then throws `ConversationAwaitingApprovalException` and no approval card was ever posted. The exception branch now calls `notifyApprovers`, made idempotent via a `slack-hitl-approval-notified` cache (`putIfAbsent`) so re-message-while-paused never posts a second card.
+
+### H9 — follow-up conversations get the resume continuation push
+
+`SlackHitlResumeObserver` now recognizes the `channel:followup:<channelId>:<parentTs>` intent shape (in the prefix guard and `parseIntent`) in addition to `channel:slack:...`, so agent-thread follow-ups receive the verdict/continuation in their thread.
+
+### H10 — pause card read the bookmark before it was persisted
+
+The say callback completes before `ConversationService` persists the HITL bookmark, so `getConversationMemorySnapshot` re-reads returned the previous turn (null pause reason/timeout). New `loadHitlBookmark` retries the read (5×100ms) until state==AWAITING_HUMAN and is loaded ONCE per pause, shared by the in-thread notice and the approval card.
+
+### New contracts
+
+- `SlackSignatureVerifier.verifyWithSecret(String ts, String body, String sig, String secret)` — single-secret (integration-bound) verification for `/interactive`.
+- `SlackInteractivityHandler.resolveSigningSecretForDecision(String payloadJson)` — resolves the owning integration's signing secret from the button value; null → endpoint rejects.
+- `ChannelTargetRouter.getIntegrationByName(String channelType, String name)` — deterministic by-name lookup.
+- Approval button `value` format: **`<integrationName>|<conversationId>`** / **`<integrationName>|group:<gcId>`** (was bare `<conversationId>` / `group:<gcId>`).
+
+### Tests
+
+Plain JUnit/Mockito (compile + test-compile pass; touched suites run green locally): `SlackSignatureVerifierTest` (+verifyWithSecret), `SlackHitlSupportTest` (+buildActionValue/parseActionValue), `SlackInteractivityHandlerTest` (rewritten for value-binding + H1 cross-integration + H3 group double-click + resolveSigningSecretForDecision), `SlackHitlResumeObserverTest` (3-arg decisionSummary, ERROR/cancellation/followup delivery), `RestSlackWebhookTest` (new interactivity flow), `SlackGroupDiscussionListenerTest` (integration-bound group value), `ConverseWithAgentToolHitlTest`/`McpConversationToolsHitlTest` (H7 skip), `ChannelTargetRouterRefreshTest` (getIntegrationByName).
+
+---
+
+## 🧪 HITL Coverage Closure + Schedule-Contract Consolidation (2026-07-03, WS-F + merge)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+**Coverage (WS-F, findings 10/22/23/24/41/43):** 13 test files, +1469 lines, tests only. Queued-say guard + say fast-fail (finding 10 — previously zero coverage), zombie-pause discard guard, the entire finite-timeout leg (schedule creation/metadata routing/fire-log parity/error isolation/delete-on-resume+cancel, initial say-path arming), regular-surface endpoint authz incl. fail-closed missing-descriptor, resume robustness against REAL workflow lists (config drift → ERROR, multi-workflow continuation order), HitlConfigValidation wiring at AgentStore/AgentGroupStore CRUD + the import seam, storage regressions (Postgres zombie: post-CAS load must report the column state; `jsonb_set` convergence; owner-filtered summaries; `storeIfFieldEquals` deleted-404 vs mismatch-409 on both backends; anchored group filters + SAFE_ID rejection), case-insensitive verdict round-trip, REJECTED-path `ConversationOutput` visibility + ACTIONS strip. Testcontainers classes (`PostgresConversationMemoryStoreTest`, `MongoConversationMemoryStoreTest`) execute in CI; everything else ran green locally (202 tests). Known residual gaps documented in the test agent's report: no wall-clock end-to-end timeout IT (every seam unit-covered), full ZIP pipeline (validation seam covered).
+
+**Consolidation:** new `ai.labs.eddi.engine.hitl.HitlSchedules` — single source of truth for the HITL timeout-schedule contract (names `hitl-timeout-*`/`hitl-timeout-group-*`; metadata keys `hitlType`/`policy`/`surface`/`conversationId`; `isHitlTimeout` predicate) — adopted by ConversationService, GroupConversationService, ScheduleFireExecutor, HitlTimeoutHandler, HitlCrashRecoveryObserver, RestScheduleStore. Closes the "HITL lifecycle glued by magic strings across five classes" review finding.
+
+---
+
+## 🔌 HITL — Slack integration + nested-consumer bridges (2026-07-03, WS-E)
+
+**Repo:** EDDI (`feat/hitl-ws-e-slack`, branched from `feat/hitl-framework`)
+**Scope:** Human-in-the-loop support in the Slack channel adapter, plus finding 25 (nested/managed/delegated conversation consumers stranded by a pause).
+
+### Slack HITL surface
+
+- **In-thread pause notice (`SlackEventHandler`):** when a say returns an `AWAITING_HUMAN` snapshot, the output-so-far is posted followed by a pause notice ("⏸️ This conversation is awaiting human approval" + pause reason from the HITL bookmark). A `ConversationAwaitingApprovalException` on subsequent messages posts "Still awaiting approval — a reviewer must decide…" instead of the generic error. Follow-up (group-thread) replies get the same handling.
+- **Approver notification + Approve/Reject buttons (config-driven, fail-closed):** two new **optional** `ChannelIntegrationConfiguration.platformConfig` keys — `hitlApprovalChannel` (Slack channel id for approval notifications) and `hitlApproverUserIds` (comma-separated Slack user ids allowed to decide). On pause, an interactive Block Kit message is posted to the approval channel (conversationId, agent, reason, timeout policy/deadline). Buttons are rendered **only** when `hitlApproverUserIds` is set (otherwise notification-only). Data minimization: only the pause reason is included, never the user's message.
+- **Interactivity endpoint (`RestSlackWebhook`):** new `POST /integrations/slack/interactive` (form-urlencoded, `payload` param). Verifies the Slack signature over the RAW body with the existing `SlackSignatureVerifier` + router signing secrets, acks 200 within 3s, processes async on a virtual thread (`SlackInteractivityHandler`). Handles `block_actions` (`hitl_approve`/`hitl_reject`). AUTHZ is fail-closed against the owning integration's approver list; `decidedBy` is always derived server-side (`slack:<userId>`). On success it `chat.update`s the message ("✅ Approved by …" / "⛔ Rejected"), removing buttons; an already-decided/timed-out click resolves to the `IllegalStateException` path and updates the message without error-spam (idempotent double-click).
+- **Continuation push after resume (CDI event):** `ConversationService` fires a new async CDI event `ai.labs.eddi.engine.events.HitlResumeCompletedEvent` when a resume settles to a non-paused state (in `resumeFinished.onComplete`, after `storeConversationMemory`, `fireAsync` so observers never block the engine; failures isolated). `SlackHitlResumeObserver` observes it, resolves the conversation's Slack routing via the new reverse-lookup `IUserConversationStore.readUserConversationByConversationId` (implemented on both Mongo + Postgres for parity), and posts the verdict + continuation output to the originating channel/thread. Timeout (`system:timeout`) and cancellation outcomes flow through the same event.
+- **Group discussions (`SlackGroupDiscussionListener`):** implemented the HITL listener callbacks — `onHitlPause` (thread notice + approval-channel buttons whose action value carries `group:<groupConversationId>`, routed to `resumeDiscussion`), `onHitlResume` (verdict), `onMemberPauseSkipped`, and `onCancelled`.
+- **Shared helpers:** `SlackHitlSupport` (config keys, Block Kit builders, approver authz, and the Slack-friendly response-text extraction refactored out of `SlackEventHandler`); `SlackWebApiClient` gained `postBlocksMessage` + `updateMessage` (chat.update), reusing a shared send/parse helper with the existing retry/backoff classification.
+
+### Finding 25 — nested/managed/delegated consumers
+
+- `ConverseWithAgentTool`, `McpConversationTools#chat_managed`, and `CreateSubAgentTool` now detect the delegated conversation pausing (AWAITING_HUMAN snapshot **or** `ConversationAwaitingApprovalException`) and return a structured, actionable `PAUSED_FOR_APPROVAL` result (with the conversationId and the `/resume` instruction) instead of "[no response]" or a 60s hang. The nested pause is **not** auto-cancelled (a delegated approval may be intended) and managed mappings are preserved so re-invoking after approval continues the same conversation.
+
+### Tests
+
+Plain JUnit/Mockito (no Quarkus boot): `SlackHitlSupportTest`, `SlackInteractivityHandlerTest`, `SlackHitlResumeObserverTest`, `ConverseWithAgentToolHitlTest`, `McpConversationToolsHitlTest`, plus additions to `SlackEventHandlerTest`, `SlackGroupDiscussionListenerTest`, `RestSlackWebhookTest`. Covers signature rejection on `/interactive`, unauthorized user cannot decide, authorized resume with `decidedBy=slack:…`, double-click no error-spam, buttons omitted without approvers, observer posts to the right channel/thread and ignores non-Slack conversations, and the bridges' PAUSED_FOR_APPROVAL result. `docs/hitl.md` needs a new "Slack" section (docs phase — not edited here).
+
+---
+
+## 🔧 HITL Production-Readiness Remediation — storage parity + say-path contract (2026-07-03, session 5)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+**Trigger:** A 92-agent adversarial review of the branch confirmed 46 findings (1 CRITICAL, 7 HIGH, 18 MEDIUM, 20 LOW). This entry covers the storage-layer and regular-surface batches; parallel batches (schedule security/sweeps, group surface) land as separate commits from their own branches.
+
+### CRITICAL — PostgreSQL conversation-state duality (the Postgres zombie)
+
+State was persisted twice on Postgres: in the indexed `conversation_state` column (updated by CAS/cancel) AND inside the JSONB snapshot (read by loads). A cancelled or ABORT-timed-out pause kept reporting `AWAITING_HUMAN` from the stale document — wedging `say()`, showing phantom pauses in approval-status, and letting the next user message resurrect the terminated approval as a zombie (full-document store flips the column back, re-arms a timeout; a later approve fails into ERROR). Fixes, defense in depth:
+
+- **Column wins on load** — `loadConversationMemorySnapshot`/`loadActiveConversationMemorySnapshot` overwrite the deserialized state with the `conversation_state` column (`applyStateColumn`).
+- **Writers converge the document** — `setConversationState` and `compareAndSetState` also `jsonb_set` the JSONB `conversationState` in the same statement.
+- **Say-path zombie guard** — `runGuardedConversationStep.onComplete` discards a turn result whose `AWAITING_HUMAN` state was already present at submit time (a stale pause the turn did not produce is never re-persisted or re-armed).
+
+### HIGH — say() into a paused conversation: honest 409 instead of a 60s hang
+
+`say()`/`sayStreaming()` now **fast-fail** with a new `ConversationAwaitingApprovalException` → REST 409 with an actionable body (matches the docs' "say() is rejected" promise, mirrors ENDED→410). The queued-say race backstop now completes the response via a new `ConversationResponseHandler.onSkipped(snapshot)` (default: delegates to `onComplete`) instead of dropping the turn into the 408 watchdog — and the `processingConversationReferences` gauge entry is removed on every exit path (was a permanent leak per dropped request). `RestAgentEngine` maps skipped turns to 409 ("awaiting approval" vs "busy — retry"). Callback consumers (group, Slack, MCP) are unaffected: the default `onSkipped` delivers the snapshot whose state they already inspect.
+
+### Storage-layer fixes (DB-agnostic parity)
+
+| Fix | Detail |
+|-----|--------|
+| Postgres regex 500s | `GroupConversationStore` built filters with `Pattern.quote` (`\Q…\E`) — valid in Mongo's PCRE, **rejected by PostgreSQL's regex engine** → group listing + pending-approvals 500'd on PG. Replaced with charset-validated plain anchoring (`^id$`; ids are hex/UUID, no metacharacters). Non-id input → honest empty result. |
+| Projected pending summaries | Postgres now runs ONE projected query (JSONB field extraction, `hitlPausedAt` round-tripped through the same Jackson mapper) instead of `1+limit` full-document deserializations; Mongo now runs ONE projected query instead of N+1 point-reads. |
+| Owner-scoped inbox | `findPendingApprovalSummaries(ownerUserId, limit)` implemented on both backends — the owner filter is INSIDE the query, so the limit applies after the restriction (a non-admin's inbox can no longer be starved by other users' backlog). New Mongo compound index `(conversationState, userId)`. `RestAgentEngine` uses it for non-admin/non-approver callers. |
+| CAS 404-vs-409 | `storeIfFieldEquals` (both backends) now distinguishes "document deleted" (`ResourceNotFoundException`) from "field mismatch" (`ResourceModifiedException`) via an existence check on zero-match. `GroupConversationStore.updateIfState` surfaces deletion as unchecked `GroupConversationGoneException` (kept unchecked so existing CAS call sites compile; surfaces map it to 404). The `IResourceStorage` default no longer silently degrades the CAS to an unconditional store — it throws `UnsupportedOperationException`. |
+| Truncation visibility | `findByState` WARNs when it hits its limit (pending listings / crash recovery must never truncate silently). |
+
+### Regular-surface fixes
+
+- **End-vs-resume race:** the resume pre-execution guard now also aborts on persisted `ENDED` (previously only `EXECUTION_INTERRUPTED`) — an accepted resume can no longer resurrect an ended conversation.
+- **Cooperative-cancel integrity:** all `inFlightConversations.remove(key)` calls are now value-conditional `remove(key, memory)` — a finishing leg can no longer evict a newer execution's registration.
+- **Cancel attribution (EU AI Act):** `cancelConversation(id, mode, cancelledBy)` threads the actor into the `hitl.approval` audit entry (`decidedBy` + `automated`); REST passes the principal, `HitlTimeoutHandler` passes `system:timeout`. Old 2-arg signature delegates (`unknown`).
+- **Configurable pause reason:** new optional `hitlConfig.pauseReason` (agent-level, ≤500 chars, validated at save/import) flows into the bookmark → pending-approvals/approval-status answer "what am I approving?". Falls back to the generic constant.
+- **approval-status payload** now includes `approvalTimeout` so UIs can render the auto-decision deadline.
+- **Fail-closed HITL authz:** resume/cancel/approval-status on a conversation whose descriptor is missing now require admin/approver (was: ownership check silently skipped).
+- **REJECTED-path visibility:** the rejection message is now written to `ConversationOutput["output"]` (UIs/log generator actually render it) and the stale `PAUSE_CONVERSATION` action is stripped on the REJECTED path (as on APPROVED).
+- **Verdict parsing** is case-insensitive on all surfaces (`HitlVerdict.fromString` @JsonCreator); note-length cap single-sourced as `HitlDecision.MAX_NOTE_LENGTH`.
+- **`IConversation.resume(decision)`** — dead `contexts` parameter removed (CodeQL).
+- Misleading "transient — not serialized" comment on the HITL bookmark fields corrected (they ARE persisted via the snapshot).
+
+### Deliberately deferred
+
+- Bookmark value-object refactor (6 flat fields → 1 object): cosmetic, touches the persisted snapshot shape late in the branch — deferred.
+- `RestGroupConversation`'s duplicated note-length constant: consolidation phase (group-surface files owned by a parallel batch).
+
+---
+
+## 🔒 HITL Schedule Security, Sweeps & Retention — WS-C (2026-07-03)
+
+**Repo:** EDDI (`fix/hitl-ws-c-schedules`, branched from `feat/hitl-framework`)
+**Trigger:** Confirmed code-review findings (5, 7, 17, 26, 32, 44) on schedule security, idle/undeploy sweeps, poller scalability, and pause retention.
+
+| Finding | Fix |
+|---------|-----|
+| #5 (HIGH, security) | **Editor could bypass the HITL approval gate via the schedule REST surface.** `RestScheduleStore` now: (a) `fireNow` **refuses** any schedule with `metadata.hitlType=="hitl_timeout"` — for **everyone** including admins — returning **409 Conflict** directing to `/agents/{id}/resume` or `/cancel` (manual firing side-steps the /resume owner/admin/approver audit gate); (b) `updateSchedule`/`deleteSchedule`/`enableSchedule`/`disableSchedule` on a HITL schedule require `eddi-admin`, else **403 Forbidden** (detected via the STORED schedule so a doctored request body can't hide the marker); (c) `readAllSchedules` **redacts** HITL schedules for non-admins so they can't be enumerated. Internal firing via `SchedulePollerService` is unaffected (it bypasses REST). **Parity enabler:** `PostgresScheduleStore` never persisted `metadata` (Mongo did via full-doc serialization) — added a `metadata JSONB` column (+ idempotent `ADD COLUMN IF NOT EXISTS` upgrade, `IJsonSerialization` round-trip). Without this the HITL timeout fast-path never fired on Postgres AND the security guard couldn't recognize HITL schedules there. |
+| #7 (HIGH) | `AgentDeploymentManagement.endOldConversationsWithOldAgents` now **skips AWAITING_HUMAN** conversations (mirrors the deliberate `getActiveConversationCount` exclusion) instead of force-ENDing them with a raw non-CAS write (which left armed schedules, stale bookmarks, and no audit). Logs at INFO how many paused conversations were spared. The pre-existing agent-document-age heuristic for non-paused conversations is left unchanged with an explanatory comment. |
+| #17 (MEDIUM, scalability) | Poll batch size is now configurable (`eddi.schedule.poll-batch-size`, default 100) in **both** stores; `SchedulePollerService` **claims all due schedules on the poll thread (CAS before dispatch)** then **fires the claimed ones concurrently on virtual threads** (`newVirtualThreadPerTaskExecutor`) with **per-fire error isolation** — a mass HITL-timeout burst no longer serializes behind one thread and starves Dream/maintenance schedules. Exactly-once cluster semantics preserved. |
+| #26 (MEDIUM) | `RestConversationStore.endActiveConversations` routes AWAITING_HUMAN conversations through the HITL-aware `IConversationService.endConversation` (schedule disarm + bookmark clear + audit + in-flight-resume signal) instead of a raw ENDED write; non-paused conversations keep the raw path. |
+| #44 (LOW) | `RestConversationStore.deleteConversationLog(deletePermanently=true)` now calls `endConversation` for an AWAITING_HUMAN conversation **before** deleting the document — disarming the leaked one-shot schedule, clearing the bookmark, auditing, and invalidating the cached state — via the existing public service method. |
+| #32 (LOW) | New **optional** pause-retention sweep in `HitlCrashRecoveryObserver` (`@Scheduled`): `eddi.hitl.pending.max-age` (ISO-8601, default empty=OFF) auto-cancels pauses older than the threshold via `cancelConversation` (audited, schedule-disarmed); `eddi.hitl.pending.sweep-interval` (default 6h). Reuses the existing poller/scheduling infra — no new scheduler. |
+| CodeQL | `HitlCrashRecoveryObserver.onStartup(@Observes StartupEvent event)` — silenced the "unused parameter" alert with `@SuppressWarnings("unused")` + comment; the param is the required CDI observer trigger. |
+
+**REST status codes chosen:** manual fire of a HITL schedule → **409 Conflict** (operation not permitted for anyone; directs to /resume|/cancel). Non-admin mutate/disable/delete of a HITL schedule → **403 Forbidden**.
+
+**New config properties:** `eddi.schedule.poll-batch-size` (default 100), `eddi.hitl.pending.max-age` (default empty/OFF), `eddi.hitl.pending.sweep-interval` (default 6h) — documented in `application.properties`. `docs/hitl.md` (owned by a later phase) should document the retention property for operators.
+
+**Tests (pure JUnit/Mockito):** RestScheduleStore HITL guards (editor/admin fire+mutate+redact); AgentDeploymentManagement paused-skip; SchedulePollerService concurrent dispatch + per-fire error isolation + claim-before-dispatch; RestConversationStore paused end/delete routing; HitlCrashRecoveryObserver retention sweep (OFF-by-default, cancels-expired, non-positive=OFF); PostgresScheduleStore metadata round-trip.
+
+---
+
+## 🔧 HITL PR Review Response — Copilot + CodeRabbit (2026-07-02, session 4)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+**Trigger:** Automated review on the open PR (GitHub Copilot + CodeRabbit) surfaced ~24 findings. Each was independently, adversarially re-verified against the actual code (not the bot's paraphrase); the confirmed ones are fixed here, deliberate skips are recorded with rationale.
+
+| Area | Fix |
+|------|-----|
+| Cross-group leak (MAJOR) | `GroupConversationStore.findByState(state, groupId, limit)` passed `groupId` as a raw filter value; `MongoResourceStorage.findResources` turns String filters into **unanchored** regexes, so a group id that is a substring of another matched across groups. Now anchored + `Pattern.quote`d (`^\Q…\E$`) in both `findByState` and the pre-existing `listByGroupId`. |
+| Stuck resume (MAJOR) | `resumeConversation`'s critical section (CAS → `submitInOrder`) only caught `ServiceException`/`InstantiationException`/`IllegalAccessException`; an unchecked exception from `continueConversation` escaped, leaving the conversation stuck `IN_PROGRESS` with a leaked `inFlightConversations` entry. The catch now also covers `RuntimeException` (restores the pause + drops the registry entry), while the deliberate agent-not-deployed `IllegalStateException` is re-thrown as-is so it still maps to 409. |
+| Props on failed resume (MAJOR) | `Conversation.resume()`'s finally ran `postConversationLifecycleTasks()` whenever the state was not `AWAITING_HUMAN` — including `ERROR`, so a failed resume persisted long-term properties, unlike the say path. Now also skipped on `ERROR`. |
+| Resume bookmark index (MAJOR) | `LifecycleManager` selective execution (`rerun`) ran a suffix sublist but stored the sublist-relative loop index as the "absolute" pause bookmark. Added an `indexOffset` threaded only into the pause-index computation (component-cache/telemetry indices unchanged), so a pause during selective execution records a true absolute index. Also added bounds validation to `executeLifecycleFromIndex` (negative → `LifecycleException`; strictly-past-end from a redeployed workflow → warn + skip; exactly `size()` remains valid). |
+| End-vs-resume race (MAJOR) | `endConversation` wrote `ENDED` without signalling `inFlightConversations`, so a resume past the CAS could persist its snapshot back over the terminal state. It now sets the cooperative-cancel flag on any in-flight memory (mirrors `cancelConversation`), so the resume's `onComplete` skips persistence and `ENDED` wins. |
+| Timeout fire-log parity | `ScheduleFireExecutor`'s HITL fast-path returned before `logFire()` and had no exception isolation. It now records a `ScheduleFireLog` (with the conversationId + FAILED status on error) and wraps `handleTimeout` in try/catch, matching the normal path. |
+| Consistency / hardening | `OwnershipValidator.isAdmin` null-guards `identity` (matches `isApprover`/`isOwner`); `AgentGroupConfiguration.HitlConfig` setters null-coalesce to their defaults (a JSON `null` can no longer wipe `timeoutPolicy`/`granularity`/`onTaskRejection`, mirroring `setLifecyclePolicy`); `DiscussionControlToken` wave loop re-checks `isCancelled()` after `setActiveFuture` so a `CANCEL_IMMEDIATE` landing mid-registration still cancels the new future; `MongoScheduleStore` uses a `NAME` constant; `ConversationMemory` drops redundant `java.time.Instant` FQNs; `SharedTaskList.TaskStatus` Javadoc corrected (AWAITING_APPROVAL is fully wired, not a placeholder). |
+| Tests | New `resetFromAnyToAssigned` coverage (7 cases: valid transitions, ASSIGNED no-op, rejected states); new resume test for an unexpected `RuntimeException` from `continueConversation` (asserts pause restored + `ResourceStoreException` + never submitted); `turnCounterSeedsFromPausedTurnCount` de-flaked by capturing `pausedTurnCount` at the synchronous resume CAS instead of racing the async completion; bogus timeout-policy strings in memory round-trip tests replaced with real enum names. |
+| Deliberately skipped | `listPendingApprovals` "max 1000 not enforced" — FALSE POSITIVE, the service already clamps `Math.min(limit, 1000)`. Crash-recovery pagination (10k scan cap) — 10k concurrent pauses is unrealistic and the code already warns. Pending-summary N+1 (Mongo/Postgres) and `findByState` bulk-read — perf-only on bounded/one-time paths, a pre-existing `IResourceStorage` API limitation; deferred. `HitlPauseType` vs `HitlGranularity` unification — intentional pause-record vs config separation. Duplicated cancel-check refactor — declined to churn just-hardened control flow. |
+
+---
+
+## 🔧 HITL Merge-Readiness Hardening (2026-07-02, session 2)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Second full-branch review after the phase 1–7 fixes; verified 22 tracked findings (10 FIXED, 7 PARTIAL, 5 UNFIXED) plus new regressions in the fix commits themselves. This session closes the remainder before PR.
+
+| Step | Fix |
+|------|-----|
+| Red tests | `HitlTimeoutHandlerTest` — inject `SimpleMeterRegistry` (new metrics field NPE'd all 7 tests); `RestGroupConversationHitlTest.approveDenied` — body validation runs before authz, so the test now sends a valid decision (plus a new test pinning the 400-before-authz ordering). The suite was red at HEAD; these commits restore green as the baseline. |
+
+| Crash recovery (C-A/F4/F6) | **`HitlCrashRecoveryObserver` reworked from destroyer to repairer.** It no longer transitions old paused conversations to ERROR/FAILED (the previous behavior destroyed legitimately-paused WAIT_INDEFINITELY conversations — the default policy — on every restart). New behavior: finite-policy pauses get their one-shot timeout schedule idempotently re-armed at the original due time (applies the configured policy through the normal handler, even after a crash); WAIT_INDEFINITELY pauses are never touched; regular conversations stuck IN_PROGRESS with an intact HITL bookmark (pod died mid-resume) are CAS-restored to AWAITING_HUMAN; IN_PROGRESS without bookmark → EXECUTION_INTERRUPTED. Stale-threshold config dropped (no longer meaningful); added `eddi.hitl.crash-recovery.recover-in-progress` (default true, multi-pod caveat documented). Prereq: the regular pause commit now populates `hitlTimeoutPolicy`/`hitlApprovalTimeout` bookmark fields (F6) — `approval-status`/`pending-approvals` finally report the effective policy on both surfaces. |
+| Regular cancel (F2) | `cancelConversation` is no longer a silent no-op: in-flight registry (`inFlightConversations`) lets cancel set the cooperative `setCancelled` flag the LifecycleManager checks at task boundaries (mode param now read; IMMEDIATE degrades to graceful, documented); returns typed `CancelOutcome` — REST maps CANCELLED→200, NOT_FOUND→404, NOTHING_TO_CANCEL→409 (was unconditional 200). |
+| Resume robustness (F4/F7) | Resume now: pre-checks existence → 404 (was 409 with misleading message); reports the current state in the 409 body; **restores the pause** (CAS back to AWAITING_HUMAN + re-arms timeout) when the agent is undeployed or a service error occurs, instead of destroying the approval with ERROR; wraps execution with the same watchdog as the say path (hung LLM → EXECUTION_INTERRUPTED, never stuck IN_PROGRESS). |
+| Undo/redo gate (F5/C-C) | Gate now reads the DB-loaded state (was per-pod cache — silently bypassed after restart/cross-pod) and returns `false` → 409 CONFLICT (was 500). |
+
+| Group cancel (F9) | No-token branch now uses the `updateIfState` state-CAS (was plain read-modify-write racing approve/resume); `CancelledEvent` is finally emitted via new `onCancelled` listener method and the SSE stream closes on cancel (was: `/discuss/stream` clients hung forever after a cancel). |
+| Group approvals (F13/C-D) | `taskApprovals` validated up front (unknown taskId / task not awaiting → 400, no partial in-memory mutation, schedule untouched); RETRY rejection now passes the reviewer's note into the re-queued task and `buildTaskExecutionInput` surfaces it as feedback (was: blind retry loop); `resetFromAnyToAssigned` enforces its documented status contract. |
+| Group robustness (F11/5f) | Stranded IN_PROGRESS tasks are reset to ASSIGNED in ALL wave-abort branches (was: timeout only — cancellation/error still stranded tasks forever); config-drift guard now also fails when phases were REMOVED (bookmarked index out of range no longer silently skips the check); nested-group sub-pauses are cancelled instead of stranded with an armed schedule; `commitPause` reuses the in-scope config (no duplicate store read per pause). |
+| Group pending list (C-B) | `GET /groups/{groupId}/conversations/pending-approvals` now scopes to the path's group and applies the same ownership filter as the regular listing (admin/approver see the group's items, others only their own, anonymous nothing) — was a global unfiltered dump of all users' paused conversations incl. transcripts. |
+| Approver role | New `eddi-approver` role: `OwnershipValidator.isApprover`, added to `@RolesAllowed` on all HITL endpoints (approver-only accounts were blocked at RBAC), and approvers now see pending listings on both surfaces (they could approve but not list). SSE error events now serialize through the JSON serializer (no string-concatenation injection). |
+
+| Audit (F15) | `hitl.approval` AuditEntry submitted on BOTH surfaces for every decision (verdict, decidedBy, automated flag, note) — covers human and `system:timeout` decisions; `GroupConversationService` now injects `AuditLedgerService`. Combined with the earlier resume audit-collector wiring, the EU AI Act human-oversight trail is complete. |
+| Quota (F16, plan §10a) | `getActiveConversationCount` excludes AWAITING_HUMAN on Mongo AND Postgres — paused conversations no longer block undeploy/old-version GC forever. Undeployed-while-paused conversations keep their pause; resume reports 409 and restores it. |
+| Pending listing scale (F17) | New `findPendingApprovalSummaries(limit)` store method: Mongo uses POJO-codec projection (never deserializes step data), Postgres a LIMIT-bounded loop; REST takes `?limit` (default 200, max 1000); `PendingApprovalSummary` gains `userId` so the ownership filter no longer does N+1 descriptor reads. |
+| Config safety (F20/C-E/C-F) | Duplicate `engine.lifecycle.model.HitlTimeoutPolicy` enum deleted — `AgentGroupConfiguration.HitlTimeoutPolicy` is the single source (no more constants-drift between schedule metadata writer and parser). New `HitlConfigValidation` enforced in `AgentStore`/`AgentGroupStore` create+update: finite policy requires a valid positive ISO-8601 `approvalTimeout`, actionable 400 messages via the existing `IllegalArgumentExceptionMapper`. |
+| Input bounds | HITL decision `note` capped at 4 KB on both surfaces (400 on overflow). Dead `counterHitlTimeout` field removed (handler owns the timeout metric). |
+
+| Test hardening (F22) | R2 cancel tests: `else assertNotNull` escape hatches removed — reverting the R2 fix now fails them. NEW R1 test: cancel racing a `requiresApproval` phase asserts CANCELLED + commitPause never ran. B1 test rebuilt: snapshot reflects post-CAS reality (IN_PROGRESS) and the memory state is captured at `continueConversation` time — deleting the B1 fix now fails it. New behavioral tests: `stripPauseAction` (stale action removed, others preserved), decision visibility (`hitlDecision` output + `hitlVerdict` property), Invariant 9 asserted via step-property survival (pause) vs purge (normal turn). |
+| Integration test (F22) | **New `HitlPauseResumeIT`** — full end-to-end with zero mocked seams: real behavior rule emits PAUSE_CONVERSATION → real Mongo persistence → REST resume completes the remaining pipeline tasks (the original BLOCKER's fail-on-revert), plus REJECTED path, cancel path, 400-does-not-consume-pause, 404 unknown id, 409 not-paused, and undo-blocked-while-paused. New `tests/hitl/*.json` agent fixtures. Runs in CI via `mvnw verify -DskipITs=false` (ci.yml:179); local Docker daemon was unavailable during this session, so first execution happens in CI — same as any IT change. |
+| Docs (F21) | New [docs/hitl.md](hitl.md): both surfaces, config reference incl. `onTaskRejection`, real REST paths, template access (`hitlDecision` / `{properties.hitlVerdict}`), timeout policies, approver role, crash recovery config, operations notes (metrics, undeploy semantics, cancel matrix), known v1 limitations, `requiresApproval` upgrade note. AGENTS.md reserved-action list updated with PAUSE_CONVERSATION. `planning/hitl-framework-plan.md` committed. |
+
+| Final sweep | Full 9,761-test suite executed: the only genuine branch defect was `GroupConversationTest.groupConversationStates` still asserting 6 enum values after the branch added CANCELLED (fixed: 7 + CANCELLED assertion). All other local failures are environmental (Docker unavailable for Testcontainers classes, sandbox-blocked loopback sockets for HTTP-server-based tool tests) — these classes are untouched by this branch and run in CI. Mongo `findPendingApprovalSummaries` reworked to bounded projected point-reads with explicit id mapping (the bulk POJO-codec projection could not be guaranteed to populate `_id`→conversationId). |
+
+*(End of session 2.)*
+
+---
+
+## 🔧 HITL Final-Review Fixes — Round 3 (2026-07-02, session 3)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Third full-branch multi-agent review (70 agents, adversarial verification completed): 43 confirmed findings (12 MAJOR). This session fixes all of them.
+
+| Area | Fix |
+|------|-----|
+| Queued-say race (MAJOR) | `processConversationStep` re-reads the persisted state at execution time and DROPS a queued turn when the conversation is AWAITING_HUMAN/IN_PROGRESS — a stale pre-pause memory copy can no longer execute and full-document-overwrite a just-committed pause. |
+| Zombie resume (MAJOR) | Resume persistence moved from the callable's `finally` into `IFinishedExecution.onComplete` — BaseRuntime's completed-after-cancellation discard now protects the resume path like the say path; a timed-out resume can never clobber state written after its watchdog fired. |
+| Cancel-vs-resume window (MAJOR) | The live memory is registered in `inFlightConversations` synchronously after the resume CAS; the resume callable re-checks `isCancelled()`/persisted EXECUTION_INTERRUPTED before executing and skips persistence when cancelled. Cancel now also wins over a pause committed by the very task it interrupted (`Conversation` treats pause-while-cancelled as stop), on both say and resume paths. |
+| Init pause (MAJOR) | `startConversation` performs the same HITL bookkeeping as the say path — a CONVERSATION_START pause now gets its policy bookmark, pause counter, and timeout schedule. |
+| Resume rollback (MAJOR) | Every post-CAS failure restores the pause: snapshot-load failures, `RejectedExecutionException` from a saturated coordinator, and service exceptions. Wrong-state/agent-undeployed now throw `IllegalStateException` → 409; infrastructure failures throw `ResourceStoreException` → 500 (was: everything 409). Audit + resume counter moved AFTER the successful submit — rolled-back resumes no longer pollute the compliance trail or metrics; undeployed-agent restores skip schedule re-arm (kills the infinite timeout→restore→re-arm loop). |
+| Bookmark hygiene | New `clearHitlBookmark` store op (Mongo `$unset` / Postgres jsonb key-removal) called when a pause is terminally resolved outside resume (cancel, end-while-paused) — stale bookmarks no longer round-trip forever, mislead approval-status (now also state-gated), or trick crash recovery into resurrecting dead pauses. Cancel of a pending approval writes an `hitl.approval` audit entry (verdict CANCELLED). `endConversation` on a paused conversation disarms the schedule and clears the bookmark (round-1 leftover). |
+| Config resolution | HITL timeout config is read ONCE per pause at the conversation's PINNED agentVersion (fallback to latest); `scheduleHitlTimeout` derives from the memory bookmark — bookmark and schedule can no longer diverge, and draft config edits no longer change paused conversations' behavior. Re-pauses now increment the pause counter (metric parity with the group surface). Undo/redo additionally rejected during IN_PROGRESS (protects the resume-CAS invariant crash recovery relies on). |
+| Group cancel window (MAJOR) | Control tokens are registered BEFORE the executor submit in `startAndDiscussAsync` and `resumeDiscussion` (`executeDiscussion` uses `computeIfAbsent` so a signalled pre-registered token is never wiped) — a cancel landing between the resume CAS (or async start) and thread startup now finds a signalable token instead of being overwritten by the running leg's unconditional updates. New `convertPauseToCancelIfSignalled`: a cancel that lands while `commitPause` is writing converts the just-committed pause to CANCELLED (CAS), disarms the schedule, audits, and emits the cancelled SSE event — cancel can no longer report success while the pause survives. |
+| Group TASK-gate bypass (MAJOR) | The `requiresApproval` EXECUTE gate now also pauses when an aborted wave (timeout/error) left executable tasks behind with nothing awaiting approval — previously the phase loop fell through to VERIFY/synthesis over unexecuted work and silently skipped the remaining tasks. |
+| Group resume resilience (MAJOR) | Config-drift aborts and pre-`executeDiscussion` failures now RESTORE the pause (`restoreGroupPause`: bookmark re-set, CAS IN_PROGRESS→AWAITING_APPROVAL, schedule re-armed) and fire `group_error` so SSE clients terminate — previously they persisted terminal FAILED, destroying the approval, without ever notifying the stream. `executorService.submit` failures roll back the same way (resume) or fail the conversation honestly (async start) instead of leaving IN_PROGRESS zombies. Failures INSIDE `executeDiscussion` are not double-handled (it owns its terminal states + events). REJECTED verdict now fires `group_complete` so streams close. |
+| Group terminal cleanup (MAJOR) | New `cleanupAfterTerminalState`: ephemeral dynamic agents and `lastVerifiedIndex` entries are released when a paused discussion reaches a terminal state OUTSIDE the execution loop (cancel-of-paused, REJECTED resume) — previously they leaked forever because the in-loop finally only runs while a thread is executing. |
+| Group cancel outcome | `cancelDiscussion` returns boolean (`false` = already terminal / lost CAS race) → REST maps to 409 (was unconditional 200); paused-cancels emit an `hitl.approval` audit entry (verdict CANCELLED) — parity with the regular surface. Timeout handler logs skipped aborts. |
+| Group approvals | `taskApprovals` VALUES validated up front (only APPROVED/REJECTED, case-insensitive → else 400 before any mutation); an explicit `{}` map is treated as the approve-all shortcut instead of approving nothing and instantly re-pausing. `approveGroupPhase` returns a freshly-read copy — the HTTP layer no longer serializes the live object being mutated by the background thread. |
+| Group timeout source | `scheduleGroupHitlTimeout` reads the pause bookmark on the conversation (set by `commitPause`/`restoreGroupPause`) instead of re-reading the group config — schedule and approval-status can no longer diverge after a config edit. |
+| Group pending listing | `listGroupPendingApprovals(groupId, limit)` returns bounded `PendingApprovalSummary` objects (query-level group filter + limit, new `findByState(state, groupId, limit)` store variant) instead of unbounded full transcripts; summary gains `groupId`; REST takes `?limit` (default 100). |
+| Approver read scope (MAJOR) | `detail=full` on both approval-status endpoints is now gated for approver-only callers (not owner, not admin): full content is readable ONLY while the conversation is actually awaiting approval → 403 otherwise. The approver role exists to decide pending approvals, not as a universal read-everything grant over all conversations/transcripts. New `OwnershipValidator.isOwner` helper. |
+| Group approval-status detail | `GET .../approval-status` on the group surface finally honors `detail`: default is a summary projection (state, pausedAt, phase, pauseType, reason, timeoutPolicy, awaiting task ids — stale fields suppressed outside AWAITING_APPROVAL, mirroring the regular surface) instead of always dumping the full conversation incl. transcript; `detail=full` returns the conversation, subject to the read-scope gate. |
+| Crash recovery scale (MAJOR) | The recovery sweep runs on a background virtual thread — application readiness no longer blocks on repairing thousands of paused conversations. The paused-regular sweep reads bounded PROJECTED summaries (10k cap, logged if hit) instead of full multi-MB documents, and skips WAIT_INDEFINITELY pauses without any further read (`PendingApprovalSummary` gains `approvalTimeout`, projected on Mongo + Postgres and exposed on both listing surfaces). `rearmSchedule` re-checks the pause state AFTER creating the schedule and withdraws it if a resume/cancel landed in the window — no armed timeout on a no-longer-paused conversation. |
+| Schedule + listing bounds | New `name` index on schedules (Mongo + Postgres) — HITL timeout delete/re-arm by name was a collection scan on every pause/resume/cancel. Mongo `findPendingApprovalSummaries` bounds the ids query with `.limit()` at the DB instead of materializing every paused id first. |
+| HITL enum home | `HitlTimeoutPolicy`/`HitlGranularity`/`HitlRejectionPolicy` moved from nested types in `AgentGroupConfiguration` to the neutral `ai.labs.eddi.configs.hitl` package (`HitlConfigValidation` moved there too) — the regular-surface agent config and the whole engine no longer depend on the GROUP config class for shared HITL vocabulary. JSON compatibility unchanged (enum names serialize identically). |
+| Dead surface removed | `ControlSignal.PAUSE` and `DiscussionControlToken.isPaused()/shouldStop()` deleted — HITL pauses are committed by the execution loop at the gates, never signalled through the token; the dead PAUSE path only invited misuse (a signalled "pause" would have been persisted as CANCELLED). Token checks now read `isCancelled()` explicitly. |
+| hitl_resume event wired | `HitlResumeEvent`/`EVENT_HITL_RESUME` existed but were never fired. New `onHitlResume` listener method fires after the resume CAS commits; the SSE streaming endpoint forwards `hitl_resume` WITHOUT closing, so `/approve/stream` clients see an explicit resume marker before the resumed discussion's events. |
+| ZIP import validation | `RestImportService` validates `hitlConfig` right after deserializing the agent file — an invalid config now fails the import up front with 400 (via `IllegalArgumentExceptionMapper`) instead of importing all workflows/extensions first and then failing agent creation with a 500 (partial import). |
+| Javadoc drift | `IConversationMemory.getHitlTimeoutPolicy` no longer documents non-existent policy values ("expire"); `AgentGroupConfiguration.HitlConfig` no longer claims a "per turn / per discussion" granularity that never existed (actual: PHASE or TASK). Unused Mongo `Updates` import removed. |
+| Test hardening (round 3) | New `HitlConfigValidationTest` (both surfaces, all rejection branches). `taskApprovals` validation tests: unknown id / wrong state / bad value → IAE with NOTHING mutated and no CAS; case-insensitive values; `{}` = approve-all. Audit emission tests (hitl.approval on resume with automated flag; verdict CANCELLED on cancel-of-paused; silent when ledger disabled). Note-cap tests on both surfaces (4097 → 400, 4096 → OK). Undo/redo HITL gate unit tests (AWAITING_HUMAN + IN_PROGRESS → false, nothing stored) + redo-409 IT. Group pending listing filter tests on summaries (admin/approver/owner/anonymous + default limit). Crash-observer tests rewritten for the projected sweep incl. schedule-withdraw races on both surfaces. Postgres container IT now covers the HITL store primitives (CAS, state query, projected summaries incl. approvalTimeout + limit, bookmark clearing). `HitlPauseResumeIT.waitForState` polls the DB-backed approval-status instead of the per-pod `/status` cache (flakiness fix). |
+| Docs | [docs/hitl.md](hitl.md) updated: approver read-scope gate (403 semantics), group approval-status summary/full, pending summaries + `?limit`, group cancel 409, `hitl_resume` SSE event + every-terminal-path-closes guarantee, drift-restores-pause behavior, cancel audit entries, async + projected crash recovery. |
+| Group end-to-end IT | **New `GroupHitlIT`** — full group-surface HITL path with zero mocked seams: a `requiresApproval` phase commits a real pause through the store, `/approve` applies the decision, and the background resume re-enters the phase loop and runs the post-gate phase to completion (transcript asserted). Also: approval-status summary vs `detail=full`, pending-approvals summary listing (conversationId + groupId), REJECTED-is-terminal (later approve/cancel → 409), cancel-of-paused → CANCELLED (second cancel/late approve → 409), 400s that do NOT consume the pause (missing verdict, >4 KB note), 404 for unknown ids. Like all ITs, first execution happens in CI (`-DskipITs=false`); local Docker unavailable. |
+
+*(End of session 3.)*
+
+---
+
+## 🔧 HITL Review Fixes — Phases 1–5 (partial) (2026-07-02)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** 7-phase implementation plan from code review (1 BLOCKER + 21 MAJORs).
+
+### Fixes Implemented
+
+| ID | Severity | Phase | Fix |
+|----|----------|-------|-----|
+| #1 | **BLOCKER** | 1a | **Resume re-pause loop**: `checkIfPauseConversationAction` is now delta-based — only throws if the just-executed task *added* `PAUSE_CONVERSATION` (not if it was stale from the prior turn). Belt-and-braces: `Conversation.resume()` strips `PAUSE_CONVERSATION` from step ACTIONS before re-entering the pipeline. |
+| #1b | MAJOR | 1b | **Decision visibility**: Verdict stored as conversation output (`hitlDecision`) and conversation-scoped property (`hitlVerdict`) for template/behavior-rule access. REJECTED emits public output. |
+| #8 | MAJOR | 2a | **Request body validation**: Null/missing verdict → 400 on both REST surfaces (regular + group + streaming). |
+| #12 | MAJOR | 5g | **Double-approve → 409**: `GroupDiscussionException` caught and mapped to 409 Conflict (was falling through to 500). |
+| #9 | MAJOR | 3a | **Group cancel state guard**: No-token branch validates state before writing CANCELLED — terminal states (COMPLETED/CANCELLED/FAILED) cannot be overwritten. |
+| #3 | MAJOR | 3b | **Timeout rescheduling on re-pause**: Resume callable's `finally` block arms a new HITL timeout if the conversation re-paused to AWAITING_HUMAN. |
+| #5 | MAJOR | 4a | **Undo/redo gate**: Undo and redo blocked during AWAITING_HUMAN state (would corrupt the HITL bookmark). |
+
+### Test Changes
+- `pauseActionThrowsPause`: Updated for delta-based semantics (sequential mock: null → actionData)
+- `fromIndexDetectsPause` → split into `fromIndexIgnoresStaleAction` (stale action = no re-pause) + `fromIndexDetectsNewPause` (new action = re-pause)
+- New: `executeLifecycleDetectsFreshPause` — verifies fresh pause on `executeLifecycle`
+
+### Files Changed
+- `LifecycleManager.java` — Delta-based `checkIfPauseConversationAction`, unconditional `actionsBefore` snapshot
+- `Conversation.java` — `stripPauseAction` helper, decision visibility, rejection output
+- `ConversationService.java` — Undo/redo gate, timeout rescheduling on re-pause
+- `RestAgentEngine.java` — Resume body validation
+- `RestGroupConversation.java` — Approve body validation, `GroupDiscussionException` → 409
+- `GroupConversationService.java` — Cancel state guard in no-token branch
+- `LifecycleManagerHitlTest.java` — 3 new/fixed delta-based pause tests
+
+### Completed (this session)
+- Phase 2b: HitlConfig string→enum typing (HitlGranularity, HitlTimeoutPolicy, HitlRejectionPolicy)
+- Phase 3d: Discriminating status codes — cancelDiscussion exception mapping (409/404 instead of 500)
+- Phase 4b: Strict ownership + eddi-approver role for HITL endpoints (requireOwnerAdminOrApprover)
+- Phase 4d: Micrometer HITL counters (eddi_hitl_pause/resume/timeout_count with surface tag)
+- Phase 6a: Deduplicated executeLifecycle/executeLifecycleFromIndex → shared executeTaskRange()
+- Phase 7b: HitlCrashRecoveryObserver unit tests (6 tests)
+- Phase 7b: OwnershipValidator approver role tests (6 tests)
+
+---
+
+## 🔧 HITL Review Fixes — Phases 5/6: Group Correctness + Config Surface (2026-07-02)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Continuing 7-phase implementation plan — group API correctness, config surface, and architecture.
+
+### Fixes Implemented
+
+| ID | Severity | Phase | Fix |
+|----|----------|-------|-----|
+| #10 | MAJOR | 5b | **Non-EXECUTE + TASK fallback**: TASK granularity only applies to EXECUTE phases (they have a SharedTaskList). Non-EXECUTE phases (OPINION, SYNTHESIS, etc.) now fall back to PHASE-style pause. |
+| #5e | MAJOR | 5e | **Resume ordering**: Timeout schedule deleted only AFTER the CAS succeeds (both approve + reject paths). If CAS fails, schedule preserved → timeout can still fire. |
+| #5f | MAJOR | 5f | **Config drift guard**: On resume, bookmarked phase name validated against loaded config. If config was edited while paused → FAILED + ERROR transcript entry. |
+| #10 | MAJOR | 5d | **Nested group HITL guard**: Sub-group returning AWAITING_APPROVAL → SKIPPED entry instead of extracting partial answer. Nested HITL not supported in v1. |
+| #11 | MAJOR | 5c | **Timed-out task fixup**: After wave timeout, IN_PROGRESS tasks reset to ASSIGNED (prevents permanent stranding). |
+| #5a | MAJOR | 5a | **Task rejection policy**: New `onTaskRejection` field in HitlConfig (FAIL/RETRY). RETRY resets rejected tasks to ASSIGNED for re-execution. |
+| #15 | MAJOR | 4c | **Audit trail**: Audit collector added to resume path (same as say path). |
+| #6c | MINOR | 6c | **Pause reason**: `hitlPauseReason` field on GroupConversation — human-readable reason set at commitPause. |
+| #6d | MINOR | 6d | **Bookmark timeout fields**: `hitlTimeoutPolicy` + `hitlApprovalTimeout` copied from config at pause time for REST visibility. |
+
+### Files Changed
+- `GroupConversationService.java` — HITL gate type check, drift guard, resume ordering, nested guard, timeout task fixup, rejection policy, bookmark population
+- `GroupConversation.java` — 3 new bookmark fields (hitlPauseReason, hitlTimeoutPolicy, hitlApprovalTimeout)
+- `AgentGroupConfiguration.java` — `onTaskRejection` field in HitlConfig
+- `SharedTaskList.java` — `resetFromAnyToAssigned()` method for RETRY policy
+- `ConversationService.java` — Audit collector on resume path
+
+---
+
+## 🔧 HITL Framework — Cancel Path Fixes: R1 + R2 MAJORs (2026-07-01)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Final merge verdict found 2 MAJORs in cancel path — cancel-vs-pause race and CancellationException misrouting.
+
+### Fixes
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| R1 | MAJOR | **Cancel-vs-pause race**: Added `isCancelled()` guard immediately before the HITL gate. After the wave loop breaks on cancel, the HITL gate fired before the next phase-loop iteration's `shouldStop()` check, converting a cancel into a pause. Guard uses `isCancelled()` (not `shouldStop()`) so real PAUSE still routes to `commitPause`. |
+| R2 | MAJOR | **CANCEL_IMMEDIATE → FAILED**: Added explicit `CancellationException` catch in the wave `allOf.get()` handler. Forward-cancels all source agent futures (since `allOf.cancel` doesn't propagate). Both generic `catch (GroupDiscussionException)` and `catch (Exception)` now check `token.isCancelled()` and route to CANCELLED instead of FAILED. Also added source-future forward-cancel in the `ExecutionException` branch. |
+
+### Regression Test Added
+- `InFlightCancel.gracefulCancelDuringExecution` — Concurrent latch-based test: launches `discuss()` on separate thread, blocks `say()` with latch, fires `cancelDiscussion(GRACEFUL)`, asserts CANCELLED state.
+
+### Files Changed
+- `GroupConversationService.java` — R1 cancel guard before HITL gate + R2 CancellationException handling + cancel-aware generic catch blocks
+- `GroupConversationServiceHitlTest.java` — In-flight cancel test with proper agent mock wiring
+
+---
+
+## 🔧 HITL Framework — Final Ship Fix: 2 BLOCKERs + 2 MAJORs in group TASK path (2026-07-01)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Ship/no-ship verdict found 2 BLOCKERs + 2 MAJORs, all in the group TASK surface.
+
+### Fixes
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| NEW-1 | BLOCKER | **Submit gate ≠ pause gate**: `submitForApproval` now gates on `taskLevelHitl && phase.requiresApproval()`. Without both, `completeTask` is used. Prevents TASK_FORCE preset from stranding all tasks in AWAITING_APPROVAL when the phase doesn't require approval. |
+| NEW-2 | BLOCKER | **Cancel-of-paused silent no-op**: `activeTokens.remove()` is now unconditional in the `finally` block. Paused conversations have no running thread, so a lingering token caused `cancelDiscussion` to take the no-op signal branch. Resume re-registers a fresh token. |
+| NEW-3 | MAJOR | **Control token write-only**: Added `token.shouldStop()` safe-points at the top of both the phase loop and the wave loop. Registered the wave `allOf` future via `setActiveFuture()` so IMMEDIATE cancel can interrupt. |
+| AUTO_APPROVE | MAJOR | **TASK auto-approve infinite loop**: When TASK granularity + APPROVED verdict + null taskApprovals (e.g., timeout handler), `resumeDiscussion` now synthesizes APPROVED for all AWAITING_APPROVAL tasks. Previously caused infinite reschedule. |
+
+### Regression Tests Added
+- `SubmitGateAlignment` — TASK granularity + requiresApproval=false → tasks COMPLETED not stranded
+- `CancelOfPaused` — Cancel of AWAITING_APPROVAL group does DB write to CANCELLED
+- `AutoApproveTaskSynthesis` — APPROVED + TASK + null taskApprovals auto-approves all tasks
+- `TaskResumeCompletesDependent` — TASK resume re-enters same phase, clears hitlPauseType
+
+### Files Changed
+- `GroupConversationService.java` — All 4 fixes + `taskLevelHitl` local variable in `executeTaskExecutionPhase`
+- `GroupConversationServiceHitlTest.java` — 4 new regression test classes (13 → 17 tests)
+
+---
+
+## 🔧 HITL Framework — Delta Code Review Fix #2: BLOCKER + MAJORs (2026-07-01)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Delta code review identified 1 BLOCKER + 7 MAJORs + 2 MINORs in group TASK surface.
+
+### Fixes
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| BLOCKER | BLOCKER | **TASK resume index**: `resumeDiscussion` now reads `hitlPauseType` before clearing. TASK resumes at same phase (re-entry idempotent via findExecutableTasks); PHASE resumes at +1. |
+| MAJOR-1 | MAJOR | **Mutual exclusion of PHASE/TASK gates**: TASK gate fires only when `phase.requiresApproval() AND taskLevelHitl AND hasAwaitingApproval()`. PHASE gate fires only when `NOT taskLevelHitl`. Eliminates double-pause. |
+| MAJOR-2 | MAJOR | **Group timeout scheduling**: `commitPause` now creates a one-shot `IScheduleStore` schedule for group HITL timeouts (reads `approvalTimeout` + `timeoutPolicy` from group config). |
+| MAJOR-3 | MAJOR | **Schedule deletion on resume/cancel**: Added `IScheduleStore.deleteSchedulesByName()` (MongoDB + PostgreSQL). Called in `ConversationService.resumeConversation`, `cancelConversation`, `GroupConversationService.resumeDiscussion`, and `cancelDiscussion`. |
+| MAJOR-4 | MAJOR | **REJECTED branch CAS**: Rejection now uses `updateIfState(gc, AWAITING_APPROVAL)` instead of plain `update(gc)` to prevent concurrent approve clobbering reject. |
+| MAJOR-5 | MAJOR | **activeTokens lifecycle**: `executeDiscussion` now registers control token at start (`activeTokens.put`) and removes it in `finally` block when discussion truly ends (not paused). |
+| MAJOR-6 | MAJOR | **listPendingApprovals ownership filter**: `RestAgentEngine.listPendingApprovals()` now filters by caller identity. Admin sees all; non-admin sees only their conversations. Added `OwnershipValidator.isAdmin()`. |
+| MINOR-1 | MINOR | **Metrics/events guard**: `counterGroupDiscussion.increment()` and `onGroupStart` only fire when `startPhaseIndex == 0` (fresh discussion, not resume). |
+| MINOR-2 | MINOR | **Fail-closed on null owner**: Added `OwnershipValidator.requireOwnerOrAdminStrict()` for state-changing ops where null-owner resources should deny access (admin exempted). |
+
+### Files Changed
+- `GroupConversationService.java` — BLOCKER, MAJOR-1/2/3/4/5, MINOR-1 fixes
+- `ConversationService.java` — MAJOR-3 schedule deletion on resume/cancel
+- `RestAgentEngine.java` — MAJOR-6 ownership filtering
+- `IScheduleStore.java` — MAJOR-3 new `deleteSchedulesByName` API
+- `MongoScheduleStore.java` — MAJOR-3 MongoDB implementation
+- `PostgresScheduleStore.java` — MAJOR-3 PostgreSQL implementation
+- `OwnershipValidator.java` — MAJOR-6 `isAdmin()`, MINOR-2 `requireOwnerOrAdminStrict()`
+- 6 test files — Constructor updated for new `IScheduleStore` param + test fixes
+
+---
+
+## 🔁 HITL Framework — Human-in-the-Loop Pause/Resume for Conversations & Group Discussions (2026-06-30)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Plan:** `planning/hitl-framework-plan.md`
+**What changed:** Full implementation of the Human-in-the-Loop (HITL) framework enabling conversations and group discussions to pause mid-pipeline for human approval, then resume or reject.
+
+### Wave 0: Storage Primitives & Lifecycle Prerequisites
+
+1. **`IResourceStorage.storeIfFieldEquals`** — New CAS primitive for conditional updates on arbitrary JSON fields (not just `_version`). Implemented in both `MongoResourceStorage` (Filters.eq) and `PostgresResourceStorage` (`data->>?`). Used by group conversation store for atomic state transitions.
+2. **`ControlSignal` enum** — CONTINUE, CANCEL_GRACEFUL, CANCEL_IMMEDIATE, PAUSE. Used by `DiscussionControlToken` for thread-safe in-flight control.
+3. **`DiscussionControlToken`** — AtomicReference-based token shared between execution loops and external callers (cancel/pause). Includes `activeFuture` for immediate cancel interrupt.
+4. **`ConversationPauseException`** — Checked exception carrying pausedWorkflowId, absoluteTaskIndex, and reason. Mirrors `ConversationStopException` pattern.
+5. **Cancel infrastructure** — `IConversationMemory.setCancelled/isCancelled`, `GroupConversationState.CANCELLED`, `IGroupConversationStore.updateIfState/findByState`, SSE events (EVENT_CANCELLED, EVENT_AWAITING_APPROVAL, EVENT_HITL_RESUME).
+
+### Wave 1: Core HITL State Machine
+
+6. **`ConversationState.AWAITING_HUMAN`** — New state for paused conversations. Gates `say()` with "use the /resume endpoint" message.
+7. **HITL bookmark fields** — 6 fields on `ConversationMemorySnapshot` (hitlPausedWorkflowId, hitlPausedAbsoluteTaskIndex, hitlPausedAt, hitlPauseReason, hitlTimeoutPolicy, hitlApprovalTimeout) + corresponding `IConversationMemory` defaults + `ConversationMemory` implementation.
+8. **`HitlDecision`** / **`HitlTimeoutPolicy`** — Decision model (APPROVED/REJECTED + note + decidedBy) and timeout policy enum (AUTO_REJECT, AUTO_APPROVE, ABORT, WAIT_INDEFINITELY).
+9. **`LifecycleManager` extensions** — `executeLifecycleFromIndex()` for resume-from-task, `checkIfPauseConversationAction()` for PAUSE_CONVERSATION detection, cancel check in main loop.
+10. **`Conversation.resume()`** — Full resume flow: skip-before-paused-workflow → resume-from-index → run-remaining-workflows. Handles re-pause, rejected short-circuit, and finally-block with state normalization.
+
+### Wave 2: REST API & Resume Flow
+
+11. **`POST /{conversationId}/resume`** — Accepts `HitlDecision` body, CAS on AWAITING_HUMAN→IN_PROGRESS, reloads agent, submits resume via coordinator.
+12. **`GET /{conversationId}/approval-status`** — Summary or full detail of paused conversation.
+13. **`GET /pending-approvals`** — Lists all AWAITING_HUMAN conversations with PendingApprovalSummary.
+14. **`POST /{conversationId}/cancel`** — Cancels active or paused conversations.
+15. **`IConversationMemoryStore.compareAndSetState`** — Atomic CAS on conversation state for both MongoDB and PostgreSQL.
+16. **Timeout handler guard** — `waitForExecutionFinishOrTimeout` skips state overwrite when AWAITING_HUMAN (Invariant 10).
+
+### Wave 3: Group Discussion HITL
+
+17. **`GroupConversation` HITL fields** — pausedAtPhaseIndex, pausedTurnCount, pausedPhaseName, pausedAt, hitlPauseType (PHASE/TASK).
+18. **`SharedTaskList` HITL methods** — submitForApproval (IN_PROGRESS→AWAITING_APPROVAL), approveTask, rejectTask, resetToAssigned, hasAwaitingApproval.
+19. **`GroupConversationService` HITL** — cancelDiscussion (via DiscussionControlToken or direct DB), resumeDiscussion (task approvals + phase resume).
+20. **Group REST endpoints** — POST /{gcId}/cancel, POST /{gcId}/approve, POST /{gcId}/approve/stream (SSE), GET /{gcId}/approval-status.
+21. **`GroupApprovalRequest`** — REST body with HitlDecision + Map<String,String> taskApprovals for per-task verdicts.
+
+### Wave 4: Configuration, Timeout & Audit
+
+22. **`AgentConfiguration.HitlConfig`** — approvalTimeout (ISO-8601 duration), timeoutPolicy (default WAIT_INDEFINITELY).
+23. **`AgentGroupConfiguration.HitlConfig`** — Same + granularity (PHASE/TASK).
+24. **`HitlTimeoutHandler`** — @ApplicationScoped handler dispatched by ScheduleFireExecutor when hitlType=hitl_timeout schedule fires. Routes to auto-approve/reject/abort based on policy.
+25. **`ScheduleFireExecutor` integration** — Early return for hitl_timeout metadata in fire() method.
+
+### Files changed (38 total: 32 modified, 6 new)
+
+**New files:** `ControlSignal.java`, `DiscussionControlToken.java`, `ConversationPauseException.java`, `HitlDecision.java`, `HitlTimeoutPolicy.java`, `PendingApprovalSummary.java`, `GroupApprovalRequest.java`, `HitlTimeoutHandler.java`
+
+**Key invariants preserved:** (1) No typed POJOs in snapshot storage — bookmark fields are first-class. (2) Resume task index is absolute. (3) Group halt = set state + return. (4) Per-task approval detection = post-join scan. (5) Group CAS on state field. (9) Paused turns skip postConversationLifecycleTasks. (10) AWAITING_HUMAN is never overwritten by timeout handler.
+
+### Bug Fixes — Code Review Round (2026-07-01)
+
+**B1: Regular resume always landed in ERROR.** `ConversationService.resumeConversation()` set in-memory state to `IN_PROGRESS` at line 844, but `Conversation.resume()` guards `if (state != AWAITING_HUMAN) throw`. The DB CAS was correct (AWAITING_HUMAN → IN_PROGRESS), but the in-memory state loaded from the updated snapshot was already IN_PROGRESS. **Fix:** set in-memory state to `AWAITING_HUMAN` so `resume()`'s own guard passes — it does its own transition at line 459.
+
+**B2: Group discussion never paused.** `phase.requiresApproval()` / `submitForApproval()` / `hasAwaitingApproval()` had zero consumers — nothing set `AWAITING_APPROVAL`. **Fix:** Added `commitPause()` helper. After each phase completes, if `requiresApproval()` → pause. For TASK granularity, `submitForApproval()` replaces `completeTask()`, and `hasAwaitingApproval()` is checked after the join. Guarded `COMPLETED` assignment and `finally` cleanup block against AWAITING_APPROVAL state.
+
+**B3+M2: Group REST endpoints missing ownership checks (IDOR).** `cancelDiscussion`, `approveGroupPhase`, `approveGroupPhaseStreaming`, and `getGroupApprovalStatus` had no ownership validation. **Fix:** Added `validateGroupConversationOwnership()` (mirrors RestAgentEngine pattern) and `setDecidedByFromIdentity()` to all 4 endpoints.
+
+**B4: Group double-resume race.** `resumeDiscussion` used `update(gc)` — plain write. **Fix:** `updateIfState(gc, AWAITING_APPROVAL)` → `ResourceModifiedException` on concurrent resume → 409 Conflict.
+
+**M1: Timeout schedule never created.** The `HitlTimeoutHandler` consumer was wired but no producer created schedules on pause. **Fix:** Injected `IScheduleStore` + `IAgentStore` into `ConversationService`. After `storeConversationMemory` detects `AWAITING_HUMAN`, `scheduleHitlTimeout()` loads agent config, checks for `approvalTimeout` + non-WAIT_INDEFINITELY policy, and creates a one-shot schedule with `hitlType=hitl_timeout` metadata.
+
+**M3: Turn budget reset on resume.** `turnCounter` was initialized to `0` in `executeDiscussion`, and `pausedTurnCount` was reset to `0` in `resumeDiscussion`. **Fix:** Seed `turnCounter` from `gc.getPausedTurnCount()`. Don't reset `pausedTurnCount` in `resumeDiscussion` — only clear it on successful COMPLETED.
+
+**Minor: Phase resume index.** Replaced `subList` hack in `resumeDiscussion` with `startPhaseIndex` parameter on `executeDiscussion`. Uses `pausedAtPhaseIndex + 1` (paused phase already completed). Fixes absolute index corruption.
+
+**Minor: Bookmark mismatch guard.** `Conversation.resume()` silently no-oped when `pausedWorkflowId` wasn't found. Now throws `LifecycleException` with descriptive message.
+
+**Minor: SSE leak on group HITL pause.** `onHitlPause` listener in `RestGroupConversation` didn't close the SSE sink. Client connections would leak until timeout. Now calls `closeQuietly(eventSink)`.
+
+**Files changed:** `ConversationService.java`, `GroupConversationService.java`, `RestGroupConversation.java`, `Conversation.java`
 
 ---
 
@@ -370,6 +2290,13 @@ Rejected adding 5 separate tools (read_task_list, list_dynamic_agents, discuss_t
 **Files:** `README.md`, `docs/mcp-server.md`, `docs/changelog.md`
 
 ---
+
+## Refactor: Standardize backup logger fields (2026-06-23)
+
+**Repo:** EDDI (`refactor/539-logger-name`)
+**What changed:** Renamed the private logger field from `log` to `LOGGER` in the seven backup implementation classes listed in #539. The change follows the existing project convention and does not alter runtime behavior.
+
+**Files:** `RemoteApiResourceSource.java`, `RestExportService.java`, `RestImportService.java`, `SourceUrlValidator.java`, `StructuralMatcher.java`, `UpgradeExecutor.java`, `ZipResourceSource.java`, `docs/changelog.md`
 
 ## 🐛 Fix: Swagger UI CSP Regression — Duplicate Header Causes Inline Script Block (2026-06-23)
 

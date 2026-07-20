@@ -9,12 +9,14 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -55,7 +57,13 @@ class RestAgentEngineTest {
         // Default: descriptor not found → ownership check skipped gracefully
         when(descriptorStore.readDescriptor(anyString(), anyInt()))
                 .thenThrow(new ResourceNotFoundException("test default"));
-        restAgentEngine = new RestAgentEngine(conversationService, descriptorStore, identity, ownershipValidator, 30);
+        var conversationMemoryStore = mock(ai.labs.eddi.engine.memory.IConversationMemoryStore.class);
+        var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService,
+                mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
+        var conversationAccessGuard = new ConversationAccessGuard(identity, ownershipValidator, descriptorStore);
+        var hitlToolJournalStore = mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class);
+        restAgentEngine = new RestAgentEngine(conversationService, conversationMemoryStore, identity, ownershipValidator,
+                conversationAccessGuard, hitlAccessGuard, hitlToolJournalStore, 30);
     }
 
     @Nested
@@ -123,7 +131,9 @@ class RestAgentEngineTest {
             Response response = restAgentEngine.endConversation("conv-1");
 
             assertEquals(200, response.getStatus());
-            verify(conversationService).endConversation("conv-1");
+            // G4: the engine attributes the end to the calling principal (null for the
+            // unauthenticated mock identity here) via the 2-arg overload.
+            verify(conversationService).endConversation("conv-1", null);
         }
     }
 

@@ -4,7 +4,10 @@
  */
 package ai.labs.eddi.configs.mcpcalls.model;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -84,6 +87,8 @@ class McpCallsModelsTest {
         assertTrue(call.getSaveResponse()); // default true
         assertNull(call.getResponseObjectName());
         assertNull(call.getPostResponse());
+        assertFalse(call.getContinueOnError()); // default false
+        assertNull(call.getRetry()); // default null
     }
 
     @Test
@@ -104,6 +109,87 @@ class McpCallsModelsTest {
         assertEquals(1, call.getToolArguments().size());
         assertFalse(call.getSaveResponse());
         assertEquals("repos", call.getResponseObjectName());
+    }
+
+    // ==================== McpCall Error Handling Fields ====================
+
+    @Nested
+    @DisplayName("McpCall error handling fields")
+    class McpCallErrorHandlingTests {
+
+        @Test
+        @DisplayName("continueOnError defaults to false")
+        void continueOnErrorDefaultsFalse() {
+            var call = new McpCall();
+            assertFalse(call.getContinueOnError());
+        }
+
+        @Test
+        @DisplayName("continueOnError getter/setter works")
+        void continueOnErrorSetterGetter() {
+            var call = new McpCall();
+            call.setContinueOnError(true);
+            assertTrue(call.getContinueOnError());
+        }
+
+        @Test
+        @DisplayName("retry defaults to null")
+        void retryDefaultsNull() {
+            var call = new McpCall();
+            assertNull(call.getRetry());
+        }
+
+        @Test
+        @DisplayName("retry getter/setter works")
+        void retrySetterGetter() {
+            var call = new McpCall();
+            var retry = new RetryConfiguration();
+            retry.setMaxAttempts(5);
+            retry.setBackoffDelayMs(2000L);
+
+            call.setRetry(retry);
+
+            assertNotNull(call.getRetry());
+            assertEquals(5, call.getRetry().getMaxAttempts());
+            assertEquals(2000L, call.getRetry().getBackoffDelayMs());
+        }
+
+        @Test
+        @DisplayName("continueOnError survives Jackson round-trip")
+        void continueOnErrorJacksonRoundTrip() throws Exception {
+            var call = new McpCall();
+            call.setToolName("test_tool");
+            call.setContinueOnError(true);
+
+            var mapper = new ObjectMapper();
+            var json = mapper.writeValueAsString(call);
+            var deserialized = mapper.readValue(json, McpCall.class);
+
+            assertTrue(deserialized.getContinueOnError());
+        }
+
+        @Test
+        @DisplayName("retry survives Jackson round-trip")
+        void retryJacksonRoundTrip() throws Exception {
+            var call = new McpCall();
+            call.setToolName("test_tool");
+            var retry = new RetryConfiguration();
+            retry.setMaxAttempts(4);
+            retry.setBackoffDelayMs(500L);
+            retry.setBackoffMultiplier(1.5);
+            retry.setMaxBackoffDelayMs(5000L);
+            call.setRetry(retry);
+
+            var mapper = new ObjectMapper();
+            var json = mapper.writeValueAsString(call);
+            var deserialized = mapper.readValue(json, McpCall.class);
+
+            assertNotNull(deserialized.getRetry());
+            assertEquals(4, deserialized.getRetry().getMaxAttempts());
+            assertEquals(500L, deserialized.getRetry().getBackoffDelayMs());
+            assertEquals(1.5, deserialized.getRetry().getBackoffMultiplier());
+            assertEquals(5000L, deserialized.getRetry().getMaxBackoffDelayMs());
+        }
     }
 
     @Test

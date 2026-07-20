@@ -230,5 +230,50 @@ class ToolExecutionServiceBranchTest {
             assertEquals("Hello, Alice!", r1);
             assertEquals("Hello, Bob!", r2);
         }
+
+        @Test
+        @DisplayName("many tools sharing one trace must not corrupt it (thread-safety)")
+        void concurrentToolsShareTraceWithoutCorruption() throws Exception {
+            when(rateLimiter.tryAcquire("TestTool")).thenReturn(true);
+            when(cacheService.get(anyString(), anyString())).thenReturn(null);
+            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.0);
+            when(jsonSerialization.serialize(any())).thenReturn("[\"arg\"]");
+
+            TestTool tool = new TestTool();
+            Method method = TestTool.class.getMethod("greet", String.class);
+
+            // executeToolsParallel shares ONE ToolExecutionTrace across every task, and
+            // each task records into it. If the trace's recording is not synchronized,
+            // the ArrayList/HashMap inside it races: HashMap.computeIfAbsent throws
+            // ConcurrentModificationException (executeTool then returns
+            // "Error executing tool: ConcurrentModificationException"), or an ArrayList
+            // add is silently lost. One round of 2 tasks is flaky (tiny window); many
+            // rounds, each starting from a fresh empty trace whose map all tasks race to
+            // populate, makes the race reliably reproducible.
+            final int tasksPerRound = 32;
+            final int rounds = 50;
+
+            for (int round = 0; round < rounds; round++) {
+                Object[] tools = new Object[tasksPerRound];
+                Method[] methods = new Method[tasksPerRound];
+                Object[][] args = new Object[tasksPerRound][];
+                for (int i = 0; i < tasksPerRound; i++) {
+                    tools[i] = tool;
+                    methods[i] = method;
+                    args[i] = new Object[]{"u" + i};
+                }
+
+                ToolExecutionTrace trace = new ToolExecutionTrace();
+                CompletableFuture<String>[] futures = service.executeToolsParallel(tools, methods, args, "conv-1", trace);
+                CompletableFuture.allOf(futures).join();
+
+                for (int i = 0; i < tasksPerRound; i++) {
+                    assertEquals("Hello, u" + i + "!", futures[i].get(),
+                            "round " + round + ": no tool call may fail on a shared-trace race");
+                }
+                assertEquals(tasksPerRound, trace.getToolCalls().size(),
+                        "round " + round + ": every call must be recorded exactly once (no lost updates)");
+            }
+        }
     }
 }

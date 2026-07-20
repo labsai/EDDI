@@ -53,7 +53,7 @@ import java.util.*;
 @ApplicationScoped
 public class StructuralMatcher {
 
-    private static final Logger log = Logger.getLogger(StructuralMatcher.class);
+    private static final Logger LOGGER = Logger.getLogger(StructuralMatcher.class);
 
     private final IRestAgentStore agentStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
@@ -105,7 +105,7 @@ public class StructuralMatcher {
                 targetConfig = readTargetAgent(targetAgentId);
                 targetAgentName = readDescriptorName(targetAgentId);
             } catch (Exception e) {
-                log.warnf("Could not load target agent %s: %s", targetAgentId, e.getMessage());
+                LOGGER.warnf("Could not load target agent %s: %s", targetAgentId, e.getMessage());
                 // Proceed without target — all resources will be CREATE
                 targetAgentId = null;
             }
@@ -297,7 +297,7 @@ public class StructuralMatcher {
             WorkflowConfiguration config = workflowStore.readWorkflow(workflowId, version);
             return serializeSafe(config);
         } catch (Exception e) {
-            log.debugf("Could not read target workflow %s v%d: %s", workflowId, version, e.getMessage());
+            LOGGER.debugf("Could not read target workflow %s v%d: %s", workflowId, version, e.getMessage());
             return null;
         }
     }
@@ -335,11 +335,11 @@ public class StructuralMatcher {
                     result.put(stepType.toString(), new TargetExtension(
                             extResId.getId(), extResId.getVersion(), json));
                 } catch (Exception e) {
-                    log.debugf("Could not read target extension %s: %s", extUri, e.getMessage());
+                    LOGGER.debugf("Could not read target extension %s: %s", extUri, e.getMessage());
                 }
             }
         } catch (Exception e) {
-            log.debugf("Could not read target workflow config %s v%d: %s", workflowId, version, e.getMessage());
+            LOGGER.debugf("Could not read target workflow config %s v%d: %s", workflowId, version, e.getMessage());
         }
 
         return result;
@@ -381,7 +381,7 @@ public class StructuralMatcher {
                     ai.labs.eddi.configs.rag.IRestRagStore.class)
                     .readRag(resId.getId(), resId.getVersion());
             default -> {
-                log.debugf("Unknown step type for typed read: %s", stepType);
+                LOGGER.debugf("Unknown step type for typed read: %s", stepType);
                 yield null;
             }
         };
@@ -392,7 +392,7 @@ public class StructuralMatcher {
             PromptSnippet snippet = snippetStore.readSnippet(snippetId, version);
             return serializeSafe(snippet);
         } catch (Exception e) {
-            log.debugf("Could not read target snippet %s v%d: %s", snippetId, version, e.getMessage());
+            LOGGER.debugf("Could not read target snippet %s v%d: %s", snippetId, version, e.getMessage());
             return null;
         }
     }
@@ -422,11 +422,11 @@ public class StructuralMatcher {
                         nameMap.put(name, resId);
                     }
                 } catch (Exception e) {
-                    log.debugf("Could not read snippet for name map: %s", e.getMessage());
+                    LOGGER.debugf("Could not read snippet for name map: %s", e.getMessage());
                 }
             }
         } catch (Exception e) {
-            log.debugf("Could not build snippet name map: %s", e.getMessage());
+            LOGGER.debugf("Could not build snippet name map: %s", e.getMessage());
         }
         return nameMap;
     }
@@ -466,7 +466,7 @@ public class StructuralMatcher {
         try {
             return jsonSerialization.serialize(obj);
         } catch (Exception e) {
-            log.debugf("Serialization failed: %s", e.getMessage());
+            LOGGER.debugf("Serialization failed: %s", e.getMessage());
             return null;
         }
     }

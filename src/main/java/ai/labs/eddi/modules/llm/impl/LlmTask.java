@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -29,16 +30,23 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.ChatMessage;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -97,6 +105,7 @@ public class LlmTask implements ILifecycleTask {
     private final LegacyChatExecutor legacyChatExecutor;
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final AgentOrchestrator agentOrchestrator;
+    private final CascadingModelExecutor cascadingModelExecutor;
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
@@ -106,10 +115,50 @@ public class LlmTask implements ILifecycleTask {
     private final IdentityMaskingService identityMaskingService;
     private final IAttachmentStore attachmentStore;
 
+    // Field-injected so the many direct-construction unit tests are unaffected;
+    // null-guarded at the call site.
+    @Inject
+    AttachmentForwarder attachmentForwarder;
+
+    @Inject
+    AttachmentTextExtractor attachmentTextExtractor;
+
+    /**
+     * Wire the attachment services into the (constructor-built) AgentOrchestrator
+     * after CDI field injection completes, so the {@code readAttachment} tool can
+     * be offered. Skipped in direct-construction unit tests (no CDI) — the tool is
+     * simply never added there.
+     */
+    @jakarta.annotation.PostConstruct
+    void wireAttachmentServices() {
+        if (agentOrchestrator != null) {
+            agentOrchestrator.setAttachmentServices(attachmentStore, attachmentTextExtractor);
+        }
+    }
+
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
     private final IRestAgentStore restAgentStore;
     private final IRestWorkflowStore restWorkflowStore;
+
+    /**
+     * Tool-level HITL kill-switch. When false the tool-approval gate is inert
+     * (effective config forced to null) — rolling-upgrade control. Default true.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.hitl.tool.enabled", defaultValue = "true")
+    boolean toolHitlEnabled;
+
+    /**
+     * Configured cap (bytes) for serializing the frozen tool-call transcript into a
+     * {@link PendingToolCallBatch} on a HITL tool pause. Default MUST equal
+     * {@link PendingToolCallBatch#TRANSCRIPT_MAX_BYTES_DEFAULT} (2_000_000) — kept
+     * as a literal here because {@code @ConfigProperty}'s {@code defaultValue} must
+     * be a compile-time constant string.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.hitl.tool.transcript-max-bytes", defaultValue = "2000000")
+    int toolTranscriptMaxBytes;
 
     private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
@@ -130,7 +179,8 @@ public class LlmTask implements ILifecycleTask {
             ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
             MemorySnapshotService memorySnapshotService, IAttachmentStore attachmentStore,
             AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
-            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore) {
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
+            MeterRegistry meterRegistry, IHitlToolJournalStore hitlToolJournalStore) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -147,7 +197,8 @@ public class LlmTask implements ILifecycleTask {
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,
                 restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore,
                 toolResponseTruncator, tenantQuotaService, memorySnapshotService,
-                agentSetupService, capabilityRegistryService, conversationService, agentFactory, agentStore);
+                agentSetupService, capabilityRegistryService, conversationService, agentFactory, agentStore,
+                hitlToolJournalStore, conversationHistoryBuilder);
         this.ragContextProvider = ragContextProvider;
         this.tokenCounterFactory = tokenCounterFactory;
         this.apiCallExecutor = apiCallExecutor;
@@ -159,6 +210,8 @@ public class LlmTask implements ILifecycleTask {
         this.counterweightService = counterweightService;
         this.identityMaskingService = identityMaskingService;
         this.attachmentStore = attachmentStore;
+        this.cascadingModelExecutor = new CascadingModelExecutor(chatModelRegistry, globalVariableResolver, templatingEngine, legacyChatExecutor,
+                streamingLegacyChatExecutor, meterRegistry);
     }
 
     @Override
@@ -203,9 +256,40 @@ public class LlmTask implements ILifecycleTask {
                 return;
             }
 
-            for (var task : llmConfig.tasks()) {
+            // === HITL tool-pause resume detection ===
+            // A tool pause froze THIS task mid-LLM-loop. On resume, both the pending
+            // batch and the human decision are present on memory (set by
+            // Conversation.resume). We must NOT re-run the normal path for the paused
+            // task — that would re-execute RAG, preRequest property mutations, and the
+            // model call from scratch. Instead the paused task re-enters via
+            // executeResume, which replays the frozen transcript and applies the
+            // verdict; tasks BEFORE it already ran pre-pause, tasks AFTER it run the
+            // normal path so the turn completes fully.
+            PendingToolCallBatch batch = memory.getHitlPendingToolCalls();
+            HitlDecision resumeDecision = memory.getHitlResumeDecision();
+            boolean resumeMode = batch != null && resumeDecision != null;
+            int resumeIndex = resumeMode ? batch.getLlmTaskIndex() : -1;
+
+            if (resumeMode) {
+                // Same-index re-entry FIRST — deterministically, not via the loop.
+                // executeResume owns the config-drift guard (bounds + id), so it must
+                // run even when resumeIndex is out of range for the current config
+                // (redeploy) — otherwise a drifted pause would silently never clear.
+                // Tasks BEFORE resumeIndex already ran pre-pause and are skipped.
+                executeResume(memory, llmConfig, batch, resumeDecision, currentStep, templateDataObjects);
+            }
+
+            var tasks = llmConfig.tasks();
+            for (int taskIndex = 0; taskIndex < tasks.size(); taskIndex++) {
+                // In resume mode, only tasks AFTER the resumed index run the normal
+                // path so the turn completes fully; the resumed task was handled above
+                // and earlier tasks already ran pre-pause.
+                if (resumeMode && taskIndex <= resumeIndex) {
+                    continue;
+                }
+                var task = tasks.get(taskIndex);
                 if (task.getActions().contains(MATCH_ALL_OPERATOR) || task.getActions().stream().anyMatch(actions::contains)) {
-                    executeTask(memory, task, currentStep, templateDataObjects);
+                    executeTask(memory, task, currentStep, templateDataObjects, taskIndex);
                 }
             }
 
@@ -217,8 +301,22 @@ public class LlmTask implements ILifecycleTask {
     /**
      * Execute a single task — delegates to LegacyChatExecutor or AgentOrchestrator.
      */
-    private void executeTask(IConversationMemory memory, Task task, IWritableConversationStep currentStep, Map<String, Object> templateDataObjects)
+    private void executeTask(IConversationMemory memory, Task task, IWritableConversationStep currentStep, Map<String, Object> templateDataObjects,
+                             int llmTaskIndex)
             throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLlmTaskException, IOException, LifecycleException {
+
+        // === Tool-approval (tool-level HITL) effective config resolution ===
+        // Per-task override fully replaces the agent-level default (no merging). The
+        // agent default reaches memory via a transient carrier set at turn start.
+        // The feature flag lets operators disable the gate cluster-wide during a
+        // rolling upgrade — when false the effective config is treated as null
+        // (gate inert), byte-identical to the pre-HITL path.
+        ToolApprovalsConfig effectiveToolApprovals = null;
+        if (toolHitlEnabled) {
+            effectiveToolApprovals = task.getToolApprovals() != null
+                    ? task.getToolApprovals()
+                    : memory.getAgentToolApprovalsConfig();
+        }
 
         var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
 
@@ -334,15 +432,38 @@ public class LlmTask implements ILifecycleTask {
                     includeFirstAgentMessage, summaryPrefix, skipSteps);
         }
 
-        // Enhance the last user message with multimodal attachment content (images,
-        // etc.)
-        MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, attachmentStore);
+        // Forward the current step's attachments to the LLM as multimodal content,
+        // gated on the resolved (provider, model) capabilities, honoring any
+        // per-task multimodal overrides.
+        if (attachmentForwarder != null) {
+            var mm = task.getMultimodal();
+            var vision = mm != null
+                    ? ModelCapabilityService.Support.parse(mm.getVision())
+                    : ModelCapabilityService.Support.AUTO;
+            var documents = mm != null
+                    ? ModelCapabilityService.Support.parse(mm.getDocuments())
+                    : ModelCapabilityService.Support.AUTO;
+            var audio = mm != null
+                    ? ModelCapabilityService.Support.parse(mm.getAudio())
+                    : ModelCapabilityService.Support.AUTO;
+            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams),
+                    vision, documents, audio);
+        }
 
         if (messages.isEmpty()) {
             return;
         }
 
-        var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
+        // Determine whether the multi-model cascade will run. The base model is only
+        // needed outside the active-cascade branch, so create it lazily to avoid an
+        // unused model build when the cascade owns the request.
+        var cascadeConfig = task.getModelCascade();
+        boolean cascadeConfigured = cascadeConfig != null && cascadeConfig.isEnabled() && cascadeConfig.getSteps() != null
+                && !cascadeConfig.getSteps().isEmpty();
+        boolean skipCascade = cascadeConfigured && task.isAgentMode() && !cascadeConfig.isEnableInAgentMode();
+        boolean cascadeActive = cascadeConfigured && !skipCascade;
+
+        var chatModel = cascadeActive ? null : chatModelRegistry.getOrCreate(resolvedType, processedParams);
         prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 
         // Detect streaming mode — event sink is set when SSE endpoint is used
@@ -364,6 +485,8 @@ public class LlmTask implements ILifecycleTask {
         Map<String, Object> responseMetadata = new HashMap<>();
         List<Map<String, Object>> toolTrace = new ArrayList<>();
         boolean usedToolMode = false;
+        // Real model name of the cascade-selected step, for the audit ledger (#5).
+        String cascadeAuditModel = null;
 
         // Build chat messages without system message for agent mode
         // (agent orchestrator adds system message internally)
@@ -371,67 +494,103 @@ public class LlmTask implements ILifecycleTask {
                 .toList();
 
         // === Multi-Model Cascade Branch ===
-        var cascadeConfig = task.getModelCascade();
-        if (cascadeConfig != null && cascadeConfig.isEnabled() && cascadeConfig.getSteps() != null && !cascadeConfig.getSteps().isEmpty()) {
+        if (cascadeActive) {
+            boolean convertToObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+            boolean allowLiveStreaming = eventSink != null && !addToOutputExplicitlyFalse;
+            var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, systemMessage, processedParams, task, memory,
+                    agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
+                    effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
 
-            // In agent mode, cascade only runs if enableInAgentMode is true
-            boolean skipCascade = task.isAgentMode() && !cascadeConfig.isEnableInAgentMode();
+            responseContent = cascadeResult.response();
+            cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
 
-            if (!skipCascade) {
-                var cascadeResult = CascadingModelExecutor.execute(chatModelRegistry, cascadeConfig, messages, systemMessage, processedParams, task,
-                        memory, agentOrchestrator);
+            // Propagate agent result's tool trace if agent mode was used
+            if (cascadeResult.agentResult() != null) {
+                toolTrace = cascadeResult.agentResult().trace();
+                usedToolMode = true;
+            }
 
-                responseContent = cascadeResult.response();
+            // Surface real token usage + cost as response metadata (#gap: cost/token
+            // evidence). Previously the cascade discarded these, so
+            // responseMetadataObjectName yielded {}.
+            if (cascadeResult.tokenUsage() != null && !cascadeResult.tokenUsage().isEmpty()) {
+                responseMetadata.put("tokenUsage", cascadeResult.tokenUsage());
+            }
 
-                // Propagate agent result's tool trace if agent mode was used
-                if (cascadeResult.agentResult() != null) {
-                    toolTrace = cascadeResult.agentResult().trace();
-                    usedToolMode = true;
+            // Carry the winning step's validation signals through. Without these,
+            // responseValidation's onTruncation / onContentFilter / onStreamingTimeout
+            // policies are unreachable whenever the cascade is enabled — a truncated or
+            // filtered answer would reach the user even with action "error" configured.
+            var cascadeMetadata = cascadeResult.responseMetadata();
+            if (cascadeMetadata != null) {
+                if (cascadeMetadata.get("warning") != null) {
+                    responseMetadata.put("warning", cascadeMetadata.get("warning"));
                 }
+                if (cascadeMetadata.get("finishReason") != null) {
+                    responseMetadata.put("finishReason", cascadeMetadata.get("finishReason"));
+                }
+                if (Boolean.TRUE.equals(cascadeMetadata.get("streamingTimeout"))) {
+                    responseMetadata.put("streamingTimeout", true);
+                }
+            }
+            responseMetadata.put("cascadeCostUsd", cascadeResult.runCostUsd());
+            responseMetadata.put("cascadeModel", cascadeAuditModel);
+            responseMetadata.put("cascadeStep", cascadeResult.stepUsed());
+            responseMetadata.put("cascadeConfidence", cascadeResult.confidence());
 
-                // Stream final response if streaming is active and no agent result (agent mode
-                // already streams)
-                if (eventSink != null && responseContent != null && cascadeResult.agentResult() == null && !addToOutputExplicitlyFalse) {
+            // Emit the final response to the stream unless the executor already streamed
+            // it live token-by-token (legacy final-step streaming). Agent-mode results are
+            // emitted here as a single chunk, matching the standard (non-cascade) agent
+            // path.
+            if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
+                eventSink.onToken(responseContent);
+            }
+
+            // Store cascade trace for audit
+            if (!cascadeResult.trace().isEmpty()) {
+                var cascadeTraceData = dataFactory.createData(KEY_LANGCHAIN + ":cascade:trace:" + task.getId(), cascadeResult.trace());
+                currentStep.storeData(cascadeTraceData);
+            }
+
+            // Store cascade metadata in audit — real model name + provider + step + cost
+            // (#5)
+            if (memory.getAuditCollector() != null) {
+                String cascadeModelDesc = cascadeAuditModel + " (step " + cascadeResult.stepUsed() + ")";
+                currentStep.storeData(dataFactory.createData("audit:cascade_model", cascadeModelDesc));
+                currentStep.storeData(dataFactory.createData("audit:cascade_confidence", String.valueOf(cascadeResult.confidence())));
+                currentStep.storeData(dataFactory.createData("audit:cascade_cost",
+                        String.format(java.util.Locale.ROOT, "%.6f", cascadeResult.runCostUsd())));
+                if (cascadeResult.tokenUsage() != null && !cascadeResult.tokenUsage().isEmpty()) {
+                    currentStep.storeData(dataFactory.createData("audit:cascade_token_usage", cascadeResult.tokenUsage()));
+                }
+            }
+
+        } else if (skipCascade) {
+            // Agent mode with cascade disabled — use normal agent flow
+            var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
+                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
+            if (agentResult != null) {
+                responseContent = agentResult.response();
+                toolTrace = agentResult.trace();
+                usedToolMode = true;
+                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
                     eventSink.onToken(responseContent);
                 }
-
-                // Store cascade trace for audit
-                if (!cascadeResult.trace().isEmpty()) {
-                    var cascadeTraceData = dataFactory.createData(KEY_LANGCHAIN + ":cascade:trace:" + task.getId(), cascadeResult.trace());
-                    currentStep.storeData(cascadeTraceData);
-                }
-
-                // Store cascade metadata in audit
-                if (memory.getAuditCollector() != null) {
-                    var cascadeModelData = dataFactory.createData("audit:cascade_model",
-                            cascadeResult.modelType() + " (step " + cascadeResult.stepUsed() + ")");
-                    currentStep.storeData(cascadeModelData);
-                    var cascadeConfidenceData = dataFactory.createData("audit:cascade_confidence", String.valueOf(cascadeResult.confidence()));
-                    currentStep.storeData(cascadeConfidenceData);
-                }
-
             } else {
-                // Agent mode with cascade disabled — use normal agent flow
-                var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                        memory);
-                if (agentResult != null) {
-                    responseContent = agentResult.response();
-                    toolTrace = agentResult.trace();
-                    usedToolMode = true;
-                    if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
-                        eventSink.onToken(responseContent);
-                    }
-                } else {
-                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
-                    responseContent = chatResult.response();
-                    responseMetadata = chatResult.responseMetadata();
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
+                responseContent = chatResult.response();
+                responseMetadata = chatResult.responseMetadata();
+                // Forward the buffered response to the stream so an SSE client is not left
+                // empty.
+                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
+                    eventSink.onToken(responseContent);
                 }
             }
 
         } else {
             // === Standard (non-cascade) execution path ===
             var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory);
+                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
 
             if (agentResult != null) {
                 // Agent mode — tools execute synchronously, stream final response if sink
@@ -447,7 +606,9 @@ public class LlmTask implements ILifecycleTask {
                 // Legacy mode with streaming — try to get a streaming model
                 var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
                 if (streamingModel != null) {
-                    responseContent = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink);
+                    var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task);
+                    responseContent = streamingResult.response();
+                    responseMetadata.putAll(streamingResult.metadata());
                 } else {
                     // Streaming not supported by this builder — fall back to sync, emit as single
                     // chunk
@@ -465,6 +626,9 @@ public class LlmTask implements ILifecycleTask {
                 responseMetadata = chatResult.responseMetadata();
             }
         }
+
+        // === Response Validation (Phase D) ===
+        responseContent = applyResponseValidation(responseContent, responseMetadata, task, currentStep);
 
         // Store metadata if configured
         var responseMetadataObjectName = task.getResponseMetadataObjectName();
@@ -509,7 +673,10 @@ public class LlmTask implements ILifecycleTask {
                 currentStep.storeData(modelResponse);
             }
 
-            String modelName = processedParams.getOrDefault("model", task.getType());
+            // Under cascade, record the actual winning model (provider/model), not the
+            // task-level default — an auditor must be able to reconstruct which model
+            // produced the answer (#5).
+            String modelName = cascadeAuditModel != null ? cascadeAuditModel : processedParams.getOrDefault("model", task.getType());
             var modelNameData = dataFactory.createData("audit:model_name", modelName);
             currentStep.storeData(modelNameData);
         }
@@ -559,6 +726,236 @@ public class LlmTask implements ILifecycleTask {
                 // Non-fatal — conversation continues, summary will catch up next turn
             }
         }
+    }
+
+    /**
+     * Applies config-driven response validation policies. Inspects the LLM response
+     * and metadata for anomalies (empty, truncated, filtered, refused, streaming
+     * timeout) and applies the configured action.
+     *
+     * @return the (possibly modified) response content
+     */
+    private String applyResponseValidation(String responseContent, Map<String, Object> responseMetadata,
+                                           Task task, IWritableConversationStep currentStep)
+            throws LifecycleException {
+
+        ResponseValidation validation = task.getResponseValidation();
+        if (validation == null || !validation.isEnabled()) {
+            return responseContent;
+        }
+
+        String warning = responseMetadata != null ? (String) responseMetadata.get("warning") : null;
+        boolean streamingTimeout = responseMetadata != null && Boolean.TRUE.equals(responseMetadata.get("streamingTimeout"));
+
+        // 1. Empty response check
+        if (isNullOrEmpty(responseContent)) {
+            responseContent = applyValidationAction(validation.getOnEmpty(), "empty_response",
+                    "LLM returned empty response", responseContent, task, currentStep);
+        }
+
+        // 2. Truncation check (finishReason=LENGTH)
+        if ("truncated".equals(warning)) {
+            responseContent = applyValidationAction(validation.getOnTruncation(), "truncated_response",
+                    "LLM response was truncated (finishReason=LENGTH)", responseContent, task, currentStep);
+        }
+
+        // 3. Content filter check
+        if ("content_filter".equals(warning)) {
+            responseContent = applyValidationAction(validation.getOnContentFilter(), "content_filter",
+                    "LLM response was blocked by content filter", responseContent, task, currentStep);
+        }
+
+        // 4. Streaming timeout check
+        if (streamingTimeout) {
+            responseContent = applyValidationAction(validation.getOnStreamingTimeout(), "streaming_timeout",
+                    "Streaming response timed out", responseContent, task, currentStep);
+        }
+
+        // 5. Refusal heuristic — simple check for common refusal patterns
+        if (!isNullOrEmpty(responseContent)) {
+            String lower = responseContent.trim().toLowerCase();
+            if (lower.startsWith("i'm sorry, i can't") || lower.startsWith("i cannot")
+                    || lower.startsWith("i'm not able to") || lower.startsWith("as an ai")) {
+                responseContent = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
+                        "LLM response appears to be a refusal", responseContent, task, currentStep);
+            }
+        }
+
+        return responseContent;
+    }
+
+    /**
+     * Applies a single validation action.
+     *
+     * @return the (possibly modified) response content
+     */
+    private String applyValidationAction(String action, String validationType, String message,
+                                         String responseContent, Task task, IWritableConversationStep currentStep)
+            throws LifecycleException {
+
+        if (action == null || "ignore".equalsIgnoreCase(action)) {
+            return responseContent;
+        }
+
+        switch (action.toLowerCase()) {
+            case "warn" :
+                LOGGER.warnf("[ResponseValidation] %s (task=%s): %s", validationType, task.getId(), message);
+                var warnData = dataFactory.createData("llm:validation:" + validationType + ":" + task.getId(), message);
+                currentStep.storeData(warnData);
+                break;
+
+            case "fallback" :
+                String fallbackMsg = "I'm sorry, I wasn't able to generate a complete response. Please try again.";
+                LOGGER.warnf("[ResponseValidation] %s — substituting fallback (task=%s)", validationType, task.getId());
+                var fallbackData = dataFactory.createData("llm:validation:" + validationType + ":" + task.getId(),
+                        Map.of("action", "fallback", "original", responseContent != null ? responseContent : ""));
+                currentStep.storeData(fallbackData);
+                return fallbackMsg;
+
+            case "error" :
+                LOGGER.errorf("[ResponseValidation] %s — throwing error (task=%s): %s", validationType, task.getId(), message);
+                throw new LifecycleException("Response validation failed [" + validationType + "]: " + message);
+
+            default :
+                LOGGER.warnf("[ResponseValidation] Unknown action '%s' for %s, treating as 'warn'", action, validationType);
+                var unknownData = dataFactory.createData("llm:validation:" + validationType + ":" + task.getId(), message);
+                currentStep.storeData(unknownData);
+                break;
+        }
+
+        return responseContent;
+    }
+
+    /**
+     * Re-enter the paused LLM task after a HITL tool pause was resolved by a human.
+     * <p>
+     * This is the RESUME mirror of {@link #executeTask}: it rebuilds the chat model
+     * for the paused task, hands the frozen batch + human decision to
+     * {@link AgentOrchestrator#resumeToolLoop} (which replays the transcript and
+     * applies the verdicts — implemented in Task 9), then stores the final result
+     * EXACTLY like the normal path and runs {@code postResponse}.
+     * <p>
+     * <strong>Pre-LLM bypass:</strong> unlike {@code executeTask}, this method
+     * deliberately skips every side-effecting step that already ran before the
+     * pause — httpCall RAG, vector RAG, {@code preRequest} property instructions,
+     * history rebuild + multimodal enhancement, the cascade branch, and
+     * identity-masking / counterweight re-application. Those are baked into the
+     * frozen transcript; re-running them would double-execute external calls and
+     * mutate state twice.
+     */
+    private void executeResume(IConversationMemory memory, LlmConfiguration llmConfig, PendingToolCallBatch batch, HitlDecision resumeDecision,
+                               IWritableConversationStep currentStep, Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLlmTaskException, IOException, LifecycleException {
+
+        // === Task-identity binding (config-drift guard) ===
+        // The batch records the task index AND id at pause time. If the workflow/llm
+        // config was redeployed while awaiting approval, the task at that index may be
+        // gone or different. In that case we FAIL SAFE: the gated tools never ran, so
+        // we degrade gracefully — surface a clear message, clear the pause state, and
+        // let the rest of the pipeline continue. We never guess and execute.
+        int index = batch.getLlmTaskIndex();
+        var tasks = llmConfig.tasks();
+        Task task = (index >= 0 && index < tasks.size()) ? tasks.get(index) : null;
+        if (task == null || !Objects.equals(task.getId(), batch.getLlmTaskId())) {
+            clearToolPauseState(memory);
+            String driftMessage = "The pending approval could not be applied because the agent's configuration changed. "
+                    + "No gated action was executed.";
+            var driftData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":drift", driftMessage);
+            currentStep.storeData(driftData);
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(new TextOutputItem(driftMessage, 0)));
+            // Audit: no lightweight hitl.tool.* audit collector is reachable from this
+            // task (the AuditEntry record is built by LifecycleManager per-task with
+            // HMAC context we do not have here). WARN-log with a distinctive marker so
+            // operators can alert on drift; a first-class audit hook can be added later.
+            LOGGER.warnf("hitl.tool.config_drift: pending tool approval discarded for conversation '%s' — recorded task id '%s' at index %d "
+                    + "no longer matches deployed config (found '%s'). No gated action executed.",
+                    sanitize(memory.getConversationId()), batch.getLlmTaskId(), index, task != null ? task.getId() : "<out-of-bounds>");
+            return;
+        }
+
+        // === Rebuild the chat model for THIS task only (normal-path parity) ===
+        var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
+        var resolvedType = globalVariableResolver.resolveValue(task.getType());
+        var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
+
+        // === Hand off to the resume loop (Task 9) ===
+        // Pass the cluster-wide kill-switch so the continuation's gate resolution
+        // matches the live path (executeTask) — a disabled gate stays inert on resume.
+        var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision, templateDataObjects,
+                toolHitlEnabled);
+
+        String responseContent = result != null ? result.response() : null;
+        List<Map<String, Object>> toolTrace = result != null && result.trace() != null ? result.trace() : new ArrayList<>();
+
+        // === Store the result EXACTLY like the normal path (executeTask) ===
+        var responseObjectName = task.getResponseObjectName();
+        if (isNullOrEmpty(responseObjectName)) {
+            responseObjectName = task.getId();
+        }
+
+        var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), responseContent);
+        currentStep.storeData(langchainData);
+
+        if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
+            String trimmed = responseContent != null ? responseContent.trim() : "";
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                var contentAsObject = jsonSerialization.deserialize(responseContent, Map.class);
+                templateDataObjects.put(responseObjectName, contentAsObject);
+            } else {
+                LOGGER.warn("convertToObject=true but resumed LLM response is not JSON, storing as string");
+                templateDataObjects.put(responseObjectName, responseContent);
+            }
+        } else {
+            templateDataObjects.put(responseObjectName, responseContent);
+        }
+
+        // Audit keys (mirror executeTask)
+        if (memory.getAuditCollector() != null) {
+            if (responseContent != null) {
+                var modelResponse = dataFactory.createData("audit:model_response", responseContent);
+                currentStep.storeData(modelResponse);
+            }
+            String modelName = processedParams.getOrDefault("model", task.getType());
+            var modelNameData = dataFactory.createData("audit:model_name", modelName);
+            currentStep.storeData(modelNameData);
+        }
+
+        // Tool trace (mirror executeTask)
+        if (!toolTrace.isEmpty()) {
+            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(), toolTrace);
+            currentStep.storeData(traceData);
+        }
+
+        // Output add. On resume the task used tool mode (that is why it paused), so
+        // add the final response unless addToOutput was explicitly false.
+        boolean addToOutputExplicitlyFalse = "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT));
+        if (!addToOutputExplicitlyFalse) {
+            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), responseContent);
+            currentStep.storeData(outputData);
+            var outputItem = new TextOutputItem(responseContent, 0);
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+        }
+
+        // postResponse DOES run on resume — it reacts to the final response, which
+        // only exists now that the tool loop completed.
+        prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
+
+        // Batch consumed — clear the transient tool-pause state so the next turn does
+        // not re-detect resume mode.
+        clearToolPauseState(memory);
+    }
+
+    /**
+     * Nulls the transient tool-pause state on memory (pending batch, resume
+     * decision, pause type) after the batch has been consumed on resume — or when a
+     * config-drift degradation discards it. Mirrors the private clearing helper on
+     * {@code Conversation}; kept local because {@code IConversationMemory} exposes
+     * the three setters but no combined clear method.
+     */
+    private void clearToolPauseState(IConversationMemory memory) {
+        memory.setHitlPendingToolCalls(null);
+        memory.setHitlResumeDecision(null);
+        memory.setHitlPauseType(null);
     }
 
     /**
@@ -654,7 +1051,10 @@ public class LlmTask implements ILifecycleTask {
             URI uri = URI.create(uriObj.toString());
 
             try {
-                return resourceClientLibrary.getResource(uri, LlmConfiguration.class);
+                LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
+                // Fail fast on cascade misconfiguration at deploy time (#validation).
+                CascadeConfigValidator.validate(llmConfiguration);
+                return llmConfiguration;
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
                 throw new WorkflowConfigurationException(e.getLocalizedMessage(), e);

@@ -183,14 +183,55 @@ public class CreateSubAgentTool {
                     InputData inputData = new InputData();
                     inputData.setInput(initialMessage);
 
-                    CompletableFuture<String> responseFuture = new CompletableFuture<>();
+                    CompletableFuture<ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
+                    final java.util.concurrent.atomic.AtomicBoolean skipped = new java.util.concurrent.atomic.AtomicBoolean();
+
+                    // Finding H7: a busy-skip (onSkipped, e.g. IN_PROGRESS) must NOT be
+                    // treated as a fresh response — the default onSkipped→onComplete would
+                    // report the PREVIOUS turn's output as the "Initial response".
+                    // Flag the skip and discriminate below (busy vs not-active).
                     conversationService.say(DEFAULT_ENV, agentId, conversationId,
-                            false, true, null, inputData, false, snapshot -> {
-                                String text = extractResponse(snapshot);
-                                responseFuture.complete(text);
+                            false, true, null, inputData, false,
+                            new IConversationService.ConversationResponseHandler() {
+                                @Override
+                                public void onComplete(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+                                    responseFuture.complete(snapshot);
+                                }
+
+                                @Override
+                                public void onSkipped(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+                                    skipped.set(true);
+                                    responseFuture.complete(snapshot);
+                                }
                             });
 
-                    response = responseFuture.get(60, TimeUnit.SECONDS);
+                    var snapshot = responseFuture.get(60, TimeUnit.SECONDS);
+                    // Finding 25: a sub-agent that pauses for approval on its first
+                    // message must report the pending approval, not "[no response]".
+                    if (snapshot != null && snapshot.getConversationState() == ai.labs.eddi.engine.memory.model.ConversationState.AWAITING_HUMAN) {
+                        response = "PAUSED_FOR_APPROVAL: the sub-agent's conversation " + conversationId
+                                + " requires human approval before it can continue. A reviewer must decide via "
+                                + "POST /agents/" + conversationId + "/resume." + toolPauseSuffix(snapshot);
+                    } else if (skipped.get()) {
+                        // Finding H7: the initial message was dropped without being
+                        // processed (busy or no longer active) — report accurately
+                        // instead of returning the stale previous-turn output.
+                        var state = snapshot != null ? snapshot.getConversationState() : null;
+                        if (state == ai.labs.eddi.engine.memory.model.ConversationState.ENDED
+                                || state == ai.labs.eddi.engine.memory.model.ConversationState.EXECUTION_INTERRUPTED) {
+                            response = "[Sub-agent conversation " + conversationId + " is no longer active (state: "
+                                    + state + "); initial message not delivered]";
+                        } else {
+                            response = "[Sub-agent conversation " + conversationId + " is busy processing another turn; "
+                                    + "initial message not delivered — retry shortly]";
+                        }
+                    } else {
+                        response = extractResponse(snapshot);
+                    }
+                } catch (IConversationService.ConversationAwaitingApprovalException e) {
+                    response = "PAUSED_FOR_APPROVAL: the sub-agent's conversation " + conversationId
+                            + " is awaiting human approval; a reviewer must decide via POST /agents/"
+                            + conversationId + "/resume before it can continue.";
                 } catch (Exception e) {
                     LOGGER.warnf("[SUB-AGENT] Initial message failed for agent '%s': %s",
                             agentId, e.getMessage());
@@ -236,5 +277,28 @@ public class CreateSubAgentTool {
      */
     private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
         return ai.labs.eddi.engine.memory.ConversationOutputExtractor.extractResponse(snapshot);
+    }
+
+    /**
+     * Task 13 (additive): for a TOOL_CALL pause, a suffix naming the pause type and
+     * the gated tool NAMES (names ONLY — never arguments, raw or redacted). Empty
+     * for a RULE pause so the existing message shape is preserved.
+     */
+    private String toolPauseSuffix(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+        if (snapshot == null || !"TOOL_CALL".equals(snapshot.getHitlPauseType())) {
+            return "";
+        }
+        var suffix = new StringBuilder(" pauseType=TOOL_CALL.");
+        var batch = snapshot.getHitlPendingToolCalls();
+        if (batch != null && batch.getCalls() != null) {
+            var toolNames = batch.getCalls().stream()
+                    .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                    .filter(java.util.Objects::nonNull)
+                    .toList();
+            if (!toolNames.isEmpty()) {
+                suffix.append(" Gated tools: ").append(String.join(", ", toolNames)).append('.');
+            }
+        }
+        return suffix.toString();
     }
 }

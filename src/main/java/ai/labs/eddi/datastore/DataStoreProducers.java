@@ -22,6 +22,7 @@ import ai.labs.eddi.datastore.postgres.PostgresConversationMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresDatabaseLogs;
 import ai.labs.eddi.datastore.postgres.PostgresDeploymentStorage;
 import ai.labs.eddi.datastore.postgres.PostgresGlobalVariableStore;
+import ai.labs.eddi.datastore.postgres.PostgresHitlToolJournalStore;
 import ai.labs.eddi.datastore.postgres.PostgresMigrationLogStore;
 import ai.labs.eddi.datastore.postgres.PostgresMigrationManager;
 import ai.labs.eddi.datastore.postgres.PostgresResourceStorageFactory;
@@ -31,6 +32,8 @@ import ai.labs.eddi.datastore.postgres.PostgresUserMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresAgentTriggerStore;
 import ai.labs.eddi.engine.audit.AuditStore;
 import ai.labs.eddi.engine.audit.IAuditStore;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
@@ -80,6 +83,13 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IScheduleStore scheduleStore(Instance<MongoScheduleStore> mongo, Instance<PostgresScheduleStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IHitlToolJournalStore hitlToolJournalStore(Instance<HitlToolJournalStore> mongo,
+                                                      Instance<PostgresHitlToolJournalStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

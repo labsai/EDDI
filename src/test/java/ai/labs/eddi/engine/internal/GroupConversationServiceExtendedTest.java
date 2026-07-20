@@ -29,6 +29,7 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -57,6 +58,8 @@ class GroupConversationServiceExtendedTest {
     private IJsonSerialization jsonSerialization;
     private GroupConversationService service;
 
+    private ai.labs.eddi.configs.agents.IAgentStore agentStore;
+
     private static final String GROUP_ID = "test-group";
     private static final String USER_ID = "test-user";
     private static final String QUESTION = "What is the best approach?";
@@ -70,10 +73,11 @@ class GroupConversationServiceExtendedTest {
         templatingEngine = mock(ITemplatingEngine.class);
         jsonSerialization = mock(IJsonSerialization.class);
 
+        agentStore = mock(ai.labs.eddi.configs.agents.IAgentStore.class);
         service = new GroupConversationService(groupStore, conversationStore,
                 conversationService, agentFactory, templatingEngine,
                 jsonSerialization, new SimpleMeterRegistry(),
-                null, null, null, "default", 3);
+                null, agentStore, null, null, null, "default", 3);
 
         when(conversationStore.create(any())).thenReturn("gc-1");
 
@@ -587,7 +591,10 @@ class GroupConversationServiceExtendedTest {
             when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
                     .thenReturn(null);
 
-            assertThrows(GroupDiscussionException.class,
+            // executeDiscussion must surface an execution failure as
+            // GroupExecutionException
+            // (which REST maps to 5xx), not a bare GroupDiscussionException (409).
+            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException.class,
                     () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
         }
 
@@ -603,7 +610,7 @@ class GroupConversationServiceExtendedTest {
             when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
                     .thenThrow(new RuntimeException("Agent check failed"));
 
-            assertThrows(GroupDiscussionException.class,
+            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException.class,
                     () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
         }
 
@@ -652,6 +659,35 @@ class GroupConversationServiceExtendedTest {
             assertTrue(result.getTranscript().stream()
                     .anyMatch(e -> e.type() == TranscriptEntryType.SKIPPED &&
                             "a1".equals(e.speakerAgentId())));
+        }
+
+        @Test
+        void abortPolicy_agentTimesOut_throwsGroupTimeoutException() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setModeratorAgentId("mod");
+            // 1s timeout, ABORT on failure, no retries → a member timeout aborts fast.
+            cfg.setProtocol(new ProtocolConfig(1,
+                    ProtocolConfig.MemberFailurePolicy.ABORT, 0,
+                    ProtocolConfig.MemberUnavailablePolicy.SKIP));
+            setupStore(cfg);
+
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
+                    .thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("a1"), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+            // say() never invokes the response handler → the future never completes → the
+            // get(timeout) call times out, and under ABORT the round is aborted.
+            doNothing().when(conversationService).say(any(Environment.class), eq("a1"),
+                    anyString(), any(), any(), any(), any(InputData.class),
+                    anyBoolean(), any(ConversationResponseHandler.class));
+
+            // A real member-agent timeout must be a GroupTimeoutException so REST maps it
+            // to
+            // 504 (not the 502 an ordinary execution failure gets). executeDiscussion's
+            // re-wrap preserves the subtype.
+            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupTimeoutException.class,
+                    () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
         }
     }
 
@@ -770,7 +806,7 @@ class GroupConversationServiceExtendedTest {
             var svc = new GroupConversationService(groupStore, conversationStore,
                     conversationService, agentFactory, templatingEngine,
                     jsonSerialization, new SimpleMeterRegistry(),
-                    null, null, null, "default", 3);
+                    null, null, null, null, null, "default", 3);
 
             assertDoesNotThrow(svc::shutdown);
         }
@@ -1358,6 +1394,107 @@ class GroupConversationServiceExtendedTest {
             assertEquals(GroupConversationState.COMPLETED, result.getState());
             assertTrue(result.getTranscript().stream()
                     .anyMatch(e -> e.type() == TranscriptEntryType.REVISION));
+        }
+    }
+
+    // =========================================================
+    // Regression guards for bugs the direct-invocation tests could not see.
+    // Each of these was a surviving mutant: the fix could be reverted with the
+    // whole suite still green.
+    // =========================================================
+
+    @Nested
+    class MergeRegressionGuards {
+
+        @Test
+        @DisplayName("a failed discussion streams a CURATED error — never the raw exception text")
+        void failedDiscussion_doesNotLeakRawExceptionTextToTheListener() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setProtocol(new ProtocolConfig(60,
+                    ProtocolConfig.MemberFailurePolicy.SKIP, 2,
+                    ProtocolConfig.MemberUnavailablePolicy.FAIL));
+            setupStore(cfg);
+            // Agent unavailable + FAIL policy => executeDiscussion throws.
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
+                    .thenReturn(null);
+
+            var listener = mock(GroupDiscussionEventListener.class);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0, listener));
+
+            var captor = ArgumentCaptor.forClass(GroupConversationEventSink.GroupErrorEvent.class);
+            verify(listener, atLeastOnce()).onGroupError(captor.capture());
+
+            // The listener installed by RestGroupConversation forwards this text straight
+            // to the browser over SSE. The raw message can carry LLM/DB/driver detail and
+            // the caller's own input, so it must never be the event payload.
+            for (var event : captor.getAllValues()) {
+                String text = String.valueOf(event.error());
+                assertFalse(text.contains("a1"),
+                        "the SSE error event must not carry the raw exception text: " + text);
+                assertFalse(text.toLowerCase().contains("agent unavailable"),
+                        "the SSE error event must be curated, not the raw message: " + text);
+            }
+        }
+
+        @Test
+        @DisplayName("a continuation re-runs from the FIRST phase (startPhaseIndex 0), not from phase 1")
+        void continuation_restartsAtPhaseZero() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setModeratorAgentId("mod");
+            setupStore(cfg);
+            stubAgent("a1", "Opinion");
+            stubAgent("mod", "Synthesis");
+
+            var completed = new GroupConversation();
+            completed.setId("gc-1");
+            completed.setGroupId(GROUP_ID);
+            completed.setState(GroupConversation.GroupConversationState.COMPLETED);
+            completed.setRound(1);
+            when(conversationStore.read("gc-1")).thenReturn(completed);
+            when(conversationStore.compareAndSetState("gc-1",
+                    GroupConversation.GroupConversationState.COMPLETED,
+                    GroupConversation.GroupConversationState.IN_PROGRESS)).thenReturn(true);
+
+            var listener = mock(GroupDiscussionEventListener.class);
+
+            service.continueDiscussion("gc-1", "round two question", listener);
+
+            // A continuation re-runs the WHOLE protocol. If startPhaseIndex were anything
+            // but 0, phase 0 would be silently skipped and the round would be incomplete.
+            var phases = ArgumentCaptor.forClass(GroupConversationEventSink.PhaseStartEvent.class);
+            verify(listener, atLeastOnce()).onPhaseStart(phases.capture());
+            assertTrue(phases.getAllValues().stream().anyMatch(p -> p.phaseIndex() == 0),
+                    "the first phase must run on a continuation round");
+            // It is a new ROUND, not a new discussion.
+            verify(listener).onRoundStart(any(GroupConversationEventSink.RoundStartEvent.class));
+            verify(listener, never()).onGroupStart(any(GroupConversationEventSink.GroupStartEvent.class));
+        }
+
+        @Test
+        @DisplayName("ephemeral agents survive a COMPLETED round (follow-ups reuse them) but are reclaimed on failure")
+        void ephemeralCleanup_isDeferredForCompleted_butRunsOnFailure() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setModeratorAgentId("mod");
+            setupStore(cfg);
+            stubAgent("a1", "Opinion");
+            stubAgent("mod", "Synthesis");
+            // A dynamically-created agent that a follow-up/continue would want to reuse.
+            when(conversationStore.create(any())).thenAnswer(inv -> {
+                GroupConversation gc = inv.getArgument(0);
+                gc.getCreatedAgentIds().add("ephemeral-1");
+                return "gc-1";
+            });
+
+            service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            // COMPLETED must DEFER cleanup to close/delete — otherwise a follow-up or a
+            // continuation has no agents left to talk to.
+            verify(agentStore, never()).deleteAllPermanently(anyString());
         }
     }
 }

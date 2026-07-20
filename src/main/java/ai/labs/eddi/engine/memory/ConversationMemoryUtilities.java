@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSn
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -66,6 +67,14 @@ public class ConversationMemoryUtilities {
         snapshot.setAgentId(conversationMemory.getAgentId());
         snapshot.setAgentVersion(conversationMemory.getAgentVersion());
         snapshot.setConversationState(conversationMemory.getConversationState());
+        snapshot.setHitlPausedWorkflowId(conversationMemory.getHitlPausedWorkflowId());
+        snapshot.setHitlPausedAbsoluteTaskIndex(conversationMemory.getHitlPausedAbsoluteTaskIndex());
+        snapshot.setHitlPausedAt(conversationMemory.getHitlPausedAt());
+        snapshot.setHitlPauseReason(conversationMemory.getHitlPauseReason());
+        snapshot.setHitlTimeoutPolicy(conversationMemory.getHitlTimeoutPolicy());
+        snapshot.setHitlApprovalTimeout(conversationMemory.getHitlApprovalTimeout());
+        snapshot.setHitlPauseType(conversationMemory.getHitlPauseType());
+        snapshot.setHitlPendingToolCalls(conversationMemory.getHitlPendingToolCalls());
         return snapshot;
     }
 
@@ -109,6 +118,14 @@ public class ConversationMemoryUtilities {
                 snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
+        conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
+        conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());
+        conversationMemory.setHitlPausedAt(snapshot.getHitlPausedAt());
+        conversationMemory.setHitlPauseReason(snapshot.getHitlPauseReason());
+        conversationMemory.setHitlTimeoutPolicy(snapshot.getHitlTimeoutPolicy());
+        conversationMemory.setHitlApprovalTimeout(snapshot.getHitlApprovalTimeout());
+        conversationMemory.setHitlPauseType(snapshot.getHitlPauseType());
+        conversationMemory.setHitlPendingToolCalls(snapshot.getHitlPendingToolCalls());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
 
         var redoSteps = iterateRedoCache(snapshot.getRedoCache());
@@ -206,10 +223,107 @@ public class ConversationMemoryUtilities {
         simpleSnapshot.setAgentId(conversationMemorySnapshot.getAgentId());
         simpleSnapshot.setAgentVersion(conversationMemorySnapshot.getAgentVersion());
         simpleSnapshot.setConversationState(conversationMemorySnapshot.getConversationState());
+        simpleSnapshot.setHitlPausedAt(conversationMemorySnapshot.getHitlPausedAt());
+        // Task 13: carry the HITL pause type + gated tool-call batch (names-only for
+        // consumers) so delegated/MCP surfaces and the group member-turn path can
+        // additively surface a TOOL_CALL pause. Additive — RULE pauses leave these
+        // null.
+        //
+        // Fix #4 (security): the SimpleConversationMemorySnapshot is the GENERIC
+        // conversation-read DTO serialized by unauthenticated-of-pause read surfaces
+        // (MCP read_conversation, REST simple conversation log). It must expose ONLY
+        // pauseType + gated tool NAMES (+ safe per-call metadata) — never argumentsRaw,
+        // argumentsRedacted, chatTranscriptJson, traceSoFar, or fingerprint. Those stay
+        // on the FULL ConversationMemorySnapshot (the persisted shape) and the
+        // access-controlled approver-only detail=full surface. See
+        // namesOnlyPendingToolCalls below.
+        simpleSnapshot.setHitlPauseType(conversationMemorySnapshot.getHitlPauseType());
+        simpleSnapshot.setHitlPendingToolCalls(namesOnlyPendingToolCalls(conversationMemorySnapshot.getHitlPendingToolCalls()));
         simpleSnapshot.setEnvironment(conversationMemorySnapshot.getEnvironment());
         simpleSnapshot.setUndoAvailable(conversationMemorySnapshot.getConversationSteps().size() > 1);
         simpleSnapshot.setRedoAvailable(!conversationMemorySnapshot.getRedoCache().isEmpty());
         return simpleSnapshot;
+    }
+
+    /**
+     * Fix #4 (security): projects a persisted {@link PendingToolCallBatch} down to
+     * a names-only view safe for the GENERIC conversation-read DTO
+     * ({@link SimpleConversationMemorySnapshot}).
+     * <p>
+     * The persisted batch on the full {@link ConversationMemorySnapshot} carries
+     * the raw tool arguments, the frozen LLM transcript, the running trace, and the
+     * fingerprint — all required for the at-most-once resume/durability path. None
+     * of those may leak through the generic read surfaces (MCP
+     * {@code read_conversation}, REST simple conversation log), which are not gated
+     * on pause-approver identity.
+     * <p>
+     * This copy therefore carries ONLY per-call {@code callId}/{@code toolName}/
+     * {@code source}/{@code gateReason}/{@code argsTruncated} — never
+     * {@code argumentsRaw} or {@code argumentsRedacted} — and leaves
+     * {@code chatTranscriptJson}, {@code traceSoFar}, and {@code fingerprint} null.
+     * Consumers that read tool NAMES (delegated/group/MCP parity via
+     * {@code batch.getCalls().getToolName()}) keep working unchanged. Returns
+     * {@code null} when there is no batch.
+     */
+    private static PendingToolCallBatch namesOnlyPendingToolCalls(PendingToolCallBatch source) {
+        if (source == null) {
+            return null;
+        }
+
+        var projected = new PendingToolCallBatch();
+        // Keep the non-sensitive envelope metadata that identifies the pause.
+        projected.setPauseEpoch(source.getPauseEpoch());
+        projected.setLlmTaskId(source.getLlmTaskId());
+        projected.setLlmTaskIndex(source.getLlmTaskIndex());
+        projected.setWorkflowId(source.getWorkflowId());
+        projected.setTranscriptOmitted(source.isTranscriptOmitted());
+        projected.setExecutedUngatedCallNames(source.getExecutedUngatedCallNames());
+        projected.setIterationIndex(source.getIterationIndex());
+        projected.setActivatedToolNames(source.getActivatedToolNames());
+        projected.setAutoApproveCount(source.getAutoApproveCount());
+        projected.setPauseCountThisTurn(source.getPauseCountThisTurn());
+        // Deliberately NOT copied (sensitive / heavy): chatTranscriptJson, traceSoFar,
+        // fingerprint. Left null so they never reach the generic read surfaces.
+
+        if (source.getCalls() != null) {
+            var projectedCalls = new ArrayList<PendingToolCallBatch.PendingToolCall>(source.getCalls().size());
+            for (var call : source.getCalls()) {
+                if (call == null) {
+                    continue;
+                }
+                var projectedCall = new PendingToolCallBatch.PendingToolCall();
+                projectedCall.setCallId(call.getCallId());
+                projectedCall.setToolName(call.getToolName());
+                projectedCall.setSource(call.getSource());
+                projectedCall.setGateReason(call.getGateReason());
+                projectedCall.setArgsTruncated(call.isArgsTruncated());
+                // Deliberately NOT copied: argumentsRaw, argumentsRedacted.
+                projectedCalls.add(projectedCall);
+            }
+            projected.setCalls(projectedCalls);
+        }
+
+        return projected;
+    }
+
+    /**
+     * Fix (security): projects the raw {@link PendingToolCallBatch} on a snapshot
+     * returned by the GENERIC raw-read surface ({@code readRawConversationLog})
+     * down to the same names-only view the Simple projection uses — stripping
+     * {@code argumentsRaw}, {@code argumentsRedacted}, {@code chatTranscriptJson},
+     * {@code traceSoFar}, {@code fingerprint} and {@code effectiveToolApprovals}.
+     * Without this, the raw endpoint leaks unredacted tool arguments and the frozen
+     * LLM transcript of a paused conversation to any authenticated caller,
+     * defeating the approver-only {@code detail=full} gate. The persisted document
+     * is untouched; {@code loadConversationMemorySnapshot} returns a
+     * freshly-deserialized, caller-owned snapshot per call, so mutating its batch
+     * field here is safe.
+     */
+    public static ConversationMemorySnapshot redactRawPendingToolCallsForRead(ConversationMemorySnapshot snapshot) {
+        if (snapshot != null && snapshot.getHitlPendingToolCalls() != null) {
+            snapshot.setHitlPendingToolCalls(namesOnlyPendingToolCalls(snapshot.getHitlPendingToolCalls()));
+        }
+        return snapshot;
     }
 
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(IConversationMemory returnConversationMemory,

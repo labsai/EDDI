@@ -51,6 +51,18 @@ public class ConversationLogGenerator {
     }
 
     public ConversationLog generate(int logSize, boolean includeFirstAgentMessage) {
+        return generate(logSize, includeFirstAgentMessage, false);
+    }
+
+    /**
+     * @param stitchAttachmentExtracts
+     *            when {@code true} and backed by a live
+     *            {@link IConversationMemory}, the per-step attachment text extracts
+     *            ({@link MemoryKeys#ATTACHMENT_EXTRACTS}) are appended to that
+     *            turn's user input. Used only for the LLM-facing message build so
+     *            the visible transcript stays clean.
+     */
+    public ConversationLog generate(int logSize, boolean includeFirstAgentMessage, boolean stitchAttachmentExtracts) {
         if (conversationMemory == null && memorySnapshot == null) {
             throw new IllegalStateException(
                     "ConversationMemory was null. " + "You need to either set IConversationMemory or ConversationMemorySnapshot");
@@ -61,6 +73,10 @@ public class ConversationLogGenerator {
             var conversationOutputs = conversationMemory != null
                     ? conversationMemory.getConversationOutputs()
                     : memorySnapshot.getConversationOutputs();
+
+            var allSteps = (stitchAttachmentExtracts && conversationMemory != null)
+                    ? conversationMemory.getAllSteps()
+                    : null;
 
             var startIndex = 0;
             if (logSize > 0) {
@@ -89,7 +105,7 @@ public class ConversationLogGenerator {
                 if (input != null) {
                     var inputText = new Content();
                     inputText.setType(text);
-                    inputText.setValue(input);
+                    inputText.setValue(withAttachmentExtracts(allSteps, index, input));
                     var inputs = new ArrayList<>(contentList);
                     inputs.add(inputText);
                     conversationLog.getMessages().add(new ConversationPart(KEY_ROLE_USER, inputs));
@@ -127,6 +143,38 @@ public class ConversationLogGenerator {
         }
 
         return conversationLog;
+    }
+
+    /**
+     * Append the step's attachment text extracts (if any) to a turn's user input.
+     * Returns {@code input} unchanged when there is no step stack (snapshot mode),
+     * the index is out of range, or the step carries no extracts.
+     *
+     * @param allSteps
+     *            the memory's step stack aligned 1:1 with conversation outputs (may
+     *            be null)
+     * @param stepIndex
+     *            the output/step index for this turn
+     * @param input
+     *            the raw user input text
+     * @return the input, with extracts appended when present
+     */
+    public static String withAttachmentExtracts(IConversationMemory.IConversationStepStack allSteps,
+                                                int stepIndex, String input) {
+        if (allSteps == null || input == null || stepIndex < 0 || stepIndex >= allSteps.size()) {
+            return input;
+        }
+        // conversationOutputs is forward-ordered (0 = oldest) but
+        // IConversationStepStack.get()
+        // is reverse-ordered (get(0) = newest), so convert the forward output index to
+        // the
+        // reverse step index to land on the SAME turn (not its mirror).
+        IConversationMemory.IConversationStep step = allSteps.get(allSteps.size() - 1 - stepIndex);
+        IData<List<String>> data = step.getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS);
+        if (data == null || data.getResult() == null || data.getResult().isEmpty()) {
+            return input;
+        }
+        return input + "\n\n" + String.join("\n\n", data.getResult());
     }
 
     private static ContentType getContentType(String type) {

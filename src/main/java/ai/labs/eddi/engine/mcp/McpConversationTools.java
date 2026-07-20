@@ -30,8 +30,13 @@ import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.utils.LogSanitizer;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -72,13 +77,20 @@ public class McpConversationTools {
     private final IUserConversationStore userConversationStore;
     private final IRestAgentEngine restAgentEngine;
     private final SecurityIdentity identity;
+    private final ConversationAccessGuard conversationAccessGuard;
     private final boolean authEnabled;
+
+    // Field-injected per the AGENTS.md metrics pattern; the SimpleMeterRegistry
+    // default keeps it non-null in unit tests that construct this bean directly
+    // (CDI overwrites it with the real registry in production).
+    @Inject
+    MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @Inject
     public McpConversationTools(IConversationService conversationService, IRestAgentAdministration agentAdmin, IRestAgentStore agentStore,
             IRestInterfaceFactory restInterfaceFactory, IJsonSerialization jsonSerialization, BoundedLogStore boundedLogStore,
             IRestAuditStore auditStore, IRestAgentTriggerStore agentTriggerStore, IUserConversationStore userConversationStore,
-            IRestAgentEngine restAgentEngine, SecurityIdentity identity,
+            IRestAgentEngine restAgentEngine, SecurityIdentity identity, ConversationAccessGuard conversationAccessGuard,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this.conversationService = conversationService;
         this.agentAdmin = agentAdmin;
@@ -91,7 +103,21 @@ public class McpConversationTools {
         this.userConversationStore = userConversationStore;
         this.restAgentEngine = restAgentEngine;
         this.identity = identity;
+        this.conversationAccessGuard = conversationAccessGuard;
         this.authEnabled = authEnabled;
+    }
+
+    /**
+     * Uniform ownership denial for an MCP call on someone else's conversation. The
+     * message discloses neither the owner nor any conversation content and reads
+     * the same for every gated tool. It covers the ownership denial only — a
+     * genuinely missing conversation is reported by the tool's normal
+     * not-found/error path, so the two are not guaranteed to be indistinguishable.
+     */
+    private String accessDenied(String tool, String conversationId) {
+        LOGGER.infof("%s denied: caller does not own conversation %s", tool, LogSanitizer.sanitize(conversationId));
+        meterRegistry.counter("eddi.mcp.conversation.access.denied", "tool", tool).increment();
+        return errorJson("Access denied: you do not own this conversation");
     }
 
     @Tool(name = "list_agents", description = "List all deployed agents with their status, version, and name. "
@@ -134,7 +160,12 @@ public class McpConversationTools {
             return errorJson("agentId is required");
         try {
             var env = parseEnvironment(environment);
-            ConversationResult result = conversationService.startConversation(env, agentId, null, Collections.emptyMap());
+            // Stamp the caller as owner (null when authorization is disabled — the
+            // engine then assigns an anonymous id, as before). Without this, an
+            // MCP-created conversation would belong to nobody and its own creator
+            // could never read it back once the ownership gate applies.
+            String ownerUserId = conversationAccessGuard.resolveOwnerUserId(null);
+            ConversationResult result = conversationService.startConversation(env, agentId, ownerUserId, Collections.emptyMap());
             return jsonSerialization.serialize(Map.of("conversationId", result.conversationId(), "conversationUri",
                     result.conversationUri().toString(), "agentId", agentId, "environment", env.name()));
         } catch (Exception e) {
@@ -158,9 +189,36 @@ public class McpConversationTools {
         if (message == null || message.isBlank())
             return errorJson("message is required");
         try {
+            // Driving someone else's conversation is a write — gate it exactly like
+            // the REST say() does, or a viewer could inject turns into another
+            // user's conversation and read the agent's reply.
+            conversationAccessGuard.requireConversationOwner(conversationId);
+
             var snapshot = sendMessageAndWait(conversationId, message);
+
+            // Finding 25: this turn itself paused for human approval — return a
+            // structured PAUSED signal (not BUSY/error) so the MCP client can inform
+            // its user and re-invoke after a reviewer decides.
+            if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                return pausedForApprovalJson(agentId, conversationId, snapshot);
+            }
+
             var result = buildConversationResponse(snapshot, null);
             return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            return accessDenied("talk_to_agent", conversationId);
+        } catch (IConversationService.ConversationAwaitingApprovalException e) {
+            // Finding 25: already-paused at submit — say() rejects the input
+            // synchronously. Report the pending approval instead of a generic error.
+            return pausedForApprovalJson(agentId, conversationId);
+        } catch (ConversationSkippedException e) {
+            // H7: the turn was dropped without processing — report busy/not-active
+            // instead of a stale previous-turn reply.
+            if (e.state() == ConversationState.AWAITING_HUMAN) {
+                // Finding 25: queued-then-paused — a deliberate pause, not busy.
+                return pausedForApprovalJson(agentId, conversationId);
+            }
+            return skippedResultJson(conversationId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP talk_to_agent failed for Agent " + agentId + " conversation " + conversationId, e);
             return errorJson("Failed to talk to agent: " + e.getMessage());
@@ -180,18 +238,33 @@ public class McpConversationTools {
             return errorJson("agentId is required");
         if (message == null || message.isBlank())
             return errorJson("message is required");
+        // O4: hoist convId out of the try so a freshly-created conversation id is
+        // still in scope for the catch — otherwise a skip/pause after auto-creation
+        // would report the (nullable) method arg and lose the real id.
+        String convId = conversationId;
         try {
             var env = parseEnvironment(environment);
 
-            // Step 1: Create conversation if not provided
-            String convId = conversationId;
+            // Step 1: Create conversation if not provided — stamping the caller as
+            // owner. An existing conversation must instead be owned by the caller:
+            // continuing another user's conversation is a write into it.
             if (convId == null || convId.isBlank()) {
-                ConversationResult convResult = conversationService.startConversation(env, agentId, null, Collections.emptyMap());
+                String ownerUserId = conversationAccessGuard.resolveOwnerUserId(null);
+                ConversationResult convResult = conversationService.startConversation(env, agentId, ownerUserId, Collections.emptyMap());
                 convId = convResult.conversationId();
+            } else {
+                conversationAccessGuard.requireConversationOwner(convId);
             }
 
             // Step 2: Send the message
             var snapshot = sendMessageAndWait(convId, message);
+
+            // Finding 25: this turn itself paused for human approval — return a
+            // structured PAUSED signal (not BUSY/error) so the MCP client can inform
+            // its user and re-invoke after a reviewer decides.
+            if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                return pausedForApprovalJson(agentId, convId, snapshot);
+            }
 
             // Step 3: Return AI-agent-friendly summary + full snapshot
             var result = buildConversationResponse(snapshot, convId);
@@ -199,6 +272,21 @@ public class McpConversationTools {
             result.putFirst("agentId", agentId);
             result.putFirst("conversationId", convId);
             return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            return accessDenied("chat_with_agent", convId);
+        } catch (IConversationService.ConversationAwaitingApprovalException e) {
+            // Finding 25: already-paused at submit — say() rejects the input
+            // synchronously. Report the pending approval instead of a generic error.
+            return pausedForApprovalJson(agentId, convId);
+        } catch (ConversationSkippedException e) {
+            // H7: the turn was dropped without processing — report busy/not-active
+            // instead of a stale previous-turn reply. convId carries the real id even
+            // when auto-created above (O4).
+            if (e.state() == ConversationState.AWAITING_HUMAN) {
+                // Finding 25: queued-then-paused — a deliberate pause, not busy.
+                return pausedForApprovalJson(agentId, convId);
+            }
+            return skippedResultJson(convId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP chat_with_agent failed for Agent " + agentId, e);
             return errorJson("Failed to chat with agent: " + e.getMessage());
@@ -217,6 +305,8 @@ public class McpConversationTools {
                                            + "Empty = all fields.") String returningFields) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
+            conversationAccessGuard.requireConversationOwner(conversationId);
+
             boolean stepOnly = currentStepOnly != null ? currentStepOnly : true;
             boolean detailed = returnDetailed != null ? returnDetailed : false;
 
@@ -255,6 +345,8 @@ public class McpConversationTools {
             }
 
             return jsonSerialization.serialize(snapshot);
+        } catch (ForbiddenException e) {
+            return accessDenied("read_conversation", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation failed for conversation " + conversationId, e);
             return errorJson("Failed to read conversation: " + e.getMessage());
@@ -268,8 +360,12 @@ public class McpConversationTools {
                                       @ToolArg(description = "Number of recent steps to include (default: all)") Integer logSize) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
+            conversationAccessGuard.requireConversationOwner(conversationId);
+
             var result = conversationService.readConversationLog(conversationId, "text", logSize != null && logSize > 0 ? logSize : null);
             return result.content().toString();
+        } catch (ForbiddenException e) {
+            return accessDenied("read_conversation_log", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation_log failed for conversation " + conversationId, e);
             return errorJson("Failed to read conversation log: " + e.getMessage());
@@ -308,13 +404,20 @@ public class McpConversationTools {
                 return errorJson("Failed to get conversation store: " + e.getMessage());
             }
 
-            List<ConversationDescriptor> descriptors = convStore.readConversationDescriptors(0, limitInt, null, null, agentId, ver == 0 ? null : ver,
+            // Ownership filtering is enforced by the conversation store itself:
+            // RestConversationStore owner-filters this listing and back-fills the page
+            // for the caller, so a single call returns exactly the conversations this
+            // caller may see — admins (and any caller when authorization is disabled)
+            // get all, everyone else gets only their own. No MCP-side over-fetch loop
+            // is needed (and passing a row count as the store's page index over-skipped
+            // once past the first page).
+            List<ConversationDescriptor> visible = convStore.readConversationDescriptors(0, limitInt, null, null, agentId, ver == 0 ? null : ver,
                     state, null);
 
             var result = new LinkedHashMap<String, Object>();
             result.put("agentId", agentId);
-            result.put("count", descriptors.size());
-            result.put("conversations", descriptors);
+            result.put("count", visible.size());
+            result.put("conversations", visible);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_conversations failed for Agent " + agentId, e);
@@ -369,11 +472,31 @@ public class McpConversationTools {
                                 @ToolArg(description = "Filter by log level: 'ERROR', 'WARN', 'INFO', 'DEBUG' (optional)") String level,
                                 @ToolArg(description = "Maximum number of log entries to return (default: 50)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
+        // An unscoped or agent-only read pulls from a shared server-side buffer that
+        // mixes every user's workflow logs, provider errors and diagnostics — an
+        // operator surface, not one user's data. The REST log endpoint
+        // (IRestLogAdmin) is @RolesAllowed("eddi-admin") for exactly this reason;
+        // require the same here so MCP is not the more permissive door. A
+        // conversation-scoped read stays owner-or-admin (below) — BoundedLogStore
+        // filters by exact conversationId, so it returns only that conversation's
+        // lines. Gated before the try so an admin-role denial surfaces as a role
+        // error rather than the ownership "Access denied" message.
+        String convFilter = (conversationId != null && !conversationId.isBlank()) ? conversationId : null;
+        if (convFilter == null) {
+            // In addition to the eddi-viewer floor above (which every tool in this
+            // class shares); eddi-admin holders are expected to also hold eddi-viewer.
+            requireRole(identity, authEnabled, "eddi-admin");
+        }
         try {
             int limitInt = limit != null ? limit : 50;
             String agentFilter = (agentId != null && !agentId.isBlank()) ? agentId : null;
-            String convFilter = (conversationId != null && !conversationId.isBlank()) ? conversationId : null;
             String levelFilter = (level != null && !level.isBlank()) ? level.toUpperCase() : null;
+
+            // A conversation-scoped read is that one conversation's data — owner or
+            // admin only. (Unscoped/agent-only was gated to admin above.)
+            if (convFilter != null) {
+                conversationAccessGuard.requireConversationOwner(convFilter);
+            }
 
             List<LogEntry> entries = boundedLogStore.getEntries(agentFilter, convFilter, levelFilter, limitInt);
 
@@ -388,6 +511,8 @@ public class McpConversationTools {
                 result.put("level", levelFilter);
             result.put("entries", entries);
             return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            return accessDenied("read_agent_logs", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_agent_logs failed", e);
             return errorJson("Failed to read Agent logs: " + e.getMessage());
@@ -404,6 +529,10 @@ public class McpConversationTools {
         if (conversationId == null || conversationId.isBlank())
             return errorJson("conversationId is required");
         try {
+            // The audit trail carries that conversation's prompts, tool calls and
+            // costs — at least as sensitive as the transcript itself.
+            conversationAccessGuard.requireConversationOwner(conversationId);
+
             int limitInt = limit != null ? limit : 20;
             List<AuditEntry> entries = auditStore.getAuditTrail(conversationId, 0, limitInt);
 
@@ -412,6 +541,8 @@ public class McpConversationTools {
             result.put("count", entries.size());
             result.put("entries", entries);
             return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            return accessDenied("read_audit_trail", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_audit_trail failed for conversation " + conversationId, e);
             return errorJson("Failed to read audit trail: " + e.getMessage());
@@ -505,23 +636,158 @@ public class McpConversationTools {
         try {
             var env = parseEnvironment(environment);
 
+            // The userId here is a plain tool argument: without this check a caller
+            // could name any userId and take over that user's managed conversation
+            // for the intent. Admins may still act on another user's behalf.
+            userId = conversationAccessGuard.resolveOwnerUserId(userId);
+
             // Step 1: Get or create the user conversation for this intent
             var userConversation = getOrCreateManagedConversation(intent, userId, env);
+            var conversationId = userConversation.getConversationId();
 
-            // Step 2: Send the message using the existing sendMessageAndWait helper
-            var snapshot = sendMessageAndWait(userConversation.getConversationId(), message);
+            // Step 2: Send the message using the existing sendMessageAndWait helper.
+            // Finding 25: a managed conversation already paused for human approval
+            // throws synchronously — report the pending approval instead of hanging
+            // on the timeout and returning a generic error on every call. The
+            // mapping is intentionally preserved (NOT recreated) so re-invoking
+            // after approval continues the same conversation.
+            SimpleConversationMemorySnapshot snapshot;
+            try {
+                snapshot = sendMessageAndWait(conversationId, message);
+            } catch (IConversationService.ConversationAwaitingApprovalException e) {
+                return pausedForApprovalJson(intent, userId, userConversation.getAgentId(), conversationId);
+            } catch (ConversationSkippedException e) {
+                // H7: a busy-skip (AWAITING_HUMAN → pending approval; else busy /
+                // not-active). Report the accurate state — never a stale reply.
+                if (e.state() == ConversationState.AWAITING_HUMAN) {
+                    return pausedForApprovalJson(intent, userId, userConversation.getAgentId(), conversationId);
+                }
+                return skippedResultJson(conversationId, e.state());
+            }
+
+            // Finding 25: this turn itself paused for approval — same structured
+            // signal so the MCP client can inform its user and re-invoke later.
+            if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                return pausedForApprovalJson(intent, userId, userConversation.getAgentId(), conversationId, snapshot);
+            }
 
             // Step 3: Build response
-            var result = buildConversationResponse(snapshot, userConversation.getConversationId());
+            var result = buildConversationResponse(snapshot, conversationId);
             result.putFirst("intent", intent);
             result.putFirst("userId", userId);
             result.putFirst("agentId", userConversation.getAgentId());
-            result.putFirst("conversationId", userConversation.getConversationId());
+            result.putFirst("conversationId", conversationId);
             result.putFirst("environment", userConversation.getEnvironment().name());
             return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            // Two ways in: naming another user's userId, or a stale intent→conversation
+            // mapping pointing at a conversation the caller does not own (the ownership
+            // check inside getConversationState). One message covers both without
+            // disclosing which.
+            LOGGER.infof("chat_managed denied for intent %s as user %s",
+                    LogSanitizer.sanitize(intent), LogSanitizer.sanitize(userId));
+            meterRegistry.counter("eddi.mcp.conversation.access.denied", "tool", "chat_managed").increment();
+            return errorJson("Access denied: you do not own this managed conversation");
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
             return errorJson("Failed to chat via managed agent: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Structured, actionable JSON for a managed conversation awaiting human
+     * approval (finding 25). The MCP client should relay this to its user rather
+     * than retrying blindly — the pause is intentional and must not be
+     * auto-cancelled. Re-invoke {@code chat_managed} with the same intent+userId
+     * after a reviewer decides.
+     */
+    private String pausedForApprovalJson(String intent, String userId, String agentId, String conversationId) {
+        return pausedForApprovalJson(intent, userId, agentId, conversationId, null);
+    }
+
+    private String pausedForApprovalJson(String intent, String userId, String agentId, String conversationId,
+                                         SimpleConversationMemorySnapshot snapshot) {
+        var result = new LinkedHashMap<String, Object>();
+        result.put("status", "PAUSED_FOR_APPROVAL");
+        result.put("intent", intent);
+        result.put("userId", userId);
+        result.put("agentId", agentId);
+        result.put("conversationId", conversationId);
+        result.put("conversationState", ConversationState.AWAITING_HUMAN.name());
+        // Name the MCP tool that resolves this gate so an LLM client can chain the
+        // approval
+        // instead of dropping to REST. resume_conversation handles both RULE and
+        // TOOL_CALL pauses.
+        result.put("suggestNextTool", "resume_conversation");
+        // Task 13 (additive): a TOOL_CALL pause surfaces pauseType + tool NAMES.
+        addToolPauseFields(result, snapshot);
+        result.put("message", "The managed agent's conversation " + conversationId
+                + " requires human approval before it can continue. A reviewer must decide via "
+                + "POST /agents/" + conversationId + "/resume (APPROVED or REJECTED); "
+                + "re-invoke chat_managed with the same intent and userId afterwards to continue.");
+        try {
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return errorJson("Conversation " + conversationId + " is awaiting human approval");
+        }
+    }
+
+    /**
+     * Agent-scoped counterpart of the intent-scoped
+     * {@link #pausedForApprovalJson(String, String, String, String)} used by
+     * chat_managed. Reports a deliberate HITL pause for the direct
+     * agent-conversation tools (talk_to_agent / chat_with_agent) — a PAUSED signal
+     * the MCP client should relay to its user, not retry blindly. Re-invoke the
+     * same tool with the same conversationId after a reviewer decides.
+     */
+    private String pausedForApprovalJson(String agentId, String conversationId) {
+        return pausedForApprovalJson(agentId, conversationId, null);
+    }
+
+    private String pausedForApprovalJson(String agentId, String conversationId, SimpleConversationMemorySnapshot snapshot) {
+        var result = new LinkedHashMap<String, Object>();
+        result.put("status", "PAUSED_FOR_APPROVAL");
+        result.put("agentId", agentId);
+        result.put("conversationId", conversationId);
+        result.put("conversationState", ConversationState.AWAITING_HUMAN.name());
+        // Name the MCP tool that resolves this gate so an LLM client can chain the
+        // approval
+        // instead of dropping to REST. resume_conversation handles both RULE and
+        // TOOL_CALL pauses.
+        result.put("suggestNextTool", "resume_conversation");
+        // Task 13 (additive): a TOOL_CALL pause surfaces pauseType + tool NAMES.
+        addToolPauseFields(result, snapshot);
+        result.put("message", "Conversation " + conversationId
+                + " requires human approval before it can continue; resolve via POST /agents/"
+                + conversationId + "/resume (APPROVED or REJECTED), then resend.");
+        try {
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return errorJson("Conversation " + conversationId + " is awaiting human approval");
+        }
+    }
+
+    /**
+     * Task 13 (additive): when the pause is a TOOL_CALL gate, add {@code pauseType}
+     * and {@code tools} (gated tool NAMES only — never arguments, raw or redacted)
+     * to the envelope map. A RULE pause (or an absent snapshot) leaves the map
+     * unchanged, preserving the existing envelope shape and every existing field
+     * (including {@code suggestNextTool}) for backward compatibility.
+     */
+    private void addToolPauseFields(Map<String, Object> result, SimpleConversationMemorySnapshot snapshot) {
+        if (snapshot == null || !"TOOL_CALL".equals(snapshot.getHitlPauseType())) {
+            return;
+        }
+        result.put("pauseType", "TOOL_CALL");
+        var batch = snapshot.getHitlPendingToolCalls();
+        if (batch != null && batch.getCalls() != null) {
+            var toolNames = batch.getCalls().stream()
+                    .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                    .filter(java.util.Objects::nonNull)
+                    .toList();
+            if (!toolNames.isEmpty()) {
+                result.put("tools", toolNames);
+            }
         }
     }
 
@@ -599,6 +865,13 @@ public class McpConversationTools {
     /**
      * Send a message to a Agent synchronously and wait for the response. Bridges
      * the async callback pattern to a blocking call.
+     * <p>
+     * Finding H7: a busy-skip ({@code onSkipped}, e.g. IN_PROGRESS) must NOT be
+     * reported as a fresh agent response — the default onSkipped→onComplete would
+     * return the PREVIOUS turn's output as if it answered this message. On a skip
+     * we surface a {@link ConversationSkippedException} carrying the persisted
+     * state so callers can report "busy — retry" / "not active" instead of a stale
+     * reply.
      */
     private SimpleConversationMemorySnapshot sendMessageAndWait(String conversationId, String message) throws Exception {
 
@@ -608,15 +881,78 @@ public class McpConversationTools {
 
         var responseFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
 
-        conversationService.say(conversationId, false, true, Collections.emptyList(), inputData, false, snapshot -> {
-            if (snapshot != null) {
-                responseFuture.complete(snapshot);
-            } else {
-                responseFuture.completeExceptionally(new RuntimeException("Agent returned null response"));
-            }
-        });
+        conversationService.say(conversationId, false, true, Collections.emptyList(), inputData, false,
+                new IConversationService.ConversationResponseHandler() {
+                    @Override
+                    public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                        if (snapshot != null) {
+                            responseFuture.complete(snapshot);
+                        } else {
+                            responseFuture.completeExceptionally(new RuntimeException("Agent returned null response"));
+                        }
+                    }
 
-        return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    @Override
+                    public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                        ConversationState state = snapshot != null ? snapshot.getConversationState() : null;
+                        responseFuture.completeExceptionally(new ConversationSkippedException(state));
+                    }
+                });
+
+        try {
+            return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.ExecutionException e) {
+            // Unwrap the skip signal so callers can catch it directly.
+            if (e.getCause() instanceof ConversationSkippedException cse) {
+                throw cse;
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Signals that a queued {@code say} was DROPPED without processing the input
+     * (paused/busy/ended by the time the turn ran). {@code state} is the persisted
+     * conversation state at skip time (may be {@code null}). Distinguishes a
+     * dropped turn from a real response so a stale previous-turn reply is never
+     * returned.
+     */
+    private static final class ConversationSkippedException extends RuntimeException {
+        private final ConversationState state;
+
+        ConversationSkippedException(ConversationState state) {
+            super("Conversation turn was skipped (state=" + state + ")");
+            this.state = state;
+        }
+
+        ConversationState state() {
+            return state;
+        }
+    }
+
+    /**
+     * Build a "turn skipped" result for a busy/paused/not-active conversation
+     * (finding H7). AWAITING_HUMAN is handled by the caller's pause branch; here we
+     * report busy (IN_PROGRESS) vs no-longer-active (ENDED/EXECUTION_INTERRUPTED).
+     */
+    private String skippedResultJson(String conversationId, ConversationState state) {
+        var result = new LinkedHashMap<String, Object>();
+        boolean notActive = state == ConversationState.ENDED || state == ConversationState.EXECUTION_INTERRUPTED;
+        result.put("status", notActive ? "CONVERSATION_NOT_ACTIVE" : "BUSY");
+        result.put("conversationId", conversationId);
+        if (state != null) {
+            result.put("conversationState", state.name());
+        }
+        result.put("message", notActive
+                ? "Conversation " + conversationId + " is no longer active (state: " + state
+                        + "); your message was not processed."
+                : "Conversation " + conversationId + " is processing another turn; your message was "
+                        + "not processed — retry shortly.");
+        try {
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return errorJson("Conversation " + conversationId + " could not process the message right now");
+        }
     }
 
     /**

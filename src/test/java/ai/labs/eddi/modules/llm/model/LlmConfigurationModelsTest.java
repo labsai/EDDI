@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.model;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
+
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -183,7 +185,7 @@ class LlmConfigurationModelsTest {
 
         @Test
         void defaults() {
-            var rc = new LlmConfiguration.RetryConfiguration();
+            var rc = new RetryConfiguration();
             assertEquals(3, rc.getMaxAttempts());
             assertEquals(1000L, rc.getBackoffDelayMs());
             assertEquals(2.0, rc.getBackoffMultiplier());
@@ -192,7 +194,7 @@ class LlmConfigurationModelsTest {
 
         @Test
         void setters() {
-            var rc = new LlmConfiguration.RetryConfiguration();
+            var rc = new RetryConfiguration();
             rc.setMaxAttempts(5);
             rc.setBackoffDelayMs(500L);
             rc.setBackoffMultiplier(1.5);

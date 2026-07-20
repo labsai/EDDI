@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import io.quarkus.arc.DefaultBean;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -36,6 +37,8 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 @ApplicationScoped
 @DefaultBean
 public class PostgresConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
+
+    private static final Logger LOGGER = Logger.getLogger(PostgresConversationMemoryStore.class);
 
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS conversation_memories (
@@ -120,8 +123,45 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public boolean storeConversationMemorySnapshotIfState(ConversationMemorySnapshot snapshot, ConversationState expectedState)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String conversationId = snapshot.getConversationId();
+        if (conversationId == null || expectedState == null) {
+            // A conditional store only makes sense against an existing row with a known
+            // expected state. expectedState can be null when the caller derives it from
+            // a live lookup (say-path preTurnPersistedState, undo/redo loaded state) and
+            // the row was deleted concurrently — treat as a CAS miss, not an NPE at
+            // expectedState.name().
+            return false;
+        }
+        try {
+            String json = jsonSerialization.serialize(snapshot);
+            // Atomic compare-and-store: the WHERE guards the state column (the CAS
+            // arbiter, see compareAndSetState), so a concurrent terminal writer that
+            // moved the row off expectedState is not overwritten.
+            String sql = """
+                    UPDATE conversation_memories
+                    SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = ?::jsonb
+                    WHERE id = ?::uuid AND conversation_state = ?
+                    """;
+            try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, snapshot.getAgentId());
+                ps.setInt(2, snapshot.getAgentVersion());
+                ps.setString(3, snapshot.getConversationState() != null ? snapshot.getConversationState().name() : "IN_PROGRESS");
+                ps.setString(4, json);
+                ps.setString(5, conversationId);
+                ps.setString(6, expectedState.name());
+                return ps.executeUpdate() > 0;
+            }
+        } catch (IOException | SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to conditionally store conversation memory", e);
+        }
+    }
+
+    @Override
     public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) {
-        String sql = "SELECT data FROM conversation_memories WHERE id = ?::uuid";
+        String sql = "SELECT conversation_state, data FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -129,6 +169,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                     ConversationMemorySnapshot snapshot = jsonSerialization.deserialize(rs.getString("data"), ConversationMemorySnapshot.class);
                     fixContextTypes(snapshot);
                     snapshot.setConversationId(conversationId);
+                    applyStateColumn(snapshot, rs.getString("conversation_state"));
                     return snapshot;
                 }
                 return null;
@@ -142,7 +183,8 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     public List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        String sql = "SELECT data FROM conversation_memories " + "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
+        String sql = "SELECT conversation_state, data FROM conversation_memories "
+                + "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agentId);
             ps.setInt(2, agentVersion);
@@ -150,7 +192,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             try (ResultSet rs = ps.executeQuery()) {
                 List<ConversationMemorySnapshot> results = new ArrayList<>();
                 while (rs.next()) {
-                    results.add(jsonSerialization.deserialize(rs.getString("data"), ConversationMemorySnapshot.class));
+                    ConversationMemorySnapshot snapshot = jsonSerialization.deserialize(rs.getString("data"), ConversationMemorySnapshot.class);
+                    applyStateColumn(snapshot, rs.getString("conversation_state"));
+                    results.add(snapshot);
                 }
                 return results;
             }
@@ -159,13 +203,33 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         }
     }
 
+    /**
+     * The indexed {@code conversation_state} column is the single source of truth
+     * for the state: CAS transitions ({@link #compareAndSetState}) and
+     * {@link #setConversationState} update the column, while the JSONB document
+     * still carries the state it had when the full snapshot was last stored.
+     * Loading MUST reconcile the two, or a cancelled/timed-out pause keeps
+     * reporting AWAITING_HUMAN from the stale document — wedging say() and
+     * resurrecting terminated approvals (parity with MongoDB, where the state lives
+     * once in the document the codec reads).
+     */
+    private static void applyStateColumn(ConversationMemorySnapshot snapshot, String stateColumn) {
+        if (stateColumn != null) {
+            snapshot.setConversationState(ConversationState.valueOf(stateColumn));
+        }
+    }
+
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
         ensureSchema();
-        String sql = "UPDATE conversation_memories SET conversation_state = ? WHERE id = ?::uuid";
+        // Patch the JSONB copy of the state along with the column so direct
+        // document readers can never observe the pre-transition state.
+        String sql = "UPDATE conversation_memories SET conversation_state = ?, "
+                + "data = jsonb_set(data, '{conversationState}', to_jsonb(?::text)) WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationState.name());
-            ps.setString(2, conversationId);
+            ps.setString(2, conversationState.name());
+            ps.setString(3, conversationId);
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to set conversation state", e);
@@ -204,11 +268,15 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     @Override
     public Long getActiveConversationCount(String agentId, Integer agentVersion) {
         ensureSchema();
-        String sql = "SELECT COUNT(*) FROM conversation_memories " + "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
+        // Plan §10(a): AWAITING_HUMAN does not count as active (mirrors the Mongo
+        // store) — otherwise a forgotten approval blocks undeploy/GC forever.
+        String sql = "SELECT COUNT(*) FROM conversation_memories "
+                + "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state NOT IN (?, ?)";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agentId);
             ps.setInt(2, agentVersion);
             ps.setString(3, ENDED.toString());
+            ps.setString(4, ConversationState.AWAITING_HUMAN.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);
@@ -233,6 +301,168 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to list ended conversations", e);
+        }
+    }
+
+    @Override
+    public boolean compareAndSetState(String conversationId, ConversationState expected, ConversationState target)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        // Column is the CAS arbiter; the JSONB copy is patched in the same
+        // statement so document and column can never diverge on this transition.
+        String sql = "UPDATE conversation_memories SET conversation_state = ?, "
+                + "data = jsonb_set(data, '{conversationState}', to_jsonb(?::text)) "
+                + "WHERE id = ?::uuid AND conversation_state = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, target.name());
+            ps.setString(2, target.name());
+            ps.setString(3, conversationId);
+            ps.setString(4, expected.name());
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to compare-and-set conversation state", e);
+        }
+    }
+
+    @Override
+    public List<String> findConversationIdsByState(ConversationState state) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "SELECT id FROM conversation_memories WHERE conversation_state = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, state.name());
+            try (ResultSet rs = ps.executeQuery()) {
+                List<String> ids = new ArrayList<>();
+                while (rs.next()) {
+                    ids.add(rs.getString("id"));
+                }
+                return ids;
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to find conversations by state", e);
+        }
+    }
+
+    @Override
+    public void clearHitlBookmark(String conversationId) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        // Terminal cleanup must also drop the tool-level HITL fields so no stale
+        // hitlPauseType / pending batch lingers on an ended or cancelled document.
+        String sql = "UPDATE conversation_memories SET data = data "
+                + "- 'hitlPausedWorkflowId' - 'hitlPausedAbsoluteTaskIndex' - 'hitlPausedAt' "
+                + "- 'hitlPauseReason' - 'hitlTimeoutPolicy' - 'hitlApprovalTimeout' "
+                + "- 'hitlPauseType' - 'hitlPendingToolCalls' "
+                + "WHERE id = ?::uuid";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to clear HITL bookmark", e);
+        }
+    }
+
+    /**
+     * Projected columns for pending-approval summaries — never the full document.
+     * {@code hitlPendingToolCalls} is projected as JSON text and reduced to tool
+     * NAMES ONLY in {@link #readPendingSummaries} — arguments never leave the
+     * database for this bulk listing.
+     */
+    private static final String PENDING_SUMMARY_SELECT = "SELECT id, AGENT_ID, data->>'userId' AS user_id, data->'hitlPausedAt' AS paused_at_json, "
+            + "data->>'hitlPauseReason' AS pause_reason, data->>'hitlTimeoutPolicy' AS timeout_policy, "
+            + "data->>'hitlApprovalTimeout' AS approval_timeout, data->>'hitlPauseType' AS pause_type, "
+            + "data->'hitlPendingToolCalls'->'calls' AS pending_calls_json "
+            + "FROM conversation_memories WHERE conversation_state = ?";
+
+    @Override
+    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        // Single bounded query with JSONB field extraction — this listing is
+        // polled and backs the crash-recovery sweep; deserializing full multi-MB
+        // documents here violates the interface's projection contract.
+        String sql = PENDING_SUMMARY_SELECT + " LIMIT ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, ConversationState.AWAITING_HUMAN.name());
+            ps.setInt(2, limit);
+            return readPendingSummaries(ps);
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to list pending approvals", e);
+        }
+    }
+
+    @Override
+    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(String ownerUserId, int limit)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        // Owner filter INSIDE the query: the limit applies after the restriction,
+        // so a user's inbox is complete even behind a large global backlog.
+        String sql = PENDING_SUMMARY_SELECT + " AND data->>'userId' = ? LIMIT ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, ConversationState.AWAITING_HUMAN.name());
+            ps.setString(2, ownerUserId);
+            ps.setInt(3, limit);
+            return readPendingSummaries(ps);
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to list pending approvals for owner", e);
+        }
+    }
+
+    private List<ai.labs.eddi.engine.model.PendingApprovalSummary> readPendingSummaries(PreparedStatement ps)
+            throws SQLException {
+        List<ai.labs.eddi.engine.model.PendingApprovalSummary> out = new ArrayList<>();
+        try (ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                String id = rs.getString("id");
+                var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                        id, rs.getString("AGENT_ID"), rs.getString("user_id"),
+                        parseInstantJson(id, rs.getString("paused_at_json")),
+                        rs.getString("pause_reason"), rs.getString("timeout_policy"));
+                summary.setApprovalTimeout(rs.getString("approval_timeout"));
+                summary.setPauseType(rs.getString("pause_type"));
+                summary.setToolNames(parsePendingToolNamesJson(id, rs.getString("pending_calls_json")));
+                out.add(summary);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Deserializes the raw JSON value of {@code hitlPausedAt} ({@code data->},
+     * keeping the JSON representation) through the SAME mapper that serialized the
+     * snapshot — correct for both ISO-string and numeric-timestamp configurations.
+     */
+    private java.time.Instant parseInstantJson(String conversationId, String rawJson) {
+        if (rawJson == null || rawJson.isBlank() || "null".equals(rawJson)) {
+            return null;
+        }
+        try {
+            return jsonSerialization.deserialize(rawJson, java.time.Instant.class);
+        } catch (Exception e) {
+            LOGGER.warnf("Unparseable hitlPausedAt for conversation %s: %s", conversationId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Reduces the JSON array projected from {@code hitlPendingToolCalls.calls} to
+     * tool NAMES ONLY — never deserializes {@code argumentsRaw}/
+     * {@code argumentsRedacted} into memory for this bulk listing.
+     */
+    private List<String> parsePendingToolNamesJson(String conversationId, String rawJson) {
+        if (rawJson == null || rawJson.isBlank() || "null".equals(rawJson)) {
+            return null;
+        }
+        try {
+            var calls = jsonSerialization.deserialize(rawJson,
+                    ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall[].class);
+            if (calls == null) {
+                return null;
+            }
+            return java.util.Arrays.stream(calls)
+                    .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                    .toList();
+        } catch (Exception e) {
+            LOGGER.warnf("Unparseable hitlPendingToolCalls for conversation %s: %s", conversationId, e.getMessage());
+            return null;
         }
     }
 

@@ -88,13 +88,24 @@ class LegacyChatExecutor {
             messageResponse = AgentExecutionHelper.executeChatWithRetry(chatModel, messages, task);
         }
 
-        var responseContent = messageResponse.aiMessage().text();
+        var aiMessage = messageResponse.aiMessage();
+        var responseContent = aiMessage != null ? aiMessage.text() : null;
 
         Map<String, Object> responseMetadata = new HashMap<>();
         var metadata = messageResponse.metadata();
         if (metadata != null) {
             if (metadata.finishReason() != null) {
-                responseMetadata.put("finishReason", metadata.finishReason().toString());
+                var finishReason = metadata.finishReason().toString();
+                responseMetadata.put("finishReason", finishReason);
+
+                // Flag non-normal finish reasons for downstream validation
+                if ("CONTENT_FILTER".equalsIgnoreCase(finishReason)) {
+                    responseMetadata.put("warning", "content_filter");
+                    LOGGER.warnf("LLM response was filtered by content policy (finishReason=%s)", finishReason);
+                } else if ("LENGTH".equalsIgnoreCase(finishReason)) {
+                    responseMetadata.put("warning", "truncated");
+                    LOGGER.warnf("LLM response was truncated due to token limit (finishReason=%s)", finishReason);
+                }
             }
             if (metadata.tokenUsage() != null) {
                 responseMetadata.put("tokenUsage", Map.of("inputTokens", metadata.tokenUsage().inputTokenCount(), "outputTokens",

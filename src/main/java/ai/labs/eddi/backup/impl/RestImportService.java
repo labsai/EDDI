@@ -103,7 +103,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final StructuralMatcher structuralMatcher;
     private final UpgradeExecutor upgradeExecutor;
 
-    private static final Logger log = Logger.getLogger(RestImportService.class);
+    private static final Logger LOGGER = Logger.getLogger(RestImportService.class);
 
     @Inject
     public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization,
@@ -146,7 +146,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // Wait for all deployments to complete
             CompletableFuture.allOf(deploymentFutures.toArray(new CompletableFuture[0])).join();
 
-            log.info("Imported & Deployed Initial Agents");
+            LOGGER.info("Imported & Deployed Initial Agents");
             return restAgentAdministration.getDeploymentStatuses(production);
         } catch (IOException e) {
             throw sneakyThrow(e);
@@ -226,7 +226,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
             return new ImportPreview(null, null, null, null, List.of());
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Preview failed: " + e.getMessage(), e);
         }
     }
@@ -294,12 +294,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                     null, null, null, -1));
                         }
                     } catch (Exception e) {
-                        log.debugf("Could not preview snippet %s: %s", snippetFilePath.getFileName(), e.getMessage());
+                        LOGGER.debugf("Could not preview snippet %s: %s", snippetFilePath.getFileName(), e.getMessage());
                     }
                 }
             }
         } catch (Exception e) {
-            log.debugf("Could not scan snippets for preview: %s", e.getMessage());
+            LOGGER.debugf("Could not scan snippets for preview: %s", e.getMessage());
         }
     }
 
@@ -315,7 +315,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            log.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
+            LOGGER.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
         }
 
         // Fallback: try by resource ID directly (handles export→re-import round-trip
@@ -333,7 +333,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-            log.debugf("Fallback resource ID lookup for '%s' not found: %s", originId, e.getMessage());
+            LOGGER.debugf("Fallback resource ID lookup for '%s' not found: %s", originId, e.getMessage());
         }
 
         return new ResourceDiff(originId, resourceType, name, DiffAction.CREATE, null, null, null, null, null, -1);
@@ -374,8 +374,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             boolean isMerge = STRATEGY_MERGE.equalsIgnoreCase(strategy);
 
             return importAgentZipFile(zippedAgentConfigFiles, targetDir, isMerge, selectedSet);
+        } catch (IllegalArgumentException e) {
+            // Config validation failure (e.g. invalid hitlConfig) → 400 via the
+            // IllegalArgumentExceptionMapper, not a 500.
+            throw e;
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getMessage(), e);
         }
     }
@@ -413,6 +417,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     agentFileString = normalizeVaultReferences(agentFileString);
 
                     AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
+
+                    // Reject an invalid HITL config BEFORE importing workflows —
+                    // otherwise the store-level validation only fires at agent
+                    // creation, after all extensions already landed (partial
+                    // import), and surfaced as a 500 instead of a 400.
+                    ai.labs.eddi.configs.hitl.HitlConfigValidation.validate(agentConfig.getHitlConfig());
+
                     agentConfig.getWorkflows()
                             .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet));
 
@@ -430,12 +441,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                     lastAgentUri = newAgentUri;
                 } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException e) {
-                    log.error(e.getLocalizedMessage(), e);
+                    LOGGER.error(e.getLocalizedMessage(), e);
                     throw new InternalServerErrorException(e.getLocalizedMessage(), e);
                 }
             }
         }
-        log.infof("Import complete: lastAgentUri=%s", lastAgentUri);
+        LOGGER.infof("Import complete: lastAgentUri=%s", lastAgentUri);
         if (lastAgentUri != null) {
             // Use manual .header("Location", ...) instead of Response.created(URI)
             // because Response.created() validates the URI scheme and may strip eddi://
@@ -568,7 +579,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 .collect(Collectors.toList()));
 
                     } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException | CallbackMatcher.CallbackMatcherException e) {
-                        log.error(e.getLocalizedMessage(), e);
+                        LOGGER.error(e.getLocalizedMessage(), e);
                         throw new InternalServerErrorException(e.getMessage(), e);
                     }
                 });
@@ -576,7 +587,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             }
 
         } catch (IOException e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getMessage(), e);
         }
     }
@@ -659,7 +670,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 return existing.getFirst().getResource();
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            log.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
+            LOGGER.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
         }
 
         // Fallback: try by resource ID directly (handles export→re-import round-trip
@@ -673,7 +684,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-            log.debugf("Fallback resource ID lookup for '%s' not found: %s", originId, e.getMessage());
+            LOGGER.debugf("Fallback resource ID lookup for '%s' not found: %s", originId, e.getMessage());
         }
         return null;
     }
@@ -734,7 +745,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
         } catch (Exception e) {
-            log.warn("Could not set originId on descriptor for " + resourceUri + ": " + e.getMessage());
+            LOGGER.warn("Could not set originId on descriptor for " + resourceUri + ": " + e.getMessage());
         }
     }
 
@@ -934,17 +945,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 Response updateResp = restSnippetStore.updateSnippet(
                                         localResId.getId(), localResId.getVersion(), snippet);
                                 if (updateResp.getStatus() == 200) {
-                                    log.debugf("Updated existing snippet '%s' (id=%s, v=%d)",
+                                    LOGGER.debugf("Updated existing snippet '%s' (id=%s, v=%d)",
                                             snippetName, localResId.getId(), localResId.getVersion());
                                     importedCount++;
                                     continue;
                                 }
                                 // Update failed (e.g., version conflict) — fall through to create
-                                log.warnf("Update failed for snippet '%s' (status=%d), creating new",
+                                LOGGER.warnf("Update failed for snippet '%s' (status=%d), creating new",
                                         snippetName, updateResp.getStatus());
                             } else {
                                 // Create strategy: snippet already exists globally, skip to avoid duplicates
-                                log.debugf("Snippet '%s' already exists, skipping (create strategy)", snippetName);
+                                LOGGER.debugf("Snippet '%s' already exists, skipping (create strategy)", snippetName);
                                 skippedCount++;
                                 continue;
                             }
@@ -954,17 +965,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         Response createResp = restSnippetStore.createSnippet(snippet);
                         checkIfCreatedResponse(createResp);
                         importedCount++;
-                        log.debugf("Created new snippet '%s'", snippetName);
+                        LOGGER.debugf("Created new snippet '%s'", snippetName);
                     } catch (Exception e) {
-                        log.warnf("Failed to import snippet from %s: %s", snippetFilePath, e.getMessage());
+                        LOGGER.warnf("Failed to import snippet from %s: %s", snippetFilePath, e.getMessage());
                     }
                 }
                 if (importedCount > 0 || skippedCount > 0) {
-                    log.infof("Snippets: imported %d, skipped %d (already exist)", importedCount, skippedCount);
+                    LOGGER.infof("Snippets: imported %d, skipped %d (already exist)", importedCount, skippedCount);
                 }
             }
         } catch (Exception e) {
-            log.warnf("Failed to import snippets: %s", e.getMessage());
+            LOGGER.warnf("Failed to import snippets: %s", e.getMessage());
         }
     }
 
@@ -992,11 +1003,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         nameMap.put(existing.getName(), resourceId);
                     }
                 } catch (Exception e) {
-                    log.debugf("Could not load snippet for dedup: %s", e.getMessage());
+                    LOGGER.debugf("Could not load snippet for dedup: %s", e.getMessage());
                 }
             }
         } catch (Exception e) {
-            log.warnf("Could not build snippet name map: %s", e.getMessage());
+            LOGGER.warnf("Could not build snippet name map: %s", e.getMessage());
         }
         return nameMap;
     }
@@ -1028,7 +1039,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
         } catch (IOException e) {
-            log.debug("Error searching for snippets directory: " + e.getMessage());
+            LOGGER.debug("Error searching for snippets directory: " + e.getMessage());
         }
         return null;
     }
@@ -1098,7 +1109,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     }
                 }
             } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException e) {
-                log.error(e.getLocalizedMessage(), e);
+                LOGGER.error(e.getLocalizedMessage(), e);
             }
         });
     }
@@ -1176,11 +1187,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                 return jsonSerialization.deserialize(resourceContent, clazz);
             } catch (Exception e) {
-                log.error(e.getLocalizedMessage());
-                log.error(String.format("uri is: %s", uri));
-                log.error(String.format("workflowPath is: %s", workflowPath));
-                log.error(String.format("resourcePath is: %s", resourcePath));
-                log.error(String.format("resourceContent is:\n%s", resourceContent));
+                LOGGER.error(e.getLocalizedMessage());
+                LOGGER.error(String.format("uri is: %s", uri));
+                LOGGER.error(String.format("workflowPath is: %s", workflowPath));
+                LOGGER.error(String.format("resourcePath is: %s", resourcePath));
+                LOGGER.error(String.format("resourceContent is:\n%s", resourceContent));
                 return null;
             }
         }).collect(Collectors.toList());
@@ -1206,7 +1217,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private void checkIfCreatedResponse(Response response) {
         int status = response.getStatus();
         if (status != 201) {
-            log.error(String.format("Http Response Code was not 201 when attempting resource creation, but %s", status));
+            LOGGER.error(String.format("Http Response Code was not 201 when attempting resource creation, but %s", status));
         }
     }
 
@@ -1220,7 +1231,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             ZipResourceSource source = new ZipResourceSource(targetDir.toPath(), jsonSerialization);
             return structuralMatcher.buildPreview(source, targetAgentId, true);
         } catch (Exception e) {
-            log.error("Upgrade preview failed: " + e.getMessage(), e);
+            LOGGER.error("Upgrade preview failed: " + e.getMessage(), e);
             throw new InternalServerErrorException("Upgrade preview failed: " + e.getMessage(), e);
         }
     }
@@ -1239,7 +1250,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return Response.status(Response.Status.CREATED)
                     .header("Location", resultUri.toString()).build();
         } catch (Exception e) {
-            log.error("Upgrade from ZIP failed: " + e.getMessage(), e);
+            LOGGER.error("Upgrade from ZIP failed: " + e.getMessage(), e);
             throw new InternalServerErrorException("Upgrade failed: " + e.getMessage(), e);
         }
     }
@@ -1273,7 +1284,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try {
             return RemoteApiResourceSource.listRemoteAgentDescriptors(sourceUrl, sourceAuth, jsonSerialization);
         } catch (Exception e) {
-            log.errorf("Failed to list remote agents from %s: %s", sourceUrl, e.getMessage());
+            LOGGER.errorf("Failed to list remote agents from %s: %s", sourceUrl, e.getMessage());
             throw new InternalServerErrorException("Failed to connect to remote instance: " + e.getMessage(), e);
         }
     }
@@ -1285,7 +1296,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try (var source = new RemoteApiResourceSource(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
             return structuralMatcher.buildPreview(source, targetAgentId, true);
         } catch (Exception e) {
-            log.errorf("Sync preview failed for agent %s from %s: %s", sourceAgentId, sourceUrl, e.getMessage());
+            LOGGER.errorf("Sync preview failed for agent %s from %s: %s", sourceAgentId, sourceUrl, e.getMessage());
             throw new InternalServerErrorException("Sync preview failed: " + e.getMessage(), e);
         }
     }
@@ -1305,7 +1316,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 ImportPreview preview = structuralMatcher.buildPreview(source, mapping.targetAgentId(), true);
                 previews.add(preview);
             } catch (Exception e) {
-                log.warnf("Batch preview failed for agent %s: %s", mapping.sourceAgentId(), e.getMessage());
+                LOGGER.warnf("Batch preview failed for agent %s: %s", mapping.sourceAgentId(), e.getMessage());
                 // Add a failed preview entry so the caller knows which agent failed
                 previews.add(new ImportPreview(
                         mapping.sourceAgentId(), "Error: " + e.getMessage(),
@@ -1331,7 +1342,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         .header("Location", resultUri.toString()).build();
             }
         } catch (Exception e) {
-            log.errorf("Sync execution failed for agent %s from %s: %s",
+            LOGGER.errorf("Sync execution failed for agent %s from %s: %s",
                     sourceAgentId, sourceUrl, e.getMessage());
             throw new InternalServerErrorException("Sync failed: " + e.getMessage(), e);
         }
@@ -1351,7 +1362,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             request.selectedResources(), request.workflowOrder());
                     resultUris.add(resultUri);
                 } catch (Exception e) {
-                    log.warnf("Batch sync failed for agent %s→%s: %s",
+                    LOGGER.warnf("Batch sync failed for agent %s→%s: %s",
                             request.sourceAgentId(), request.targetAgentId(), e.getMessage());
                     // Continue with remaining agents — partial success is better than total failure
                 }
@@ -1359,7 +1370,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
             return Response.ok(resultUris).build();
         } catch (Exception e) {
-            log.errorf("Batch sync execution failed: %s", e.getMessage());
+            LOGGER.errorf("Batch sync execution failed: %s", e.getMessage());
             throw new InternalServerErrorException("Batch sync failed: " + e.getMessage(), e);
         }
     }

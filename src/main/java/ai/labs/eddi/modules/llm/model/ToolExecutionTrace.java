@@ -354,9 +354,16 @@ public class ToolExecutionTrace {
     }
 
     /**
-     * Add a successful tool call to the trace
+     * Add a successful tool call to the trace.
+     *
+     * <p>
+     * {@code synchronized} because a single trace is shared across all tasks of a
+     * parallel tool run (ToolExecutionService.executeToolsParallel passes one trace
+     * to every concurrent executeTool call). Without it, the backing
+     * ArrayList/HashMap and the primitive accumulators race — most visibly
+     * HashMap.computeIfAbsent throwing a ConcurrentModificationException.
      */
-    public void addToolCall(String toolName, String arguments, String result, long executionTimeMs, double cost, boolean fromCache) {
+    public synchronized void addToolCall(String toolName, String arguments, String result, long executionTimeMs, double cost, boolean fromCache) {
         ToolCall call = new ToolCall();
         call.setToolName(toolName);
         call.setArguments(arguments);
@@ -381,9 +388,11 @@ public class ToolExecutionTrace {
     }
 
     /**
-     * Add a failed tool call to the trace
+     * Add a failed tool call to the trace. {@code synchronized} for the same reason
+     * as {@link #addToolCall} — it is the other writer invoked concurrently from a
+     * shared trace during parallel tool execution.
      */
-    public void addFailedToolCall(String toolName, String arguments, String error, long executionTimeMs, double cost) {
+    public synchronized void addFailedToolCall(String toolName, String arguments, String error, long executionTimeMs, double cost) {
         ToolCall call = new ToolCall();
         call.setToolName(toolName);
         call.setArguments(arguments);

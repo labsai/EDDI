@@ -23,8 +23,10 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -55,6 +57,14 @@ public class McpToolProviderManager {
      * across conversation turns to avoid reconnect overhead.
      */
     private final Map<String, McpClient> clientCache = new ConcurrentHashMap<>();
+
+    // ----- Circuit breaker state -----
+    /** Maximum failures within the window before the circuit opens. */
+    private static final int CIRCUIT_FAILURE_THRESHOLD = 3;
+    /** Time window for counting failures (seconds). */
+    private static final long CIRCUIT_WINDOW_SECONDS = 60;
+    /** Recent failure timestamps per server URL. */
+    private final Map<String, List<Instant>> failureTimestamps = new ConcurrentHashMap<>();
 
     @Inject
     public McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
@@ -98,6 +108,14 @@ public class McpToolProviderManager {
                 continue;
             }
 
+            // Circuit breaker: skip servers that failed too often recently
+            if (isCircuitOpen(serverConfig.getUrl())) {
+                String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
+                LOGGER.warnf("Circuit breaker OPEN for MCP server '%s' — skipping (>=%d failures in last %ds)",
+                        sanitize(serverName), CIRCUIT_FAILURE_THRESHOLD, CIRCUIT_WINDOW_SECONDS);
+                continue;
+            }
+
             try {
                 McpClient client = getOrCreateClient(serverConfig);
                 String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
@@ -119,9 +137,13 @@ public class McpToolProviderManager {
                     LOGGER.infof("Discovered %d tools from MCP server '%s'", result.tools().size(), sanitize(serverName));
                 }
 
+                // Success — clear failure history for this server
+                recordSuccess(serverConfig.getUrl());
+
             } catch (Exception e) {
                 String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
                 LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
+                recordFailure(serverConfig.getUrl());
             }
         }
 
@@ -205,5 +227,42 @@ public class McpToolProviderManager {
      */
     int getActiveConnectionCount() {
         return clientCache.size();
+    }
+
+    // ========================== Circuit Breaker ==========================
+
+    /**
+     * Check whether the circuit breaker is open for a given server URL. The circuit
+     * opens when the server has failed {@value #CIRCUIT_FAILURE_THRESHOLD} or more
+     * times within the last {@value #CIRCUIT_WINDOW_SECONDS} seconds.
+     */
+    boolean isCircuitOpen(String url) {
+        List<Instant> failures = failureTimestamps.get(url);
+        if (failures == null) {
+            return false;
+        }
+        Instant cutoff = Instant.now().minusSeconds(CIRCUIT_WINDOW_SECONDS);
+        long recentFailures = failures.stream().filter(t -> t.isAfter(cutoff)).count();
+        return recentFailures >= CIRCUIT_FAILURE_THRESHOLD;
+    }
+
+    /**
+     * Record a connection failure for circuit breaker tracking. Evicts timestamps
+     * older than the window to prevent unbounded growth.
+     */
+    private void recordFailure(String url) {
+        List<Instant> failures = failureTimestamps.computeIfAbsent(url, k -> new CopyOnWriteArrayList<>());
+        failures.add(Instant.now());
+        // Evict old entries outside the window
+        Instant cutoff = Instant.now().minusSeconds(CIRCUIT_WINDOW_SECONDS);
+        failures.removeIf(t -> t.isBefore(cutoff));
+    }
+
+    /**
+     * Record a successful connection — clears the failure history so the circuit
+     * breaker resets.
+     */
+    private void recordSuccess(String url) {
+        failureTimestamps.remove(url);
     }
 }

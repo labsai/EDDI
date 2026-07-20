@@ -34,7 +34,8 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
 
     @BeforeEach
     void initStorage() throws SQLException {
-        var json = new JsonSerialization(new ObjectMapper());
+        var json = new JsonSerialization(
+                ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
         @SuppressWarnings("unchecked")
         Class<Map<String, Object>> type = (Class<Map<String, Object>>) (Class<?>) Map.class;
         storage = new PostgresResourceStorage<>(ds, COLLECTION, json, type);

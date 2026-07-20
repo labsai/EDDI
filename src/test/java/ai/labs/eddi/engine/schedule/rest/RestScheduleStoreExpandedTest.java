@@ -38,6 +38,7 @@ class RestScheduleStoreExpandedTest {
     private IScheduleStore scheduleStore;
     private ScheduleFireExecutor fireExecutor;
     private SchedulePollerService pollerService;
+    private ai.labs.eddi.engine.security.OwnershipValidator ownershipValidator;
     private RestScheduleStore sut;
 
     @BeforeEach
@@ -45,11 +46,17 @@ class RestScheduleStoreExpandedTest {
         scheduleStore = mock(IScheduleStore.class);
         fireExecutor = mock(ScheduleFireExecutor.class);
         pollerService = mock(SchedulePollerService.class);
+        ownershipValidator = mock(ai.labs.eddi.engine.security.OwnershipValidator.class);
+        // admin by default: the HITL redaction/guards are tested in
+        // RestScheduleStoreTest — these tests exercise the general surface
+        doReturn(true).when(ownershipValidator).isAdmin(any());
 
         sut = new RestScheduleStore();
         setField(sut, "scheduleStore", scheduleStore);
         setField(sut, "fireExecutor", fireExecutor);
         setField(sut, "pollerService", pollerService);
+        setField(sut, "identity", mock(io.quarkus.security.identity.SecurityIdentity.class));
+        setField(sut, "ownershipValidator", ownershipValidator);
         setField(sut, "defaultTimeZone", "UTC");
         setField(sut, "minIntervalSeconds", 60L);
     }
@@ -76,6 +83,15 @@ class RestScheduleStoreExpandedTest {
         s.setHeartbeatIntervalSeconds(300L);
         s.setTimeZone("UTC");
         s.setFireStatus(FireStatus.PENDING);
+        return s;
+    }
+
+    /** A HITL approval-timeout schedule as stored by ConversationService. */
+    private static ScheduleConfiguration hitlSchedule(String id) {
+        var s = makeCronSchedule(id);
+        s.setName("hitl-timeout-conv-" + id);
+        s.setMetadata(java.util.Map.of("hitlType", "hitl_timeout", "policy", "AUTO_REJECT",
+                "surface", "regular", "conversationId", "conv-" + id));
         return s;
     }
 
@@ -232,6 +248,56 @@ class RestScheduleStoreExpandedTest {
         }
     }
 
+    // ─── HITL admin guard fails closed ──────────────────────────────────────────
+
+    @Nested
+    @DisplayName("requireAdminForHitl fail-closed")
+    class HitlGuardFailClosed {
+
+        @Test
+        @DisplayName("delete returns 500 and does NOT delete when the guard's readSchedule fails non-not-found")
+        void deleteStoreErrorFailsClosed() throws Exception {
+            // A non-ResourceNotFoundException from the guard's readSchedule means we
+            // cannot prove the target is NOT a HITL safety timeout → fail closed with
+            // 500 and refuse the mutation. Triggers regardless of admin role because
+            // the read failure precedes the isHitl/admin check.
+            when(scheduleStore.readSchedule("s1"))
+                    .thenThrow(new IResourceStore.ResourceStoreException("boom"));
+
+            Response response = sut.deleteSchedule("s1");
+
+            assertEquals(500, response.getStatus());
+            verify(scheduleStore, never()).deleteSchedule(anyString());
+        }
+
+        @Test
+        @DisplayName("update returns 500 and does NOT update when the guard's readSchedule fails non-not-found")
+        void updateStoreErrorFailsClosed() throws Exception {
+            when(scheduleStore.readSchedule("s1"))
+                    .thenThrow(new IResourceStore.ResourceStoreException("boom"));
+
+            Response response = sut.updateSchedule("s1", makeCronSchedule("s1"));
+
+            assertEquals(500, response.getStatus());
+            verify(scheduleStore, never()).updateSchedule(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("delete proceeds normally when the guard's readSchedule is a genuine not-found (guard returns null)")
+        void deleteNotFoundFallsThrough() throws Exception {
+            // A genuine not-found is the ONLY case the guard lets through: it returns
+            // null so the downstream op runs (and here succeeds, since deleteSchedule
+            // is idempotent on a missing id).
+            when(scheduleStore.readSchedule("gone"))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+
+            Response response = sut.deleteSchedule("gone");
+
+            assertEquals(204, response.getStatus());
+            verify(scheduleStore).deleteSchedule("gone");
+        }
+    }
+
     // ─── fireNow ───────────────────────────────────────────────────────────────
 
     @Nested
@@ -363,6 +429,18 @@ class RestScheduleStoreExpandedTest {
             assertThrows(InternalServerErrorException.class,
                     () -> sut.retryDeadLetter("s1"));
         }
+
+        @Test
+        @DisplayName("should 403 for a non-admin on a HITL timeout schedule and not requeue it")
+        void nonAdminHitlForbidden() throws Exception {
+            doReturn(false).when(ownershipValidator).isAdmin(any());
+            when(scheduleStore.readSchedule("s1")).thenReturn(hitlSchedule("s1"));
+
+            Response response = sut.retryDeadLetter("s1");
+
+            assertEquals(403, response.getStatus());
+            verify(scheduleStore, never()).requeueDeadLetter(anyString());
+        }
     }
 
     // ─── dismissDeadLetter ─────────────────────────────────────────────────────
@@ -414,6 +492,18 @@ class RestScheduleStoreExpandedTest {
 
             assertThrows(InternalServerErrorException.class,
                     () -> sut.dismissDeadLetter("s1"));
+        }
+
+        @Test
+        @DisplayName("should 403 for a non-admin on a HITL timeout schedule and not disarm it")
+        void nonAdminHitlForbidden() throws Exception {
+            doReturn(false).when(ownershipValidator).isAdmin(any());
+            when(scheduleStore.readSchedule("s1")).thenReturn(hitlSchedule("s1"));
+
+            Response response = sut.dismissDeadLetter("s1");
+
+            assertEquals(403, response.getStatus());
+            verify(scheduleStore, never()).markCompleted(anyString(), any());
         }
     }
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.model;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.*;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

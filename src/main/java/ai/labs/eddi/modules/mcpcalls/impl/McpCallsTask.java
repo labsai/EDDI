@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -189,7 +190,10 @@ public class McpCallsTask implements ILifecycleTask {
             // 5. Execute the tool
             ToolExecutionRequest toolRequest = ToolExecutionRequest.builder().name(toolName).arguments(argumentsJson).build();
 
-            String toolResult = executor.execute(toolRequest, null);
+            String toolResult = RetryConfiguration.executeWithRetry(
+                    () -> executor.execute(toolRequest, null),
+                    mcpCall.getRetry(),
+                    "MCP call '" + callName + "'");
             LOGGER.infof("MCP call '%s' result: %d chars", callName, toolResult != null ? toolResult.length() : 0);
 
             // 6. Store result in memory
@@ -217,8 +221,31 @@ public class McpCallsTask implements ILifecycleTask {
             }
 
         } catch (ITemplatingEngine.TemplateEngineException | IOException e) {
-            LOGGER.errorf(e, "Error executing MCP call '%s'", mcpCall.getName());
-            throw new LifecycleException("MCP call execution failed: " + e.getMessage(), e);
+            LOGGER.errorf(e, "MCP template error for '%s'", mcpCall.getName());
+            throw new LifecycleException("MCP call template failed: " + e.getMessage(), e);
+        } catch (LifecycleException e) {
+            // Retry exhaustion or non-retryable error from RetryConfiguration
+            // Store error data, then check continueOnError
+            String errorCallName = mcpCall.getName() != null ? mcpCall.getName() : mcpCall.getToolName();
+            LOGGER.errorf(e, "MCP tool execution failed for '%s': %s", errorCallName, e.getMessage());
+            String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            String truncated = errorMsg.length() > 500 ? errorMsg.substring(0, 500) : errorMsg;
+            String errorObjName = (mcpCall.getResponseObjectName() != null
+                    ? mcpCall.getResponseObjectName()
+                    : errorCallName + "Response") + "Error";
+            prePostUtils.createMemoryEntry(currentStep, truncated, errorObjName, KEY_MCP_CALLS);
+            if (mcpCall.getPostResponse() != null) {
+                try {
+                    prePostUtils.runPostResponse(memory, mcpCall.getPostResponse(), templateDataObjects, 500, true);
+                } catch (Exception postEx) {
+                    LOGGER.warnf("Post-response processing failed during error handling for '%s': %s",
+                            errorCallName, postEx.getMessage());
+                }
+            }
+            if (!Boolean.TRUE.equals(mcpCall.getContinueOnError())) {
+                throw e;
+            }
+            LOGGER.warnf("MCP call '%s' failed but continueOnError=true, proceeding", errorCallName);
         }
     }
 

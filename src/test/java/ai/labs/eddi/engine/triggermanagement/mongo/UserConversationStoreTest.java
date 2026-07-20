@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Indexes;
 import com.mongodb.client.result.DeleteResult;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -45,6 +46,15 @@ class UserConversationStoreTest {
 
         when(database.getCollection("userconversations")).thenReturn(collection);
         store = new UserConversationStore(database, jsonSerialization, documentBuilder);
+    }
+
+    @Test
+    @DisplayName("constructor — creates an index on conversationId (backs the reverse HITL-resume lookup)")
+    void constructorCreatesConversationIdIndex() {
+        // readUserConversationByConversationId queries by conversationId alone;
+        // without a dedicated index, every reverse lookup after a HITL resume is a
+        // full collection scan.
+        verify(collection).createIndex(eq(Indexes.ascending("conversationId")));
     }
 
     // ==================== readUserConversation ====================
