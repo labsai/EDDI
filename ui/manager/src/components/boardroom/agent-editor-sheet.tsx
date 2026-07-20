@@ -132,7 +132,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
     if (enableMemoryTools !== (agent.enableMemoryTools ?? false)) return true;
     if (JSON.stringify(capabilities) !== JSON.stringify(agent.capabilities ?? []))
       return true;
-    if (promptData && systemPrompt !== promptData.systemMessage) return true;
+    if (promptSynced && promptData && systemPrompt !== promptData.systemMessage) return true;
     return false;
   })();
 
@@ -192,29 +192,34 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
     if (!agentId || !agent) return;
     setSaving(true);
     try {
+      let agentVersion = version;
+
+      // 1. Save prompt first (cascade bumps agent version)
+      if (promptData && systemPrompt !== promptData.systemMessage) {
+        const result = await updatePromptMutation.mutateAsync({
+          agentId,
+          promptData,
+          newSystemMessage: systemPrompt,
+        });
+        // Use the new agent version from the cascade for the next save
+        if (result.newAgentVersion) {
+          agentVersion = result.newAgentVersion;
+        }
+      }
+
+      // 2. Save agent-level changes with the (possibly bumped) version
+      const freshAgent = agentVersion !== version
+        ? await getAgent(agentId, agentVersion)
+        : agent;
       const updated: Agent = {
-        ...agent,
+        ...freshAgent,
         description,
         capabilities,
         a2aEnabled,
         enableMemoryTools,
       };
-      await updateAgent(agentId, version, updated);
+      await updateAgent(agentId, agentVersion, updated);
 
-      // Save prompt if changed
-      if (promptData && systemPrompt !== promptData.systemMessage) {
-        await updatePromptMutation.mutateAsync({
-          agentId,
-          promptData,
-          newSystemMessage: systemPrompt,
-        });
-      }
-
-      await queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
-      await queryClient.invalidateQueries({
-        queryKey: ["agent-descriptor", agentId],
-      });
-      await queryClient.invalidateQueries({ queryKey: ["agents"] });
       toast.success(
         t("boardroom.agentEditor.saveSuccess", "Agent updated successfully")
       );
@@ -224,6 +229,13 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
       );
     } finally {
       setSaving(false);
+      // Always re-sync to pick up version bumps, even on partial failures
+      await queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
+      await queryClient.invalidateQueries({
+        queryKey: ["agent-descriptor", agentId],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["agents"] });
+      setPromptSynced(false);
     }
   }, [
     agentId,
@@ -397,7 +409,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                       "text-sm text-foreground placeholder:text-muted-foreground",
                       "resize-y min-h-[120px]",
                       "focus:outline-none focus:ring-2 focus:ring-ring",
-                      "transition-colors font-mono text-xs leading-relaxed"
+                      "transition-colors text-sm leading-relaxed"
                     )}
                     rows={6}
                     placeholder={t(
