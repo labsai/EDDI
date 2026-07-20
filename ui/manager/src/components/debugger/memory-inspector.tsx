@@ -142,9 +142,9 @@ export function MemoryInspector({ conversationId }: MemoryInspectorProps) {
           <div className="flex flex-col gap-2">
             {currentTab === "props" ? (
               <PropertiesTable properties={properties} searchQuery={searchQuery} />
-            ) : (
+            ) : steps[currentTab as number] ? (
               <StepTable step={steps[currentTab as number]} searchQuery={searchQuery} />
-            )}
+            ) : null}
           </div>
         </>
       )}

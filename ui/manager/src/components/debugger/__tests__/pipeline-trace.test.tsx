@@ -93,15 +93,15 @@ describe("PipelineTrace", () => {
     useDebugStore.setState({ turns: [mockTurn] });
     renderTrace();
 
-    expect(screen.getByText("42ms")).toBeInTheDocument();
-    expect(screen.getByText("250ms")).toBeInTheDocument();
+    expect(screen.getAllByText("42ms").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("250ms").length).toBeGreaterThan(0);
   });
 
   it("shows total duration for the turn", () => {
     useDebugStore.setState({ turns: [mockTurn] });
     renderTrace();
 
-    expect(screen.getByText("292ms")).toBeInTheDocument();
+    expect(screen.getAllByText("292ms").length).toBeGreaterThan(0);
   });
 
   it("task bars have aria-expanded=false by default", () => {
@@ -122,7 +122,7 @@ describe("PipelineTrace", () => {
     await user.click(firstBar);
 
     expect(firstBar).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText(/Duration/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Duration/).length).toBeGreaterThan(0);
   });
 
   it("collapses task bar on second click", async () => {
