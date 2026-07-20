@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   X,
@@ -290,15 +291,15 @@ function AgentPerformanceSheet({
             </Button>
           )}
           <Button variant="ghost" className="w-full" asChild>
-            <a
-              href={`/workforce/chat?agentId=${agent.agentId}`}
+            <Link
+              to={`/workforce/chat?agentId=${agent.agentId}`}
             >
               <MessageSquare className="h-4 w-4" />
               {t(
                 "boardroom.analytics.chatWithAgent",
                 "Chat with Agent",
               )}
-            </a>
+            </Link>
           </Button>
         </div>
       </div>

@@ -13,7 +13,6 @@ import { ExportMenu } from "@/components/boardroom/export-menu";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
-import type { AgentGroupConfiguration } from "@/lib/api/groups";
 
 // ─── Icons ───────────────────────────────────────────────────────
 
@@ -391,7 +390,7 @@ function BoardroomBoard() {
               </button>
             </div>
             <GroupConfigPanel
-              config={groupConfig as unknown as AgentGroupConfiguration}
+              config={groupConfig}
               className="flex-1 min-h-0"
             />
           </div>

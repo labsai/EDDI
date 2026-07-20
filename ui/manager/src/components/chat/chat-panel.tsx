@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useSearchParams, Link } from "react-router-dom";
+import { useSearchParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -73,6 +73,7 @@ interface PendingAttachment {
 export function ChatPanel() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -691,13 +692,15 @@ export function ChatPanel() {
             <span className="text-amber-600 dark:text-amber-400">
               {pauseReason || t("hitl.chatPaused", "This conversation is awaiting human approval.")}
             </span>
-            <Link
-              to={`/manage/conversationview/${conversationId}`}
-              className="ms-auto rounded-md bg-amber-500/10 px-2.5 py-1 font-medium text-amber-600 hover:bg-amber-500/20 transition-colors dark:text-amber-400"
-              data-testid="chat-pause-review"
-            >
-              {t("hitl.review", "Review")}
-            </Link>
+            {!location.pathname.startsWith("/workforce") && (
+              <Link
+                to={`/manage/conversationview/${conversationId}`}
+                className="ms-auto rounded-md bg-amber-500/10 px-2.5 py-1 font-medium text-amber-600 hover:bg-amber-500/20 transition-colors dark:text-amber-400"
+                data-testid="chat-pause-review"
+              >
+                {t("hitl.review", "Review")}
+              </Link>
+            )}
           </div>
         )}
 
