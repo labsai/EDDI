@@ -25,6 +25,29 @@ export interface SecretStoreResponse {
   keyName: string;
 }
 
+/** Response of a per-tenant DEK rotation (safe, no restart). */
+export interface RotateDekResponse {
+  tenantId: string;
+  /** Number of secrets re-encrypted with the freshly generated DEK. */
+  secretsReEncrypted: number;
+  message: string;
+}
+
+/** Response of a master-key (KEK) rotation. */
+export interface RotateKekResponse {
+  /** Number of tenant DEKs re-encrypted with the new master key. */
+  deksReEncrypted: number;
+  message: string;
+}
+
+/** Response of a destructive per-tenant vault reset. */
+export interface ResetTenantResponse {
+  tenantId: string;
+  /** Number of secrets permanently deleted. */
+  secretsDeleted: number;
+  message: string;
+}
+
 export interface VaultHealth {
   status: "UP" | "DOWN";
   provider: string;
@@ -165,6 +188,89 @@ export async function rotateSecret(
     }
     const err = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(err.error || `Failed to rotate secret (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+/* ─── Key lifecycle (crypto-key operations) ─── */
+
+/**
+ * Rotate the Data Encryption Key (DEK) for a tenant.
+ * SAFE: no restart required — re-encrypts all of the tenant's secrets with a
+ * freshly generated DEK. Maps to `POST /{tenantId}/rotate-dek`.
+ */
+export async function rotateDek(tenantId: string): Promise<RotateDekResponse> {
+  const res = await fetch(
+    `${api.getBaseUrl()}${BASE}/${tenantId}/rotate-dek`,
+    { method: "POST", headers: api.getAuthHeader() },
+  );
+  if (!res.ok) {
+    if (res.status === 503) {
+      throw new Error(
+        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+      );
+    }
+    const err = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(err.error || `Failed to rotate DEK (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Rotate the master key (KEK). Re-encrypts every tenant DEK with the new master
+ * key. Maps to `POST /admin/rotate-kek` with body `{ oldMasterKey, newMasterKey }`.
+ *
+ * WARNING: both keys are transmitted in the request body — only call over TLS.
+ * After success, update `EDDI_VAULT_MASTER_KEY` to the new value and restart.
+ */
+export async function rotateKek(args: {
+  oldKey: string;
+  newKey: string;
+}): Promise<RotateKekResponse> {
+  const res = await fetch(
+    `${api.getBaseUrl()}${BASE}/admin/rotate-kek`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...api.getAuthHeader() },
+      body: JSON.stringify({
+        oldMasterKey: args.oldKey,
+        newMasterKey: args.newKey,
+      }),
+    },
+  );
+  if (!res.ok) {
+    if (res.status === 503) {
+      throw new Error(
+        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+      );
+    }
+    const err = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(err.error || `Failed to rotate master key (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * Reset the vault for a tenant. DESTRUCTIVE: permanently deletes ALL secrets and
+ * the DEK for the tenant so the vault can start fresh with the current master
+ * key. Maps to `POST /{tenantId}/reset`. Use this as the recovery step after a
+ * lost or changed master key.
+ */
+export async function resetTenant(
+  tenantId: string,
+): Promise<ResetTenantResponse> {
+  const res = await fetch(
+    `${api.getBaseUrl()}${BASE}/${tenantId}/reset`,
+    { method: "POST", headers: api.getAuthHeader() },
+  );
+  if (!res.ok) {
+    if (res.status === 503) {
+      throw new Error(
+        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+      );
+    }
+    const err = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(err.error || `Failed to reset vault (HTTP ${res.status})`);
   }
   return res.json();
 }
