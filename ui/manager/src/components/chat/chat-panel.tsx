@@ -698,8 +698,8 @@ export function ChatPanel() {
             pendingAttachments={pendingAttachments}
             onRemoveAttachment={handleRemoveAttachment}
             hasReadyAttachment={hasReadyAttachment}
-            onUndo={undoAvailable && !isProcessing ? () => undoConversation.mutate() : undefined}
-            onRedo={redoAvailable && !isProcessing ? () => redoConversation.mutate() : undefined}
+            onUndo={conversationId && undoAvailable && !isProcessing ? () => undoConversation.mutate() : undefined}
+            onRedo={conversationId && redoAvailable && !isProcessing ? () => redoConversation.mutate() : undefined}
           />
         )}
       </div>
