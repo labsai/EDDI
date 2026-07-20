@@ -61,7 +61,10 @@ export function BoardroomSidebar({
       )}
     >
       {/* ── Header ────────────────────────────────────────────── */}
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border ps-3 pe-3">
+      <div className={cn(
+        "shrink-0 border-b border-border",
+        collapsed ? "flex flex-col items-center py-3 gap-2" : "flex h-14 items-center gap-2 ps-3 pe-3",
+      )}>
         {!collapsed && (
           <Link to="/workforce" className="flex flex-1 items-center gap-2 truncate">
             <img
@@ -72,11 +75,11 @@ export function BoardroomSidebar({
           </Link>
         )}
         {collapsed && (
-          <Link to="/workforce" className="flex items-center justify-center mx-auto" aria-label="EDDI">
+          <Link to="/workforce" className="flex items-center justify-center" aria-label="EDDI">
             <img
               src="/eddi-icon.svg"
               alt="EDDI"
-              className="h-9 w-9 rounded-md"
+              className="h-10 w-10"
             />
           </Link>
         )}
@@ -85,7 +88,7 @@ export function BoardroomSidebar({
           <Button
             variant="ghost"
             size="icon"
-            className="ms-auto h-8 w-8"
+            className={cn("h-8 w-8", !collapsed && "ms-auto")}
             onClick={onClose}
             aria-label={t("boardroom.closeSidebar", "Close sidebar")}
           >
@@ -95,7 +98,7 @@ export function BoardroomSidebar({
           <Button
             variant="ghost"
             size="icon"
-            className={cn("h-8 w-8", collapsed && "ms-auto")}
+            className={cn("h-8 w-8", !collapsed && "ms-auto")}
             onClick={onToggle}
             aria-label={t("boardroom.toggleSidebar", "Toggle sidebar")}
           >
