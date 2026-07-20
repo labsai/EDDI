@@ -8,7 +8,16 @@ import {
 import { useParams, useLocation, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Paperclip, X, ChevronLeft } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  Paperclip,
+  X,
+  ChevronLeft,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
+  MessageSquare,
+} from "lucide-react";
 import { useGroup } from "@/hooks/use-groups";
 import {
   startConversation,
@@ -16,10 +25,13 @@ import {
   sendMessageWithContext,
   readConversation,
 } from "@/lib/api/chat";
+import { getAgent } from "@/lib/api/agents";
 import { useBoardroomThreads } from "@/hooks/use-boardroom-threads";
 import type { SimpleConversationStep } from "@/lib/api/conversations";
 import { ContextCard } from "@/components/boardroom/context-card";
 import { AdvisorAvatar } from "@/components/boardroom/advisor-avatar";
+import { AgentEditorSheet } from "@/components/boardroom/agent-editor-sheet";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -413,6 +425,15 @@ function BoardroomThread() {
   const [isLoading, setIsLoading] = useState(false);
   const [isStarting, setIsStarting] = useState(true);
   const [inputPrefill, setInputPrefill] = useState("");
+  const [showDetails, setShowDetails] = useState(false);
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+
+  // Fetch full agent data for the details panel
+  const { data: agentData, isLoading: agentLoading } = useQuery({
+    queryKey: ["agent-detail", memberId],
+    queryFn: () => getAgent(memberId),
+    enabled: !!memberId && showDetails,
+  });
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -599,28 +620,50 @@ function BoardroomThread() {
 
   // ─── Render ──────────────────────────────────────────────────
   return (
-    <div className="flex h-full flex-col">
-      {/* Back header */}
-      <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card/80 backdrop-blur-sm ps-2 pe-4">
-        <Link
-          to={`/workforce/${boardId}?version=${version}`}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          aria-label={t("boardroom.back", "Back")}
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </Link>
-        <div className="flex items-center gap-2 min-w-0">
-          <AdvisorAvatar name={memberName} agentId={memberId} size="sm" />
-          <span className="text-sm font-medium text-foreground truncate">
-            {memberName}
-          </span>
-          {memberRole && (
-            <span className="text-xs text-muted-foreground truncate hidden sm:inline">
-              — {memberRole}
+    <div className="flex h-full overflow-hidden">
+      <div className="flex flex-1 min-w-0 flex-col">
+        {/* Back header */}
+        <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card/80 backdrop-blur-sm ps-2 pe-4">
+          <Link
+            to={`/workforce/${boardId}?version=${version}`}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            aria-label={t("boardroom.back", "Back")}
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </Link>
+          <div className="flex flex-1 items-center gap-2 min-w-0">
+            <AdvisorAvatar name={memberName} agentId={memberId} size="sm" />
+            <span className="text-sm font-medium text-foreground truncate">
+              {memberName}
             </span>
-          )}
+            {memberRole && (
+              <span className="text-xs text-muted-foreground truncate hidden sm:inline">
+                — {memberRole}
+              </span>
+            )}
+          </div>
+          {/* Details panel toggle */}
+          <button
+            type="button"
+            onClick={() => setShowDetails((v) => !v)}
+            className={cn(
+              "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              showDetails
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+            aria-label={t(
+              "boardroom.chat.toggleDetails",
+              showDetails ? "Hide agent details" : "Show agent details"
+            )}
+          >
+            {showDetails ? (
+              <PanelRightClose className="h-4 w-4" />
+            ) : (
+              <PanelRightOpen className="h-4 w-4" />
+            )}
+          </button>
         </div>
-      </div>
       {/* Context card — shown when navigating from a group discussion */}
       {hasGroupContext && groupContext && (
         <div className="shrink-0 ps-4 pe-4 pt-4">
@@ -744,17 +787,163 @@ function BoardroomThread() {
         </div>
       </div>
 
-      {/* Thread input with file attachment support */}
-      <ThreadInput
-        onSend={handleSend}
-        disabled={isLoading || !conversationId}
-        placeholder={
-          inputPrefill ||
-          t("boardroom.thread.placeholder", "Message {{name}}...", {
-            name: memberName,
-          })
-        }
-        className="shrink-0"
+        {/* Thread input with file attachment support */}
+        <ThreadInput
+          onSend={handleSend}
+          disabled={isLoading || !conversationId}
+          placeholder={
+            inputPrefill ||
+            t("boardroom.thread.placeholder", "Message {{name}}...", {
+              name: memberName,
+            })
+          }
+          className="shrink-0"
+        />
+      </div>
+
+      {/* Right details panel */}
+      {showDetails && (
+        <div className="w-80 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden">
+          <div className="p-3 border-b border-border flex items-center justify-between shrink-0">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("boardroom.chat.agentDetails", "Agent Details")}
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowDetails(false)}
+              className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={t("boardroom.chat.hideDetails", "Hide details panel")}
+            >
+              <PanelRightClose className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {agentLoading ? (
+            <div className="p-4 space-y-4">
+              <div className="flex flex-col items-center gap-2">
+                <Skeleton className="h-14 w-14 rounded-full" />
+                <Skeleton className="h-4 w-24" />
+              </div>
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </div>
+          ) : agentData ? (
+            <div className="p-4 space-y-5">
+              <div className="flex flex-col items-center text-center gap-2">
+                <AdvisorAvatar
+                  name={memberName ?? agentData.name ?? "Agent"}
+                  agentId={memberId}
+                  size="lg"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    {memberName ?? agentData.name}
+                  </p>
+                  {agentData.description && (
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3">
+                      {agentData.description}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {agentData.capabilities && agentData.capabilities.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                    {t("boardroom.agentEditor.capabilities", "Capabilities")}
+                  </h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    {agentData.capabilities.map((cap, idx) => (
+                      <Badge
+                        key={`${cap.skill}-${idx}`}
+                        variant="secondary"
+                        className="text-[10px]"
+                      >
+                        {cap.skill}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">
+                    {t("boardroom.agentEditor.a2aEnabled", "Agent-to-Agent")}
+                  </span>
+                  <Badge
+                    variant={agentData.a2aEnabled ? "success" : "secondary"}
+                    className="text-[10px]"
+                  >
+                    {agentData.a2aEnabled
+                      ? t("common.on", "On")
+                      : t("common.off", "Off")}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">
+                    {t("boardroom.agentEditor.memoryTools", "Memory Tools")}
+                  </span>
+                  <Badge
+                    variant={
+                      agentData.enableMemoryTools ? "success" : "secondary"
+                    }
+                    className="text-[10px]"
+                  >
+                    {agentData.enableMemoryTools
+                      ? t("common.on", "On")
+                      : t("common.off", "Off")}
+                  </Badge>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-xs font-medium text-muted-foreground mb-2 mt-4">
+                  {t("boardroom.thread.history", "Conversation History")}
+                </h4>
+                {conversationId ? (
+                  <div className="flex flex-col gap-2 rounded-lg border border-border p-3 text-xs bg-muted/30">
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground flex items-center gap-1.5">
+                         <MessageSquare className="h-3.5 w-3.5" />
+                         {t("boardroom.thread.currentSession", "Current Session")}
+                      </span>
+                      <span className="font-medium text-foreground">{messages.length} {t("boardroom.thread.msgs", "msgs")}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("boardroom.thread.noHistory", "No history available.")}</p>
+                )}
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full mt-2"
+                onClick={() => setEditingAgentId(memberId)}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                {t("boardroom.chat.editAgent", "Edit Agent")}
+              </Button>
+            </div>
+          ) : (
+             <div className="flex flex-1 items-center justify-center p-4">
+                <div className="text-center text-muted-foreground">
+                  <p className="text-xs">
+                    {t(
+                      "boardroom.chat.selectToView",
+                      "Select an agent to view details",
+                    )}
+                  </p>
+                </div>
+              </div>
+          )}
+        </div>
+      )}
+
+      {/* Agent editor sheet (slide-over) */}
+      <AgentEditorSheet
+        agentId={editingAgentId}
+        onClose={() => setEditingAgentId(null)}
       />
     </div>
   );

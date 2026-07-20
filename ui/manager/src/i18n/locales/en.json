@@ -2344,7 +2344,11 @@
       "questionLabel": "Question",
       "responseLabel": "Response",
       "fileTooLarge": "File is too large. Maximum size is 10MB.",
-      "unsupportedFile": "This file type is not supported."
+      "unsupportedFile": "This file type is not supported.",
+      "history": "Conversation History",
+      "currentSession": "Current Session",
+      "msgs": "msgs",
+      "noHistory": "No history available."
     },
     "sidebar": {
       "boards": "Task Forces",

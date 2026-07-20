@@ -2272,7 +2272,11 @@
       "questionLabel": "Frage",
       "responseLabel": "Antwort",
       "fileTooLarge": "Die Datei ist zu groß. Maximale Größe ist 10 MB.",
-      "unsupportedFile": "Dieser Dateityp wird nicht unterstützt."
+      "unsupportedFile": "Dieser Dateityp wird nicht unterstützt.",
+      "history": "Gesprächsverlauf",
+      "currentSession": "Aktuelle Sitzung",
+      "msgs": "Nachr.",
+      "noHistory": "Kein Verlauf verfügbar."
     },
     "sidebar": {
       "boards": "Task Forces",

@@ -2272,7 +2272,11 @@
       "questionLabel": "Question",
       "responseLabel": "Réponse",
       "fileTooLarge": "Le fichier est trop volumineux. La taille maximale est de 10 Mo.",
-      "unsupportedFile": "Ce type de fichier n'est pas pris en charge."
+      "unsupportedFile": "Ce type de fichier n'est pas pris en charge.",
+      "history": "Historique des conversations",
+      "currentSession": "Session actuelle",
+      "msgs": "msgs",
+      "noHistory": "Aucun historique disponible."
     },
     "sidebar": {
       "boards": "Groupes de travail",
