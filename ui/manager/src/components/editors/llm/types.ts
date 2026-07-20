@@ -148,11 +148,63 @@ export interface LlmTask {
   counterweight?: CounterweightConfig;
   identityMasking?: IdentityMaskingConfig;
 
+  // Response Validation & Recovery
+  /**
+   * Response validation policies. When enabled, the engine validates each LLM
+   * turn against per-signal policies and applies the configured remediation.
+   */
+  responseValidation?: ResponseValidation;
+  /**
+   * Timeout (seconds) for streaming chat completions. Overrides the engine
+   * default (120s). Only applies while streaming is active.
+   */
+  streamingTimeoutSeconds?: number;
+
   /**
    * Per-task tool-approval override (tool-level HITL). A FULL REPLACE of the
    * agent-level `hitlConfig.toolApprovals` for this task — no field merge.
    */
   toolApprovals?: ToolApprovalsConfig | null;
+}
+
+/**
+ * Remediation action applied by a response-validation policy. Mirrors the
+ * backend `LlmConfiguration.ResponseValidation` action strings (case-insensitive
+ * on the engine side).
+ * - `ignore`   — do nothing
+ * - `warn`     — log a warning, store validation metadata, continue
+ * - `fallback` — substitute a static fallback message
+ * - `error`    — throw a LifecycleException (fails the turn)
+ */
+export type ResponseValidationAction = "ignore" | "warn" | "fallback" | "error";
+
+/** Ordered action options for response-validation policy selectors. */
+export const RESPONSE_VALIDATION_ACTIONS = [
+  "ignore",
+  "warn",
+  "fallback",
+  "error",
+] as const satisfies readonly ResponseValidationAction[];
+
+/**
+ * Response validation policies for LLM outputs — one policy per anomaly signal.
+ * Field names match the backend `LlmConfiguration.Task.responseValidation`
+ * nested type exactly. Every field is optional; an omitted field falls back to
+ * the backend default (onRefusal defaults to `ignore`, all others to `warn`).
+ */
+export interface ResponseValidation {
+  /** Master switch — validation is only applied when enabled. */
+  enabled?: boolean;
+  /** Action when the LLM returns an empty or null response. */
+  onEmpty?: ResponseValidationAction;
+  /** Action when the response was truncated (finishReason=LENGTH). */
+  onTruncation?: ResponseValidationAction;
+  /** Action when the response was blocked by a content filter. */
+  onContentFilter?: ResponseValidationAction;
+  /** Action when the LLM refused to respond (heuristic detection). */
+  onRefusal?: ResponseValidationAction;
+  /** Action when a streaming response timed out. */
+  onStreamingTimeout?: ResponseValidationAction;
 }
 
 export interface ConversationSummaryConfig {
