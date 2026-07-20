@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AttachmentsSection } from "@/components/conversations/attachments-section";
 import {
   useSimpleConversation,
   useDeleteConversation,
@@ -289,6 +290,13 @@ export function ConversationDetailPage() {
             properties={conversation.conversationProperties}
           />
         )}
+
+      {/* Attachments the conversation owns (browse / download / delete) */}
+      {id && (
+        <section className="rounded-xl border bg-card p-5 shadow-sm">
+          <AttachmentsSection conversationId={id} />
+        </section>
+      )}
 
       {/* Chat-style conversation */}
       <section className="rounded-xl border bg-card shadow-sm" data-testid="conversation-chat">
