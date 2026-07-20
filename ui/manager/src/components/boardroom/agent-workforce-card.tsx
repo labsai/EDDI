@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { cn, getInitials } from "@/lib/utils";
-import { Sparkles, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -31,7 +31,7 @@ export function AgentWorkforceCard({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex flex-col items-center gap-2 rounded-xl border border-border p-4 min-w-[140px]",
+        "flex flex-col items-center gap-1.5 rounded-xl border border-border p-3",
         "bg-card hover:bg-muted/40 transition-all duration-200",
         "hover:shadow-lg hover:-translate-y-1 br-card-premium",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -42,30 +42,18 @@ export function AgentWorkforceCard({
     >
       {/* Avatar */}
       <div
-        className="flex h-12 w-12 items-center justify-center rounded-full text-sm font-semibold bg-muted text-muted-foreground transition-transform duration-200 group-hover:scale-105"
+        className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold bg-muted text-muted-foreground transition-transform duration-200 group-hover:scale-105"
         aria-hidden
       >
         {getInitials(name)}
       </div>
 
       {/* Name */}
-      <div className="min-w-0 w-full">
-        <p className="text-sm font-medium text-foreground truncate">{name}</p>
-        {description ? (
-          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-            {description}
-          </p>
-        ) : (
-          <p className="text-xs text-muted-foreground/50 mt-0.5 flex items-center justify-center gap-1">
-            <Sparkles className="h-3 w-3" />
-            {t("workforce.agent", "Digital Expert")}
-          </p>
-        )}
-      </div>
+      <p className="w-full text-xs font-medium text-foreground truncate">{name}</p>
 
       {/* Status dot */}
       <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500/60" />
         {t("workforce.ready", "Ready")}
       </span>
     </button>
@@ -87,7 +75,7 @@ export function AddAgentCard({ onClick, className }: AddAgentCardProps) {
       type="button"
       onClick={onClick}
       className={cn(
-        "flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-4 min-w-[140px]",
+        "flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-4",
         "text-muted-foreground hover:text-foreground hover:border-muted-foreground/50 hover:bg-muted/30",
         "transition-all duration-200",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
