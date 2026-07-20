@@ -18,7 +18,10 @@ describe("SchedulesPage", () => {
   it("renders the page title", async () => {
     renderSchedules();
     await waitFor(() => {
-      expect(screen.getByText("Schedules")).toBeInTheDocument();
+      // "Schedules" also appears as a tab label, so target the h1 heading.
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Schedules" })
+      ).toBeInTheDocument();
     });
   });
 
@@ -464,7 +467,10 @@ describe("SchedulesPage", () => {
       expect(screen.getByTestId("fire-sched-1")).toBeInTheDocument();
     });
 
+    // Fire Now now opens a lightweight inline confirm before firing.
     await user.click(screen.getByTestId("fire-sched-1"));
+    const confirmBtn = await screen.findByTestId("fire-confirm-sched-1");
+    await user.click(confirmBtn);
 
     await waitFor(() => {
       expect(firedId).toBe("sched-1");

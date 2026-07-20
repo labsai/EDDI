@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import {
@@ -17,30 +17,61 @@ import {
   Zap,
   Pause,
   HandMetal,
+  Pencil,
+  Globe,
+  X,
+  Inbox,
+  Ban,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   useSchedules,
   useCreateSchedule,
+  useUpdateSchedule,
   useDeleteSchedule,
   useToggleSchedule,
   useFireNow,
   useRetryDeadLetter,
+  useDismissDeadLetter,
+  useFailedFires,
   useFireLogs,
 } from "@/hooks/use-schedules";
-import { fireLogDurationMs } from "@/lib/api/schedules";
+import {
+  fireLogDurationMs,
+  describeCron,
+  isValidCron,
+  nextCronFires,
+  cronMinIntervalSeconds,
+  isoToLocalInput,
+  localInputToIso,
+  listTimeZones,
+  CRON_PRESETS,
+  DEFAULT_TIME_ZONE,
+  MIN_INTERVAL_SECONDS,
+  UNLIMITED_COST,
+} from "@/lib/api/schedules";
 import type {
   ScheduleConfiguration,
   ScheduleFireLog,
   FireLogStatus,
-  TriggerType,
 } from "@/lib/api/schedules";
 
+/** Which timing form the create/edit dialog is currently showing. */
+type FormMode = "cron" | "oneTime" | "heartbeat";
+
 /** HITL approval-timeout schedules are system-managed: the backend refuses a
- *  manual fire (409) and restricts mutation to admins. Detect them so the UI
- *  doesn't offer a Fire action the backend will reject. */
+ *  manual fire (409), an edit/delete/enable/disable/retry by non-admins (403),
+ *  and any body that tries to forge one (400). Detect them so the UI doesn't
+ *  offer actions the backend will reject. */
 function isHitlTimeoutSchedule(s: ScheduleConfiguration): boolean {
   return s.metadata?.hitlType === "hitl_timeout";
+}
+
+/** Render a cost value, treating -1 / undefined as "unlimited". */
+function formatCost(cost?: number): string {
+  if (cost == null) return "—";
+  if (cost < 0) return "∞";
+  return `$${cost.toFixed(4)}`;
 }
 
 // ==================== Status Badge ====================
@@ -109,14 +140,25 @@ function StatusBadge({ schedule }: { schedule: ScheduleConfiguration }) {
 
 // ==================== Type Badge ====================
 
-function TypeBadge({ type }: { type: TriggerType }) {
+function TypeBadge({ schedule }: { schedule: ScheduleConfiguration }) {
   const { t } = useTranslation();
-  return type === "HEARTBEAT" ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
-      <Timer className="h-3 w-3" />
-      {t("schedules.typeHeartbeat", "Heartbeat")}
-    </span>
-  ) : (
+  if (schedule.triggerType === "HEARTBEAT") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+        <Timer className="h-3 w-3" />
+        {t("schedules.typeHeartbeat", "Heartbeat")}
+      </span>
+    );
+  }
+  if (schedule.oneTimeAt) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+        <Clock className="h-3 w-3" />
+        {t("schedules.typeOneTime", "One-time")}
+      </span>
+    );
+  }
+  return (
     <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
       <CalendarClock className="h-3 w-3" />
       {t("schedules.typeCron", "Cron")}
@@ -149,6 +191,21 @@ function FireStatusBadge({ status }: { status: FireLogStatus }) {
   );
 }
 
+/** A conversation id rendered as a short monospace chip (or a dash). */
+function ConversationCell({ conversationId }: { conversationId?: string }) {
+  if (!conversationId) return <span className="text-muted-foreground">—</span>;
+  return (
+    <code
+      className="text-xs text-muted-foreground"
+      title={conversationId}
+    >
+      {conversationId.length > 12
+        ? `${conversationId.slice(0, 12)}…`
+        : conversationId}
+    </code>
+  );
+}
+
 // ==================== Fire Logs Expandable ====================
 
 function FireLogsRow({ scheduleId }: { scheduleId: string }) {
@@ -173,7 +230,7 @@ function FireLogsRow({ scheduleId }: { scheduleId: string }) {
         </button>
 
         {expanded && (
-          <div className="mb-3 rounded-lg border border-border/50 bg-muted/30">
+          <div className="mb-3 overflow-x-auto rounded-lg border border-border/50 bg-muted/30">
             {isLoading ? (
               <div className="p-4 text-center">
                 <div className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -186,14 +243,27 @@ function FireLogsRow({ scheduleId }: { scheduleId: string }) {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/50 text-muted-foreground">
-                    <th className="px-3 py-2 text-start font-medium">{t("schedules.logFired", "Fired")}</th>
+                    <th className="px-3 py-2 text-start font-medium">
+                      {t("schedules.logFired", "Fired")}
+                    </th>
                     <th className="px-3 py-2 text-start font-medium">
                       {t("schedules.logDuration", "Duration")}
                     </th>
                     <th className="px-3 py-2 text-start font-medium">
                       {t("schedules.logResult", "Result")}
                     </th>
-                    <th className="px-3 py-2 text-start font-medium">{t("status.error", "Error")}</th>
+                    <th className="px-3 py-2 text-start font-medium">
+                      {t("schedules.logAttempt", "Attempt")}
+                    </th>
+                    <th className="px-3 py-2 text-start font-medium">
+                      {t("schedules.logCost", "Cost")}
+                    </th>
+                    <th className="px-3 py-2 text-start font-medium">
+                      {t("schedules.logConversation", "Conversation")}
+                    </th>
+                    <th className="px-3 py-2 text-start font-medium">
+                      {t("status.error", "Error")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -215,6 +285,17 @@ function FireLogsRow({ scheduleId }: { scheduleId: string }) {
                         <td className="px-3 py-1.5">
                           <FireStatusBadge status={log.status} />
                         </td>
+                        <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
+                          {log.attemptNumber ?? "—"}
+                        </td>
+                        <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
+                          {formatCost(log.cost)}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <ConversationCell
+                            conversationId={log.conversationId}
+                          />
+                        </td>
                         <td
                           className="max-w-[300px] truncate px-3 py-1.5 text-red-400"
                           title={log.errorMessage}
@@ -234,41 +315,254 @@ function FireLogsRow({ scheduleId }: { scheduleId: string }) {
   );
 }
 
-// ==================== Create Dialog ====================
+// ==================== Failed / Dead-letter Panel ====================
 
-function CreateScheduleDialog({
+function FailedFiresPanel({
+  schedules,
+}: {
+  schedules?: ScheduleConfiguration[];
+}) {
+  const { t } = useTranslation();
+  const { data: failed, isLoading } = useFailedFires();
+  const retryMutation = useRetryDeadLetter();
+  const dismissMutation = useDismissDeadLetter();
+
+  const nameFor = (scheduleId: string) =>
+    schedules?.find((s) => s.id === scheduleId)?.name ?? scheduleId;
+
+  const handleRetry = (scheduleId: string) => {
+    retryMutation.mutate(scheduleId, {
+      onSuccess: () =>
+        toast.success(t("schedules.retrySuccess", "Schedule re-queued")),
+      onError: () =>
+        toast.error(t("schedules.retryError", "Failed to retry schedule")),
+    });
+  };
+
+  const handleDismiss = (scheduleId: string) => {
+    dismissMutation.mutate(scheduleId, {
+      onSuccess: () =>
+        toast.success(t("schedules.dismissSuccess", "Dead letter dismissed")),
+      onError: () =>
+        toast.error(t("schedules.dismissError", "Failed to dismiss dead letter")),
+    });
+  };
+
+  return (
+    <div
+      className="rounded-xl border border-border bg-card"
+      data-testid="failed-fires-panel"
+    >
+      <div className="border-b border-border px-5 py-4">
+        <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+          <AlertTriangle className="h-4 w-4 text-amber-500" />
+          {t("schedules.failedTitle", "Failed & Dead-Lettered Fires")}
+        </h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          {t(
+            "schedules.failedSubtitle",
+            "Fires that failed permanently. Retry to re-queue, or dismiss to clear without re-running."
+          )}
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="p-8 text-center">
+          <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      ) : !failed || failed.length === 0 ? (
+        <div
+          className="p-8 text-center text-muted-foreground"
+          data-testid="failed-fires-empty"
+        >
+          <Inbox className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
+          <p>{t("schedules.failedEmpty", "No failed fires")}</p>
+          <p className="mt-1 text-xs">
+            {t(
+              "schedules.failedEmptyHint",
+              "Dead-lettered fires will appear here for retry or dismissal."
+            )}
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full" data-testid="failed-fires-table">
+            <thead>
+              <tr className="border-b border-border text-start text-sm text-muted-foreground">
+                <th className="px-5 py-3 text-start font-medium">
+                  {t("schedules.colSchedule2", "Schedule")}
+                </th>
+                <th className="px-5 py-3 text-start font-medium">
+                  {t("schedules.logFired", "Fired")}
+                </th>
+                <th className="px-5 py-3 text-start font-medium">
+                  {t("schedules.logAttempt", "Attempt")}
+                </th>
+                <th className="px-5 py-3 text-start font-medium">
+                  {t("schedules.logCost", "Cost")}
+                </th>
+                <th className="px-5 py-3 text-start font-medium">
+                  {t("schedules.logConversation", "Conversation")}
+                </th>
+                <th className="px-5 py-3 text-start font-medium">
+                  {t("status.error", "Error")}
+                </th>
+                <th className="px-5 py-3 text-end font-medium">
+                  {t("schedules.colActions", "Actions")}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {failed.map((log, i) => (
+                <tr
+                  key={log.id ?? i}
+                  className="border-b border-border/50 transition-colors hover:bg-muted/30"
+                  data-testid={`failed-row-${log.scheduleId}`}
+                >
+                  <td className="px-5 py-3">
+                    <span className="font-medium text-foreground">
+                      {nameFor(log.scheduleId)}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
+                    {log.fireTime
+                      ? new Date(log.fireTime).toLocaleString()
+                      : "—"}
+                  </td>
+                  <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
+                    {log.attemptNumber ?? "—"}
+                  </td>
+                  <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
+                    {formatCost(log.cost)}
+                  </td>
+                  <td className="px-5 py-3">
+                    <ConversationCell conversationId={log.conversationId} />
+                  </td>
+                  <td
+                    className="max-w-[280px] truncate px-5 py-3 text-sm text-red-400"
+                    title={log.errorMessage}
+                  >
+                    {log.errorMessage ?? "—"}
+                  </td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => handleRetry(log.scheduleId)}
+                        disabled={retryMutation.isPending}
+                        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+                        data-testid={`failed-retry-${log.scheduleId}`}
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        {t("schedules.retry", "Retry")}
+                      </button>
+                      <button
+                        onClick={() => handleDismiss(log.scheduleId)}
+                        disabled={dismissMutation.isPending}
+                        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                        data-testid={`failed-dismiss-${log.scheduleId}`}
+                      >
+                        <Ban className="h-3 w-3" />
+                        {t("schedules.dismiss", "Dismiss")}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==================== Create / Edit Dialog ====================
+
+function ScheduleFormDialog({
   open,
+  editing,
   onClose,
 }: {
   open: boolean;
+  editing: ScheduleConfiguration | null;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const createMutation = useCreateSchedule();
-  const [triggerType, setTriggerType] = useState<TriggerType>("CRON");
+  const updateMutation = useUpdateSchedule();
+  const isEdit = editing != null;
+
+  const [formMode, setFormMode] = useState<FormMode>("cron");
   const [name, setName] = useState("");
   const [agentId, setAgentId] = useState("");
+  const [agentVersion, setAgentVersion] = useState(0);
   const [cronExpression, setCronExpression] = useState("0 9 * * MON-FRI");
   const [heartbeatInterval, setHeartbeatInterval] = useState(300);
+  const [oneTimeAt, setOneTimeAt] = useState("");
+  const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [message, setMessage] = useState("Hello");
   const [environment, setEnvironment] = useState("production");
   const [strategy, setStrategy] = useState<"new" | "persistent">("new");
+  const [persistentConversationId, setPersistentConversationId] = useState("");
+  const [userId, setUserId] = useState("");
+  const [unlimitedCost, setUnlimitedCost] = useState(true);
+  const [maxCost, setMaxCost] = useState(1);
 
-  // Reset form when dialog opens
-  const resetForm = useCallback(() => {
+  const timeZones = useMemo(() => listTimeZones(), []);
+
+  const resetToDefaults = useCallback(() => {
+    setFormMode("cron");
     setName("");
     setAgentId("");
-    setTriggerType("CRON");
+    setAgentVersion(0);
     setCronExpression("0 9 * * MON-FRI");
     setHeartbeatInterval(300);
+    setOneTimeAt("");
+    setTimeZone(DEFAULT_TIME_ZONE);
     setMessage("Hello");
     setEnvironment("production");
     setStrategy("new");
+    setPersistentConversationId("");
+    setUserId("");
+    setUnlimitedCost(true);
+    setMaxCost(1);
   }, []);
 
+  const prefillFrom = useCallback((s: ScheduleConfiguration) => {
+    const mode: FormMode =
+      s.triggerType === "HEARTBEAT"
+        ? "heartbeat"
+        : s.oneTimeAt
+          ? "oneTime"
+          : "cron";
+    setFormMode(mode);
+    setName(s.name ?? "");
+    setAgentId(s.agentId ?? "");
+    setAgentVersion(s.agentVersion ?? 0);
+    setCronExpression(s.cronExpression ?? "0 9 * * MON-FRI");
+    setHeartbeatInterval(s.heartbeatIntervalSeconds ?? 300);
+    setOneTimeAt(isoToLocalInput(s.oneTimeAt));
+    setTimeZone(s.timeZone ?? DEFAULT_TIME_ZONE);
+    setMessage(s.message ?? "");
+    setEnvironment(s.environment ?? "production");
+    setStrategy((s.conversationStrategy as "new" | "persistent") ?? "new");
+    setPersistentConversationId(s.persistentConversationId ?? "");
+    setUserId(s.userId ?? "");
+    if (s.maxCostPerFire == null || s.maxCostPerFire < 0) {
+      setUnlimitedCost(true);
+      setMaxCost(1);
+    } else {
+      setUnlimitedCost(false);
+      setMaxCost(s.maxCostPerFire);
+    }
+  }, []);
+
+  // (Re)initialise the form each time the dialog opens.
   useEffect(() => {
-    if (open) resetForm();
-  }, [open, resetForm]);
+    if (!open) return;
+    if (editing) prefillFrom(editing);
+    else resetToDefaults();
+  }, [open, editing, prefillFrom, resetToDefaults]);
 
   // ESC to close
   useEffect(() => {
@@ -280,69 +574,163 @@ function CreateScheduleDialog({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // --- Live cron helper state ---
+  const cronDesc = useMemo(
+    () => (formMode === "cron" ? describeCron(cronExpression) : null),
+    [formMode, cronExpression]
+  );
+  const cronNextFires = useMemo(
+    () =>
+      formMode === "cron" && isValidCron(cronExpression)
+        ? nextCronFires(cronExpression, 3, new Date(), timeZone)
+        : [],
+    [formMode, cronExpression, timeZone]
+  );
+  const cronMin = useMemo(
+    () =>
+      formMode === "cron" && isValidCron(cronExpression)
+        ? cronMinIntervalSeconds(cronExpression, timeZone)
+        : null,
+    [formMode, cronExpression, timeZone]
+  );
+
+  let cronError: string | null = null;
+  if (formMode === "cron") {
+    if (!isValidCron(cronExpression)) {
+      cronError = t(
+        "schedules.cronInvalid",
+        "Invalid cron expression (expected 5 fields)"
+      );
+    } else if (cronMin != null && cronMin < MIN_INTERVAL_SECONDS) {
+      cronError = t(
+        "schedules.cronTooFrequent",
+        "Fires more often than the 60-second minimum"
+      );
+    }
+  }
+
+  const heartbeatError =
+    formMode === "heartbeat" && heartbeatInterval < MIN_INTERVAL_SECONDS
+      ? t(
+          "schedules.intervalTooShort",
+          "Interval must be at least 60 seconds"
+        )
+      : null;
+
   if (!open) return null;
 
-  // Form validation
+  const messageRequired = formMode !== "heartbeat";
   const isValid =
     name.trim().length > 0 &&
     agentId.trim().length > 0 &&
-    (triggerType === "CRON"
-      ? cronExpression.trim().length > 0
-      : heartbeatInterval >= 60);
+    (!messageRequired || message.trim().length > 0) &&
+    (formMode === "cron"
+      ? cronError == null
+      : formMode === "oneTime"
+        ? localInputToIso(oneTimeAt) != null
+        : heartbeatError == null);
 
-  const handleCreate = () => {
-    if (!isValid) return;
+  const isPending = createMutation.isPending || updateMutation.isPending;
+
+  const buildConfig = (): Partial<ScheduleConfiguration> => {
+    const effectiveStrategy = formMode === "heartbeat" ? "persistent" : strategy;
     const config: Partial<ScheduleConfiguration> = {
       name: name.trim(),
-      triggerType,
+      triggerType: formMode === "heartbeat" ? "HEARTBEAT" : "CRON",
       agentId: agentId.trim(),
-      agentVersion: 0,
+      agentVersion,
       environment,
-      message,
-      conversationStrategy:
-        triggerType === "HEARTBEAT" ? "persistent" : strategy,
-      enabled: true,
-      ...(triggerType === "CRON"
-        ? { cronExpression: cronExpression.trim() }
-        : { heartbeatIntervalSeconds: heartbeatInterval }),
+      message: message.trim() || undefined,
+      timeZone,
+      userId: userId.trim() || undefined,
+      maxCostPerFire: unlimitedCost ? UNLIMITED_COST : maxCost,
+      conversationStrategy: effectiveStrategy,
+      enabled: editing ? editing.enabled : true,
     };
-
-    createMutation.mutate(config, {
-      onSuccess: () => {
-        toast.success(
-          t("schedules.createSuccess", "Schedule created successfully")
-        );
-        onClose();
-      },
-      onError: () =>
-        toast.error(
-          t("schedules.createError", "Failed to create schedule")
-        ),
-    });
+    // Exactly one of cron / oneTimeAt / heartbeat (backend rule).
+    if (formMode === "cron") {
+      config.cronExpression = cronExpression.trim();
+    } else if (formMode === "oneTime") {
+      config.oneTimeAt = localInputToIso(oneTimeAt) ?? undefined;
+    } else {
+      config.heartbeatIntervalSeconds = heartbeatInterval;
+    }
+    if (effectiveStrategy === "persistent" && persistentConversationId.trim()) {
+      config.persistentConversationId = persistentConversationId.trim();
+    }
+    return config;
   };
+
+  const handleSubmit = () => {
+    if (!isValid) return;
+    const config = buildConfig();
+    if (isEdit && editing?.id) {
+      updateMutation.mutate(
+        { id: editing.id, config },
+        {
+          onSuccess: () => {
+            toast.success(t("schedules.updateSuccess", "Schedule updated"));
+            onClose();
+          },
+          onError: () =>
+            toast.error(
+              t("schedules.updateError", "Failed to update schedule")
+            ),
+        }
+      );
+    } else {
+      createMutation.mutate(config, {
+        onSuccess: () => {
+          toast.success(
+            t("schedules.createSuccess", "Schedule created successfully")
+          );
+          onClose();
+        },
+        onError: () =>
+          toast.error(t("schedules.createError", "Failed to create schedule")),
+      });
+    }
+  };
+
+  const modeTabs: { mode: FormMode; label: string; Icon: typeof Timer }[] = [
+    { mode: "cron", label: t("schedules.typeCron", "Cron"), Icon: CalendarClock },
+    { mode: "oneTime", label: t("schedules.typeOneTime", "One-time"), Icon: Clock },
+    {
+      mode: "heartbeat",
+      label: t("schedules.typeHeartbeat", "Heartbeat"),
+      Icon: Timer,
+    },
+  ];
+
+  const inputCls =
+    "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none";
+  const labelCls = "mb-1 block text-sm font-medium text-muted-foreground";
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="create-schedule-title"
+      aria-labelledby="schedule-form-title"
     >
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
-        <h2 id="create-schedule-title" className="mb-4 text-lg font-bold text-foreground">
-          {t("schedules.createTitle", "Create Schedule")}
+      <div className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
+        <h2
+          id="schedule-form-title"
+          className="mb-4 text-lg font-bold text-foreground"
+        >
+          {isEdit
+            ? t("schedules.editTitle", "Edit Schedule")
+            : t("schedules.createTitle", "Create Schedule")}
         </h2>
 
         <div className="space-y-4">
           {/* Name */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-muted-foreground">
-              {t("schedules.name", "Name")}
-            </label>
+            <label className={labelCls}>{t("schedules.name", "Name")}</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -350,106 +738,225 @@ function CreateScheduleDialog({
                 "schedules.namePlaceholder",
                 "e.g. Daily health check"
               )}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
+              className={inputCls}
+              data-testid="schedule-name-input"
             />
           </div>
 
           {/* Trigger Type Tabs */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-muted-foreground">
+            <label className={labelCls}>
               {t("schedules.triggerType", "Trigger Type")}
             </label>
             <div className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
-              {(["CRON", "HEARTBEAT"] as TriggerType[]).map((tt) => (
+              {modeTabs.map(({ mode, label, Icon }) => (
                 <button
-                  key={tt}
+                  key={mode}
                   onClick={() => {
-                    setTriggerType(tt);
-                    if (tt === "HEARTBEAT") setStrategy("persistent");
+                    setFormMode(mode);
+                    if (mode === "heartbeat") setStrategy("persistent");
                   }}
+                  data-testid={`trigger-${mode}`}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
-                    triggerType === tt
+                    formMode === mode
                       ? "bg-primary text-primary-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {tt === "CRON" ? (
-                    <CalendarClock className="h-3.5 w-3.5" />
-                  ) : (
-                    <Timer className="h-3.5 w-3.5" />
-                  )}
-                  {tt === "CRON" ? t("schedules.typeCron", "Cron") : t("schedules.typeHeartbeat", "Heartbeat")}
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Cron / Interval */}
-          {triggerType === "CRON" ? (
+          {/* Timing: Cron */}
+          {formMode === "cron" && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-muted-foreground">
+              <label className={labelCls}>
                 {t("schedules.cronExpression", "Cron Expression")}
               </label>
+              <div className="mb-2 flex flex-wrap gap-1">
+                {CRON_PRESETS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => setCronExpression(p.expression)}
+                    title={p.expression}
+                    data-testid={`cron-preset-${p.key}`}
+                    className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${
+                      cronExpression.trim() === p.expression
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {t(`schedules.cronPreset.${p.key}`, p.label)}
+                  </button>
+                ))}
+              </div>
               <input
                 value={cronExpression}
                 onChange={(e) => setCronExpression(e.target.value)}
                 placeholder="0 9 * * MON-FRI"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
+                className={`${inputCls} font-mono`}
+                data-testid="cron-input"
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t("schedules.cronHelp", "5-field format: minute hour day-of-month month day-of-week")}
+              {cronError ? (
+                <p className="mt-1 text-xs text-red-400" data-testid="cron-error">
+                  {cronError}
+                </p>
+              ) : (
+                <>
+                  {cronDesc && (
+                    <p
+                      className="mt-1 text-xs text-primary"
+                      data-testid="cron-description"
+                    >
+                      {cronDesc}
+                    </p>
+                  )}
+                  {cronNextFires.length > 0 && (
+                    <p
+                      className="mt-0.5 text-xs text-muted-foreground"
+                      data-testid="cron-next-preview"
+                    >
+                      {t("schedules.cronNext", "Next")}:{" "}
+                      {cronNextFires
+                        .map((d) => d.toLocaleString())
+                        .join(" · ")}
+                    </p>
+                  )}
+                </>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground/70">
+                {t(
+                  "schedules.cronHelp",
+                  "5-field format: minute hour day-of-month month day-of-week"
+                )}
               </p>
             </div>
-          ) : (
+          )}
+
+          {/* Timing: One-time */}
+          {formMode === "oneTime" && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-muted-foreground">
+              <label className={labelCls}>
+                {t("schedules.oneTimeAt", "Date & time")}
+              </label>
+              <input
+                type="datetime-local"
+                value={oneTimeAt}
+                onChange={(e) => setOneTimeAt(e.target.value)}
+                className={inputCls}
+                data-testid="onetime-input"
+              />
+              <p className="mt-1 text-xs text-muted-foreground/70">
+                {t(
+                  "schedules.oneTimeHelp",
+                  "Fires once at this moment, then completes. Interpreted in your local time."
+                )}
+              </p>
+            </div>
+          )}
+
+          {/* Timing: Heartbeat */}
+          {formMode === "heartbeat" && (
+            <div>
+              <label className={labelCls}>
                 {t("schedules.interval", "Interval (seconds)")}
               </label>
               <input
                 type="number"
-                min={60}
+                min={MIN_INTERVAL_SECONDS}
                 value={heartbeatInterval}
                 onChange={(e) => setHeartbeatInterval(Number(e.target.value))}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                className={inputCls}
+                data-testid="heartbeat-input"
               />
+              {heartbeatError && (
+                <p
+                  className="mt-1 text-xs text-red-400"
+                  data-testid="heartbeat-error"
+                >
+                  {heartbeatError}
+                </p>
+              )}
             </div>
           )}
 
-          {/* Agent ID */}
+          {/* Time Zone */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-muted-foreground">
-              {t("schedules.agentId", "Agent ID")}
+            <label className={`${labelCls} flex items-center gap-1.5`}>
+              <Globe className="h-3.5 w-3.5" />
+              {t("schedules.timeZone", "Time Zone")}
             </label>
-            <input
-              value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
-              placeholder={t(
-                "schedules.agentIdPlaceholder",
-                "Enter agent ID..."
-              )}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
-            />
+            <select
+              value={timeZone}
+              onChange={(e) => setTimeZone(e.target.value)}
+              className={inputCls}
+              data-testid="timezone-select"
+            >
+              {timeZones.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Agent ID + Version */}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className={labelCls}>
+                {t("schedules.agentId", "Agent ID")}
+              </label>
+              <input
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
+                placeholder={t(
+                  "schedules.agentIdPlaceholder",
+                  "Enter agent ID..."
+                )}
+                className={inputCls}
+                data-testid="agent-id-input"
+              />
+            </div>
+            <div className="w-32">
+              <label className={labelCls}>
+                {t("schedules.agentVersion", "Version")}
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={agentVersion}
+                onChange={(e) => setAgentVersion(Number(e.target.value))}
+                className={inputCls}
+                data-testid="agent-version-input"
+                title={t("schedules.agentVersionHint", "0 = latest deployed")}
+              />
+            </div>
           </div>
 
           {/* Environment */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-muted-foreground">
+            <label className={labelCls}>
               {t("schedules.environment", "Environment")}
             </label>
             <select
               value={environment}
               onChange={(e) => setEnvironment(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              className={inputCls}
             >
-              <option value="production">{t("schedules.envProduction", "Production")}</option>
-              
+              <option value="production">
+                {t("schedules.envProduction", "Production")}
+              </option>
               <option value="test">{t("schedules.envTest", "Test")}</option>
             </select>
           </div>
 
           {/* Message */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-muted-foreground">
+            <label className={labelCls}>
               {t("schedules.message", "Message")}
             </label>
             <input
@@ -459,14 +966,58 @@ function CreateScheduleDialog({
                 "schedules.messagePlaceholder",
                 "Message to send to agent"
               )}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
+              className={inputCls}
+              data-testid="message-input"
             />
           </div>
 
-          {/* Conversation Strategy (only for CRON) */}
-          {triggerType === "CRON" && (
+          {/* User ID */}
+          <div>
+            <label className={labelCls}>
+              {t("schedules.userId", "User ID")}
+            </label>
+            <input
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              placeholder={t("schedules.userIdPlaceholder", "system:scheduler")}
+              className={inputCls}
+              data-testid="userid-input"
+            />
+          </div>
+
+          {/* Max cost per fire */}
+          <div>
+            <label className={labelCls}>
+              {t("schedules.maxCostPerFire", "Max cost per fire")}
+            </label>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={unlimitedCost}
+                  onChange={(e) => setUnlimitedCost(e.target.checked)}
+                  data-testid="maxcost-unlimited"
+                  className="h-4 w-4 rounded border-border"
+                />
+                {t("schedules.unlimited", "Unlimited")}
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={maxCost}
+                disabled={unlimitedCost}
+                onChange={(e) => setMaxCost(Number(e.target.value))}
+                className={`${inputCls} flex-1 disabled:opacity-50`}
+                data-testid="maxcost-input"
+              />
+            </div>
+          </div>
+
+          {/* Conversation Strategy (cron / one-time only) */}
+          {formMode !== "heartbeat" && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-muted-foreground">
+              <label className={labelCls}>
                 {t("schedules.conversationStrategy", "Conversation Strategy")}
               </label>
               <select
@@ -474,13 +1025,41 @@ function CreateScheduleDialog({
                 onChange={(e) =>
                   setStrategy(e.target.value as "new" | "persistent")
                 }
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                className={inputCls}
+                data-testid="strategy-select"
               >
-                <option value="new">{t("schedules.strategyNew", "New (fresh conversation each fire)")}</option>
+                <option value="new">
+                  {t("schedules.strategyNew", "New (fresh conversation each fire)")}
+                </option>
                 <option value="persistent">
-                  {t("schedules.strategyPersistent", "Persistent (reuse same conversation)")}
+                  {t(
+                    "schedules.strategyPersistent",
+                    "Persistent (reuse same conversation)"
+                  )}
                 </option>
               </select>
+            </div>
+          )}
+
+          {/* Persistent conversation id (only when persistent) */}
+          {(formMode === "heartbeat" || strategy === "persistent") && (
+            <div>
+              <label className={labelCls}>
+                {t(
+                  "schedules.persistentConversationId",
+                  "Persistent conversation ID"
+                )}
+              </label>
+              <input
+                value={persistentConversationId}
+                onChange={(e) => setPersistentConversationId(e.target.value)}
+                placeholder={t(
+                  "schedules.persistentConversationIdPlaceholder",
+                  "Auto-generated if left blank"
+                )}
+                className={inputCls}
+                data-testid="persistent-conv-input"
+              />
             </div>
           )}
         </div>
@@ -494,13 +1073,18 @@ function CreateScheduleDialog({
             {t("common.cancel", "Cancel")}
           </button>
           <button
-            onClick={handleCreate}
-            disabled={!isValid || createMutation.isPending}
+            onClick={handleSubmit}
+            disabled={!isValid || isPending}
             className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            data-testid="schedule-submit-btn"
           >
-            {createMutation.isPending
-              ? t("schedules.creating", "Creating...")
-              : t("common.create", "Create")}
+            {isEdit
+              ? isPending
+                ? t("schedules.saving", "Saving...")
+                : t("common.save", "Save")
+              : isPending
+                ? t("schedules.creating", "Creating...")
+                : t("common.create", "Create")}
           </button>
         </div>
       </div>
@@ -512,17 +1096,30 @@ function CreateScheduleDialog({
 
 export function SchedulesPage() {
   const { t } = useTranslation();
-  
+
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
-  useEffect(() => { const t = setTimeout(() => maybeAutoStart("schedules"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
+  useEffect(() => {
+    const timer = setTimeout(() => maybeAutoStart("schedules"), 500);
+    return () => clearTimeout(timer);
+  }, [maybeAutoStart]);
 
   const { data: schedules, isLoading } = useSchedules();
+  const { data: failedFires } = useFailedFires();
   const deleteMutation = useDeleteSchedule();
   const toggleMutation = useToggleSchedule();
   const fireMutation = useFireNow();
   const retryMutation = useRetryDeadLetter();
-  const [showCreate, setShowCreate] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<"schedules" | "failed">(
+    "schedules"
+  );
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<ScheduleConfiguration | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmFireId, setConfirmFireId] = useState<string | null>(null);
+  const [fireOutcomes, setFireOutcomes] = useState<
+    Record<string, ScheduleFireLog | null>
+  >({});
 
   const total = schedules?.length ?? 0;
   const active = schedules?.filter((s) => s.enabled).length ?? 0;
@@ -530,10 +1127,21 @@ export function SchedulesPage() {
     schedules?.filter(
       (s) => s.fireStatus === "FAILED" || s.fireStatus === "DEAD_LETTERED"
     ).length ?? 0;
+  const failedFiresCount = failedFires?.length ?? 0;
 
   const soonest = schedules
     ?.filter((s) => s.enabled && s.nextFire)
     ?.sort((a, b) => (a.nextFire ?? 0) - (b.nextFire ?? 0))?.[0];
+
+  const openCreate = () => {
+    setEditing(null);
+    setShowForm(true);
+  };
+
+  const openEdit = (s: ScheduleConfiguration) => {
+    setEditing(s);
+    setShowForm(true);
+  };
 
   const handleToggle = (s: ScheduleConfiguration) => {
     toggleMutation.mutate(
@@ -551,14 +1159,34 @@ export function SchedulesPage() {
     );
   };
 
-  const handleFire = (id: string) => {
-    fireMutation.mutate(id, {
-      onSuccess: () =>
-        toast.success(t("schedules.fired", "Schedule fired successfully")),
-      onError: () =>
-        toast.error(t("schedules.fireError", "Failed to fire schedule")),
+  const doFire = (s: ScheduleConfiguration) => {
+    fireMutation.mutate(s.id!, {
+      onSuccess: (log) => {
+        setConfirmFireId(null);
+        setFireOutcomes((prev) => ({ ...prev, [s.id!]: log ?? null }));
+        if (log && (log.status === "FAILED" || log.status === "DEAD_LETTERED")) {
+          toast.error(
+            `${t("schedules.fireOutcomeFailed", "Fire failed")}: ${
+              log.errorMessage ?? t("schedules.unknownError", "unknown error")
+            }`
+          );
+        } else {
+          toast.success(t("schedules.fired", "Schedule fired successfully"));
+        }
+      },
+      onError: () => {
+        setConfirmFireId(null);
+        toast.error(t("schedules.fireError", "Failed to fire schedule"));
+      },
     });
   };
+
+  const clearOutcome = (id: string) =>
+    setFireOutcomes((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
 
   const handleDelete = (id: string) => {
     deleteMutation.mutate(id, {
@@ -599,7 +1227,7 @@ export function SchedulesPage() {
           </div>
         </div>
         <button
-          onClick={() => setShowCreate(true)}
+          onClick={openCreate}
           className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           data-testid="create-schedule-btn"
         >
@@ -692,216 +1320,366 @@ export function SchedulesPage() {
         </div>
       )}
 
-      {/* Schedule Table */}
-      <div
-        className="rounded-xl border border-border bg-card"
-        data-testid="schedules-table-container"
-      >
-        <div className="border-b border-border px-5 py-4">
-          <h2 className="text-lg font-semibold text-foreground">
-            {t("schedules.tableTitle", "All Schedules")}
-          </h2>
-        </div>
-
-        {isLoading ? (
-          <div className="p-8 text-center">
-            <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          </div>
-        ) : !schedules || schedules.length === 0 ? (
-          <div
-            className="p-8 text-center text-muted-foreground"
-            data-testid="schedules-empty"
-          >
-            <Clock className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
-            <p>{t("schedules.empty", "No schedules yet")}</p>
-            <p className="mt-1 text-xs">
-              {t(
-                "schedules.emptyHint",
-                "Create a schedule to automate agent triggers."
-              )}
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full" data-testid="schedules-table">
-              <thead>
-                <tr className="border-b border-border text-start text-sm text-muted-foreground">
-                  <th className="px-5 py-3 text-start font-medium">
-                    {t("schedules.colName", "Name")}
-                  </th>
-                  <th className="px-5 py-3 text-start font-medium">
-                    {t("schedules.colType", "Type")}
-                  </th>
-                  <th className="px-5 py-3 text-start font-medium">
-                    {t("schedules.colSchedule", "Schedule")}
-                  </th>
-                  <th className="px-5 py-3 text-start font-medium">
-                    {t("schedules.colAgent", "Agent")}
-                  </th>
-                  <th className="px-5 py-3 text-start font-medium">
-                    {t("schedules.colStatus", "Status")}
-                  </th>
-                  <th className="px-5 py-3 text-start font-medium">
-                    {t("schedules.colNextFire", "Next Fire")}
-                  </th>
-                  <th className="px-5 py-3 text-start font-medium">
-                    {t("schedules.colLastFired", "Last Fired")}
-                  </th>
-                  <th className="px-5 py-3 text-end font-medium">
-                    {t("schedules.colActions", "Actions")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {schedules.map((s) => (
-                  <Fragment key={s.id}>
-                    <tr
-                      className="border-b border-border/50 transition-colors hover:bg-muted/30"
-                    >
-                      <td className="px-5 py-3">
-                        <span className="font-medium text-foreground">
-                          {s.name}
-                        </span>
-                        {isHitlTimeoutSchedule(s) && (
-                          <span
-                            className="ms-2 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600"
-                            title={t("schedules.hitlTimeoutHint", "System-managed HITL approval timeout — resolve it via the conversation's approval, not here.")}
-                            data-testid={`hitl-schedule-badge-${s.id}`}
-                          >
-                            <HandMetal className="h-3 w-3" /> {t("schedules.hitlTimeout", "HITL timeout")}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3">
-                        <TypeBadge type={s.triggerType} />
-                      </td>
-                      <td className="px-5 py-3">
-                        <code className="text-xs text-muted-foreground">
-                          {s.triggerType === "CRON"
-                            ? s.cronExpression
-                            : `Every ${s.heartbeatIntervalSeconds}s`}
-                        </code>
-                        {s.cronDescription && (
-                          <p className="mt-0.5 text-xs text-muted-foreground/70">
-                            {s.cronDescription}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-5 py-3">
-                        <code className="text-xs text-foreground">
-                          {s.agentId}
-                        </code>
-                      </td>
-                      <td className="px-5 py-3">
-                        <StatusBadge schedule={s} />
-                        {s.failCount > 0 && (
-                          <span className="ms-1.5 text-xs text-amber-500">
-                            ×{s.failCount}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
-                        {s.nextFire
-                          ? new Date(s.nextFire).toLocaleString()
-                          : "—"}
-                      </td>
-                      <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
-                        {s.lastFired
-                          ? new Date(s.lastFired).toLocaleString()
-                          : "—"}
-                      </td>
-                      <td className="px-5 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          {/* Toggle Enable/Disable */}
-                          <button
-                            onClick={() => handleToggle(s)}
-                            disabled={toggleMutation.isPending}
-                            title={
-                              s.enabled
-                                ? t("schedules.disable", "Disable")
-                                : t("schedules.enable", "Enable")
-                            }
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
-                            data-testid={`toggle-${s.id}`}
-                          >
-                            {s.enabled ? (
-                              <ToggleRight className="h-4 w-4 text-emerald-500" />
-                            ) : (
-                              <ToggleLeft className="h-4 w-4" />
-                            )}
-                          </button>
-
-                          {/* Fire Now — hidden for HITL-timeout schedules, which
-                              the backend refuses to fire manually (409). */}
-                          {!isHitlTimeoutSchedule(s) && (
-                            <button
-                              onClick={() => handleFire(s.id!)}
-                              disabled={fireMutation.isPending}
-                              title={t("schedules.fireNow", "Fire Now")}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
-                              data-testid={`fire-${s.id}`}
-                            >
-                              <Play className="h-4 w-4" />
-                            </button>
-                          )}
-
-                          {/* Retry (only for dead-lettered) */}
-                          {s.fireStatus === "DEAD_LETTERED" && (
-                            <button
-                              onClick={() => handleRetry(s.id!)}
-                              disabled={retryMutation.isPending}
-                              title={t("schedules.retry", "Retry")}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-amber-500/10 hover:text-amber-500 disabled:opacity-50"
-                              data-testid={`retry-${s.id}`}
-                            >
-                              <RotateCcw className="h-4 w-4" />
-                            </button>
-                          )}
-
-                          {/* Delete */}
-                          {confirmDeleteId === s.id ? (
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => handleDelete(s.id!)}
-                                disabled={deleteMutation.isPending}
-                                className="rounded-md bg-red-500 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-50"
-                              >
-                                {t("common.delete", "Delete")}
-                              </button>
-                              <button
-                                onClick={() => setConfirmDeleteId(null)}
-                                className="rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-                              >
-                                {t("common.cancel", "Cancel")}
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => setConfirmDeleteId(s.id!)}
-                              title={t("common.delete", "Delete")}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
-                              data-testid={`delete-${s.id}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                    {/* Expandable fire logs */}
-                    <FireLogsRow key={`logs-${s.id}`} scheduleId={s.id!} />
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-border" role="tablist">
+        <button
+          role="tab"
+          aria-selected={activeTab === "schedules"}
+          onClick={() => setActiveTab("schedules")}
+          data-testid="tab-schedules"
+          className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            activeTab === "schedules"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {t("schedules.tabSchedules", "Schedules")}
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === "failed"}
+          onClick={() => setActiveTab("failed")}
+          data-testid="tab-failed"
+          className={`-mb-px flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            activeTab === "failed"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {t("schedules.tabFailed", "Failed / Dead-letter")}
+          {failedFiresCount > 0 && (
+            <span
+              className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-xs font-semibold text-amber-500"
+              data-testid="failed-tab-count"
+            >
+              {failedFiresCount}
+            </span>
+          )}
+        </button>
       </div>
 
-      {/* Create Dialog */}
-      <CreateScheduleDialog
-        open={showCreate}
-        onClose={() => setShowCreate(false)}
+      {activeTab === "failed" ? (
+        <FailedFiresPanel schedules={schedules} />
+      ) : (
+        /* Schedule Table */
+        <div
+          className="rounded-xl border border-border bg-card"
+          data-testid="schedules-table-container"
+        >
+          <div className="border-b border-border px-5 py-4">
+            <h2 className="text-lg font-semibold text-foreground">
+              {t("schedules.tableTitle", "All Schedules")}
+            </h2>
+          </div>
+
+          {isLoading ? (
+            <div className="p-8 text-center">
+              <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          ) : !schedules || schedules.length === 0 ? (
+            <div
+              className="p-8 text-center text-muted-foreground"
+              data-testid="schedules-empty"
+            >
+              <Clock className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
+              <p>{t("schedules.empty", "No schedules yet")}</p>
+              <p className="mt-1 text-xs">
+                {t(
+                  "schedules.emptyHint",
+                  "Create a schedule to automate agent triggers."
+                )}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full" data-testid="schedules-table">
+                <thead>
+                  <tr className="border-b border-border text-start text-sm text-muted-foreground">
+                    <th className="px-5 py-3 text-start font-medium">
+                      {t("schedules.colName", "Name")}
+                    </th>
+                    <th className="px-5 py-3 text-start font-medium">
+                      {t("schedules.colType", "Type")}
+                    </th>
+                    <th className="px-5 py-3 text-start font-medium">
+                      {t("schedules.colSchedule", "Schedule")}
+                    </th>
+                    <th className="px-5 py-3 text-start font-medium">
+                      {t("schedules.colAgent", "Agent")}
+                    </th>
+                    <th className="px-5 py-3 text-start font-medium">
+                      {t("schedules.colStatus", "Status")}
+                    </th>
+                    <th className="px-5 py-3 text-start font-medium">
+                      {t("schedules.colNextFire", "Next Fire")}
+                    </th>
+                    <th className="px-5 py-3 text-start font-medium">
+                      {t("schedules.colLastFired", "Last Fired")}
+                    </th>
+                    <th className="px-5 py-3 text-end font-medium">
+                      {t("schedules.colActions", "Actions")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {schedules.map((s) => {
+                    const hitl = isHitlTimeoutSchedule(s);
+                    const outcome = fireOutcomes[s.id!];
+                    return (
+                      <Fragment key={s.id}>
+                        <tr className="border-b border-border/50 transition-colors hover:bg-muted/30">
+                          <td className="px-5 py-3">
+                            <span className="font-medium text-foreground">
+                              {s.name}
+                            </span>
+                            {hitl && (
+                              <span
+                                className="ms-2 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600"
+                                title={t(
+                                  "schedules.hitlTimeoutHint",
+                                  "System-managed HITL approval timeout — resolve it via the conversation's approval, not here."
+                                )}
+                                data-testid={`hitl-schedule-badge-${s.id}`}
+                              >
+                                <HandMetal className="h-3 w-3" />{" "}
+                                {t("schedules.hitlTimeout", "HITL timeout")}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-5 py-3">
+                            <TypeBadge schedule={s} />
+                          </td>
+                          <td className="px-5 py-3">
+                            <code className="text-xs text-muted-foreground">
+                              {s.triggerType === "HEARTBEAT"
+                                ? `Every ${s.heartbeatIntervalSeconds}s`
+                                : s.oneTimeAt
+                                  ? new Date(s.oneTimeAt).toLocaleString()
+                                  : s.cronExpression}
+                            </code>
+                            {s.cronDescription && (
+                              <p className="mt-0.5 text-xs text-muted-foreground/70">
+                                {s.cronDescription}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-5 py-3">
+                            <code className="text-xs text-foreground">
+                              {s.agentId}
+                            </code>
+                          </td>
+                          <td className="px-5 py-3">
+                            <StatusBadge schedule={s} />
+                            {s.failCount > 0 && (
+                              <span className="ms-1.5 text-xs text-amber-500">
+                                ×{s.failCount}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
+                            {s.nextFire
+                              ? new Date(s.nextFire).toLocaleString()
+                              : "—"}
+                            <span
+                              className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground/60"
+                              data-testid={`timezone-${s.id}`}
+                            >
+                              <Globe className="h-3 w-3" />
+                              {s.timeZone ?? DEFAULT_TIME_ZONE}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
+                            {s.lastFired
+                              ? new Date(s.lastFired).toLocaleString()
+                              : "—"}
+                          </td>
+                          <td className="px-5 py-3">
+                            <div className="flex items-center justify-end gap-1">
+                              {/* Edit — hidden for HITL-timeout schedules
+                                  (backend restricts their mutation to admins). */}
+                              {!hitl && (
+                                <button
+                                  onClick={() => openEdit(s)}
+                                  title={t("common.edit", "Edit")}
+                                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                                  data-testid={`edit-${s.id}`}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                              )}
+
+                              {/* Toggle Enable/Disable */}
+                              <button
+                                onClick={() => handleToggle(s)}
+                                disabled={toggleMutation.isPending}
+                                title={
+                                  s.enabled
+                                    ? t("schedules.disable", "Disable")
+                                    : t("schedules.enable", "Enable")
+                                }
+                                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+                                data-testid={`toggle-${s.id}`}
+                              >
+                                {s.enabled ? (
+                                  <ToggleRight className="h-4 w-4 text-emerald-500" />
+                                ) : (
+                                  <ToggleLeft className="h-4 w-4" />
+                                )}
+                              </button>
+
+                              {/* Fire Now — hidden for HITL-timeout schedules,
+                                  which the backend refuses to fire (409). A
+                                  lightweight inline confirm precedes the fire. */}
+                              {!hitl &&
+                                (confirmFireId === s.id ? (
+                                  <span className="inline-flex items-center gap-1">
+                                    <button
+                                      onClick={() => doFire(s)}
+                                      disabled={fireMutation.isPending}
+                                      className="rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                                      data-testid={`fire-confirm-${s.id}`}
+                                    >
+                                      {t("schedules.fireNow", "Fire Now")}
+                                    </button>
+                                    <button
+                                      onClick={() => setConfirmFireId(null)}
+                                      className="rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                                      data-testid={`fire-cancel-${s.id}`}
+                                    >
+                                      {t("common.cancel", "Cancel")}
+                                    </button>
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => setConfirmFireId(s.id!)}
+                                    title={t("schedules.fireNow", "Fire Now")}
+                                    className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+                                    data-testid={`fire-${s.id}`}
+                                  >
+                                    <Play className="h-4 w-4" />
+                                  </button>
+                                ))}
+
+                              {/* Retry (only for dead-lettered) */}
+                              {s.fireStatus === "DEAD_LETTERED" && (
+                                <button
+                                  onClick={() => handleRetry(s.id!)}
+                                  disabled={retryMutation.isPending}
+                                  title={t("schedules.retry", "Retry")}
+                                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-amber-500/10 hover:text-amber-500 disabled:opacity-50"
+                                  data-testid={`retry-${s.id}`}
+                                >
+                                  <RotateCcw className="h-4 w-4" />
+                                </button>
+                              )}
+
+                              {/* Delete */}
+                              {confirmDeleteId === s.id ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => handleDelete(s.id!)}
+                                    disabled={deleteMutation.isPending}
+                                    className="rounded-md bg-red-500 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+                                  >
+                                    {t("common.delete", "Delete")}
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmDeleteId(null)}
+                                    className="rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                                  >
+                                    {t("common.cancel", "Cancel")}
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setConfirmDeleteId(s.id!)}
+                                  title={t("common.delete", "Delete")}
+                                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
+                                  data-testid={`delete-${s.id}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* Inline fire outcome */}
+                        {outcome !== undefined && (
+                          <tr data-testid={`fire-outcome-${s.id}`}>
+                            <td colSpan={8} className="px-5 py-0">
+                              <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-xs">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-medium text-muted-foreground">
+                                    {t(
+                                      "schedules.lastManualFire",
+                                      "Last manual fire"
+                                    )}
+                                    :
+                                  </span>
+                                  {outcome ? (
+                                    <>
+                                      <FireStatusBadge status={outcome.status} />
+                                      {outcome.cost != null && (
+                                        <span className="text-muted-foreground">
+                                          · {formatCost(outcome.cost)}
+                                        </span>
+                                      )}
+                                      {outcome.conversationId && (
+                                        <span className="text-muted-foreground">
+                                          ·{" "}
+                                          <ConversationCell
+                                            conversationId={
+                                              outcome.conversationId
+                                            }
+                                          />
+                                        </span>
+                                      )}
+                                      {outcome.errorMessage && (
+                                        <span className="text-red-400">
+                                          · {outcome.errorMessage}
+                                        </span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="text-muted-foreground">
+                                      {t(
+                                        "schedules.outcomePending",
+                                        "triggered — awaiting result"
+                                      )}
+                                    </span>
+                                  )}
+                                </div>
+                                <button
+                                  onClick={() => clearOutcome(s.id!)}
+                                  title={t("common.dismiss", "Dismiss")}
+                                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                  data-testid={`fire-outcome-clear-${s.id}`}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Expandable fire logs */}
+                        <FireLogsRow scheduleId={s.id!} />
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Create / Edit Dialog */}
+      <ScheduleFormDialog
+        open={showForm}
+        editing={editing}
+        onClose={() => setShowForm(false)}
       />
     </div>
   );

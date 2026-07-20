@@ -17,6 +17,7 @@ import {
   useFireLogs,
   useFailedFires,
   useRetryDeadLetter,
+  useDismissDeadLetter,
 } from "@/hooks/use-schedules";
 
 function createWrapper() {
@@ -180,6 +181,18 @@ describe("useRetryDeadLetter", () => {
     });
     await act(async () => {
       result.current.mutate("fire-fail-1");
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+});
+
+describe("useDismissDeadLetter", () => {
+  it("dismisses a dead letter", async () => {
+    const { result } = renderHook(() => useDismissDeadLetter(), {
+      wrapper: createWrapper(),
+    });
+    await act(async () => {
+      result.current.mutate("sched-3");
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
