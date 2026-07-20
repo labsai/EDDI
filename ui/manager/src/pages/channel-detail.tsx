@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { parseChannelResourceUri } from "@/lib/api/channels";
+import { getErrorMessage } from "@/lib/api-client";
 import { useTranslation } from "react-i18next";
 import {
   Cable, Save, Trash2, ArrowLeft, Plus, X, Copy, Check,
@@ -137,18 +139,46 @@ export function ChannelDetailPage() {
 
   const handleSave = async () => {
     if (!draft || !id) return;
-    const result = await updateMutation.mutateAsync({ id, version, config: draft });
-    // Update URL to new version so subsequent saves don't conflict
-    const location = (result as { location?: string })?.location;
-    if (location) {
-      const { version: newVersion } = parseChannelResourceUri(location);
-      setSearchParams({ version: String(newVersion) }, { replace: true });
+    try {
+      const result = await updateMutation.mutateAsync({ id, version, config: draft });
+      // Update URL to new version so subsequent saves don't conflict
+      const location = (result as { location?: string })?.location;
+      if (location) {
+        const { version: newVersion } = parseChannelResourceUri(location);
+        setSearchParams({ version: String(newVersion) }, { replace: true });
+      }
+      toast.success(t("channelDetail.saveSuccess", "Channel saved"));
+    } catch (err) {
+      // Backend rejects duplicate/reserved triggers, missing targetId, a
+      // defaultTargetName mismatch, channelId conflicts, etc. with a 400 — surface
+      // it instead of letting Save silently do nothing.
+      toast.error(getErrorMessage(err));
     }
   };
-  const handleDelete = async () => { if (!id) return; await deleteMutation.mutateAsync({ id, version }); navigate("/manage/channels"); };
+  const handleDelete = async () => {
+    if (!id) return;
+    try {
+      await deleteMutation.mutateAsync({ id, version });
+      navigate("/manage/channels");
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    }
+  };
 
   const updateTarget = useCallback((index: number, target: ChannelTarget) => {
-    setDraft((prev) => { if (!prev) return prev; const targets = [...prev.targets]; targets[index] = target; return { ...prev, targets }; });
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const targets = [...prev.targets];
+      const old = targets[index];
+      targets[index] = target;
+      // Renaming the default target must move the pointer, else the backend
+      // rejects the save (defaultTargetName no longer matches any target).
+      let { defaultTargetName } = prev;
+      if (old && old.name === defaultTargetName && target.name !== old.name) {
+        defaultTargetName = target.name;
+      }
+      return { ...prev, targets, defaultTargetName };
+    });
   }, []);
 
   const removeTarget = useCallback((index: number) => {

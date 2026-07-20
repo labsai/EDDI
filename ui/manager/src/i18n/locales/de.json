@@ -1996,6 +1996,7 @@
     "version": "Version"
   },
   "channelDetail": {
+    "saveSuccess": "Kanal gespeichert",
     "addTarget": "Ziel hinzufügen",
     "addTrigger": "Trigger hinzufügen…",
     "agentId": "Agenten-ID",

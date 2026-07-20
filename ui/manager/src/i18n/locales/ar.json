@@ -1996,6 +1996,7 @@
     "version": "الإصدار"
   },
   "channelDetail": {
+    "saveSuccess": "تم حفظ القناة",
     "addTarget": "إضافة هدف",
     "addTrigger": "إضافة مشغل…",
     "agentId": "معرف الوكيل",

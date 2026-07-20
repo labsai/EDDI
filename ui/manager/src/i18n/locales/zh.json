@@ -1996,6 +1996,7 @@
     "version": "版本"
   },
   "channelDetail": {
+    "saveSuccess": "频道已保存",
     "addTarget": "添加目标",
     "addTrigger": "添加触发器…",
     "agentId": "代理 ID",

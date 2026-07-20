@@ -2025,6 +2025,7 @@
     "version": "Version"
   },
   "channelDetail": {
+    "saveSuccess": "Channel saved",
     "addTarget": "Add Target",
     "addTrigger": "Add trigger...",
     "agentId": "Agent ID",

@@ -1996,6 +1996,7 @@
     "version": "संस्करण"
   },
   "channelDetail": {
+    "saveSuccess": "चैनल सहेजा गया",
     "addTarget": "लक्ष्य जोड़ें",
     "addTrigger": "ट्रिगर जोड़ें…",
     "agentId": "एजेंट ID",

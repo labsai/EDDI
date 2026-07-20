@@ -1996,6 +1996,7 @@
     "version": "เวอร์ชัน"
   },
   "channelDetail": {
+    "saveSuccess": "บันทึกช่องแล้ว",
     "addTarget": "เพิ่มเป้าหมาย",
     "addTrigger": "เพิ่มทริกเกอร์…",
     "agentId": "ID เอเจนต์",
