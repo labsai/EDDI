@@ -16,7 +16,7 @@ import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { useTheme } from "@/components/layout/theme-provider";
 import { STYLE_INFO, type DiscussionStyle } from "@/lib/api/groups";
-import { AdvisorAvatar } from "@/components/boardroom/advisor-avatar";
+import { getInitials } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -76,7 +76,7 @@ export function BoardroomSidebar({
             <img
               src="/eddi-icon.svg"
               alt="EDDI"
-              className="h-7 w-7 rounded-md"
+              className="h-9 w-9 rounded-md"
             />
           </Link>
         )}
@@ -275,11 +275,15 @@ function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?
                   collapsed && "justify-center ps-0 pe-0",
                 )}
               >
-                <AdvisorAvatar
-                  name={agent.name || agentId}
-                  agentId={agentId}
-                  size="xs"
-                />
+                <span
+                  className={cn(
+                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-medium",
+                    "bg-muted text-muted-foreground",
+                  )}
+                  aria-hidden
+                >
+                  {getInitials(agent.name || agentId)}
+                </span>
                 {!collapsed && (
                   <span className="min-w-0 flex-1 truncate">
                     {agent.name || agentId}
