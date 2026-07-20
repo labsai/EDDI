@@ -2151,6 +2151,7 @@
     "themeSystem": "System",
     "themeDark": "Dark",
     "themeLight": "Light",
+    "goToManager": "Manager",
     "tabHome": "Home",
     "tabThreads": "Threads",
     "sidebarDrawer": "Sidebar navigation",

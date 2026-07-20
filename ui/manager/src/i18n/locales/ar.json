@@ -2351,7 +2351,8 @@
       "customFromScratch": "إنشاء من الصفر",
       "customDesc": "حدد فريقك وقواعدك الخاصة",
       "assembleNow": "شكّل أول فريق عمل لك"
-    }
+    },
+    "goToManager": "Manager"
   },
   "variables": {
     "title": "Global Variables",

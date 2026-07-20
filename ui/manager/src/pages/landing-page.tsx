@@ -1,5 +1,4 @@
-import { useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Settings2,
@@ -105,7 +104,7 @@ function ModeCard({
         {/* CTA */}
         <div className="flex items-center gap-1 text-sm font-medium text-primary opacity-70 group-hover:opacity-100 transition-opacity">
           {title}
-          <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+          <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1 rtl:group-hover:-translate-x-1" />
         </div>
       </div>
     </Link>
@@ -116,16 +115,13 @@ function ModeCard({
 
 export function LandingPage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const { resolvedTheme } = useTheme();
 
-  // Auto-redirect if user has a stored preference
-  useEffect(() => {
-    const pref = getStoredPreference();
-    if (pref === "manage" || pref === "workforce") {
-      navigate(`/${pref}`, { replace: true });
-    }
-  }, [navigate]);
+  // Synchronous redirect — no flash
+  const pref = getStoredPreference();
+  if (pref === "manage" || pref === "workforce") {
+    return <Navigate to={`/${pref}`} replace />;
+  }
 
   return (
     <div

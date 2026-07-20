@@ -254,14 +254,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <Link
           to="/workforce"
           className={cn(
-            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all",
-            "border-s-2 border-primary/30 bg-primary/5 text-primary",
-            "hover:bg-primary/10",
-            collapsed && "justify-center px-2 border-s-0",
+            "flex w-full items-center gap-2 rounded-lg ps-3 pe-3 py-2 text-sm font-medium transition-colors",
+            "text-sidebar-foreground/70 hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            collapsed && "justify-center ps-2 pe-2",
           )}
           title={collapsed ? t("nav.workforce", "Workforce") : undefined}
         >
-          <UsersRound className="h-5 w-5 shrink-0" aria-hidden="true" />
+          <UsersRound className="h-4 w-4 shrink-0" aria-hidden="true" />
           {!collapsed && (
             <span>{t("nav.workforce", "Workforce")}</span>
           )}

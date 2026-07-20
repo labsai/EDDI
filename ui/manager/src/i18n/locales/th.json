@@ -2314,7 +2314,8 @@
       "customFromScratch": "สร้างจากศูนย์",
       "customDesc": "กำหนดทีมและกฎของคุณเอง",
       "assembleNow": "จัดตั้งทีมงานแรกของคุณ"
-    }
+    },
+    "goToManager": "Manager"
   },
   "variables": {
     "title": "Global Variables",

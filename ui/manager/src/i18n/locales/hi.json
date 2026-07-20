@@ -2314,7 +2314,8 @@
       "customFromScratch": "शून्य से बनाएं",
       "customDesc": "अपनी खुद की टीम और नियम परिभाषित करें",
       "assembleNow": "अपना पहला कार्य दल बनाएं"
-    }
+    },
+    "goToManager": "Manager"
   },
   "variables": {
     "title": "Global Variables",

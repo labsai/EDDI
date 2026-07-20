@@ -2314,7 +2314,8 @@
       "customFromScratch": "从零开始",
       "customDesc": "定义您自己的团队和规则",
       "assembleNow": "组建您的第一个工作组"
-    }
+    },
+    "goToManager": "Manager"
   },
   "workforce": {
     "title": "您的数字劳动力",

@@ -2314,7 +2314,8 @@
       "customFromScratch": "Créer de zéro",
       "customDesc": "Définissez votre propre équipe et vos règles",
       "assembleNow": "Constituer votre premier groupe de travail"
-    }
+    },
+    "goToManager": "Manager"
   },
   "variables": {
     "title": "Global Variables",

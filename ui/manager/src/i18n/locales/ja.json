@@ -2314,7 +2314,8 @@
       "customFromScratch": "ゼロから作成",
       "customDesc": "独自のチームとルールを定義",
       "assembleNow": "最初のタスクフォースを編成"
-    }
+    },
+    "goToManager": "Manager"
   },
   "variables": {
     "title": "Global Variables",

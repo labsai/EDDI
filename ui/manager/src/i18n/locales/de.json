@@ -2314,7 +2314,8 @@
       "customFromScratch": "Von Grund auf erstellen",
       "customDesc": "Definieren Sie Ihr eigenes Team und Ihre Regeln",
       "assembleNow": "Erste Task Force zusammenstellen"
-    }
+    },
+    "goToManager": "Manager"
   },
   "workforce": {
     "title": "Ihre digitale Belegschaft",

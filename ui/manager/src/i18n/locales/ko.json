@@ -2314,7 +2314,8 @@
       "customFromScratch": "처음부터 만들기",
       "customDesc": "나만의 팀과 규칙 정의",
       "assembleNow": "첫 태스크 포스 구성"
-    }
+    },
+    "goToManager": "Manager"
   },
   "variables": {
     "title": "Global Variables",

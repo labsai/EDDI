@@ -2314,7 +2314,8 @@
       "customFromScratch": "Criar do zero",
       "customDesc": "Defina sua própria equipe e regras",
       "assembleNow": "Monte sua primeira força-tarefa"
-    }
+    },
+    "goToManager": "Manager"
   },
   "variables": {
     "title": "Global Variables",
