@@ -176,6 +176,7 @@ export function BoardroomSidebar({
                     navigate(`/workforce/${board.id}?version=${board.version ?? 1}`)
                   }
                   title={collapsed ? board.name : undefined}
+                  aria-label={collapsed ? board.name : undefined}
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-start text-sm transition-colors",
@@ -270,7 +271,8 @@ function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?
                     ? navigate(`/workforce/${boardId}/thread/${agentId}`)
                     : navigate(`/workforce/chat?agentId=${agentId}`)
                 }
-                title={collapsed ? agent.name : undefined}
+                title={collapsed ? (agent.name || agentId) : undefined}
+                aria-label={collapsed ? (agent.name || agentId) : undefined}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-1.5 text-start text-sm transition-colors",
                   "text-foreground/80 hover:bg-muted",

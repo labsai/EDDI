@@ -118,6 +118,7 @@ function ViewToggle({
         onClick={() => onViewModeChange("grid")}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-s-lg ps-3 pe-3 py-1.5 text-sm font-medium transition-colors",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:z-10 relative",
           viewMode === "grid"
             ? "bg-muted text-foreground"
             : "text-muted-foreground hover:bg-muted/50",
@@ -132,6 +133,7 @@ function ViewToggle({
         onClick={() => onViewModeChange("list")}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-e-lg ps-3 pe-3 py-1.5 text-sm font-medium transition-colors",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:z-10 relative",
           viewMode === "list"
             ? "bg-muted text-foreground"
             : "text-muted-foreground hover:bg-muted/50",
@@ -195,10 +197,9 @@ function MobileFab() {
 
 // ─── Workforce Section ───────────────────────────────────────────
 
-function WorkforceSection() {
+function WorkforceSection({ onEditAgent }: { onEditAgent: (id: string) => void }) {
   const { t } = useTranslation();
   const { data: agentsRaw } = useAgentDescriptors(50);
-  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
 
   const agents = useMemo(
     () => (agentsRaw ? groupAgentsByName(agentsRaw).slice(0, 10) : []),
@@ -237,12 +238,11 @@ function WorkforceSection() {
               name={agent.name || t("workforce.unnamed", "Unnamed Agent")}
               agentId={agentId}
               description={agent.description}
-              onClick={() => setEditingAgentId(agentId)}
+              onClick={() => onEditAgent(agentId)}
             />
           );
         })}
       </div>
-      <AgentEditorSheet agentId={editingAgentId} onClose={() => setEditingAgentId(null)} />
     </section>
   );
 }
@@ -260,6 +260,7 @@ function BoardroomDashboard() {
   const [viewMode, setViewMode] = useState<"grid" | "list">(getStoredViewMode);
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
 
   const pinnedBoards = useMemo(
     () => boards?.filter((b) => pinned.has(b.id)) ?? [],
@@ -343,9 +344,10 @@ function BoardroomDashboard() {
 
   // Populated — 3-pillar Intelligence Dashboard
   return (
-    <div className="p-5 md:p-8 space-y-8">
+    <div className="flex h-full overflow-hidden">
+      <div className="flex-1 overflow-auto p-5 md:p-8 space-y-8">
       {/* ─── Pillar 1: Your Digital Workforce ────────────────── */}
-      <WorkforceSection />
+      <WorkforceSection onEditAgent={setEditingAgentId} />
 
       {/* ─── Templates ────────────────────────────────────────── */}
       <TemplatesPanel
@@ -374,8 +376,9 @@ function BoardroomDashboard() {
                   {bulkMode && (
                     <button
                       type="button"
-                      className="absolute top-2 start-2 z-10"
+                      className="absolute top-2 start-2 z-10 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                       aria-label={selectedIds.has(board.id) ? t("boardroom.dashboard.deselect", "Deselect") : t("boardroom.dashboard.selectItem", "Select")}
+                      aria-pressed={selectedIds.has(board.id)}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -470,8 +473,9 @@ function BoardroomDashboard() {
                   {bulkMode && (
                     <button
                       type="button"
-                      className="absolute top-2 start-2 z-10"
+                      className="absolute top-2 start-2 z-10 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                       aria-label={selectedIds.has(board.id) ? t("boardroom.dashboard.deselect", "Deselect") : t("boardroom.dashboard.selectItem", "Select")}
+                      aria-pressed={selectedIds.has(board.id)}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -516,8 +520,9 @@ function BoardroomDashboard() {
                   {bulkMode && (
                     <button
                       type="button"
-                      className="absolute top-2 start-2 z-10"
+                      className="absolute top-2 start-2 z-10 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                       aria-label={selectedIds.has(board.id) ? t("boardroom.dashboard.deselect", "Deselect") : t("boardroom.dashboard.selectItem", "Select")}
+                      aria-pressed={selectedIds.has(board.id)}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -590,6 +595,14 @@ function BoardroomDashboard() {
 
       {/* Mobile FAB */}
       <MobileFab />
+    </div>
+
+    {/* Inline agent editor panel */}
+    <AgentEditorSheet
+      agentId={editingAgentId}
+      onClose={() => setEditingAgentId(null)}
+      inline
+    />
     </div>
   );
 }

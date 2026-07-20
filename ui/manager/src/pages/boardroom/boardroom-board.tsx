@@ -383,7 +383,7 @@ function BoardroomBoard() {
               <button
                 type="button"
                 onClick={() => setShowConfig(false)}
-                className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+                className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={t("boardroom.board.hideConfig", "Hide details panel")}
               >
                 <PanelRightClose className="h-3.5 w-3.5" />

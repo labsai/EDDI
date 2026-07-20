@@ -288,6 +288,7 @@ function ThreadInput({
                 "ms-0.5 rounded-full p-0.5",
                 "hover:bg-muted-foreground/20",
                 "transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted"
               )}
               aria-label={t(
                 "boardroom.thread.removeAttachment",

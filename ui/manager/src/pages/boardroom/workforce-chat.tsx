@@ -68,6 +68,7 @@ export function WorkforceChat() {
               showDetails
                 ? "bg-primary/10 text-primary"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             )}
             aria-label={t(
               "boardroom.chat.toggleDetails",
@@ -101,7 +102,7 @@ export function WorkforceChat() {
               <button
                 type="button"
                 onClick={() => setShowDetails(false)}
-                className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+                className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={t(
                   "boardroom.chat.hideDetails",
                   "Hide details panel",

@@ -18,6 +18,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 interface AgentEditorSheetProps {
   agentId: string | null;
   onClose: () => void;
+  /** When true, renders as an inline panel instead of a fixed overlay */
+  inline?: boolean;
 }
 
 // ─── Confidence helpers ──────────────────────────────────────────
@@ -39,7 +41,7 @@ function confidenceBadgeVariant(
 
 // ─── Component ───────────────────────────────────────────────────
 
-function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
+function AgentEditorSheet({ agentId, onClose, inline = false }: AgentEditorSheetProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
@@ -258,31 +260,37 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
 
   return (
     <>
-      {/* Backdrop overlay */}
-      <div
-        className="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300"
-        onClick={() => {
-          if (isDirty) {
-            if (!window.confirm(t("boardroom.agentEditor.discardChanges", "You have unsaved changes. Discard?"))) {
-              return;
+      {/* Backdrop overlay — only for non-inline mode */}
+      {!inline && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300"
+          onClick={() => {
+            if (isDirty) {
+              if (!window.confirm(t("boardroom.agentEditor.discardChanges", "You have unsaved changes. Discard?"))) {
+                return;
+              }
             }
-          }
-          onClose();
-        }}
-        aria-hidden="true"
-      />
+            onClose();
+          }}
+          aria-hidden="true"
+        />
+      )}
 
       {/* Panel */}
       <div
         className={cn(
-          "fixed top-0 end-0 bottom-0 w-[480px] max-w-full",
-          "bg-background border-s border-border z-50",
-          "flex flex-col",
-          "transition-transform duration-300",
-          "shadow-2xl"
+          inline
+            ? "w-[400px] shrink-0 border-s border-border bg-background flex flex-col overflow-hidden max-lg:hidden"
+            : cn(
+                "fixed top-0 end-0 bottom-0 w-[480px] max-w-full",
+                "bg-background border-s border-border z-50",
+                "flex flex-col",
+                "transition-transform duration-300",
+                "shadow-2xl",
+              ),
         )}
-        role="dialog"
-        aria-modal="true"
+        role={inline ? "region" : "dialog"}
+        aria-modal={inline ? undefined : true}
         aria-label={t("boardroom.agentEditor.title", "Edit Agent")}
       >
         {/* ── Header ──────────────────────────────────────── */}
@@ -467,7 +475,8 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                         className={cn(
                           "h-5 w-5 rounded-full flex items-center justify-center",
                           "text-muted-foreground hover:text-foreground hover:bg-muted",
-                          "transition-colors"
+                          "transition-colors",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 bg-card"
                         )}
                         onClick={() => handleRemoveCapability(idx)}
                         aria-label={t(
@@ -571,11 +580,13 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                     className={cn(
                       "w-full flex items-center justify-between",
                       "rounded-lg border border-border bg-card px-4 py-3",
-                      "hover:bg-muted/50 transition-colors text-start"
+                      "hover:bg-muted/50 transition-colors text-start",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
                     )}
                     onClick={() => setA2aEnabled((v) => !v)}
                     role="switch"
                     aria-checked={a2aEnabled}
+                    aria-label={t("boardroom.agentEditor.a2aEnabled", "Agent-to-Agent Communication")}
                   >
                     <span className="text-sm text-foreground">
                       {t(
@@ -605,11 +616,13 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                     className={cn(
                       "w-full flex items-center justify-between",
                       "rounded-lg border border-border bg-card px-4 py-3",
-                      "hover:bg-muted/50 transition-colors text-start"
+                      "hover:bg-muted/50 transition-colors text-start",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
                     )}
                     onClick={() => setEnableMemoryTools((v) => !v)}
                     role="switch"
                     aria-checked={enableMemoryTools}
+                    aria-label={t("boardroom.agentEditor.memoryTools", "Memory Tools")}
                   >
                     <span className="text-sm text-foreground">
                       {t(
