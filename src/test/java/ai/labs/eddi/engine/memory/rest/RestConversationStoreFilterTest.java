@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,10 +58,14 @@ class RestConversationStoreFilterTest {
         IRuntime runtime = mock(IRuntime.class);
         Instance<IAttachmentStore> attachmentStorageInstance = mock(Instance.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
+        ConversationAccessGuard conversationAccessGuard = mock(ConversationAccessGuard.class);
+        // Agent-filter regression tests don't exercise ownership scoping — the caller
+        // sees all conversations, so filtering behaves as before owner-scoping landed.
+        when(conversationAccessGuard.seesAllConversations()).thenReturn(true);
 
         restConversationStore = new RestConversationStore(
                 documentDescriptorStore, conversationDescriptorStore,
-                conversationMemoryStore, conversationService, userMemoryStore, runtime,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                 30, 90, attachmentStorageInstance);
     }
 

@@ -19,6 +19,9 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -51,15 +54,32 @@ import static java.lang.String.format;
 public class RestConversationStore implements IRestConversationStore {
     public static final String DESCRIPTOR_TYPE = "ai.labs.conversation";
 
+    /**
+     * Upper bound on how many descriptors an owner-filtered listing will scan
+     * before giving up, so a caller who owns few/none of a large shared store
+     * cannot turn one list request into a full-collection scan. This is the single
+     * owner-scan budget in the system — the MCP {@code list_conversations} tool
+     * delegates to this endpoint rather than scanning itself. Admins /
+     * auth-disabled callers are not filtered and never reach this bound.
+     */
+    private static final int MAX_OWNER_SCAN = 500;
+
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IConversationService conversationService;
     private final IUserMemoryStore userMemoryStore;
     private final IRuntime runtime;
+    private final ConversationAccessGuard conversationAccessGuard;
     private final Integer deleteEndedConversationsOnceOlderThanDays;
     private final Integer deleteMemoriesOlderThanDays;
     private final Instance<IAttachmentStore> attachmentStorageInstance;
+
+    // Field-injected per the AGENTS.md metrics pattern; the SimpleMeterRegistry
+    // default keeps it non-null in unit tests that construct this bean directly
+    // (CDI overwrites it with the real registry in production).
+    @Inject
+    MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -72,6 +92,7 @@ public class RestConversationStore implements IRestConversationStore {
             IConversationService conversationService,
             IUserMemoryStore userMemoryStore,
             IRuntime runtime,
+            ConversationAccessGuard conversationAccessGuard,
             @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
             Integer deleteEndedConversationsOnceOlderThanDays,
             @ConfigProperty(name = "eddi.usermemories.deleteOlderThanDays")
@@ -85,6 +106,7 @@ public class RestConversationStore implements IRestConversationStore {
         this.conversationService = conversationService;
         this.userMemoryStore = userMemoryStore;
         this.runtime = runtime;
+        this.conversationAccessGuard = conversationAccessGuard;
         this.deleteEndedConversationsOnceOlderThanDays = deleteEndedConversationsOnceOlderThanDays;
         this.deleteMemoriesOlderThanDays = deleteMemoriesOlderThanDays;
         this.attachmentStorageInstance = attachmentStorageInstance;
@@ -105,9 +127,22 @@ public class RestConversationStore implements IRestConversationStore {
             limit = 100;
         }
 
+        // Owner-scoping: a non-admin caller may only enumerate their own
+        // conversations. The descriptor store has no owner-scoped query, so we
+        // post-filter each descriptor by its resolved owner. Admins (and any caller
+        // when authorization is disabled) see all — resolved once, up front, so the
+        // per-row check is skipped entirely on that path. The existing do-while
+        // back-fills across pages so a filtered-out row does not starve a personal
+        // list, but that back-fill is bounded by MAX_OWNER_SCAN so a caller who owns
+        // few/none of a large shared store cannot force a full-collection scan
+        // (descriptors come back most-recent-first, so a typical caller's own
+        // conversations fall well within the budget).
+        final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
+
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
+            int scannedDescriptors = 0;
 
             do {
                 conversationDescriptors = readConversationDescriptors(index, limit, filter);
@@ -116,6 +151,14 @@ public class RestConversationStore implements IRestConversationStore {
                 }
 
                 for (var conversationDescriptor : conversationDescriptors) {
+                    // Enforce the scan budget per-descriptor, not just per-page, so a
+                    // non-admin scan honours MAX_OWNER_SCAN exactly rather than
+                    // overrunning by up to a page (and the exhaustion metric fires at
+                    // the documented bound).
+                    if (!seesAllConversations && scannedDescriptors >= MAX_OWNER_SCAN) {
+                        break;
+                    }
+                    scannedDescriptors++;
                     try {
                         URI resourceUri = conversationDescriptor.getResource();
                         var conversationResourceId = extractResourceId(resourceUri);
@@ -124,7 +167,30 @@ public class RestConversationStore implements IRestConversationStore {
                             continue;
                         }
 
+                        // Ownership gate — split around the expensive snapshot load so a
+                        // foreign conversation is skipped WITHOUT loading its memory
+                        // document. Every conversation since v5.1.6 records its owner on
+                        // the descriptor, so decide here for the common case; only a
+                        // legacy row with no recorded owner falls through to the
+                        // post-populate re-check below (populate resolves its owner from
+                        // the snapshot). A fully unowned (null both ways) conversation
+                        // stays visible, matching OwnershipValidator.requireOwnerOrAdmin.
+                        String recordedOwner = conversationDescriptor.getUserId();
+                        boolean ownerRecorded = !isNullOrEmpty(recordedOwner);
+                        if (!seesAllConversations && ownerRecorded
+                                && !conversationAccessGuard.canAccessConversation(recordedOwner)) {
+                            continue;
+                        }
+
                         populateDataToDescriptor(conversationDescriptor, conversationResourceId);
+
+                        // Legacy safety net: the descriptor recorded no owner; populate
+                        // has now resolved it from the snapshot (pre-v5.1.6 fallback), so
+                        // re-check before returning it.
+                        if (!seesAllConversations && !ownerRecorded
+                                && !conversationAccessGuard.canAccessConversation(conversationDescriptor.getUserId())) {
+                            continue;
+                        }
 
                         // Agent filtering uses the agentResource URI (which contains
                         // the agent's ID), NOT the conversation's resource URI.
@@ -164,7 +230,19 @@ public class RestConversationStore implements IRestConversationStore {
                 } else {
                     break; // prevent integer overflow
                 }
-            } while (!conversationDescriptors.isEmpty() && retConversationDescriptors.size() < limit);
+                // Bound the owner-filtered back-fill: stop once the scan budget is spent
+                // (admins/auth-disabled are never filtered, so they page only as far as
+                // filling `limit` requires and never hit this).
+            } while (!conversationDescriptors.isEmpty() && retConversationDescriptors.size() < limit
+                    && (seesAllConversations || scannedDescriptors < MAX_OWNER_SCAN));
+
+            // Observability: a non-admin listing that stopped on the scan budget with
+            // fewer than `limit` results may have owned conversations beyond what was
+            // scanned (the List return type can't signal that truncation to the
+            // caller). Count it so a persistently-truncated user is not invisible.
+            if (!seesAllConversations && retConversationDescriptors.size() < limit && scannedDescriptors >= MAX_OWNER_SCAN) {
+                meterRegistry.counter("eddi.conversations.listing.owner_scan_exhausted").increment();
+            }
 
             return retConversationDescriptors;
 

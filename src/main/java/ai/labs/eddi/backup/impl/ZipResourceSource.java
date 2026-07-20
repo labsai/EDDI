@@ -58,7 +58,7 @@ import static ai.labs.eddi.backup.impl.AbstractBackupService.*;
  */
 public class ZipResourceSource implements IResourceSource {
 
-    private static final Logger log = Logger.getLogger(ZipResourceSource.class);
+    private static final Logger LOGGER = Logger.getLogger(ZipResourceSource.class);
 
     /** Map from URI pattern authority to [file extension, step type label]. */
     private static final Map<Pattern, String[]> EXTENSION_TYPE_MAP = new LinkedHashMap<>();
@@ -130,7 +130,7 @@ public class ZipResourceSource implements IResourceSource {
                     workflowDataList.add(wfData);
                 }
             } catch (Exception e) {
-                log.warnf("Failed to read workflow %d from ZIP: %s", i, e.getMessage());
+                LOGGER.warnf("Failed to read workflow %d from ZIP: %s", i, e.getMessage());
             }
         }
 
@@ -161,12 +161,12 @@ public class ZipResourceSource implements IResourceSource {
                                 snippetId, snippet.getName(), snippet));
                     }
                 } catch (Exception e) {
-                    log.warnf("Failed to read snippet %s: %s",
+                    LOGGER.warnf("Failed to read snippet %s: %s",
                             snippetFile.getFileName(), e.getMessage());
                 }
             }
         } catch (IOException e) {
-            log.warnf("Failed to scan snippets directory: %s", e.getMessage());
+            LOGGER.warnf("Failed to scan snippets directory: %s", e.getMessage());
         }
 
         return snippetDataList;
@@ -178,10 +178,10 @@ public class ZipResourceSource implements IResourceSource {
         try {
             if (rootDir != null && Files.exists(rootDir)) {
                 deleteDirectoryRecursively(rootDir);
-                log.debugf("Cleaned up temp import directory: %s", rootDir);
+                LOGGER.debugf("Cleaned up temp import directory: %s", rootDir);
             }
         } catch (IOException e) {
-            log.warnf("Failed to clean up temp import directory %s: %s", rootDir, e.getMessage());
+            LOGGER.warnf("Failed to clean up temp import directory %s: %s", rootDir, e.getMessage());
         }
     }
 
@@ -252,7 +252,7 @@ public class ZipResourceSource implements IResourceSource {
                             resId.getId(), name, fileExtension, stepType, contentJson));
                 }
             } catch (Exception e) {
-                log.debugf("Failed to read %s extensions: %s", fileExtension, e.getMessage());
+                LOGGER.debugf("Failed to read %s extensions: %s", fileExtension, e.getMessage());
             }
         }
 
@@ -273,7 +273,7 @@ public class ZipResourceSource implements IResourceSource {
                 uris.add(URI.create(uri));
             }
         } catch (Exception e) {
-            log.debugf("URI extraction failed: %s", e.getMessage());
+            LOGGER.debugf("URI extraction failed: %s", e.getMessage());
         }
         return uris;
     }
@@ -335,7 +335,7 @@ public class ZipResourceSource implements IResourceSource {
             if (it.hasNext())
                 return it.next();
         } catch (IOException e) {
-            log.debugf("Could not scan for %s in %s: %s", suffix, dir, e.getMessage());
+            LOGGER.debugf("Could not scan for %s in %s: %s", suffix, dir, e.getMessage());
         }
         return null;
     }

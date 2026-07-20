@@ -5,6 +5,17 @@
 
 ---
 
+## 🔀 Merge `origin/main` into `feat/group-followups` — conflict resolution (2026-07-20)
+
+**Repo:** EDDI (`feat/group-followups`)
+
+Merged `origin/main` (multi-model cascade enterprise hardening + MCP/REST conversation-ownership security hardening) to resolve PR #595's merge conflicts against `main`. Two files conflicted, both non-substantive:
+
+- **`ToolExecutionTrace.java`:** both branches independently documented the same `synchronized` rationale on `addToolCall`/`addFailedToolCall` — ours as a Javadoc block above each method, `origin/main`'s as an inline comment restating it. Kept the existing Javadoc, dropped the redundant inline comment.
+- **`docs/changelog.md`:** both branches appended new entries directly below the file header. Resolved as a union, newest-first per branch: this branch's own entries (group follow-ups work, 2026-07-08 to 2026-07-15) kept first, followed by `origin/main`'s entries (MCP/REST conversation-ownership hardening + multi-model cascade, 2026-07-03 to 2026-07-15).
+
+---
+
 ## 🧵 ToolExecutionTrace — thread-safe recording (fixes CI flake) (2026-07-15)
 
 **Repo:** EDDI (`feat/group-followups`) — a **pre-existing** bug on `main`, unrelated to the group work, that surfaced as an intermittent full-suite CI failure on this branch: `ToolExecutionServiceBranchTest.executeMultipleInParallel` → `expected <Hello, Alice!> but was <Error executing tool: ConcurrentModificationException>`. Committed here to unblock this branch's CI (per decision), clearly scoped as an independent fix.
@@ -317,6 +328,232 @@ Adds three new interaction patterns for completed group conversations:
 - **`availableActions` computed property**: JSON response includes `["followup", "continue", "close"]` when COMPLETED, `["close"]` when FAILED, `[]` otherwise. Clients can discover available operations without reading docs
 - **Close returns body**: `/close` now returns the closed `GroupConversation` with `state: CLOSED` and `availableActions: []`
 - **Lifecycle documented in OpenAPI**: Close endpoint description includes `discuss → COMPLETED → [followup|continue]* → close → CLOSED (terminal)`
+
+---
+
+## 🔭 Security — conversation-listing scan: enforce the budget per-descriptor + changelog accuracy (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+Second CodeRabbit pass on this branch (its first pass predated the metrics/doc commit and was already moot). Two valid, current items:
+
+- **Enforce `MAX_OWNER_SCAN` per-descriptor, not per-page.** The budget was only checked in the `do-while` condition (after a full page), so a non-admin scan could reach `MAX_OWNER_SCAN + limit - 1` before stopping — over the documented bound. Added an in-loop `break`. Impact is small (the overrun rows are within an already-fetched page, and foreign rows skip the snapshot load either way), but it makes the bound exact and the `owner_scan_exhausted` metric fire at 500 rather than up to a page late. Not separately unit-tested: with all-foreign pages the store returns the same empty list and the same page-read count with or without the break, so the tightening isn't observable through the store interface; the existing bounded-scan tests guard against regression.
+- **Changelog accuracy.** The `009ca0f20` entry's "Fix" paragraph said the ownership check "runs **after** `populateDataToDescriptor`" — stale since `8bb304b4c` split it (common case decides *before* the snapshot load; only a legacy null-owner row is re-checked after). Corrected. Also dropped a second stale "mirroring the MCP twin's budget" reference (MCP has no scan cap since `009ca0f20`).
+
+---
+
+## 🔭 Security — MCP/REST conversation ownership: PR-review response (metrics + doc accuracy) (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+Triaged the Copilot + CodeRabbit review of this branch. Most bot findings targeted the MCP-side `list_conversations` over-fetch/scan loop that `009ca0f20` already **deleted** (its page-index bug was the reason for the delete), so they were moot against current HEAD. The substantive, still-valid items:
+
+- **Observability (Micrometer).** Per the project convention "always add metrics to new features", the new authorization paths were operationally invisible. Added two counters via field-injected `MeterRegistry` (AGENTS.md metrics pattern, `SimpleMeterRegistry` default so unit tests that construct the bean directly stay non-null): `eddi.mcp.conversation.access.denied{tool}` incremented on every MCP ownership denial (the six gated read/drive tools via `accessDenied`, plus `chat_managed`'s impersonation denial — MCP denials return a 200 error-body, so unlike REST 403s they are not visible in `http.server.requests`); and `eddi.conversations.listing.owner_scan_exhausted` incremented when a non-admin listing stops on the `MAX_OWNER_SCAN` budget with fewer than `limit` results, so a persistently-truncated user is not invisible.
+- **Fail-open on a missing descriptor — kept, documented.** CodeRabbit flagged that `requireConversationOwner` returns `null` (operation proceeds → 404) rather than denying when a descriptor is absent. Kept deliberately: a missing descriptor means the conversation is genuinely not found, and 404 is correct; flipping the *shared* guard to deny would change REST 404→403 and contradict its documented "let the operation handle the 404" contract. The only residual is orphaned memory with no descriptor — a deletion-path integrity concern, not something the read gate should mask. Softened `accessDenied`'s javadoc, which had over-claimed that a denial is indistinguishable from "does not exist".
+- **Doc accuracy.** `RestConversationStore.MAX_OWNER_SCAN` javadoc no longer says it "mirrors the MCP owner-scan cap" (MCP has none since `009ca0f20`; this is now the sole budget); the previous entry's "never starved" line is qualified to "within the scan budget".
+
+**Declined:** the suggestion to take `userId` out of `chat_managed`. The cited rule exempts "external interfaces (MCP, REST) that operate outside a conversation", which is exactly what `chat_managed` is (it routes to a per-`intent+userId` managed conversation rather than running inside one); `resolveOwnerUserId` already rejects impersonation.
+
+---
+
+## 🔒 Security — `RestConversationStore` listing: owner-filter the conversation store enumeration (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+**Closes the first residual gap filed two entries below.** `RestConversationStore.readConversationDescriptors` — the `GET /conversationstore/conversations` endpoint declared on `IRestConversationStore` — carried no `@RolesAllowed` and no ownership filter, so it fell through to the global `authenticated` policy. With `authorization.enabled=true`, any authenticated caller could enumerate **every** user's conversation descriptors (id, agent, state, and the descriptor's `userId`). It is the REST twin of the MCP `list_conversations` gap fixed in the entry two below.
+
+**Fix (`RestConversationStore`):** inject the existing `ConversationAccessGuard` and filter the listing inside the endpoint's existing paging `do-while`. `seesAllConversations()` is resolved once up front (admins, and any caller when authorization is disabled, skip filtering entirely); otherwise each descriptor is dropped unless `canAccessConversation(descriptor.getUserId())` admits it. The check runs **before** `populateDataToDescriptor` for the common case (every conversation since v5.1.6 records its owner on the descriptor), and only **after** populate for a legacy null-owner row, where populate resolves the owner from the snapshot (the pre-v5.1.6 fallback) — see the *bounded back-fill* note below. An unowned/legacy conversation stays visible, matching `OwnershipValidator.requireOwnerOrAdmin`.
+
+**Design decisions**
+- **Owner-filter, not admin-only.** The endpoint backs the **EDDI-Manager** conversation views (its bundled UI calls `conversationstore/conversations`). Owner-filtering keeps admins' full visibility and still lets a non-admin Manager user see *their own* conversations; a blanket `@RolesAllowed("eddi-admin")` would 403 the listing for every non-admin and diverge from the MCP twin, which chose owner-filtering. The `ConversationAccessGuard` was purpose-built for a listing (`canAccessConversation` / `seesAllConversations`), so this reuses it rather than adding a check.
+- **No starvation, no dedup needed.** The store's `readDescriptors` treats its `index` as a **page number** (`ResourceFilter`: `skip = index * limit`), and the endpoint's `do-while` already re-pages (`index++`) until it fills `limit` or the store is exhausted. So a filtered-out row is naturally back-filled from a later, non-overlapping page — a caller's own conversations are not starved just because newer pages belong to others (bounded by the scan budget in the next bullet), and (unlike the MCP over-fetch) no resource-URI dedup is required.
+- **Bounded, cheap back-fill (self-review fix).** Two costs had to be contained before that back-fill was safe on a large multi-tenant store, since this is the default EDDI-Manager list view: (1) the ownership check is split around `populateDataToDescriptor` — for the common case (every conversation since v5.1.6 records its owner on the descriptor) the decision is made on `descriptor.getUserId()` **before** the snapshot load, so a foreign row is skipped without loading its full memory document; only a legacy null-owner row falls through to the post-populate re-check that resolves the owner from the snapshot. (2) the back-fill is capped at `MAX_OWNER_SCAN = 500` descriptors — the sole owner-scan budget in the system, since the MCP listing delegates here rather than scanning itself — so a caller who owns few/none of a huge store cannot force a full-collection scan. Admins / auth-disabled callers are never filtered and never reach the budget. **Tradeoff:** for a non-admin, a very old owned conversation buried beyond the 500-descriptor (most-recent-first) window may not appear; the `List` return type can't signal truncation the way the MCP tool's `incomplete` flag did. The proper long-term fix is an owner-scoped descriptor query (index on `userId`) rather than in-memory filtering of a global scan — filed as a follow-up; the same unbounded-scan shape pre-existed for the `agentId`/`state`/`viewState` filters.
+
+**MCP `list_conversations` simplified (same branch).** `McpConversationTools.listConversations` now issues a **single** store call and relays the result, dropping its per-caller `seesAll`/over-fetch branch, the 100-row chunking, the resource-URI dedup, and the `incomplete`/`note` signal. This is safe once the reality of the internal hop is accounted for — and that reality is why the removed loop was effectively dead code:
+- **The MCP→store call is an unauthenticated loopback.** `RestInterfaceFactory` builds a bare REST client to `http://127.0.0.1:<port>` with no `ClientHeadersFactory` and no header propagation anywhere, so the caller's identity does **not** cross that hop.
+- **Auth off (the default):** `DisabledAuthController` reports authorization disabled, so the loopback is allowed and the store's `seesAllConversations()` is `true` — it returns everything and the tool relays it. This matches the prior behavior exactly (the tool's own guard also admitted everything with auth off), so the simplification is **behavior-neutral** here.
+- **Auth on:** the `authenticated` HTTP policy rejects the token-less loopback with **401 before the endpoint method runs**, so the tool's internal listing is non-functional under `authorization.enabled=true` — and was **already** so, independently of this change. That is also why the removed scan-loop is safe to delete: its only runtime path (auth-on, non-admin) 401s upstream and never executes. (For the record, that loop also carried a latent bug — it passed `scanned += page.size()`, a row count, as the store's page `index`, so a second page would `skip = 100 * 100`; the ownership unit test masked it by mocking `IRestConversationStore` directly.)
+
+**Tests**
+- New `RestConversationStoreOwnershipTest` (real guard over a mocked `SecurityIdentity`, `authorization.enabled=true`): a caller sees only their own conversations and never another user's; a non-owner enumerating the store gets nothing of the owner's; an admin sees all; an unowned/legacy (null-owner) conversation stays visible; a personal list is **back-filled across foreign pages** (first page all-foreign, the caller's own on the next) rather than starved; a foreign row is **skipped without loading its memory snapshot** (guards the cheap pre-check); a legacy null-owner descriptor whose snapshot resolves to a **foreign** owner is filtered out (guards the post-populate ordering — added per self-review, so a reorder that moved the check above `populateDataToDescriptor` would fail); and a sparse owner's scan is **bounded at `MAX_OWNER_SCAN`** (5 page reads, no snapshot loads) rather than scanning the whole store.
+- `RestConversationStoreTest` and `RestConversationStoreFilterTest` updated to construct with the guard (stubbed `seesAllConversations() → true`, so their filter/paging assertions are unchanged).
+- `McpConversationToolsOwnershipTest.ListConversations` reduced to a single delegation test (one store call, no scan loop); the ownership-filtering assertions moved to `RestConversationStoreOwnershipTest`. `McpConversationToolsExtendedTest`'s `list_conversations` cases already exercised the single-call path (its guard has auth disabled) and are unchanged.
+
+**Remaining residual gaps** (deliberately out of scope): the single-conversation REST reads (`readRawConversationLog` / `readSimpleConversationLog`) and `getActiveConversations` carry no ownership check; **internal loopback REST calls via `RestInterfaceFactory` do not authenticate**, so MCP tools that call them are non-functional under `authorization.enabled=true` (a pre-existing, cross-cutting gap affecting every internal REST caller and the auth model, not just this endpoint — filed as a follow-up); `read_agent_logs` without a `conversationId` was closed in the entry immediately below.
+
+---
+
+## 🔒 Security — `read_agent_logs`: admin-gate unscoped/agent-only log reads (2026-07-15)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`)
+
+**Closes the residual gap filed by the entry below.** The ownership pass gated `read_agent_logs` only when a `conversationId` was supplied; **without** one (unfiltered, or filtered by `agentId` alone) it still returned `BoundedLogStore` entries — workflow execution logs, LLM provider errors, internal diagnostics that can quote other users' conversation data — to any caller holding the coarse `eddi-viewer` role. That unscoped read pulls from a single shared server-side ring buffer that mixes every user's activity: an **operator surface**, not one user's data.
+
+**Why this is the same class of bug the ownership pass fixed:** the REST equivalent, `IRestLogAdmin` (`/administration/logs` — recent, `/history`, and `/stream`), is `@RolesAllowed("eddi-admin")` at the interface level. Every log read over REST already requires admin; the MCP tool was the more permissive door. This aligns MCP with REST.
+
+**Fix (`McpConversationTools.readAgentLogs`):** require `eddi-admin` when no `conversationId` filter is present; the conversation-scoped path is unchanged (`ConversationAccessGuard.requireConversationOwner` → owner-or-admin). The admin check is placed **before** the `try` so a role denial surfaces as an honest role error, not the ownership `accessDenied(...)` "you do not own this conversation" message (there is no conversation to own).
+
+**Design decisions**
+- **Owner-or-admin kept for the conversation-scoped path, rather than admin-only parity with REST.** `BoundedLogStore.getEntries` filters by **exact** `conversationId`, so a scoped read returns only that one conversation's log lines — no cross-user leakage. That preserves the self-service diagnostics the ownership pass deliberately added for `read_conversation` / `read_audit_trail`. The cross-user exposure was only ever in the *unscoped* path, and that is what is now closed. (An admin-only-for-all-log-reads posture was considered and rejected as an unnecessary regression of that self-service capability.)
+- **`agentId`-only counts as unscoped.** An agent filter still spans every user of that agent, so it is admin-gated too — only a `conversationId` narrows the read to a single owner's data.
+
+**Tests:** extended `McpConversationToolsOwnershipTest.ReadAgentLogs` — a viewer is denied the unscoped buffer and the agent-only buffer (`ForbiddenException`, and `BoundedLogStore` is never reached); owning one conversation does **not** grant the unscoped firehose; an admin may read both the unscoped and agent-scoped buffers; the existing owner/non-owner conversation-scoped cases still pass.
+
+---
+
+## 🔒 Security — MCP conversation tools had no ownership check (2026-07-14)
+
+**Repo:** EDDI (`fix/mcp-conversation-ownership`, from `main`)
+
+**Gap (pre-existing on `main`):** every conversation-scoped tool in `McpConversationTools` was gated on the coarse `eddi-viewer` role and nothing else, while the equivalent REST endpoints on `RestAgentEngine` all enforce `requireOwnerOrAdmin` (403). With `authorization.enabled=true`, any caller holding `eddi-viewer` could — over MCP — read **any** user's conversation memory (`read_conversation`) and transcript (`read_conversation_log`), enumerate conversations across all users (`list_conversations`), read another conversation's prompts/tool-calls/costs (`read_audit_trail`, whose REST surface is `@RolesAllowed("eddi-admin")`) and its server logs (`read_agent_logs`), **inject turns into** someone else's conversation and read the agent's reply (`talk_to_agent`, `chat_with_agent` with a foreign `conversationId`), and take over another user's managed conversation by simply naming their `userId` (`chat_managed`). The read half also defeats the group-conversation ownership gate: group members' conversations are ordinary conversations, so `list_conversations` + `read_conversation_log` reached transcripts that `read_group_conversation` denies.
+
+**Two findings that shaped the fix:**
+
+1. **A naive ownership gate would have broken MCP outright.** MCP created conversations with `userId = null`, and `ConversationSetup.computeAnonymousUserIdIfEmpty` turns that into a generated `anonymous-<uuid>` — a *non-blank* owner matching no principal. Gating reads on `requireOwnerOrAdmin` alone would therefore have locked every MCP-created conversation away from its own creator (admins only). REST never had this problem because it resolves the owner at creation. So the fix has to **stamp the caller as owner at MCP conversation creation** — that is what makes the gate both effective and non-regressive.
+2. **The read gap had a write-side twin** (`talk_to_agent` / `chat_with_agent` / `chat_managed`), which is strictly worse than reading and lives in the same file, so it is closed here too.
+
+**Fix — new `ConversationAccessGuard` (`engine.security`), the non-HITL sibling of `HitlAccessGuard`:**
+- `requireConversationOwner(conversationId)` — owner-or-admin via the conversation descriptor; skips when the descriptor is absent (the operation itself 404s); fail-closed on a store error. This is `RestAgentEngine`'s private `validateConversationOwnership` lifted out verbatim.
+- `canAccessConversation(ownerId)` / `seesAllConversations()` — non-throwing predicates for listings; admit exactly what the read gate admits (admin, owner, or unowned legacy data), so a caller never lists what they cannot read, nor reads what they cannot list.
+- `resolveOwnerUserId(requestedUserId)` — delegates to `validateAndResolveUserId`, stamping the caller and rejecting impersonation.
+
+`RestAgentEngine` now delegates to the guard (behavior identical; its `IConversationDescriptorStore` dependency became dead and was dropped). `McpConversationTools` gates all eight conversation-scoped tools, each catching `ForbiddenException` ahead of its generic catch and returning a uniform, non-leaking `accessDenied(...)` that never distinguishes "not yours" from "does not exist".
+
+**`list_conversations` owner-filtering (reworked after self-review).** The first cut filtered a single 100-row page, which silently starves a personal list: on a shared agent the newest page is often entirely other users' conversations, so the caller would get `count: 0` — indistinguishable from "you have none" — and the requested `limit` stopped meaning anything. It now scans forward page by page until the limit is filled or a 500-descriptor budget is spent, dedupes by resource URI (the store's own paging skips deleted rows, so its cursor can outrun the rows it returns and an offset scan can re-read one), and sets `incomplete: true` with a note when it stops on the budget rather than on the store running out — per AGENTS.md "no silent caps".
+
+**Design decisions**
+- **Shared guard, not a third copy.** `McpGroupTools` (on `feat/group-followups`) had already duplicated this logic once; a third copy in the MCP conversation tools would guarantee drift. One `@ApplicationScoped` guard is now the single answer to "who may read or drive a conversation", exactly as `HitlAccessGuard` is for "who may decide an approval".
+- **No auth-disabled short-circuit inside the guard.** It reads the descriptor unconditionally, as `RestAgentEngine` always has; `OwnershipValidator` already no-ops when authorization is off. Short-circuiting would have quietly changed REST semantics (and its tests mock `OwnershipValidator`).
+- **`read_audit_trail` gets the ownership gate, not admin-only.** REST's audit surface is admin-only; matching that would have been a role-policy change beyond this fix. The ownership gate is a strict tightening either way.
+
+**Behavior change (auth on only).** With `authorization.enabled=false` — the default — nothing changes: every check no-ops and new conversations still get their `anonymous-*` id. With auth on, pre-existing `anonymous-*` conversations become invisible and unreadable to non-admins over MCP: they provably belong to nobody. That is the intended tightening.
+
+**Residual gaps, deliberately out of scope** (filed as follow-ups): `RestConversationStore.readConversationDescriptors` — the REST store listing — is unfiltered for every caller, and `read_agent_logs` *without* a conversationId still returns cross-user server logs to any viewer.
+
+**Tests:** new `ConversationAccessGuardTest` (owner / non-owner / admin / missing descriptor / store error / unowned / auth-off, plus the listing predicates) and `McpConversationToolsOwnershipTest`, which asserts for every gated tool that a non-owner is denied **and** the underlying service is never reached — no data leaves, not even inside an error message — while owner and admin pass. Existing `McpConversationTools*Test` and `RestAgentEngine*Test` constructors updated to wire a real guard from the same mocks.
+
+---
+
+## 🔬 Multi-Model Cascade — Merge-readiness review: fixes + coverage backfill (2026-07-14)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+
+A critical whole-branch review (6 parallel high-effort reviewers, then adversarial confirm/refute on each finding) declared the branch **merge-ready** — every unit "ready-with-nits", no blockers. Acted on the confirmed nits and backfilled test coverage for new/adapted paths the existing suite missed.
+
+### Fixes
+
+- **Validator ↔ runtime parity (`CascadeConfigValidator`).** The `convertToObject`-incompatibility warning now uses `EvaluationStrategy.fromConfigOrDefault`, so an *unknown* `evaluationStrategy` — which `resolveEffectiveStrategy` also resolves to `structured_output` and then downgrades at runtime — warns too (previously only `null`/`structured_output` warned).
+- **Live-stream mid-failure de-dup (`CascadingModelExecutor`).** If the live-streamed final step fails *after* emitting partial tokens, the fallback to the buffered best is now marked `streamedLive=true`, so `LlmTask` does not re-emit the best's (different) text as a duplicate token stream after the partial tokens the client already received — the correct full response still arrives via the final `done` snapshot. Added a `withRun(…, streamedLive)` overload and a per-step `stepStreamedLive` flag read in the catch.
+
+### Coverage backfill (new tests; all green)
+
+- **AgentOrchestrator:** token accumulation into `ExecutionResult.responseMetadata` (the cascade-cost feed — previously 0% exercised because every test mocked null response metadata), direct `sumTokens`/`tokenUsageMap` unit tests (helpers made package-private), and the before-tool cooperative-cancellation check.
+- **CascadingModelExecutor:** step-param templating + credential skip (`TEMPLATE_SKIP_PARAMS` — previously 0%, all tests used a null templating engine), a deterministic duration-ceiling test (replacing a timing-flaky one), and the streaming mid-failure de-dup above.
+- **LlmTask:** the skipCascade legacy-fallback SSE emit and cascade token-usage surfacing (`responseMetadata` + `audit:cascade_token_usage`).
+- **ConfidenceEvaluator:** `stripJsonWrapper` fallback, `extractFirstBalancedObject` backslash-escaped-quote handling, and the judge-model readTree-throw → regex-fallback path.
+- **CascadeConfigValidator:** cascade-level negative-pricing hard-fail and the `convertToObject` + unknown-strategy warn path.
+
+### Flagged (pre-existing, out of scope)
+
+- A HITL tool-approval pause originating *inside* an agent-mode cascade step resumes on the base model, not the cascade step's (cheaper) model — misattributing cost/audit. Confirmed real but pre-existing (baseline already threaded the tool-approval params; the resume path predates cascade-step pauses and stores only the outer task's model). Tracked as a follow-up.
+
+---
+
+## 🧊 Multi-Model Cascade — PR-review follow-ups: type-safe SSE events + strategy enums (2026-07-14)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+
+Addressed two @niedch review comments on PR #587, after merging `origin/main` (tool-level HITL) into the branch.
+
+- **Typed SSE cascade events (comment #1).** `RestAgentEngineStreaming` built the `cascade_step_start` / `cascade_escalation` SSE payloads with hand-written `String.format` JSON (manual escaping, `%.4f` formatting). Replaced with two `record` payloads serialized through the existing Jackson `MAPPER` via a new `sendJsonEvent` helper (graceful `{}` fallback on the unexpected serialization failure). Non-finite `confidence`/`threshold` are still sanitized via `finite()` before serialization. The `escapeJson`/`finite` helpers remain (still used by the task/error events).
+- **Strategy enums (comment #2).** Introduced `EvaluationStrategy` (`structured_output` / `heuristic` / `judge_model` / `none`) and `CascadingStrategy` (`cascade` / `parallel`) as the **single source of truth** for the recognized strategy tokens. `ConfidenceEvaluator` (exhaustive enum switch), `CascadingModelExecutor` (`resolveEffectiveStrategy` + gating checks), and `CascadeConfigValidator` (valid-set + warn logic) now resolve to these enums instead of scattered magic strings.
+  - **Design note (answers "is there a reason it's a String?"):** the config *wire* fields (`ModelCascadeConfig.strategy` / `.evaluationStrategy`) deliberately stay lenient `String`s. An unrecognized value (a typo, or one written by a newer engine) still loads, the validator warns, the runtime falls back to the enum `DEFAULT`, and the original token round-trips unchanged through export/import — behavior a strict enum field would regress. Parsing to the enum happens at the boundary via `fromConfig` / `fromConfigOrDefault`. If the field type itself should become an enum, that's a separate contract decision (see the HITL enums for the pattern).
+  - Behavior is byte-for-byte preserved (verified: `ConfidenceEvaluator*Test`, `CascadeConfigValidatorTest`, `CascadingModelExecutor*Test`, `LlmTask*Test` — 324 tests green); new `StrategyEnumsTest` locks the lenient `fromConfig` contract (case-insensitive, trimmed, unknown→null, default fallback).
+
+---
+
+## 🚀 Multi-Model Cascade — Enterprise Hardening (2026-07-03)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+**What changed:** Full enterprise pass over the multi-model cascading feature. A review found two documented-but-dead capabilities (SSE events, judge model), a compliance bug (audit recorded the wrong model), and discarded token/cost/metrics that made the cost-savings pitch unmeasurable. This lands all of it. Plan: [`planning/model-cascade-enterprise-hardening-plan.md`](../planning/model-cascade-enterprise-hardening-plan.md).
+
+### Correctness / compliance
+
+- **Audit records the real model (#5).** `LlmTask` now writes `audit:model_name` and `audit:cascade_model` from the cascade-selected step (`provider/model (step N)`), not the task-level default. Added `audit:cascade_cost` and `audit:cascade_token_usage`. An auditor can now reconstruct which model produced an answer.
+- **Agent-mode confidence (#6).** `structured_output` cannot be injected around the tool-loop, so agent mode auto-routes to `judge_model` (if configured) else `heuristic`. A single deploy-time warning replaces the previous per-turn WARN.
+- **convertToObject + cascade (#7).** The cascade now honors native `jsonMode`, and forces a non-wrapper confidence strategy when `convertToObject=true` (the wrapper contradicts the raw-JSON instruction).
+- **Global-var / Qute consistency (#8).** Step `type` is resolved through `GlobalVariableResolver` and step param values are run through the template engine — parity with the standard path.
+
+### Broken promises made real
+
+- **SSE cascade events (#1).** `StreamingResponseHandler` gained default `onCascadeStepStart`/`onCascadeEscalation`; the anonymous sink in `ConversationService.sayStreaming` forwards them; `RestAgentEngineStreaming` emits `cascade_step_start` / `cascade_escalation` SSE events. The plumbing is now live end-to-end.
+- **judge_model implemented (#2).** New `judgeModel: {type, parameters}` config block, built once via `ChatModelRegistry` (vault + global-var resolution), passed into `ConfidenceEvaluator`. `evaluationStrategy: judge_model` without a judge logs a deploy-time warning and falls back to heuristic at runtime.
+- **`strategy: parallel` (#3) / budget javadoc (#4).** Unknown/`parallel` strategy logs a deploy-time warning and runs sequentially; the false "budget exhausted" javadoc replaced with real ceiling docs.
+
+### Observability & guardrails
+
+- **Token + cost evidence.** Per-step `tokenUsage` and `costUsd` in the trace; aggregate run cost + token usage surfaced via `responseMetadataObjectName` (was `{}`). Agent-mode token usage is accumulated across tool-loop iterations.
+- **Micrometer metrics** under `eddi.llm.cascade.*`: executions, escalations (tag `reason`), accepted step, step latency, confidence distribution, step errors (tags `provider`,`type`), tokens, cost, ceiling exceeded (tag `kind`).
+- **Cascade ceilings.** `maxTotalDurationMs` (wall-clock) and `maxCostPerRun` (dollars, from configurable per-step `inputPricePer1M`/`outputPricePer1M`) stop escalation and return the best response so far. Per-step timeout is capped by the remaining duration budget for **buffered** steps only — a live-streamed step is exempt (see the "Live-stream timeout" fix below).
+- **Configure-time validation** (`CascadeConfigValidator`): invalid *new* numeric fields (negative pricing, non-positive `maxTotalDurationMs`, negative `maxCostPerRun`) fail fast at deploy; legacy conditions (empty steps, unknown `evaluationStrategy`/`strategy`, `judge_model` without a judge, thresholds ∉ [0,1], dead non-last null thresholds, non-positive `timeoutMs`) emit deploy-time warnings but still load (backward-compatible).
+
+### Robustness
+
+- **Confidence parsing** tries a real Jackson parse first (only reads `confidence` from an identified wrapper object, so a stray `"confidence":` in answer content is ignored), regex as fallback.
+- **Heuristic i18n.** `heuristicConfig` makes phrases/thresholds config-driven (English defaults); the no-phrase-match fallback is language-agnostic (keeps the default score rather than mis-scoring).
+- **Cancellation safety (#9).** `AgentOrchestrator` checks interruption between tool-loop iterations and before each tool, so a timed-out cascade step stops launching further side-effectful tools. Residual risk: a tool already in-flight when the timeout fires may complete.
+- **Streaming the final step live.** The always-accepted final step (legacy mode, non-wrapper strategy, streaming-capable provider) streams token-by-token via the event sink instead of buffering. `StreamingLegacyChatExecutor.executeCapturing` preserves token usage while streaming.
+- **`returnBestAcrossSteps`** (opt-in): return an earlier step's response if it scored strictly higher than the finally-accepted step.
+- **Base-model laziness.** The base `ChatModel` is no longer built when the active-cascade branch owns the request.
+
+### Architecture
+
+- `CascadingModelExecutor` converted from a static utility to an instance (constructed by `LlmTask`) holding `ChatModelRegistry`, `GlobalVariableResolver`, `ITemplatingEngine`, `LegacyChatExecutor`, `StreamingLegacyChatExecutor`, and `MeterRegistry`. `AgentOrchestrator.ExecutionResult` gained a `responseMetadata` field (2-arg constructor retained for compatibility).
+- Backward compatible: all new config fields optional with today's defaults; configs without `modelCascade` and `enabled:false` are unaffected; `StreamingResponseHandler` cascade methods are `default`.
+
+### Cross-provider credentials
+
+- Because step/judge parameters are merged **over** the task parameters, a step (or judge) targeting a **different provider** than the task would silently inherit the task's `apiKey` — wrong for that provider, failing at runtime as a 401 that looks like an escalation. `CascadeConfigValidator` now emits a **deploy-time warning** for a different-provider step/judge that omits its own `apiKey`. Not a hard error (Ollama/Bedrock don't use `apiKey`); documented in `docs/model-cascade.md`.
+
+### Tests & coverage
+
+- Updated the 3 executor test classes to the instance API and the 6 `LlmTask` test classes to the new constructor. Removed the backward-incompatible `languageAgnosticScore` band that regressed the default heuristic score.
+- New coverage: `CascadingModelExecutorEnterpriseTest`, `CascadingModelExecutorCoverageTest` (agent mode, live streaming, cost/duration ceilings, timeout + retryable escalation, convertToObject downgrade), `ConfidenceEvaluatorEnterpriseTest`, `StreamingLegacyChatExecutorCoverageTest`, and expanded `CascadeConfigValidatorTest`. New-code coverage ≈ **92% instruction / 78% branch** (residual branches are the 120s streaming-timeout guard and typed-exception variants); the project aggregate stays above the 90%/80% gate.
+- `CascadingModelExecutor.isRetryableError` message matching collapsed to a single regex (fewer branches, same behavior).
+
+### Adversarial-review fixes
+
+A multi-lens adversarial review (7 reviewers → independent skeptics) surfaced several real defects, now fixed:
+
+- **`returnBestAcrossSteps` vs. live streaming (high):** a final step already streamed live is no longer superseded by an earlier higher-scoring step — that would have replaced text the client had already received. The trace marks the superseded step accordingly.
+- **Agent-mode cascade streaming (medium):** the cascade now emits the agent-mode final response to the SSE stream as a single chunk, matching the standard (non-cascade) agent path (it was silently dropped before); docs corrected.
+- **Validator backward-compat (medium):** `CascadeConfigValidator` now **warns** (instead of hard-failing) for conditions older releases tolerated at load — unknown strategy/evaluationStrategy, out-of-range thresholds, dead non-last steps, judge_model without a judge, empty steps — so upgrading cannot stop a previously-loading agent from deploying. Only the new pricing/ceiling fields hard-fail on an invalid value.
+- **Heuristic clamping (medium):** config-supplied heuristic scores are clamped to [0,1] so a mis-set value can't produce an out-of-range confidence.
+- **`unescapeJsonString` (low):** rewritten as a single-pass scanner so an escaped backslash is consumed before the following char (chained `replace` corrupted `\\n`). Judge regex fallback scoped to the extracted object.
+- **Streaming-timeout caveat** documented (partial tokens of an abandoned final step).
+- New regression tests for all of the above, plus the previously-missing SSE-forwarding and cooperative-cancellation tests. New-code coverage ≈ **92% instruction / 79% branch**.
+
+### Second-pass review fixes
+
+A lean second adversarial pass (5 reviewers → synthesizer) found five more real issues, now fixed:
+
+- **Live-stream timeout (high):** a live-streamed step is no longer subject to the per-step/duration timeout — cancelling it couldn't stop the provider's callback thread, so tokens leaked to the client while the cascade re-emitted a different response (concurrent SSE writes). A streamed step now runs under the streaming executor's own ~120 s bound and its result (even if partial) is the accepted answer; no re-emit, no mid-stream cancel. `streamLive` also tightened to *guaranteed-accept* steps only (last, null-threshold, or `none`≤1.0).
+- **Judge confidence regression (medium):** the judge regex fallback runs over the full judge text again (scoping it to the first balanced object dropped the score when a reasoning object preceded the rating).
+- **Docs vs. validator (medium):** the Configure-time Validation section now states the real two tiers (hard-error only for new pricing/ceiling fields; warnings for legacy conditions).
+- **Single-line code fence (low):** `stripCodeFences` now unwraps ```` ```{...}``` ```` (no newline), which was being discarded.
+- **`returnBestAcrossSteps` trace (low):** the earlier winning step's trace entry is relabeled `accepted_as_best` so the trace agrees with `stepUsed`.
+
+Regression tests added for each. Full touched-area suite green.
+
+### PR-review fixes (bots)
+
+CodeRabbit + Copilot + github-code-quality on PR #587 flagged further items, now addressed: retry token usage accumulated across *all* attempts (not just the last); the cancellation interrupt flag is cleared (`Thread.interrupted()`) so it can't leak; the `accepted.step` metric + trace status name the *actual* returned step under `returnBestAcrossSteps`; unknown `evaluationStrategy` normalized to `structured_output` at runtime (matches the validator + evaluator default); SSE `cascade_escalation` guards non-finite `confidence`/`threshold`; the structured-output regex fallback uses the fence-stripped text; the cascade-disabled agent path forwards its buffered response to the stream; an unused parameter removed; a dead `@Disabled` test deleted; and the docs/changelog/plan corrected to say the validator *warns* (not "rejects/fails fast") on legacy conditions.
+
+### Status
+
+Complete and merged-ready on `feat/model-cascade-enterprise-hardening` (PR #587). No open items; the branch is the terminal state of this feature — next planned work is unrelated (see Section 3 of AGENTS.md).
+
+---
 
 ## 🧹 Multimodal Attachments Completion — Remove dead config knob `reattachTurns` (2026-07-13)
 
@@ -1745,6 +1982,13 @@ Rejected adding 5 separate tools (read_task_list, list_dynamic_agents, discuss_t
 **Files:** `README.md`, `docs/mcp-server.md`, `docs/changelog.md`
 
 ---
+
+## Refactor: Standardize backup logger fields (2026-06-23)
+
+**Repo:** EDDI (`refactor/539-logger-name`)
+**What changed:** Renamed the private logger field from `log` to `LOGGER` in the seven backup implementation classes listed in #539. The change follows the existing project convention and does not alter runtime behavior.
+
+**Files:** `RemoteApiResourceSource.java`, `RestExportService.java`, `RestImportService.java`, `SourceUrlValidator.java`, `StructuralMatcher.java`, `UpgradeExecutor.java`, `ZipResourceSource.java`, `docs/changelog.md`
 
 ## 🐛 Fix: Swagger UI CSP Regression — Duplicate Header Causes Inline Script Block (2026-06-23)
 
