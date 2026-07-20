@@ -183,10 +183,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             </text>
           </svg>
         ) : (
+          // The wordmark is a pure-white glyph: keep it white on the dark
+          // sidebar (dark mode) but invert to near-black on the white sidebar
+          // (light mode) so it stays visible.
           <img
             src="/logo_eddi.png"
             alt="EDDI"
-            className="h-7 w-auto"
+            className="h-7 w-auto invert dark:invert-0"
           />
         )}
       </div>
