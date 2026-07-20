@@ -143,7 +143,9 @@
     "loadError": "Daten konnten nicht geladen werden",
     "actions": "Aktionen",
     "view": "Ansehen",
-    "refresh": "Aktualisieren"
+    "refresh": "Aktualisieren",
+    "on": "Ein",
+    "off": "Aus"
   },
   "agents": {
     "deploy": "Bereitstellen",
@@ -2315,7 +2317,15 @@
       "customDesc": "Definieren Sie Ihr eigenes Team und Ihre Regeln",
       "assembleNow": "Erste Task Force zusammenstellen"
     },
-    "goToManager": "Manager"
+    "goToManager": "Manager",
+    "chat": {
+      "title": "Chat",
+      "toggleDetails": "Agentendetails umschalten",
+      "agentDetails": "Agentendetails",
+      "hideDetails": "Detailbereich ausblenden",
+      "editAgent": "Agent bearbeiten",
+      "selectToView": "Agent auswählen, um Details anzuzeigen"
+    }
   },
   "workforce": {
     "title": "Ihre digitale Belegschaft",

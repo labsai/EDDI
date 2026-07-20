@@ -162,7 +162,9 @@
     "loadError": "Failed to load data",
     "actions": "Actions",
     "view": "View",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "on": "On",
+    "off": "Off"
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -2363,6 +2365,14 @@
       "confirm": "Confirm",
       "settings": "Settings",
       "themeToggle": "Toggle theme"
+    },
+    "chat": {
+      "title": "Chat",
+      "toggleDetails": "Toggle agent details",
+      "agentDetails": "Agent Details",
+      "hideDetails": "Hide details panel",
+      "editAgent": "Edit Agent",
+      "selectToView": "Select an agent to view details"
     }
   },
   "workforce": {

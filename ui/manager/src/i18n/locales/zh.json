@@ -143,7 +143,9 @@
     "loadError": "加载数据失败",
     "actions": "操作",
     "view": "查看",
-    "refresh": "刷新"
+    "refresh": "刷新",
+    "on": "开",
+    "off": "关"
   },
   "agents": {
     "deploy": "部署",
@@ -2315,7 +2317,15 @@
       "customDesc": "定义您自己的团队和规则",
       "assembleNow": "组建您的第一个工作组"
     },
-    "goToManager": "Manager"
+    "goToManager": "Manager",
+    "chat": {
+      "title": "聊天",
+      "toggleDetails": "切换代理详情",
+      "agentDetails": "代理详情",
+      "hideDetails": "隐藏详情面板",
+      "editAgent": "编辑代理",
+      "selectToView": "选择一个代理以查看详情"
+    }
   },
   "workforce": {
     "title": "您的数字劳动力",

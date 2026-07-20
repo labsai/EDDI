@@ -143,7 +143,9 @@
     "loadError": "Falha ao carregar os dados",
     "actions": "Ações",
     "view": "Ver",
-    "refresh": "Atualizar"
+    "refresh": "Atualizar",
+    "on": "Ligado",
+    "off": "Desligado"
   },
   "agents": {
     "deploy": "Implementar",
@@ -2315,7 +2317,15 @@
       "customDesc": "Defina sua própria equipe e regras",
       "assembleNow": "Monte sua primeira força-tarefa"
     },
-    "goToManager": "Manager"
+    "goToManager": "Manager",
+    "chat": {
+      "title": "Chat",
+      "toggleDetails": "Alternar detalhes do agente",
+      "agentDetails": "Detalhes do Agente",
+      "hideDetails": "Ocultar painel de detalhes",
+      "editAgent": "Editar Agente",
+      "selectToView": "Selecione um agente para ver detalhes"
+    }
   },
   "variables": {
     "title": "Global Variables",

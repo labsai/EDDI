@@ -143,7 +143,9 @@
     "loadError": "데이터를 불러오지 못했습니다",
     "actions": "동작",
     "view": "보기",
-    "refresh": "새로고침"
+    "refresh": "새로고침",
+    "on": "켜짐",
+    "off": "꺼짐"
   },
   "agents": {
     "deploy": "배포",
@@ -2315,7 +2317,15 @@
       "customDesc": "나만의 팀과 규칙 정의",
       "assembleNow": "첫 태스크 포스 구성"
     },
-    "goToManager": "Manager"
+    "goToManager": "Manager",
+    "chat": {
+      "title": "채팅",
+      "toggleDetails": "에이전트 세부정보 전환",
+      "agentDetails": "에이전트 세부정보",
+      "hideDetails": "세부정보 패널 숨기기",
+      "editAgent": "에이전트 편집",
+      "selectToView": "세부정보를 보려면 에이전트를 선택하세요"
+    }
   },
   "variables": {
     "title": "Global Variables",

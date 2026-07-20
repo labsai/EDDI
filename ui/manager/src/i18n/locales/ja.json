@@ -143,7 +143,9 @@
     "loadError": "データの読み込みに失敗しました",
     "actions": "操作",
     "view": "表示",
-    "refresh": "更新"
+    "refresh": "更新",
+    "on": "オン",
+    "off": "オフ"
   },
   "agents": {
     "deploy": "デプロイ",
@@ -2315,7 +2317,15 @@
       "customDesc": "独自のチームとルールを定義",
       "assembleNow": "最初のタスクフォースを編成"
     },
-    "goToManager": "Manager"
+    "goToManager": "Manager",
+    "chat": {
+      "title": "チャット",
+      "toggleDetails": "エージェント詳細の切り替え",
+      "agentDetails": "エージェント詳細",
+      "hideDetails": "詳細パネルを非表示",
+      "editAgent": "エージェントを編集",
+      "selectToView": "エージェントを選択して詳細を表示"
+    }
   },
   "variables": {
     "title": "Global Variables",

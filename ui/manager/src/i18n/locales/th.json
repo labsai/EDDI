@@ -143,7 +143,9 @@
     "loadError": "โหลดข้อมูลไม่สำเร็จ",
     "actions": "การดำเนินการ",
     "view": "ดู",
-    "refresh": "รีเฟรช"
+    "refresh": "รีเฟรช",
+    "on": "เปิด",
+    "off": "ปิด"
   },
   "agents": {
     "deploy": "ติดตั้ง (Deploy)",
@@ -2315,7 +2317,15 @@
       "customDesc": "กำหนดทีมและกฎของคุณเอง",
       "assembleNow": "จัดตั้งทีมงานแรกของคุณ"
     },
-    "goToManager": "Manager"
+    "goToManager": "Manager",
+    "chat": {
+      "title": "แชท",
+      "toggleDetails": "สลับรายละเอียดเอเจนต์",
+      "agentDetails": "รายละเอียดเอเจนต์",
+      "hideDetails": "ซ่อนแผงรายละเอียด",
+      "editAgent": "แก้ไขเอเจนต์",
+      "selectToView": "เลือกเอเจนต์เพื่อดูรายละเอียด"
+    }
   },
   "variables": {
     "title": "Global Variables",

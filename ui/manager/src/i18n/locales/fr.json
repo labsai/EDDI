@@ -143,7 +143,9 @@
     "loadError": "Échec du chargement des données",
     "actions": "Actions",
     "view": "Voir",
-    "refresh": "Actualiser"
+    "refresh": "Actualiser",
+    "on": "Activé",
+    "off": "Désactivé"
   },
   "agents": {
     "deploy": "Déployer",
@@ -2315,7 +2317,15 @@
       "customDesc": "Définissez votre propre équipe et vos règles",
       "assembleNow": "Constituer votre premier groupe de travail"
     },
-    "goToManager": "Manager"
+    "goToManager": "Manager",
+    "chat": {
+      "title": "Chat",
+      "toggleDetails": "Afficher/masquer les détails de l'agent",
+      "agentDetails": "Détails de l'agent",
+      "hideDetails": "Masquer le panneau de détails",
+      "editAgent": "Modifier l'agent",
+      "selectToView": "Sélectionnez un agent pour afficher les détails"
+    }
   },
   "variables": {
     "title": "Global Variables",

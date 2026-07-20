@@ -143,7 +143,9 @@
     "loadError": "فشل تحميل البيانات",
     "actions": "إجراءات",
     "view": "عرض",
-    "refresh": "تحديث"
+    "refresh": "تحديث",
+    "on": "مفعّل",
+    "off": "معطّل"
   },
   "agents": {
     "deploy": "نشر",
@@ -2352,7 +2354,15 @@
       "customDesc": "حدد فريقك وقواعدك الخاصة",
       "assembleNow": "شكّل أول فريق عمل لك"
     },
-    "goToManager": "Manager"
+    "goToManager": "Manager",
+    "chat": {
+      "title": "دردشة",
+      "toggleDetails": "تبديل تفاصيل الوكيل",
+      "agentDetails": "تفاصيل الوكيل",
+      "hideDetails": "إخفاء لوحة التفاصيل",
+      "editAgent": "تعديل الوكيل",
+      "selectToView": "حدد وكيلاً لعرض التفاصيل"
+    }
   },
   "variables": {
     "title": "Global Variables",

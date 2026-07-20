@@ -143,7 +143,9 @@
     "loadError": "डेटा लोड करने में विफल",
     "actions": "क्रियाएँ",
     "view": "देखें",
-    "refresh": "ताज़ा करें"
+    "refresh": "ताज़ा करें",
+    "on": "चालू",
+    "off": "बंद"
   },
   "agents": {
     "deploy": "तैनात करें",
@@ -2315,7 +2317,15 @@
       "customDesc": "अपनी खुद की टीम और नियम परिभाषित करें",
       "assembleNow": "अपना पहला कार्य दल बनाएं"
     },
-    "goToManager": "Manager"
+    "goToManager": "Manager",
+    "chat": {
+      "title": "चैट",
+      "toggleDetails": "एजेंट विवरण टॉगल करें",
+      "agentDetails": "एजेंट विवरण",
+      "hideDetails": "विवरण पैनल छुपाएं",
+      "editAgent": "एजेंट संपादित करें",
+      "selectToView": "विवरण देखने के लिए एक एजेंट चुनें"
+    }
   },
   "variables": {
     "title": "Global Variables",
