@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, Plus, RefreshCw, Loader2 } from "lucide-react";
+import { X, Plus, RefreshCw, Loader2, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getAgent, getAgentDescriptors, updateAgent } from "@/lib/api/agents";
 import type { Agent, Capability, AgentDescriptor } from "@/lib/api/agents";
 import { parseResourceUri } from "@/lib/api/agents";
+import { useAgentPrompt, useUpdateAgentPrompt } from "@/hooks/use-agent-prompt";
 import { AdvisorAvatar } from "@/components/boardroom/advisor-avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -83,6 +84,10 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
   const [enableMemoryTools, setEnableMemoryTools] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Prompt state
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [promptSynced, setPromptSynced] = useState(false);
+
   // Capability inline-add form
   const [addingCapability, setAddingCapability] = useState(false);
   const [newSkill, setNewSkill] = useState("");
@@ -98,6 +103,26 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
     }
   }, [agent]);
 
+  // Prompt fetching
+  const {
+    data: promptData,
+    isLoading: promptLoading,
+  } = useAgentPrompt(agentId, version);
+  const updatePromptMutation = useUpdateAgentPrompt();
+
+  // Sync prompt from fetched data
+  useEffect(() => {
+    if (promptData && !promptSynced) {
+      setSystemPrompt(promptData.systemMessage);
+      setPromptSynced(true);
+    }
+  }, [promptData, promptSynced]);
+
+  // Reset prompt sync when agent changes
+  useEffect(() => {
+    setPromptSynced(false);
+  }, [agentId]);
+
   // ── Dirty tracking ──────────────────────────────────────────
 
   const isDirty = (() => {
@@ -107,6 +132,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
     if (enableMemoryTools !== (agent.enableMemoryTools ?? false)) return true;
     if (JSON.stringify(capabilities) !== JSON.stringify(agent.capabilities ?? []))
       return true;
+    if (promptData && systemPrompt !== promptData.systemMessage) return true;
     return false;
   })();
 
@@ -174,6 +200,16 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
         enableMemoryTools,
       };
       await updateAgent(agentId, version, updated);
+
+      // Save prompt if changed
+      if (promptData && systemPrompt !== promptData.systemMessage) {
+        await updatePromptMutation.mutateAsync({
+          agentId,
+          promptData,
+          newSystemMessage: systemPrompt,
+        });
+      }
+
       await queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
       await queryClient.invalidateQueries({
         queryKey: ["agent-descriptor", agentId],
@@ -199,6 +235,9 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
     version,
     queryClient,
     t,
+    systemPrompt,
+    promptData,
+    updatePromptMutation,
   ]);
 
   // ── Render nothing when closed ──────────────────────────────
@@ -334,6 +373,48 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                 />
+              </section>
+
+              {/* ── 1b. System Prompt ──────────────────────── */}
+              <section>
+                <label
+                  htmlFor="agent-system-prompt"
+                  className="flex items-center gap-1.5 text-sm font-medium text-foreground mb-1.5"
+                >
+                  <Brain className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+                  {t("boardroom.agentEditor.systemPrompt", "System Prompt")}
+                </label>
+                {promptLoading ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-24 w-full" />
+                  </div>
+                ) : promptData ? (
+                  <textarea
+                    id="agent-system-prompt"
+                    className={cn(
+                      "w-full rounded-lg border border-border bg-card px-3 py-2",
+                      "text-sm text-foreground placeholder:text-muted-foreground",
+                      "resize-y min-h-[120px]",
+                      "focus:outline-none focus:ring-2 focus:ring-ring",
+                      "transition-colors font-mono text-xs leading-relaxed"
+                    )}
+                    rows={6}
+                    placeholder={t(
+                      "boardroom.agentEditor.systemPromptPlaceholder",
+                      "Instructions that define this agent's behavior, personality, and expertise..."
+                    )}
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">
+                    {t(
+                      "boardroom.agentEditor.noPrompt",
+                      "This agent has no configurable system prompt."
+                    )}
+                  </p>
+                )}
               </section>
 
               {/* ── 2. Capabilities ────────────────────────── */}
