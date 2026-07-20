@@ -395,7 +395,7 @@ describe("useUndeployAgent", () => {
     expect(captured).not.toBeNull();
     expect(captured!.searchParams.get("version")).toBe("3");
     expect(captured!.searchParams.get("endAllActiveConversations")).toBe("true");
-    expect(captured!.searchParams.get("undeployAllPreviousVersions")).toBe("true");
+    expect(captured!.searchParams.get("undeployThisAndAllPreviousAgentVersions")).toBe("true");
   });
 
   it("omits the destructive query flags when the options are not passed", async () => {
@@ -418,7 +418,7 @@ describe("useUndeployAgent", () => {
 
     expect(captured).not.toBeNull();
     expect(captured!.searchParams.has("endAllActiveConversations")).toBe(false);
-    expect(captured!.searchParams.has("undeployAllPreviousVersions")).toBe(false);
+    expect(captured!.searchParams.has("undeployThisAndAllPreviousAgentVersions")).toBe(false);
   });
 });
 

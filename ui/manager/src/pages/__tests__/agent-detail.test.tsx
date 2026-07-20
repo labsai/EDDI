@@ -379,7 +379,7 @@ describe("AgentDetailPage", () => {
       expect(undeployUrl).not.toBeNull();
     });
     expect(undeployUrl!.searchParams.get("endAllActiveConversations")).toBe("true");
-    expect(undeployUrl!.searchParams.get("undeployAllPreviousVersions")).toBe("true");
+    expect(undeployUrl!.searchParams.get("undeployThisAndAllPreviousAgentVersions")).toBe("true");
   });
 
   it("undeploy request omits the destructive flags when options are left unchecked", async () => {
@@ -409,7 +409,7 @@ describe("AgentDetailPage", () => {
       expect(undeployUrl).not.toBeNull();
     });
     expect(undeployUrl!.searchParams.has("endAllActiveConversations")).toBe(false);
-    expect(undeployUrl!.searchParams.has("undeployAllPreviousVersions")).toBe(false);
+    expect(undeployUrl!.searchParams.has("undeployThisAndAllPreviousAgentVersions")).toBe(false);
   });
 
   // ─── Chat button ────────────────────────────────────────────────────────

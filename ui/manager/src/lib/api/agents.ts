@@ -257,8 +257,8 @@ export function deployAgent(
  * destructive query flags (both default to `false`):
  *   - `endAllActiveConversations` — terminate every in-progress conversation
  *     on this deployment (irreversible).
- *   - `undeployAllPreviousVersions` — also undeploy every earlier version of
- *     this agent from the environment.
+ *   - `undeployThisAndAllPreviousAgentVersions` — also undeploy every earlier
+ *     version of this agent from the environment.
  */
 export function undeployAgent(
   environment: string,
@@ -274,7 +274,8 @@ export function undeployAgent(
     params.set("endAllActiveConversations", "true");
   }
   if (options?.undeployAllPreviousVersions) {
-    params.set("undeployAllPreviousVersions", "true");
+    // Backend query-param name (IRestAgentAdministration.undeployAgent).
+    params.set("undeployThisAndAllPreviousAgentVersions", "true");
   }
   return api.post(
     `/administration/${environment}/undeploy/${agentId}?${params.toString()}`
