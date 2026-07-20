@@ -161,6 +161,25 @@ class StreamingLegacyChatExecutorRetryTest {
             assertEquals(1, callCount.get(), "Should not retry when partial content exists");
             assertEquals("partial", result.response());
         }
+
+        @Test
+        @DisplayName("executeCapturing should throw even when tokens were already emitted")
+        void executeCapturing_propagatesErrorDespitePartialTokens() {
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    handler.onPartialResponse("partial ");
+                    handler.onError(new RuntimeException("provider blew up mid-stream"));
+                }
+            };
+
+            // The cascade has no try/catch around executeCapturing — it relies on this
+            // throw to fall back to the best previous step. Salvaging the partial text
+            // here would let a failed final step be accepted as a successful one.
+            var ex = assertThrows(RuntimeException.class,
+                    () -> executor.executeCapturing(model, createMessages("Hi"), eventSink));
+            assertTrue(ex.getMessage().contains("Streaming chat failed"));
+        }
     }
 
     // ==================== Timeout with Partial Content ====================
@@ -206,6 +225,102 @@ class StreamingLegacyChatExecutorRetryTest {
             assertEquals("", result.response());
             assertTrue((Boolean) result.metadata().get("streamingTimeout"));
             verify(eventSink, never()).onToken(anyString());
+        }
+    }
+
+    // ==================== Per-Attempt Metadata Isolation ====================
+
+    @Nested
+    @DisplayName("Per-attempt metadata isolation")
+    class MetadataIsolationTests {
+
+        @Test
+        @DisplayName("should not leak a failed attempt's streamingTimeout into a successful retry")
+        void timeoutThenSuccess_doesNotLeakTimeoutMetadata() {
+            var callCount = new AtomicInteger(0);
+
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    if (callCount.incrementAndGet() == 1) {
+                        // First attempt: no tokens, no completion — pure timeout
+                        return;
+                    }
+                    handler.onPartialResponse("Recovered");
+                    handler.onCompleteResponse(ChatResponse.builder()
+                            .aiMessage(AiMessage.from("Recovered"))
+                            .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build())
+                            .build());
+                }
+            };
+
+            var task = createTaskWithTimeout(1);
+            task.setRetry(createRetryConfig(2, 1L));
+            var result = executor.execute(model, createMessages("Hi"), eventSink, task);
+
+            assertEquals("Recovered", result.response());
+            assertEquals(2, callCount.get());
+            // The retry succeeded — stale signals from attempt 1 must not survive, or
+            // responseValidation.onStreamingTimeout would fire on a perfectly good answer.
+            assertFalse(result.metadata().containsKey("streamingTimeout"),
+                    "streamingTimeout from the failed attempt must not leak into the successful retry");
+            assertFalse(result.metadata().containsKey("warning"),
+                    "stale warning from the failed attempt must not leak into the successful retry");
+            assertEquals("STOP", result.metadata().get("finishReason"));
+        }
+    }
+
+    // ==================== Degenerate Retry Configuration ====================
+
+    @Nested
+    @DisplayName("Degenerate retry configuration")
+    class DegenerateRetryConfigTests {
+
+        @Test
+        @DisplayName("should still invoke the model exactly once when maxAttempts is 0")
+        void zeroMaxAttempts_stillRunsOnce() {
+            var callCount = new AtomicInteger(0);
+
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    callCount.incrementAndGet();
+                    handler.onPartialResponse("Hello");
+                    handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hello")).build());
+                }
+            };
+
+            var task = createTask();
+            task.setRetry(createRetryConfig(0, 1L));
+            var result = executor.execute(model, createMessages("Hi"), eventSink, task);
+
+            // maxAttempts <= 0 must mean "one attempt, no retries" — never "skip the
+            // model and hand back a null response nobody can distinguish from silence".
+            assertEquals(1, callCount.get(), "model must be invoked once even with maxAttempts=0");
+            assertEquals("Hello", result.response());
+            assertNotNull(result.response(), "a degenerate retry config must never yield a null response");
+        }
+
+        @Test
+        @DisplayName("should treat a negative maxAttempts as a single attempt")
+        void negativeMaxAttempts_stillRunsOnce() {
+            var callCount = new AtomicInteger(0);
+
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    callCount.incrementAndGet();
+                    handler.onPartialResponse("Hi there");
+                    handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hi there")).build());
+                }
+            };
+
+            var task = createTask();
+            task.setRetry(createRetryConfig(-5, 1L));
+            var result = executor.execute(model, createMessages("Hi"), eventSink, task);
+
+            assertEquals(1, callCount.get());
+            assertEquals("Hi there", result.response());
         }
     }
 

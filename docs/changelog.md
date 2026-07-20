@@ -5,6 +5,37 @@
 
 ---
 
+## 🐛 Fix: two latent retry-loop defects in `StreamingLegacyChatExecutor` (2026-07-20)
+
+**Repo:** EDDI (`feat/error-handling-recovery`)
+
+Surfaced by an adversarial post-merge review of the streaming executor (see the merge entry below). Both defects pre-date the merge — they came in with this branch's retry loop, not with the conflict resolution — but both live inside the method the merge rewrote, and both are squarely in this PR's own subject area (error handling and recovery), so they are fixed here rather than deferred.
+
+### 1. A failed attempt's metadata leaked into a successful retry
+
+`metadata` is declared outside the retry loop and mutated inside it. If attempt 1 timed out with no tokens (setting `streamingTimeout=true`) and attempt 2 succeeded, the successful response was returned **with the stale `streamingTimeout` flag still attached**. `LlmTask.applyResponseValidation` reads that flag and fires `responseValidation.onStreamingTimeout` — so with `action: "fallback"` a perfectly good answer was silently replaced by the "I wasn't able to generate a complete response" string, and with `action: "error"` the turn threw. The loop body now clears the map at the start of each attempt, so each attempt reports only its own outcome.
+
+### 2. `maxAttempts <= 0` skipped the model entirely and returned a null response
+
+`RetryConfiguration.setMaxAttempts` does no clamping, so a config of `retry: {maxAttempts: 0}` — a natural way to write "don't retry" — made `for (attempt = 1; attempt <= 0; …)` never execute. The model was never invoked, `responseText` stayed null, and `StreamingResult(null, …)` propagated into `LlmTask` and on into a `TextOutputItem(null, 0)`: no exception, no log, a completely silent turn. Now clamped with `Math.max(1, …)` — "no retries" means one attempt.
+
+Deliberately **not** clamped in `RetryConfiguration.setMaxAttempts` itself: the shared `executeWithRetry` already fails *loudly* on `maxAttempts=0` (throws `LifecycleException`), and changing the setter would silently alter that contract for the MCP and HTTP-call consumers and their existing tests. The clamp belongs at the streaming call site, which is the one that was failing silently.
+
+### Tests
+
+Three regression tests added to `StreamingLegacyChatExecutorRetryTest`, each confirmed to fail before the fix and pass after: `timeoutThenSuccess_doesNotLeakTimeoutMetadata`, `zeroMaxAttempts_stillRunsOnce`, `negativeMaxAttempts_stillRunsOnce`. A fourth, `executeCapturing_propagatesErrorDespitePartialTokens`, pins the merge's central contract at the executor level — until now it was guarded only indirectly, by a cascade-level test.
+
+155 tests green across the streaming, cascade, orchestrator and LlmTask suites.
+
+### Known follow-ups (not fixed here — pre-existing, out of scope for this PR)
+
+- **Cascade drops the validation-signal metadata.** `CascadeResult` carries only `tokenUsage`, not the producing executor's `warning`/`streamingTimeout`. With `modelCascade` *and* `responseValidation` both enabled, only `onEmpty` and `onRefusal` can fire; `onTruncation`, `onContentFilter` and `onStreamingTimeout` are unreachable. Coverage was worse before the merge (the cascade path left the metadata map empty), so this is an exposure, not a regression.
+- **Streaming never derives `warning` from `finishReason`.** `LegacyChatExecutor` maps `LENGTH` → `truncated` and `CONTENT_FILTER` → `content_filter`; `buildMetadata` does not, so those two policies are inert on the streaming path even without the cascade.
+- **A timed-out live-streamed final cascade step is accepted as the winner** rather than falling back to `bestSoFar` — a mid-stream *error* falls back correctly, a *timeout* does not.
+- **~500 lines of cascade error-path tests lapsed on `main`** before this merge (`CascadingModelExecutorExtendedTest` deleted; 15 of 16 tests in `CascadingModelExecutorCoverageTest` replaced), covering exception-unwrapping and timeout-escalation. Worth re-adding against the current implementation.
+
+---
+
 ## 🔀 Merge `origin/main` into `feat/error-handling-recovery` — conflict resolution (2026-07-20)
 
 **Repo:** EDDI (`feat/error-handling-recovery`)

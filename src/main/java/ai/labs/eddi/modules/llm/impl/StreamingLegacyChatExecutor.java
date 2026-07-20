@@ -126,12 +126,22 @@ class StreamingLegacyChatExecutor {
         }
 
         RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
-        int maxAttempts = retryConfig != null && retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 1;
+        // Clamp to at least one attempt: a config of maxAttempts <= 0 means "don't
+        // retry", not "never call the model". Without this the loop body never runs
+        // and we hand back a null response that is indistinguishable from silence.
+        int configuredAttempts = retryConfig != null && retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 1;
+        int maxAttempts = Math.max(1, configuredAttempts);
 
         Map<String, Object> metadata = new HashMap<>();
         String responseText = null;
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            // Each attempt reports its own outcome. Without this reset, a
+            // streamingTimeout/warning recorded by a failed attempt survives into a
+            // successful retry, and responseValidation then acts on a stale signal —
+            // replacing a perfectly good answer with the timeout fallback.
+            metadata.clear();
+
             var latch = new CountDownLatch(1);
             var fullResponse = new StringBuilder();
             var errorRef = new AtomicReference<Throwable>();
