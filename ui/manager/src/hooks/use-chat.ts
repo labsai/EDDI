@@ -638,13 +638,54 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
       store.getState().finishStreaming();
       return true;
     }
-    case "error":
-      store
-        .getState()
-        .appendToLastAgentMessage(`\n\n⚠️ Error: ${event.data}`);
+    case "error": {
+      // Backend sends `{"message":"..."}`; show the message, not the raw JSON.
+      let message = event.data;
+      try {
+        const parsed = JSON.parse(event.data);
+        if (parsed && typeof parsed.message === "string") message = parsed.message;
+      } catch {
+        // non-JSON payload — fall back to the raw text
+      }
+      store.getState().appendToLastAgentMessage(`\n\n⚠️ Error: ${message}`);
       store.getState().finishStreaming();
       debug.finalizeTurn();
       return true;
+    }
+    case "task_failed": {
+      // Classified per-task failure for real-time admin monitoring; lights up
+      // the "error" status in the activity card / pipeline views (previously
+      // dead code — the event was dropped, so a failing stage stuck on "running").
+      store.getState().setThinking(false);
+      let taskId = "unknown";
+      let taskType = "unknown";
+      let index = 0;
+      let durationMs: number | undefined;
+      let errorType: string | undefined;
+      let errorSummary: string | undefined;
+      try {
+        const parsed = JSON.parse(event.data);
+        taskId = parsed.taskId ?? parsed.id ?? "unknown";
+        taskType = parsed.taskType ?? parsed.type ?? "unknown";
+        index = parsed.index ?? 0;
+        durationMs = parsed.durationMs ?? parsed.duration;
+        errorType = parsed.errorType;
+        errorSummary = parsed.error ?? parsed.errorSummary;
+      } catch {
+        taskType = event.data || "unknown";
+      }
+      debug.addEvent({
+        type: "task_failed",
+        taskId,
+        taskType,
+        index,
+        durationMs,
+        errorType,
+        errorSummary,
+        timestamp: Date.now(),
+      });
+      return false;
+    }
     case "task_start": {
       store.getState().setThinking(true);
       // Parse event data for structured pipeline info

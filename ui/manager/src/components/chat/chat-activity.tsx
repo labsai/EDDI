@@ -37,6 +37,8 @@ interface TaskSummary {
   toolTrace?: ToolTraceEntry[];
   actions?: string[];
   confidence?: number;
+  errorType?: string;
+  errorSummary?: string;
 }
 
 // ==================== Helpers ====================
@@ -93,6 +95,27 @@ function buildTaskSummaries(events: PipelineEvent[]): TaskSummary[] {
           toolTrace: event.toolTrace,
           actions: event.actions,
           confidence: event.confidence,
+        });
+      }
+    } else if (event.type === "task_failed") {
+      // Correlate to the running task by taskId (the failed payload has no index).
+      const running = tasks.find(
+        (tk) => tk.taskId === event.taskId && tk.status === "running",
+      );
+      const failed = {
+        status: "error" as const,
+        durationMs: event.durationMs,
+        errorType: event.errorType,
+        errorSummary: event.errorSummary,
+      };
+      if (running) {
+        Object.assign(running, failed);
+      } else {
+        tasks.push({
+          taskType: event.taskType,
+          taskId: event.taskId,
+          index: event.index,
+          ...failed,
         });
       }
     }
@@ -277,6 +300,21 @@ function TaskRow({ task }: { task: TaskSummary }) {
               : "—"}
         </span>
       </div>
+
+      {/* Failure detail (classified errorType + redacted summary) */}
+      {task.status === "error" && (task.errorType || task.errorSummary) && (
+        <div
+          className="ms-8 mb-1 flex items-start gap-1.5 text-[10px] text-destructive"
+          data-testid="task-error-detail"
+        >
+          {task.errorType && (
+            <span className="shrink-0 rounded bg-destructive/10 px-1 py-0.5 font-mono uppercase">
+              {task.errorType}
+            </span>
+          )}
+          {task.errorSummary && <span>{truncate(task.errorSummary, 140)}</span>}
+        </div>
+      )}
 
       {/* Tool calls detail (nested) */}
       {hasTools && toolsExpanded && (
