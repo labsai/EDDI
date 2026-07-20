@@ -792,6 +792,10 @@
     "toolApprovalsDesc": "يتجاوز موافقات الأدوات على مستوى الوكيل لهذه المهمة فقط — استبدال كامل، وليس دمجًا."
   },
   "outputEditor": {
+    "labelPlaceholder": "تسمية الرابط...",
+    "pathPlaceholder": "مسار الرابط...",
+    "altPlaceholder": "نص بديل...",
+    "uriPlaceholder": "رابط الصورة...",
     "language": "اللغة",
     "langPlaceholder": "مثال: en, ar",
     "outputSets": "مجموعات المخرجات",

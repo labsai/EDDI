@@ -13,9 +13,15 @@ import {
 
 export interface OutputItem {
   type: string;
+  // text (TextOutputItem: text, delay)
   text?: string;
   delay?: number;
-  url?: string;
+  // image (ImageOutputItem: uri, alt)
+  uri?: string;
+  alt?: string;
+  // applicationLink (ApplicationLinkOutputItem: path, label, delay)
+  path?: string;
+  label?: string;
   [key: string]: unknown;
 }
 
@@ -65,21 +71,38 @@ function OutputItemEditor({
         {OUTPUT_TYPES.map((ot) => (<option key={ot} value={ot}>{ot}</option>))}
       </select>
       {item.type === "text" ? (
-        <input type="text" value={item.text ?? ""} onChange={(e) => onChange({ ...item, text: e.target.value })}
-          readOnly={readOnly} placeholder={t("outputEditor.textPlaceholder", "Output text...")}
-          className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-      ) : item.type === "image" || item.type === "applicationLink" ? (
-        <input type="text" value={(item.url as string) ?? ""} onChange={(e) => onChange({ ...item, url: e.target.value })}
-          readOnly={readOnly} placeholder={t("outputEditor.urlPlaceholder", "URL...")}
-          className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+        <>
+          <input type="text" value={item.text ?? ""} onChange={(e) => onChange({ ...item, text: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.textPlaceholder", "Output text...")}
+            className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="number" value={item.delay ?? 0} onChange={(e) => onChange({ ...item, delay: parseInt(e.target.value, 10) || 0 })}
+            readOnly={readOnly} title={t("outputEditor.delayMs", "Delay (ms)")} data-testid="output-text-delay"
+            className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+        </>
+      ) : item.type === "image" ? (
+        <>
+          <input type="text" value={item.uri ?? ""} onChange={(e) => onChange({ ...item, uri: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.uriPlaceholder", "Image URL...")} data-testid="output-image-uri"
+            className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="text" value={item.alt ?? ""} onChange={(e) => onChange({ ...item, alt: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.altPlaceholder", "Alt text...")} data-testid="output-image-alt"
+            className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+        </>
+      ) : item.type === "applicationLink" ? (
+        <>
+          <input type="text" value={item.path ?? ""} onChange={(e) => onChange({ ...item, path: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.pathPlaceholder", "Link path...")} data-testid="output-link-path"
+            className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="text" value={item.label ?? ""} onChange={(e) => onChange({ ...item, label: e.target.value })}
+            readOnly={readOnly} placeholder={t("outputEditor.labelPlaceholder", "Link label...")} data-testid="output-link-label"
+            className="h-7 w-24 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+          <input type="number" value={item.delay ?? 0} onChange={(e) => onChange({ ...item, delay: parseInt(e.target.value, 10) || 0 })}
+            readOnly={readOnly} title={t("outputEditor.delayMs", "Delay (ms)")} data-testid="output-link-delay"
+            className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+        </>
       ) : (
         <input type="text" readOnly value={JSON.stringify(Object.fromEntries(Object.entries(item).filter(([k]) => k !== "type")))}
           className="h-7 flex-1 rounded border border-input bg-muted px-2 font-mono text-xs text-foreground" />
-      )}
-      {item.type === "text" && (
-        <input type="number" value={item.delay ?? 0} onChange={(e) => onChange({ ...item, delay: parseInt(e.target.value, 10) || 0 })}
-          readOnly={readOnly} title={t("outputEditor.delayMs", "Delay (ms)")}
-          className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
       )}
       {!readOnly && (
         <button type="button" onClick={onRemove} className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors">

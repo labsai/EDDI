@@ -792,6 +792,10 @@
     "toolApprovalsDesc": "Remplace les approbations d'outils au niveau de l'agent pour CETTE tâche uniquement — un remplacement complet, pas une fusion."
   },
   "outputEditor": {
+    "labelPlaceholder": "Libellé du lien...",
+    "pathPlaceholder": "Chemin du lien...",
+    "altPlaceholder": "Texte alternatif...",
+    "uriPlaceholder": "URL de l’image...",
     "language": "Langue",
     "langPlaceholder": "ex. en, fr",
     "outputSets": "Jeux de sorties",

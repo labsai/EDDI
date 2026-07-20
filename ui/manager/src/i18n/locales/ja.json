@@ -792,6 +792,10 @@
     "toolApprovalsDesc": "このタスクに限りエージェントレベルのツール承認を上書きします。マージではなく完全な置き換えです。"
   },
   "outputEditor": {
+    "labelPlaceholder": "リンクラベル...",
+    "pathPlaceholder": "リンクパス...",
+    "altPlaceholder": "代替テキスト...",
+    "uriPlaceholder": "画像URL...",
     "language": "言語",
     "langPlaceholder": "例: en, ja",
     "outputSets": "出力セット",

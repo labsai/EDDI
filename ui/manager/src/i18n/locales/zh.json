@@ -792,6 +792,10 @@
     "toolApprovalsDesc": "仅为此任务覆盖智能体级别的工具审批——是完全替换，而非合并。"
   },
   "outputEditor": {
+    "labelPlaceholder": "链接标签...",
+    "pathPlaceholder": "链接路径...",
+    "altPlaceholder": "替代文本...",
+    "uriPlaceholder": "图片网址...",
     "language": "语言",
     "langPlaceholder": "例如 en, zh",
     "outputSets": "输出集",

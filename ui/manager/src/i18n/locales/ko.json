@@ -792,6 +792,10 @@
     "toolApprovalsDesc": "이 작업에만 에이전트 수준 도구 승인을 재정의합니다 — 병합이 아닌 전체 대체입니다."
   },
   "outputEditor": {
+    "labelPlaceholder": "링크 라벨...",
+    "pathPlaceholder": "링크 경로...",
+    "altPlaceholder": "대체 텍스트...",
+    "uriPlaceholder": "이미지 URL...",
     "language": "언어",
     "langPlaceholder": "예: en, ko",
     "outputSets": "출력 세트",

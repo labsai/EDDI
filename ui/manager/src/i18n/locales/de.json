@@ -792,6 +792,10 @@
     "toolApprovalsDesc": "Überschreibt die Tool-Freigaben auf Agentenebene nur für DIESE Aufgabe — ein vollständiger Ersatz, keine Zusammenführung."
   },
   "outputEditor": {
+    "labelPlaceholder": "Link-Beschriftung...",
+    "pathPlaceholder": "Link-Pfad...",
+    "altPlaceholder": "Alt-Text...",
+    "uriPlaceholder": "Bild-URL...",
     "language": "Sprache",
     "langPlaceholder": "z.B. en, de",
     "outputSets": "Ausgabesets",

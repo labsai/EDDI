@@ -792,6 +792,10 @@
     "toolApprovalsDesc": "Anula las aprobaciones de herramienta a nivel de agente solo para ESTA tarea — un reemplazo completo, no una combinación."
   },
   "outputEditor": {
+    "labelPlaceholder": "Etiqueta del enlace...",
+    "pathPlaceholder": "Ruta del enlace...",
+    "altPlaceholder": "Texto alternativo...",
+    "uriPlaceholder": "URL de imagen...",
     "language": "Idioma",
     "langPlaceholder": "ej. en, es",
     "outputSets": "Conjuntos de salida",

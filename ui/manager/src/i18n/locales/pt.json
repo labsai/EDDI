@@ -792,6 +792,10 @@
     "toolApprovalsDesc": "Substitui as aprovações de ferramenta ao nível do agente APENAS para esta tarefa — uma substituição completa, não uma fusão."
   },
   "outputEditor": {
+    "labelPlaceholder": "Rótulo do link...",
+    "pathPlaceholder": "Caminho do link...",
+    "altPlaceholder": "Texto alternativo...",
+    "uriPlaceholder": "URL da imagem...",
     "language": "Idioma",
     "langPlaceholder": "ex. en, pt",
     "outputSets": "Conjuntos de saída",

@@ -792,6 +792,10 @@
     "toolApprovalsDesc": "แทนที่การอนุมัติเครื่องมือระดับเอเจนต์สำหรับงานนี้เท่านั้น — เป็นการแทนที่ทั้งหมด ไม่ใช่การรวม"
   },
   "outputEditor": {
+    "labelPlaceholder": "ป้ายลิงก์...",
+    "pathPlaceholder": "เส้นทางลิงก์...",
+    "altPlaceholder": "ข้อความแทน...",
+    "uriPlaceholder": "URL รูปภาพ...",
     "language": "ภาษา",
     "langPlaceholder": "เช่น en, th",
     "outputSets": "ชุดเอาต์พุต",

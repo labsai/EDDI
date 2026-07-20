@@ -792,6 +792,10 @@
     "toolApprovalsDesc": "केवल इस कार्य के लिए एजेंट-स्तरीय टूल अनुमोदनों को ओवरराइड करता है — यह पूर्ण प्रतिस्थापन है, विलय नहीं।"
   },
   "outputEditor": {
+    "labelPlaceholder": "लिंक लेबल...",
+    "pathPlaceholder": "लिंक पथ...",
+    "altPlaceholder": "वैकल्पिक टेक्स्ट...",
+    "uriPlaceholder": "छवि URL...",
     "language": "भाषा",
     "langPlaceholder": "उदा: en, hi",
     "outputSets": "आउटपुट सेट",

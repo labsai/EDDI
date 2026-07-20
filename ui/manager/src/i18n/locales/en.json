@@ -828,6 +828,10 @@
     "toolApprovalsDesc": "Overrides the agent-level tool approvals for THIS task only — a full replace, not a merge."
   },
   "outputEditor": {
+    "labelPlaceholder": "Link label...",
+    "pathPlaceholder": "Link path...",
+    "altPlaceholder": "Alt text...",
+    "uriPlaceholder": "Image URL...",
     "language": "Language",
     "langPlaceholder": "e.g. en, de",
     "outputSets": "Output Sets",
