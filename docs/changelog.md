@@ -5,6 +5,66 @@
 
 ---
 
+## 🔎 Auto-approve workflow — Copilot pagination review comment is a false positive (2026-07-20)
+
+**Repo:** EDDI (`chore/auto-approve-copilot`)
+
+Copilot flagged the CI-gate's `github.paginate(github.rest.checks.listForRef, …)` call, claiming it returns page objects rather than check-runs (so the gate would never approve) and suggested adding a `(response) => response.data.check_runs` map function. Verified against the **exact** runtime this workflow pins (`actions/github-script@v7.1.0` → `@octokit/plugin-paginate-rest@9.2.2`): the claim is backwards. Octokit auto-normalizes list responses that carry `total_count` (check-runs do), so `paginate()` already returns the flattened `check_runs` array — the current code is correct and yields `APPROVE`. The suggested map function would read `.check_runs` off that already-flattened array → `undefined` → `TypeError: Cannot read properties of undefined (reading 'name')`, crashing the job. Both outcomes were reproduced with a mocked-HTTP harness on the pinned versions. Left the call unchanged and added an inline comment documenting why no map function is used, so the concern isn't re-raised.
+
+---
+
+## 🔀 Merge `origin/main` into `chore/auto-approve-copilot` — conflict resolution (2026-07-20)
+
+**Repo:** EDDI (`chore/auto-approve-copilot`)
+
+Brought the auto-approve-workflow branch up to date with `main` to clear the open PR's merge conflict. The branch adds a single new file (`.github/workflows/auto-approve-copilot.yml`), so the merge pulled in all of main's post-branch work — including the HITL framework, multi-model cascade enterprise hardening, error-handling recovery, and group-conversation follow-ups — with a single textual conflict: `docs/changelog.md`. Both sides had prepended entry blocks; both kept whole — this merge entry plus the branch's auto-approve entry on top, main's newer history below. No source files conflicted: the branch modifies no `.java` that main also touched, so the merged tree's source is byte-identical to `origin/main`.
+
+---
+
+## ⚙️ Chore: Auto-approve workflow for Copilot-reviewed PRs (2026-07-08)
+
+**Repo:** EDDI (`chore/auto-approve-copilot`)
+
+### Summary
+
+New GitHub Actions workflow (`.github/workflows/auto-approve-copilot.yml`) that converts a clean GitHub Copilot code review into an actual PR approval once CI is green, so PRs from trusted authors can satisfy a required-review gate without a human reviewer on hand. Built as a self-owned workflow using `actions/github-script` (SHA-pinned, v7.1.0) instead of the marketplace `strspc-pr-review` action, which was rejected for low provenance (2 stars, no contributor data) and requiring a broad classic PAT — incompatible with this repo's OpenSSF-Gold security posture.
+
+### Key Design Decisions
+
+- **Self-owned, not marketplace**: All logic lives in-repo; the only external dependency is GitHub's own `actions/github-script`. Bot credential is a fine-grained PAT scoped to one repo.
+- **Public-repo safety**: Only PRs from authors with `author_association` in `{OWNER, MEMBER, COLLABORATOR}` are eligible — external contributors are never auto-approved.
+- **`workflow_run` trigger, not `check_suite`**: GitHub suppresses `check_suite`/`check_run` events for check suites produced by GitHub Actions. Since EDDI's CI runs entirely as Actions jobs, a `check_suite: [completed]` trigger would never fire. `workflow_run: { workflows: ["CI/CD"], types: [completed] }` is used instead.
+- **Single-token design**: All API calls (reads + approval) use the single `github` object authenticated via `github-token` set to the bot PAT. Avoids `getOctokit`/`require('@actions/github')` differences between `actions/github-script` versions.
+- **Graceful skip when unconfigured**: `env.BOT_TOKEN` pattern avoids the `github-token: required` error when the secret doesn't exist — the step is simply skipped, no red check.
+
+### Gates (all must pass for approval)
+
+1. PR is open, not draft, targets `main`
+2. Author is trusted (`OWNER`/`MEMBER`/`COLLABORATOR`)
+3. No outstanding `CHANGES_REQUESTED` from anyone
+4. Copilot has reviewed the **current** head commit (not stale)
+5. Copilot's latest review has zero inline/line comments
+6. All CI check-runs on head commit (excluding this workflow's own check) are completed and successful
+7. Bot has not already approved at this exact head SHA (idempotency)
+
+### Known Scope Limitations (documented, accepted)
+
+- CI gate checks only check-runs, not legacy commit statuses. EDDI's CI only emits check-runs (confirmed via `ci.yml`); branch protection remains the actual merge gate regardless.
+- "Clean Copilot review" is defined as zero inline comments; a summary-only body with concerns in prose would still pass. This is an intentional proxy.
+
+### Verification
+
+- YAML syntax validated (`yaml.safe_load`)
+- Embedded JavaScript validated (`node --check` wrapped in async function)
+- SHA pin format matches repo convention (`sha # tag` comment)
+- Adversarial code review (3 dimensions × 2 agents, 7 findings, all addressed or documented)
+
+### One-Time Manual Setup Required
+
+A repo admin must: (1) create/designate a bot GitHub account with write access, (2) generate a fine-grained PAT scoped to this repo with `Pull requests: R/W`, `Checks: Read`, `Metadata: Read`, (3) store it as repo secret `AUTO_APPROVE_BOT_TOKEN`, (4) set repo variable `AUTO_APPROVE_BOT_LOGIN` to the bot's username.
+
+---
+
 ## 🔁 Fix: PR-review response — interrupted streaming, FQN imports, changelog accuracy (2026-07-20)
 
 **Repo:** EDDI (`feat/error-handling-recovery`)
