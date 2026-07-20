@@ -646,39 +646,6 @@ export function ChatPanel() {
           </div>
         )}
 
-        {/* Undo / Redo — compact inline buttons */}
-        {conversationId && (undoAvailable || redoAvailable) && (
-          <div className="flex items-center gap-0.5 border-t border-border px-3 py-0.5">
-            <button
-              onClick={() => undoConversation.mutate()}
-              disabled={!undoAvailable || isProcessing}
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded transition-colors",
-                undoAvailable && !isProcessing
-                  ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  : "text-muted-foreground/20 cursor-not-allowed"
-              )}
-              title={t("chat.undo")}
-              data-testid="undo-btn"
-            >
-              <Undo2 className="h-3 w-3" />
-            </button>
-            <button
-              onClick={() => redoConversation.mutate()}
-              disabled={!redoAvailable || isProcessing}
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded transition-colors",
-                redoAvailable && !isProcessing
-                  ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  : "text-muted-foreground/20 cursor-not-allowed"
-              )}
-              title={t("chat.redo")}
-              data-testid="redo-btn"
-            >
-              <Redo2 className="h-3 w-3" />
-            </button>
-          </div>
-        )}
 
         {/* Awaiting-approval notice — input is disabled while a turn is paused
             for human approval; the decision is made on the conversation's
@@ -731,6 +698,8 @@ export function ChatPanel() {
             pendingAttachments={pendingAttachments}
             onRemoveAttachment={handleRemoveAttachment}
             hasReadyAttachment={hasReadyAttachment}
+            onUndo={undoAvailable && !isProcessing ? () => undoConversation.mutate() : undefined}
+            onRedo={redoAvailable && !isProcessing ? () => redoConversation.mutate() : undefined}
           />
         )}
       </div>
@@ -843,6 +812,8 @@ function ChatInputWithSecretToggle({
   pendingAttachments = [],
   onRemoveAttachment,
   hasReadyAttachment = false,
+  onUndo,
+  onRedo,
 }: {
   onSend: (message: string, isSecret?: boolean) => void;
   disabled?: boolean;
@@ -856,6 +827,8 @@ function ChatInputWithSecretToggle({
   pendingAttachments?: PendingAttachment[];
   onRemoveAttachment?: (id: string) => void;
   hasReadyAttachment?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -952,6 +925,37 @@ function ChatInputWithSecretToggle({
         >
           {isSecretMode ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
         </button>
+
+        {/* Undo / Redo — inline with input icons, only when available */}
+        {(onUndo || onRedo) && (
+          <>
+            <div className="h-5 w-px bg-border/50 shrink-0" />
+            {onUndo && (
+              <button
+                type="button"
+                onClick={onUndo}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                title={t("chat.undo", "Undo")}
+                aria-label={t("chat.undo", "Undo")}
+                data-testid="undo-btn"
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {onRedo && (
+              <button
+                type="button"
+                onClick={onRedo}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                title={t("chat.redo", "Redo")}
+                aria-label={t("chat.redo", "Redo")}
+                data-testid="redo-btn"
+              >
+                <Redo2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </>
+        )}
 
         {isSecretMode ? (
           /* Secret mode: password input with eye toggle */

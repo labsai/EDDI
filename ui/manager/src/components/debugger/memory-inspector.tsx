@@ -273,6 +273,7 @@ function PropertyGroup({ title, props }: { title: string; props: Record<string, 
 // ==================== Shared Rows ====================
 
 function KeyValueRow({ itemKey, itemValue }: { itemKey: string; itemValue: unknown }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -300,7 +301,7 @@ function KeyValueRow({ itemKey, itemValue }: { itemKey: string; itemValue: unkno
         </div>
         <div className="flex-1 min-w-0">
           {!expanded ? (
-            <p className="truncate text-xs font-mono text-foreground/80" title={!isComplex ? displayValue : "Object"}>
+            <p className="truncate text-xs font-mono text-foreground/80" title={!isComplex ? displayValue : t("memoryInspector.object", "Object")}>
               {isComplex ? "{...}" : displayValue}
             </p>
           ) : (
@@ -316,7 +317,9 @@ function KeyValueRow({ itemKey, itemValue }: { itemKey: string; itemValue: unkno
             <button
               onClick={() => setExpanded(!expanded)}
               className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-              title={expanded ? "Collapse" : "Expand"}
+              title={expanded ? t("memoryInspector.collapse", "Collapse") : t("memoryInspector.expand", "Expand")}
+              aria-expanded={expanded}
+              aria-label={expanded ? t("memoryInspector.collapse", "Collapse") : t("memoryInspector.expand", "Expand")}
             >
               <ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} />
             </button>
@@ -324,7 +327,8 @@ function KeyValueRow({ itemKey, itemValue }: { itemKey: string; itemValue: unkno
           <button
             onClick={handleCopy}
             className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-            title="Copy value"
+            title={t("memoryInspector.copyValue", "Copy value")}
+            aria-label={t("memoryInspector.copyValue", "Copy value")}
           >
             {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
           </button>

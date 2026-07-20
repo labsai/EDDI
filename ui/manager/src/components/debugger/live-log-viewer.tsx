@@ -181,7 +181,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
 
         {/* Search */}
         <div className="relative">
-          <Search className="absolute inset-s-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <Search className="absolute start-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             value={searchQuery}
