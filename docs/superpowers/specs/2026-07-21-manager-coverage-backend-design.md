@@ -50,7 +50,27 @@ Separately the reference scan failed **open**: read errors were swallowed (two a
 
 Both new behavioural tests were **mutation-checked** — reverting the production change makes each fail — so neither is vacuous.
 
+## Shipped in the second round
+
+### 4. `fix(admin)!` — `includeDeleted` becomes a true inclusion flag (`bd3f8bdbf`)
+
+It was an equality filter, so `true` matched *only* soft-deleted descriptors. The Manager scans with `false` and purges with `true`, so the set shown and the set deleted were disjoint. `purgeOrphans`'s default flipped `true` → `false`: left at `true`, the semantics fix plus the earlier page-walk fix would have turned the parameterless `DELETE` into "permanently wipe every unreferenced resource, unbounded".
+
+### 5. `feat(tenancy)` — `maxAgentsPerTenant` enforcement (`a4d368683`)
+
+Read-only gate, not a counter (several paths mutate deployments without passing any acquire point). Placed between the null-checks and the `try`, because inside it `catch (Exception)` converts the 429 to a 500. Counts distinct agent ids, unioning persisted `deployed` rows with live `READY` agents — `autoDeploy=false` writes no row but deploys unconditionally, and the resulting agent is **durable**, since `ConversationService.getAgent` lazily re-deploys it after restart.
+
+### 6. `fix(serialization)!` — persistence/REST mapper split (`4eb7ec5cb`)
+
+New `@PersistenceMapper` qualifier; the `Instant` → ISO override lives in `customize()` only. See the deferral note below for why the shared static could not be touched.
+
+### 7. `fix(llm)` — agent-mode token usage (`15b7a08a7`)
+
+`LlmTask` never read `agentResult.responseMetadata()`, so usage the orchestrator had already summed was discarded. Prerequisite for any metering.
+
 ## Deliberately not shipped
+
+> **Superseded:** the C3 and C4 deferrals below were resolved in the second round (`4eb7ec5cb`, `a4d368683`). They are kept for the reasoning, which still governs how *not* to change the shared mapper.
 
 ### C3 as designed — repo-wide `Instant` → ISO-8601
 
@@ -95,7 +115,18 @@ No blockers, several confirmed majors:
 
 ### C5 — cost metering
 
-**Blocked on a blocker, not just majors.** The design accumulated per-turn USD from token usage, but agent mode and the HITL resume path *discard* `tokenUsage` — so the accumulator would read ~0 on exactly the paths the change targets. `ObservableChatModel` is the correct interception point, not `LlmTask`.
+**Still open. The diagnosis was right; the prescription was wrong.**
+
+A later verification pass **refuted `ObservableChatModel` as the seam** on four independent counts: `wrapIfNeeded` returns the raw model unless timeout/logging is configured, so default agents are unwrapped; it never wraps streaming (it implements `ChatModel`, not `StreamingChatModel`), so the SSE and cascade live-stream paths are invisible; instances are `@ApplicationScoped`-cached and shared across all conversations with the observability params stripped from the cache key, so it has **zero attribution context** and its presence is nondeterministic; and its timeout path runs the delegate on a shared daemon thread. It also never reads `TokenUsage` today.
+
+The actual loss was in `LlmTask`, and that half is now **fixed** (`15b7a08a7`).
+
+**Remaining work, with the verified seam:** a small `LlmUsageRecorder` called at the six sites that already hold a `ChatResponse` — `AgentOrchestrator:909`, `LegacyChatExecutor:110`, `StreamingLegacyChatExecutor:297`, `ToolResponseTruncator:236`, `SummarizationService:133`, `ConfidenceEvaluator:254`. That set is closed: a grep for `UserMessage.from|SystemMessage.from` across `src/main/java` returns 8 files, of which only these construct model calls. Then per-turn accumulation into step data and `recordTurnCost` at the two `ConversationService` settle points.
+
+Three things must be settled first:
+1. **Precedence between three price locations.** `inputPricePer1M`/`outputPricePer1M` already exist on `CascadeStep` *and* `ModelCascadeConfig`, are validated, documented, and already drive `runCostUsd`. A third copy on `Task` double-counts cascade turns unless cascade config wins for cascade tasks and task-level applies only to non-cascade paths.
+2. **The Mongo E11000 goes live.** `tryAddCost` upserts against a filter pinning `costMonth` while `tenant_usage` has a unique index on `tenantId`, so the first cost of each new UTC month attempts a duplicate insert. Dormant only because nothing calls `recordCost`. `MongoTenantQuotaStoreTest:369` pins the current two-call sequence and needs rewriting.
+3. **Uncounted spend.** Judge-model calls, tool-response summarization and the rolling summary all make in-turn LLM calls whose usage is never captured; tool cost is structurally $0 because `ToolCostTracker`'s map is keyed `"websearch"` while the real name is `searchWeb`.
 
 Additional confirmed problems:
 - `inputPricePer1M`/`outputPricePer1M` already exist on `CascadeStep` **and** `ModelCascadeConfig`. A third copy on `Task` needs a stated precedence rule or it double-counts cascade turns against `runCostUsd`, which `LlmTask` already surfaces as `cascadeCostUsd`.
