@@ -19,6 +19,8 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -59,6 +61,15 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     private static final int BATCH_SIZE = 200;
 
+    /**
+     * Hard ceiling on pages read per store type. The scan is a synchronous,
+     * one-read-per-descriptor traversal, so an unbounded walk would hold a worker
+     * thread for the whole collection. Hitting the ceiling is reported as an error
+     * rather than silently truncating — a truncated scan cannot be used to decide
+     * what to delete.
+     */
+    private static final int MAX_PAGES = 100;
+
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
@@ -81,7 +92,20 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     @Override
     public OrphanReport purgeOrphans(Boolean includeDeleted) {
-        List<OrphanInfo> orphans = findOrphans(includeDeleted);
+        // The reference set decides what is NOT an orphan. Every way of building it
+        // incompletely — a failed store read, a truncated page walk — makes MORE
+        // resources look unreferenced, and the delete below is permanent and
+        // irreversible. So an incomplete scan must refuse to purge rather than
+        // proceed on a partial picture.
+        ReferenceScan scan = scanReferencedUris();
+        if (!scan.complete()) {
+            log.errorf("Refusing to purge orphans: the reference scan was incomplete (%s)", scan.failureReason());
+            throw new WebApplicationException("Refusing to purge orphans: the reference scan was incomplete (" + scan.failureReason()
+                    + "). Purging on a partial reference set could permanently delete resources that are still in use.",
+                    Response.Status.CONFLICT);
+        }
+
+        List<OrphanInfo> orphans = collectOrphans(scan.referencedUris(), includeDeleted);
         int deletedCount = 0;
 
         for (OrphanInfo orphan : orphans) {
@@ -98,12 +122,27 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         return new OrphanReport(orphans.size(), deletedCount, orphans);
     }
 
+    /**
+     * Outcome of building the referenced-URI set.
+     *
+     * @param referencedUris
+     *            every URI referenced by at least one Agent or workflow
+     * @param complete
+     *            false when any part of the traversal failed, meaning the set may
+     *            be missing references and is therefore unsafe to delete against
+     * @param failureReason
+     *            human-readable cause when {@code complete} is false
+     */
+    private record ReferenceScan(Set<String> referencedUris, boolean complete, String failureReason) {
+    }
+
     private List<OrphanInfo> findOrphans(boolean includeDeleted) {
-        // Step 1: Build the set of all referenced resource URIs
-        Set<String> referencedUris = buildReferencedUrisSet();
+        return collectOrphans(scanReferencedUris().referencedUris(), includeDeleted);
+    }
+
+    private List<OrphanInfo> collectOrphans(Set<String> referencedUris, boolean includeDeleted) {
         log.infof("Orphan scan: found %d referenced resource URIs", referencedUris.size());
 
-        // Step 2: Scan all store types and find unreferenced resources
         List<OrphanInfo> orphans = new ArrayList<>();
 
         for (String[] storeType : SCANNABLE_STORE_TYPES) {
@@ -128,11 +167,18 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
     }
 
     /**
-     * Build the complete set of all URIs that are referenced by at least one Agent
-     * or workflow.
+     * Build the set of all URIs that are referenced by at least one Agent or
+     * workflow, tracking whether the traversal completed.
+     *
+     * <p>
+     * Completeness is reported rather than assumed: every failure here removes
+     * entries from the set, and a missing entry promotes a live resource to
+     * "orphan". Read-only callers may use a partial set; the purge may not.
+     * </p>
      */
-    private Set<String> buildReferencedUrisSet() {
+    private ReferenceScan scanReferencedUris() {
         Set<String> referencedUris = new HashSet<>();
+        String failureReason = null;
 
         try {
             // Step 1a: Get all agents and collect their workflow URIs
@@ -150,9 +196,11 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                         }
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
-                    // Agent descriptor exists but resource doesn't — skip
+                    // Agent descriptor exists but resource doesn't — genuinely
+                    // unreferenced, so this does not make the scan incomplete.
                 } catch (Exception e) {
-                    log.debugf("Error reading Agent %s: %s", agentDescriptor.getResource(), e.getMessage());
+                    log.warnf("Error reading Agent %s: %s", agentDescriptor.getResource(), e.getMessage());
+                    failureReason = "could not read Agent " + agentDescriptor.getResource() + ": " + e.getMessage();
                 }
             }
 
@@ -167,17 +215,20 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     WorkflowConfiguration workflowConfig = workflowStore.read(resourceId.getId(), resourceId.getVersion());
                     collectExtensionUris(workflowConfig, referencedUris);
                 } catch (IResourceStore.ResourceNotFoundException e) {
-                    // Workflow descriptor exists but resource doesn't — skip
+                    // Workflow descriptor exists but resource doesn't — genuinely
+                    // unreferenced, so this does not make the scan incomplete.
                 } catch (Exception e) {
-                    log.debugf("Error reading workflow %s: %s", workflowDescriptor.getResource(), e.getMessage());
+                    log.warnf("Error reading workflow %s: %s", workflowDescriptor.getResource(), e.getMessage());
+                    failureReason = "could not read workflow " + workflowDescriptor.getResource() + ": " + e.getMessage();
                 }
             }
 
         } catch (Exception e) {
             log.errorf("Error building referenced URIs set: %s", e.getMessage());
+            failureReason = "could not enumerate Agent/workflow descriptors: " + e.getMessage();
         }
 
-        return referencedUris;
+        return new ReferenceScan(referencedUris, failureReason == null, failureReason);
     }
 
     /**
@@ -218,18 +269,35 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     /**
      * Read all descriptors for a given type, paging through all results.
+     *
+     * <p>
+     * {@code index} is a PAGE index, not a row offset —
+     * {@link ai.labs.eddi.datastore.DescriptorStore#readDescriptors} computes
+     * {@code skip = index * limit}. Advancing it by {@code batch.size()} asked for
+     * page 200 (skip = 40 000) on the second iteration, which always came back
+     * empty, so every type was silently truncated at {@value #BATCH_SIZE} rows.
+     * That truncation also hit {@link #buildReferencedUrisSet()}, where a missing
+     * reference makes a live resource look unreferenced.
+     * </p>
      */
     private List<DocumentDescriptor> readAllDescriptors(String type, boolean includeDeleted)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         List<DocumentDescriptor> all = new ArrayList<>();
-        int index = 0;
+        int pageIndex = 0;
         List<DocumentDescriptor> batch;
 
         do {
-            batch = documentDescriptorStore.readDescriptors(type, "", index, BATCH_SIZE, includeDeleted);
+            batch = documentDescriptorStore.readDescriptors(type, "", pageIndex, BATCH_SIZE, includeDeleted);
             all.addAll(batch);
-            index += batch.size();
-        } while (batch.size() == BATCH_SIZE);
+            pageIndex++;
+        } while (batch.size() == BATCH_SIZE && pageIndex < MAX_PAGES);
+
+        if (batch.size() == BATCH_SIZE) {
+            log.warnf("Descriptor scan for type %s hit the %d-page ceiling (%d rows); results are incomplete", type, MAX_PAGES,
+                    all.size());
+            throw new IResourceStore.ResourceStoreException(
+                    "Descriptor scan for type " + type + " exceeded " + (MAX_PAGES * BATCH_SIZE) + " rows");
+        }
 
         return all;
     }

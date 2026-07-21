@@ -5,6 +5,34 @@
 
 ---
 
+## 🛡️ Orphan admin — fix page-walk truncation and refuse to purge on an incomplete scan (2026-07-21)
+
+**Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)
+
+Two defects in `RestOrphanAdmin` that together could permanently delete live configuration.
+
+**1. The descriptor page walk never advanced past page 0.** `readAllDescriptors` advanced its cursor with `index += batch.size()`, but `DescriptorStore.readDescriptors` treats that argument as a *page* index (`skip = index * effectiveLimit`, `DescriptorStore.java:61`). The second iteration therefore asked for page 200 — `skip = 40 000` — which always came back empty, so every store type was silently truncated at 200 rows. Fixed to `pageIndex++`.
+
+The dangerous half of this was not the orphan list but `buildReferencedUrisSet`: the *referenced* set was truncated the same way, so on any deployment with more than 200 agents or 200 workflows, live in-use resources were classified as orphans — and `purgeOrphans` deletes with `permanent=true`, which is `deleteAllPermanently(id)` (current document *and* all history).
+
+A `MAX_PAGES` ceiling (100 pages / 20 000 rows per type) now bounds the walk, since the scan is a synchronous one-read-per-descriptor traversal on a blocking JAX-RS method. Hitting the ceiling raises `ResourceStoreException` rather than truncating silently — a truncated scan must not be used to decide what to delete.
+
+**2. The reference scan failed open.** Every read error while building the referenced-URI set was swallowed (two at `debug` level), and the partially-built set was returned as if complete. Because that set is what *protects* a resource, each swallowed error made **more** things look orphaned. One unreadable workflow could mark every rules/apicalls/output/llm/property/dictionary/parser resource in the database as an orphan.
+
+`scanReferencedUris()` now returns a `ReferenceScan` record carrying a `complete` flag, and `purgeOrphans` refuses with **409 Conflict** when the scan is incomplete, naming the cause. `scanOrphans` (read-only) still returns its best-effort report — only the irreversible path is gated. A `ResourceNotFoundException` is explicitly *not* treated as incompleteness: a descriptor whose resource is gone is a genuine orphan.
+
+### Design decisions
+
+- **Fail closed on the destructive path only.** Read-only callers tolerate a partial picture; a permanent delete may not.
+- **Ceiling raises rather than truncates.** Silent truncation is what made the original bug invisible.
+- **No change to `includeDeleted` semantics in this commit.** It is currently an equality filter (`Filters.eq("deleted", flag)`), so `scanOrphans` (defaults to `false`) and `purgeOrphans` (defaults to `true`) operate on *disjoint* sets. Fixing that is a real behaviour change to an irreversible endpoint and is deliberately left to its own commit — with the page-walk now complete, redefining the flag without also flipping the `true` default would turn the default `DELETE /administration/orphans` from "purge ≤200 already-soft-deleted rows" into "permanently wipe every unreferenced resource, unbounded".
+
+### Tests
+
+New `RestOrphanAdminSafetyTest` (7 tests): page index advances by 1 and a second page is actually requested; walk stops on the first partial page; an unreadable Agent aborts the purge with 409 and deletes nothing; a *missing* Agent resource does not abort; a complete scan purges normally; `scanOrphans` tolerates an incomplete reference set and never deletes; a workflow referenced by an Agent is never purged. Fixtures use 24-char hex ids because `RestUtilities.extractResourceId` returns a null id otherwise, which would make the assertions pass vacuously. All 27 pre-existing orphan tests unchanged and green.
+
+---
+
 ## 🔎 Auto-approve workflow — Copilot pagination review comment is a false positive (2026-07-20)
 
 **Repo:** EDDI (`chore/auto-approve-copilot`)
