@@ -1196,3 +1196,85 @@ a:hover { opacity: 0.85; }
   background: var(--chat-accent-soft);
   color: var(--chat-text);
 }
+
+/* ─── Paused: awaiting human approval ─────────── */
+
+.paused-card {
+  margin: 8px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--chat-qr-border, var(--chat-border));
+  border-left: 3px solid var(--chat-accent);
+  border-radius: 10px;
+  background: var(--chat-agent-bg);
+  color: var(--chat-agent-text);
+}
+
+.paused-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.paused-card__icon {
+  font-size: 1rem;
+}
+
+.paused-card__title {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.paused-card__text {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.paused-card__tools {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.paused-card__tool {
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--chat-accent-soft, rgba(127, 127, 127, 0.15));
+  font-family: var(--chat-font-mono, monospace);
+  font-size: 0.8rem;
+}
+
+.paused-card__deadline {
+  margin: 8px 0 0;
+  color: var(--chat-text-muted);
+  font-size: 0.82rem;
+}
+
+.paused-card__actions {
+  margin-top: 10px;
+}
+
+.paused-card__cancel {
+  padding: 5px 12px;
+  border: 1px solid var(--chat-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--chat-text-muted);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.paused-card__cancel:hover:not(:disabled),
+.paused-card__cancel:focus-visible:not(:disabled) {
+  border-color: var(--chat-accent);
+  color: var(--chat-text);
+}
+
+.paused-card__cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

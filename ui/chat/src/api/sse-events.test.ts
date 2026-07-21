@@ -8,6 +8,7 @@ import {
   parseDoneSnapshot,
   isSkippedTurn,
   isPausedState,
+  extractOutputTexts,
 } from "./sse-events";
 
 describe("parseErrorMessage", () => {
@@ -90,5 +91,45 @@ describe("isPausedState", () => {
     expect(isPausedState("READY")).toBe(false);
     expect(isPausedState("IN_PROGRESS")).toBe(false);
     expect(isPausedState(null)).toBe(false);
+  });
+});
+
+describe("extractOutputTexts", () => {
+  it("reads text from object-shaped output items", () => {
+    expect(extractOutputTexts([{ type: "text", text: "hello" }])).toEqual([
+      "hello",
+    ]);
+  });
+
+  it("reads bare string output items", () => {
+    // HITL writes the pending-approval placeholder and the reviewer-rejection
+    // message as raw Strings into conversationOutputs[].output[]. Code that
+    // only reads `.text` drops them silently — the user sees nothing at all.
+    expect(
+      extractOutputTexts(["Waiting for approval of send_email."]),
+    ).toEqual(["Waiting for approval of send_email."]);
+  });
+
+  it("handles a mix of both shapes in order", () => {
+    expect(
+      extractOutputTexts([{ type: "text", text: "a" }, "b", { text: "c" }]),
+    ).toEqual(["a", "b", "c"]);
+  });
+
+  it("skips inputField items — they drive the input, not the transcript", () => {
+    expect(
+      extractOutputTexts([
+        { type: "inputField", subType: "password" },
+        { type: "text", text: "after" },
+      ]),
+    ).toEqual(["after"]);
+  });
+
+  it("skips empty and blank entries", () => {
+    expect(extractOutputTexts(["", "   ", { text: "" }, null, undefined])).toEqual([]);
+  });
+
+  it("returns an empty list for a missing output array", () => {
+    expect(extractOutputTexts(undefined)).toEqual([]);
   });
 });

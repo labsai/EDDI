@@ -12,6 +12,7 @@ import {
 } from "react";
 import type { ChatMessage, QuickReply, ConversationState, ChatConfig, InputField } from "@/types";
 import type { AttachmentResult } from "@/api/attachments-api";
+import type { ApprovalStatus } from "@/api/hitl-api";
 
 /* ─── State ───────────────────────────────────── */
 
@@ -36,6 +37,16 @@ export interface ChatState {
    * them to the agent.
    */
   pendingAttachments: AttachmentResult[];
+  /**
+   * Set while the conversation is AWAITING_HUMAN. There is no push channel on
+   * the 1:1 surface, so this is refreshed by polling approval-status.
+   */
+  approvalStatus: ApprovalStatus | null;
+  /**
+   * Text put back into the composer after the server refused the turn
+   * (409 — never consumed). Null once the composer has picked it up.
+   */
+  restoreDraft: string | null;
 }
 
 const defaultConfig: ChatConfig = {
@@ -70,6 +81,8 @@ export const initialState: ChatState = {
   activeInputField: null,
   isSecretMode: false,
   pendingAttachments: [],
+  approvalStatus: null,
+  restoreDraft: null,
 };
 
 /* ─── Actions ─────────────────────────────────── */
@@ -94,7 +107,10 @@ export type ChatAction =
   | { type: "TOGGLE_SECRET_MODE" }
   | { type: "ADD_ATTACHMENT"; attachment: AttachmentResult }
   | { type: "REMOVE_ATTACHMENT"; storageRef: string }
-  | { type: "CLEAR_ATTACHMENTS" };
+  | { type: "CLEAR_ATTACHMENTS" }
+  | { type: "SET_APPROVAL_STATUS"; status: ApprovalStatus | null }
+  | { type: "WITHDRAW_LAST_USER_MESSAGE" }
+  | { type: "CLEAR_RESTORE_DRAFT" };
 
 /* ─── Reducer ─────────────────────────────────── */
 
@@ -149,6 +165,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         activeInputField: null,
         isSecretMode: false,
         pendingAttachments: [],
+        approvalStatus: null,
+        restoreDraft: null,
       };
 
     case "SET_UNDO_REDO":
@@ -196,6 +214,25 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "CLEAR_ATTACHMENTS":
       return { ...state, pendingAttachments: [] };
+
+    case "SET_APPROVAL_STATUS":
+      return { ...state, approvalStatus: action.status };
+
+    case "WITHDRAW_LAST_USER_MESSAGE": {
+      const msgs = [...state.messages];
+      // Drop the empty agent placeholder this turn created, if any.
+      const last = msgs[msgs.length - 1];
+      if (last?.role === "agent" && last.content === "") msgs.pop();
+
+      const lastUserIndex = msgs.map((m) => m.role).lastIndexOf("user");
+      if (lastUserIndex === -1) return { ...state, messages: msgs };
+
+      const [withdrawn] = msgs.splice(lastUserIndex, 1);
+      return { ...state, messages: msgs, restoreDraft: withdrawn.content };
+    }
+
+    case "CLEAR_RESTORE_DRAFT":
+      return { ...state, restoreDraft: null };
 
     default:
       return state;

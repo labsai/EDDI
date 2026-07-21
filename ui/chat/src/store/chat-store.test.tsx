@@ -257,3 +257,88 @@ describe("pending attachments", () => {
     expect(initialState.pendingAttachments).toEqual([]);
   });
 });
+
+/* ─── HITL approval status ──────────────────── */
+
+describe("approval status", () => {
+  const status = {
+    conversationId: "c1",
+    state: "AWAITING_HUMAN" as const,
+    pausedAt: "2026-07-21T10:00:00Z",
+    pauseReason: "needs approval",
+    timeoutPolicy: "AUTO_REJECT",
+    approvalTimeout: "PT15M",
+    pauseDetails: null,
+  };
+
+  it("starts with no approval status", () => {
+    expect(initialState.approvalStatus).toBeNull();
+  });
+
+  it("stores the approval status while paused", () => {
+    const next = chatReducer(initialState, { type: "SET_APPROVAL_STATUS", status });
+
+    expect(next.approvalStatus).toEqual(status);
+  });
+
+  it("clears the approval status once the pause resolves", () => {
+    const pausedState = { ...initialState, approvalStatus: status };
+
+    const next = chatReducer(pausedState, { type: "SET_APPROVAL_STATUS", status: null });
+
+    expect(next.approvalStatus).toBeNull();
+  });
+
+  it("drops the approval status when the conversation is reset", () => {
+    const pausedState = { ...initialState, approvalStatus: status };
+
+    expect(chatReducer(pausedState, { type: "CLEAR_MESSAGES" }).approvalStatus).toBeNull();
+  });
+});
+
+/* ─── Rejected turn: restore the user's input ─── */
+
+describe("withdrawing a turn the server refused", () => {
+  it("removes the optimistic user bubble and restores the text as a draft", () => {
+    // A 409 means the message was NEVER consumed server-side. Leaving it in
+    // the transcript implies it was sent; discarding it loses what was typed.
+    const state = {
+      ...initialState,
+      messages: [
+        { id: "u1", role: "user" as const, content: "hello there", timestamp: 1 },
+      ],
+    };
+
+    const next = chatReducer(state, { type: "WITHDRAW_LAST_USER_MESSAGE" });
+
+    expect(next.messages).toHaveLength(0);
+    expect(next.restoreDraft).toBe("hello there");
+  });
+
+  it("also withdraws the empty agent placeholder created for the turn", () => {
+    const state = {
+      ...initialState,
+      messages: [
+        { id: "u1", role: "user" as const, content: "hi", timestamp: 1 },
+        { id: "a1", role: "agent" as const, content: "", timestamp: 2, isStreaming: true },
+      ],
+    };
+
+    const next = chatReducer(state, { type: "WITHDRAW_LAST_USER_MESSAGE" });
+
+    expect(next.messages).toHaveLength(0);
+    expect(next.restoreDraft).toBe("hi");
+  });
+
+  it("does nothing when there is no user message to withdraw", () => {
+    const next = chatReducer(initialState, { type: "WITHDRAW_LAST_USER_MESSAGE" });
+
+    expect(next.restoreDraft).toBeNull();
+  });
+
+  it("clears the draft once the composer has consumed it", () => {
+    const state = { ...initialState, restoreDraft: "hello" };
+
+    expect(chatReducer(state, { type: "CLEAR_RESTORE_DRAFT" }).restoreDraft).toBeNull();
+  });
+});

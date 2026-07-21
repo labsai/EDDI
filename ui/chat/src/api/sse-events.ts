@@ -74,6 +74,37 @@ export function isPausedState(state: ConversationState | null): boolean {
   return state === "AWAITING_HUMAN";
 }
 
+/**
+ * Pull the renderable text out of a conversation output's `output` array.
+ *
+ * Entries are NOT uniformly objects: HITL writes its pending-approval
+ * placeholder and reviewer-rejection message as bare Java Strings, which
+ * serialize to raw JSON strings. Reading only `.text` dropped them silently,
+ * so a paused or rejected turn rendered as nothing at all.
+ *
+ * `inputField` items are excluded — they configure the composer rather than
+ * appearing in the transcript.
+ */
+export function extractOutputTexts(output: unknown): string[] {
+  if (!Array.isArray(output)) return [];
+
+  const texts: string[] = [];
+  for (const item of output) {
+    if (typeof item === "string") {
+      if (item.trim()) texts.push(item);
+      continue;
+    }
+    if (item && typeof item === "object") {
+      const record = item as { type?: string; text?: string };
+      if (record.type === "inputField") continue;
+      if (typeof record.text === "string" && record.text.trim()) {
+        texts.push(record.text);
+      }
+    }
+  }
+  return texts;
+}
+
 /** User-facing copy explaining why a turn was dropped. */
 export function skippedTurnMessage(state: ConversationState | undefined): string {
   switch (state) {

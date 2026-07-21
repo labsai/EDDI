@@ -3,7 +3,7 @@
    With 🔒 secret mode toggle for client-initiated secret input.
    ────────────────────────────────────────────── */
 
-import { useState, useRef, useCallback, type KeyboardEvent } from "react";
+import { useState, useRef, useCallback, useEffect, type KeyboardEvent } from "react";
 import { useChatState, useChatDispatch } from "@/store/chat-store";
 import { uploadAttachment, MAX_ATTACHMENTS_PER_TURN } from "@/api/attachments-api";
 import { ApiError } from "@/api/http";
@@ -31,11 +31,21 @@ interface ChatInputProps {
 }
 
 export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) {
-  const { isProcessing, config, isSecretMode, pendingAttachments } = useChatState();
+  const { isProcessing, config, isSecretMode, pendingAttachments, restoreDraft } =
+    useChatState();
   const dispatch = useChatDispatch();
   const [value, setValue] = useState("");
   const [secretVisible, setSecretVisible] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // A turn the server refused (409) was never consumed — put the text back so
+  // the user does not have to retype it.
+  useEffect(() => {
+    if (restoreDraft === null) return;
+    setValue(restoreDraft);
+    dispatch({ type: "CLEAR_RESTORE_DRAFT" });
+    textareaRef.current?.focus();
+  }, [restoreDraft, dispatch]);
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();

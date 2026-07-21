@@ -34,11 +34,17 @@ import {
   demoGetQuickReplies,
 } from "@/api/demo-api";
 import { buildAttachmentContext } from "@/api/attachments-api";
+import { cancelConversation, type ApprovalStatus } from "@/api/hitl-api";
+import { useHitlPolling } from "@/hooks/useHitlPolling";
+import { PausedCard } from "./PausedCard";
+import { ApiError } from "@/api/http";
 import {
   parseDoneSnapshot,
   parseErrorMessage,
   isSkippedTurn,
   skippedTurnMessage,
+  isPausedState,
+  extractOutputTexts,
 } from "@/api/sse-events";
 import type { ChatMessage, SSEEvent, ChatConfig, OutputItem } from "@/types";
 
@@ -284,30 +290,35 @@ export function ChatWidget() {
       if (snapshot.conversationOutputs?.length) {
         for (const output of snapshot.conversationOutputs) {
           // Extract agent replies and detect input field requests
-          const agentReplies: OutputItem[] = output.output ?? [];
+          const agentReplies: unknown[] = output.output ?? [];
+
+          // inputField items configure the composer rather than the transcript.
           for (const reply of agentReplies) {
-            if (reply.type === "inputField") {
-              // Backend is requesting a specific input field (e.g. password)
+            if (
+              reply &&
+              typeof reply === "object" &&
+              (reply as OutputItem).type === "inputField"
+            ) {
+              const field = reply as OutputItem;
               dispatch({
                 type: "SET_INPUT_FIELD",
                 field: {
-                  subType: reply.subType || "password",
-                  placeholder: reply.placeholder,
-                  label: reply.label,
-                  defaultValue: reply.defaultValue,
-                },
-              });
-            } else if (reply.text) {
-              dispatch({
-                type: "ADD_MESSAGE",
-                message: {
-                  id: `agent-${Date.now()}-${Math.random()}`,
-                  role: "agent",
-                  content: reply.text,
-                  timestamp: Date.now(),
+                  subType: field.subType || "password",
+                  placeholder: field.placeholder,
+                  label: field.label,
+                  defaultValue: field.defaultValue,
                 },
               });
             }
+          }
+
+          // Handles bare-string entries too — HITL's pending-approval
+          // placeholder and reviewer-rejection message arrive as raw strings.
+          for (const text of extractOutputTexts(agentReplies)) {
+            dispatch({
+              type: "ADD_MESSAGE",
+              message: makeAgentMessage(text),
+            });
           }
         }
 
@@ -561,9 +572,62 @@ export function ChatWidget() {
           dispatch({ type: "SET_PROCESSING", value: false });
         }
       } catch (err) {
-        console.error("Failed to send message:", err);
         dispatch({ type: "SET_PROCESSING", value: false });
         dispatch({ type: "SET_THINKING", value: false });
+
+        if (err instanceof ApiError && err.status === 409) {
+          // The turn was refused and NEVER consumed — most often because the
+          // conversation is awaiting a human decision. Withdraw the optimistic
+          // bubble, hand the text back to the composer, and say why.
+          dispatch({ type: "WITHDRAW_LAST_USER_MESSAGE" });
+          dispatch({
+            type: "ADD_MESSAGE",
+            message: makeAgentMessage(
+              err.body?.trim()
+                ? `⚠️ ${err.body.trim()}`
+                : "⚠️ Your message was not sent — this conversation is waiting on a decision.",
+            ),
+          });
+          // Re-read so the paused state (and its card) appears immediately.
+          if (environment && agentId && state.conversationId) {
+            try {
+              const snap = await readConversation(
+                environment,
+                agentId,
+                state.conversationId,
+                true,
+              );
+              if (snap.conversationState) {
+                dispatch({
+                  type: "SET_CONVERSATION_STATE",
+                  state: snap.conversationState,
+                });
+              }
+            } catch {
+              // best effort
+            }
+          }
+          return;
+        }
+
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+          dispatch({ type: "WITHDRAW_LAST_USER_MESSAGE" });
+          dispatch({
+            type: "ADD_MESSAGE",
+            message: makeAgentMessage(
+              "⚠️ You are not allowed to continue this conversation. It may belong to a different user.",
+            ),
+          });
+          return;
+        }
+
+        console.error("Failed to send message:", err);
+        dispatch({
+          type: "ADD_MESSAGE",
+          message: makeAgentMessage(
+            "⚠️ Your message could not be sent. Please try again.",
+          ),
+        });
       }
     },
     [
@@ -711,6 +775,63 @@ export function ChatWidget() {
     }
   }, [dispatch, isDemo, isManagedAgent, intent, environment, agentId, userId, processSnapshot]);
 
+  /* ─── HITL: watch a paused conversation ─────── */
+  const isPaused = isPausedState(state.conversationState);
+
+  const handleApprovalStatus = useCallback(
+    (status: ApprovalStatus | null) => {
+      dispatch({ type: "SET_APPROVAL_STATUS", status });
+    },
+    [dispatch],
+  );
+
+  const handlePauseResolved = useCallback(async () => {
+    // The pause ended — by a reviewer, or automatically by timeout policy.
+    // Nothing was pushed to us, so re-read to pick up the resumed turn.
+    if (!environment || !agentId || !state.conversationId) return;
+    try {
+      const snapshot = await readConversation(
+        environment,
+        agentId,
+        state.conversationId,
+        true,
+      );
+      processSnapshot(snapshot);
+    } catch (err) {
+      console.error("Failed to refresh after approval:", err);
+    }
+  }, [environment, agentId, state.conversationId, processSnapshot]);
+
+  useHitlPolling({
+    conversationId: state.conversationId,
+    paused: isPaused && !isDemo,
+    onStatus: handleApprovalStatus,
+    onResolved: handlePauseResolved,
+  });
+
+  const handleCancel = useCallback(async () => {
+    if (!state.conversationId) return;
+    try {
+      dispatch({ type: "SET_PROCESSING", value: true });
+      await cancelConversation(state.conversationId);
+      dispatch({ type: "SET_APPROVAL_STATUS", status: null });
+      dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeAgentMessage("This request was cancelled."),
+      });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Nothing to cancel — it resolved between render and click.
+        dispatch({ type: "SET_APPROVAL_STATUS", status: null });
+      } else {
+        console.error("Cancel failed:", err);
+      }
+    } finally {
+      dispatch({ type: "SET_PROCESSING", value: false });
+    }
+  }, [dispatch, state.conversationId]);
+
   /* ─── Auto-scroll ───────────────────────────── */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -742,7 +863,7 @@ export function ChatWidget() {
         ref={messagesContainerRef}
         onScroll={handleScroll}
       >
-        {state.messages.length === 0 && !state.isProcessing ? (
+        {state.messages.length === 0 && !state.isProcessing && !isPaused ? (
           <div className="chat-empty">
             <div className="chat-empty__icon">💬</div>
             <p className="chat-empty__text">
@@ -755,8 +876,18 @@ export function ChatWidget() {
               <MessageBubble key={msg.id} message={msg} />
             ))}
 
-            {state.isThinking && <ThinkingIndicator />}
-            {state.isProcessing && !state.isThinking && <TypingIndicator />}
+            {isPaused && state.approvalStatus ? (
+              <PausedCard
+                status={state.approvalStatus}
+                onCancel={handleCancel}
+                cancelDisabled={state.isProcessing}
+              />
+            ) : (
+              <>
+                {state.isThinking && <ThinkingIndicator />}
+                {state.isProcessing && !state.isThinking && <TypingIndicator />}
+              </>
+            )}
 
             <div ref={messagesEndRef} />
           </>
@@ -767,7 +898,7 @@ export function ChatWidget() {
         <ScrollToBottom visible={showScrollBtn} onClick={scrollToBottom} />
       </div>
 
-      {!isEnded &&
+      {!isEnded && !isPaused &&
         state.config.enableQuickReplies !== false && (
           <QuickReplies
             replies={state.quickReplies}
@@ -841,7 +972,7 @@ export function ChatWidget() {
             ) : (
               <ChatInput
                 onSend={handleSend}
-                disabled={!state.conversationId && !isManagedAgent}
+                disabled={(!state.conversationId && !isManagedAgent) || isPaused}
                 conversationId={state.conversationId}
               />
             )}
