@@ -28,9 +28,10 @@ import { loader } from "@monaco-editor/react";
 // Monaco needs web workers for language intelligence (validation,
 // autocompletion, formatting).  Without this, the JSON editor loses
 // schema validation and smart features.  Vite handles the worker
-// bundling via the `?worker` import syntax.
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
+// bundling via the `?worker` import syntax.  Monaco 0.56+'s exports
+// map routes `./*` → `./esm/vs/*.js`, so we drop the `esm/vs/` prefix.
+import editorWorker from "monaco-editor/editor/editor.worker?worker";
+import jsonWorker from "monaco-editor/language/json/json.worker?worker";
 
 self.MonacoEnvironment = {
   getWorker(_: string, label: string) {
