@@ -256,9 +256,14 @@ export async function endConversation(
  */
 export async function rerunLastStep(
   conversationId: string,
+  language = "en",
 ): Promise<ConversationSnapshot | null> {
+  // `language` is REQUIRED: the backend declares it without @DefaultValue and
+  // calls checkNotEmpty(language) before any other work, so omitting it is an
+  // unconditional 400 — the retry could never have worked.
+  const params = new URLSearchParams({ language });
   return requestJson<ConversationSnapshot>(
-    `/agents/${encodeSegment(conversationId)}/rerun`,
+    `/agents/${encodeSegment(conversationId)}/rerun?${params}`,
     { method: "POST" },
     "Failed to retry",
   );

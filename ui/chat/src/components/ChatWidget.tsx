@@ -166,6 +166,18 @@ export function ChatWidget() {
   const initializedRef = useRef(false);
   /** Controller for the in-flight SSE read, so it can be stopped on demand. */
   const abortRef = useRef<AbortController | null>(null);
+  /**
+   * Live conversation state. handleSend must read this at CLICK time; taking it
+   * from the callback closure made it stale by however long the memo lived, so
+   * skipped-turn detection compared against an out-of-date state.
+   */
+  const conversationStateRef = useRef(state.conversationState);
+  conversationStateRef.current = state.conversationState;
+  /** The raw input of the in-flight turn, for restoring it if the server refuses. */
+  const pendingTurnRef = useRef<{
+    text: string;
+    attachments: typeof state.pendingAttachments;
+  }>({ text: "", attachments: [] });
 
   /* ─── Apply query param config + colors on mount ── */
   useEffect(() => {
@@ -317,6 +329,12 @@ export function ChatWidget() {
   const processSnapshot = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (snapshot: any) => {
+      // Managed-agent mode never calls startConversation, so without this the
+      // widget has no conversationId — disabling HITL polling, cancel, retry
+      // and attachments for the entire managed route.
+      if (snapshot.conversationId) {
+        dispatch({ type: "SET_CONVERSATION_ID", id: snapshot.conversationId });
+      }
       if (snapshot.conversationState) {
         dispatch({
           type: "SET_CONVERSATION_STATE",
@@ -491,6 +509,10 @@ export function ChatWidget() {
         content: [attachmentLine, displayed].filter(Boolean).join("\n\n"),
         timestamp: Date.now(),
       };
+      // Remember the REAL input: the bubble content is display text (masked
+      // secrets, "📎 name" lines) and must never be what we hand back.
+      pendingTurnRef.current = { text, attachments };
+
       dispatch({ type: "ADD_MESSAGE", message: userMsg });
       dispatch({ type: "CLEAR_ATTACHMENTS" });
       dispatch({ type: "SET_QUICK_REPLIES", replies: [] });
@@ -512,7 +534,7 @@ export function ChatWidget() {
           });
 
           const events = demoSendMessageStreaming(text);
-          const demoTurn = newTurn(state.conversationState);
+          const demoTurn = newTurn(conversationStateRef.current);
           let demoDone = false;
           for await (const event of events) {
             if (handleSSEEvent(event, demoTurn)) demoDone = true;
@@ -552,7 +574,7 @@ export function ChatWidget() {
           // so reader.read() would hang forever without this.
           const abort = new AbortController();
           abortRef.current = abort;
-          const turn = newTurn(state.conversationState);
+          const turn = newTurn(conversationStateRef.current);
           let streamDone = false;
 
           const events = sendMessageStreaming(
@@ -625,7 +647,11 @@ export function ChatWidget() {
           // The turn was refused and NEVER consumed — most often because the
           // conversation is awaiting a human decision. Withdraw the optimistic
           // bubble, hand the text back to the composer, and say why.
-          dispatch({ type: "WITHDRAW_LAST_USER_MESSAGE" });
+          dispatch({
+            type: "WITHDRAW_LAST_USER_MESSAGE",
+            draft: pendingTurnRef.current.text,
+            attachments: pendingTurnRef.current.attachments,
+          });
           dispatch({
             type: "ADD_MESSAGE",
             message: makeAgentMessage(
@@ -657,7 +683,11 @@ export function ChatWidget() {
         }
 
         if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-          dispatch({ type: "WITHDRAW_LAST_USER_MESSAGE" });
+          dispatch({
+            type: "WITHDRAW_LAST_USER_MESSAGE",
+            draft: pendingTurnRef.current.text,
+            attachments: pendingTurnRef.current.attachments,
+          });
           dispatch({
             type: "ADD_MESSAGE",
             message: makeAgentMessage(
@@ -848,20 +878,24 @@ export function ChatWidget() {
     [dispatch],
   );
 
-  const handlePauseResolved = useCallback(async () => {
+  const handlePauseResolved = useCallback(async (): Promise<boolean> => {
     // The pause ended — by a reviewer, or automatically by timeout policy.
     // Nothing was pushed to us, so re-read to pick up the resumed turn.
-    if (!environment || !agentId || !state.conversationId) return;
+    // Returning false keeps the watch alive: a dropped refresh must not strand
+    // the widget in a paused state it can never leave.
+    if (!state.conversationId) return false;
     try {
       const snapshot = await readConversation(
-        environment,
-        agentId,
+        environment ?? "",
+        agentId ?? "",
         state.conversationId,
         true,
       );
       processSnapshot(snapshot);
+      return true;
     } catch (err) {
       console.error("Failed to refresh after approval:", err);
+      return false;
     }
   }, [environment, agentId, state.conversationId, processSnapshot]);
 

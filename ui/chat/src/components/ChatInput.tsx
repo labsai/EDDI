@@ -175,7 +175,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         type="button"
         className="chat-input__attach"
         onClick={() => fileInputRef.current?.click()}
-        disabled={!conversationId || isUploading}
+        disabled={!conversationId || isUploading || isProcessing || disabled}
         title="Attach file"
         data-testid="chat-attach-btn"
         aria-label="Attach file"

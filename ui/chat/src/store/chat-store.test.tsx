@@ -409,3 +409,105 @@ describe("RECONCILE_LAST_AGENT", () => {
     );
   });
 });
+
+/* ─── Streaming bubble is targeted by identity, not position ─── */
+
+describe("streaming bubble targeting", () => {
+  const withNotice = () => ({
+    ...initialState,
+    messages: [
+      { id: "a1", role: "agent" as const, content: "part", timestamp: 1, isStreaming: true },
+      { id: "n1", role: "agent" as const, content: "⚠️ upload too large", timestamp: 2 },
+    ],
+  });
+
+  it("appends tokens to the streaming bubble, not to a notice that arrived after it", () => {
+    // An attachment error dispatched mid-stream used to land at the end of the
+    // list, so every subsequent token was appended to the ERROR message.
+    const next = chatReducer(withNotice(), { type: "APPEND_TO_LAST_AGENT", token: "-more" });
+
+    expect(next.messages[0].content).toBe("part-more");
+    expect(next.messages[1].content).toBe("⚠️ upload too large");
+  });
+
+  it("finishes the streaming bubble, not the notice", () => {
+    const next = chatReducer(withNotice(), { type: "FINISH_STREAMING" });
+
+    expect(next.messages[0].isStreaming).toBe(false);
+    expect(next.messages[1].isStreaming).toBeUndefined();
+  });
+
+  it("reconciles the streaming bubble, not the notice", () => {
+    const next = chatReducer(withNotice(), {
+      type: "RECONCILE_LAST_AGENT",
+      content: "authoritative",
+    });
+
+    expect(next.messages[0].content).toBe("authoritative");
+    expect(next.messages[1].content).toBe("⚠️ upload too large");
+  });
+
+  it("removes the empty streaming bubble even when a notice follows it", () => {
+    const state = {
+      ...initialState,
+      messages: [
+        { id: "a1", role: "agent" as const, content: "", timestamp: 1, isStreaming: true },
+        { id: "n1", role: "agent" as const, content: "⚠️ note", timestamp: 2 },
+      ],
+    };
+
+    const next = chatReducer(state, { type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+
+    expect(next.messages.map((m) => m.id)).toEqual(["n1"]);
+  });
+});
+
+/* ─── Withdrawing a turn restores the REAL input ─── */
+
+describe("withdrawing a turn restores the true composer input", () => {
+  const att = { storageRef: "r1", fileName: "a.pdf", mimeType: "application/pdf", sizeBytes: 3 };
+
+  it("restores the raw text, not the rendered bubble content", () => {
+    // The bubble content may be a mask ("●●●●●●●●") or carry "📎 file" lines.
+    // Restoring it would destroy the secret / corrupt the retry text.
+    const state = {
+      ...initialState,
+      messages: [{ id: "u1", role: "user" as const, content: "📎 a.pdf\n\n●●●●●●●●", timestamp: 1 }],
+    };
+
+    const next = chatReducer(state, {
+      type: "WITHDRAW_LAST_USER_MESSAGE",
+      draft: "hunter2",
+      attachments: [att],
+    });
+
+    expect(next.restoreDraft).toBe("hunter2");
+  });
+
+  it("puts the staged attachments back so they are not silently lost", () => {
+    const state = {
+      ...initialState,
+      messages: [{ id: "u1", role: "user" as const, content: "x", timestamp: 1 }],
+      pendingAttachments: [],
+    };
+
+    const next = chatReducer(state, {
+      type: "WITHDRAW_LAST_USER_MESSAGE",
+      draft: "x",
+      attachments: [att],
+    });
+
+    expect(next.pendingAttachments).toEqual([att]);
+  });
+
+  it("falls back to the bubble content when no explicit draft is supplied", () => {
+    const state = {
+      ...initialState,
+      messages: [{ id: "u1", role: "user" as const, content: "plain text", timestamp: 1 }],
+    };
+
+    const next = chatReducer(state, { type: "WITHDRAW_LAST_USER_MESSAGE" });
+
+    expect(next.restoreDraft).toBe("plain text");
+  });
+});

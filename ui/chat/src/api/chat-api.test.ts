@@ -126,6 +126,9 @@ describe("rerunLastStep", () => {
 
     expect(calls[0].url).toContain("/agents/conv-1/rerun");
     expect(calls[0].init?.method).toBe("POST");
+    // `language` has no @DefaultValue server-side and is checked before any
+    // other work, so omitting it is an unconditional 400.
+    expect(calls[0].url).toContain("language=en");
   });
 
   it("tolerates an empty 200 body", async () => {

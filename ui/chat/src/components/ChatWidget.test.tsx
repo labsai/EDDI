@@ -344,3 +344,44 @@ describe("ChatWidget — recovering from a stuck conversation", () => {
     expect(screen.queryByTestId("recovery-banner")).toBeNull();
   });
 });
+
+describe("ChatWidget — managed-agent route", () => {
+  function renderManaged() {
+    return render(
+      <MemoryRouter initialEntries={["/chat/managed/support/user-7"]}>
+        <ChatProvider>
+          <Routes>
+            <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
+          </Routes>
+        </ChatProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("adopts the conversationId the snapshot carries", async () => {
+    // Managed mode never calls startConversation, so without this the widget
+    // has no conversationId — which disables HITL polling, cancel, retry and
+    // attachments for the whole managed route.
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes("/agentstore/")) return new Response("{}", { status: 200 });
+      return new Response(
+        JSON.stringify({
+          conversationId: "managed-conv-9",
+          conversationState: "READY",
+          conversationSteps: [{ output: "Hi from managed" }],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderManaged();
+
+    await screen.findByText("Hi from managed");
+    // The action bar renders only once a conversationId is known.
+    await waitFor(() => {
+      expect(screen.getByTestId("restart-btn")).toBeInTheDocument();
+    });
+    // And the attach button is no longer inert.
+    expect(screen.getByTestId("chat-attach-btn")).not.toBeDisabled();
+  });
+});

@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────
-   useHitlPolling — watch a paused conversation until it resolves
+   useHitlPolling — watch a paused conversation until it settles
 
    The 1:1 REST/SSE surface has no push channel for HITL: once a turn pauses,
    nothing tells the client that a reviewer decided, or that the timeout policy
@@ -7,7 +7,7 @@
    ────────────────────────────────────────────── */
 
 import { useEffect, useRef } from "react";
-import { getApprovalStatus, nextPollDelay } from "@/api/hitl-api";
+import { getApprovalStatus, isSettledState, nextPollDelay } from "@/api/hitl-api";
 import type { ApprovalStatus } from "@/api/hitl-api";
 
 interface UseHitlPollingArgs {
@@ -15,8 +15,12 @@ interface UseHitlPollingArgs {
   /** Poll only while this is true. */
   paused: boolean;
   onStatus: (status: ApprovalStatus | null) => void;
-  /** Called once when the conversation leaves AWAITING_HUMAN. */
-  onResolved: () => void;
+  /**
+   * Called when the conversation reaches a settled state. Returns true if the
+   * caller successfully picked up the resumed turn; false means "try again" and
+   * the watch keeps running.
+   */
+  onResolved: () => Promise<boolean>;
 }
 
 export function useHitlPolling({
@@ -44,13 +48,23 @@ export function useHitlPolling({
         const status = await getApprovalStatus(conversationId);
         if (cancelled) return;
 
-        if (status && status.state !== "AWAITING_HUMAN") {
-          // Resolved — by a reviewer, or automatically by timeout policy.
-          onStatusRef.current(null);
-          onResolvedRef.current();
-          return;
+        // IN_PROGRESS is NOT resolution: resume() flips AWAITING_HUMAN ->
+        // IN_PROGRESS before running the approved turn, so treating it as
+        // resolved abandons the watch while the answer is still being produced.
+        if (isSettledState(status?.state)) {
+          const handled = await onResolvedRef.current();
+          if (cancelled) return;
+          if (handled) {
+            onStatusRef.current(null);
+            return;
+          }
+          // The refresh failed. Keep watching rather than stranding the widget
+          // in a paused state it can never leave.
+        } else {
+          // Only surface a status that still describes a pause; a mid-resume
+          // IN_PROGRESS would otherwise blank the card for the whole turn.
+          onStatusRef.current(status?.state === "AWAITING_HUMAN" ? status : null);
         }
-        onStatusRef.current(status);
       } catch {
         // Transient failures must not end the watch; the pause outlives them.
         // Backing off below keeps a persistent outage from spinning.

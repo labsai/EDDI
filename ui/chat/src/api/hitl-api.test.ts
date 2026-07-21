@@ -10,6 +10,7 @@ import {
   pauseHeadline,
   getApprovalStatus,
   nextPollDelay,
+  isSettledState,
   cancelConversation,
   type ApprovalStatus,
 } from "./hitl-api";
@@ -175,5 +176,29 @@ describe("nextPollDelay", () => {
 
   it("never returns a non-positive delay", () => {
     expect(nextPollDelay(-1)).toBeGreaterThan(0);
+  });
+});
+
+describe("isSettledState", () => {
+  it.each(["READY", "ENDED", "ERROR", "EXECUTION_INTERRUPTED"] as const)(
+    "treats %s as settled",
+    (s) => {
+      expect(isSettledState(s)).toBe(true);
+    },
+  );
+
+  it("does NOT treat IN_PROGRESS as settled", () => {
+    // resume() CASes AWAITING_HUMAN -> IN_PROGRESS *before* running the
+    // resumed turn, so IN_PROGRESS means "the approved turn is still being
+    // produced". Declaring the pause over here loses the answer.
+    expect(isSettledState("IN_PROGRESS")).toBe(false);
+  });
+
+  it("does NOT treat AWAITING_HUMAN as settled", () => {
+    expect(isSettledState("AWAITING_HUMAN")).toBe(false);
+  });
+
+  it("treats an unknown/absent state as unsettled", () => {
+    expect(isSettledState(null)).toBe(false);
   });
 });

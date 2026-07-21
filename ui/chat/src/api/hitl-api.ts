@@ -112,6 +112,27 @@ export function pauseHeadline(status: ApprovalStatus): string {
     : "A reviewer must approve this step before I can continue.";
 }
 
+/**
+ * States in which the backend has finished with the turn.
+ *
+ * Deliberately EXCLUDES IN_PROGRESS: `resumeConversation` compare-and-sets
+ * AWAITING_HUMAN → IN_PROGRESS *before* executing the resumed turn, and only
+ * persists the final state on completion. A client that treats "anything but
+ * AWAITING_HUMAN" as resolved therefore stops watching while the approved
+ * answer is still being generated, and never sees it.
+ */
+const SETTLED_STATES: ReadonlyArray<ConversationState> = [
+  "READY",
+  "ENDED",
+  "ERROR",
+  "EXECUTION_INTERRUPTED",
+];
+
+/** True once the backend has finished with the turn. */
+export function isSettledState(state: ConversationState | null | undefined): boolean {
+  return !!state && SETTLED_STATES.includes(state);
+}
+
 const POLL_BASE_MS = 3_000;
 const POLL_MAX_MS = 30_000;
 

@@ -109,9 +109,32 @@ export type ChatAction =
   | { type: "REMOVE_ATTACHMENT"; storageRef: string }
   | { type: "CLEAR_ATTACHMENTS" }
   | { type: "SET_APPROVAL_STATUS"; status: ApprovalStatus | null }
-  | { type: "WITHDRAW_LAST_USER_MESSAGE" }
+  | {
+      type: "WITHDRAW_LAST_USER_MESSAGE";
+      /** The raw composer text. The bubble may be masked or carry 📎 lines. */
+      draft?: string;
+      /** Attachments staged for the refused turn, to put back. */
+      attachments?: AttachmentResult[];
+    }
   | { type: "CLEAR_RESTORE_DRAFT" }
   | { type: "RECONCILE_LAST_AGENT"; content: string };
+
+/**
+ * Index of the agent bubble currently being streamed into.
+ *
+ * Position is not a safe proxy: a local notice (an upload failure, a cap
+ * warning) can be appended while a turn is in flight, after which "the last
+ * message" is the notice and every subsequent token would land in it.
+ * Falls back to a trailing agent message so a finished bubble is still
+ * reconcilable.
+ */
+function streamingIndex(messages: ChatMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "agent" && messages[i].isStreaming) return i;
+  }
+  const last = messages.length - 1;
+  return last >= 0 && messages[last].role === "agent" ? last : -1;
+}
 
 /* ─── Reducer ─────────────────────────────────── */
 
@@ -127,20 +150,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, messages: [...state.messages, action.message] };
 
     case "APPEND_TO_LAST_AGENT": {
+      const idx = streamingIndex(state.messages);
+      if (idx === -1) return state;
       const msgs = [...state.messages];
-      const last = msgs[msgs.length - 1];
-      if (last?.role === "agent") {
-        msgs[msgs.length - 1] = { ...last, content: last.content + action.token };
-      }
+      msgs[idx] = { ...msgs[idx], content: msgs[idx].content + action.token };
       return { ...state, messages: msgs };
     }
 
     case "FINISH_STREAMING": {
+      const idx = streamingIndex(state.messages);
       const msgs = [...state.messages];
-      const last = msgs[msgs.length - 1];
-      if (last?.role === "agent") {
-        msgs[msgs.length - 1] = { ...last, isStreaming: false };
-      }
+      if (idx !== -1) msgs[idx] = { ...msgs[idx], isStreaming: false };
       return { ...state, messages: msgs, isProcessing: false, isThinking: false };
     }
 
@@ -176,9 +196,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "REMOVE_EMPTY_STREAMING_MESSAGE": {
       // A turn dropped server-side leaves a placeholder agent bubble that
       // never received tokens; left in place it renders as "No response".
-      const last = state.messages[state.messages.length - 1];
-      if (last?.role !== "agent" || last.content !== "") return state;
-      return { ...state, messages: state.messages.slice(0, -1) };
+      const idx = streamingIndex(state.messages);
+      if (idx === -1 || state.messages[idx].content !== "") return state;
+      return { ...state, messages: state.messages.filter((_, i) => i !== idx) };
     }
 
     case "REPLACE_MESSAGES":
@@ -220,16 +240,29 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, approvalStatus: action.status };
 
     case "WITHDRAW_LAST_USER_MESSAGE": {
-      const msgs = [...state.messages];
+      let msgs = [...state.messages];
       // Drop the empty agent placeholder this turn created, if any.
-      const last = msgs[msgs.length - 1];
-      if (last?.role === "agent" && last.content === "") msgs.pop();
+      const placeholder = streamingIndex(msgs);
+      if (placeholder !== -1 && msgs[placeholder].content === "") {
+        msgs = msgs.filter((_, i) => i !== placeholder);
+      }
 
       const lastUserIndex = msgs.map((m) => m.role).lastIndexOf("user");
-      if (lastUserIndex === -1) return { ...state, messages: msgs };
+      const restored = { ...state, messages: msgs };
+      if (action.attachments?.length) {
+        restored.pendingAttachments = [
+          ...state.pendingAttachments,
+          ...action.attachments,
+        ];
+      }
+      if (lastUserIndex === -1) return restored;
 
       const [withdrawn] = msgs.splice(lastUserIndex, 1);
-      return { ...state, messages: msgs, restoreDraft: withdrawn.content };
+      // Prefer the caller's raw text: the bubble content is DISPLAY text and
+      // may be the secret mask or prefixed with attachment names.
+      restored.messages = msgs;
+      restored.restoreDraft = action.draft ?? withdrawn.content;
+      return restored;
     }
 
     case "CLEAR_RESTORE_DRAFT":
@@ -242,12 +275,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const incoming = action.content.trim();
       if (!incoming) return state;
 
-      const msgs = [...state.messages];
-      const last = msgs[msgs.length - 1];
-      if (last?.role !== "agent") return state;
-      if (last.content.trim() === incoming) return state;
+      const idx = streamingIndex(state.messages);
+      if (idx === -1) return state;
+      if (state.messages[idx].content.trim() === incoming) return state;
 
-      msgs[msgs.length - 1] = { ...last, content: action.content };
+      const msgs = [...state.messages];
+      msgs[idx] = { ...msgs[idx], content: action.content };
       return { ...state, messages: msgs };
     }
 
