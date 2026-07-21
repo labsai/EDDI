@@ -68,11 +68,13 @@ export function MemoryInspector({ conversationId }: MemoryInspectorProps) {
   const properties = data?.conversationProperties ?? {};
   const hasProperties = Object.keys(properties).length > 0;
 
-  // Make sure selectedTab is valid
+  // Make sure selectedTab is valid; default to props if no steps but properties exist
   const currentTab =
     selectedTab === "props"
       ? (hasProperties ? "props" : 0)
-      : (selectedTab < steps.length ? selectedTab : 0);
+      : (steps.length === 0 && hasProperties
+        ? "props"
+        : (selectedTab < steps.length ? selectedTab : 0));
 
   return (
     <div className="flex flex-col gap-3 p-3" data-testid="memory-inspector">
@@ -109,7 +111,7 @@ export function MemoryInspector({ conversationId }: MemoryInspectorProps) {
         <>
           {/* Tabs */}
           <div className="flex flex-wrap gap-1.5 border-b border-border pb-2">
-            {steps.map((step, idx) => (
+            {steps.map((_step, idx) => (
               <button
                 key={idx}
                 onClick={() => setSelectedTab(idx)}
@@ -140,11 +142,13 @@ export function MemoryInspector({ conversationId }: MemoryInspectorProps) {
 
           {/* Content */}
           <div className="flex flex-col gap-2">
-            {currentTab === "props" ? (
-              <PropertiesTable properties={properties} searchQuery={searchQuery} />
-            ) : steps[currentTab as number] ? (
-              <StepTable step={steps[currentTab as number]} searchQuery={searchQuery} />
-            ) : null}
+            {(() => {
+              if (currentTab === "props") {
+                return <PropertiesTable properties={properties} searchQuery={searchQuery} />;
+              }
+              const activeStep = steps[currentTab as number];
+              return activeStep ? <StepTable step={activeStep} searchQuery={searchQuery} /> : null;
+            })()}
           </div>
         </>
       )}
@@ -190,8 +194,8 @@ function StepTable({ step, searchQuery }: { step: DetailedConversationStep; sear
         </span>
       </div>
       <div className="divide-y divide-border">
-        {items.map((item, idx) => (
-          <KeyValueRow key={idx} itemKey={item.key} itemValue={item.value} />
+        {items.map((item) => (
+          <KeyValueRow key={item.key} itemKey={item.key} itemValue={item.value} />
         ))}
       </div>
     </div>

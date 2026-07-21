@@ -128,13 +128,13 @@ export function WorkforceChat() {
                 {/* Agent identity */}
                 <div className="flex flex-col items-center text-center gap-2">
                   <AdvisorAvatar
-                    name={selectedAgentName ?? agentData.name ?? "Agent"}
+                    name={selectedAgentName ?? "Agent"}
                     agentId={selectedAgentId}
                     size="lg"
                   />
                   <div>
                     <p className="text-sm font-semibold text-foreground">
-                      {selectedAgentName ?? agentData.name}
+                      {selectedAgentName ?? "Agent"}
                     </p>
                     {agentData.description && (
                       <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3">

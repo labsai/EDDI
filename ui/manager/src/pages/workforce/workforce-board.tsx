@@ -265,6 +265,7 @@ function WorkforceBoard() {
             onClick={() => {
               if (!showMembers) panelTriggerRef.current = document.activeElement as HTMLElement;
               setShowMembers((v) => !v);
+              setShowHistory(false);
             }}
             className={cn("h-8 w-8", showMembers && "bg-primary/10")}
             aria-label={t("Workforce.board.members", "Team")}
@@ -278,6 +279,7 @@ function WorkforceBoard() {
             onClick={() => {
               if (!showHistory) panelTriggerRef.current = document.activeElement as HTMLElement;
               setShowHistory((v) => !v);
+              setShowMembers(false);
             }}
             className={cn("h-8 w-8", showHistory && "bg-primary/10")}
             aria-label={t("Workforce.board.sessions", "Sessions")}

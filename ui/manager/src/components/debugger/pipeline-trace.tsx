@@ -301,7 +301,7 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
           <div className="ms-22 mb-1 mt-1 rounded-md border border-border bg-card p-2 text-[10px] text-muted-foreground space-y-1.5">
             {audit?.llmDetail && (
               <div className="flex flex-wrap gap-x-3 gap-y-1">
-                {audit.llmDetail.modelName && (
+                {Boolean(audit.llmDetail.modelName) && (
                   <p><span className="font-medium">{t("debugDrawer.model", "Model")}:</span> {String(audit.llmDetail.modelName)}</p>
                 )}
                 {costLabel && (

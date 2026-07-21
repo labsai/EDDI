@@ -151,11 +151,11 @@ export function KnowledgeHealthCard({ className }: KnowledgeHealthCardProps) {
             title={metric.description}
           >
             <div className="flex items-center justify-center mb-1">
-              <metric.icon
+            <metric.icon
                 className={cn(
                   "h-4 w-4",
                   "highlight" in metric && metric.highlight
-                    ? "text-muted-foreground"
+                    ? "text-warning"
                     : "text-muted-foreground",
                 )}
               />
@@ -164,7 +164,7 @@ export function KnowledgeHealthCard({ className }: KnowledgeHealthCardProps) {
               className={cn(
                 "text-2xl font-bold",
                 "highlight" in metric && metric.highlight
-                  ? "text-muted-foreground"
+                  ? "text-warning"
                   : "text-foreground",
               )}
             >

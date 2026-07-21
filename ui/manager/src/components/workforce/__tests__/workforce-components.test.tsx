@@ -51,7 +51,9 @@ describe("Workforce Components", () => {
       expect(buttons.length).toBeGreaterThan(0);
 
       const user = userEvent.setup();
-      await user.click(buttons[0]);
+      const firstButton = buttons[0];
+      expect(firstButton).toBeDefined();
+      await user.click(firstButton!);
       expect(onMenuClick).toHaveBeenCalled();
     });
 
@@ -135,12 +137,9 @@ describe("Workforce Components", () => {
       const user = userEvent.setup();
 
       const pinBtn = buttons.find((b) => b.getAttribute("aria-label")?.includes("pin") || b.getAttribute("aria-label")?.includes("Pin"));
-      if (pinBtn) {
-        await user.click(pinBtn);
-        expect(onTogglePin).toHaveBeenCalled();
-      } else {
-        await user.click(buttons[0]);
-      }
+      expect(pinBtn).toBeDefined();
+      await user.click(pinBtn!);
+      expect(onTogglePin).toHaveBeenCalled();
     });
 
     it("has menu trigger with data-testid", () => {
@@ -253,11 +252,10 @@ describe("Workforce Components", () => {
 
         const buttons = screen.getAllByRole("button");
         const customBtn = buttons.find((b) => b.textContent?.includes("Custom"));
-        if (customBtn) {
-          const user = userEvent.setup();
-          await user.click(customBtn);
-          expect(onSelect).toHaveBeenCalledWith("custom");
-        }
+        expect(customBtn).toBeDefined();
+        const user = userEvent.setup();
+        await user.click(customBtn!);
+        expect(onSelect).toHaveBeenCalledWith("custom");
       });
     });
 

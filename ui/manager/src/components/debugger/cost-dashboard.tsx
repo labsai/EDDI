@@ -29,7 +29,7 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
     return computeTokenMetrics(auditEntries);
   }, [auditEntries]);
 
-  if (costsError && !costs) {
+  if (costsError && !costs && !tokenMetrics) {
     return (
       <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="cost-dashboard-error">
         <Activity className="h-8 w-8 text-destructive/50" />
@@ -99,8 +99,9 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
             className="h-2 w-full rounded-full flex overflow-hidden bg-muted"
             role="meter"
             aria-label={t("costDashboard.tokenDistribution", "Token distribution")}
-            aria-valuenow={totalTokens}
+            aria-valuenow={totalIn}
             aria-valuemin={0}
+            aria-valuemax={totalTokens}
           >
             <div className="bg-muted-foreground/40 transition-all" style={{ width: `${inPct}%` }} />
             <div className="bg-primary transition-all" style={{ width: `${outPct}%` }} />

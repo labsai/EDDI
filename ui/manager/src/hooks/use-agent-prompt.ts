@@ -104,11 +104,12 @@ export function useUpdateAgentPrompt() {
     mutationFn: async ({ agentId, promptData, newSystemMessage }: UpdatePromptVars) => {
       // Build updated LLM config with new system message
       const updatedTasks = [...(promptData.llmConfig.tasks ?? [])];
-      if (updatedTasks.length > 0) {
+      const firstTask = updatedTasks[0];
+      if (firstTask) {
         updatedTasks[0] = {
-          ...updatedTasks[0],
+          ...firstTask,
           parameters: {
-            ...updatedTasks[0].parameters,
+            ...firstTask.parameters,
             systemMessage: newSystemMessage,
           },
         };

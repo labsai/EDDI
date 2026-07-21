@@ -832,13 +832,13 @@ function WorkforceThread() {
             <div className="p-4 space-y-5">
               <div className="flex flex-col items-center text-center gap-2">
                 <AdvisorAvatar
-                  name={memberName ?? agentData.name ?? "Agent"}
+                  name={memberName ?? "Agent"}
                   agentId={memberId}
                   size="lg"
                 />
                 <div>
                   <p className="text-sm font-semibold text-foreground">
-                    {memberName ?? agentData.name}
+                    {memberName ?? "Agent"}
                   </p>
                   {agentData.description && (
                     <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3">
