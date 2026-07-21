@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -201,6 +202,36 @@ class RestOrphanAdminSafetyTest {
 
             assertEquals(0, report.getDeletedCount(), "a scan must never delete");
             verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
+    }
+
+    @Nested
+    @DisplayName("includeDeleted is an inclusion flag, not an equality filter")
+    class IncludeDeletedSemantics {
+
+        @Test
+        @DisplayName("false constrains to live resources only")
+        void falseFiltersToLive() throws Exception {
+            when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            restOrphanAdmin.scanOrphans(false);
+
+            verify(documentDescriptorStore, atLeastOnce()).readDescriptors(eq("ai.labs.rules"), anyString(), eq(0), anyInt(), eq(false));
+        }
+
+        @Test
+        @DisplayName("true is forwarded so the store drops the deleted constraint entirely")
+        void trueForwardsInclusion() throws Exception {
+            when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            restOrphanAdmin.scanOrphans(true);
+
+            // The store-level change is what makes true mean "live AND soft-deleted";
+            // previously it meant "soft-deleted only", so a scan(false)/purge(true) pair
+            // acted on disjoint sets.
+            verify(documentDescriptorStore, atLeastOnce()).readDescriptors(eq("ai.labs.rules"), anyString(), eq(0), anyInt(), eq(true));
         }
     }
 

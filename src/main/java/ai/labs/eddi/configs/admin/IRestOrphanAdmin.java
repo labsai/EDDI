@@ -34,24 +34,28 @@ public interface IRestOrphanAdmin {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Scan for orphaned resources", description = "Scans all stores "
-            + "(packages, behavior sets, HTTP calls, output sets, langchains, "
-            + "property setters, dictionaries) and returns resources not referenced by any Agent or package. "
-            + "Use includeDeleted=true to also include soft-deleted resources in the report.")
+            + "(workflows, behavior sets, HTTP calls, output sets, LLMs, "
+            + "property setters, dictionaries, parsers) and returns resources not referenced by any Agent or workflow. "
+            + "includeDeleted=true additionally includes soft-deleted resources; false (the default) reports live resources only.")
     @APIResponse(responseCode = "200", description = "Orphan report with list of unreferenced resources.")
     // @formatter:off
     OrphanReport scanOrphans(
-            @Parameter(description = "Include soft-deleted resources in the scan. Default: false.")
+            @Parameter(description = "Also include soft-deleted resources. Default: false (live resources only).")
             @QueryParam("includeDeleted") @DefaultValue("false") Boolean includeDeleted);
     // @formatter:on
 
     @DELETE
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Purge orphaned resources", description = "Scans all stores for orphans and permanently deletes them. "
-            + "Returns a report of what was deleted. This operation is irreversible.")
+            + "Returns a report of what was deleted. This operation is irreversible. "
+            + "Pass the same includeDeleted value used for the scan so the purge acts on the set that was reviewed. "
+            + "Refuses with 409 when the reference scan is incomplete, since a partial reference set would "
+            + "misclassify live resources as orphans.")
     @APIResponse(responseCode = "200", description = "Purge report with count and list of deleted resources.")
+    @APIResponse(responseCode = "409", description = "The reference scan was incomplete; nothing was deleted.")
     // @formatter:off
     OrphanReport purgeOrphans(
-            @Parameter(description = "Include soft-deleted resources in the purge. Default: true.")
-            @QueryParam("includeDeleted") @DefaultValue("true") Boolean includeDeleted);
+            @Parameter(description = "Also purge soft-deleted resources. Default: false (live resources only).")
+            @QueryParam("includeDeleted") @DefaultValue("false") Boolean includeDeleted);
     // @formatter:on
 }

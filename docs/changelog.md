@@ -5,6 +5,31 @@
 
 ---
 
+## 🧹 Orphan admin — `includeDeleted` becomes a true inclusion flag; purge default flipped (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+⚠️ **REST behaviour change on `DELETE /administration/orphans`.**
+
+`DescriptorStore.readDescriptors` treated `includeDeleted` as an **equality** filter — `eq("deleted", includeDeleted)` — so `includeDeleted=true` matched *only* soft-deleted descriptors rather than adding them to the live ones. Two consequences:
+
+- The parameter did not mean what its name, its `@Parameter` text, and `docs/deployment-management-of-agents.md` all said it meant.
+- The shipped Manager scans with `includeDeleted=false` and purges with `includeDeleted=true`, so **the set shown to the user and the set deleted were disjoint**. The UI listed live orphans and then purged soft-deleted ones.
+
+`true` now drops the `deleted` constraint entirely (live **and** soft-deleted); `false` constrains to live only. Every other caller in `src/main` passes a literal `false` — verified by enumerating all ~35 call sites — so their behaviour is bit-for-bit unchanged.
+
+**`purgeOrphans`'s `@DefaultValue` flipped from `true` to `false`.** Left at `true`, the semantics fix would have made the parameterless `DELETE` dramatically *more* destructive — combined with the page-walk fix two commits earlier, from "purge ≤200 already-soft-deleted rows" to "permanently wipe every unreferenced resource, unbounded". Flipping the default makes the bare call the conservative one and matches `scanOrphans`, so a scan and a purge with no parameters now describe the same set.
+
+### Client impact
+
+A client that relied on the old default now purges **less**: live-but-unreferenced orphans only, not soft-deleted ones. Pass `includeDeleted=true` explicitly to also purge soft-deleted resources. EDDI-Manager should send the flag explicitly, matching whichever set it is displaying.
+
+### Tests
+
+`DescriptorStoreTest` gains two tests capturing the actual `QueryFilters` and asserting the `deleted` constraint is present for `false` and **absent** for `true`; mutation-checked by restoring the equality filter, which fails the second. `RestOrphanAdminSafetyTest` gains two tests pinning the flag's propagation. All 86 tests across every descriptor-store consumer green.
+
+---
+
 ## 🔍 Review follow-ups on the orphan/tenancy fixes (2026-07-21)
 
 **Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)

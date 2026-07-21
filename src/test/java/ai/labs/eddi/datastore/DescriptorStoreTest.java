@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.util.List;
@@ -143,6 +144,45 @@ class DescriptorStoreTest {
 
         List<String> result = store.readDescriptors("agents", null, null, null, false);
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("readDescriptors — includeDeleted=false constrains `deleted` to false")
+    void readDescriptorsExcludesDeleted() throws Exception {
+        when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        store.readDescriptors("agents", null, 0, 20, false);
+
+        var captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        verify(resourceStorage).findResources(captor.capture(), anyString(), anyInt(), anyInt());
+        assertTrue(hasDeletedFilter(captor.getValue()), "expected a `deleted` constraint when includeDeleted=false");
+    }
+
+    @Test
+    @DisplayName("readDescriptors — includeDeleted=true drops the `deleted` constraint entirely")
+    void readDescriptorsIncludesDeleted() throws Exception {
+        when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        store.readDescriptors("agents", null, 0, 20, true);
+
+        // It previously added eq(deleted, true), which matched ONLY soft-deleted rows —
+        // so a caller scanning with false and purging with true saw disjoint sets.
+        var captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        verify(resourceStorage).findResources(captor.capture(), anyString(), anyInt(), anyInt());
+        assertFalse(hasDeletedFilter(captor.getValue()), "includeDeleted=true must not constrain on `deleted` at all");
+    }
+
+    private static boolean hasDeletedFilter(IResourceFilter.QueryFilters[] filters) {
+        for (IResourceFilter.QueryFilters group : filters) {
+            for (IResourceFilter.QueryFilter f : group.getQueryFilters()) {
+                if ("deleted".equals(f.getField())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     // ==================== findByOriginId ====================
