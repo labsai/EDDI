@@ -510,3 +510,81 @@ describe("ChatWidget — round-3 regressions", () => {
     expect(screen.queryByText("hunter2")).toBeNull();
   });
 });
+
+describe("ChatWidget — round-4 regressions", () => {
+  /** Non-streaming backend returning a scripted reply per POST. */
+  function mockNonStreaming(replies: string[]) {
+    let turn = 0;
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (init?.method === "POST") {
+        const text = replies[Math.min(turn, replies.length - 1)];
+        turn += 1;
+        return new Response(
+          JSON.stringify({
+            conversationState: "READY",
+            conversationOutputs: [{ output: [text], quickReplies: [] }],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+  }
+
+  function renderNonStreaming() {
+    return render(
+      <MemoryRouter initialEntries={["/chat/production/agent-1?hideStreaming=true"]}>
+        <ChatProvider>
+          <Routes>
+            <Route path="/chat/:environment/:agentId" element={<ChatWidget />} />
+          </Routes>
+        </ChatProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  async function send(text: string) {
+    const input = await screen.findByTestId("chat-input");
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+  }
+
+  it("renders a repeated agent reply on every turn, not just the first", async () => {
+    // returnCurrentStepOnly=true pins outputIndex to 0, so the dedupe key
+    // degenerated to the reply text. A repeated fallback — the single most
+    // common agent utterance — was silently swallowed from the second turn on.
+    mockNonStreaming(["Sorry, I did not understand that."]);
+
+    renderNonStreaming();
+    await send("asdf");
+    await screen.findByText("Sorry, I did not understand that.");
+
+    await send("qwer");
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Sorry, I did not understand that.")).toHaveLength(2);
+    });
+  });
+
+  it("renders a second, different reply that shares a long prefix with the first", async () => {
+    const a = "Thank you for your question. Based on the information available, I found 3 results.";
+    const b = "Thank you for your question. Based on the information available, I found 7 results.";
+    mockNonStreaming([a, b]);
+
+    renderNonStreaming();
+    await send("one");
+    await screen.findByText(a);
+
+    await send("two");
+
+    expect(await screen.findByText(b)).toBeInTheDocument();
+  });
+});

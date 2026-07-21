@@ -71,10 +71,15 @@ interface TurnContext {
    * end with zero tokens and the same conversationState.
    */
   stateBeforeSend: ConversationState | null;
+  /** Id of this turn's optimistic user bubble, so a dropped turn can withdraw it. */
+  userMessageId: string | null;
 }
 
-function newTurn(stateBeforeSend: ConversationState | null): TurnContext {
-  return { tokenCount: 0, stateBeforeSend };
+function newTurn(
+  stateBeforeSend: ConversationState | null,
+  userMessageId: string | null = null,
+): TurnContext {
+  return { tokenCount: 0, stateBeforeSend, userMessageId };
 }
 
 function makeAgentMessage(content: string): ChatMessage {
@@ -249,7 +254,25 @@ export function ChatWidget() {
             // The server dropped this turn without consuming it. The payload
             // carries the PREVIOUS step's outputs, so its quick replies must
             // not be applied — doing so re-offered stale buttons as if new.
-            dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+            //
+            // The user's own bubble must go too: leaving it there asserts the
+            // message was sent when it never reached the agent. Withdrawing it
+            // also hands the text back to the composer so it can be resent.
+            const pending = turn.userMessageId
+              ? pendingTurnsRef.current.get(turn.userMessageId)
+              : undefined;
+            if (turn.userMessageId) {
+              pendingTurnsRef.current.delete(turn.userMessageId);
+              dispatch({
+                type: "WITHDRAW_LAST_USER_MESSAGE",
+                messageId: turn.userMessageId,
+                draft: pending?.text,
+                attachments: pending?.attachments,
+                wasSecret: pending?.isSecret,
+              });
+            } else {
+              dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+            }
             dispatch({
               type: "ADD_MESSAGE",
               message: makeAgentMessage(
@@ -330,8 +353,16 @@ export function ChatWidget() {
 
   /* ─── Process conversation snapshot ─────────── */
   const processSnapshot = useCallback(
+    /**
+     * @param dedupe Suppress texts already rendered from an identical snapshot
+     *   slot. ONLY for reads that deliberately revisit a step already shown —
+     *   retry and the post-approval refresh. It must stay off for ordinary
+     *   sends: `returnCurrentStepOnly=true` pins every response to one output
+     *   at index 0, so the key degenerates to the reply text and a repeated
+     *   utterance (a fallback, a re-prompt) would be silently swallowed.
+     */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (snapshot: any) => {
+    (snapshot: any, { dedupe = false }: { dedupe?: boolean } = {}) => {
       // Managed-agent mode never calls startConversation, so without this the
       // widget has no conversationId — disabling HITL polling, cancel, retry
       // and attachments for the entire managed route.
@@ -380,16 +411,17 @@ export function ChatWidget() {
 
           // Handles bare-string entries too — HITL's pending-approval
           // placeholder and reviewer-rejection message arrive as raw strings.
-          //
-          // Dispatched as SNAPSHOT messages with a stable key: retry and the
-          // post-approval refresh both re-read the SAME step, and appending
-          // blindly duplicated the transcript on every refresh.
           extractOutputTexts(agentReplies).forEach((text, textIndex) => {
+            const message = makeAgentMessage(text);
+            if (!dedupe) {
+              dispatch({ type: "ADD_MESSAGE", message });
+              return;
+            }
             dispatch({
               type: "ADD_SNAPSHOT_MESSAGE",
               message: {
-                ...makeAgentMessage(text),
-                sourceKey: `out:${outputIndex}:${textIndex}:${text.slice(0, 64)}`,
+                ...message,
+                sourceKey: `out:${outputIndex}:${textIndex}:${text}`,
               },
             });
           });
@@ -605,7 +637,7 @@ export function ChatWidget() {
           // so reader.read() would hang forever without this.
           const abort = new AbortController();
           abortRef.current = abort;
-          const turn = newTurn(conversationStateRef.current);
+          const turn = newTurn(conversationStateRef.current, turnId);
           let streamDone = false;
 
           const events = sendMessageStreaming(
@@ -656,7 +688,15 @@ export function ChatWidget() {
             // so nothing else on this path learns the conversation is now
             // ERROR / EXECUTION_INTERRUPTED — leaving the recovery banner
             // unreachable on the default transport.
-            if (after.conversationState) {
+            //
+            // But this read RACES a Stop: handleStop cancels and then sets
+            // EXECUTION_INTERRUPTED, and a refresh issued before that lands
+            // afterwards carrying a stale READY, wiping the state Stop just
+            // set — and with it the recovery banner. handleStop clears
+            // abortRef, so a controller that is no longer current means this
+            // turn was stopped and its refresh must not speak for the state.
+            const wasStopped = abortRef.current !== abort;
+            if (after.conversationState && !wasStopped) {
               dispatch({
                 type: "SET_CONVERSATION_STATE",
                 state: after.conversationState,
@@ -698,11 +738,15 @@ export function ChatWidget() {
             ),
           });
           // Re-read so the paused state (and its card) appears immediately.
-          if (environment && agentId && state.conversationId) {
+          // Gated on conversationId ALONE: readConversation ignores
+          // environment/agentId, and the managed route never has them — so
+          // requiring them meant the managed route never learned it had been
+          // refused, leaving the composer live against a paused conversation.
+          if (state.conversationId) {
             try {
               const snap = await readConversation(
-                environment,
-                agentId,
+                environment ?? "",
+                agentId ?? "",
                 state.conversationId,
                 true,
               );
@@ -731,6 +775,8 @@ export function ChatWidget() {
         }
 
         console.error("Failed to send message:", err);
+        // Nothing further will withdraw this turn, so release its record.
+        pendingTurnsRef.current.delete(turnId);
         // Without this the empty placeholder stays in the transcript flagged
         // isStreaming forever, rendering as a perpetually-typing bubble.
         dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
@@ -741,6 +787,11 @@ export function ChatWidget() {
             "⚠️ Your message could not be sent. Please try again.",
           ),
         });
+      } finally {
+        // Release this turn's record. Only the failure paths deleted it, so a
+        // long session accumulated one entry (text + attachments) per
+        // successful turn, forever.
+        pendingTurnsRef.current.delete(turnId);
       }
     },
     [
@@ -934,7 +985,8 @@ export function ChatWidget() {
       // restart, an unmount). Applying the snapshot then would graft the old
       // conversation's transcript onto the new one.
       if (isStale()) return true;
-      processSnapshot(snapshot);
+      // Re-reading the step that was already rendered when the turn paused.
+      processSnapshot(snapshot, { dedupe: true });
       return true;
     } catch (err) {
       console.error("Failed to refresh after approval:", err);
@@ -991,7 +1043,8 @@ export function ChatWidget() {
       if (snapshot.conversationState) {
         dispatch({ type: "SET_CONVERSATION_STATE", state: snapshot.conversationState });
       }
-      processSnapshot(snapshot);
+      // Retry re-reads the same step that failed; its output is already shown.
+      processSnapshot(snapshot, { dedupe: true });
     } catch (err) {
       dispatch({
         type: "ADD_MESSAGE",
