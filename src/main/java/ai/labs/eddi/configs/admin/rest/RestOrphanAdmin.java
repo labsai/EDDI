@@ -20,6 +20,7 @@ import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -100,9 +101,14 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         ReferenceScan scan = scanReferencedUris();
         if (!scan.complete()) {
             log.errorf("Refusing to purge orphans: the reference scan was incomplete (%s)", scan.failureReason());
-            throw new WebApplicationException("Refusing to purge orphans: the reference scan was incomplete (" + scan.failureReason()
-                    + "). Purging on a partial reference set could permanently delete resources that are still in use.",
-                    Response.Status.CONFLICT);
+            // Build the Response explicitly rather than using the (String, Status)
+            // constructor: that one sets no entity, so the caller would receive a bare
+            // 409 and the reason would exist only in the server log.
+            throw new WebApplicationException(Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "incomplete_scan", "message",
+                            "Refusing to purge orphans: the reference scan was incomplete (" + scan.failureReason()
+                                    + "). Purging on a partial reference set could permanently delete resources that are still in use."))
+                    .type(MediaType.APPLICATION_JSON).build());
         }
 
         List<OrphanInfo> orphans = collectOrphans(scan.referencedUris(), includeDeleted);
@@ -158,6 +164,10 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     }
                 }
             } catch (Exception e) {
+                // Safe to continue: a type that cannot be enumerated contributes no
+                // orphan CANDIDATES, so the purge under-deletes rather than over-
+                // deletes. The opposite failure — an incomplete REFERENCE set — is the
+                // dangerous one and is handled by ReferenceScan.complete().
                 log.warnf("Error scanning store type %s: %s", type, e.getMessage());
             }
         }
@@ -276,7 +286,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
      * {@code skip = index * limit}. Advancing it by {@code batch.size()} asked for
      * page 200 (skip = 40 000) on the second iteration, which always came back
      * empty, so every type was silently truncated at {@value #BATCH_SIZE} rows.
-     * That truncation also hit {@link #buildReferencedUrisSet()}, where a missing
+     * That truncation also hit {@link #scanReferencedUris()}, where a missing
      * reference makes a live resource look unreferenced.
      * </p>
      */

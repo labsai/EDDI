@@ -149,6 +149,12 @@ class RestOrphanAdminSafetyTest {
             WebApplicationException thrown = assertThrows(WebApplicationException.class, () -> restOrphanAdmin.purgeOrphans(true));
 
             assertEquals(409, thrown.getResponse().getStatus());
+            // The reason must reach the caller, not just the server log — the
+            // (String, Status) constructor sets no entity, so this pins that the
+            // Response is built explicitly.
+            assertTrue(thrown.getResponse().hasEntity(), "409 must carry a body explaining the refusal");
+            assertTrue(thrown.getResponse().getEntity().toString().contains("mongo down"),
+                    "the body must name the underlying cause, got: " + thrown.getResponse().getEntity());
             verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
         }
 

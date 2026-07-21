@@ -485,6 +485,19 @@ class PostgresTenantQuotaStoreTest {
         }
 
         @Test
+        @DisplayName("should return denied at exactly the limit, matching checkCostBudget")
+        void exactlyAtLimit() throws Exception {
+            when(resultSet.next()).thenReturn(true);
+            when(resultSet.getDouble(1)).thenReturn(100.0);
+
+            QuotaCheckResult result = sut.tryAddCost(TENANT_ID, 10.0, 100.0);
+
+            // TenantQuotaService.checkCostBudget denies on `currentCost >= limit`, so
+            // post-call accounting must use >= too or the two disagree at the boundary.
+            assertFalse(result.allowed(), "at exactly the limit the budget is spent");
+        }
+
+        @Test
         @DisplayName("should return OK when limit is negative (unlimited)")
         void unlimitedBudget() throws Exception {
             when(resultSet.next()).thenReturn(true);

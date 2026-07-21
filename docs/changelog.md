@@ -5,6 +5,22 @@
 
 ---
 
+## 🔍 Review follow-ups on the orphan/tenancy fixes (2026-07-21)
+
+**Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)
+
+Self-review of the three preceding commits found three defects, all fixed here.
+
+- **The 409 refusal carried no body.** `purgeOrphans` threw `new WebApplicationException(String, Response.Status)`, whose response has **no entity** — so an operator saw a bare 409 and the reason existed only in the server log. Confirmed empirically by mutation: reverting to that constructor makes the new `hasEntity()` assertion fail. Now builds the `Response` explicitly with `{"error":"incomplete_scan","message":…}`.
+- **Broken javadoc link.** The page-walk javadoc still referenced `buildReferencedUrisSet()`, renamed to `scanReferencedUris()` in the same commit. Also updated three now-inaccurate `@DisplayName`s in `RestOrphanAdminBranchTest`.
+- **Postgres had no at-limit test.** The `>` → `>=` change was mutation-verified on Mongo but not Postgres. Added `PostgresTenantQuotaStoreTest.exactlyAtLimit` and mutation-checked it too.
+
+Also documented why a `MAX_PAGES` trip during orphan *collection* is safely swallowed while the same failure in the *reference* scan blocks the purge: a type that cannot be enumerated yields fewer delete candidates (under-delete), whereas a missing reference promotes a live resource to "orphan" (over-delete).
+
+**Verification:** full clean suite `tests=11273 failures=8 errors=288 skipped=3` across the same 15 classes as the pre-change baseline — all environmental (loopback sockets, network egress, model downloads). Zero regressions. Checkstyle clean on every changed file; `javadoc:javadoc` builds.
+
+---
+
 ## 🚦 Engine — return 429 instead of 500 when the api-call quota denies a turn (2026-07-21)
 
 **Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)
