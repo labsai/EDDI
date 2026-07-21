@@ -73,8 +73,21 @@
   - **i18n**: 100+ new keys across `boardroom.*` namespace, propagated to all 11 locales.
   - **Commits**: 8 commits on `feat/advisory-board-wizard` from `4226d6c5` to `13a538ba`.
 
-### In Progress: Boardroom v2 Redesign
-**Plan**: See `implementation_plan.md` in the conversation artifacts (conv `3779feda-326c-438d-aad4-4cf63505fa7c`).
+- **Debug Panel Overhaul + Workforce Rename + Settings Gap Closure** (branch: `test/debug-workforce-coverage`): Comprehensive debug panel redesign, boardroom→workforce rename, and missing configuration coverage. Includes:
+  - **Debug Panel Rewrite**: Pipeline waterfall with expandable task detail, cost dashboard with stat cards + per-turn table, memory inspector with key-value search, role-labeled prompt viewer, polished log viewer.
+  - **Boardroom → Workforce Rename**: Renamed across 65+ files — directories (`src/pages/workforce/`, `src/components/workforce/`), component prefixes (`Workforce*`), i18n namespaces, route paths, git-tracked directory renames.
+  - **CodeRabbit Review Fixes**: Resolved all 10+ critical/major findings — TS type safety (TS2345, TS2532, TS2339), cost dashboard error handling, memory inspector React keys, workforce board panel mutual exclusivity, i18n mojibake repair.
+  - **Workforce Settings Config Gaps**: Added 4 new collapsible sections to `workforce-settings.tsx` completing backend parity:
+    - **Protocol & Resilience**: Agent timeout, failure policy (Skip/Retry/Abort), max retries, member unavailable policy, max turns.
+    - **Human Oversight (HITL)**: Approval granularity (Phase/Task), timeout with ISO-8601 duration, timeout policy (Wait/Auto-approve/Auto-reject/Abort), rejection policy (Fail/Retry).
+    - **Dynamic Agents**: Toggle-gated creation/recruitment/delegation with per-discussion limits, lifecycle policy (Ephemeral/Keep/Undeploy/Agent Decides), model inheritance.
+    - **Task Definitions**: TASK_FORCE-only pre-configured task list with subject, description, role assignment, priority.
+  - **UX Polish**: Chevron disclosure affordance on collapsible sections, hover feedback, module-level defaults for stable React hook refs.
+  - **i18n**: 57 new `Workforce.settings.*` keys propagated to all 11 locales.
+  - **Tests**: 119 unit tests across debug panel + workforce components, audit test fix (camelCase assertion).
+  - **Commits**: 6 commits on `test/debug-workforce-coverage` from `e05391bf` to `feeb5aef`.
+
+### Boardroom v2 Design Decisions
 
 **Decisions confirmed by user:**
 | Decision | Answer |
@@ -107,10 +120,10 @@
 - Boardroom files: `src/pages/boardroom/`, `src/components/boardroom/`, `src/styles/advisory.css`
 
 ### Test Counts
-- 247 test files passing (EDDI-Manager)
-- 3579 Tests passing (`npm run test`)
+- 249 test files passing (EDDI-Manager)
+- 3613 Tests passing (`npm run test`)
+- 76.59% statement coverage
 - 112 Backend tenancy tests passing (`mvn test`)
 
 ### Last Commit Focus
-- Frontend: `fix: review round 3 — clipboard error handling, focus trap, stale closure, confetti render, RTL, reduced motion` on `feat/advisory-board-wizard` (`13a538ba`)
-
+- Frontend: `feat: add Protocol, HITL, Dynamic Agents, and Task config to workforce settings` on `test/debug-workforce-coverage` (`feeb5aef`)
