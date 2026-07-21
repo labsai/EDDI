@@ -10,7 +10,46 @@ import {
   listTimeZones,
   CRON_PRESETS,
   MIN_INTERVAL_SECONDS,
+  parseInstant,
+  fireLogDurationMs,
 } from "../schedules";
+
+// The backend (Quarkus write-dates-as-timestamps) serializes Instant as
+// FRACTIONAL EPOCH SECONDS. parseInstant must handle that plus ISO / millis.
+describe("parseInstant", () => {
+  it("parses fractional epoch SECONDS (the real backend format)", () => {
+    const d = parseInstant(1719964800.123);
+    expect(d?.getTime()).toBe(1719964800123);
+  });
+  it("parses a numeric-seconds string", () => {
+    expect(parseInstant("1719964800")?.getTime()).toBe(1719964800000);
+  });
+  it("parses an ISO-8601 string (tolerated for @JsonFormat fields / mocks)", () => {
+    expect(parseInstant("2026-07-01T09:00:00.000Z")?.getTime()).toBe(
+      Date.parse("2026-07-01T09:00:00.000Z")
+    );
+  });
+  it("treats an already-millis number as millis (no double *1000)", () => {
+    expect(parseInstant(1719964800123)?.getTime()).toBe(1719964800123);
+  });
+  it("returns null for missing/blank/unparseable", () => {
+    expect(parseInstant(null)).toBeNull();
+    expect(parseInstant(undefined)).toBeNull();
+    expect(parseInstant("")).toBeNull();
+    expect(parseInstant("not-a-date")).toBeNull();
+  });
+  it("fireLogDurationMs computes ms from fractional-second timestamps", () => {
+    expect(
+      fireLogDurationMs({
+        scheduleId: "s",
+        status: "COMPLETED",
+        fireTime: 1719964800,
+        startedAt: 1719964800,
+        completedAt: 1719964802.5,
+      })
+    ).toBe(2500);
+  });
+});
 
 describe("parseCron / isValidCron", () => {
   it("accepts a standard weekday expression", () => {

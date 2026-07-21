@@ -203,14 +203,18 @@ describe("MCP Calls Editor", () => {
 
     await user.click(screen.getByTestId("discover-tools-btn"));
 
+    // Descriptions also appear in the tool-name combobox datalist, so scope the
+    // assertion to the discovered-tools panel this test is about.
     await waitFor(() => {
-      expect(
-        screen.getByText("Search indexed documents by query")
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText("Delete a document by its unique ID")
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("discovered-tools-panel")).toBeInTheDocument();
     });
+    const panel = within(screen.getByTestId("discovered-tools-panel"));
+    expect(
+      panel.getByText("Search indexed documents by query")
+    ).toBeInTheDocument();
+    expect(
+      panel.getByText("Delete a document by its unique ID")
+    ).toBeInTheDocument();
   });
 
   it("shows tool count in discovered panel header", async () => {

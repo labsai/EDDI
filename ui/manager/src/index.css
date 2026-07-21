@@ -187,6 +187,11 @@
     backdrop-filter: blur(16px);
     background: rgba(24, 24, 27, 0.95);
     border: 1px solid rgba(245, 158, 11, 0.15);
+    /* This hero card is ALWAYS dark, so pin the sidebar tokens its text/borders
+       read to light values — otherwise light-mode's dark --color-sidebar-*
+       tokens render dark-on-dark (unreadable). */
+    --color-sidebar-foreground: #e4e4e7;
+    --color-sidebar-border: rgba(245, 158, 11, 0.2);
   }
 
   /* Carousel dot transitions */

@@ -66,20 +66,18 @@ export interface ScheduleConfiguration {
 export type FireLogStatus = "COMPLETED" | "FAILED" | "DEAD_LETTERED";
 
 /**
- * One fire-execution record. Mirrors the backend `ScheduleFireLog` record
- * exactly — its JSON keys are the record component names, and the three
- * timestamps are ISO-8601 strings (Jackson-serialized `Instant`), NOT epoch
- * millis. (The previous shape — firedAt/success/durationMs/error — was never
- * emitted by the backend and rendered "Invalid Date"/always-failed for every
- * row against a real EDDI; only the wrong mocks hid it.)
+ * One fire-execution record. JSON keys are the backend record component names.
+ * The Instant timestamps (fireTime/startedAt/completedAt) are serialized by
+ * Quarkus as FRACTIONAL EPOCH SECONDS (write-dates-as-timestamps), e.g.
+ * 1719964800.123 — parse them with {@link parseInstant}, never `new Date(x)`.
  */
 export interface ScheduleFireLog {
   id?: string;
   scheduleId: string;
   fireId?: string;
-  fireTime: string;
-  startedAt?: string;
-  completedAt?: string;
+  fireTime: string | number;
+  startedAt?: string | number;
+  completedAt?: string | number;
   status: FireLogStatus;
   instanceId?: string;
   conversationId?: string;
@@ -88,13 +86,36 @@ export interface ScheduleFireLog {
   cost?: number;
 }
 
+/**
+ * Parse a backend timestamp into a Date. EDDI runs Quarkus with
+ * `quarkus.jackson.write-dates-as-timestamps=true`, so a `java.time.Instant`
+ * serializes as FRACTIONAL EPOCH SECONDS (e.g. 1719964800.123), NOT epoch millis
+ * and NOT (by default) an ISO string. This also tolerates an ISO string (should a
+ * field gain @JsonFormat) and an epoch-millis number, so the UI renders correctly
+ * regardless of the backend's date format. Returns null for missing/unparseable.
+ */
+export function parseInstant(
+  value: string | number | null | undefined
+): Date | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") {
+    // Distinguish epoch seconds (~1.7e9) from already-millis (~1.7e12).
+    const ms = value < 1e12 ? value * 1000 : value;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const s = value.trim();
+  if (/^\d+(\.\d+)?$/.test(s)) return parseInstant(Number(s));
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 /** Duration in ms between startedAt and completedAt, or null if unavailable. */
 export function fireLogDurationMs(log: ScheduleFireLog): number | null {
-  if (!log.startedAt || !log.completedAt) return null;
-  const start = Date.parse(log.startedAt);
-  const end = Date.parse(log.completedAt);
-  if (Number.isNaN(start) || Number.isNaN(end)) return null;
-  return Math.max(0, end - start);
+  const start = parseInstant(log.startedAt);
+  const end = parseInstant(log.completedAt);
+  if (!start || !end) return null;
+  return Math.max(0, end.getTime() - start.getTime());
 }
 
 // ==================== Scheduling constants & helpers ====================

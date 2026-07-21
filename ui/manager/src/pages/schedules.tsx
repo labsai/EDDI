@@ -38,6 +38,7 @@ import {
 } from "@/hooks/use-schedules";
 import {
   fireLogDurationMs,
+  parseInstant,
   describeCron,
   isValidCron,
   nextCronFires,
@@ -276,7 +277,7 @@ function FireLogsRow({ scheduleId }: { scheduleId: string }) {
                       >
                         <td className="px-3 py-1.5 tabular-nums text-foreground">
                           {log.fireTime
-                            ? new Date(log.fireTime).toLocaleString()
+                            ? (parseInstant(log.fireTime)?.toLocaleString() ?? "—")
                             : "—"}
                         </td>
                         <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
@@ -426,7 +427,7 @@ function FailedFiresPanel({
                   </td>
                   <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
                     {log.fireTime
-                      ? new Date(log.fireTime).toLocaleString()
+                      ? (parseInstant(log.fireTime)?.toLocaleString() ?? "—")
                       : "—"}
                   </td>
                   <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
@@ -1308,7 +1309,7 @@ export function SchedulesPage() {
             </div>
             <p className="mt-2 text-lg font-semibold tabular-nums text-foreground">
               {soonest?.nextFire
-                ? new Date(soonest.nextFire).toLocaleString()
+                ? (parseInstant(soonest.nextFire)?.toLocaleString() ?? "—")
                 : "—"}
             </p>
             {soonest && (
@@ -1478,7 +1479,7 @@ export function SchedulesPage() {
                           </td>
                           <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
                             {s.nextFire
-                              ? new Date(s.nextFire).toLocaleString()
+                              ? (parseInstant(s.nextFire)?.toLocaleString() ?? "—")
                               : "—"}
                             <span
                               className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground/60"
@@ -1490,7 +1491,7 @@ export function SchedulesPage() {
                           </td>
                           <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
                             {s.lastFired
-                              ? new Date(s.lastFired).toLocaleString()
+                              ? (parseInstant(s.lastFired)?.toLocaleString() ?? "—")
                               : "—"}
                           </td>
                           <td className="px-5 py-3">
