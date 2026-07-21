@@ -32,7 +32,10 @@ describe("demo-api", () => {
       }
       expect(events.length).toBeGreaterThan(0);
       expect(events.some((e) => e.type === "done")).toBe(true);
-    });
+      // Same explicit timeout as the sibling test above: the demo stream uses
+      // real delays totalling ~5s, so the 5s default makes this flaky under
+      // parallel load rather than genuinely failing.
+    }, 15000);
   });
 
   describe("demoGetQuickReplies", () => {
