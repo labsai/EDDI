@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import org.bson.BsonDocument;
@@ -40,9 +41,9 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
         BsonDocument query = createQuery(queryFilters);
         Document sort = createSortQuery(sortTypes);
         var iterable = collection.find(query).sort(sort);
-        if (limit == null || limit < 1) {
-            limit = 20;
-        }
+        // Same limit contract as IDescriptorStore.readDescriptors: null means
+        // "no opinion" (default page), <= 0 means "no limit" (up to the ceiling).
+        limit = IDescriptorStore.resolveDescriptorLimit(limit);
         iterable.limit(limit);
 
         if (index != null) {

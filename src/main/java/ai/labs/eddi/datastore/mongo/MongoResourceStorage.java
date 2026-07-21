@@ -306,7 +306,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
         Bson query = Filters.and(connectedFilters);
         Document sort = sortField != null ? new Document(sortField, -1) : new Document();
-        int effectiveLimit = limit < 1 ? 20 : limit;
+        int effectiveLimit = IResourceStorage.resolveLimit(limit);
 
         var iterable = currentCollection.find(query.toBsonDocument()).sort(sort).limit(effectiveLimit).skip(skip > 0 ? skip : 0);
 

@@ -5,6 +5,50 @@
 
 ---
 
+## 🐛 Fix: `readDescriptors(limit = 0)` silently returned only 20 descriptors (2026-07-21)
+
+**Repo:** EDDI (`fix/descriptor-store-limit-semantics`)
+
+### Summary
+
+`DescriptorStore.readDescriptors` resolved its limit with `(limit == null || limit < 1) ? 20 : limit`, so a caller passing `0` to mean "give me everything" silently received the first 20 rows. The same `limit < 1 ? 20` fallback was duplicated in `MongoResourceStorage.findResources`, `PostgresResourceStorage.findResources`, and `ResourceFilter.readResources` — four independent copies of a magic default, none of them documented.
+
+Three production call sites were affected in a user-visible way:
+
+- **`PromptSnippetService.loadAllSnippets`** — a deployment with more than 20 prompt snippets never got the rest into the `{snippets.*}` template namespace. Silent: templates just rendered empty.
+- **`RestExportService.exportSnippets`** — agent export dropped any referenced snippet outside the first 20, producing an incomplete ZIP that imports without error.
+- **`RestAgentStore.populateCapabilityRegistry`** — only the first 20 agents were scanned for capabilities at startup, so capability-based discovery/delegation silently missed agents.
+
+Three further call sites (`ChannelTargetRouter`, `ChannelConnectorMigration`, `RestChannelIntegrationStore`) passed a magic `1000` to dodge the cap; the channel-uniqueness check among them would have let a duplicate `channelId` through past that many configs.
+
+### Fix — explicit sentinel plus a hard ceiling
+
+Option (a) from the two candidates, because the storage layer supports a bounded unlimited query cleanly and paging every caller would have been six copies of `RestOrphanAdmin`'s batch loop:
+
+- **`IDescriptorStore.NO_LIMIT` (`0`)** and **`DEFAULT_LIMIT` (`20`)** define the contract in one place, with `resolveDescriptorLimit(Integer)`: `null` → default page, `<= 0` → unlimited, `> 0` → honoured.
+- **`IResourceStorage.MAX_RESULT_LIMIT` (`10_000`)** is the hard safety ceiling, applied through the shared static `IResourceStorage.resolveLimit(int)` that both backends now call — the two implementations can no longer drift apart.
+- **Truncation is no longer silent**: `DescriptorStore` logs a WARN naming the descriptor type when a result set hits the ceiling. The original defect was not the number 20, it was that nothing said anything.
+- All six "give me everything" call sites now pass `IDescriptorStore.NO_LIMIT` instead of `0` or `1000`, so intent is readable at the call site. `RestOrphanAdmin` keeps its explicit 200-row batch loop — it genuinely pages.
+
+### Key Design Decisions
+
+- **`null` and `0` deliberately mean different things.** `null` is "caller expressed no opinion" → default page; `0` is "no limit". Collapsing them would have made `?limit=` omission return everything.
+- **Redefining `0` is safe for the REST API** because every REST endpoint already declares `@QueryParam("limit") @DefaultValue("20")`. JAX-RS, not the store fallback, supplies the REST default, so no endpoint's behaviour changes when the parameter is omitted. Only internal callers and an explicit `?limit=0` are affected — and `?limit=0` now means what it reads like.
+- **Ceiling over true unbounded**: an unbounded query on a large `descriptors` collection is a memory risk, and `readDescriptors` issues one `read()` per descriptor. 10,000 is high enough that no realistic deployment hits it, and the WARN makes it loud if one does.
+- **Legacy `mongo/ResourceFilter` updated too**, so both descriptor-store implementations obey one contract rather than diverging.
+- **The ceiling warning sanitizes `type`.** Self-review caught that the new WARN logged `type` unsanitized — and `type` reaches `readDescriptors` straight from `@QueryParam("type")` on `IRestDocumentDescriptorStore`. That is the CWE-117 log-injection pattern that commit `d71de742` remediated across 13 files (the commit that also last touched this very method), so the new log line now uses the `LogSanitizer.sanitize` helper that commit introduced. Reachability is hard (10,000 matching descriptors), but CodeQL taint analysis is flow-based, not reachability-gated, and the repo's convention is to sanitize unconditionally.
+- **The warning states impact, not just cause.** Its reader is an operator who cannot "page" anything — the actionable fact for them is that the returned list is incomplete and dependent features are missing entries, so the message leads with that.
+
+### Verification
+
+- `./mvnw clean compile` — clean
+- 976 unit tests across the datastore package and every affected call site — 0 failures, 1 pre-existing skip
+- New tests pin the semantics: `null` → 20, `NO_LIMIT` → ceiling (with an explicit `assertNotEquals(DEFAULT_LIMIT)` regression guard), negative → ceiling, oversized → clamped, `skip == index * effectiveLimit`, results not post-truncated; plus helper-level tests and backend-level assertions (Mongo `iterable.limit(...)`, Postgres `LIMIT` in the generated SQL)
+- Two pre-existing tests asserted the old `limit=0 → 20` behaviour (`ResourceFilterTest`, `MongoResourceStorageBranchTest`) and were updated to the new contract — they were pinning the bug
+- `./mvnw formatter:format` + `./mvnw validate` clean
+
+---
+
 ## 🔎 Auto-approve workflow — Copilot pagination review comment is a false positive (2026-07-20)
 
 **Repo:** EDDI (`chore/auto-approve-copilot`)

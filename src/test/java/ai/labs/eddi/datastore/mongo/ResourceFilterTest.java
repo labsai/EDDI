@@ -6,7 +6,9 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilter;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilters;
+import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -149,8 +151,8 @@ class ResourceFilterTest {
 
         @SuppressWarnings("unchecked")
         @Test
-        @DisplayName("should default to limit=20 when limit is 0")
-        void defaultsLimitWhenZero() throws Exception {
+        @DisplayName("should treat limit=0 as unlimited, up to the safety ceiling")
+        void zeroLimitMeansUnlimited() throws Exception {
             var queryFilter = new QueryFilter("field", false);
             var queryFilters = new QueryFilters(List.of(queryFilter));
 
@@ -165,7 +167,28 @@ class ResourceFilterTest {
 
             filter.readResources(new QueryFilters[]{queryFilters}, null, 0);
 
-            verify(iterable).limit(20);
+            verify(iterable).limit(IResourceStorage.MAX_RESULT_LIMIT);
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("should use the default page size when limit is null")
+        void nullLimitUsesDefaultPageSize() throws Exception {
+            var queryFilter = new QueryFilter("field", false);
+            var queryFilters = new QueryFilters(List.of(queryFilter));
+
+            FindIterable<Document> iterable = mock(FindIterable.class);
+            when(collection.find(any(BsonDocument.class))).thenReturn(iterable);
+            when(iterable.sort(any(Document.class))).thenReturn(iterable);
+            when(iterable.limit(anyInt())).thenReturn(iterable);
+
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            doReturn(cursor).when(iterable).iterator();
+            when(cursor.hasNext()).thenReturn(false);
+
+            filter.readResources(new QueryFilters[]{queryFilters}, null, null);
+
+            verify(iterable).limit(IDescriptorStore.DEFAULT_LIMIT);
         }
 
         @SuppressWarnings("unchecked")

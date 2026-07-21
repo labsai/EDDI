@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.utils.FileUtilities;
@@ -582,7 +583,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
         try {
             List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors(
-                    "ai.labs.snippet", "", 0, 0, false);
+                    "ai.labs.snippet", "", 0, IDescriptorStore.NO_LIMIT, false);
             if (descriptors == null || descriptors.isEmpty()) {
                 return;
             }
