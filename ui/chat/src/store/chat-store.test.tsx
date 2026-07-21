@@ -634,3 +634,78 @@ describe("withdrawing a SECRET turn", () => {
     expect(next.restoreDraft).toBe("hi");
   });
 });
+
+describe("ADD_SNAPSHOT_MESSAGE dedupes against messages rendered by any path", () => {
+  it("suppresses a text already shown, even though that message carries no sourceKey", () => {
+    // The paused placeholder reaches the transcript via the streaming `done`
+    // handler, which uses plain ADD_MESSAGE and stamps no key. Matching on
+    // sourceKey alone could never see it, so the post-approval refresh
+    // re-appended the placeholder it was written to suppress.
+    const withPlaceholder = {
+      ...initialState,
+      messages: [
+        {
+          id: "a1",
+          role: "agent" as const,
+          content: "Waiting for approval to send the email.",
+          timestamp: 1,
+        },
+      ],
+    };
+
+    const next = chatReducer(withPlaceholder, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: {
+        id: "a2",
+        role: "agent",
+        content: "Waiting for approval to send the email.",
+        timestamp: 2,
+      },
+    });
+
+    expect(next.messages).toHaveLength(1);
+    expect(next).toBe(withPlaceholder);
+  });
+
+  it("ignores surrounding whitespace when matching", () => {
+    const state = {
+      ...initialState,
+      messages: [{ id: "a1", role: "agent" as const, content: "Done.", timestamp: 1 }],
+    };
+
+    const next = chatReducer(state, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: { id: "a2", role: "agent", content: "  Done.\n", timestamp: 2 },
+    });
+
+    expect(next.messages).toHaveLength(1);
+  });
+
+  it("still adds a genuinely different reply", () => {
+    const state = {
+      ...initialState,
+      messages: [{ id: "a1", role: "agent" as const, content: "First answer.", timestamp: 1 }],
+    };
+
+    const next = chatReducer(state, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: { id: "a2", role: "agent", content: "Second answer.", timestamp: 2 },
+    });
+
+    expect(next.messages).toHaveLength(2);
+  });
+
+  it("does not match a USER message with the same text", () => {
+    const state = {
+      ...initialState,
+      messages: [{ id: "u1", role: "user" as const, content: "hello", timestamp: 1 }],
+    };
+
+    const next = chatReducer(state, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: { id: "a1", role: "agent", content: "hello", timestamp: 2 },
+    });
+
+    expect(next.messages).toHaveLength(2);
+  });
+});

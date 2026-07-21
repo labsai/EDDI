@@ -155,11 +155,21 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, messages: [...state.messages, action.message] };
 
     case "ADD_SNAPSHOT_MESSAGE": {
-      // Snapshot reads are repeatable: handleRetry and the post-approval
-      // refresh both re-read the SAME step. Appending blindly duplicated the
-      // transcript on every refresh, so entries carry a stable sourceKey.
-      const key = action.message.sourceKey;
-      if (key && state.messages.some((m) => m.sourceKey === key)) return state;
+      // Used ONLY by reads that deliberately revisit an already-rendered step
+      // (retry, post-approval refresh). Matching is on agent-message CONTENT,
+      // not on a sourceKey: the text being re-read may have first reached the
+      // transcript through the streaming `done` handler, which uses plain
+      // ADD_MESSAGE and stamps no key — so a key-only comparison could never
+      // see the very placeholder this exists to suppress.
+      const incoming = action.message.content.trim();
+      if (
+        incoming &&
+        state.messages.some(
+          (m) => m.role === "agent" && m.content.trim() === incoming,
+        )
+      ) {
+        return state;
+      }
       return { ...state, messages: [...state.messages, action.message] };
     }
 

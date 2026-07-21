@@ -385,7 +385,7 @@ export function ChatWidget() {
 
       // Handle the "conversationOutputs" format (from POST /agents responses)
       if (snapshot.conversationOutputs?.length) {
-        snapshot.conversationOutputs.forEach((output: any, outputIndex: number) => {
+        snapshot.conversationOutputs.forEach((output: any) => {
           // Extract agent replies and detect input field requests
           const agentReplies: unknown[] = output.output ?? [];
 
@@ -411,18 +411,11 @@ export function ChatWidget() {
 
           // Handles bare-string entries too — HITL's pending-approval
           // placeholder and reviewer-rejection message arrive as raw strings.
-          extractOutputTexts(agentReplies).forEach((text, textIndex) => {
+          extractOutputTexts(agentReplies).forEach((text) => {
             const message = makeAgentMessage(text);
-            if (!dedupe) {
-              dispatch({ type: "ADD_MESSAGE", message });
-              return;
-            }
             dispatch({
-              type: "ADD_SNAPSHOT_MESSAGE",
-              message: {
-                ...message,
-                sourceKey: `out:${outputIndex}:${textIndex}:${text}`,
-              },
+              type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
+              message,
             });
           });
         });

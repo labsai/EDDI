@@ -588,3 +588,96 @@ describe("ChatWidget — round-4 regressions", () => {
     expect(await screen.findByText(b)).toBeInTheDocument();
   });
 });
+
+describe("ChatWidget — resume after approval", () => {
+  it("does not duplicate the pending-approval placeholder when the pause resolves", async () => {
+    // The placeholder is rendered by the streaming `done` handler; the
+    // post-approval refresh then re-reads the SAME step. Matching on a
+    // sourceKey could never see the placeholder (it carries none), so it was
+    // appended a second time.
+    const PLACEHOLDER = "Waiting for approval to send the email.";
+    let approvalPolls = 0;
+    let convReads = 0;
+
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/approval-status")) {
+        approvalPolls += 1;
+        // First poll: still paused. Second: settled, so the widget refreshes.
+        return new Response(
+          JSON.stringify({
+            conversationId: "conv-1",
+            state: approvalPolls === 1 ? "AWAITING_HUMAN" : "READY",
+            pausedAt: "2026-07-21T10:00:00Z",
+            pauseReason: "manager approval required",
+            timeoutPolicy: "AUTO_REJECT",
+            approvalTimeout: "PT15M",
+            pauseDetails: null,
+          }),
+          { status: 200 },
+        );
+      }
+      if (href.includes("/stream")) {
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(
+                new TextEncoder().encode(
+                  `event: done\ndata: ${JSON.stringify({
+                    conversationState: "AWAITING_HUMAN",
+                    conversationOutputs: [{ output: [PLACEHOLDER], quickReplies: [] }],
+                  })}\n\n`,
+                ),
+              );
+              c.close();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      // Conversation reads, in the order the widget makes them:
+      //   1 = initial load after start (nothing said yet)
+      //   2 = post-stream undo/redo refresh (still paused)
+      //   3+ = the post-approval re-read, which returns the SAME step the
+      //        `done` payload already rendered — placeholder included.
+      convReads += 1;
+      if (convReads === 1) {
+        return new Response(
+          JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+          { status: 200 },
+        );
+      }
+      if (convReads === 2) {
+        return new Response(
+          JSON.stringify({ conversationState: "AWAITING_HUMAN", conversationSteps: [] }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [{ output: [PLACEHOLDER], quickReplies: [] }],
+          conversationSteps: [],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+    const input = await screen.findByTestId("chat-input");
+    fireEvent.change(input, { target: { value: "email bob" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+
+    await screen.findByText(PLACEHOLDER);
+
+    // Let the watch observe the settled state and run its refresh.
+    await waitFor(() => expect(approvalPolls).toBeGreaterThan(1), { timeout: 8000 });
+    await waitFor(() => {
+      expect(screen.getAllByText(PLACEHOLDER)).toHaveLength(1);
+    });
+  }, 15000);
+});
