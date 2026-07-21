@@ -90,7 +90,8 @@ export async function getHistoryLogs(
 }
 
 export async function getInstanceId(): Promise<InstanceInfo> {
-  return api.get<InstanceInfo>(`${BASE}/instance`);
+  // Backend serves this at /instance-id (IRestLogAdmin.getInstanceId @Path("/instance-id")).
+  return api.get<InstanceInfo>(`${BASE}/instance-id`);
 }
 
 /**

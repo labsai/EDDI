@@ -74,7 +74,18 @@ export async function listSecrets(
     `${api.getBaseUrl()}${BASE}/${tenantId}`,
     { headers: api.getAuthHeader() },
   );
-  if (!res.ok) return [];
+  // Throw on non-OK so callers can distinguish a real failure (500/503/403)
+  // from a genuinely empty vault ([]). Swallowing errors here made every
+  // backend failure render as the misleading "No secrets found" empty state.
+  if (!res.ok) {
+    if (res.status === 503) {
+      throw new Error(
+        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+      );
+    }
+    const err = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(err.error || `Failed to list secrets (HTTP ${res.status})`);
+  }
   return res.json();
 }
 

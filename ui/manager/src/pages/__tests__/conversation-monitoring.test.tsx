@@ -146,4 +146,39 @@ describe("ConversationMonitoringPage — purge ended", () => {
     });
     expect(toast.success).toHaveBeenCalled();
   });
+
+  it("clamps the days input to a minimum of 1 (0 would purge ALL ended conversations)", async () => {
+    renderWithProviders(<ConversationMonitoringPage />);
+
+    const input = screen.getByTestId("purge-days") as HTMLInputElement;
+    expect(input).toHaveAttribute("min", "1");
+
+    // Trying to set 0 (which would purge every ENDED conversation) is clamped.
+    fireEvent.change(input, { target: { value: "0" } });
+    expect(input).toHaveValue(1);
+  });
+
+  it("purges with the clamped minimum of 1 day, never 0", async () => {
+    let purgeUrl = "";
+    server.use(
+      http.delete("*/conversationstore/conversations/", ({ request }) => {
+        purgeUrl = request.url;
+        return HttpResponse.json(0);
+      })
+    );
+
+    renderWithProviders(<ConversationMonitoringPage />);
+    const user = userEvent.setup();
+
+    fireEvent.change(screen.getByTestId("purge-days"), { target: { value: "0" } });
+    await user.click(screen.getByTestId("purge-ended"));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Purge" }));
+
+    await waitFor(() => {
+      expect(purgeUrl).toContain("deleteOlderThanDays=1");
+    });
+    expect(purgeUrl).not.toContain("deleteOlderThanDays=0");
+  });
 });

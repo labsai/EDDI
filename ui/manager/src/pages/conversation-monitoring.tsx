@@ -393,9 +393,9 @@ export function ConversationMonitoringPage() {
           <input
             id="purge-days"
             type="number"
-            min={0}
+            min={1}
             value={purgeDays}
-            onChange={(e) => setPurgeDays(Math.max(0, Number(e.target.value)))}
+            onChange={(e) => setPurgeDays(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
             data-testid="purge-days"
             className="h-9 w-24 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />

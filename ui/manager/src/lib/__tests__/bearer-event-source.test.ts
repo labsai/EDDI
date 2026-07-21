@@ -78,7 +78,7 @@ describe("BearerEventSource", () => {
     es.close();
   });
 
-  it("parses named events with event: field", async () => {
+  it("delivers named events only to their listener, not onmessage", async () => {
     const body = createSSEStream(["event: custom\ndata: payload\n\n"]);
     fetchSpy.mockResolvedValueOnce(
       new Response(body, { status: 200 })
@@ -93,13 +93,34 @@ describe("BearerEventSource", () => {
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(10);
 
-    // onmessage receives ALL events
-    expect(msgFn).toHaveBeenCalledTimes(1);
-    // Named listener also receives it
+    // Native EventSource semantics: onmessage fires only for the default
+    // "message" type, NOT for named events. This is what prevents a caller
+    // that registers addEventListener("log") + onmessage (unnamed fallback)
+    // from handling a named "log" event twice.
+    expect(msgFn).not.toHaveBeenCalled();
+    // The named listener receives it exactly once.
     expect(listenerFn).toHaveBeenCalledTimes(1);
     const event = listenerFn.mock.calls[0]![0] as MessageEvent;
     expect(event.type).toBe("custom");
     expect(event.data).toBe("payload");
+
+    es.close();
+  });
+
+  it("onmessage still fires for default (unnamed) 'message' events", async () => {
+    const body = createSSEStream(["data: fallback\n\n"]);
+    fetchSpy.mockResolvedValueOnce(new Response(body, { status: 200 }));
+
+    const msgFn = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.onmessage = msgFn;
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Unnamed events default to type "message" → onmessage fallback fires once.
+    expect(msgFn).toHaveBeenCalledTimes(1);
+    expect((msgFn.mock.calls[0]![0] as MessageEvent).data).toBe("fallback");
 
     es.close();
   });

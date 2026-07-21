@@ -2,11 +2,40 @@ import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { AuditPage } from "@/pages/audit";
+import { server } from "@/test/mocks/server";
+import { http, HttpResponse } from "msw";
+import type { AuditEntry } from "@/lib/api/audit";
 
 function renderAudit() {
   return renderWithProviders(<AuditPage />, {
     initialRoute: "/manage/audit",
   });
+}
+
+/** Build a full page of audit entries whose ids encode the page label. */
+function makeAuditPage(label: string, count: number, skip: number): AuditEntry[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `${label}-${skip + i}`,
+    conversationId: "conv-load-more",
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: null,
+    environment: null,
+    stepIndex: 0,
+    taskId: `${label}-task-${skip + i}`,
+    taskType: "behavior",
+    taskIndex: i,
+    durationMs: 10,
+    input: null,
+    output: null,
+    llmDetail: null,
+    toolCalls: null,
+    actions: null,
+    cost: 0,
+    timestamp: new Date().toISOString(),
+    hmac: null,
+    agentSignature: null,
+  }));
 }
 
 describe("AuditPage", () => {
@@ -288,5 +317,44 @@ describe("AuditPage", () => {
     // All 4 hardcoded entries have HMAC, so all should show "Signed" badges
     const signedBadges = screen.getAllByTestId("hmac-badge");
     expect(signedBadges.length).toBeGreaterThan(0);
+  });
+
+  // ─── Paging: Load more appends instead of replacing ──────────────
+
+  it("'Load more' appends the next page and keeps page-1 entries", async () => {
+    const PAGE_SIZE = 100;
+    server.use(
+      http.get("*/auditstore/:conversationId", ({ request, params }) => {
+        const url = new URL(request.url);
+        if (url.pathname.endsWith("/count")) return;
+        if (params.conversationId === "agent") return;
+        const skip = Number(url.searchParams.get("skip") ?? "0");
+        // Page 1 (skip 0) and page 2 (skip 100) carry distinct, identifiable ids.
+        const label = skip === 0 ? "page1" : "page2";
+        return HttpResponse.json(makeAuditPage(label, PAGE_SIZE, skip));
+      }),
+    );
+
+    renderAudit();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId("mode-conversation"));
+    await user.type(screen.getByTestId("conversation-input"), "conv-load-more");
+    await user.click(screen.getByTestId("search-button"));
+
+    // Page 1 loaded.
+    await waitFor(() => {
+      expect(screen.getByTestId("audit-entry-page1-0")).toBeInTheDocument();
+    });
+
+    // Load more → fetches skip=100.
+    await user.click(screen.getByTestId("load-more"));
+
+    // Page 2 entries appear...
+    await waitFor(() => {
+      expect(screen.getByTestId("audit-entry-page2-100")).toBeInTheDocument();
+    });
+    // ...and page-1 entries are still present (appended, not replaced).
+    expect(screen.getByTestId("audit-entry-page1-0")).toBeInTheDocument();
   });
 });

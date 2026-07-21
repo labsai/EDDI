@@ -59,6 +59,7 @@ export function SecretsPage() {
   const [rotateValue, setRotateValue] = useState("");
   const [rotateVisible, setRotateVisible] = useState(false);
   const [newAllowedAgents, setNewAllowedAgents] = useState<string[]>([]);
+  const [newAgentInput, setNewAgentInput] = useState("");
 
   /* ─── Key-lifecycle (danger zone) state ─── */
   const [showRotateDek, setShowRotateDek] = useState(false);
@@ -72,7 +73,13 @@ export function SecretsPage() {
   const [kekResult, setKekResult] = useState<number | null>(null);
 
   /* ─── Queries ─── */
-  const { data: secrets, isLoading } = useSecrets(tenantId);
+  const {
+    data: secrets,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useSecrets(tenantId);
   const { data: vaultHealth } = useVaultHealth();
   const storeMut = useStoreSecret();
   const deleteMut = useDeleteSecret();
@@ -84,6 +91,18 @@ export function SecretsPage() {
   const vaultDown = vaultHealth?.available === false;
   const secretCount = secrets?.length ?? 0;
   const kekValid = kekOldKey.trim().length > 0 && kekNewKey.length >= 8;
+
+  /* The KEK-rotation result is tenant-agnostic advice about the running instance,
+   * but leaving it up while switching tenants is confusing. Clear it on switch. */
+  useEffect(() => {
+    setKekResult(null);
+  }, [tenantId]);
+
+  /* Drop any pending (un-committed) allowed-agent text once the create dialog
+   * closes so it doesn't reappear the next time the dialog is opened. */
+  useEffect(() => {
+    if (!showCreate) setNewAgentInput("");
+  }, [showCreate]);
 
   /* ─── Copy vault reference ─── */
   const copyRef = useCallback(
@@ -107,13 +126,21 @@ export function SecretsPage() {
   /* ─── Handlers ─── */
   const handleCreate = useCallback(() => {
     if (!newKeyName.trim() || !newValue.trim()) return;
+    // Flush any typed-but-not-Entered agent so it isn't silently dropped
+    // (which would leave the secret unrestricted / available to ALL agents).
+    const pendingAgent = newAgentInput.trim().replace(/,$/, "");
+    const finalAllowedAgents =
+      pendingAgent && !newAllowedAgents.includes(pendingAgent)
+        ? [...newAllowedAgents, pendingAgent]
+        : newAllowedAgents;
     storeMut.mutate(
       {
         tenantId,
         keyName: newKeyName.trim(),
         value: newValue.trim(),
         description: newDescription.trim() || undefined,
-        allowedAgents: newAllowedAgents.length > 0 ? newAllowedAgents : undefined,
+        allowedAgents:
+          finalAllowedAgents.length > 0 ? finalAllowedAgents : undefined,
       },
       {
         onSuccess: () => {
@@ -129,12 +156,13 @@ export function SecretsPage() {
           setNewDescription("");
           setValueVisible(false);
           setNewAllowedAgents([]);
+          setNewAgentInput("");
         },
         onError: (err) =>
           toast.error(err instanceof Error ? err.message : String(err)),
       },
     );
-  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, storeMut, t]);
+  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, newAgentInput, storeMut, t]);
 
   const handleDelete = useCallback(() => {
     if (!deleteTarget) return;
@@ -517,8 +545,33 @@ export function SecretsPage() {
         </div>
       )}
 
+      {/* Error state — distinct from the empty state so a 500/503/403 is not
+          mistaken for an empty vault. */}
+      {isError && !vaultDown && (
+        <div
+          className="space-y-3 rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center"
+          data-testid="secrets-error"
+        >
+          <AlertTriangle className="mx-auto h-10 w-10 text-destructive" />
+          <p className="text-lg font-medium text-foreground">
+            {t("secrets.loadError", "Couldn't load secrets")}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {getErrorMessage(error)}
+          </p>
+          <button
+            onClick={() => refetch()}
+            className="inline-flex items-center gap-2 rounded-lg border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            data-testid="secrets-error-retry"
+          >
+            <RefreshCw className="h-4 w-4" />
+            {t("common.retry", "Retry")}
+          </button>
+        </div>
+      )}
+
       {/* Empty state */}
-      {secrets && secrets.length === 0 && (
+      {!isError && secrets && secrets.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border p-12 text-center">
           <KeyRound className="h-12 w-12 text-muted-foreground/30" />
           <p className="mt-4 text-lg font-medium text-foreground">
@@ -557,10 +610,19 @@ export function SecretsPage() {
           {/* KEK rotation success — unmissable restart instruction */}
           {kekResult !== null && (
             <div
-              className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3"
+              className="relative space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 pe-10"
               data-testid="kek-rotation-result"
               role="status"
             >
+              <button
+                type="button"
+                onClick={() => setKekResult(null)}
+                className="absolute inset-e-2 top-2 rounded-md p-1 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
+                aria-label={t("common.dismiss", "Dismiss")}
+                data-testid="dismiss-kek-result"
+              >
+                <X className="h-4 w-4" />
+              </button>
               <p className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
                 <AlertTriangle className="h-4 w-4 shrink-0" />
                 {t("secrets.kekResultTitle", {
@@ -1024,6 +1086,8 @@ export function SecretsPage() {
                   <input
                     id="new-allowed-agents"
                     type="text"
+                    value={newAgentInput}
+                    onChange={(e) => setNewAgentInput(e.target.value)}
                     placeholder={t("secrets.allowedAgentsPlaceholder", "Type agent ID and press Enter (empty = all agents)")}
                     className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                     data-testid="new-allowed-agents-input"
@@ -1031,12 +1095,11 @@ export function SecretsPage() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === ",") {
                         e.preventDefault();
-                        const input = e.currentTarget;
-                        const val = input.value.trim().replace(/,$/,"");
+                        const val = newAgentInput.trim().replace(/,$/,"");
                         if (val && !newAllowedAgents.includes(val)) {
                           setNewAllowedAgents((prev) => [...prev, val]);
-                          input.value = "";
                         }
+                        setNewAgentInput("");
                       }
                     }}
                   />

@@ -207,6 +207,54 @@ describe("SecretsPage — key lifecycle danger zone", () => {
     expect(result).toHaveTextContent(/4/);
   });
 
+  async function rotateKekSuccessfully(
+    user: ReturnType<typeof userEvent.setup>,
+  ) {
+    server.use(
+      http.post("*/secretstore/secrets/admin/rotate-kek", () =>
+        HttpResponse.json({
+          deksReEncrypted: 4,
+          message: "KEK rotated successfully.",
+        }),
+      ),
+    );
+    await user.click(await screen.findByTestId("open-rotate-kek"));
+    await user.type(screen.getByTestId("kek-old-key-input"), "old-master-key");
+    await user.type(screen.getByTestId("kek-new-key-input"), "new-master-key-123");
+    await user.click(screen.getByRole("button", { name: "Rotate master key now" }));
+    await screen.findByTestId("kek-rotation-result");
+  }
+
+  it("KEK result banner can be dismissed with the close control", async () => {
+    renderSecrets();
+    const user = userEvent.setup();
+
+    await rotateKekSuccessfully(user);
+
+    await user.click(screen.getByTestId("dismiss-kek-result"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("kek-rotation-result")).not.toBeInTheDocument();
+    });
+  });
+
+  it("KEK result banner clears when the tenant is switched", async () => {
+    renderSecrets();
+    const user = userEvent.setup();
+
+    await rotateKekSuccessfully(user);
+    expect(screen.getByTestId("kek-rotation-result")).toBeInTheDocument();
+
+    // Switching tenants should drop the (tenant-agnostic but stale) banner.
+    const tenantInput = screen.getByTestId("tenant-input");
+    await user.clear(tenantInput);
+    await user.type(tenantInput, "other-tenant");
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("kek-rotation-result")).not.toBeInTheDocument();
+    });
+  });
+
   // ─── Reset: type-to-confirm gating ─────────────────────────────────────
 
   it("reset is gated by type-to-confirm — button disabled until tenant name typed", async () => {
