@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import type { ChatMessage, QuickReply, ConversationState, ChatConfig, InputField } from "@/types";
+import type { AttachmentResult } from "@/api/attachments-api";
 
 /* ─── State ───────────────────────────────────── */
 
@@ -29,6 +30,12 @@ export interface ChatState {
   activeInputField: InputField | null;
   /** Set when the user toggles the 🔒 secret mode on the chat input. */
   isSecretMode: boolean;
+  /**
+   * Files uploaded but not yet attached to a turn. They travel with the NEXT
+   * message as attachment_N context entries — uploading alone does not send
+   * them to the agent.
+   */
+  pendingAttachments: AttachmentResult[];
 }
 
 const defaultConfig: ChatConfig = {
@@ -62,6 +69,7 @@ export const initialState: ChatState = {
   config: defaultConfig,
   activeInputField: null,
   isSecretMode: false,
+  pendingAttachments: [],
 };
 
 /* ─── Actions ─────────────────────────────────── */
@@ -83,7 +91,10 @@ export type ChatAction =
   | { type: "SET_CONFIG"; config: Partial<ChatConfig> }
   | { type: "SET_INPUT_FIELD"; field: InputField }
   | { type: "CLEAR_INPUT_FIELD" }
-  | { type: "TOGGLE_SECRET_MODE" };
+  | { type: "TOGGLE_SECRET_MODE" }
+  | { type: "ADD_ATTACHMENT"; attachment: AttachmentResult }
+  | { type: "REMOVE_ATTACHMENT"; storageRef: string }
+  | { type: "CLEAR_ATTACHMENTS" };
 
 /* ─── Reducer ─────────────────────────────────── */
 
@@ -137,6 +148,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         redoAvailable: false,
         activeInputField: null,
         isSecretMode: false,
+        pendingAttachments: [],
       };
 
     case "SET_UNDO_REDO":
@@ -167,6 +179,23 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "TOGGLE_SECRET_MODE":
       return { ...state, isSecretMode: !state.isSecretMode };
+
+    case "ADD_ATTACHMENT":
+      return {
+        ...state,
+        pendingAttachments: [...state.pendingAttachments, action.attachment],
+      };
+
+    case "REMOVE_ATTACHMENT":
+      return {
+        ...state,
+        pendingAttachments: state.pendingAttachments.filter(
+          (a) => a.storageRef !== action.storageRef,
+        ),
+      };
+
+    case "CLEAR_ATTACHMENTS":
+      return { ...state, pendingAttachments: [] };
 
     default:
       return state;

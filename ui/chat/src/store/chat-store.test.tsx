@@ -217,3 +217,43 @@ describe("REMOVE_EMPTY_STREAMING_MESSAGE", () => {
     expect(next.messages).toHaveLength(1);
   });
 });
+
+/* ─── Pending attachments ───────────────────── */
+
+describe("pending attachments", () => {
+  const att = { storageRef: "r1", fileName: "a.pdf", mimeType: "application/pdf", sizeBytes: 3 };
+
+  it("stages an uploaded attachment", () => {
+    const next = chatReducer(initialState, { type: "ADD_ATTACHMENT", attachment: att });
+
+    expect(next.pendingAttachments).toEqual([att]);
+  });
+
+  it("removes a staged attachment by storageRef", () => {
+    const staged = { ...initialState, pendingAttachments: [att, { ...att, storageRef: "r2" }] };
+
+    const next = chatReducer(staged, { type: "REMOVE_ATTACHMENT", storageRef: "r1" });
+
+    expect(next.pendingAttachments.map((a) => a.storageRef)).toEqual(["r2"]);
+  });
+
+  it("clears staged attachments once the turn is sent", () => {
+    const staged = { ...initialState, pendingAttachments: [att] };
+
+    const next = chatReducer(staged, { type: "CLEAR_ATTACHMENTS" });
+
+    expect(next.pendingAttachments).toEqual([]);
+  });
+
+  it("drops staged attachments when the conversation is reset", () => {
+    const staged = { ...initialState, pendingAttachments: [att] };
+
+    const next = chatReducer(staged, { type: "CLEAR_MESSAGES" });
+
+    expect(next.pendingAttachments).toEqual([]);
+  });
+
+  it("starts with no staged attachments", () => {
+    expect(initialState.pendingAttachments).toEqual([]);
+  });
+});

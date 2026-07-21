@@ -304,32 +304,3 @@ export async function fetchAgentDescriptor(
     return {};
   }
 }
-
-/* ─── Attachments ────────────────────────────── */
-
-export interface AttachmentResult {
-  storageRef: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-}
-
-/**
- * Upload a file attachment to a conversation.
- * POST /conversations/{conversationId}/attachments (multipart/form-data)
- */
-export async function uploadAttachment(
-  conversationId: string,
-  file: File,
-): Promise<AttachmentResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const res = await fetch(
-    buildUrl(`/conversations/${encodeSegment(conversationId)}/attachments`),
-    { method: "POST", body: formData },
-  );
-
-  if (!res.ok) throw new Error(`Attachment upload failed: ${res.statusText}`);
-  return res.json();
-}

@@ -1139,3 +1139,60 @@ a:hover { opacity: 0.85; }
     }
   }
 }
+
+/* ─── Attachment chips (staged, not yet sent) ─── */
+
+.chat-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px;
+}
+
+.chat-attachments__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--chat-input-border);
+  border-radius: 14px;
+  background: var(--chat-input-bg);
+  color: var(--chat-text);
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.chat-attachments__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachments__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--chat-text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-attachments__remove:hover,
+.chat-attachments__remove:focus-visible {
+  background: var(--chat-accent-soft);
+  color: var(--chat-text);
+}

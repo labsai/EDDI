@@ -5,7 +5,24 @@
 
 import { useState, useRef, useCallback, type KeyboardEvent } from "react";
 import { useChatState, useChatDispatch } from "@/store/chat-store";
-import { uploadAttachment } from "@/api/chat-api";
+import { uploadAttachment, MAX_ATTACHMENTS_PER_TURN } from "@/api/attachments-api";
+import { ApiError } from "@/api/http";
+
+/** Turn an upload failure into copy that names the actual reason. */
+function describeUploadFailure(err: unknown, fileName: string): string {
+  if (err instanceof ApiError) {
+    if (err.status === 413 || err.body.includes("ATTACHMENT_TOO_LARGE")) {
+      return `${fileName} is too large to upload.`;
+    }
+    if (err.body.includes("ATTACHMENT_REJECTED")) {
+      return `${fileName} was rejected — that file type is not accepted.`;
+    }
+    if (err.status === 401 || err.status === 403) {
+      return `You are not allowed to attach files to this conversation.`;
+    }
+  }
+  return `Failed to upload ${fileName}.`;
+}
 
 interface ChatInputProps {
   onSend: (message: string, isSecret?: boolean) => void;
@@ -14,7 +31,7 @@ interface ChatInputProps {
 }
 
 export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) {
-  const { isProcessing, config, isSecretMode } = useChatState();
+  const { isProcessing, config, isSecretMode, pendingAttachments } = useChatState();
   const dispatch = useChatDispatch();
   const [value, setValue] = useState("");
   const [secretVisible, setSecretVisible] = useState(false);
@@ -22,7 +39,9 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    if (!trimmed || disabled || isProcessing) return;
+    // An attachment on its own is a valid turn — the file is the message.
+    const hasAttachments = pendingAttachments.length > 0;
+    if ((!trimmed && !hasAttachments) || disabled || isProcessing) return;
     onSend(trimmed, isSecretMode);
     setValue("");
     if (isSecretMode) {
@@ -32,7 +51,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, disabled, isProcessing, isSecretMode, onSend, dispatch]);
+  }, [value, disabled, isProcessing, isSecretMode, onSend, dispatch, pendingAttachments.length]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
@@ -56,7 +75,10 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
     setSecretVisible(false);
   }, [dispatch]);
 
-  const canSend = value.trim().length > 0 && !disabled && !isProcessing;
+  const canSend =
+    (value.trim().length > 0 || pendingAttachments.length > 0) &&
+    !disabled &&
+    !isProcessing;
 
   // ── Attachment upload ──
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -65,17 +87,35 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
   const handleAttach = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !conversationId) return;
-    setIsUploading(true);
-    try {
-      const result = await uploadAttachment(conversationId, file);
-      onSend(`📎 ${file.name} [ref:${result.storageRef}]`);
-    } catch {
+
+    if (pendingAttachments.length >= MAX_ATTACHMENTS_PER_TURN) {
       dispatch({
         type: "ADD_MESSAGE",
         message: {
           id: `error-${Date.now()}-${Math.random()}`,
           role: "agent",
-          content: `⚠️ Failed to upload attachment: ${file.name}`,
+          content: `⚠️ You can attach at most ${MAX_ATTACHMENTS_PER_TURN} files per message.`,
+          timestamp: Date.now(),
+        },
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const result = await uploadAttachment(conversationId, file);
+      // Stage it. The ref reaches the agent as an attachment_N context entry
+      // when the next message is sent — embedding it in the message text was
+      // silently ignored by the backend.
+      dispatch({ type: "ADD_ATTACHMENT", attachment: result });
+    } catch (err) {
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: {
+          id: `error-${Date.now()}-${Math.random()}`,
+          role: "agent",
+          content: `⚠️ ${describeUploadFailure(err, file.name)}`,
           timestamp: Date.now(),
         },
       });
@@ -83,9 +123,34 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [conversationId, onSend, dispatch]);
+  }, [conversationId, dispatch, pendingAttachments.length]);
 
   return (
+    <div className="chat-input-wrapper">
+      {pendingAttachments.length > 0 && (
+        <div className="chat-attachments" data-testid="attachment-chips">
+          {pendingAttachments.map((a) => (
+            <span
+              key={a.storageRef}
+              className="chat-attachments__chip"
+              data-testid="attachment-chip"
+            >
+              <span className="chat-attachments__name">📎 {a.fileName}</span>
+              <button
+                type="button"
+                className="chat-attachments__remove"
+                onClick={() =>
+                  dispatch({ type: "REMOVE_ATTACHMENT", storageRef: a.storageRef })
+                }
+                aria-label={`Remove ${a.fileName}`}
+                data-testid="attachment-remove"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
     <div className="chat-input">
       {/* Hidden file input for attachments */}
       <input
@@ -175,6 +240,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
           "➤"
         )}
       </button>
+    </div>
     </div>
   );
 }

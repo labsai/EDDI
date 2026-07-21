@@ -33,6 +33,7 @@ import {
   demoSendMessageStreaming,
   demoGetQuickReplies,
 } from "@/api/demo-api";
+import { buildAttachmentContext } from "@/api/attachments-api";
 import {
   parseDoneSnapshot,
   parseErrorMessage,
@@ -408,19 +409,34 @@ export function ChatWidget() {
   /* ─── Send message ──────────────────────────── */
   const handleSend = useCallback(
     async (text: string, isSecret?: boolean) => {
-      // Build context for secret input
+      // Attachments staged in the composer travel with THIS turn as
+      // attachment_N context entries — the only path the backend reads.
+      const attachments = state.pendingAttachments;
+      const attachmentContext = buildAttachmentContext(attachments);
+
       const secretContext = isSecret
         ? { secretInput: { type: "string" as const, value: "true" } }
         : undefined;
 
-      // Add user message (display masked if secret)
+      const context =
+        secretContext || Object.keys(attachmentContext).length > 0
+          ? { ...secretContext, ...attachmentContext }
+          : undefined;
+
+      // Add user message (display masked if secret). Attachments are named in
+      // the transcript so the user can see what was actually sent.
+      const attachmentLine = attachments.length
+        ? attachments.map((a) => `📎 ${a.fileName}`).join("\n")
+        : "";
+      const displayed = isSecret ? "●●●●●●●●" : text;
       const userMsg: ChatMessage = {
         id: `user-${Date.now()}-${Math.random()}`,
         role: "user",
-        content: isSecret ? "●●●●●●●●" : text,
+        content: [attachmentLine, displayed].filter(Boolean).join("\n\n"),
         timestamp: Date.now(),
       };
       dispatch({ type: "ADD_MESSAGE", message: userMsg });
+      dispatch({ type: "CLEAR_ATTACHMENTS" });
       dispatch({ type: "SET_QUICK_REPLIES", replies: [] });
       dispatch({ type: "SET_PROCESSING", value: true });
       dispatch({ type: "SET_THINKING", value: true });
@@ -487,7 +503,7 @@ export function ChatWidget() {
             agentId,
             state.conversationId,
             text,
-            secretContext,
+            context,
             abort.signal,
           );
 
@@ -538,7 +554,7 @@ export function ChatWidget() {
             state.conversationId,
             text,
             userId,
-            secretContext,
+            context,
           );
           dispatch({ type: "SET_THINKING", value: false });
           processSnapshot(snapshot);
@@ -562,6 +578,7 @@ export function ChatWidget() {
       agentId,
       state.conversationId,
       state.config.enableStreaming,
+      state.pendingAttachments,
     ],
   );
 
