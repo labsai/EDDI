@@ -2423,24 +2423,24 @@
     "msgAtRisk": "Most of your workforce is dormant — consider engaging them"
   },
   "quickActions": {
-    "title": "Quick Actions",
-    "assembleTaskForce": "Assemble Task Force",
-    "assembleTaskForceDesc": "Bring experts together to solve complex challenges",
-    "chatWithAgent": "Chat with Agent",
-    "chatWithAgentDesc": "Have a 1:1 conversation with any digital expert",
-    "viewInsights": "View Insights",
-    "viewInsightsDesc": "Track your workforce's knowledge coverage",
-    "manageWorkforce": "Manage Workforce",
-    "manageWorkforceDesc": "Configure and deploy digital experts"
+    "title": "إجراءات سريعة",
+    "assembleTaskForce": "تشكيل فريق عمل",
+    "assembleTaskForceDesc": "اجمع الخبراء معًا لحل التحديات المعقدة",
+    "chatWithAgent": "الدردشة مع وكيل",
+    "chatWithAgentDesc": "إجراء محادثة فردية مع أي خبير رقمي",
+    "viewInsights": "عرض الرؤى",
+    "viewInsightsDesc": "تتبع تغطية المعرفة الخاصة بفريق عملك",
+    "manageWorkforce": "إدارة فريق العمل",
+    "manageWorkforceDesc": "تكوين ونشر الخبراء الرقميين"
   },
   "workforce": {
-    "title": "Your Digital Workforce",
-    "count": "{{count}} experts",
-    "agent": "Digital Expert",
-    "ready": "Ready",
-    "addAgent": "Deploy Agent",
-    "unnamed": "Unnamed Agent",
-    "sectionLabel": "Workforce"
+    "title": "فريق عملك الرقمي",
+    "count": "{{count}} خبراء",
+    "agent": "خبير رقمي",
+    "ready": "جاهز",
+    "addAgent": "نشر الوكيل",
+    "unnamed": "وكيل بدون اسم",
+    "sectionLabel": "فريق العمل"
   },
   "analyticsPage": {
     "daysAgo": "منذ {{count}} يوم",
@@ -2512,11 +2512,11 @@
       "feature3": "Manage resources & extensions"
     },
     "workforce": {
-      "title": "Workforce",
-      "description": "Assemble AI teams that debate, analyze, and solve complex challenges together.",
-      "feature1": "Assemble agent task forces",
-      "feature2": "Run collaborative discussions",
-      "feature3": "Get synthesized answers"
+      "title": "فريق العمل",
+      "description": "قم بتجميع فرق الذكاء الاصطناعي التي تناقش وتحلل وتحل التحديات المعقدة معًا.",
+      "feature1": "تجميع فرق عمل الوكلاء",
+      "feature2": "إجراء مناقشات تعاونية",
+      "feature3": "الحصول على إجابات مجمعة"
     }
   }
 }

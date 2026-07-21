@@ -178,7 +178,7 @@ describe("AuditPage", () => {
     await user.click(llmButtons[0]!);
 
     await waitFor(() => {
-      expect(screen.getByText(/"compiled_prompt"/)).toBeInTheDocument();
+      expect(screen.getByText(/"compiledPrompt"/)).toBeInTheDocument();
     });
   });
 

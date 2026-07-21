@@ -2475,11 +2475,11 @@
       "feature3": "Manage resources & extensions"
     },
     "workforce": {
-      "title": "Workforce",
-      "description": "Assemble AI teams that debate, analyze, and solve complex challenges together.",
-      "feature1": "Assemble agent task forces",
-      "feature2": "Run collaborative discussions",
-      "feature3": "Get synthesized answers"
+      "title": "Fuerza de trabajo",
+      "description": "Reúna equipos de IA que debatan, analicen y resuelvan desafíos complejos juntos.",
+      "feature1": "Reunir grupos de trabajo de agentes",
+      "feature2": "Ejecutar discusiones colaborativas",
+      "feature3": "Obtener respuestas sintetizadas"
     }
   }
 }
