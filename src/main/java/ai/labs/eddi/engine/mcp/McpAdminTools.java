@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
@@ -142,6 +143,12 @@ public class McpAdminTools {
             }
 
             return resultJson("deployed", result);
+        } catch (QuotaExceededException e) {
+            // Return the quota reason rather than the generic message: an MCP client
+            // (and the model driving it) cannot self-correct from "check server logs"
+            // and will retry the deploy in a loop.
+            LOGGER.warn("MCP deploy_agent denied by quota for Agent " + agentId + ": " + e.getMessage());
+            return errorJson(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("MCP deploy_agent failed for Agent " + agentId, e);
             return errorJson("Failed to deploy agent. Check server logs for details.");

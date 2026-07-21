@@ -149,6 +149,49 @@ public class TenantQuotaService {
         return result;
     }
 
+    // ─── Agent Capacity ───
+
+    /**
+     * Read-only capacity gate: checks whether deploying one MORE distinct agent
+     * would exceed {@link TenantQuota#maxAgentsPerTenant()}.
+     * <p>
+     * Deliberately shaped like {@link #checkCostBudget} rather than
+     * {@code acquire*Slot()}: the deployed-agent count is a <em>stock</em> derived
+     * by counting current deployments, not a per-window <em>flow</em>. A stored
+     * counter would drift irrecoverably, because several paths add or remove
+     * deployments without passing through any acquire/release point — the scheduled
+     * re-deploy sweep, the old-version undeploy sweep, teardown tooling, and the
+     * lazy re-deploy on first use. Passing the count in also keeps this package
+     * free of a dependency on the deployment store and keeps the method trivially
+     * testable.
+     * <p>
+     * Like {@code checkCostBudget}, this does NOT increment
+     * {@code quotaAllowedCounter} on the happy path — that counter is documented as
+     * counting slot acquisitions only.
+     *
+     * @param currentDistinctAgents
+     *            number of distinct agent ids currently deployed for this tenant,
+     *            excluding the agent being deployed
+     */
+    public QuotaCheckResult checkAgentQuota(String tenantId, int currentDistinctAgents) {
+        TenantQuota quota = quotaStore.getQuota(tenantId);
+        if (quota == null || !quota.enabled()) {
+            return QuotaCheckResult.OK;
+        }
+
+        int limit = quota.maxAgentsPerTenant();
+        if (limit >= 0 && currentDistinctAgents >= limit) {
+            quotaDeniedCounter.increment();
+            meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "agent").increment();
+            String reason = String.format("Agent limit (%d) reached for tenant '%s' — undeploy an agent before deploying another", limit,
+                    tenantId);
+            LOGGER.warn(reason);
+            return QuotaCheckResult.denied(reason);
+        }
+
+        return QuotaCheckResult.OK;
+    }
+
     // ─── Cost Budget ───
 
     /**

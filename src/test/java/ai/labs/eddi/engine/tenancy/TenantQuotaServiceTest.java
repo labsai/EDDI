@@ -133,6 +133,56 @@ class TenantQuotaServiceTest {
 
     // --- Cost budget ---
 
+    // --- Agent capacity ---
+
+    @Test
+    @DisplayName("checkAgentQuota — allows when below the agent limit")
+    void shouldAllowBelowAgentLimit() {
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, 3, -1, -1.0, true));
+
+        assertTrue(quotaService.checkAgentQuota(TENANT_ID, 2).allowed());
+    }
+
+    @Test
+    @DisplayName("checkAgentQuota — denies at exactly the agent limit")
+    void shouldDenyAtAgentLimit() {
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, 3, -1, -1.0, true));
+
+        QuotaCheckResult result = quotaService.checkAgentQuota(TENANT_ID, 3);
+
+        assertFalse(result.allowed());
+        assertTrue(result.reason().contains("Agent limit (3)"));
+        assertEquals(1.0, meterRegistry.counter("eddi.tenant.quota.denied", "tenant", TENANT_ID, "type", "agent").count());
+    }
+
+    @Test
+    @DisplayName("checkAgentQuota — -1 means unlimited")
+    void shouldAllowUnlimitedAgents() {
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, -1, -1, -1.0, true));
+
+        assertTrue(quotaService.checkAgentQuota(TENANT_ID, 9999).allowed());
+    }
+
+    @Test
+    @DisplayName("checkAgentQuota — disabled quota allows anything")
+    void shouldAllowWhenAgentQuotaDisabled() {
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, 1, -1, -1.0, false));
+
+        assertTrue(quotaService.checkAgentQuota(TENANT_ID, 100).allowed());
+    }
+
+    @Test
+    @DisplayName("checkAgentQuota — does not touch the allowed counter (parity with checkCostBudget)")
+    void shouldNotCountAllowedOnAgentCheck() {
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, 3, -1, -1.0, true));
+
+        quotaService.checkAgentQuota(TENANT_ID, 1);
+
+        // eddi.tenant.quota.allowed counts slot ACQUISITIONS; a read-only gate must
+        // not inflate it, or the allowed/denied ratio becomes meaningless.
+        assertEquals(0.0, meterRegistry.counter("eddi.tenant.quota.allowed").count());
+    }
+
     @Test
     @DisplayName("should allow when within cost budget (pre-call check)")
     void shouldAllowWithinCostBudget() {

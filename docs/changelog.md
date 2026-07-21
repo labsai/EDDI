@@ -5,6 +5,34 @@
 
 ---
 
+## 🎫 Tenancy — enforce `maxAgentsPerTenant` on deploy (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+`TenantQuota.maxAgentsPerTenant` was persisted end-to-end by all three stores and round-tripped through the REST API, but **nothing ever read it** — `TenantQuotaService` had no agent method at all. Operators could set the limit and get silent no-enforcement.
+
+New `TenantQuotaService.checkAgentQuota(tenantId, currentDistinctAgents)` gates `RestAgentAdministration.deployAgent`, denying with `QuotaExceededException` → **429** `{"error":"quota_exceeded"}` via the existing mapper.
+
+### Design decisions
+
+- **A read-only gate, not an atomic counter.** The deployed-agent count is a *stock* derived by counting current deployments, not a per-window *flow*. A stored counter would drift irrecoverably: the 10s re-deploy sweep, the 24h old-version undeploy, `TeardownAgentTool`, `GroupConversationService` and the lazy re-deploy on first use all add or remove deployments without passing any acquire/release point. Modelled on `checkCostBudget`, so no `ITenantQuotaStore` method was added and the three store implementations are untouched.
+- **Placement is forced, not stylistic.** The gate sits between the null-checks and the `try`. Inside the `try`, `catch (Exception) → InternalServerErrorException` would convert the 429 into a **500**; inside the submitted `Callable` it runs off the request thread and could never produce a status code at all.
+- **Counts distinct agent ids**, so redeploys and version bumps are free — required because the old-version undeploy sweep legitimately keeps two versions of one agent deployed while the previous drains.
+- **The count unions persisted rows with live agents, and needs both.** `autoDeploy=false` never writes a `deployed` row, but the in-memory deploy is unconditional — so a rows-only count let a caller deploy unlimited agents with one query parameter. Those agents are genuinely live: `getLatestReadyAgent` serves them without consulting the store, and `ConversationService.getAgent` lazily re-deploys them after a restart, so the bypass is **durable**, not merely transient. Conversely, a live-agents-only count would be per-JVM and would miss other cluster nodes.
+- **Fails open.** A store outage must not block deployments; the denial is logged and metered either way.
+- **The two CDI callers surface the reason.** `AgentSetupService.deployAndWait` and `McpAdminTools.deployAgent` call the bean directly, so the exception mapper never runs — both now return the quota reason instead of "check server logs", which an agent designer (or a model driving `create_sub_agent`) cannot act on and would retry in a loop.
+- **Scheduled sweeps stay ungated by construction** — they call `IAgentFactory` directly, so lowering the limit never undeploys anything. The limit gates *new* agents only.
+
+### Not addressed
+
+Single-tenant only: the gate resolves `getDefaultTenantId()`, exactly as the conversation and api-call quotas already do. This is a deployment-wide cap, not per-organisation, until the multi-tenancy plan's Phase 1 lands. Do not describe it as multi-tenant enforcement.
+
+### Tests
+
+New `RestAgentAdministrationQuotaTest` (8 tests): denial throws `QuotaExceededException` and submits nothing to the runtime; two versions of one agent count once; redeploy skips the quota entirely; **live agents with no `deployed` row still count** (the loophole); no double counting; non-`READY` agents skipped; null agent ids skipped; store error fails open. Mutation-checked — reverting to a rows-only count fails exactly the loophole test. `TenantQuotaServiceTest` gains 5 tests including parity with `checkCostBudget` on not inflating the `allowed` counter. Both existing `RestAgentAdministration*Test` classes updated for the new constructor arg in the same commit.
+
+---
+
 ## 🧹 Orphan admin — `includeDeleted` becomes a true inclusion flag; purge default flipped (2026-07-21)
 
 **Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)

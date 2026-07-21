@@ -22,6 +22,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.Map;
@@ -42,10 +45,11 @@ class RestAgentAdministrationTest {
     private IDocumentDescriptorStore documentDescriptorStore;
     private IDeploymentListener deploymentListener;
     private IScheduleStore scheduleStore;
+    private TenantQuotaService tenantQuotaService;
     private RestAgentAdministration restAgentAdmin;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         runtime = mock(IRuntime.class);
         agentFactory = mock(IAgentFactory.class);
         deploymentStore = mock(IDeploymentStore.class);
@@ -54,9 +58,15 @@ class RestAgentAdministrationTest {
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         deploymentListener = mock(IDeploymentListener.class);
         scheduleStore = mock(IScheduleStore.class);
+        tenantQuotaService = mock(TenantQuotaService.class);
+        // Quota gate transparent by default so the existing deploy assertions are
+        // unaffected; the gate itself is covered by RestAgentAdministrationQuotaTest.
+        lenient().when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
+        lenient().when(agentFactory.getAllLatestAgents(any())).thenReturn(List.of());
+        lenient().when(tenantQuotaService.checkAgentQuota(any(), anyInt())).thenReturn(QuotaCheckResult.OK);
         restAgentAdmin = new RestAgentAdministration(runtime, agentFactory, deploymentStore,
                 conversationMemoryStore, restConversationStore, documentDescriptorStore,
-                deploymentListener, scheduleStore);
+                deploymentListener, scheduleStore, tenantQuotaService);
     }
 
     @Nested
