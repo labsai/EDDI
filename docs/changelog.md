@@ -39,6 +39,12 @@ Option (a) from the two candidates, because the storage layer supports a bounded
 - **The ceiling warning sanitizes `type`.** Self-review caught that the new WARN logged `type` unsanitized — and `type` reaches `readDescriptors` straight from `@QueryParam("type")` on `IRestDocumentDescriptorStore`. That is the CWE-117 log-injection pattern that commit `d71de742` remediated across 13 files (the commit that also last touched this very method), so the new log line now uses the `LogSanitizer.sanitize` helper that commit introduced. Reachability is hard (10,000 matching descriptors), but CodeQL taint analysis is flow-based, not reachability-gated, and the repo's convention is to sanitize unconditionally.
 - **The warning states impact, not just cause.** Its reader is an operator who cannot "page" anything — the actionable fact for them is that the returned list is incomplete and dependent features are missing entries, so the message leads with that.
 
+### Review follow-ups (Copilot + CodeRabbit)
+
+- **`index` javadoc overstated the contract.** It claimed any `index > 0` with `NO_LIMIT` "yields an empty list". It does not: the effective limit is the ceiling, so `index=1` returns rows 10,000–20,000. The claim was only true for collections smaller than the ceiling — the common case mistaken for the contract. Reworded to say a non-zero index pages in ceiling-sized chunks.
+- **Integer overflow in the legacy `ResourceFilter` skip.** `index * limit` was int arithmetic; raising the effective limit from 20 to 10,000 dropped the overflow threshold from `index > ~107M` to `index > ~214,748`, where the skip goes negative. Now uses the same `long` cast + `Math.min` guard that `d71de742` added to `DescriptorStore.readDescriptors`, so both paths match. Reachability is low (this is the legacy store path), but the fix is three lines and removes a CodeQL-shaped pattern.
+- **Removed a duplicate test.** The added `nullLimitUsesDefaultPageSize` re-tested exactly what the pre-existing `defaultsLimitWhenNull` already covered. Deleted it and updated the pre-existing test to assert against `DEFAULT_LIMIT` instead of a literal `20`, keeping coverage and dropping the magic number.
+
 ### Verification
 
 - `./mvnw clean compile` — clean

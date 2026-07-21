@@ -46,9 +46,12 @@ public interface IDescriptorStore<T> {
      *
      * @param index
      *            zero-based page index; the skip offset is
-     *            {@code index * effectiveLimit}, so any {@code index > 0} combined
-     *            with {@link #NO_LIMIT} is past the (single) unlimited page and
-     *            yields an empty list
+     *            {@code index * effectiveLimit}. With {@link #NO_LIMIT} the
+     *            effective limit is
+     *            {@link ai.labs.eddi.datastore.IResourceStorage#MAX_RESULT_LIMIT},
+     *            so a non-zero index pages in ceiling-sized chunks — it is not
+     *            rejected, and it only yields an empty list once the skip offset
+     *            exceeds the number of matching descriptors
      * @param limit
      *            see above
      */
