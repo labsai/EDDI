@@ -7,6 +7,8 @@ import {
   sendMessageStreaming,
   undoConversation,
   rerunLastStep,
+  loadManagedConversation,
+  sendManagedAgentMessage,
   setBaseUrl,
 } from "./chat-api";
 import { mockFetchSSE, mockFetchResponse, captureFetch } from "@/test-utils/sse";
@@ -143,5 +145,42 @@ describe("rerunLastStep", () => {
     mockFetchResponse(409, "");
 
     await expect(rerunLastStep("conv-1")).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+describe("managed-agent conversation", () => {
+  it("loads an existing conversation with GET", async () => {
+    setBaseUrl("");
+    const { calls } = captureFetch(200, '{"conversationId":"c1"}');
+
+    await loadManagedConversation("support", "user-7");
+
+    expect(calls[0].init?.method).toBe("GET");
+  });
+
+  it("POSTs an attachment-only turn instead of falling back to GET", async () => {
+    // Verb selection used to hinge on the truthiness of `message`, so a turn
+    // carrying only attachments issued a GET — sending nothing and re-reading
+    // the whole conversation.
+    setBaseUrl("");
+    const { calls } = captureFetch(200, '{"conversationId":"c1"}');
+
+    await sendManagedAgentMessage("support", "user-7", "", {
+      attachment_0: { type: "object", value: { storageRef: "r1", fileName: "a.pdf" } },
+    });
+
+    expect(calls[0].init?.method).toBe("POST");
+  });
+
+  it("carries the attachment context on the wire", async () => {
+    setBaseUrl("");
+    const { calls } = captureFetch(200, '{"conversationId":"c1"}');
+
+    await sendManagedAgentMessage("support", "user-7", "review this", {
+      attachment_0: { type: "object", value: { storageRef: "r1", fileName: "a.pdf" } },
+    });
+
+    const body = JSON.parse(String(calls[0].init?.body));
+    expect(body.context.attachment_0.value.storageRef).toBe("r1");
   });
 });

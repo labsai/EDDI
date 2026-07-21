@@ -91,6 +91,7 @@ export type ChatAction =
   | { type: "SET_CONVERSATION_ID"; id: string | null }
   | { type: "SET_CONVERSATION_STATE"; state: ConversationState }
   | { type: "ADD_MESSAGE"; message: ChatMessage }
+  | { type: "ADD_SNAPSHOT_MESSAGE"; message: ChatMessage }
   | { type: "APPEND_TO_LAST_AGENT"; token: string }
   | { type: "FINISH_STREAMING" }
   | { type: "SET_QUICK_REPLIES"; replies: QuickReply[] }
@@ -111,10 +112,14 @@ export type ChatAction =
   | { type: "SET_APPROVAL_STATUS"; status: ApprovalStatus | null }
   | {
       type: "WITHDRAW_LAST_USER_MESSAGE";
+      /** Id of the exact message to withdraw — NOT merely the most recent one. */
+      messageId?: string;
       /** The raw composer text. The bubble may be masked or carry 📎 lines. */
       draft?: string;
       /** Attachments staged for the refused turn, to put back. */
       attachments?: AttachmentResult[];
+      /** True when the withdrawn turn was secret; its text must not be restored. */
+      wasSecret?: boolean;
     }
   | { type: "CLEAR_RESTORE_DRAFT" }
   | { type: "RECONCILE_LAST_AGENT"; content: string };
@@ -148,6 +153,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "ADD_MESSAGE":
       return { ...state, messages: [...state.messages, action.message] };
+
+    case "ADD_SNAPSHOT_MESSAGE": {
+      // Snapshot reads are repeatable: handleRetry and the post-approval
+      // refresh both re-read the SAME step. Appending blindly duplicated the
+      // transcript on every refresh, so entries carry a stable sourceKey.
+      const key = action.message.sourceKey;
+      if (key && state.messages.some((m) => m.sourceKey === key)) return state;
+      return { ...state, messages: [...state.messages, action.message] };
+    }
 
     case "APPEND_TO_LAST_AGENT": {
       const idx = streamingIndex(state.messages);
@@ -247,7 +261,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         msgs = msgs.filter((_, i) => i !== placeholder);
       }
 
-      const lastUserIndex = msgs.map((m) => m.role).lastIndexOf("user");
+      // Target the EXACT turn. Falling back to "the most recent user message"
+      // let a late-failing turn delete a newer, unrelated one.
+      const targetIndex = action.messageId
+        ? msgs.findIndex((m) => m.id === action.messageId)
+        : msgs.map((m) => m.role).lastIndexOf("user");
+
       const restored = { ...state, messages: msgs };
       if (action.attachments?.length) {
         restored.pendingAttachments = [
@@ -255,13 +274,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           ...action.attachments,
         ];
       }
-      if (lastUserIndex === -1) return restored;
+      if (targetIndex === -1) return restored;
 
-      const [withdrawn] = msgs.splice(lastUserIndex, 1);
-      // Prefer the caller's raw text: the bubble content is DISPLAY text and
-      // may be the secret mask or prefixed with attachment names.
-      restored.messages = msgs;
-      restored.restoreDraft = action.draft ?? withdrawn.content;
+      const withdrawn = msgs[targetIndex];
+      restored.messages = msgs.filter((_, i) => i !== targetIndex);
+      // A secret is never handed back as plain text — the composer that would
+      // receive it is unmasked, and the secret marking would be lost.
+      restored.restoreDraft = action.wasSecret
+        ? null
+        : action.draft ?? withdrawn.content;
       return restored;
     }
 

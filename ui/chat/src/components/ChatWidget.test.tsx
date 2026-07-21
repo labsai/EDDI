@@ -385,3 +385,128 @@ describe("ChatWidget — managed-agent route", () => {
     expect(screen.getByTestId("chat-attach-btn")).not.toBeDisabled();
   });
 });
+
+describe("ChatWidget — round-3 regressions", () => {
+  it("shows the recovery banner after a failed STREAMING turn", async () => {
+    // A failed stream sends `error` then closes — no `done`. Nothing else on
+    // this path learned the conversation was now ERROR, so the Try again
+    // button was unreachable on the default transport.
+    let reads = 0;
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/stream")) {
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(
+                new TextEncoder().encode(
+                  'event: error\ndata: {"message":"LLM provider unavailable"}\n\n',
+                ),
+              );
+              c.close();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      reads += 1;
+      return new Response(
+        JSON.stringify({
+          conversationState: reads === 1 ? "READY" : "ERROR",
+          conversationSteps: [],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+    const input = await screen.findByTestId("chat-input");
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+
+    expect(await screen.findByTestId("recovery-banner")).toBeInTheDocument();
+  });
+
+  it("sends attachments on the managed-agent route", async () => {
+    // The managed branch dropped `context` entirely, so the file never reached
+    // the model while the transcript claimed it had been sent.
+    const bodies: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/attachments")) {
+        return new Response(
+          '{"storageRef":"ref-1","fileName":"a.pdf","mimeType":"application/pdf","sizeBytes":3}',
+          { status: 201 },
+        );
+      }
+      if (init?.method === "POST") bodies.push(String(init.body));
+      return new Response(
+        JSON.stringify({
+          conversationId: "managed-conv-9",
+          conversationState: "READY",
+          conversationSteps: [],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    render(
+      <MemoryRouter initialEntries={["/chat/managed/support/user-7"]}>
+        <ChatProvider>
+          <Routes>
+            <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
+          </Routes>
+        </ChatProvider>
+      </MemoryRouter>,
+    );
+
+    const fileInput = await screen.findByTestId("chat-file-input");
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["abc"], "a.pdf", { type: "application/pdf" })] },
+    });
+    await screen.findByTestId("attachment-chip");
+
+    fireEvent.click(screen.getByTestId("chat-send"));
+
+    await waitFor(() => expect(bodies.length).toBeGreaterThan(0));
+    expect(JSON.parse(bodies[0]).context.attachment_0.value.storageRef).toBe("ref-1");
+  });
+
+  it("does not put a secret back into the unmasked composer after a 409", async () => {
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/stream")) {
+        return new Response("a reviewer must resolve the pending approval", { status: 409 });
+      }
+      return new Response(
+        JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+    // Turn on secret mode, then send.
+    fireEvent.click(await screen.findByTestId("chat-secret-toggle"));
+    const input = await screen.findByTestId("chat-input");
+    fireEvent.change(input, { target: { value: "hunter2" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+
+    await screen.findByText(/reviewer must resolve/i);
+    // Let the restore effect run before asserting — checking immediately after
+    // the error text appears races it, and the assertion passes vacuously.
+    await waitFor(() => {});
+
+    const composer = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    expect(composer.value).toBe("");
+    expect(screen.queryByText("hunter2")).toBeNull();
+  });
+});

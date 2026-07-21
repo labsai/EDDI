@@ -19,8 +19,12 @@ interface UseHitlPollingArgs {
    * Called when the conversation reaches a settled state. Returns true if the
    * caller successfully picked up the resumed turn; false means "try again" and
    * the watch keeps running.
+   *
+   * `isStale()` reports whether the watch was torn down while the refresh was
+   * in flight — the caller MUST consult it before applying a snapshot, or a
+   * restarted conversation adopts the old one's transcript.
    */
-  onResolved: () => Promise<boolean>;
+  onResolved: (isStale: () => boolean) => Promise<boolean>;
 }
 
 export function useHitlPolling({
@@ -52,7 +56,7 @@ export function useHitlPolling({
         // IN_PROGRESS before running the approved turn, so treating it as
         // resolved abandons the watch while the answer is still being produced.
         if (isSettledState(status?.state)) {
-          const handled = await onResolvedRef.current();
+          const handled = await onResolvedRef.current(() => cancelled);
           if (cancelled) return;
           if (handled) {
             onStatusRef.current(null);
@@ -60,11 +64,14 @@ export function useHitlPolling({
           }
           // The refresh failed. Keep watching rather than stranding the widget
           // in a paused state it can never leave.
-        } else {
-          // Only surface a status that still describes a pause; a mid-resume
-          // IN_PROGRESS would otherwise blank the card for the whole turn.
-          onStatusRef.current(status?.state === "AWAITING_HUMAN" ? status : null);
+        } else if (status?.state === "AWAITING_HUMAN") {
+          onStatusRef.current(status);
         }
+        // A mid-resume IN_PROGRESS is deliberately NOT reported: clearing the
+        // status here blanked the paused card — and its Cancel button — for the
+        // whole of the resumed turn, leaving an empty screen and a locked
+        // composer. Keeping the last pause context on screen is the honest
+        // rendering: the turn genuinely has not finished.
       } catch {
         // Transient failures must not end the watch; the pause outlives them.
         // Backing off below keeps a persistent outage from spinning.

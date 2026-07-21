@@ -175,3 +175,27 @@ describe("extractOutputTexts", () => {
     expect(extractOutputTexts(undefined)).toEqual([]);
   });
 });
+
+describe("isSkippedTurn — the prior-state guard applies only where it is ambiguous", () => {
+  it("detects a drop into a busy conversation even if we thought it was READY", () => {
+    // The skip is a post-acceptance RACE: the server reads the PERSISTED state
+    // when the turn arrives, which the widget cannot have observed. Zero tokens
+    // plus IN_PROGRESS can only be a drop — an accepted turn never reports
+    // IN_PROGRESS in its own `done`.
+    expect(isSkippedTurn({ conversationState: "IN_PROGRESS" }, 0, "READY")).toBe(true);
+  });
+
+  it("detects a drop into an ended conversation even if we thought it was READY", () => {
+    expect(isSkippedTurn({ conversationState: "ENDED" }, 0, "READY")).toBe(false);
+  });
+
+  it("still treats an accepted-then-paused turn as NOT skipped", () => {
+    expect(isSkippedTurn({ conversationState: "AWAITING_HUMAN" }, 0, "READY")).toBe(false);
+  });
+
+  it("still treats a send into an already-paused conversation as skipped", () => {
+    expect(
+      isSkippedTurn({ conversationState: "AWAITING_HUMAN" }, 0, "AWAITING_HUMAN"),
+    ).toBe(true);
+  });
+});

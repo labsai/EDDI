@@ -73,9 +73,29 @@ export function isSkippedTurn(
   stateBeforeSend: ConversationState | null,
 ): boolean {
   if (!snapshot || tokenCount > 0) return false;
-  if (!stateBeforeSend || !SKIP_STATES.includes(stateBeforeSend)) return false;
   const state = snapshot.conversationState;
-  return !!state && SKIP_STATES.includes(state);
+  if (!state) return false;
+
+  // IN_PROGRESS in a turn's OWN `done` can only mean the turn was dropped: an
+  // accepted turn never reports itself as still running. The skip is a race
+  // against the PERSISTED state, which the client cannot have observed, so the
+  // prior-state guard must not be applied here.
+  if (state === "IN_PROGRESS") return true;
+
+  // AWAITING_HUMAN is the genuinely ambiguous case — an accepted turn that then
+  // paused looks identical to one dropped into an already-paused conversation.
+  // Only the state we held before sending separates them.
+  if (state === "AWAITING_HUMAN") {
+    return !!stateBeforeSend && SKIP_STATES.includes(stateBeforeSend);
+  }
+
+  // ENDED reached BY this turn (CONVERSATION_END) is a legitimate outcome; only
+  // a send into an already-ended conversation is a drop.
+  if (state === "ENDED") {
+    return stateBeforeSend === "ENDED";
+  }
+
+  return false;
 }
 
 /**

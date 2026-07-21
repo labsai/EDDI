@@ -32,7 +32,10 @@ function mockStatuses(states: string[]) {
   return calls;
 }
 
-function mount(onResolved: () => Promise<boolean>, onStatus = vi.fn()) {
+function mount(
+  onResolved: (isStale: () => boolean) => Promise<boolean>,
+  onStatus = vi.fn(),
+) {
   setBaseUrl("");
   return renderHook(() =>
     useHitlPolling({
@@ -49,7 +52,7 @@ describe("useHitlPolling", () => {
     // resume() CASes AWAITING_HUMAN -> IN_PROGRESS BEFORE running the approved
     // turn. Resolving here abandoned the watch mid-flight and the user never
     // saw the answer they had waited for.
-    const onResolved = vi.fn(async () => true);
+    const onResolved = vi.fn(async (_isStale: () => boolean) => true);
     const calls = mockStatuses(["IN_PROGRESS"]);
 
     mount(onResolved);
@@ -59,7 +62,7 @@ describe("useHitlPolling", () => {
   });
 
   it("resolves once a settled state is observed", async () => {
-    const onResolved = vi.fn(async () => true);
+    const onResolved = vi.fn(async (_isStale: () => boolean) => true);
     mockStatuses(["READY"]);
 
     mount(onResolved);
@@ -70,7 +73,7 @@ describe("useHitlPolling", () => {
   it("keeps watching when the post-resolution refresh fails", async () => {
     // A dropped refresh used to stop the loop forever, wedging the widget in a
     // paused state with a locked composer.
-    const onResolved = vi.fn(async () => false);
+    const onResolved = vi.fn(async (_isStale: () => boolean) => false);
     mockStatuses(["READY"]);
 
     mount(onResolved);
@@ -86,7 +89,7 @@ describe("useHitlPolling", () => {
     const onStatus = vi.fn();
     mockStatuses(["AWAITING_HUMAN"]);
 
-    mount(vi.fn(async () => true), onStatus);
+    mount(vi.fn(async (_isStale: () => boolean) => true), onStatus);
 
     await waitFor(() =>
       expect(onStatus).toHaveBeenCalledWith(

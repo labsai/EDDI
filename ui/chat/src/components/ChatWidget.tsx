@@ -22,6 +22,7 @@ import {
   sendMessage,
   sendMessageStreaming,
   sendManagedAgentMessage,
+  loadManagedConversation,
   undoConversation,
   redoConversation,
   fetchAgentDescriptor,
@@ -173,11 +174,13 @@ export function ChatWidget() {
    */
   const conversationStateRef = useRef(state.conversationState);
   conversationStateRef.current = state.conversationState;
-  /** The raw input of the in-flight turn, for restoring it if the server refuses. */
-  const pendingTurnRef = useRef<{
-    text: string;
-    attachments: typeof state.pendingAttachments;
-  }>({ text: "", attachments: [] });
+  /**
+   * Raw input of in-flight turns, keyed by the user message's id. A single
+   * slot let a late-failing turn withdraw a newer, unrelated message.
+   */
+  const pendingTurnsRef = useRef<
+    Map<string, { text: string; attachments: typeof state.pendingAttachments; isSecret: boolean }>
+  >(new Map());
 
   /* ─── Apply query param config + colors on mount ── */
   useEffect(() => {
@@ -351,7 +354,7 @@ export function ChatWidget() {
 
       // Handle the "conversationOutputs" format (from POST /agents responses)
       if (snapshot.conversationOutputs?.length) {
-        for (const output of snapshot.conversationOutputs) {
+        snapshot.conversationOutputs.forEach((output: any, outputIndex: number) => {
           // Extract agent replies and detect input field requests
           const agentReplies: unknown[] = output.output ?? [];
 
@@ -377,13 +380,20 @@ export function ChatWidget() {
 
           // Handles bare-string entries too — HITL's pending-approval
           // placeholder and reviewer-rejection message arrive as raw strings.
-          for (const text of extractOutputTexts(agentReplies)) {
+          //
+          // Dispatched as SNAPSHOT messages with a stable key: retry and the
+          // post-approval refresh both re-read the SAME step, and appending
+          // blindly duplicated the transcript on every refresh.
+          extractOutputTexts(agentReplies).forEach((text, textIndex) => {
             dispatch({
-              type: "ADD_MESSAGE",
-              message: makeAgentMessage(text),
+              type: "ADD_SNAPSHOT_MESSAGE",
+              message: {
+                ...makeAgentMessage(text),
+                sourceKey: `out:${outputIndex}:${textIndex}:${text.slice(0, 64)}`,
+              },
             });
-          }
-        }
+          });
+        });
 
         // Quick replies from the last output (most recent step)
         const lastOutput =
@@ -441,7 +451,7 @@ export function ChatWidget() {
           dispatch({ type: "SET_CONVERSATION_STATE", state: "READY" });
         } else if (isManagedAgent && intent && userId) {
           // Managed agent: GET to load existing or start new
-          const snapshot = await sendManagedAgentMessage(intent, userId);
+          const snapshot = await loadManagedConversation(intent, userId);
           processSnapshot(snapshot);
         } else if (environment && agentId) {
           // Direct agent: POST to create conversation
@@ -509,9 +519,25 @@ export function ChatWidget() {
         content: [attachmentLine, displayed].filter(Boolean).join("\n\n"),
         timestamp: Date.now(),
       };
-      // Remember the REAL input: the bubble content is display text (masked
-      // secrets, "📎 name" lines) and must never be what we hand back.
-      pendingTurnRef.current = { text, attachments };
+      // Remember the REAL input per turn: the bubble content is display text
+      // (masked secrets, "📎 name" lines) and must never be what we hand back.
+      const turnId = userMsg.id;
+      pendingTurnsRef.current.set(turnId, {
+        text,
+        attachments,
+        isSecret: !!isSecret,
+      });
+      const withdrawTurn = () => {
+        const pending = pendingTurnsRef.current.get(turnId);
+        pendingTurnsRef.current.delete(turnId);
+        dispatch({
+          type: "WITHDRAW_LAST_USER_MESSAGE",
+          messageId: turnId,
+          draft: pending?.text,
+          attachments: pending?.attachments,
+          wasSecret: pending?.isSecret,
+        });
+      };
 
       dispatch({ type: "ADD_MESSAGE", message: userMsg });
       dispatch({ type: "CLEAR_ATTACHMENTS" });
@@ -547,7 +573,12 @@ export function ChatWidget() {
           dispatch({ type: "SET_QUICK_REPLIES", replies: qrs });
         } else if (isManagedAgent && intent && userId) {
           // Managed agent (non-streaming only)
-          const snapshot = await sendManagedAgentMessage(intent, userId, text);
+          const snapshot = await sendManagedAgentMessage(
+            intent,
+            userId,
+            text,
+            context,
+          );
           dispatch({ type: "SET_THINKING", value: false });
           processSnapshot(snapshot);
           dispatch({ type: "SET_PROCESSING", value: false });
@@ -621,6 +652,16 @@ export function ChatWidget() {
               undoAvailable: after.undoAvailable ?? false,
               redoAvailable: after.redoAvailable ?? false,
             });
+            // A stream that fails sends `error` and closes WITHOUT a `done`,
+            // so nothing else on this path learns the conversation is now
+            // ERROR / EXECUTION_INTERRUPTED — leaving the recovery banner
+            // unreachable on the default transport.
+            if (after.conversationState) {
+              dispatch({
+                type: "SET_CONVERSATION_STATE",
+                state: after.conversationState,
+              });
+            }
           } catch {
             // Availability refresh is best-effort; a failure here must not
             // sink an otherwise successful turn.
@@ -647,11 +688,7 @@ export function ChatWidget() {
           // The turn was refused and NEVER consumed — most often because the
           // conversation is awaiting a human decision. Withdraw the optimistic
           // bubble, hand the text back to the composer, and say why.
-          dispatch({
-            type: "WITHDRAW_LAST_USER_MESSAGE",
-            draft: pendingTurnRef.current.text,
-            attachments: pendingTurnRef.current.attachments,
-          });
+          withdrawTurn();
           dispatch({
             type: "ADD_MESSAGE",
             message: makeAgentMessage(
@@ -683,11 +720,7 @@ export function ChatWidget() {
         }
 
         if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-          dispatch({
-            type: "WITHDRAW_LAST_USER_MESSAGE",
-            draft: pendingTurnRef.current.text,
-            attachments: pendingTurnRef.current.attachments,
-          });
+          withdrawTurn();
           dispatch({
             type: "ADD_MESSAGE",
             message: makeAgentMessage(
@@ -698,6 +731,10 @@ export function ChatWidget() {
         }
 
         console.error("Failed to send message:", err);
+        // Without this the empty placeholder stays in the transcript flagged
+        // isStreaming forever, rendering as a perpetually-typing bubble.
+        dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+        dispatch({ type: "FINISH_STREAMING" });
         dispatch({
           type: "ADD_MESSAGE",
           message: makeAgentMessage(
@@ -855,7 +892,7 @@ export function ChatWidget() {
         dispatch({ type: "SET_CONVERSATION_STATE", state: "READY" });
       } else if (isManagedAgent && intent && userId) {
         // Managed agent: GET to load or re-initialize conversation
-        const snapshot = await sendManagedAgentMessage(intent, userId);
+        const snapshot = await loadManagedConversation(intent, userId);
         processSnapshot(snapshot);
       } else if (environment && agentId) {
         const convId = await startConversation(environment, agentId, userId);
@@ -878,7 +915,9 @@ export function ChatWidget() {
     [dispatch],
   );
 
-  const handlePauseResolved = useCallback(async (): Promise<boolean> => {
+  const handlePauseResolved = useCallback(async (
+    isStale: () => boolean,
+  ): Promise<boolean> => {
     // The pause ended — by a reviewer, or automatically by timeout policy.
     // Nothing was pushed to us, so re-read to pick up the resumed turn.
     // Returning false keeps the watch alive: a dropped refresh must not strand
@@ -891,6 +930,10 @@ export function ChatWidget() {
         state.conversationId,
         true,
       );
+      // The watch may have been torn down while this read was in flight (a
+      // restart, an unmount). Applying the snapshot then would graft the old
+      // conversation's transcript onto the new one.
+      if (isStale()) return true;
       processSnapshot(snapshot);
       return true;
     } catch (err) {

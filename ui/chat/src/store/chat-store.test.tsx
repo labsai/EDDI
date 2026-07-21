@@ -511,3 +511,126 @@ describe("withdrawing a turn restores the true composer input", () => {
     expect(next.restoreDraft).toBe("plain text");
   });
 });
+
+/* ─── Snapshot messages are idempotent ─── */
+
+describe("ADD_SNAPSHOT_MESSAGE", () => {
+  const msg = (sourceKey: string, content = "hello") => ({
+    id: `a-${sourceKey}`,
+    role: "agent" as const,
+    content,
+    timestamp: 1,
+    sourceKey,
+  });
+
+  it("adds a snapshot-derived message the first time", () => {
+    const next = chatReducer(initialState, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: msg("out:0:0"),
+    });
+
+    expect(next.messages).toHaveLength(1);
+  });
+
+  it("does not re-add the same snapshot text on a refresh", () => {
+    // handleRetry and the post-approval refresh both re-read the SAME step.
+    // Appending blindly duplicated the transcript every time.
+    const once = chatReducer(initialState, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: msg("out:0:0"),
+    });
+
+    const twice = chatReducer(once, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: msg("out:0:0"),
+    });
+
+    expect(twice.messages).toHaveLength(1);
+    expect(twice).toBe(once);
+  });
+
+  it("still adds a genuinely different step", () => {
+    const once = chatReducer(initialState, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: msg("out:0:0"),
+    });
+
+    const twice = chatReducer(once, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: msg("out:1:0", "second"),
+    });
+
+    expect(twice.messages).toHaveLength(2);
+  });
+});
+
+/* ─── Withdrawing targets an exact turn ─── */
+
+describe("WITHDRAW_LAST_USER_MESSAGE targets a specific turn", () => {
+  it("withdraws the identified message, not merely the most recent user message", () => {
+    // A late-failing turn used to withdraw whichever user message happened to
+    // be last, silently deleting a newer, unrelated one.
+    const state = {
+      ...initialState,
+      messages: [
+        { id: "u1", role: "user" as const, content: "first", timestamp: 1 },
+        { id: "u2", role: "user" as const, content: "second", timestamp: 2 },
+      ],
+    };
+
+    const next = chatReducer(state, {
+      type: "WITHDRAW_LAST_USER_MESSAGE",
+      messageId: "u1",
+      draft: "first",
+    });
+
+    expect(next.messages.map((m) => m.id)).toEqual(["u2"]);
+    expect(next.restoreDraft).toBe("first");
+  });
+
+  it("is a no-op when the identified message is already gone", () => {
+    const state = {
+      ...initialState,
+      messages: [{ id: "u2", role: "user" as const, content: "second", timestamp: 2 }],
+    };
+
+    const next = chatReducer(state, {
+      type: "WITHDRAW_LAST_USER_MESSAGE",
+      messageId: "u1",
+      draft: "first",
+    });
+
+    expect(next.messages.map((m) => m.id)).toEqual(["u2"]);
+    expect(next.restoreDraft).toBeNull();
+  });
+});
+
+describe("withdrawing a SECRET turn", () => {
+  const secretState = {
+    ...initialState,
+    messages: [{ id: "u1", role: "user" as const, content: "●●●●●●●●", timestamp: 1 }],
+  };
+
+  it("does not hand the secret back as a restorable draft", () => {
+    // The composer that would receive it is unmasked, and the secret marking
+    // is lost — so the value would be shown in clear and re-sent unmarked.
+    const next = chatReducer(secretState, {
+      type: "WITHDRAW_LAST_USER_MESSAGE",
+      messageId: "u1",
+      draft: "hunter2",
+      wasSecret: true,
+    });
+
+    expect(next.restoreDraft).toBeNull();
+    expect(next.messages).toHaveLength(0);
+  });
+
+  it("still restores a non-secret draft", () => {
+    const next = chatReducer(
+      { ...initialState, messages: [{ id: "u1", role: "user" as const, content: "hi", timestamp: 1 }] },
+      { type: "WITHDRAW_LAST_USER_MESSAGE", messageId: "u1", draft: "hi", wasSecret: false },
+    );
+
+    expect(next.restoreDraft).toBe("hi");
+  });
+});

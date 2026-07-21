@@ -10,6 +10,11 @@ export interface ChatMessage {
   timestamp: number;
   /** True while the agent is still streaming tokens. */
   isStreaming?: boolean;
+  /**
+   * Stable identity for a message derived from a conversation snapshot, so a
+   * repeated read of the same step does not duplicate the transcript.
+   */
+  sourceKey?: string;
 }
 
 /**

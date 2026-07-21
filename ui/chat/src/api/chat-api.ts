@@ -207,29 +207,53 @@ export async function* sendMessageStreaming(
  * Send a message to a managed agent (intent-based routing).
  * v6: path changed from /managedagents to /agents/managed
  */
-export async function sendManagedAgentMessage(
-  intent: string,
-  userId: string,
-  message?: string,
-): Promise<ConversationSnapshot> {
+function managedPath(intent: string, userId: string): string {
   const params = new URLSearchParams({
     returnDetailed: "false",
     returnCurrentStepOnly: "true",
   });
-  const path = `/agents/managed/${encodeSegment(intent)}/${encodeSegment(userId)}?${params}`;
+  return `/agents/managed/${encodeSegment(intent)}/${encodeSegment(userId)}?${params}`;
+}
 
-  const snapshot = message
-    ? await requestJson<ConversationSnapshot>(
-        path,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: message }),
-        },
-        "Failed to send message",
-      )
-    : await requestJson<ConversationSnapshot>(path, { method: "GET" }, "Failed to load conversation");
+/** Load (or lazily create) a managed conversation without sending anything. */
+export async function loadManagedConversation(
+  intent: string,
+  userId: string,
+): Promise<ConversationSnapshot> {
+  const snapshot = await requestJson<ConversationSnapshot>(
+    managedPath(intent, userId),
+    { method: "GET" },
+    "Failed to load conversation",
+  );
+  if (!snapshot) throw new Error("loadManagedConversation: empty response body");
+  return snapshot;
+}
 
+/**
+ * Send a message to a managed agent.
+ *
+ * The verb is NOT chosen from the truthiness of `message`: an attachment-only
+ * turn has empty text and must still POST. And `context` must be forwarded —
+ * it is the only path by which an attachment reaches the model.
+ */
+export async function sendManagedAgentMessage(
+  intent: string,
+  userId: string,
+  message: string,
+  context?: ContextMap,
+): Promise<ConversationSnapshot> {
+  const body: Record<string, unknown> = { input: message };
+  if (context && Object.keys(context).length > 0) body.context = context;
+
+  const snapshot = await requestJson<ConversationSnapshot>(
+    managedPath(intent, userId),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Failed to send message",
+  );
   if (!snapshot) throw new Error("sendManagedAgentMessage: empty response body");
   return snapshot;
 }
