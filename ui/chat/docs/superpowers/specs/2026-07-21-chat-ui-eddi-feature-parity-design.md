@@ -128,7 +128,18 @@ every current user, ahead of any HITL work.
    greyed. Fix both: tolerate empty bodies, and re-read the snapshot after a streamed turn.
 7. **Skipped-turn handling.** A turn dropped server-side arrives as an ordinary `done` whose
    payload carries the *previous* step's outputs. Today that re-dispatches stale quick replies
-   as if new. Detect and surface it instead.
+   as if new, and the empty bubble renders "No response".
+
+   Detection signal: `done` arrives having emitted **zero `token` events** for this turn, and
+   `done.conversationState` is one of `AWAITING_HUMAN` / `IN_PROGRESS` / `ENDED` — the three
+   states `ConversationService` skips on. A normal turn either streams at least one token or
+   ends `READY`/`ERROR`.
+
+   On that signal: do not dispatch quick replies from the payload (they are stale), remove the
+   empty agent bubble, and surface state-appropriate copy — awaiting approval for
+   `AWAITING_HUMAN` (P2 takes over), "still working on the previous message" for `IN_PROGRESS`,
+   ended for `ENDED`. The user's own message stays in the transcript: it was never consumed,
+   so it remains resendable.
 
 ### P1 — Attachments
 
