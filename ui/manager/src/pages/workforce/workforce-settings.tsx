@@ -8,6 +8,11 @@ import {
   Settings,
   Trash2,
   Bookmark,
+  Shield,
+  Zap,
+  ListTodo,
+  ChevronRight,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -22,7 +27,14 @@ import {
   DISCUSSION_STYLES,
   type DiscussionStyle,
   type GroupMember,
+  type ProtocolConfig,
+  type TaskDefinition,
+  type DynamicAgentConfig,
+  type LifecyclePolicy,
+  type MemberFailurePolicy,
+  type MemberUnavailablePolicy,
 } from "@/lib/api/groups";
+import type { GroupHitlConfig, HitlTimeoutPolicy, HitlGranularity, HitlRejectionPolicy } from "@/lib/api/hitl";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -38,11 +50,13 @@ function SectionHeader({
   title,
   description,
   id,
+  expanded,
 }: {
   icon: React.ReactNode;
   title: string;
   description: string;
   id?: string;
+  expanded?: boolean;
 }) {
   return (
     <div className="mb-5">
@@ -50,12 +64,38 @@ function SectionHeader({
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
           {icon}
         </div>
-        <h2 id={id} className="text-base font-semibold text-foreground">{title}</h2>
+        <h2 id={id} className="text-base font-semibold text-foreground flex-1">{title}</h2>
+        {expanded !== undefined && (
+          <ChevronRight
+            className={cn(
+              "h-4 w-4 text-muted-foreground transition-transform duration-200",
+              expanded && "rotate-90"
+            )}
+          />
+        )}
       </div>
       <p className="text-sm text-muted-foreground ps-[42px]">{description}</p>
     </div>
   );
 }
+
+// ─── Default Config Values (module-level for stable references) ──
+
+const DEFAULT_PROTOCOL: ProtocolConfig = {
+  agentTimeoutSeconds: 30, onAgentFailure: "SKIP", maxRetries: 2,
+  onMemberUnavailable: "SKIP", maxTurns: 0,
+};
+const DEFAULT_HITL: GroupHitlConfig = {
+  approvalTimeout: null, timeoutPolicy: "WAIT_INDEFINITELY",
+  granularity: "PHASE", onTaskRejection: "FAIL",
+};
+const DEFAULT_DYNAMIC: DynamicAgentConfig = {
+  enabled: false, allowCreation: false, allowRecruitment: false,
+  allowDelegation: true, maxCreatedAgentsPerDiscussion: 5,
+  maxRecruitedAgentsPerDiscussion: 10, maxDelegationsPerTask: 3,
+  allowedProviders: [], allowedModels: {}, inheritParentModel: true,
+  lifecyclePolicy: "EPHEMERAL",
+};
 
 // ─── Form Field ──────────────────────────────────────────────────
 
@@ -206,21 +246,35 @@ function WorkforceSettings() {
   const [moderatorAgentId, setModeratorAgentId] = useState<string | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
 
+  // ─── Advanced config state ──────────────────────────────────────
+  const [protocol, setProtocol] = useState<ProtocolConfig>(DEFAULT_PROTOCOL);
+  const [hitlConfig, setHitlConfig] = useState<GroupHitlConfig>(DEFAULT_HITL);
+  const [dynamicAgents, setDynamicAgents] = useState<DynamicAgentConfig>(DEFAULT_DYNAMIC);
+  const [tasks, setTasks] = useState<TaskDefinition[]>([]);
+
   // ─── UI state ────────────────────────────────────────────────────
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteMode, setDeleteMode] = useState<"group" | "all">("group");
   const [showAddMember, setShowAddMember] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const toggleSection = useCallback((key: string) => setExpandedSections((p) => ({ ...p, [key]: !p[key] })), []);
 
   // ─── Initialize form from config ────────────────────────────────
+  const [initialized, setInitialized] = useState(false);
   useEffect(() => {
-    if (!config) return;
+    if (!config || initialized) return;
     setName(config.name ?? "");
     setDescription(config.description ?? "");
     setStyle(config.style ?? "ROUND_TABLE");
     setMaxRounds(config.maxRounds ?? 3);
     setModeratorAgentId(config.moderatorAgentId ?? null);
     setMembers(config.members ?? []);
-  }, [config]);
+    if (config.protocol) setProtocol(config.protocol);
+    if (config.hitlConfig) setHitlConfig({ ...DEFAULT_HITL, ...config.hitlConfig });
+    if (config.dynamicAgents) setDynamicAgents({ ...DEFAULT_DYNAMIC, ...config.dynamicAgents });
+    if (config.tasks) setTasks(config.tasks);
+    setInitialized(true);
+  }, [config, initialized]);
 
   // ─── Dirty tracking ─────────────────────────────────────────────
   const isDirty = useMemo(() => {
@@ -230,10 +284,13 @@ function WorkforceSettings() {
     if (style !== (config.style ?? "ROUND_TABLE")) return true;
     if (maxRounds !== (config.maxRounds ?? 3)) return true;
     if (moderatorAgentId !== (config.moderatorAgentId ?? null)) return true;
-    if (JSON.stringify(members) !== JSON.stringify(config.members ?? []))
-      return true;
+    if (JSON.stringify(members) !== JSON.stringify(config.members ?? [])) return true;
+    if (JSON.stringify(protocol) !== JSON.stringify(config.protocol ?? DEFAULT_PROTOCOL)) return true;
+    if (JSON.stringify(hitlConfig) !== JSON.stringify({ ...DEFAULT_HITL, ...(config.hitlConfig ?? {}) })) return true;
+    if (JSON.stringify(dynamicAgents) !== JSON.stringify({ ...DEFAULT_DYNAMIC, ...(config.dynamicAgents ?? {}) })) return true;
+    if (JSON.stringify(tasks) !== JSON.stringify(config.tasks ?? [])) return true;
     return false;
-  }, [config, name, description, style, maxRounds, moderatorAgentId, members]);
+  }, [config, name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks]);
 
   // ─── Beforeunload guard ─────────────────────────────────────────
   useEffect(() => {
@@ -260,6 +317,10 @@ function WorkforceSettings() {
       maxRounds,
       moderatorAgentId,
       members,
+      protocol,
+      hitlConfig,
+      dynamicAgents,
+      tasks: style === "TASK_FORCE" ? tasks : config.tasks,
     };
     try {
       await updateGroupAsync(
@@ -282,6 +343,10 @@ function WorkforceSettings() {
     maxRounds,
     moderatorAgentId,
     members,
+    protocol,
+    hitlConfig,
+    dynamicAgents,
+    tasks,
     version,
     updateGroupAsync,
     t,
@@ -698,7 +763,300 @@ function WorkforceSettings() {
       </section>
 
       {/* ═══════════════════════════════════════════════════════════
-          SECTION 3: Danger Zone
+          SECTION 3: Protocol & Resilience
+          ═══════════════════════════════════════════════════════════ */}
+      <section className="mb-10" aria-labelledby="section-protocol">
+        <button
+          type="button"
+          onClick={() => toggleSection("protocol")}
+          className="w-full text-start rounded-lg transition-colors hover:bg-muted/50"
+          aria-expanded={expandedSections.protocol ?? false}
+        >
+          <SectionHeader
+            icon={<Clock className="h-4 w-4" />}
+            title={t("Workforce.settings.protocol", "Protocol & Resilience")}
+            id="section-protocol"
+            description={t("Workforce.settings.protocolDesc", "Timeouts, retries, and failure handling for agent communication")}
+            expanded={expandedSections.protocol ?? false}
+          />
+        </button>
+
+        {(expandedSections.protocol ?? false) && (
+          <div className="space-y-5 rounded-xl border border-border bg-card p-5 shadow-sm animate-in fade-in-0 slide-in-from-top-2 duration-200">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <FormField label={t("Workforce.settings.agentTimeout", "Agent Timeout (seconds)")} htmlFor="settings-agent-timeout">
+                <input id="settings-agent-timeout" type="number" min={5} max={300} step={5} value={protocol.agentTimeoutSeconds}
+                  onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setProtocol((p) => ({ ...p, agentTimeoutSeconds: Math.max(5, Math.min(300, v)) })); }}
+                  className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+              </FormField>
+              <FormField label={t("Workforce.settings.maxRetries", "Max Retries")} htmlFor="settings-max-retries">
+                <input id="settings-max-retries" type="number" min={0} max={10} step={1} value={protocol.maxRetries}
+                  onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setProtocol((p) => ({ ...p, maxRetries: Math.max(0, Math.min(10, v)) })); }}
+                  className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+              </FormField>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <FormField label={t("Workforce.settings.onAgentFailure", "On Agent Failure")} htmlFor="settings-on-failure">
+                <select id="settings-on-failure" value={protocol.onAgentFailure}
+                  onChange={(e) => setProtocol((p) => ({ ...p, onAgentFailure: e.target.value as MemberFailurePolicy }))}
+                  className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
+                  <option value="SKIP">{t("Workforce.settings.failureSkip", "Skip — continue without this agent")}</option>
+                  <option value="RETRY">{t("Workforce.settings.failureRetry", "Retry — try the agent again")}</option>
+                  <option value="ABORT">{t("Workforce.settings.failureAbort", "Abort — stop the entire discussion")}</option>
+                </select>
+              </FormField>
+              <FormField label={t("Workforce.settings.onUnavailable", "On Member Unavailable")} htmlFor="settings-on-unavailable">
+                <select id="settings-on-unavailable" value={protocol.onMemberUnavailable}
+                  onChange={(e) => setProtocol((p) => ({ ...p, onMemberUnavailable: e.target.value as MemberUnavailablePolicy }))}
+                  className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
+                  <option value="SKIP">{t("Workforce.settings.unavailableSkip", "Skip — proceed without them")}</option>
+                  <option value="FAIL">{t("Workforce.settings.unavailableFail", "Fail — halt discussion")}</option>
+                </select>
+              </FormField>
+            </div>
+            <FormField label={t("Workforce.settings.maxTurns", "Max Turns (0 = unlimited)")} htmlFor="settings-max-turns">
+              <input id="settings-max-turns" type="number" min={0} max={100} step={1} value={protocol.maxTurns ?? 0}
+                onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setProtocol((p) => ({ ...p, maxTurns: Math.max(0, Math.min(100, v)) })); }}
+                className="h-10 w-full sm:w-1/2 rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+            </FormField>
+          </div>
+        )}
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          SECTION 4: Human Oversight (HITL)
+          ═══════════════════════════════════════════════════════════ */}
+      <section className="mb-10" aria-labelledby="section-hitl">
+        <button
+          type="button"
+          onClick={() => toggleSection("hitl")}
+          className="w-full text-start rounded-lg transition-colors hover:bg-muted/50"
+          aria-expanded={expandedSections.hitl ?? false}
+        >
+          <SectionHeader
+            icon={<Shield className="h-4 w-4" />}
+            title={t("Workforce.settings.hitl", "Human Oversight")}
+            id="section-hitl"
+            description={t("Workforce.settings.hitlDesc", "Configure when and how humans review AI decisions")}
+            expanded={expandedSections.hitl ?? false}
+          />
+        </button>
+
+        {(expandedSections.hitl ?? false) && (
+          <div className="space-y-5 rounded-xl border border-border bg-card p-5 shadow-sm animate-in fade-in-0 slide-in-from-top-2 duration-200">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <FormField label={t("Workforce.settings.hitlGranularity", "Approval Granularity")} htmlFor="settings-hitl-granularity">
+                <select id="settings-hitl-granularity" value={hitlConfig.granularity ?? "PHASE"}
+                  onChange={(e) => setHitlConfig((p) => ({ ...p, granularity: e.target.value as HitlGranularity }))}
+                  className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
+                  <option value="PHASE">{t("Workforce.settings.granularityPhase", "Per Phase — review after each discussion phase")}</option>
+                  <option value="TASK">{t("Workforce.settings.granularityTask", "Per Task — review each individual task")}</option>
+                </select>
+              </FormField>
+              <FormField label={t("Workforce.settings.hitlTimeout", "Approval Timeout")} htmlFor="settings-hitl-timeout">
+                <input id="settings-hitl-timeout" type="text" value={hitlConfig.approvalTimeout ?? ""}
+                  onChange={(e) => setHitlConfig((p) => ({ ...p, approvalTimeout: e.target.value || null }))}
+                  placeholder={t("Workforce.settings.hitlTimeoutHint", "e.g. PT15M (15 min), PT1H (1 hour)")}
+                  className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  {t("Workforce.settings.hitlTimeoutHelp", "ISO-8601 duration. Leave empty for no timeout.")}
+                </p>
+              </FormField>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <FormField label={t("Workforce.settings.hitlTimeoutPolicy", "On Timeout")} htmlFor="settings-hitl-timeout-policy">
+                <select id="settings-hitl-timeout-policy" value={hitlConfig.timeoutPolicy ?? "WAIT_INDEFINITELY"}
+                  onChange={(e) => setHitlConfig((p) => ({ ...p, timeoutPolicy: e.target.value as HitlTimeoutPolicy }))}
+                  className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
+                  <option value="WAIT_INDEFINITELY">{t("Workforce.settings.timeoutWait", "Wait indefinitely")}</option>
+                  <option value="AUTO_APPROVE">{t("Workforce.settings.timeoutAutoApprove", "Auto-approve")}</option>
+                  <option value="AUTO_REJECT">{t("Workforce.settings.timeoutAutoReject", "Auto-reject")}</option>
+                  <option value="ABORT">{t("Workforce.settings.timeoutAbort", "Abort discussion")}</option>
+                </select>
+              </FormField>
+              <FormField label={t("Workforce.settings.hitlRejection", "On Rejection")} htmlFor="settings-hitl-rejection">
+                <select id="settings-hitl-rejection" value={hitlConfig.onTaskRejection ?? "FAIL"}
+                  onChange={(e) => setHitlConfig((p) => ({ ...p, onTaskRejection: e.target.value as HitlRejectionPolicy }))}
+                  className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
+                  <option value="FAIL">{t("Workforce.settings.rejectionFail", "Fail — stop the task")}</option>
+                  <option value="RETRY">{t("Workforce.settings.rejectionRetry", "Retry — ask agent to revise")}</option>
+                </select>
+              </FormField>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          SECTION 5: Dynamic Agents
+          ═══════════════════════════════════════════════════════════ */}
+      <section className="mb-10" aria-labelledby="section-dynamic">
+        <button
+          type="button"
+          onClick={() => toggleSection("dynamic")}
+          className="w-full text-start rounded-lg transition-colors hover:bg-muted/50"
+          aria-expanded={expandedSections.dynamic ?? false}
+        >
+          <SectionHeader
+            icon={<Zap className="h-4 w-4" />}
+            title={t("Workforce.settings.dynamic", "Dynamic Agents")}
+            id="section-dynamic"
+            description={t("Workforce.settings.dynamicDesc", "Allow agents to recruit, create, or delegate to other agents during discussions")}
+            expanded={expandedSections.dynamic ?? false}
+          />
+        </button>
+
+        {(expandedSections.dynamic ?? false) && (
+          <div className="space-y-5 rounded-xl border border-border bg-card p-5 shadow-sm animate-in fade-in-0 slide-in-from-top-2 duration-200">
+            {/* Master toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">{t("Workforce.settings.dynamicEnable", "Enable Dynamic Agents")}</p>
+                <p className="text-xs text-muted-foreground">{t("Workforce.settings.dynamicEnableDesc", "Allow agents to recruit, create, or delegate to other agents")}</p>
+              </div>
+              <button type="button" role="switch" aria-checked={dynamicAgents.enabled}
+                onClick={() => setDynamicAgents((p) => ({ ...p, enabled: !p.enabled }))}
+                className={cn("relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", dynamicAgents.enabled ? "bg-primary" : "bg-muted")}>
+                <span className={cn("pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform", dynamicAgents.enabled ? "translate-x-5" : "translate-x-0")} />
+              </button>
+            </div>
+
+            {dynamicAgents.enabled && (
+              <>
+                {/* Permission toggles */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-border pt-4">
+                  {([
+                    { key: "allowCreation" as const, label: t("Workforce.settings.allowCreation", "Allow Creation"), desc: t("Workforce.settings.allowCreationDesc", "Agents can spin up new agents on demand") },
+                    { key: "allowRecruitment" as const, label: t("Workforce.settings.allowRecruitment", "Allow Recruitment"), desc: t("Workforce.settings.allowRecruitmentDesc", "Agents can recruit existing deployed agents") },
+                    { key: "allowDelegation" as const, label: t("Workforce.settings.allowDelegation", "Allow Delegation"), desc: t("Workforce.settings.allowDelegationDesc", "Agents can delegate sub-tasks to other agents") },
+                  ] as const).map((item) => (
+                    <div key={item.key} className="flex items-start gap-3">
+                      <button type="button" role="switch" aria-checked={dynamicAgents[item.key]}
+                        onClick={() => setDynamicAgents((p) => ({ ...p, [item.key]: !p[item.key] }))}
+                        className={cn("relative mt-0.5 inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", dynamicAgents[item.key] ? "bg-primary" : "bg-muted")}>
+                        <span className={cn("pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg transition-transform", dynamicAgents[item.key] ? "translate-x-4" : "translate-x-0")} />
+                      </button>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{item.label}</p>
+                        <p className="text-xs text-muted-foreground">{item.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Limits */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 border-t border-border pt-4">
+                  <FormField label={t("Workforce.settings.maxCreated", "Max Created")} htmlFor="settings-max-created">
+                    <input id="settings-max-created" type="number" min={1} max={50} value={dynamicAgents.maxCreatedAgentsPerDiscussion}
+                      onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setDynamicAgents((p) => ({ ...p, maxCreatedAgentsPerDiscussion: Math.max(1, Math.min(50, v)) })); }}
+                      className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+                  </FormField>
+                  <FormField label={t("Workforce.settings.maxRecruited", "Max Recruited")} htmlFor="settings-max-recruited">
+                    <input id="settings-max-recruited" type="number" min={1} max={50} value={dynamicAgents.maxRecruitedAgentsPerDiscussion}
+                      onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setDynamicAgents((p) => ({ ...p, maxRecruitedAgentsPerDiscussion: Math.max(1, Math.min(50, v)) })); }}
+                      className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+                  </FormField>
+                  <FormField label={t("Workforce.settings.maxDelegations", "Max Delegations / Task")} htmlFor="settings-max-delegations">
+                    <input id="settings-max-delegations" type="number" min={1} max={20} value={dynamicAgents.maxDelegationsPerTask}
+                      onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setDynamicAgents((p) => ({ ...p, maxDelegationsPerTask: Math.max(1, Math.min(20, v)) })); }}
+                      className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+                  </FormField>
+                </div>
+
+                {/* Model & lifecycle */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 border-t border-border pt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{t("Workforce.settings.inheritModel", "Inherit Parent Model")}</p>
+                      <p className="text-xs text-muted-foreground">{t("Workforce.settings.inheritModelDesc", "Created agents use the parent's LLM model")}</p>
+                    </div>
+                    <button type="button" role="switch" aria-checked={dynamicAgents.inheritParentModel}
+                      onClick={() => setDynamicAgents((p) => ({ ...p, inheritParentModel: !p.inheritParentModel }))}
+                      className={cn("relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", dynamicAgents.inheritParentModel ? "bg-primary" : "bg-muted")}>
+                      <span className={cn("pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg transition-transform", dynamicAgents.inheritParentModel ? "translate-x-4" : "translate-x-0")} />
+                    </button>
+                  </div>
+                  <FormField label={t("Workforce.settings.lifecycle", "Lifecycle Policy")} htmlFor="settings-lifecycle">
+                    <select id="settings-lifecycle" value={dynamicAgents.lifecyclePolicy}
+                      onChange={(e) => setDynamicAgents((p) => ({ ...p, lifecyclePolicy: e.target.value as LifecyclePolicy }))}
+                      className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
+                      <option value="EPHEMERAL">{t("Workforce.settings.lifecycleEphemeral", "Ephemeral — deleted after discussion")}</option>
+                      <option value="KEEP_DEPLOYED">{t("Workforce.settings.lifecycleKeep", "Keep Deployed — persist after discussion")}</option>
+                      <option value="UNDEPLOY_ONLY">{t("Workforce.settings.lifecycleUndeploy", "Undeploy Only — stopped but not deleted")}</option>
+                      <option value="AGENT_DECIDES">{t("Workforce.settings.lifecycleAgentDecides", "Agent Decides — agent chooses its own fate")}</option>
+                    </select>
+                  </FormField>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          SECTION 6: Task Definitions (TASK_FORCE only)
+          ═══════════════════════════════════════════════════════════ */}
+      {style === "TASK_FORCE" && (
+        <section className="mb-10" aria-labelledby="section-tasks">
+          <SectionHeader
+            icon={<ListTodo className="h-4 w-4" />}
+            title={t("Workforce.settings.tasks", "Pre-configured Tasks")}
+            id="section-tasks"
+            description={t("Workforce.settings.tasksDesc", "Define tasks upfront so the PLAN phase is skipped and agents execute immediately")}
+          />
+
+          <div className="space-y-3">
+            {tasks.map((task, idx) => (
+              <div key={idx} className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-3 animate-in fade-in-0 duration-150">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 space-y-3">
+                    <FormField label={t("Workforce.settings.taskSubject", "Subject")} htmlFor={`task-subject-${idx}`}>
+                      <input id={`task-subject-${idx}`} type="text" value={task.subject}
+                        onChange={(e) => setTasks((prev) => prev.map((t, i) => i === idx ? { ...t, subject: e.target.value } : t))}
+                        placeholder={t("Workforce.settings.taskSubjectHint", "What needs to be done?")}
+                        className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+                    </FormField>
+                    <FormField label={t("Workforce.settings.taskDescription", "Description")} htmlFor={`task-desc-${idx}`}>
+                      <textarea id={`task-desc-${idx}`} rows={2} value={task.description}
+                        onChange={(e) => setTasks((prev) => prev.map((t, i) => i === idx ? { ...t, description: e.target.value } : t))}
+                        placeholder={t("Workforce.settings.taskDescHint", "Detailed instructions for this task…")}
+                        className="w-full rounded-lg border border-input bg-background ps-3 pe-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow resize-none" />
+                    </FormField>
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField label={t("Workforce.settings.taskAssignRole", "Assign to Role")} htmlFor={`task-role-${idx}`}>
+                        <input id={`task-role-${idx}`} type="text" value={task.assignToRole}
+                          onChange={(e) => setTasks((prev) => prev.map((t, i) => i === idx ? { ...t, assignToRole: e.target.value } : t))}
+                          placeholder="ALL"
+                          className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+                      </FormField>
+                      <FormField label={t("Workforce.settings.taskPriority", "Priority")} htmlFor={`task-priority-${idx}`}>
+                        <input id={`task-priority-${idx}`} type="number" min={0} max={10} value={task.priority}
+                          onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setTasks((prev) => prev.map((t, i) => i === idx ? { ...t, priority: Math.max(0, v) } : t)); }}
+                          className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+                      </FormField>
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => setTasks((prev) => prev.filter((_, i) => i !== idx))}
+                    className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={t("Workforce.settings.removeTask", "Remove task")}>
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <button type="button"
+              onClick={() => setTasks((prev) => [...prev, { subject: "", description: "", assignToRole: "ALL", dependsOn: null, priority: 0 }])}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border py-3 text-sm font-medium text-muted-foreground transition-all hover:border-primary/40 hover:text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Plus className="h-4 w-4" />
+              {t("Workforce.settings.addTask", "Add Task")}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════
+          SECTION 7: Danger Zone
           ═══════════════════════════════════════════════════════════ */}
       <section className="mb-10" aria-labelledby="section-danger">
         <SectionHeader
