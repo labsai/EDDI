@@ -524,10 +524,15 @@ export function AuditPage() {
   // flattened union so paging *appends* rather than replacing earlier rows.
   const [pages, setPages] = useState<Record<number, AuditEntry[]>>({});
 
-  // Reset the accumulator whenever the search context changes (this also runs
-  // when a new search resets skip back to 0).
+  // Reset the accumulator AND the paging offset whenever the search context
+  // changes. Resetting `skip` here (not just in the search handlers) is what
+  // makes a mode toggle safe: switching agent↔conversation while a prior search
+  // is still active must restart at offset 0, otherwise the leftover `skip`
+  // renders a mid-offset page as the first page and silently drops (and makes
+  // unreachable, via the forward-only "Load more") every earlier entry.
   useEffect(() => {
     setPages({});
+    setSkip(0);
   }, [mode, searchValue, activeAgentId, activeAgentVersion]);
 
   // Merge each freshly-fetched page. Same-skip refetches (auto-refresh) replace

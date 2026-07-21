@@ -1448,6 +1448,7 @@
     "stateEnded": "Finalizado"
   },
   "secrets": {
+    "loadError": "No se pudieron cargar los secretos",
     "allAgents": "Todos los agentes",
     "allowedAgents": "Agentes permitidos",
     "allowedAgentsHint": "Deje vacío para todos los agentes. Añadir IDs de agente ayuda a rastrear qué agentes usan este secret.",
@@ -1582,6 +1583,16 @@
   },
   "schedules": {
     "cronHelp": "Formato de 5 campos: minuto hora día-del-mes mes día-de-la-semana",
+    "cronEveryMinute": "Cada minuto",
+    "cronEveryNMinutes": "Cada {{n}} minutos",
+    "cronHourlyAt": "Cada hora en el minuto :{{minute}}",
+    "cronEveryNHours": "Cada {{n}} horas en el minuto :{{minute}}",
+    "cronAtTime": "A las {{time}}",
+    "cronAtMinutePastEveryHour": "En el minuto {{minutes}} de cada hora",
+    "cronAtMinutePastHours": "En el minuto {{minutes}} de la hora {{hours}}",
+    "cronOnDays": "los {{days}}",
+    "cronOnDayOfMonth": "el día del mes {{days}}",
+    "cronInMonths": "en {{months}}",
     "cronInvalid": "Expresión cron no válida (se esperaban 5 campos)",
     "cronTooFrequent": "Se ejecuta con más frecuencia que el mínimo de 60 segundos",
     "failedEmptyHint": "Las ejecuciones en la cola de fallidos aparecerán aquí para reintentarlas o descartarlas.",

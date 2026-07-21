@@ -402,10 +402,35 @@ export function cronMinIntervalSeconds(
   return Number.isFinite(min) ? Math.round(min) : null;
 }
 
-/** A short, human-readable description of a cron expression (live preview). */
-export function describeCron(expression: string): string | null {
+/** Optional translator injected into {@link describeCron}. Mirrors i18next's
+ * `t(key, defaultValue, interpolation)`; when omitted the English `defaultValue`
+ * is used (with `{{var}}` interpolation), so tests and non-UI callers get stable
+ * English output while the schedules dialog can pass a real translator. */
+export type CronDescribeT = (
+  key: string,
+  defaultValue: string,
+  vars?: Record<string, string>
+) => string;
+
+/** Substitute i18next-style `{{var}}` placeholders in a fallback string. */
+function fillPlaceholders(s: string, vars?: Record<string, string>): string {
+  if (!vars) return s;
+  return s.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
+}
+
+/** A short, human-readable description of a cron expression (live preview).
+ *
+ * Pass `t` (and `lang`) to localize: the fixed phrases resolve through the
+ * translator and weekday/month names come from `Intl.DateTimeFormat(lang)`.
+ * With no translator it returns English, keeping tests/non-UI callers stable. */
+export function describeCron(
+  expression: string,
+  t?: CronDescribeT,
+  lang?: string
+): string | null {
   const parsed = parseCron(expression);
   if (!parsed) return null;
+  const tr: CronDescribeT = t ?? ((_k, d, vars) => fillPlaceholders(d, vars));
   const fields = expression.trim().split(/\s+/);
   const [minF, hourF, domF, monF, dowF] = fields as [
     string,
@@ -420,45 +445,86 @@ export function describeCron(expression: string): string | null {
   const stepMin = /^\*\/(\d+)$/.exec(minF);
   const stepHour = /^\*\/(\d+)$/.exec(hourF);
 
+  // Localized weekday / month names, falling back to the English arrays when no
+  // language is supplied. Intl needs a concrete reference date per unit: a
+  // 2024-01-07 (Sunday) base for weekdays, and month M of an arbitrary year.
+  const dayName = (d: number) =>
+    lang
+      ? new Intl.DateTimeFormat(lang, { weekday: "long", timeZone: "UTC" }).format(
+          new Date(Date.UTC(2024, 0, 7 + d))
+        )
+      : DOW_NAMES[d]!;
+  const monthName = (m: number) =>
+    lang
+      ? new Intl.DateTimeFormat(lang, { month: "long", timeZone: "UTC" }).format(
+          new Date(Date.UTC(2021, m - 1, 1))
+        )
+      : MONTH_NAMES[m - 1]!;
+
   let time: string;
   if (minF === "*" && hourF === "*") {
-    time = "Every minute";
+    time = tr("schedules.cronEveryMinute", "Every minute");
   } else if (stepMin && hourF === "*") {
-    time = `Every ${stepMin[1]} minutes`;
+    time = tr("schedules.cronEveryNMinutes", "Every {{n}} minutes", {
+      n: stepMin[1]!,
+    });
   } else if (mins.length === 1 && hourF === "*") {
-    time = `Hourly at :${p2(mins[0]!)}`;
+    time = tr("schedules.cronHourlyAt", "Hourly at :{{minute}}", {
+      minute: p2(mins[0]!),
+    });
   } else if (stepHour && mins.length === 1) {
-    time = `Every ${stepHour[1]} hours at :${p2(mins[0]!)}`;
+    time = tr("schedules.cronEveryNHours", "Every {{n}} hours at :{{minute}}", {
+      n: stepHour[1]!,
+      minute: p2(mins[0]!),
+    });
   } else if (mins.length === 1 && hrs.length === 1) {
-    time = `At ${p2(hrs[0]!)}:${p2(mins[0]!)}`;
+    time = tr("schedules.cronAtTime", "At {{time}}", {
+      time: `${p2(hrs[0]!)}:${p2(mins[0]!)}`,
+    });
   } else if (mins.length === 1 && hrs.length <= 4) {
-    time = `At ${hrs.map((h) => `${p2(h)}:${p2(mins[0]!)}`).join(", ")}`;
+    time = tr("schedules.cronAtTime", "At {{time}}", {
+      time: hrs.map((h) => `${p2(h)}:${p2(mins[0]!)}`).join(", "),
+    });
+  } else if (hourF === "*") {
+    time = tr(
+      "schedules.cronAtMinutePastEveryHour",
+      "At minute {{minutes}} past every hour",
+      { minutes: mins.join(",") }
+    );
   } else {
-    time = `At minute ${mins.join(",")} past ${
-      hourF === "*" ? "every hour" : `hour ${hrs.join(",")}`
-    }`;
+    time = tr(
+      "schedules.cronAtMinutePastHours",
+      "At minute {{minutes}} past hour {{hours}}",
+      { minutes: mins.join(","), hours: hrs.join(",") }
+    );
   }
 
   const quals: string[] = [];
   if (dowF !== "*") {
     quals.push(
-      `on ${[...parsed.dows]
-        .sort((a, b) => a - b)
-        .map((d) => DOW_NAMES[d])
-        .join(", ")}`
+      tr("schedules.cronOnDays", "on {{days}}", {
+        days: [...parsed.dows]
+          .sort((a, b) => a - b)
+          .map(dayName)
+          .join(", "),
+      })
     );
   }
   if (domF !== "*") {
     quals.push(
-      `on day-of-month ${[...parsed.doms].sort((a, b) => a - b).join(", ")}`
+      tr("schedules.cronOnDayOfMonth", "on day-of-month {{days}}", {
+        days: [...parsed.doms].sort((a, b) => a - b).join(", "),
+      })
     );
   }
   if (monF !== "*") {
     quals.push(
-      `in ${[...parsed.months]
-        .sort((a, b) => a - b)
-        .map((m) => MONTH_NAMES[m - 1])
-        .join(", ")}`
+      tr("schedules.cronInMonths", "in {{months}}", {
+        months: [...parsed.months]
+          .sort((a, b) => a - b)
+          .map(monthName)
+          .join(", "),
+      })
     );
   }
   return [time, ...quals].join(" ");

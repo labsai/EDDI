@@ -35,6 +35,26 @@ async function chooseAgent(user: ReturnType<typeof userEvent.setup>) {
   await user.keyboard("{Enter}");
 }
 
+describe("ConversationMonitoringPage — state badges", () => {
+  it("renders localized state labels, not the raw backend enum", async () => {
+    server.use(
+      http.get("*/conversationstore/conversations/active/:agentId", () =>
+        HttpResponse.json(ACTIVE_ROWS)
+      )
+    );
+
+    renderWithProviders(<ConversationMonitoringPage />);
+    const user = userEvent.setup();
+
+    await chooseAgent(user);
+    await screen.findByTestId("active-conversation-list");
+
+    const row = screen.getByTestId("select-conv-active-1").closest("tr")!;
+    expect(within(row).getByText("In Progress")).toBeInTheDocument();
+    expect(within(row).queryByText("IN_PROGRESS")).not.toBeInTheDocument();
+  });
+});
+
 describe("ConversationMonitoringPage — bulk end", () => {
   it("prompts before ending and posts the selected statuses to /end", async () => {
     let endBody: unknown = null;

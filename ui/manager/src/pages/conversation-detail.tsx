@@ -588,9 +588,18 @@ function PropertiesSection({
   );
 }
 
-/** Simple JSON syntax highlighter using regex — returns HTML string */
+/** Simple JSON syntax highlighter using regex — returns HTML string.
+ *
+ * The output is injected via dangerouslySetInnerHTML, and `json` can contain
+ * attacker-controlled conversation content (user input / agent output), so we
+ * HTML-escape first — otherwise a string value like `<img src=x onerror=…>`
+ * would execute as markup (stored XSS). `&` must be escaped before `<`/`>`. */
 function syntaxHighlightJson(json: string): string {
-  return json.replace(
+  const escaped = json
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return escaped.replace(
     /("(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
     (match) => {
       let cls = "color: var(--color-amber-400)"; // number

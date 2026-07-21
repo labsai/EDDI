@@ -43,6 +43,18 @@ const stateStyles: Record<ConversationState, { icon: typeof Circle; color: strin
 export function ConversationMonitoringPage() {
   const { t } = useTranslation();
 
+  // i18n labels for conversation states — mirrors conversations.tsx so the
+  // Active-Conversations badge shows the same localized text, not the raw
+  // backend enum (e.g. "In Progress"/"قيد التنفيذ", not "IN_PROGRESS").
+  const stateLabels: Record<ConversationState, string> = {
+    READY: t("conversations.stateActive", "Active"),
+    IN_PROGRESS: t("conversations.stateInProgress", "In Progress"),
+    ERROR: t("status.error", "Error"),
+    ENDED: t("conversations.stateEnded", "Ended"),
+    EXECUTION_INTERRUPTED: t("conversations.stateInterrupted", "Interrupted"),
+    AWAITING_HUMAN: t("hitl.awaitingHuman", "Awaiting Human"),
+  };
+
   const [agentId, setAgentId] = useState("");
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -356,7 +368,7 @@ export function ConversationMonitoringPage() {
                         )}
                       >
                         <StateIcon className="h-3 w-3" />
-                        {row.conversationState}
+                        {stateLabels[row.conversationState] ?? row.conversationState}
                       </span>
                     </td>
                     <td className="px-5 py-3">

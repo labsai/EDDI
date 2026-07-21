@@ -1448,6 +1448,7 @@
     "stateEnded": "समाप्त"
   },
   "secrets": {
+    "loadError": "सीक्रेट लोड नहीं हो सके",
     "allAgents": "सभी एजेंट",
     "allowedAgents": "अनुमत एजेंट",
     "allowedAgentsHint": "सभी एजेंट के लिए खाली छोड़ें। एजेंट ID जोड़ने से यह ट्रैक करने में मदद मिलती है कि कौन से एजेंट इस सीक्रेट का उपयोग करते हैं।",
@@ -1582,6 +1583,16 @@
   },
   "schedules": {
     "cronHelp": "5-फ़ील्ड प्रारूप: मिनट घंटा माह-का-दिन माह सप्ताह-का-दिन",
+    "cronEveryMinute": "हर मिनट",
+    "cronEveryNMinutes": "हर {{n}} मिनट में",
+    "cronHourlyAt": "हर घंटे :{{minute}} पर",
+    "cronEveryNHours": "हर {{n}} घंटे :{{minute}} पर",
+    "cronAtTime": "{{time}} बजे",
+    "cronAtMinutePastEveryHour": "हर घंटे के {{minutes}} मिनट पर",
+    "cronAtMinutePastHours": "{{hours}} घंटे के {{minutes}} मिनट पर",
+    "cronOnDays": "{{days}} को",
+    "cronOnDayOfMonth": "महीने की {{days}} तारीख को",
+    "cronInMonths": "{{months}} में",
     "cronInvalid": "अमान्य cron अभिव्यक्ति (5 फ़ील्ड अपेक्षित)",
     "cronTooFrequent": "60-सेकंड न्यूनतम से अधिक बार निष्पादित होता है",
     "failedEmptyHint": "डेड-लेटर किए गए निष्पादन पुनः प्रयास या खारिज करने के लिए यहां दिखाई देंगे।",

@@ -177,6 +177,49 @@ describe("ConversationDetailPage", () => {
     });
   });
 
+  it("HTML-escapes conversation content in the raw step view (no stored XSS)", async () => {
+    // A payload stored in conversation memory must render as inert text — never
+    // as live markup — when an operator expands a step's raw-data view.
+    server.use(
+      http.get("*/conversationstore/conversations/simple/:id", () =>
+        HttpResponse.json({
+          agentId: "agent1",
+          agentVersion: 1,
+          conversationId: "conv1",
+          conversationState: "READY",
+          conversationSteps: [
+            {
+              conversationStep: [
+                {
+                  key: "input:initial",
+                  value: "<img src=x onerror=alert(1)>",
+                  timestamp: new Date().toISOString(),
+                  originWorkflowId: null,
+                },
+              ],
+              timestamp: new Date().toISOString(),
+            },
+          ],
+          conversationOutputs: [],
+        })
+      )
+    );
+
+    renderConvDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByText("Step 1")).toBeInTheDocument();
+    });
+    await user.click(screen.getByText("Step 1"));
+
+    const rawBlock = await screen.findByTestId("step-raw-1");
+    // Escaped, not executed: no live <img> node, angle brackets are entities.
+    expect(rawBlock.querySelector("img")).toBeNull();
+    expect(rawBlock.innerHTML).toContain("&lt;img");
+    expect(rawBlock.innerHTML).not.toContain("<img");
+  });
+
   it("renders conversation properties section when available", async () => {
     renderConvDetail();
 

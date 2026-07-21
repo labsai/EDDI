@@ -1448,6 +1448,7 @@
     "stateEnded": "已结束"
   },
   "secrets": {
+    "loadError": "无法加载密钥",
     "allAgents": "所有智能体",
     "allowedAgents": "允许的智能体",
     "allowedAgentsHint": "留空表示所有智能体。添加智能体 ID 有助于跟踪哪些智能体使用此 Secret。",
@@ -1582,6 +1583,16 @@
   },
   "schedules": {
     "cronHelp": "5 字段格式：分 时 日 月 星期",
+    "cronEveryMinute": "每分钟",
+    "cronEveryNMinutes": "每 {{n}} 分钟",
+    "cronHourlyAt": "每小时的第 {{minute}} 分",
+    "cronEveryNHours": "每 {{n}} 小时的第 {{minute}} 分",
+    "cronAtTime": "在 {{time}}",
+    "cronAtMinutePastEveryHour": "在每小时的第 {{minutes}} 分",
+    "cronAtMinutePastHours": "在 {{hours}} 时的第 {{minutes}} 分",
+    "cronOnDays": "逢{{days}}",
+    "cronOnDayOfMonth": "在每月 {{days}} 日",
+    "cronInMonths": "在{{months}}",
     "cronInvalid": "无效的 cron 表达式（应为 5 个字段）",
     "cronTooFrequent": "触发频率高于 60 秒的最小间隔",
     "failedEmptyHint": "死信执行将显示在此处，供重试或忽略。",

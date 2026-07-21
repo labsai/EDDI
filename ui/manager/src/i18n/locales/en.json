@@ -1484,6 +1484,7 @@
     "stateEnded": "Ended"
   },
   "secrets": {
+    "loadError": "Couldn't load secrets",
     "allAgents": "All agents",
     "allowedAgents": "Allowed Agents",
     "allowedAgentsHint": "Leave empty for all agents. Adding agent IDs helps track which agents use this secret.",
@@ -1657,6 +1658,16 @@
   },
   "schedules": {
     "cronHelp": "5-field format: minute hour day-of-month month day-of-week",
+    "cronEveryMinute": "Every minute",
+    "cronEveryNMinutes": "Every {{n}} minutes",
+    "cronHourlyAt": "Hourly at :{{minute}}",
+    "cronEveryNHours": "Every {{n}} hours at :{{minute}}",
+    "cronAtTime": "At {{time}}",
+    "cronAtMinutePastEveryHour": "At minute {{minutes}} past every hour",
+    "cronAtMinutePastHours": "At minute {{minutes}} past hour {{hours}}",
+    "cronOnDays": "on {{days}}",
+    "cronOnDayOfMonth": "on day-of-month {{days}}",
+    "cronInMonths": "in {{months}}",
     "cronInvalid": "Invalid cron expression (expected 5 fields)",
     "cronTooFrequent": "Fires more often than the 60-second minimum",
     "failedEmptyHint": "Dead-lettered fires will appear here for retry or dismissal.",

@@ -488,7 +488,7 @@ function ScheduleFormDialog({
   editing: ScheduleConfiguration | null;
   onClose: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const createMutation = useCreateSchedule();
   const updateMutation = useUpdateSchedule();
   const isEdit = editing != null;
@@ -577,8 +577,15 @@ function ScheduleFormDialog({
 
   // --- Live cron helper state ---
   const cronDesc = useMemo(
-    () => (formMode === "cron" ? describeCron(cronExpression) : null),
-    [formMode, cronExpression]
+    () =>
+      formMode === "cron"
+        ? describeCron(
+            cronExpression,
+            (k, d, vars) => t(k, { defaultValue: d, ...(vars ?? {}) }),
+            i18n.language
+          )
+        : null,
+    [formMode, cronExpression, t, i18n.language]
   );
   const cronNextFires = useMemo(
     () =>

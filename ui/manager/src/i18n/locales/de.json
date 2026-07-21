@@ -1448,6 +1448,7 @@
     "stateEnded": "Beendet"
   },
   "secrets": {
+    "loadError": "Secrets konnten nicht geladen werden",
     "allAgents": "Alle Agenten",
     "allowedAgents": "Zugelassene Agenten",
     "allowedAgentsHint": "Leer lassen für alle Agenten. Das Hinzufügen von Agenten-IDs hilft nachzuvollziehen, welche Agenten dieses Secret verwenden.",
@@ -1582,6 +1583,16 @@
   },
   "schedules": {
     "cronHelp": "5-Felder-Format: Minute Stunde Tag-des-Monats Monat Wochentag",
+    "cronEveryMinute": "Jede Minute",
+    "cronEveryNMinutes": "Alle {{n}} Minuten",
+    "cronHourlyAt": "Stündlich um :{{minute}}",
+    "cronEveryNHours": "Alle {{n}} Stunden um :{{minute}}",
+    "cronAtTime": "Um {{time}}",
+    "cronAtMinutePastEveryHour": "In Minute {{minutes}} jeder Stunde",
+    "cronAtMinutePastHours": "In Minute {{minutes}} der Stunde {{hours}}",
+    "cronOnDays": "am {{days}}",
+    "cronOnDayOfMonth": "am Monatstag {{days}}",
+    "cronInMonths": "im {{months}}",
     "cronInvalid": "Ungültiger Cron-Ausdruck (5 Felder erwartet)",
     "cronTooFrequent": "Wird häufiger als das 60-Sekunden-Minimum ausgeführt",
     "failedEmptyHint": "Endgültig fehlgeschlagene Ausführungen erscheinen hier zum Wiederholen oder Verwerfen.",

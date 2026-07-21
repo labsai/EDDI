@@ -1448,6 +1448,7 @@
     "stateEnded": "終了"
   },
   "secrets": {
+    "loadError": "シークレットを読み込めませんでした",
     "allAgents": "すべてのエージェント",
     "allowedAgents": "許可されたエージェント",
     "allowedAgentsHint": "すべてのエージェントの場合は空のままにします。エージェント ID を追加すると、どのエージェントがこのシークレットを使用しているかを追跡できます。",
@@ -1582,6 +1583,16 @@
   },
   "schedules": {
     "cronHelp": "5 フィールド形式: 分 時 日 月 曜日",
+    "cronEveryMinute": "毎分",
+    "cronEveryNMinutes": "{{n}}分ごと",
+    "cronHourlyAt": "毎時{{minute}}分",
+    "cronEveryNHours": "{{n}}時間ごとの{{minute}}分",
+    "cronAtTime": "{{time}}に",
+    "cronAtMinutePastEveryHour": "毎時{{minutes}}分",
+    "cronAtMinutePastHours": "{{hours}}時{{minutes}}分",
+    "cronOnDays": "{{days}}のみ",
+    "cronOnDayOfMonth": "{{days}}日のみ",
+    "cronInMonths": "{{months}}のみ",
     "cronInvalid": "無効な cron 式です（5 フィールドが必要です）",
     "cronTooFrequent": "最小間隔の 60 秒よりも頻繁に実行されます",
     "failedEmptyHint": "デッドレター化された実行が、再試行または破棄のためにここに表示されます。",

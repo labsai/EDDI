@@ -1448,6 +1448,7 @@
     "stateEnded": "종료"
   },
   "secrets": {
+    "loadError": "시크릿을 불러올 수 없습니다",
     "allAgents": "모든 에이전트",
     "allowedAgents": "허용된 에이전트",
     "allowedAgentsHint": "모든 에이전트에 적용하려면 비워 두세요. 에이전트 ID를 추가하면 어떤 에이전트가 이 시크릿을 사용하는지 추적하는 데 도움이 됩니다.",
@@ -1582,6 +1583,16 @@
   },
   "schedules": {
     "cronHelp": "5필드 형식: 분 시 일 월 요일",
+    "cronEveryMinute": "매분",
+    "cronEveryNMinutes": "{{n}}분마다",
+    "cronHourlyAt": "매시 :{{minute}}에",
+    "cronEveryNHours": "{{n}}시간마다 :{{minute}}에",
+    "cronAtTime": "{{time}}에",
+    "cronAtMinutePastEveryHour": "매시 {{minutes}}분에",
+    "cronAtMinutePastHours": "{{hours}}시 {{minutes}}분에",
+    "cronOnDays": "{{days}}에",
+    "cronOnDayOfMonth": "매월 {{days}}일에",
+    "cronInMonths": "{{months}}에",
     "cronInvalid": "잘못된 cron 표현식 (5개 필드 필요)",
     "cronTooFrequent": "최소 60초보다 자주 실행됩니다",
     "failedEmptyHint": "데드레터 처리된 실행이 재시도 또는 무시를 위해 여기에 표시됩니다.",

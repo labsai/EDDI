@@ -357,4 +357,46 @@ describe("AuditPage", () => {
     // ...and page-1 entries are still present (appended, not replaced).
     expect(screen.getByTestId("audit-entry-page1-0")).toBeInTheDocument();
   });
+
+  it("restarts paging at offset 0 when the search mode is toggled", async () => {
+    // Regression: switching agent↔conversation must reset `skip`, otherwise a
+    // leftover offset renders a mid-offset page as the first page and silently
+    // drops (and makes unreachable) every earlier entry.
+    const PAGE_SIZE = 100;
+    server.use(
+      http.get("*/auditstore/:conversationId", ({ request, params }) => {
+        const url = new URL(request.url);
+        if (url.pathname.endsWith("/count")) return;
+        if (params.conversationId === "agent") return;
+        const skip = Number(url.searchParams.get("skip") ?? "0");
+        const label = skip === 0 ? "page1" : "page2";
+        return HttpResponse.json(makeAuditPage(label, PAGE_SIZE, skip));
+      }),
+    );
+
+    renderAudit();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId("mode-conversation"));
+    await user.type(screen.getByTestId("conversation-input"), "conv-load-more");
+    await user.click(screen.getByTestId("search-button"));
+    await waitFor(() =>
+      expect(screen.getByTestId("audit-entry-page1-0")).toBeInTheDocument(),
+    );
+
+    // Advance to page 2 (skip=100).
+    await user.click(screen.getByTestId("load-more"));
+    await waitFor(() =>
+      expect(screen.getByTestId("audit-entry-page2-100")).toBeInTheDocument(),
+    );
+
+    // Toggle to agent mode and back: the fresh conversation view must restart at
+    // page 1, not remain stranded at skip=100 (which would drop page 1).
+    await user.click(screen.getByTestId("mode-agent"));
+    await user.click(screen.getByTestId("mode-conversation"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("audit-entry-page1-0")).toBeInTheDocument(),
+    );
+  });
 });

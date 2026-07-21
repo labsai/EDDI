@@ -156,6 +156,35 @@ describe("describeCron", () => {
   });
 });
 
+describe("describeCron localization", () => {
+  it("routes fixed phrases through the provided translator", () => {
+    const t = (key: string) => `«${key}»`;
+    expect(describeCron("* * * * *", t)).toBe("«schedules.cronEveryMinute»");
+    expect(describeCron("*/15 * * * *", t)).toBe("«schedules.cronEveryNMinutes»");
+    expect(describeCron("30 14 * * *", t)).toBe("«schedules.cronAtTime»");
+  });
+
+  it("interpolates runtime values into the translated phrase", () => {
+    const t = (_key: string, def: string, vars?: Record<string, string>) =>
+      def.replace(/\{\{(\w+)\}\}/g, (_m, k) => vars?.[k] ?? "");
+    expect(describeCron("*/15 * * * *", t)).toBe("Every 15 minutes");
+    expect(describeCron("30 14 * * *", t)).toBe("At 14:30");
+  });
+
+  it("localizes weekday names via Intl when a language is passed", () => {
+    const t = (_k: string, d: string, v?: Record<string, string>) =>
+      d.replace(/\{\{(\w+)\}\}/g, (_m, k) => v?.[k] ?? "");
+    // 0 9 * * 1 → Monday; de weekday = "Montag", fr = "lundi"
+    expect(describeCron("0 9 * * 1", t, "de")).toContain("Montag");
+    expect(describeCron("0 9 * * 1", t, "fr")).toContain("lundi");
+  });
+
+  it("stays English when no translator is passed (backward compatible)", () => {
+    expect(describeCron("0 9 * * 1")).toContain("Monday");
+    expect(describeCron("0 0 1 JAN *")).toContain("January");
+  });
+});
+
 describe("datetime-local conversion", () => {
   it("round-trips through local input format", () => {
     const local = isoToLocalInput("2026-07-20T09:30:00.000Z");

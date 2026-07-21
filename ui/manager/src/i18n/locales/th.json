@@ -1448,6 +1448,7 @@
     "stateEnded": "สิ้นสุด"
   },
   "secrets": {
+    "loadError": "ไม่สามารถโหลดข้อมูลลับได้",
     "allAgents": "เอเจนต์ทั้งหมด",
     "allowedAgents": "เอเจนต์ที่อนุญาต",
     "allowedAgentsHint": "เว้นว่างไว้สำหรับเอเจนต์ทั้งหมด การเพิ่มรหัสเอเจนต์ช่วยติดตามว่าเอเจนต์ใดใช้ข้อมูลลับนี้",
@@ -1582,6 +1583,16 @@
   },
   "schedules": {
     "cronHelp": "รูปแบบ 5 ฟิลด์: นาที ชั่วโมง วันของเดือน เดือน วันของสัปดาห์",
+    "cronEveryMinute": "ทุกนาที",
+    "cronEveryNMinutes": "ทุก {{n}} นาที",
+    "cronHourlyAt": "ทุกชั่วโมง เมื่อนาทีที่ :{{minute}}",
+    "cronEveryNHours": "ทุก {{n}} ชั่วโมง เมื่อนาทีที่ :{{minute}}",
+    "cronAtTime": "เวลา {{time}}",
+    "cronAtMinutePastEveryHour": "เมื่อนาทีที่ {{minutes}} ของทุกชั่วโมง",
+    "cronAtMinutePastHours": "เมื่อนาทีที่ {{minutes}} ของชั่วโมงที่ {{hours}}",
+    "cronOnDays": "ในวัน {{days}}",
+    "cronOnDayOfMonth": "ในวันที่ {{days}} ของเดือน",
+    "cronInMonths": "ในเดือน {{months}}",
     "cronInvalid": "นิพจน์ cron ไม่ถูกต้อง (ต้องมี 5 ฟิลด์)",
     "cronTooFrequent": "ดำเนินการบ่อยกว่าค่าต่ำสุด 60 วินาที",
     "failedEmptyHint": "การดำเนินการที่เป็นเดดเลตเตอร์จะปรากฏที่นี่เพื่อลองใหม่หรือปิด",

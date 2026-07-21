@@ -1448,6 +1448,7 @@
     "stateEnded": "Encerrado"
   },
   "secrets": {
+    "loadError": "Não foi possível carregar os secrets",
     "allAgents": "Todos os agentes",
     "allowedAgents": "Agentes permitidos",
     "allowedAgentsHint": "Deixe vazio para todos os agentes. Adicionar IDs de agentes ajuda a rastrear quais agentes usam este secret.",
@@ -1582,6 +1583,16 @@
   },
   "schedules": {
     "cronHelp": "Formato de 5 campos: minuto hora dia-do-mês mês dia-da-semana",
+    "cronEveryMinute": "A cada minuto",
+    "cronEveryNMinutes": "A cada {{n}} minutos",
+    "cronHourlyAt": "A cada hora aos :{{minute}}",
+    "cronEveryNHours": "A cada {{n}} horas aos :{{minute}}",
+    "cronAtTime": "Às {{time}}",
+    "cronAtMinutePastEveryHour": "No minuto {{minutes}} de cada hora",
+    "cronAtMinutePastHours": "No minuto {{minutes}} da hora {{hours}}",
+    "cronOnDays": "em {{days}}",
+    "cronOnDayOfMonth": "no dia {{days}} do mês",
+    "cronInMonths": "em {{months}}",
     "cronInvalid": "Expressão cron inválida (esperados 5 campos)",
     "cronTooFrequent": "Dispara com mais frequência que o mínimo de 60 segundos",
     "failedEmptyHint": "As execuções dead-letter aparecerão aqui para nova tentativa ou dispensa.",

@@ -1448,6 +1448,7 @@
     "stateEnded": "منتهي"
   },
   "secrets": {
+    "loadError": "تعذّر تحميل الأسرار",
     "allAgents": "جميع الوكلاء",
     "allowedAgents": "الوكلاء المسموح لهم",
     "allowedAgentsHint": "اتركه فارغاً لجميع الوكلاء. تساعد إضافة معرفات الوكلاء على تتبّع أي الوكلاء يستخدم هذا السر.",
@@ -1582,6 +1583,16 @@
   },
   "schedules": {
     "cronHelp": "تنسيق من 5 حقول: الدقيقة الساعة يوم-الشهر الشهر يوم-الأسبوع",
+    "cronEveryMinute": "كل دقيقة",
+    "cronEveryNMinutes": "كل {{n}} دقيقة",
+    "cronHourlyAt": "كل ساعة عند الدقيقة {{minute}}",
+    "cronEveryNHours": "كل {{n}} ساعة عند الدقيقة {{minute}}",
+    "cronAtTime": "عند الساعة {{time}}",
+    "cronAtMinutePastEveryHour": "عند الدقيقة {{minutes}} من كل ساعة",
+    "cronAtMinutePastHours": "عند الدقيقة {{minutes}} من الساعة {{hours}}",
+    "cronOnDays": "أيام {{days}}",
+    "cronOnDayOfMonth": "في اليوم {{days}} من الشهر",
+    "cronInMonths": "في {{months}}",
     "cronInvalid": "تعبير cron غير صالح (المتوقع 5 حقول)",
     "cronTooFrequent": "يُنفَّذ أكثر من الحد الأدنى البالغ 60 ثانية",
     "failedEmptyHint": "ستظهر عمليات التنفيذ المُرسَلة إلى الرسائل الميتة هنا لإعادة المحاولة أو التجاهل.",
