@@ -247,6 +247,23 @@ export async function endConversation(
   );
 }
 
+/**
+ * Re-execute the last conversation step.
+ *
+ * The recovery path after a turn fails: without it an ERROR or
+ * EXECUTION_INTERRUPTED conversation is a dead end whose only escape is
+ * starting over and losing the history.
+ */
+export async function rerunLastStep(
+  conversationId: string,
+): Promise<ConversationSnapshot | null> {
+  return requestJson<ConversationSnapshot>(
+    `/agents/${encodeSegment(conversationId)}/rerun`,
+    { method: "POST" },
+    "Failed to retry",
+  );
+}
+
 /* ─── Undo / Redo ────────────────────────────── */
 
 /**

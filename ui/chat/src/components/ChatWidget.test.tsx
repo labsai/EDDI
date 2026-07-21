@@ -288,3 +288,59 @@ describe("ChatWidget — a turn that pauses vs a turn that is dropped", () => {
     });
   });
 });
+
+describe("ChatWidget — recovering from a stuck conversation", () => {
+  function mockStateBackend(conversationState: string, onRerun?: () => void) {
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/rerun")) {
+        onRerun?.();
+        return new Response(
+          JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({ conversationState, conversationSteps: [] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+  }
+
+  it.each(["ERROR", "EXECUTION_INTERRUPTED"])(
+    "offers a way out of %s instead of leaving a dead end",
+    async (conversationState) => {
+      mockStateBackend(conversationState);
+
+      renderWidget();
+
+      expect(await screen.findByTestId("recovery-banner")).toBeInTheDocument();
+      expect(screen.getByTestId("recovery-retry")).toBeInTheDocument();
+    },
+  );
+
+  it("retries the failed step when the user asks", async () => {
+    let retried = false;
+    mockStateBackend("ERROR", () => {
+      retried = true;
+    });
+
+    renderWidget();
+    fireEvent.click(await screen.findByTestId("recovery-retry"));
+
+    await waitFor(() => expect(retried).toBe(true));
+  });
+
+  it("shows no recovery banner for a healthy conversation", async () => {
+    mockStateBackend("READY");
+
+    renderWidget();
+    await screen.findByTestId("chat-input");
+
+    expect(screen.queryByTestId("recovery-banner")).toBeNull();
+  });
+});

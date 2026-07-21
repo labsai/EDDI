@@ -25,6 +25,7 @@ import {
   undoConversation,
   redoConversation,
   fetchAgentDescriptor,
+  rerunLastStep,
   setBaseUrl,
 } from "@/api/chat-api";
 import { setAuthToken } from "@/api/http";
@@ -733,7 +734,17 @@ export function ChatWidget() {
         redoAvailable: snapshot.redoAvailable ?? true,
       });
     } catch (err) {
-      console.error("Undo failed:", err);
+      // 409 is expected while the conversation is paused or a turn is running —
+      // undo/redo availability is deliberately NOT pause-aware server-side, so
+      // the button can be enabled while the operation is refused.
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeAgentMessage(
+          err instanceof ApiError && err.status === 409
+            ? "⚠️ Undo is not possible right now."
+            : "⚠️ Undo failed.",
+        ),
+      });
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
@@ -780,7 +791,14 @@ export function ChatWidget() {
         redoAvailable: snapshot.redoAvailable ?? false,
       });
     } catch (err) {
-      console.error("Redo failed:", err);
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeAgentMessage(
+          err instanceof ApiError && err.status === 409
+            ? "⚠️ Redo is not possible right now."
+            : "⚠️ Redo failed.",
+        ),
+      });
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
@@ -877,6 +895,40 @@ export function ChatWidget() {
     }
   }, [dispatch, state.conversationId]);
 
+  /* ─── Recovery from a stuck conversation ────── */
+  const isStuck =
+    state.conversationState === "ERROR" ||
+    state.conversationState === "EXECUTION_INTERRUPTED";
+
+  const handleRetry = useCallback(async () => {
+    if (!environment || !agentId || !state.conversationId) return;
+    dispatch({ type: "SET_PROCESSING", value: true });
+    try {
+      await rerunLastStep(state.conversationId);
+      const snapshot = await readConversation(
+        environment,
+        agentId,
+        state.conversationId,
+        true,
+      );
+      if (snapshot.conversationState) {
+        dispatch({ type: "SET_CONVERSATION_STATE", state: snapshot.conversationState });
+      }
+      processSnapshot(snapshot);
+    } catch (err) {
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeAgentMessage(
+          err instanceof ApiError && err.status === 409
+            ? "⚠️ There is nothing to retry right now."
+            : "⚠️ Retrying failed. You can start a new conversation instead.",
+        ),
+      });
+    } finally {
+      dispatch({ type: "SET_PROCESSING", value: false });
+    }
+  }, [dispatch, environment, agentId, state.conversationId, processSnapshot]);
+
   /* ─── Stop generating ───────────────────────── */
   const handleStop = useCallback(async () => {
     // Abort the local read first so tokens stop arriving immediately, then ask
@@ -972,6 +1024,34 @@ export function ChatWidget() {
             onSelect={handleQuickReply}
           />
         )}
+
+      {isStuck && (
+        <div className="recovery-banner" role="status" data-testid="recovery-banner">
+          <span className="recovery-banner__text">
+            {state.conversationState === "EXECUTION_INTERRUPTED"
+              ? "This request was interrupted before it finished."
+              : "Something went wrong on the last step."}
+          </span>
+          <div className="recovery-banner__actions">
+            <button
+              className="recovery-banner__btn"
+              onClick={handleRetry}
+              disabled={state.isProcessing}
+              data-testid="recovery-retry"
+            >
+              Try again
+            </button>
+            <button
+              className="recovery-banner__btn"
+              onClick={handleRestart}
+              disabled={state.isProcessing}
+              data-testid="recovery-restart"
+            >
+              Start over
+            </button>
+          </div>
+        </div>
+      )}
 
       {isEnded ? (
         <div className="chat-ended">

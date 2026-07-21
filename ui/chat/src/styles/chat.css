@@ -1278,3 +1278,49 @@ a:hover { opacity: 0.85; }
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ─── Recovery banner (ERROR / EXECUTION_INTERRUPTED) ─── */
+
+.recovery-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--chat-border);
+  border-left: 3px solid #d9822b;
+  border-radius: 10px;
+  background: var(--chat-surface);
+}
+
+.recovery-banner__text {
+  color: var(--chat-text);
+  font-size: 0.86rem;
+}
+
+.recovery-banner__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.recovery-banner__btn {
+  padding: 4px 10px;
+  border: 1px solid var(--chat-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--chat-text);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.recovery-banner__btn:hover:not(:disabled),
+.recovery-banner__btn:focus-visible:not(:disabled) {
+  border-color: var(--chat-accent);
+}
+
+.recovery-banner__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

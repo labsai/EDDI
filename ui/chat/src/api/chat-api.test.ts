@@ -3,8 +3,13 @@
    ────────────────────────────────────────────── */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { sendMessageStreaming, undoConversation, setBaseUrl } from "./chat-api";
-import { mockFetchSSE, mockFetchResponse } from "@/test-utils/sse";
+import {
+  sendMessageStreaming,
+  undoConversation,
+  rerunLastStep,
+  setBaseUrl,
+} from "./chat-api";
+import { mockFetchSSE, mockFetchResponse, captureFetch } from "@/test-utils/sse";
 import type { SSEEvent } from "@/types";
 
 const originalFetch = globalThis.fetch;
@@ -109,5 +114,31 @@ describe("undoConversation — empty response bodies", () => {
     await expect(undoConversation("", "", "conv-1")).rejects.toMatchObject({
       status: 409,
     });
+  });
+});
+
+describe("rerunLastStep", () => {
+  it("posts to the rerun endpoint so a failed turn can be retried", async () => {
+    setBaseUrl("");
+    const { calls } = captureFetch(200, "{}");
+
+    await rerunLastStep("conv-1");
+
+    expect(calls[0].url).toContain("/agents/conv-1/rerun");
+    expect(calls[0].init?.method).toBe("POST");
+  });
+
+  it("tolerates an empty 200 body", async () => {
+    setBaseUrl("");
+    mockFetchResponse(200, "");
+
+    await expect(rerunLastStep("conv-1")).resolves.toBeDefined();
+  });
+
+  it("surfaces a refusal with its status", async () => {
+    setBaseUrl("");
+    mockFetchResponse(409, "");
+
+    await expect(rerunLastStep("conv-1")).rejects.toMatchObject({ status: 409 });
   });
 });
