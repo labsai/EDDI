@@ -29,7 +29,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
-import java.lang.reflect.Field;
 import java.util.*;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
@@ -115,11 +114,9 @@ class LlmTaskResumeModeTest {
                 null, null, null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
                 mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
 
-        // The orchestrator is created internally via `new` — inject the mock so the
-        // resume path can be verified without executing the real (Task 9) loop.
-        Field orchestratorField = LlmTask.class.getDeclaredField("agentOrchestrator");
-        orchestratorField.setAccessible(true);
-        orchestratorField.set(llmTask, agentOrchestrator);
+        // Substitute the mock so the resume path can be verified without executing
+        // the real (Task 9) loop.
+        llmTask.agentOrchestrator = agentOrchestrator;
 
         when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData d = mock(IData.class);

@@ -5,6 +5,45 @@
 
 ---
 
+## 🧪 LLM — make `AgentOrchestrator` injectable; cover agent-mode response metadata (2026-07-21)
+
+**Repo:** EDDI (`refactor/agent-orchestrator-injectable`, branched from `fix/orphan-scan-and-quota-defects`)
+
+Follow-up to the token-usage fix below, which shipped without unit coverage.
+
+### Correction to the entry below
+
+Its "Verification limits" paragraph states that `LlmTask` constructs its orchestrator internally, so `executeIfToolsEnabled` cannot be stubbed and "every existing `LlmTask` test therefore exercises the legacy branch". **That is wrong.** `LlmTaskCoverage2Test` and `LlmTaskResumeModeTest` already substituted a mocked `AgentOrchestrator` — via `LlmTask.class.getDeclaredField("agentOrchestrator")` + `setAccessible(true)` — and roughly 20 tests drove the agent branches through it, including the legacy-fallback case.
+
+The branches were covered. What was never exercised was the **metadata dimension**: every stub built its result with the two-argument `ExecutionResult` convenience constructor, which hardcodes `Map.of()`. Against an always-empty map, a task that ignores `responseMetadata()` is indistinguishable from one that honours it. Branch coverage hid a data-flow gap — the more useful lesson than "the seam was missing".
+
+### What changed
+
+- `AgentOrchestrator` → `@ApplicationScoped` with an `@Inject` constructor. **Signature unchanged**, so the 8 `AgentOrchestrator*Test` classes that construct it directly are untouched.
+- `ConversationHistoryBuilder` → `@ApplicationScoped`; it is an orchestrator constructor parameter and had to become resolvable. Stateless (only a static logger).
+- `LlmTask.agentOrchestrator` is now an `@Inject` package-private field rather than `private final`. The constructor still builds one, so all 10 direct-construction call sites keep compiling unchanged; under CDI, field injection runs after the constructor and replaces the fallback with the managed bean. `@PostConstruct wireAttachmentServices()` consequently wires the *injected* bean.
+- Both reflection hacks deleted — tests now assign `llmTask.agentOrchestrator = mock(...)`.
+
+### Why the 41-parameter constructor was left alone
+
+22 of its parameters exist only to feed `new AgentOrchestrator(...)`. Removing them is the tidier end state, but the moment the task stops building its own orchestrator they become **dead** rather than merely numerous — and dropping them rewrites 10 large call sites for zero behavioural gain. Field injection follows the idiom already documented two fields above it (`attachmentForwarder`: *"Field-injected so the many direct-construction unit tests are unaffected"*), keeps every parameter genuinely used, and leaves the signature untouched. Slimming it remains worth doing as a separate, purely mechanical change.
+
+### Statelessness check (AGENTS.md §4.1 rule 2)
+
+Every `AgentOrchestrator` field is `final` except the two `volatile` attachment services, which are write-once deployment-scoped collaborators, not per-conversation state; `ToolApprovalGate` and `ChatTranscriptCodec` are stateless helpers. All conversational state travels through the `IConversationMemory` argument. Safe as a shared singleton — which it already effectively was, being owned by the singleton `LlmTask`.
+
+### Tests
+
+New `LlmTaskAgentModeMetadataTest` (5 tests) covering the live agent branch, the legacy fallback when the orchestrator declines, and the HITL resume continuation.
+
+Validated by mutation rather than by observing green: reverting `15b7a08a7` and re-running turns **exactly three** of the five red — `agentMode_surfacesResponseMetadataWithTokenUsage`, `resumeMode_surfacesContinuationMetadata`, `resumeMode_nullResult_publishesEmptyMetadata`. The other two (`agentMode_emptyMetadata_publishesEmptyMap`, `agentReturnsNull_fallsBackToLegacyChatExecutor`) pass with and without the fix by design: they pin behaviour the fix did not alter, and are regression guards, not discriminators.
+
+### Verification limits
+
+CDI wiring **cannot be validated locally** — `quarkus:build` augmentation needs a loopback socket this environment refuses (same limitation recorded for the persistence-mapper producer below). These are the repo's first package-private `@ApplicationScoped` beans, so ArC's client-proxy generation for them is specifically what CI must confirm. `@ApplicationScoped` was chosen over `@Singleton` deliberately: the chain `LlmTask → AgentOrchestrator → IConversationService → IAgentFactory → lifecycle tasks` is cyclic, and normal-scoped proxies absorb that where a pseudo-scope could break it.
+
+---
+
 ## 🔢 LLM — stop discarding agent-mode token usage (2026-07-21)
 
 **Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)

@@ -44,6 +44,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.ChatMessage;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -104,7 +105,6 @@ public class LlmTask implements ILifecycleTask {
     private final ConversationHistoryBuilder conversationHistoryBuilder;
     private final LegacyChatExecutor legacyChatExecutor;
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
-    private final AgentOrchestrator agentOrchestrator;
     private final CascadingModelExecutor cascadingModelExecutor;
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
@@ -124,12 +124,27 @@ public class LlmTask implements ILifecycleTask {
     AttachmentTextExtractor attachmentTextExtractor;
 
     /**
-     * Wire the attachment services into the (constructor-built) AgentOrchestrator
-     * after CDI field injection completes, so the {@code readAttachment} tool can
-     * be offered. Skipped in direct-construction unit tests (no CDI) — the tool is
-     * simply never added there.
+     * The tool-calling agent loop. Field-injected for the same reason as the
+     * attachment services above: the constructor below still builds one, so the
+     * many direct-construction unit tests keep working unchanged, while CDI
+     * replaces it with the managed {@link AgentOrchestrator} bean in production
+     * (field injection runs after the constructor).
+     * <p>
+     * Package-private and non-final so a test can substitute a mock by plain
+     * assignment — the agent-mode branches used to be reachable only through
+     * {@code getDeclaredField("agentOrchestrator")} reflection.
      */
-    @jakarta.annotation.PostConstruct
+    @Inject
+    AgentOrchestrator agentOrchestrator;
+
+    /**
+     * Wire the attachment services into the AgentOrchestrator after CDI field
+     * injection completes, so the {@code readAttachment} tool can be offered. By
+     * this point {@code agentOrchestrator} is the injected bean, not the
+     * constructor's fallback. Skipped in direct-construction unit tests (no CDI) —
+     * the tool is simply never added there.
+     */
+    @PostConstruct
     void wireAttachmentServices() {
         if (agentOrchestrator != null) {
             agentOrchestrator.setAttachmentServices(attachmentStore, attachmentTextExtractor);
@@ -192,6 +207,9 @@ public class LlmTask implements ILifecycleTask {
         this.conversationHistoryBuilder = new ConversationHistoryBuilder();
         this.legacyChatExecutor = new LegacyChatExecutor();
         this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();
+        // Fallback instance for direct construction (unit tests). Under CDI this is
+        // overwritten by the injected AgentOrchestrator bean right after the
+        // constructor returns — see the field declaration above.
         this.agentOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, fetchToolResponsePageTool,
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,

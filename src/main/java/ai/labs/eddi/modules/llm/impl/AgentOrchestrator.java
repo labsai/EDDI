@@ -61,6 +61,8 @@ import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.Metrics;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -88,7 +90,16 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * ToolExecutionService</li>
  * <li>Produce an execution trace for debugging</li>
  * </ul>
+ * <p>
+ * A stateless singleton, per the pipeline-component contract: every field is
+ * {@code final} except the two write-once attachment services, which are
+ * deployment-scoped collaborators rather than per-conversation state. All
+ * conversational state travels through the {@code IConversationMemory}
+ * argument. Constructing it directly (as the unit tests do) stays supported —
+ * the annotations below only add the managed instance that {@code LlmTask}
+ * injects.
  */
+@ApplicationScoped
 class AgentOrchestrator {
     private static final Logger LOGGER = Logger.getLogger(AgentOrchestrator.class);
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
@@ -165,6 +176,7 @@ class AgentOrchestrator {
     private final IHitlToolJournalStore journalStore;
     private final ConversationHistoryBuilder conversationHistoryBuilder;
 
+    @Inject
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             FetchToolResponsePageTool fetchToolResponsePageTool,
