@@ -398,5 +398,13 @@ describe("AuditPage", () => {
     await waitFor(() =>
       expect(screen.getByTestId("audit-entry-page1-0")).toBeInTheDocument(),
     );
-  });
+    // ONLY page 1 is rendered. This is the precise discriminator: the offset
+    // resets in the same batch as the mode change, so the merge effect cannot
+    // re-populate — with the stale offset — the accumulator that the context
+    // change just cleared. (That stale re-population was what left 200 rows
+    // rendered at skip=0 and made the next "Load more" a dead click.)
+    expect(screen.queryByTestId("audit-entry-page2-100")).not.toBeInTheDocument();
+    // This test renders three full 100-row pages, so give it headroom: under
+    // full-suite parallel load the default 30s timeout is not enough.
+  }, 60_000);
 });

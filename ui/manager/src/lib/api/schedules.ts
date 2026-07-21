@@ -110,6 +110,46 @@ export function parseInstant(
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * Format a Date as wall-clock in a specific IANA time zone.
+ *
+ * A schedule fires according to ITS OWN `timeZone`, and the UI labels rows with
+ * that zone — so rendering the viewer's local wall-clock underneath a different
+ * zone's label makes operators read the wrong fire time. The backend does not
+ * validate the stored zone string, and an unknown zone makes `toLocaleString`
+ * throw a RangeError, so fall back to the viewer's zone instead of crashing.
+ *
+ * @param withZoneName append a short zone marker, for places that show the
+ *                     time without a separate zone label of their own.
+ */
+export function formatDateInZone(
+  date: Date,
+  timeZone?: string | null,
+  withZoneName = false
+): string {
+  if (timeZone) {
+    try {
+      return date.toLocaleString(undefined, {
+        timeZone,
+        ...(withZoneName ? { timeZoneName: "short" as const } : {}),
+      });
+    } catch {
+      // Unknown/invalid IANA zone — fall through to the viewer's local zone.
+    }
+  }
+  return date.toLocaleString();
+}
+
+/** {@link formatDateInZone} for a raw backend instant; "—" when absent. */
+export function formatInstantInZone(
+  value: string | number | null | undefined,
+  timeZone?: string | null,
+  withZoneName = false
+): string {
+  const date = parseInstant(value);
+  return date ? formatDateInZone(date, timeZone, withZoneName) : "—";
+}
+
 /** Duration in ms between startedAt and completedAt, or null if unavailable. */
 export function fireLogDurationMs(log: ScheduleFireLog): number | null {
   const start = parseInstant(log.startedAt);

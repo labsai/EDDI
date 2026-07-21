@@ -524,15 +524,14 @@ export function AuditPage() {
   // flattened union so paging *appends* rather than replacing earlier rows.
   const [pages, setPages] = useState<Record<number, AuditEntry[]>>({});
 
-  // Reset the accumulator AND the paging offset whenever the search context
-  // changes. Resetting `skip` here (not just in the search handlers) is what
-  // makes a mode toggle safe: switching agent↔conversation while a prior search
-  // is still active must restart at offset 0, otherwise the leftover `skip`
-  // renders a mid-offset page as the first page and silently drops (and makes
-  // unreachable, via the forward-only "Load more") every earlier entry.
+  // Reset the accumulator whenever the search context changes. `skip` is reset
+  // by whatever changes the context (the search handlers *and* the mode
+  // toggles) so that it lands in the SAME render batch as the context change.
+  // Resetting it here instead would be too late: the merge effect below would
+  // run once more with the stale offset and immediately re-populate the
+  // accumulator this effect just cleared.
   useEffect(() => {
     setPages({});
-    setSkip(0);
   }, [mode, searchValue, activeAgentId, activeAgentVersion]);
 
   // Merge each freshly-fetched page. Same-skip refetches (auto-refresh) replace
@@ -701,7 +700,10 @@ export function AuditPage() {
         <div className="mb-3 flex items-center gap-2" data-tour="audit-mode-toggle">
           <button
             type="button"
-            onClick={() => setMode("agent")}
+            onClick={() => {
+              setMode("agent");
+              setSkip(0);
+            }}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
               mode === "agent"
                 ? "bg-primary text-primary-foreground shadow-sm"
@@ -714,7 +716,10 @@ export function AuditPage() {
           </button>
           <button
             type="button"
-            onClick={() => setMode("conversation")}
+            onClick={() => {
+              setMode("conversation");
+              setSkip(0);
+            }}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
               mode === "conversation"
                 ? "bg-primary text-primary-foreground shadow-sm"

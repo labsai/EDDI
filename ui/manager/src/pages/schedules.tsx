@@ -39,6 +39,8 @@ import {
 import {
   fireLogDurationMs,
   parseInstant,
+  formatInstantInZone,
+  formatDateInZone,
   describeCron,
   isValidCron,
   nextCronFires,
@@ -829,8 +831,11 @@ function ScheduleFormDialog({
                       data-testid="cron-next-preview"
                     >
                       {t("schedules.cronNext", "Next")}:{" "}
+                      {/* These instants were computed against the selected
+                          zone, so render them in it too — otherwise the preview
+                          appears not to match the cron the user just typed. */}
                       {cronNextFires
-                        .map((d) => d.toLocaleString())
+                        .map((d) => formatDateInZone(d, timeZone, true))
                         .join(" · ")}
                     </p>
                   )}
@@ -1315,9 +1320,12 @@ export function SchedulesPage() {
               {t("schedules.nextFireLabel", "Next Fire")}
             </div>
             <p className="mt-2 text-lg font-semibold tabular-nums text-foreground">
-              {soonest?.nextFire
-                ? (parseInstant(soonest.nextFire)?.toLocaleString() ?? "—")
-                : "—"}
+              {/* No zone label on this card, so carry a short zone marker. */}
+              {formatInstantInZone(
+                soonest?.nextFire,
+                soonest?.timeZone ?? DEFAULT_TIME_ZONE,
+                true
+              )}
             </p>
             {soonest && (
               <p className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -1485,9 +1493,13 @@ export function SchedulesPage() {
                             )}
                           </td>
                           <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
-                            {s.nextFire
-                              ? (parseInstant(s.nextFire)?.toLocaleString() ?? "—")
-                              : "—"}
+                            {/* Rendered in the SCHEDULE's zone — the label just
+                                below states that zone, so the viewer's local
+                                wall-clock here would contradict it. */}
+                            {formatInstantInZone(
+                              s.nextFire,
+                              s.timeZone ?? DEFAULT_TIME_ZONE
+                            )}
                             <span
                               className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground/60"
                               data-testid={`timezone-${s.id}`}
@@ -1497,9 +1509,10 @@ export function SchedulesPage() {
                             </span>
                           </td>
                           <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
-                            {s.lastFired
-                              ? (parseInstant(s.lastFired)?.toLocaleString() ?? "—")
-                              : "—"}
+                            {formatInstantInZone(
+                              s.lastFired,
+                              s.timeZone ?? DEFAULT_TIME_ZONE
+                            )}
                           </td>
                           <td className="px-5 py-3">
                             <div className="flex items-center justify-end gap-1">

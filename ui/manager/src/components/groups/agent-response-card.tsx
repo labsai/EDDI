@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
 import DOMPurify from "dompurify";
 import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, ListOrdered, User2, XCircle } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
@@ -311,7 +310,12 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
                 />
               ) : hasMarkdown(parsedContent) ? (
                 <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_hr]:border-border">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                  {/* Deliberately NO rehypeRaw: this is the allowHtml=false path,
+                      so raw HTML in agent output must stay escaped. Rendering it
+                      would inject attacker-controlled markup (e.g. an <iframe
+                      srcdoc> executing with full app-origin access). The opt-in
+                      HTML path above is the one that renders, via DOMPurify. */}
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {parsedContent}
                   </ReactMarkdown>
                 </div>

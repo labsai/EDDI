@@ -12,6 +12,8 @@ import {
   MIN_INTERVAL_SECONDS,
   parseInstant,
   fireLogDurationMs,
+  formatDateInZone,
+  formatInstantInZone,
 } from "../schedules";
 
 // The backend (Quarkus write-dates-as-timestamps) serializes Instant as
@@ -48,6 +50,39 @@ describe("parseInstant", () => {
         completedAt: 1719964802.5,
       })
     ).toBe(2500);
+  });
+});
+
+describe("formatInstantInZone / formatDateInZone", () => {
+  const d = new Date("2026-07-01T09:00:00.000Z");
+
+  it("renders the wall-clock of the REQUESTED zone, not the viewer's", () => {
+    // Different UTC offsets must produce different wall-clock strings.
+    expect(formatDateInZone(d, "UTC")).not.toBe(formatDateInZone(d, "Asia/Tokyo"));
+    expect(formatDateInZone(d, "UTC")).toBe(
+      d.toLocaleString(undefined, { timeZone: "UTC" })
+    );
+  });
+
+  it("falls back to the viewer's zone when the stored zone is invalid", () => {
+    // The backend does not validate timeZone; an unknown zone must not throw.
+    expect(() => formatDateInZone(d, "Not/AZone")).not.toThrow();
+    expect(formatDateInZone(d, "Not/AZone")).toBe(d.toLocaleString());
+  });
+
+  it("appends a zone marker only when asked", () => {
+    expect(formatDateInZone(d, "UTC", true)).not.toBe(formatDateInZone(d, "UTC"));
+  });
+
+  it("parses fractional-epoch-second instants before formatting", () => {
+    expect(formatInstantInZone(1719964800, "UTC")).toBe(
+      formatDateInZone(new Date(1719964800000), "UTC")
+    );
+  });
+
+  it("returns an em dash for a missing instant", () => {
+    expect(formatInstantInZone(null, "UTC")).toBe("—");
+    expect(formatInstantInZone(undefined, "UTC")).toBe("—");
   });
 });
 
