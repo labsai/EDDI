@@ -5,6 +5,29 @@
 
 ---
 
+## 💵 Tenancy — align the at-limit cost comparison and fix costMonth JSON shape (2026-07-21)
+
+**Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)
+
+Two independent defects in the tenant cost-budget surface.
+
+**1. The two production quota stores disagreed with the gate at exactly the limit.** `TenantQuotaService.checkCostBudget` denies on `currentCost >= limit`, and `InMemoryTenantQuotaStore.tryAddCost` matches it — but `MongoTenantQuotaStore` and `PostgresTenantQuotaStore` used `totalCost > limit`. At exactly the budget the pre-call gate denied while post-call accounting allowed. `docs/changelog.md` records the in-memory store being deliberately moved to `>=` for this reason; the two DB stores were never updated. Both now use `>=`.
+
+Verified by mutation: reverting the Mongo comparison to `>` makes the new `exactlyAtLimit` test fail with `expected: <false> but was: <true>`, so the test is not vacuous.
+
+**2. `UsageSnapshot.costMonth` serialized as a JSON array.** Under `quarkus.jackson.write-dates-as-timestamps=true` (`application.properties:174`) Jackson's `YearMonthSerializer` takes its `useTimestamp` branch and emits `[2026,7]` instead of `"2026-07"`. Both stores already persist the value as an ISO string (`YearMonth.toString()` / `YearMonth.parse`, never through Jackson), so the REST representation was the only place that disagreed. Annotated the record component with `@JsonFormat(shape = JsonFormat.Shape.STRING)`.
+
+### Design decisions
+
+- **Annotation, not a mapper-wide override.** A `configOverride(Instant.class)` on `SerializationCustomizer` would have fixed every temporal field at once, but that customizer's mapper is *also* the persistence mapper — `JsonSerialization` `@Inject`s the same CDI `ObjectMapper`, which backs `DocumentBuilder` for every Mongo write and Postgres JSONB column. Changing it would alter on-disk formats. Concretely, `GroupConversation.lastModified` is an `Instant` persisted through it and `GroupConversationStore` sorts *server-side* on that field, so mixed old-numeric/new-string rows would sort wrongly and silently in both backends. Commit `dc117cddc` ("keep numeric date format") already reverted a broader version of this change once, for breaking `findDueSchedules`. The wider Instant-format cleanup is therefore left out and tracked separately — it needs the persistence mapper decoupled from the REST mapper first, plus a coordinated EDDI-Manager change (the Schedules dashboard sorts `nextFire` arithmetically, which yields `NaN` on ISO strings).
+- **`costMonth` is safe in isolation** precisely because neither store round-trips `YearMonth` through Jackson — verified before changing it.
+
+### Tests
+
+New `UsageSnapshotSerializationTest` asserts the shape on the *real* record (not a stand-in holder) through a mapper wired exactly as production is, plus a round-trip. New `MongoTenantQuotaStoreTest.exactlyAtLimit`. All 131 tenancy tests green.
+
+---
+
 ## 🛡️ Orphan admin — fix page-walk truncation and refuse to purge on an incomplete scan (2026-07-21)
 
 **Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)

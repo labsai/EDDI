@@ -416,7 +416,11 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     double totalCost = rs.getDouble(1);
-                    if (limit >= 0 && totalCost > limit) {
+                    // >=, not >, to agree with TenantQuotaService.checkCostBudget
+                    // (currentCost >= limit) and InMemoryTenantQuotaStore. With > the
+                    // pre-call gate denied at exactly the limit while post-call
+                    // accounting allowed.
+                    if (limit >= 0 && totalCost >= limit) {
                         return QuotaCheckResult.denied(
                                 "Monthly cost budget exceeded ($%.2f / $%.2f)".formatted(totalCost, limit));
                     }
