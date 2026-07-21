@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
@@ -67,7 +68,7 @@ public class RestAgentStore implements IRestAgentStore {
     @PostConstruct
     void populateCapabilityRegistry() {
         try {
-            var descriptors = documentDescriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false);
+            var descriptors = documentDescriptorStore.readDescriptors("ai.labs.agent", null, 0, IDescriptorStore.NO_LIMIT, false);
             int registered = 0;
             for (var descriptor : descriptors) {
                 try {

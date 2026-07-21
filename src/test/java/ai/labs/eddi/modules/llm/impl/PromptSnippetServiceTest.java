@@ -9,10 +9,12 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.Collections;
@@ -45,6 +47,20 @@ class PromptSnippetServiceTest {
 
     @Nested
     class SnippetLoading {
+
+        @Test
+        void shouldRequestAllSnippetsNotJustTheFirstPage() throws Exception {
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(Collections.emptyList());
+
+            service.getAll();
+
+            ArgumentCaptor<Integer> limit = ArgumentCaptor.forClass(Integer.class);
+            verify(descriptorStore).readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), limit.capture(), anyBoolean());
+            // Every snippet must reach the template namespace — a paged request
+            // would silently drop snippets past the default page size.
+            assertEquals(IDescriptorStore.NO_LIMIT, limit.getValue());
+        }
 
         @Test
         void shouldReturnEmptyMapWhenNoDescriptorsExist() throws Exception {

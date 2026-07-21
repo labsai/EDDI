@@ -4,10 +4,13 @@
  */
 package ai.labs.eddi.datastore;
 
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.util.List;
@@ -135,14 +138,122 @@ class DescriptorStoreTest {
         assertEquals(1, result.size());
     }
 
-    @Test
-    @DisplayName("readDescriptors — uses default limit when null")
-    void readDescriptorsDefaultLimit() throws Exception {
+    // ==================== limit semantics ====================
+
+    /**
+     * The paging arguments {@code readDescriptors} actually hands to the storage
+     * layer. These are what the contract in {@link IDescriptorStore} is about — a
+     * caller asking for "everything" must not have its request quietly rewritten
+     * into a 20-row page.
+     */
+    private record Paging(int skip, int limit) {
+    }
+
+    private Paging capturePaging(Integer index, Integer limit) throws Exception {
         when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
                 .thenReturn(List.of());
 
-        List<String> result = store.readDescriptors("agents", null, null, null, false);
-        assertTrue(result.isEmpty());
+        store.readDescriptors("agents", null, index, limit, false);
+
+        ArgumentCaptor<Integer> skipCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> limitCaptor = ArgumentCaptor.forClass(Integer.class);
+        verify(resourceStorage).findResources(any(IResourceFilter.QueryFilters[].class), anyString(), skipCaptor.capture(),
+                limitCaptor.capture());
+        return new Paging(skipCaptor.getValue(), limitCaptor.getValue());
+    }
+
+    @Nested
+    @DisplayName("readDescriptors — limit semantics")
+    class LimitSemantics {
+
+        @Test
+        @DisplayName("null limit — caller has no opinion, gets the default page")
+        void nullLimitUsesDefault() throws Exception {
+            assertEquals(IDescriptorStore.DEFAULT_LIMIT, capturePaging(0, null).limit());
+        }
+
+        @Test
+        @DisplayName("NO_LIMIT — means unlimited, NOT the default page size")
+        void noLimitMeansUnlimited() throws Exception {
+            Paging paging = capturePaging(0, IDescriptorStore.NO_LIMIT);
+
+            assertEquals(IResourceStorage.MAX_RESULT_LIMIT, paging.limit());
+            assertEquals(0, paging.skip());
+            // Regression guard: this used to silently resolve to 20, truncating
+            // every caller that passed 0 meaning "give me everything".
+            assertNotEquals(IDescriptorStore.DEFAULT_LIMIT, paging.limit());
+        }
+
+        @Test
+        @DisplayName("negative limit — treated as unlimited, like NO_LIMIT")
+        void negativeLimitMeansUnlimited() throws Exception {
+            assertEquals(IResourceStorage.MAX_RESULT_LIMIT, capturePaging(0, -5).limit());
+        }
+
+        @Test
+        @DisplayName("positive limit — honoured verbatim")
+        void positiveLimitIsHonoured() throws Exception {
+            assertEquals(50, capturePaging(0, 50).limit());
+        }
+
+        @Test
+        @DisplayName("oversized limit — clamped to the safety ceiling")
+        void oversizedLimitIsClamped() throws Exception {
+            assertEquals(IResourceStorage.MAX_RESULT_LIMIT, capturePaging(0, IResourceStorage.MAX_RESULT_LIMIT + 1).limit());
+        }
+
+        @Test
+        @DisplayName("index — skip is index * effective limit")
+        void skipIsIndexTimesEffectiveLimit() throws Exception {
+            assertEquals(100, capturePaging(2, 50).skip());
+        }
+
+        @Test
+        @DisplayName("results are not post-truncated to the default page size")
+        void returnsMoreThanDefaultPageSize() throws Exception {
+            int count = IDescriptorStore.DEFAULT_LIMIT + 5;
+            List<IResourceStore.IResourceId> ids = new java.util.ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                IResourceStore.IResourceId id = mock(IResourceStore.IResourceId.class);
+                when(id.getId()).thenReturn("res-" + i);
+                when(id.getVersion()).thenReturn(1);
+                ids.add(id);
+
+                IResourceStorage.IResource<String> resource = mock(IResourceStorage.IResource.class);
+                when(resource.getData()).thenReturn("data-" + i);
+                when(resourceStorage.read("res-" + i, 1)).thenReturn(resource);
+                when(resourceStorage.getCurrentVersion("res-" + i)).thenReturn(1);
+            }
+            when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                    .thenReturn(ids);
+
+            List<String> result = store.readDescriptors("agents", null, 0, IDescriptorStore.NO_LIMIT, false);
+
+            assertEquals(count, result.size());
+        }
+    }
+
+    @Nested
+    @DisplayName("limit resolution helpers")
+    class LimitResolution {
+
+        @Test
+        @DisplayName("resolveDescriptorLimit — null is the only value meaning 'default page'")
+        void resolveDescriptorLimitNull() {
+            assertEquals(IDescriptorStore.DEFAULT_LIMIT, IDescriptorStore.resolveDescriptorLimit(null));
+            assertEquals(IResourceStorage.MAX_RESULT_LIMIT, IDescriptorStore.resolveDescriptorLimit(IDescriptorStore.NO_LIMIT));
+            assertEquals(7, IDescriptorStore.resolveDescriptorLimit(7));
+        }
+
+        @Test
+        @DisplayName("resolveLimit — never returns a non-positive or above-ceiling value")
+        void resolveLimitIsAlwaysUsable() {
+            assertEquals(IResourceStorage.MAX_RESULT_LIMIT, IResourceStorage.resolveLimit(0));
+            assertEquals(IResourceStorage.MAX_RESULT_LIMIT, IResourceStorage.resolveLimit(-1));
+            assertEquals(IResourceStorage.MAX_RESULT_LIMIT, IResourceStorage.resolveLimit(Integer.MIN_VALUE));
+            assertEquals(IResourceStorage.MAX_RESULT_LIMIT, IResourceStorage.resolveLimit(Integer.MAX_VALUE));
+            assertEquals(1, IResourceStorage.resolveLimit(1));
+        }
     }
 
     // ==================== findByOriginId ====================
