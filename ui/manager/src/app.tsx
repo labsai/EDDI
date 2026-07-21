@@ -37,18 +37,18 @@ import { ChannelDetailPage } from "@/pages/channel-detail";
 import { ApprovalsPage } from "@/pages/approvals";
 import { LandingPage } from "@/pages/landing-page";
 
-import { BoardroomLayout } from "@/components/boardroom/boardroom-layout";
-import { BoardroomDashboard } from "@/pages/boardroom/boardroom-dashboard";
-import { BoardroomWizard } from "@/pages/boardroom/boardroom-wizard";
-import { BoardroomBoard } from "@/pages/boardroom/boardroom-board";
-import { BoardroomThread } from "@/pages/boardroom/boardroom-thread";
-import { BoardroomSettings } from "@/pages/boardroom/boardroom-settings";
-import { BoardroomHistory } from "@/pages/boardroom/boardroom-history";
-import { BoardroomAnalytics } from "@/pages/boardroom/boardroom-analytics";
-import { WorkforceChat } from "@/pages/boardroom/workforce-chat";
+import { WorkforceLayout } from "@/components/workforce/workforce-layout";
+import { WorkforceDashboard } from "@/pages/workforce/workforce-dashboard";
+import { WorkforceWizard } from "@/pages/workforce/workforce-wizard";
+import { WorkforceBoard } from "@/pages/workforce/workforce-board";
+import { WorkforceThread } from "@/pages/workforce/workforce-thread";
+import { WorkforceSettings } from "@/pages/workforce/workforce-settings";
+import { WorkforceHistory } from "@/pages/workforce/workforce-history";
+import { WorkforceAnalytics } from "@/pages/workforce/workforce-analytics";
+import { WorkforceChat } from "@/pages/workforce/workforce-chat";
 
-/** Redirect /boardroom/* → /workforce/* preserving sub-paths */
-function BoardroomRedirect() {
+/** Redirect /workforce/* → /workforce/* preserving sub-paths */
+function WorkforceRedirect() {
   const { "*": rest } = useParams();
   const sub = rest ? `/${rest}` : "";
   return <Navigate to={`/workforce${sub}`} replace />;
@@ -66,20 +66,20 @@ export function App() {
       <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />
 
       {/* Workforce — standalone app, no Manager chrome */}
-      <Route path="/workforce" element={<BoardroomLayout />}>
-        <Route index element={<BoardroomDashboard />} />
-        <Route path="new" element={<BoardroomWizard />} />
-        <Route path="analytics" element={<BoardroomAnalytics />} />
+      <Route path="/workforce" element={<WorkforceLayout />}>
+        <Route index element={<WorkforceDashboard />} />
+        <Route path="new" element={<WorkforceWizard />} />
+        <Route path="analytics" element={<WorkforceAnalytics />} />
         <Route path="chat" element={<WorkforceChat />} />
-        <Route path=":boardId" element={<BoardroomBoard />} />
-        <Route path=":boardId/thread/:memberId" element={<BoardroomThread />} />
-        <Route path=":boardId/settings" element={<BoardroomSettings />} />
-        <Route path=":boardId/history" element={<BoardroomHistory />} />
+        <Route path=":boardId" element={<WorkforceBoard />} />
+        <Route path=":boardId/thread/:memberId" element={<WorkforceThread />} />
+        <Route path=":boardId/settings" element={<WorkforceSettings />} />
+        <Route path=":boardId/history" element={<WorkforceHistory />} />
       </Route>
 
-      {/* Legacy /boardroom redirect → /workforce */}
-      <Route path="/boardroom/*" element={<BoardroomRedirect />} />
-      <Route path="/boardroom" element={<Navigate to="/workforce" replace />} />
+      {/* Legacy /Workforce redirect → /workforce */}
+      <Route path="/workforce/*" element={<WorkforceRedirect />} />
+      <Route path="/Workforce" element={<Navigate to="/workforce" replace />} />
 
       <Route element={<AppLayout />}>
         <Route path="/manage" element={<DashboardPage />} />

@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 
-const STORAGE_KEY = "boardroom-pinned-groups";
+const STORAGE_KEY = "workforce-pinned-groups";
 
 function readPinned(): Set<string> {
   try {

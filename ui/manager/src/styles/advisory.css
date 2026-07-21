@@ -1,9 +1,9 @@
-/* ─── Boardroom Design Tokens ─────────────────────────────────────
- * Scoped under .boardroom so they don't leak into the rest of the app.
+/* ─── Workforce Design Tokens ─────────────────────────────────────
+ * Scoped under .Workforce so they don't leak into the rest of the app.
  * All tokens reference the EDDI global design system (gold/black CI).
  * ────────────────────────────────────────────────────────────────── */
 
-.boardroom {
+.Workforce {
   /* Surface & background — inherit from EDDI theme */
   --br-bg: var(--color-background);
   --br-surface: var(--color-card);
@@ -35,7 +35,7 @@
 
 /* ─── Dark Mode Overrides ─────────────────────────────────────── */
 
-.dark .boardroom {
+.dark .Workforce {
   --br-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --br-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4),
     0 2px 4px -2px rgba(0, 0, 0, 0.3);

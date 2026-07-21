@@ -11,7 +11,7 @@ export interface DiscussionTemplate {
   createdAt: string;
 }
 
-const STORAGE_KEY = 'boardroom-templates';
+const STORAGE_KEY = 'workforce-templates';
 
 function readTemplates(): DiscussionTemplate[] {
   try {
