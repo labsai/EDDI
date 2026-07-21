@@ -28,12 +28,14 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.container.AsyncResponse;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -72,6 +74,9 @@ public class RestAgentEngine implements IRestAgentEngine {
     private final int agentTimeout;
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngine.class);
+
+    /** Mirrors QuotaExceededExceptionMapper; jakarta.ws.rs has no 429 constant. */
+    private static final int TOO_MANY_REQUESTS = 429;
 
     @Inject
     public RestAgentEngine(IConversationService conversationService,
@@ -232,6 +237,16 @@ public class RestAgentEngine implements IRestAgentEngine {
             response.resume(Response.status(Response.Status.FORBIDDEN).type(TEXT_PLAIN).entity(e.getMessage()).build());
         } catch (ResourceNotFoundException e) {
             response.resume(new NotFoundException());
+        } catch (QuotaExceededException e) {
+            // Must be caught explicitly: say() is resumed through an AsyncResponse, so
+            // the exception never reaches QuotaExceededExceptionMapper — without this
+            // branch it fell through to the generic handler below and the api-call
+            // quota surfaced as a 500 instead of a 429. Body and headers mirror the
+            // mapper so both quota denials look identical to clients.
+            LOGGER.warnf("Quota exceeded for conversation %s: %s", conversationId, e.getMessage());
+            response.resume(Response.status(TOO_MANY_REQUESTS)
+                    .entity(Map.of("error", "quota_exceeded", "message", e.getMessage()))
+                    .type(MediaType.APPLICATION_JSON).header("Retry-After", "60").build());
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("An internal error occurred");

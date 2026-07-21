@@ -5,6 +5,27 @@
 
 ---
 
+## 🚦 Engine — return 429 instead of 500 when the api-call quota denies a turn (2026-07-21)
+
+**Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)
+
+`ConversationService.say`/`sayStreaming` throw `QuotaExceededException` when `acquireApiCallSlot()` denies, and `QuotaExceededExceptionMapper` maps that to **429** with `{"error":"quota_exceeded"}` and `Retry-After: 60`. But `say()` is resumed through a JAX-RS `AsyncResponse`, so the exception is caught inside `RestAgentEngine.sayInternal` and never reaches the `@Provider` mapper. Its catch chain lists `AgentMismatchException`, `AgentNotReadyException`, `ConversationEndedException`, `ConversationAwaitingApprovalException`, `ProcessingRestrictedException` and `ResourceNotFoundException` — but not `QuotaExceededException` — so the denial fell through to `catch (Exception e)` and surfaced as **500 "An internal error occurred"**.
+
+Only the *conversation-start* quota ever produced a real 429: `startConversationWithContext` is synchronous and its narrower catch block lets the exception escape to the mapper. The per-minute API rate limit — the quota an operator is most likely to actually hit — was indistinguishable from a server fault, so clients had no way to back off correctly.
+
+Added an explicit `catch (QuotaExceededException)` that resumes with the same status, body and `Retry-After` header as the mapper, so both quota denials look identical on the wire.
+
+### Design decisions
+
+- **Mirror the mapper rather than re-throw.** There is no way to route an already-captured async exception back through the provider chain, so the branch duplicates the mapper's three-line response. Kept adjacent constants and a comment so the two stay in sync.
+- **Streaming is not covered here.** `sayStreaming` throws the same exception, but by then the SSE response has already committed HTTP 200, so no status code can be sent — it currently emits a generic `error` event. Giving that event a distinguishable quota type is a separate, client-visible change and is tracked, not slipped in.
+
+### Tests
+
+New `RestAgentEngineTest.quotaExceeded` asserts 429, the `Retry-After: 60` header and the exact entity map. Mutation-checked: replacing the new catch with an unrelated exception type makes it fail with `InternalServerError An internal error occurred` — reproducing the original bug — so the test is not vacuous. All 43 `RestAgentEngineTest` tests green.
+
+---
+
 ## 💵 Tenancy — align the at-limit cost comparison and fix costMonth JSON shape (2026-07-21)
 
 **Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)
