@@ -17,6 +17,10 @@ import {
   PanelRightOpen,
   Pencil,
   MessageSquare,
+  FileText,
+  AlertTriangle,
+  Loader2,
+  CheckCircle2,
 } from "lucide-react";
 import { useGroup } from "@/hooks/use-groups";
 import {
@@ -26,6 +30,17 @@ import {
   readConversation,
 } from "@/lib/api/chat";
 import { getAgent } from "@/lib/api/agents";
+import {
+  uploadAttachment,
+  deleteAttachment,
+  buildAttachmentContext,
+  isImageMime,
+  formatBytes,
+  MAX_ATTACHMENTS_PER_TURN,
+  MAX_ATTACHMENT_BYTES,
+  type AttachmentResult,
+  type AttachmentRef,
+} from "@/lib/api/attachments";
 import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
 import type { SimpleConversationStep } from "@/lib/api/conversations";
 import { ContextCard } from "@/components/workforce/context-card";
@@ -38,11 +53,21 @@ import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────
 
+/** Sent attachment metadata stored in message history for rendering. */
+interface SentAttachment {
+  storageRef: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes?: number;
+  forwardableInline?: boolean;
+  previewUrl?: string;
+}
+
 interface ThreadMessage {
   role: "user" | "agent";
   content: string;
   timestamp: number;
-  attachment?: { fileName: string };
+  attachments?: SentAttachment[];
 }
 
 interface GroupContext {
@@ -51,9 +76,14 @@ interface GroupContext {
   response: string;
 }
 
-interface AttachmentInfo {
-  fileName: string;
+/** A file being uploaded or ready to send. */
+interface PendingAttachment {
+  id: string;
   file: File;
+  previewUrl?: string;
+  status: "uploading" | "ready" | "error";
+  result?: AttachmentResult;
+  error?: string;
 }
 
 const ALLOWED_FILE_TYPES = new Set([
@@ -72,7 +102,6 @@ const ALLOWED_FILE_TYPES = new Set([
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -176,13 +205,14 @@ function SendIcon() {
   );
 }
 
-// ─── Thread Input (with file attachment) ─────────────────────────
+// ─── Thread Input (with multi-file attachment upload) ────────────
 
 interface ThreadInputProps {
-  onSend: (message: string, attachment?: AttachmentInfo) => void;
+  onSend: (message: string, attachments?: SentAttachment[]) => void;
   disabled?: boolean;
   placeholder?: string;
   className?: string;
+  conversationId: string | null;
 }
 
 function ThreadInput({
@@ -190,25 +220,61 @@ function ThreadInput({
   disabled = false,
   placeholder,
   className,
+  conversationId,
 }: ThreadInputProps) {
   const { t } = useTranslation();
   const [message, setMessage] = useState("");
-  const [attachment, setAttachment] = useState<AttachmentInfo | null>(null);
+  const [pending, setPending] = useState<PendingAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const trimmed = message.trim();
-  const canSend = (trimmed.length > 0 || !!attachment) && !disabled;
+  const readyCount = pending.filter((a) => a.status === "ready").length;
+  const canSend = (trimmed.length > 0 || readyCount > 0) && !disabled;
+  const hasUploading = pending.some((a) => a.status === "uploading");
+
+  // Cleanup preview URLs on unmount
+  useEffect(() => {
+    return () => {
+      pending.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reset pending when conversation changes
+  useEffect(() => {
+    setPending((prev) => {
+      prev.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
+      return [];
+    });
+  }, [conversationId]);
 
   const handleSend = useCallback(() => {
-    if (!canSend) return;
-    onSend(trimmed, attachment ?? undefined);
+    if (!canSend || hasUploading) return;
+    const sent: SentAttachment[] = pending
+      .filter((a): a is PendingAttachment & { result: AttachmentResult } =>
+        a.status === "ready" && !!a.result,
+      )
+      .map((a) => ({
+        storageRef: a.result.storageRef,
+        fileName: a.result.fileName || a.file.name,
+        mimeType: a.result.mimeType || a.file.type || "application/octet-stream",
+        sizeBytes: a.result.sizeBytes ?? a.file.size,
+        forwardableInline: a.result.forwardableInline,
+        previewUrl: a.previewUrl,
+      }));
+    onSend(trimmed, sent.length ? sent : undefined);
     setMessage("");
-    setAttachment(null);
+    // Don't revoke preview URLs — they're now owned by the message bubble
+    setPending([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [canSend, onSend, trimmed, attachment]);
+  }, [canSend, hasUploading, onSend, trimmed, pending]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -232,35 +298,84 @@ function ThreadInput({
   }, []);
 
   const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) {
-        if (file.size > MAX_FILE_SIZE) {
-          toast.error(
-            t("Workforce.thread.fileTooLarge", "File must be under 10MB"),
-          );
-        } else if (!ALLOWED_FILE_TYPES.has(file.type)) {
-          toast.error(
-            t(
-              "Workforce.thread.fileTypeNotAllowed",
-              "This file type is not supported",
-            ),
-          );
-        } else {
-          setAttachment({ fileName: file.name, file });
-        }
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (!file || !conversationId) return;
+
+      // Validate
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.error(
+          t("Workforce.thread.fileTooLarge", "File must be under 20MB"),
+        );
+        return;
       }
-      // Reset input so the same file can be re-selected
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+      if (!ALLOWED_FILE_TYPES.has(file.type)) {
+        toast.error(
+          t("Workforce.thread.fileTypeNotAllowed", "This file type is not supported"),
+        );
+        return;
+      }
+
+      // Enforce per-turn cap
+      const activeCount = pending.filter((a) => a.status !== "error").length;
+      if (activeCount >= MAX_ATTACHMENTS_PER_TURN) {
+        toast.error(
+          t("Workforce.thread.attachmentLimit", "Maximum {{max}} attachments per message", {
+            max: MAX_ATTACHMENTS_PER_TURN,
+          }),
+        );
+        return;
+      }
+
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const previewUrl = isImageMime(file.type) ? URL.createObjectURL(file) : undefined;
+
+      const entry: PendingAttachment = { id, file, previewUrl, status: "uploading" };
+      setPending((prev) => [...prev, entry]);
+
+      try {
+        const result = await uploadAttachment(conversationId, file);
+        setPending((prev) =>
+          prev.map((a) => (a.id === id ? { ...a, status: "ready" as const, result } : a)),
+        );
+        if (result.forwardableInline === false) {
+          toast.warning(
+            t("Workforce.thread.notForwarded", "File stored but too large to send to model"),
+          );
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Upload failed";
+        setPending((prev) =>
+          prev.map((a) => (a.id === id ? { ...a, status: "error" as const, error: msg } : a)),
+        );
+        toast.error(
+          t("Workforce.thread.uploadFailed", "Upload failed: {{error}}", { error: msg }),
+        );
       }
     },
-    [t],
+    [conversationId, pending, t],
   );
 
-  const removeAttachment = useCallback(() => {
-    setAttachment(null);
-  }, []);
+  const removeAttachment = useCallback(
+    async (id: string) => {
+      const att = pending.find((a) => a.id === id);
+      if (!att) return;
+      if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      // Delete server-side if already uploaded
+      if (att.result?.storageRef && conversationId) {
+        try {
+          await deleteAttachment(conversationId, att.result.storageRef);
+        } catch {
+          // Best effort — file may already be gone
+        }
+      }
+      setPending((prev) => prev.filter((a) => a.id !== id));
+    },
+    [pending, conversationId],
+  );
+
+  const atLimit = pending.filter((a) => a.status !== "error").length >= MAX_ATTACHMENTS_PER_TURN;
 
   return (
     <div
@@ -270,34 +385,55 @@ function ThreadInput({
         className,
       )}
     >
-      {/* Attachment chip */}
-      {attachment && (
-        <div className="mb-2 flex items-center gap-1">
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full ps-3 pe-3 py-1 text-xs font-medium",
-              "bg-muted text-muted-foreground",
-            )}
-          >
-            <Paperclip className="h-3 w-3" />
-            <span className="max-w-48 truncate">{attachment.fileName}</span>
-            <button
-              type="button"
-              onClick={removeAttachment}
+      {/* Pending attachment chips */}
+      {pending.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {pending.map((att) => (
+            <span
+              key={att.id}
               className={cn(
-                "ms-0.5 rounded-full p-0.5",
-                "hover:bg-muted-foreground/20",
-                "transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted"
-              )}
-              aria-label={t(
-                "Workforce.thread.removeAttachment",
-                "Remove attachment",
+                "inline-flex items-center gap-1.5 rounded-full ps-2 pe-1 py-1 text-xs font-medium",
+                att.status === "error"
+                  ? "bg-destructive/10 text-destructive"
+                  : att.status === "uploading"
+                    ? "bg-muted text-muted-foreground animate-pulse"
+                    : "bg-muted text-muted-foreground",
               )}
             >
-              <X className="h-3 w-3" />
-            </button>
-          </span>
+              {att.status === "uploading" && <Loader2 className="h-3 w-3 animate-spin" />}
+              {att.status === "ready" && <CheckCircle2 className="h-3 w-3 text-emerald-500" />}
+              {att.status === "error" && <AlertTriangle className="h-3 w-3" />}
+
+              {/* Image preview thumbnail */}
+              {att.previewUrl && att.status !== "error" ? (
+                <img
+                  src={att.previewUrl}
+                  alt={att.file.name}
+                  className="h-6 w-6 rounded object-cover"
+                />
+              ) : null}
+
+              <span className="max-w-32 truncate">{att.file.name}</span>
+              <span className="text-[10px] opacity-60">{formatBytes(att.file.size)}</span>
+
+              <button
+                type="button"
+                onClick={() => removeAttachment(att.id)}
+                className={cn(
+                  "ms-0.5 rounded-full p-0.5",
+                  "hover:bg-muted-foreground/20",
+                  "transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted",
+                )}
+                aria-label={t(
+                  "Workforce.thread.removeAttachment",
+                  "Remove attachment",
+                )}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
         </div>
       )}
 
@@ -318,12 +454,13 @@ function ThreadInput({
           variant="ghost"
           size="icon"
           onClick={handleFileSelect}
-          disabled={disabled}
+          disabled={disabled || atLimit}
           className={cn(
             "h-10 w-10 shrink-0 rounded-full",
             "text-muted-foreground hover:text-foreground",
           )}
           aria-label={t("Workforce.thread.attachFile", "Attach file")}
+          title={atLimit ? t("Workforce.thread.attachmentLimit", "Maximum {{max}} attachments per message", { max: MAX_ATTACHMENTS_PER_TURN }) : undefined}
         >
           <Paperclip className="h-5 w-5" />
         </Button>
@@ -357,7 +494,7 @@ function ThreadInput({
           type="button"
           size="icon"
           onClick={handleSend}
-          disabled={!canSend}
+          disabled={!canSend || hasUploading}
           className={cn(
             "h-10 w-10 shrink-0 rounded-full",
             "bg-primary text-primary-foreground hover:bg-primary/90",
@@ -520,8 +657,8 @@ function WorkforceThread() {
 
   // ─── Send a message ──────────────────────────────────────────
   const handleSend = useCallback(
-    async (text: string, attachment?: AttachmentInfo) => {
-      if (!conversationId || (!text.trim() && !attachment) || isLoading) return;
+    async (text: string, attachments?: SentAttachment[]) => {
+      if (!conversationId || (!text.trim() && !attachments?.length) || isLoading) return;
       if (sendingRef.current) return;
       sendingRef.current = true;
 
@@ -533,11 +670,9 @@ function WorkforceThread() {
       // Optimistically add user message
       const userMsg: ThreadMessage = {
         role: "user",
-        content: messageText || (attachment ? `📎 ${attachment.fileName}` : ""),
+        content: messageText || (attachments?.length ? `📎 ${attachments.map((a) => a.fileName).join(", ")}` : ""),
         timestamp: Date.now(),
-        attachment: attachment
-          ? { fileName: attachment.fileName }
-          : undefined,
+        attachments: attachments?.length ? attachments : undefined,
       };
       setMessages((prev) => [...prev, userMsg]);
       setIsLoading(true);
@@ -545,22 +680,25 @@ function WorkforceThread() {
       try {
         let snapshot;
 
-        if (attachment) {
-          // Send with context including file reference
+        if (attachments?.length) {
+          // Build proper attachment context via the EDDI pipeline
+          const refs: AttachmentRef[] = attachments
+            .filter((a) => a.forwardableInline !== false)
+            .map((a) => ({
+              storageRef: a.storageRef,
+              fileName: a.fileName,
+              mimeType: a.mimeType,
+              sizeBytes: a.sizeBytes,
+              forwardableInline: a.forwardableInline,
+            }));
+          const context = buildAttachmentContext(refs);
           snapshot = await sendMessageWithContext(
             "production",
             memberId,
             conversationId,
             {
-              input: messageText || attachment.fileName,
-              context: {
-                attachment: {
-                  fileName: attachment.fileName,
-                  mimeType: attachment.file.type || "application/octet-stream",
-                  sizeBytes: attachment.file.size,
-                  note: "metadata-only: file content is not uploaded",
-                },
-              },
+              input: messageText || attachments[0]?.fileName || "attachment",
+              context,
             },
           );
         } else {
@@ -741,21 +879,53 @@ function WorkforceThread() {
                   </p>
                 )}
 
-                {/* Attachment chip on user messages */}
-                {msg.attachment && (
-                  <span
-                    className={cn(
-                      "mb-1 inline-flex items-center gap-1 rounded-full ps-2 pe-2 py-0.5 text-xs",
-                      msg.role === "user"
-                        ? "bg-white/20 text-primary-foreground"
-                        : "bg-muted text-muted-foreground",
-                    )}
-                  >
-                    <Paperclip className="h-3 w-3" />
-                    <span className="max-w-32 truncate">
-                      {msg.attachment.fileName}
-                    </span>
-                  </span>
+                {/* Attachment rendering on messages */}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className="mb-1.5 space-y-1.5">
+                    {msg.attachments.map((att) => (
+                      <div key={att.storageRef}>
+                        {/* Image preview */}
+                        {isImageMime(att.mimeType) && att.previewUrl ? (
+                          <img
+                            src={att.previewUrl}
+                            alt={att.fileName}
+                            className="max-h-40 max-w-[220px] rounded-lg object-cover"
+                          />
+                        ) : (
+                          /* Non-image file chip */
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1.5 rounded-full ps-2.5 pe-2.5 py-1 text-xs",
+                              msg.role === "user"
+                                ? "bg-white/20 text-primary-foreground"
+                                : "bg-muted text-muted-foreground",
+                            )}
+                          >
+                            <FileText className="h-3 w-3" />
+                            <span className="max-w-32 truncate">{att.fileName}</span>
+                            {att.sizeBytes != null && (
+                              <span className="opacity-60">{formatBytes(att.sizeBytes)}</span>
+                            )}
+                          </span>
+                        )}
+                        {/* Warning when file not forwarded to model */}
+                        {att.forwardableInline === false && (
+                          <span
+                            data-testid="attachment-not-forwarded"
+                            className={cn(
+                              "mt-0.5 inline-flex items-center gap-1 rounded-full ps-2 pe-2 py-0.5 text-[10px]",
+                              msg.role === "user"
+                                ? "bg-amber-500/20 text-amber-100"
+                                : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+                            )}
+                          >
+                            <AlertTriangle className="h-2.5 w-2.5" />
+                            {t("Workforce.thread.notForwarded", "File stored but too large to send to model")}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
 
                 <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -793,6 +963,7 @@ function WorkforceThread() {
         <ThreadInput
           onSend={handleSend}
           disabled={isLoading || !conversationId}
+          conversationId={conversationId}
           placeholder={
             inputPrefill ||
             t("Workforce.thread.placeholder", "Message {{name}}...", {
