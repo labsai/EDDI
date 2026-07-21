@@ -55,18 +55,39 @@ export function parseDoneSnapshot(data: string): DoneSnapshot | null {
  * answered.
  *
  * `onSkipped` defaults to `onComplete`, so a skipped turn is indistinguishable
- * from a real one at the transport level. The distinguishing signal is that no
- * token was streamed AND the conversation is in a state the service skips on.
- * The payload then carries the PREVIOUS step's outputs, so its quick replies
- * must not be applied.
+ * from a real one at the transport level. Two signals are needed:
+ *
+ *  1. No token was streamed, and
+ *  2. the conversation was ALREADY in a skip state when we sent.
+ *
+ * The second condition is essential. `processConversationStep` skips based on
+ * the state it finds on arrival — so a turn is only dropped if the pause (or
+ * the in-flight turn, or the end) predates it. A turn that is accepted and then
+ * pauses ALSO ends with zero tokens and AWAITING_HUMAN; treating that as
+ * skipped told the user "your message was not sent" when it had been sent and
+ * had caused the pause.
  */
 export function isSkippedTurn(
   snapshot: DoneSnapshot | null,
   tokenCount: number,
+  stateBeforeSend: ConversationState | null,
 ): boolean {
   if (!snapshot || tokenCount > 0) return false;
+  if (!stateBeforeSend || !SKIP_STATES.includes(stateBeforeSend)) return false;
   const state = snapshot.conversationState;
   return !!state && SKIP_STATES.includes(state);
+}
+
+/**
+ * True when THIS turn was accepted and then paused for human approval — as
+ * opposed to being dropped because the conversation was already paused.
+ */
+export function isTurnPaused(
+  snapshot: DoneSnapshot | null,
+  stateBeforeSend: ConversationState | null,
+): boolean {
+  if (snapshot?.conversationState !== "AWAITING_HUMAN") return false;
+  return !stateBeforeSend || !SKIP_STATES.includes(stateBeforeSend);
 }
 
 /** True when the conversation is waiting on a human decision. */

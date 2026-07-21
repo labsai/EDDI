@@ -176,3 +176,115 @@ describe("ChatWidget — stop generating", () => {
     await waitFor(() => expect(cancelled).toBe(true));
   });
 });
+
+describe("ChatWidget — a turn that pauses vs a turn that is dropped", () => {
+  function mockStreamingBackend(donePayload: string, initialState = "READY") {
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/approval-status")) {
+        return new Response(
+          JSON.stringify({
+            conversationId: "conv-1",
+            state: "AWAITING_HUMAN",
+            pausedAt: "2026-07-21T10:00:00Z",
+            pauseReason: "manager approval required",
+            timeoutPolicy: "AUTO_REJECT",
+            approvalTimeout: "PT15M",
+            pauseDetails: null,
+          }),
+          { status: 200 },
+        );
+      }
+      if (href.includes("/stream")) {
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(new TextEncoder().encode(`event: done\ndata: ${donePayload}\n\n`));
+              c.close();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ conversationState: initialState, conversationSteps: [] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+  }
+
+  async function send(text: string) {
+    const input = await screen.findByTestId("chat-input");
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+  }
+
+  it("shows the approval placeholder when THIS turn pauses, not 'was not sent'", async () => {
+    // The turn was accepted and then gated. Claiming it was not sent is a lie,
+    // and the placeholder arrives as a BARE STRING in the done payload.
+    mockStreamingBackend(
+      JSON.stringify({
+        conversationState: "AWAITING_HUMAN",
+        conversationOutputs: [
+          { output: ["Waiting for approval to send the email."], quickReplies: [] },
+        ],
+      }),
+    );
+
+    renderWidget();
+    await send("email bob");
+
+    expect(
+      await screen.findByText("Waiting for approval to send the email."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/was not sent/i)).toBeNull();
+  });
+
+  it("replaces streamed text that responseValidation superseded", async () => {
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/stream")) {
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              const enc = new TextEncoder();
+              c.enqueue(enc.encode("event: token\ndata: secret leaked text\n\n"));
+              c.enqueue(
+                enc.encode(
+                  `event: done\ndata: ${JSON.stringify({
+                    conversationState: "READY",
+                    conversationOutputs: [
+                      { output: [{ type: "text", text: "I could not complete that." }], quickReplies: [] },
+                    ],
+                  })}\n\n`,
+                ),
+              );
+              c.close();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+    await send("tell me a secret");
+
+    expect(await screen.findByText("I could not complete that.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("secret leaked text")).toBeNull();
+    });
+  });
+});

@@ -342,3 +342,70 @@ describe("withdrawing a turn the server refused", () => {
     expect(chatReducer(state, { type: "CLEAR_RESTORE_DRAFT" }).restoreDraft).toBeNull();
   });
 });
+
+/* ─── Reconciling streamed text with the final snapshot ─── */
+
+describe("RECONCILE_LAST_AGENT", () => {
+  const streamed = (content: string) => ({
+    ...initialState,
+    messages: [
+      { id: "a1", role: "agent" as const, content, timestamp: 1, isStreaming: false },
+    ],
+  });
+
+  it("replaces streamed text the backend superseded", () => {
+    // responseValidation `fallback` substitutes a canned string for the model's
+    // output AFTER tokens were already streamed to the client. The done
+    // snapshot is authoritative; leaving the streamed text shows the user a
+    // response the backend decided not to give.
+    const next = chatReducer(streamed("here is your account number 1234"), {
+      type: "RECONCILE_LAST_AGENT",
+      content: "I wasn't able to generate a complete response.",
+    });
+
+    expect(next.messages[0].content).toBe(
+      "I wasn't able to generate a complete response.",
+    );
+  });
+
+  it("leaves the bubble alone when the snapshot agrees with what was streamed", () => {
+    const state = streamed("hello world");
+
+    const next = chatReducer(state, {
+      type: "RECONCILE_LAST_AGENT",
+      content: "hello world",
+    });
+
+    expect(next.messages).toBe(state.messages);
+  });
+
+  it("ignores whitespace-only differences", () => {
+    const state = streamed("hello world");
+
+    const next = chatReducer(state, {
+      type: "RECONCILE_LAST_AGENT",
+      content: "  hello world\n",
+    });
+
+    expect(next.messages).toBe(state.messages);
+  });
+
+  it("does not blank a bubble when the snapshot carries no text", () => {
+    const state = streamed("hello world");
+
+    const next = chatReducer(state, { type: "RECONCILE_LAST_AGENT", content: "" });
+
+    expect(next.messages[0].content).toBe("hello world");
+  });
+
+  it("does nothing when the last message is not an agent message", () => {
+    const state = {
+      ...initialState,
+      messages: [{ id: "u1", role: "user" as const, content: "hi", timestamp: 1 }],
+    };
+
+    expect(chatReducer(state, { type: "RECONCILE_LAST_AGENT", content: "x" }).messages).toBe(
+      state.messages,
+    );
+  });
+});

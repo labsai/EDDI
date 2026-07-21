@@ -9,6 +9,7 @@ import {
   isSkippedTurn,
   isPausedState,
   extractOutputTexts,
+  isTurnPaused,
 } from "./sse-events";
 
 describe("parseErrorMessage", () => {
@@ -52,33 +53,74 @@ describe("parseDoneSnapshot", () => {
   });
 });
 
+describe("isSkippedTurn — a paused turn is not a skipped turn", () => {
+  it("is NOT skipped when THIS turn caused the pause", () => {
+    // The conversation was READY when we sent, so the turn was accepted and
+    // paused. Telling the user "your message was not sent" would be a lie.
+    expect(isSkippedTurn({ conversationState: "AWAITING_HUMAN" }, 0, "READY")).toBe(false);
+  });
+
+  it("IS skipped when the conversation was ALREADY paused before we sent", () => {
+    expect(
+      isSkippedTurn({ conversationState: "AWAITING_HUMAN" }, 0, "AWAITING_HUMAN"),
+    ).toBe(true);
+  });
+
+  it("IS skipped when the agent was already busy with the previous turn", () => {
+    expect(isSkippedTurn({ conversationState: "IN_PROGRESS" }, 0, "IN_PROGRESS")).toBe(true);
+  });
+
+  it("is NOT skipped when a fresh turn legitimately ends the conversation", () => {
+    // ENDED reached BY this turn (CONVERSATION_END action) is a real outcome.
+    expect(isSkippedTurn({ conversationState: "ENDED" }, 0, "READY")).toBe(false);
+  });
+
+  it("treats an unknown prior state as accepted rather than skipped", () => {
+    expect(isSkippedTurn({ conversationState: "AWAITING_HUMAN" }, 0, null)).toBe(false);
+  });
+});
+
+describe("isTurnPaused", () => {
+  it("detects that this turn paused for approval", () => {
+    expect(isTurnPaused({ conversationState: "AWAITING_HUMAN" }, "READY")).toBe(true);
+  });
+
+  it("is false when the conversation was already paused (that is a skip)", () => {
+    expect(isTurnPaused({ conversationState: "AWAITING_HUMAN" }, "AWAITING_HUMAN")).toBe(false);
+  });
+
+  it("is false for a normal completion", () => {
+    expect(isTurnPaused({ conversationState: "READY" }, "READY")).toBe(false);
+  });
+});
+
 describe("isSkippedTurn", () => {
   // A turn dropped server-side (ConversationService.notifySkipped) arrives as
   // an ordinary `done` whose payload carries the PREVIOUS step's outputs.
   // Signal: zero tokens streamed AND a state the service skips on.
   it.each(["AWAITING_HUMAN", "IN_PROGRESS", "ENDED"] as const)(
-    "detects a skipped turn when no tokens arrived and state is %s",
+    "detects a skipped turn when no tokens arrived and the conversation was already %s",
     (state) => {
-      expect(isSkippedTurn({ conversationState: state }, 0)).toBe(true);
+      expect(isSkippedTurn({ conversationState: state }, 0, state)).toBe(true);
     },
   );
 
   it("is not a skipped turn when tokens were streamed", () => {
-    expect(isSkippedTurn({ conversationState: "AWAITING_HUMAN" }, 1)).toBe(
-      false,
-    );
+    expect(
+      isSkippedTurn({ conversationState: "AWAITING_HUMAN" }, 1, "AWAITING_HUMAN"),
+    ).toBe(false);
   });
 
   it("is not a skipped turn when the conversation ended READY", () => {
-    expect(isSkippedTurn({ conversationState: "READY" }, 0)).toBe(false);
+    expect(isSkippedTurn({ conversationState: "READY" }, 0, "READY")).toBe(false);
   });
 
   it("is not a skipped turn when the conversation errored", () => {
-    expect(isSkippedTurn({ conversationState: "ERROR" }, 0)).toBe(false);
+    expect(isSkippedTurn({ conversationState: "ERROR" }, 0, "READY")).toBe(false);
   });
 
   it("is not a skipped turn when there is no snapshot", () => {
-    expect(isSkippedTurn(null, 0)).toBe(false);
+    expect(isSkippedTurn(null, 0, "READY")).toBe(false);
   });
 });
 

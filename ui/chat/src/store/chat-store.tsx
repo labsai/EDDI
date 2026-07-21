@@ -110,7 +110,8 @@ export type ChatAction =
   | { type: "CLEAR_ATTACHMENTS" }
   | { type: "SET_APPROVAL_STATUS"; status: ApprovalStatus | null }
   | { type: "WITHDRAW_LAST_USER_MESSAGE" }
-  | { type: "CLEAR_RESTORE_DRAFT" };
+  | { type: "CLEAR_RESTORE_DRAFT" }
+  | { type: "RECONCILE_LAST_AGENT"; content: string };
 
 /* ─── Reducer ─────────────────────────────────── */
 
@@ -233,6 +234,22 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "CLEAR_RESTORE_DRAFT":
       return { ...state, restoreDraft: null };
+
+    case "RECONCILE_LAST_AGENT": {
+      // The final snapshot is authoritative. responseValidation `fallback`
+      // substitutes its own text AFTER tokens were streamed, so what the user
+      // is looking at may be a response the backend decided not to give.
+      const incoming = action.content.trim();
+      if (!incoming) return state;
+
+      const msgs = [...state.messages];
+      const last = msgs[msgs.length - 1];
+      if (last?.role !== "agent") return state;
+      if (last.content.trim() === incoming) return state;
+
+      msgs[msgs.length - 1] = { ...last, content: action.content };
+      return { ...state, messages: msgs };
+    }
 
     default:
       return state;

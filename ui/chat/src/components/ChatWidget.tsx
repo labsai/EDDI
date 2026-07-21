@@ -46,8 +46,15 @@ import {
   skippedTurnMessage,
   isPausedState,
   extractOutputTexts,
+  isTurnPaused,
 } from "@/api/sse-events";
-import type { ChatMessage, SSEEvent, ChatConfig, OutputItem } from "@/types";
+import type {
+  ChatMessage,
+  SSEEvent,
+  ChatConfig,
+  OutputItem,
+  ConversationState,
+} from "@/types";
 
 /**
  * Per-turn mutable bookkeeping for the SSE loop. `tokenCount` is what
@@ -55,11 +62,17 @@ import type { ChatMessage, SSEEvent, ChatConfig, OutputItem } from "@/types";
  */
 interface TurnContext {
   tokenCount: number;
-  skipped: boolean;
+  /**
+   * The conversation state as it was when this turn was sent. Required to tell
+   * a turn that PAUSED (accepted, then gated) from one the server DROPPED
+   * (rejected because the conversation was already paused/busy/ended) — both
+   * end with zero tokens and the same conversationState.
+   */
+  stateBeforeSend: ConversationState | null;
 }
 
-function newTurn(): TurnContext {
-  return { tokenCount: 0, skipped: false };
+function newTurn(stateBeforeSend: ConversationState | null): TurnContext {
+  return { tokenCount: 0, stateBeforeSend };
 }
 
 function makeAgentMessage(content: string): ChatMessage {
@@ -211,12 +224,15 @@ export function ChatWidget() {
 
         case "done": {
           const snapshot = parseDoneSnapshot(event.data);
+          const lastOutput = snapshot?.conversationOutputs?.length
+            ? snapshot.conversationOutputs[snapshot.conversationOutputs.length - 1]
+            : undefined;
+          const outputText = extractOutputTexts(lastOutput?.output).join("\n\n");
 
-          if (isSkippedTurn(snapshot, turn.tokenCount)) {
+          if (isSkippedTurn(snapshot, turn.tokenCount, turn.stateBeforeSend)) {
             // The server dropped this turn without consuming it. The payload
             // carries the PREVIOUS step's outputs, so its quick replies must
             // not be applied — doing so re-offered stale buttons as if new.
-            turn.skipped = true;
             dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
             dispatch({
               type: "ADD_MESSAGE",
@@ -224,14 +240,34 @@ export function ChatWidget() {
                 skippedTurnMessage(snapshot?.conversationState),
               ),
             });
+          } else if (turn.tokenCount === 0) {
+            // No tokens, but the turn WAS accepted. Any text lives only in the
+            // done payload — including HITL's pending-approval placeholder,
+            // which arrives as a bare string. Dropping it left a paused turn
+            // rendering as "No response".
+            dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+            if (outputText) {
+              dispatch({
+                type: "ADD_MESSAGE",
+                message: makeAgentMessage(outputText),
+              });
+            }
+            if (!isTurnPaused(snapshot, turn.stateBeforeSend)) {
+              dispatch({
+                type: "SET_QUICK_REPLIES",
+                replies: lastOutput?.quickReplies ?? [],
+              });
+            }
           } else if (snapshot?.conversationOutputs?.length) {
-            const output =
-              snapshot.conversationOutputs[
-                snapshot.conversationOutputs.length - 1
-              ];
+            // Tokens already rendered the answer, but responseValidation can
+            // SUPERSEDE them (fallback text) after the fact. The snapshot is
+            // authoritative.
+            if (outputText) {
+              dispatch({ type: "RECONCILE_LAST_AGENT", content: outputText });
+            }
             dispatch({
               type: "SET_QUICK_REPLIES",
-              replies: output.quickReplies ?? [],
+              replies: lastOutput?.quickReplies ?? [],
             });
           }
 
@@ -475,7 +511,7 @@ export function ChatWidget() {
           });
 
           const events = demoSendMessageStreaming(text);
-          const demoTurn = newTurn();
+          const demoTurn = newTurn(state.conversationState);
           let demoDone = false;
           for await (const event of events) {
             if (handleSSEEvent(event, demoTurn)) demoDone = true;
@@ -515,7 +551,7 @@ export function ChatWidget() {
           // so reader.read() would hang forever without this.
           const abort = new AbortController();
           abortRef.current = abort;
-          const turn = newTurn();
+          const turn = newTurn(state.conversationState);
           let streamDone = false;
 
           const events = sendMessageStreaming(
