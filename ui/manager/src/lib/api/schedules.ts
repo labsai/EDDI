@@ -39,8 +39,15 @@ export interface ScheduleConfiguration {
 
   // State (read-only from server)
   enabled: boolean;
-  nextFire?: number;
-  lastFired?: number;
+  /**
+   * `Instant` fields. The backend now emits these as ISO-8601 strings
+   * (`@JsonFormat(shape = STRING)`), but older deployments still send a numeric
+   * epoch (fractional SECONDS under `write-dates-as-timestamps=true`). Always
+   * read them through {@link parseInstant}, which normalizes every encoding —
+   * raw arithmetic silently yields `NaN` on the ISO form.
+   */
+  nextFire?: string | number;
+  lastFired?: string | number;
   fireStatus: FireStatus;
   claimedBy?: string;
   claimedAt?: number;

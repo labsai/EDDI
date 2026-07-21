@@ -703,3 +703,60 @@ describe("SchedulesPage", () => {
   });
 });
 
+// ── Regression: Instant encoding (ISO-8601 vs numeric epoch) ────────────────
+// The backend serializes Instant as ISO-8601 (@JsonFormat(shape = STRING)).
+// Subtracting those raw values yields NaN, which makes the "soonest" comparator
+// inconsistent and silently surfaces the wrong schedule.
+
+describe("SchedulesPage — nextFire encodings", () => {
+  const base = {
+    triggerType: "CRON",
+    agentId: "agent1",
+    agentVersion: 0,
+    environment: "production",
+    cronExpression: "0 9 * * *",
+    message: "run",
+    conversationStrategy: "new",
+    enabled: true,
+    fireStatus: "COMPLETED",
+    failCount: 0,
+    timeZone: "UTC",
+  };
+
+  /** The soonest schedule is deliberately NOT first: a NaN comparator leaves
+   *  the array order untouched, so a broken sort surfaces "Later job". */
+  function useSchedules(nextFire: (offsetMs: number) => string | number) {
+    server.use(
+      http.get("*/schedulestore/schedules", () =>
+        HttpResponse.json([
+          { ...base, id: "s-late", name: "Later job", nextFire: nextFire(86_400_000) },
+          { ...base, id: "s-soon", name: "Soonest job", nextFire: nextFire(60_000) },
+          { ...base, id: "s-mid", name: "Middle job", nextFire: nextFire(3_600_000) },
+        ])
+      )
+    );
+  }
+
+  it("surfaces the soonest schedule when nextFire is an ISO-8601 string", async () => {
+    useSchedules((ms) => new Date(Date.now() + ms).toISOString());
+    renderSchedules();
+
+    const card = await screen.findByTestId("schedules-next-fire-card");
+    await waitFor(() =>
+      expect(within(card).getByText("Soonest job")).toBeInTheDocument()
+    );
+    expect(within(card).queryByText("Later job")).not.toBeInTheDocument();
+  });
+
+  it("still surfaces the soonest schedule for the numeric epoch encoding", async () => {
+    useSchedules((ms) => Date.now() + ms);
+    renderSchedules();
+
+    const card = await screen.findByTestId("schedules-next-fire-card");
+    await waitFor(() =>
+      expect(within(card).getByText("Soonest job")).toBeInTheDocument()
+    );
+    expect(within(card).queryByText("Later job")).not.toBeInTheDocument();
+  });
+});
+

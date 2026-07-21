@@ -1142,9 +1142,20 @@ export function SchedulesPage() {
     ).length ?? 0;
   const failedFiresCount = failedFires?.length ?? 0;
 
+  // `nextFire` arrives either as an ISO-8601 string (backend @JsonFormat) or as
+  // a numeric epoch, so compare parsed instants. Subtracting the raw values
+  // yields NaN on the ISO form, which makes the comparator inconsistent and
+  // silently surfaces the wrong "soonest" schedule. Unparseable values sort
+  // last, and the explicit compare avoids NaN when both are unparseable.
+  const nextFireMs = (s: { nextFire?: string | number }) =>
+    parseInstant(s.nextFire)?.getTime() ?? Number.POSITIVE_INFINITY;
   const soonest = schedules
     ?.filter((s) => s.enabled && s.nextFire)
-    ?.sort((a, b) => (a.nextFire ?? 0) - (b.nextFire ?? 0))?.[0];
+    ?.sort((a, b) => {
+      const x = nextFireMs(a);
+      const y = nextFireMs(b);
+      return x === y ? 0 : x < y ? -1 : 1;
+    })?.[0];
 
   const openCreate = () => {
     setEditing(null);
