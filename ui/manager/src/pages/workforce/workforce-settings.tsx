@@ -915,6 +915,7 @@ function WorkforceSettings() {
                 <p className="text-xs text-muted-foreground">{t("Workforce.settings.dynamicEnableDesc", "Allow agents to recruit, create, or delegate to other agents")}</p>
               </div>
               <button type="button" role="switch" aria-checked={dynamicAgents.enabled}
+                aria-label={t("Workforce.settings.dynamicEnable", "Enable Dynamic Agents")}
                 onClick={() => setDynamicAgents((p) => ({ ...p, enabled: !p.enabled }))}
                 className={cn("relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", dynamicAgents.enabled ? "bg-primary" : "bg-muted")}>
                 <span className={cn("pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform", dynamicAgents.enabled ? "translate-x-5" : "translate-x-0")} />
@@ -932,6 +933,7 @@ function WorkforceSettings() {
                   ] as const).map((item) => (
                     <div key={item.key} className="flex items-start gap-3">
                       <button type="button" role="switch" aria-checked={dynamicAgents[item.key]}
+                        aria-label={item.label}
                         onClick={() => setDynamicAgents((p) => ({ ...p, [item.key]: !p[item.key] }))}
                         className={cn("relative mt-0.5 inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", dynamicAgents[item.key] ? "bg-primary" : "bg-muted")}>
                         <span className={cn("pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg transition-transform", dynamicAgents[item.key] ? "translate-x-4" : "translate-x-0")} />
@@ -971,6 +973,7 @@ function WorkforceSettings() {
                       <p className="text-xs text-muted-foreground">{t("Workforce.settings.inheritModelDesc", "Created agents use the parent's LLM model")}</p>
                     </div>
                     <button type="button" role="switch" aria-checked={dynamicAgents.inheritParentModel}
+                      aria-label={t("Workforce.settings.inheritModel", "Inherit Parent Model")}
                       onClick={() => setDynamicAgents((p) => ({ ...p, inheritParentModel: !p.inheritParentModel }))}
                       className={cn("relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", dynamicAgents.inheritParentModel ? "bg-primary" : "bg-muted")}>
                       <span className={cn("pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg transition-transform", dynamicAgents.inheritParentModel ? "translate-x-4" : "translate-x-0")} />
@@ -1012,26 +1015,26 @@ function WorkforceSettings() {
                   <div className="flex-1 space-y-3">
                     <FormField label={t("Workforce.settings.taskSubject", "Subject")} htmlFor={`task-subject-${idx}`}>
                       <input id={`task-subject-${idx}`} type="text" value={task.subject}
-                        onChange={(e) => setTasks((prev) => prev.map((t, i) => i === idx ? { ...t, subject: e.target.value } : t))}
+                        onChange={(e) => setTasks((prev) => prev.map((tk, i) => i === idx ? { ...tk, subject: e.target.value } : tk))}
                         placeholder={t("Workforce.settings.taskSubjectHint", "What needs to be done?")}
                         className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
                     </FormField>
                     <FormField label={t("Workforce.settings.taskDescription", "Description")} htmlFor={`task-desc-${idx}`}>
                       <textarea id={`task-desc-${idx}`} rows={2} value={task.description}
-                        onChange={(e) => setTasks((prev) => prev.map((t, i) => i === idx ? { ...t, description: e.target.value } : t))}
+                        onChange={(e) => setTasks((prev) => prev.map((tk, i) => i === idx ? { ...tk, description: e.target.value } : tk))}
                         placeholder={t("Workforce.settings.taskDescHint", "Detailed instructions for this task…")}
                         className="w-full rounded-lg border border-input bg-background ps-3 pe-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow resize-none" />
                     </FormField>
                     <div className="grid grid-cols-2 gap-3">
                       <FormField label={t("Workforce.settings.taskAssignRole", "Assign to Role")} htmlFor={`task-role-${idx}`}>
                         <input id={`task-role-${idx}`} type="text" value={task.assignToRole}
-                          onChange={(e) => setTasks((prev) => prev.map((t, i) => i === idx ? { ...t, assignToRole: e.target.value } : t))}
+                          onChange={(e) => setTasks((prev) => prev.map((tk, i) => i === idx ? { ...tk, assignToRole: e.target.value } : tk))}
                           placeholder="ALL"
                           className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
                       </FormField>
                       <FormField label={t("Workforce.settings.taskPriority", "Priority")} htmlFor={`task-priority-${idx}`}>
                         <input id={`task-priority-${idx}`} type="number" min={0} max={10} value={task.priority}
-                          onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setTasks((prev) => prev.map((t, i) => i === idx ? { ...t, priority: Math.max(0, v) } : t)); }}
+                          onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setTasks((prev) => prev.map((tk, i) => i === idx ? { ...tk, priority: Math.max(0, v) } : tk)); }}
                           className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
                       </FormField>
                     </div>
