@@ -5,6 +5,30 @@
 
 ---
 
+## 🔢 LLM — stop discarding agent-mode token usage (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+`AgentOrchestrator` sums `TokenUsage` across every model call in the tool loop and returns it on `ExecutionResult.responseMetadata()` — on both the live path and the resume path. `LlmTask` then read `.response()` and `.trace()` from that result and **never `.responseMetadata()`**, so agent-mode token accounting was computed and dropped on the floor. Only the legacy-chat and cascade branches surfaced theirs.
+
+Net effect: any agent with tools enabled reported `{}` for `responseMetadataObjectName`, and no per-turn token figure existed for the paths that dominate real usage. This is the prerequisite for monthly cost metering — there was nothing to meter.
+
+Both agent branches now read the metadata, and `executeResume` surfaces it the same way `executeTask` does (it previously built no metadata map at all).
+
+### Known gap, deliberately documented rather than papered over
+
+A turn that pauses for tool approval loses its pre-pause usage: `ToolApprovalRequiredException` escapes before the metadata is assembled and carries no usage, and `resumeToolLoop` starts a fresh accumulator. So a paused turn under-reports by its pre-pause segment. Closing that requires threading the step into `runToolCallLoop` so usage is written incrementally — out of scope here.
+
+### Safety check
+
+`responseMetadata` also feeds `applyResponseValidation`, which branches on `warning` and `streamingTimeout`. `AgentOrchestrator` puts **only** `tokenUsage` into the map (`AgentOrchestrator.java:470,826`), so both of those keys stay absent exactly as they were with the previously-empty map — validation behaviour is unchanged.
+
+### Verification limits
+
+Not unit-covered: `LlmTask` constructs its `AgentOrchestrator` internally rather than receiving it injected, so `executeIfToolsEnabled` cannot be stubbed to return a non-null result at the `LlmTask` unit level, and every existing `LlmTask` test therefore exercises the legacy branch. The change was verified by reading both sides of the contract and by the safety check above; all 184 `LlmTask` tests stay green. Making this properly testable means injecting `AgentOrchestrator` — a worthwhile refactor of an already 29-argument constructor, but a separate change.
+
+---
+
 ## 🕐 Serialization — split the persistence mapper from the REST mapper; Instant is ISO-8601 on the wire (2026-07-21)
 
 **Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)

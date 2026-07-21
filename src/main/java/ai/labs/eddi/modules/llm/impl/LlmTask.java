@@ -572,6 +572,10 @@ public class LlmTask implements ILifecycleTask {
             if (agentResult != null) {
                 responseContent = agentResult.response();
                 toolTrace = agentResult.trace();
+                // AgentOrchestrator sums TokenUsage across every model call in the tool
+                // loop and returns it here; not reading it dropped all agent-mode token
+                // accounting on the floor while the legacy branches below kept theirs.
+                responseMetadata = agentResult.responseMetadata();
                 usedToolMode = true;
                 if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
                     eventSink.onToken(responseContent);
@@ -597,6 +601,9 @@ public class LlmTask implements ILifecycleTask {
                 // available
                 responseContent = agentResult.response();
                 toolTrace = agentResult.trace();
+                // See the skipCascade branch above: without this, agent-mode token usage
+                // is computed by AgentOrchestrator and then silently discarded.
+                responseMetadata = agentResult.responseMetadata();
                 usedToolMode = true;
                 // Stream the final agent response if streaming is active
                 if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
@@ -886,8 +893,22 @@ public class LlmTask implements ILifecycleTask {
 
         String responseContent = result != null ? result.response() : null;
         List<Map<String, Object>> toolTrace = result != null && result.trace() != null ? result.trace() : new ArrayList<>();
+        Map<String, Object> responseMetadata = result != null && result.responseMetadata() != null
+                ? result.responseMetadata()
+                : new HashMap<>();
 
         // === Store the result EXACTLY like the normal path (executeTask) ===
+        // Surface metadata the same way executeTask does. Note the continuation's
+        // tokenUsage covers only the post-resume model calls: the usage accumulated
+        // before the pause dies with ToolApprovalRequiredException and resumeToolLoop
+        // starts a fresh accumulator, so a paused turn under-reports by its pre-pause
+        // segment.
+        var responseMetadataObjectName = task.getResponseMetadataObjectName();
+        if (!isNullOrEmpty(responseMetadataObjectName)) {
+            templateDataObjects.put(responseMetadataObjectName, responseMetadata);
+            prePostUtils.createMemoryEntry(currentStep, responseMetadata, responseMetadataObjectName, KEY_LANGCHAIN);
+        }
+
         var responseObjectName = task.getResponseObjectName();
         if (isNullOrEmpty(responseObjectName)) {
             responseObjectName = task.getId();
