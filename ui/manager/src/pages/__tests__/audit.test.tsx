@@ -398,11 +398,14 @@ describe("AuditPage", () => {
     await waitFor(() =>
       expect(screen.getByTestId("audit-entry-page1-0")).toBeInTheDocument(),
     );
-    // ONLY page 1 is rendered. This is the precise discriminator: the offset
-    // resets in the same batch as the mode change, so the merge effect cannot
-    // re-populate — with the stale offset — the accumulator that the context
-    // change just cleared. (That stale re-population was what left 200 rows
-    // rendered at skip=0 and made the next "Load more" a dead click.)
+    // ...and ONLY page 1 — paging restarted rather than resuming mid-offset.
+    // Verified to fail without the reset (page 1 becomes unreachable).
+    //
+    // Scope note: this covers the reset itself. It does NOT cover the finer
+    // point that `skip` must reset in the SAME batch as the mode change (so a
+    // stale-offset merge can't repopulate the just-cleared accumulator) —
+    // that race isn't observable here, because switching to agent mode with no
+    // agent selected leaves the agent query disabled and its data undefined.
     expect(screen.queryByTestId("audit-entry-page2-100")).not.toBeInTheDocument();
     // This test renders three full 100-row pages, so give it headroom: under
     // full-suite parallel load the default 30s timeout is not enough.
