@@ -172,3 +172,48 @@ describe("chatReducer", () => {
     expect(initialState.isSecretMode).toBe(false);
   });
 });
+
+/* ─── Skipped-turn handling ─────────────────── */
+
+describe("REMOVE_EMPTY_STREAMING_MESSAGE", () => {
+  it("removes a trailing agent bubble that never received tokens", () => {
+    // A skipped turn leaves an empty streaming bubble that renders as
+    // "No response". It must be withdrawn, not left on screen.
+    const state = {
+      ...initialState,
+      messages: [
+        { id: "u1", role: "user" as const, content: "hi", timestamp: 1 },
+        { id: "a1", role: "agent" as const, content: "", timestamp: 2, isStreaming: true },
+      ],
+    };
+
+    const next = chatReducer(state, { type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+
+    expect(next.messages).toHaveLength(1);
+    expect(next.messages[0].id).toBe("u1");
+  });
+
+  it("keeps a trailing agent bubble that received content", () => {
+    const state = {
+      ...initialState,
+      messages: [
+        { id: "a1", role: "agent" as const, content: "hello", timestamp: 2, isStreaming: true },
+      ],
+    };
+
+    const next = chatReducer(state, { type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+
+    expect(next.messages).toHaveLength(1);
+  });
+
+  it("leaves a trailing user message untouched", () => {
+    const state = {
+      ...initialState,
+      messages: [{ id: "u1", role: "user" as const, content: "hi", timestamp: 1 }],
+    };
+
+    const next = chatReducer(state, { type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+
+    expect(next.messages).toHaveLength(1);
+  });
+});

@@ -33,7 +33,35 @@ import {
   demoSendMessageStreaming,
   demoGetQuickReplies,
 } from "@/api/demo-api";
+import {
+  parseDoneSnapshot,
+  parseErrorMessage,
+  isSkippedTurn,
+  skippedTurnMessage,
+} from "@/api/sse-events";
 import type { ChatMessage, SSEEvent, ChatConfig, OutputItem } from "@/types";
+
+/**
+ * Per-turn mutable bookkeeping for the SSE loop. `tokenCount` is what
+ * distinguishes a genuinely empty answer from a turn the server dropped.
+ */
+interface TurnContext {
+  tokenCount: number;
+  skipped: boolean;
+}
+
+function newTurn(): TurnContext {
+  return { tokenCount: 0, skipped: false };
+}
+
+function makeAgentMessage(content: string): ChatMessage {
+  return {
+    id: `agent-${Date.now()}-${Math.random()}`,
+    role: "agent",
+    content,
+    timestamp: Date.now(),
+  };
+}
 
 /**
  * Color query params → CSS variable mappings.
@@ -135,52 +163,98 @@ export function ChatWidget() {
      Returns `true` when the stream is logically complete (done / error),
      so the caller can break out of the for-await loop.                  */
   const handleSSEEvent = useCallback(
-    (event: SSEEvent): boolean => {
+    (event: SSEEvent, turn: TurnContext): boolean => {
       switch (event.type) {
         case "token":
+          turn.tokenCount += 1;
           dispatch({ type: "SET_THINKING", value: false });
           dispatch({ type: "APPEND_TO_LAST_AGENT", token: event.data });
           return false;
-        case "thinking":
-          dispatch({ type: "SET_THINKING", value: true });
-          return false;
-        case "done":
-          dispatch({ type: "FINISH_STREAMING" });
-          // Parse the snapshot from the done event to extract quickReplies,
-          // conversation state, and undo/redo availability.
-          if (event.data) {
-            try {
-              const snapshot = JSON.parse(event.data);
-              if (snapshot.conversationOutputs?.length) {
-                const output = snapshot.conversationOutputs[
-                  snapshot.conversationOutputs.length - 1
-                ];
-                dispatch({
-                  type: "SET_QUICK_REPLIES",
-                  replies: output.quickReplies ?? [],
-                });
-              }
-              if (snapshot.conversationState) {
-                dispatch({
-                  type: "SET_CONVERSATION_STATE",
-                  state: snapshot.conversationState,
-                });
-              }
-            } catch {
-              // Ignore parse errors — done event data may be empty
-            }
+
+        // Pipeline progress. The backend emits no "thinking" event, so these
+        // are what actually tell us the agent is working before any text.
+        case "task_start":
+          if (turn.tokenCount === 0) {
+            dispatch({ type: "SET_THINKING", value: true });
           }
+          return false;
+
+        case "task_complete":
+          return false;
+
+        case "task_failed":
+          // Structured per-task failure (#593). The turn may still recover
+          // (cascade escalation, retry), so `done`/`error` decides the final
+          // outcome — but stop implying the agent is still composing.
+          dispatch({ type: "SET_THINKING", value: false });
+          return false;
+
+        // Cascade progress is observability, not chat content.
+        case "cascade_step_start":
+        case "cascade_escalation":
+          return false;
+
+        case "done": {
+          const snapshot = parseDoneSnapshot(event.data);
+
+          if (isSkippedTurn(snapshot, turn.tokenCount)) {
+            // The server dropped this turn without consuming it. The payload
+            // carries the PREVIOUS step's outputs, so its quick replies must
+            // not be applied — doing so re-offered stale buttons as if new.
+            turn.skipped = true;
+            dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+            dispatch({
+              type: "ADD_MESSAGE",
+              message: makeAgentMessage(
+                skippedTurnMessage(snapshot?.conversationState),
+              ),
+            });
+          } else if (snapshot?.conversationOutputs?.length) {
+            const output =
+              snapshot.conversationOutputs[
+                snapshot.conversationOutputs.length - 1
+              ];
+            dispatch({
+              type: "SET_QUICK_REPLIES",
+              replies: output.quickReplies ?? [],
+            });
+          }
+
+          if (snapshot?.conversationState) {
+            dispatch({
+              type: "SET_CONVERSATION_STATE",
+              state: snapshot.conversationState,
+            });
+          }
+
+          dispatch({ type: "FINISH_STREAMING" });
           dispatch({ type: "SET_PROCESSING", value: false });
           return true;
-        case "error":
-          dispatch({
-            type: "APPEND_TO_LAST_AGENT",
-            token: `\n\n⚠️ Error: ${event.data}`,
-          });
+        }
+
+        case "error": {
+          // Payload is {"message":"…"}, not a bare string.
+          const message = parseErrorMessage(event.data);
+          if (turn.tokenCount === 0) {
+            dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+            dispatch({
+              type: "ADD_MESSAGE",
+              message: makeAgentMessage(`⚠️ ${message}`),
+            });
+          } else {
+            dispatch({
+              type: "APPEND_TO_LAST_AGENT",
+              token: `\n\n⚠️ ${message}`,
+            });
+          }
           dispatch({ type: "FINISH_STREAMING" });
+          dispatch({ type: "SET_PROCESSING", value: false });
           return true;
-        // task_start / task_complete — pipeline progress, ignore for now
+        }
+
         default:
+          // Unknown event: ignore rather than render. New backend events must
+          // never leak into the transcript as visible text.
           return false;
       }
     },
@@ -366,9 +440,10 @@ export function ChatWidget() {
           });
 
           const events = demoSendMessageStreaming(text);
+          const demoTurn = newTurn();
           let demoDone = false;
           for await (const event of events) {
-            if (handleSSEEvent(event)) demoDone = true;
+            if (handleSSEEvent(event, demoTurn)) demoDone = true;
           }
           // Safety net: finish streaming if the stream closed without a done event
           if (!demoDone) dispatch({ type: "FINISH_STREAMING" });
@@ -404,6 +479,7 @@ export function ChatWidget() {
           // Proxies (Vite dev, nginx) may not forward the SSE close signal,
           // so reader.read() would hang forever without this.
           const abort = new AbortController();
+          const turn = newTurn();
           let streamDone = false;
 
           const events = sendMessageStreaming(
@@ -417,7 +493,7 @@ export function ChatWidget() {
 
           try {
             for await (const event of events) {
-              const isDone = handleSSEEvent(event);
+              const isDone = handleSSEEvent(event, turn);
               if (isDone) {
                 streamDone = true;
                 abort.abort();
@@ -433,6 +509,27 @@ export function ChatWidget() {
           }
           // Safety net: finish streaming if the stream closed without a done event
           if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
+
+          // The `done` payload is a trimmed snapshot carrying only
+          // conversationState and conversationOutputs — undoAvailable and
+          // redoAvailable are absent, so without this re-read the undo/redo
+          // buttons stay permanently greyed out on the streaming path.
+          try {
+            const after = await readConversation(
+              environment,
+              agentId,
+              state.conversationId,
+              true,
+            );
+            dispatch({
+              type: "SET_UNDO_REDO",
+              undoAvailable: after.undoAvailable ?? false,
+              redoAvailable: after.redoAvailable ?? false,
+            });
+          } catch {
+            // Availability refresh is best-effort; a failure here must not
+            // sink an otherwise successful turn.
+          }
         } else if (environment && agentId && state.conversationId) {
           // Non-streaming path — pass context for secret input
           const snapshot = await sendMessage(
@@ -475,7 +572,9 @@ export function ChatWidget() {
 
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
-      const snapshot = await undoConversation(
+      // undo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
+      await undoConversation(environment, agentId, state.conversationId);
+      const snapshot = await readConversation(
         environment,
         agentId,
         state.conversationId,
@@ -521,7 +620,9 @@ export function ChatWidget() {
 
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
-      const snapshot = await redoConversation(
+      // redo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
+      await redoConversation(environment, agentId, state.conversationId);
+      const snapshot = await readConversation(
         environment,
         agentId,
         state.conversationId,

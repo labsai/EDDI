@@ -188,9 +188,14 @@ export async function* demoSendMessageStreaming(
 ): AsyncGenerator<SSEEvent> {
   const response = getResponse(message);
 
-  // Simulate thinking phase
+  // Simulate the pre-token phase. The real backend has no "thinking" event —
+  // it emits task_start/task_complete around each pipeline step — so the demo
+  // mirrors that vocabulary to stay representative.
   if (response.thinkFirst) {
-    yield { type: "thinking", data: "" };
+    yield {
+      type: "task_start",
+      data: '{"taskId":"demo","taskType":"LLM","index":0}',
+    };
     await delay(1500);
   }
 

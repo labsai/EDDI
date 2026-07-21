@@ -76,6 +76,7 @@ export type ChatAction =
   | { type: "SET_PROCESSING"; value: boolean }
   | { type: "SET_THINKING"; value: boolean }
   | { type: "SET_UNDO_REDO"; undoAvailable: boolean; redoAvailable: boolean }
+  | { type: "REMOVE_EMPTY_STREAMING_MESSAGE" }
   | { type: "REPLACE_MESSAGES"; messages: ChatMessage[] }
   | { type: "SET_AGENT_NAME"; name: string | null }
   | { type: "CLEAR_MESSAGES" }
@@ -140,6 +141,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "SET_UNDO_REDO":
       return { ...state, undoAvailable: action.undoAvailable, redoAvailable: action.redoAvailable };
+
+    case "REMOVE_EMPTY_STREAMING_MESSAGE": {
+      // A turn dropped server-side leaves a placeholder agent bubble that
+      // never received tokens; left in place it renders as "No response".
+      const last = state.messages[state.messages.length - 1];
+      if (last?.role !== "agent" || last.content !== "") return state;
+      return { ...state, messages: state.messages.slice(0, -1) };
+    }
 
     case "REPLACE_MESSAGES":
       return { ...state, messages: action.messages };
