@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { AuthProvider } from "@/components/auth/auth-provider";
-import { App } from "@/app";
+import { App } from "@/App";
 import "@/i18n/config";
 import "@/index.css";
 // Start collecting logs from session start (before user navigates to /manage/logs)

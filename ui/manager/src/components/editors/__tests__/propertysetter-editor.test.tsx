@@ -400,7 +400,7 @@ describe("PropertySetterEditor", () => {
       <PropertySetterEditor data={populatedConfig} onChange={onChange} />
     );
     await user.selectOptions(screen.getAllByTestId("scope-select")[0]!, "secret");
-    const arg = onChange.mock.calls.at(-1)![0] as PropertySetterConfig;
+    const arg = onChange.mock.lastCall![0] as PropertySetterConfig;
     expect(arg.setOnActions[0]!.setProperties[0]!.scope).toBe("secret");
   });
 
@@ -438,7 +438,7 @@ describe("PropertySetterEditor", () => {
       <PropertySetterEditor data={populatedConfig} onChange={onChange} />
     );
     await user.selectOptions(screen.getByTestId("visibility-select"), "group");
-    const arg = onChange.mock.calls.at(-1)![0] as PropertySetterConfig;
+    const arg = onChange.mock.lastCall![0] as PropertySetterConfig;
     // prop[1] is the longTerm-scoped "lang"
     expect(arg.setOnActions[0]!.setProperties[1]!.visibility).toBe("group");
   });
@@ -461,7 +461,7 @@ describe("PropertySetterEditor", () => {
     expect(screen.queryByTestId("visibility-select")).not.toBeInTheDocument();
     await user.selectOptions(screen.getByTestId("scope-select"), "longTerm");
     // Component is controlled; apply the emitted change back in
-    const arg = onChange.mock.calls.at(-1)![0] as PropertySetterConfig;
+    const arg = onChange.mock.lastCall![0] as PropertySetterConfig;
     rerender(<PropertySetterEditor data={arg} onChange={onChange} />);
     expect(screen.getByTestId("visibility-select")).toBeInTheDocument();
   });

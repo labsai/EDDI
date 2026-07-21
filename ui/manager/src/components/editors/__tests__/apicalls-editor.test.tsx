@@ -1086,7 +1086,7 @@ describe("ApiCallsEditor — Post-Response retry section", () => {
     fireEvent.change(screen.getByTestId("retry-max-retries"), {
       target: { value: "9" },
     });
-    const arg = onChange.mock.calls.at(-1)![0] as HttpCallsConfig;
+    const arg = onChange.mock.lastCall![0] as HttpCallsConfig;
     expect(arg.httpCalls[0]!.postResponse!.retryApiCallInstruction!.maxRetries).toBe(
       9
     );

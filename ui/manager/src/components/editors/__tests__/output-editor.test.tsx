@@ -209,8 +209,8 @@ describe("OutputEditor", () => {
     const user = userEvent.setup();
     renderWithProviders(<OutputEditor data={cfg} onChange={onChange} />);
     await user.type(screen.getByTestId("output-image-uri"), "x");
-    const arg = onChange.mock.calls.at(-1)![0] as OutputConfig;
-    const item = arg.outputSet[0].outputs[0].valueAlternatives[0];
+    const arg = onChange.mock.lastCall![0] as OutputConfig;
+    const item = arg.outputSet[0]!.outputs[0]!.valueAlternatives[0]!;
     expect(item.uri).toBe("x");
     expect(item).not.toHaveProperty("url");
   });
@@ -230,8 +230,8 @@ describe("OutputEditor", () => {
     const user = userEvent.setup();
     renderWithProviders(<OutputEditor data={cfg} onChange={onChange} />);
     await user.type(screen.getByTestId("output-link-path"), "y");
-    const arg = onChange.mock.calls.at(-1)![0] as OutputConfig;
-    const item = arg.outputSet[0].outputs[0].valueAlternatives[0];
+    const arg = onChange.mock.lastCall![0] as OutputConfig;
+    const item = arg.outputSet[0]!.outputs[0]!.valueAlternatives[0]!;
     expect(item.path).toBe("y");
     expect(item).not.toHaveProperty("url");
   });
@@ -286,8 +286,8 @@ describe("OutputEditor", () => {
     const user = userEvent.setup();
     renderWithProviders(<OutputEditor data={cfg} onChange={onChange} />);
     await user.type(screen.getByTestId("output-button-type"), "x");
-    const item = (onChange.mock.calls.at(-1)![0] as OutputConfig).outputSet[0]
-      .outputs[0].valueAlternatives[0];
+    const item = (onChange.mock.lastCall![0] as OutputConfig).outputSet[0]!
+      .outputs[0]!.valueAlternatives[0]!;
     expect(item.buttonType).toBe("x");
     expect(item.type).toBe("button");
   });
@@ -308,8 +308,8 @@ describe("OutputEditor", () => {
     fireEvent.change(screen.getByTestId("output-button-onpress"), {
       target: { value: '{"action":"buy","id":3}' },
     });
-    const item = (onChange.mock.calls.at(-1)![0] as OutputConfig).outputSet[0]
-      .outputs[0].valueAlternatives[0];
+    const item = (onChange.mock.lastCall![0] as OutputConfig).outputSet[0]!
+      .outputs[0]!.valueAlternatives[0]!;
     expect(item.onPress).toEqual({ action: "buy", id: 3 });
   });
 
@@ -376,8 +376,8 @@ describe("OutputEditor", () => {
     const user = userEvent.setup();
     renderWithProviders(<OutputEditor data={cfg} onChange={onChange} />);
     await user.type(screen.getByTestId("output-input-subtype"), "z");
-    const item = (onChange.mock.calls.at(-1)![0] as OutputConfig).outputSet[0]
-      .outputs[0].valueAlternatives[0];
+    const item = (onChange.mock.lastCall![0] as OutputConfig).outputSet[0]!
+      .outputs[0]!.valueAlternatives[0]!;
     expect(item.subType).toBe("z");
   });
 
@@ -397,8 +397,8 @@ describe("OutputEditor", () => {
     fireEvent.change(screen.getByTestId("output-input-minlength"), {
       target: { value: "5" },
     });
-    const item = (onChange.mock.calls.at(-1)![0] as OutputConfig).outputSet[0]
-      .outputs[0].valueAlternatives[0];
+    const item = (onChange.mock.lastCall![0] as OutputConfig).outputSet[0]!
+      .outputs[0]!.valueAlternatives[0]!;
     expect(item.validation).toEqual({ minLength: 5 });
   });
 
@@ -422,8 +422,8 @@ describe("OutputEditor", () => {
     const input = screen.getByTestId("output-json-fallback");
     expect(input).not.toHaveAttribute("readonly");
     fireEvent.change(input, { target: { value: '{"value":"wave"}' } });
-    const item = (onChange.mock.calls.at(-1)![0] as OutputConfig).outputSet[0]
-      .outputs[0].valueAlternatives[0];
+    const item = (onChange.mock.lastCall![0] as OutputConfig).outputSet[0]!
+      .outputs[0]!.valueAlternatives[0]!;
     expect(item.type).toBe("agentFace");
     expect(item.value).toBe("wave");
   });

@@ -211,10 +211,10 @@ describe("RulesEditor", () => {
     const user = userEvent.setup();
     renderWithProviders(<RulesEditor data={emptyConfig} onChange={onChange} />);
     await user.click(screen.getByTestId("add-group-btn"));
-    const arg = onChange.mock.calls.at(-1)![0] as RulesConfig;
-    expect(arg.behaviorGroups[0].executionStrategy).toBe("executeUntilFirstSuccess");
+    const arg = onChange.mock.lastCall![0] as RulesConfig;
+    expect(arg.behaviorGroups[0]!.executionStrategy).toBe("executeUntilFirstSuccess");
     expect(["currentStepOnly", "lastStepOnly", "anyStep"]).not.toContain(
-      arg.behaviorGroups[0].executionStrategy
+      arg.behaviorGroups[0]!.executionStrategy
     );
   });
 
@@ -272,8 +272,8 @@ describe("RulesEditor", () => {
       screen.getByTestId("condition-type-select"),
       "contentTypeMatcher"
     );
-    const arg = onChange.mock.calls.at(-1)![0] as RulesConfig;
-    const cond = arg.behaviorGroups[0].behaviorRules[0].conditions[0];
+    const arg = onChange.mock.lastCall![0] as RulesConfig;
+    const cond = arg.behaviorGroups[0]!.behaviorRules[0]!.conditions[0]!;
     expect(cond.type).toBe("contentTypeMatcher");
     expect(cond.configs).toEqual({ mimeType: "", minCount: "1" });
   });

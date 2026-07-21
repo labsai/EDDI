@@ -225,10 +225,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             {(!collapsed ? !collapsedSections.has(idx) : true) && (
               <div id={`sidebar-section-${idx}`} className="space-y-0.5">
                 {section.items.map((item) => {
-                  const label = t(
-                    item.labelKey,
-                    "fallback" in item ? (item.fallback as string) : undefined
-                  );
+                  const label =
+                    "fallback" in item
+                      ? t(item.labelKey, { defaultValue: item.fallback as string })
+                      : t(item.labelKey);
                   return (
                   <NavLink
                     key={item.path}

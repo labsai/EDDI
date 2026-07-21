@@ -189,7 +189,7 @@ describe("McpCallsEditor", () => {
     const input = screen.getByTestId("mcp-call-description");
     expect(input).toBeInTheDocument();
     await user.type(input, "x");
-    const arg = onChange.mock.calls.at(-1)![0] as McpCallsConfig;
+    const arg = onChange.mock.lastCall![0] as McpCallsConfig;
     expect(arg.mcpCalls![0]!.description).toBe("x");
   });
 
@@ -199,7 +199,7 @@ describe("McpCallsEditor", () => {
       <McpCallsEditor data={populatedConfig} onChange={onChange} />
     );
     await user.click(screen.getByTestId("mcp-continue-on-error"));
-    const arg = onChange.mock.calls.at(-1)![0] as McpCallsConfig;
+    const arg = onChange.mock.lastCall![0] as McpCallsConfig;
     expect(arg.mcpCalls![0]!.continueOnError).toBe(true);
   });
 
@@ -235,7 +235,7 @@ describe("McpCallsEditor", () => {
     // Retry & Backoff section is collapsed by default (no retry set) — expand it
     await user.click(screen.getByText("Retry & Backoff"));
     await user.click(screen.getByTestId("add-mcp-retry"));
-    const arg = onChange.mock.calls.at(-1)![0] as McpCallsConfig;
+    const arg = onChange.mock.lastCall![0] as McpCallsConfig;
     expect(arg.mcpCalls![0]!.retry).toEqual({
       maxAttempts: 3,
       backoffDelayMs: 1000,
@@ -263,7 +263,7 @@ describe("McpCallsEditor", () => {
     fireEvent.change(screen.getByTestId("mcp-retry-max-attempts"), {
       target: { value: "6" },
     });
-    const arg = onChange.mock.calls.at(-1)![0] as McpCallsConfig;
+    const arg = onChange.mock.lastCall![0] as McpCallsConfig;
     expect(arg.mcpCalls![0]!.retry!.maxAttempts).toBe(6);
   });
 
@@ -274,7 +274,7 @@ describe("McpCallsEditor", () => {
     );
     await user.click(screen.getByText("Pre-Request"));
     await user.click(screen.getByText("Add Property Instruction"));
-    const arg = onChange.mock.calls.at(-1)![0] as McpCallsConfig;
+    const arg = onChange.mock.lastCall![0] as McpCallsConfig;
     expect(arg.mcpCalls![0]!.preRequest!.propertyInstructions!.length).toBe(1);
   });
 

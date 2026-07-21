@@ -25,7 +25,7 @@ export function useConversationAttachments(conversationId: string | undefined) {
     queryFn: async (): Promise<ConversationAttachment[]> => {
       const raw = await listAttachments(conversationId!);
       return raw.map((a) => {
-        const rec = a as AttachmentMeta & { filename?: string };
+        const rec = a as AttachmentMeta & { filename?: string; fileName?: string };
         return {
           storageRef: rec.storageRef,
           fileName: rec.fileName ?? rec.filename ?? rec.storageRef,
