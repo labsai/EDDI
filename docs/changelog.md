@@ -5,6 +5,42 @@
 
 ---
 
+## 🕐 Serialization — split the persistence mapper from the REST mapper; Instant is ISO-8601 on the wire (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+⚠️ **REST contract change**, and it requires a companion EDDI-Manager fix (below).
+
+Every `java.time.Instant` on every endpoint rendered as a **1970 date** in the Manager. With `quarkus.jackson.write-dates-as-timestamps=true` (`application.properties:174`) plus `JavaTimeModule`, an `Instant` serializes as fractional epoch **seconds** (`1719964800.123`), while clients call `new Date(value)`, which expects **millis**. Affected `nextFire`, `lastFired`, `pausedAt`, `createdAt`, `updatedAt`, transcript timestamps — essentially every timestamp in the UI.
+
+The obvious fix — a `configOverride(Instant.class)` in the shared `configureObjectMapper` — is the trap. `JsonSerialization` `@Inject`s the **same CDI `ObjectMapper`**, and it backs `DocumentBuilder` for every Mongo write, every Postgres JSONB column, the backup/export writer, and the `{json:serialize}` Qute extension available to agent authors. That would change **on-disk formats**. Concretely, `GroupConversation.lastModified` is a persisted `Instant` that `GroupConversationStore` sorts **server-side** on: Mongo's BSON cross-type ordering ranks all Doubles before all Strings, and Postgres does `ORDER BY data->>'lastModified'` lexicographically — so old numeric rows and new ISO rows would interleave wrongly, silently, with no backfill. Commit `dc117cddc` ("keep numeric date format") already reverted a broader version of this once for breaking `findDueSchedules`.
+
+So the two mappers are now separated:
+
+- New `@PersistenceMapper` qualifier + `PersistenceMapperProducer`, built from the same `configureObjectMapper` recipe **without** the date override. `JsonSerialization` injects that.
+- The `Instant` → ISO override moved into `SerializationCustomizer.customize()` — the REST/CDI path only, never the shared static.
+
+### Design decisions
+
+- **`java.util.Date` deliberately untouched.** It already emits epoch millis and its consumers (e.g. `DocumentDescriptor.lastModifiedOn`) are correct today; widening the override would break working paths. The wire therefore carries two encodings by design: `Instant` = ISO-8601 string, `Date` = epoch-millis number.
+- **`application.properties:174` must stay.** Quarkus's own default for `write-dates-as-timestamps` is `false`, so that line is what *prevents* Quarkus disabling the feature globally. Deleting it as "redundant documentation" would flip persistence to ISO — the exact break this change avoids.
+- **A qualified CDI producer, not `new ObjectMapper()` inside `JsonSerialization`.** Keeps the persistence mapper a first-class, overridable bean and leaves the existing direct-construction test fixtures working unchanged.
+- **Deserialization is unaffected in both directions** — `InstantDeserializer` dispatches on the JSON token type, not the shape hint — so rows written numerically still parse.
+
+### Required companion change (EDDI-Manager repo)
+
+The Schedules dashboard sorts arithmetically: `(a.nextFire ?? 0) - (b.nextFire ?? 0)`, which yields `NaN` on ISO strings, leaving the "next fire" tile showing an arbitrary schedule. Change it to `new Date(a.nextFire) - new Date(b.nextFire)`, which works with **both** encodings and can therefore land before or after this commit. Every other consumer (`new Date(x).toLocaleString()`) becomes correct automatically. The vendored bundle under `META-INF/resources/assets/` is a build artifact and was deliberately not hand-edited.
+
+### Verification limits
+
+CDI wiring for the new qualified producer **cannot be validated locally** — `quarkus:build` augmentation needs a loopback socket, which this environment refuses, and the repo has only one non-IT `@QuarkusTest`. CI is the gate for that specific aspect. The format behaviour itself is fully covered by unit tests.
+
+### Tests
+
+New `SerializationCustomizerInstantFormatTest` (7 tests) asserts both halves: the REST mapper emits ISO and keeps `Date` numeric; the persistence mapper stays numeric and **does not inherit** the REST override despite sharing `configureObjectMapper`; and both still read the old numeric form.
+
+---
+
 ## 🎫 Tenancy — enforce `maxAgentsPerTenant` on deploy (2026-07-21)
 
 **Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
