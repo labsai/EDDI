@@ -311,6 +311,32 @@ describe("PipelineTrace", () => {
     expect(screen.getAllByText("75ms").length).toBeGreaterThanOrEqual(1);
   });
 
+  // ── Failed task bar ────────────────────────────────────────────────
+  it("renders a destructive error bar for a task_failed event correlated by taskId", () => {
+    // The failed payload carries no index (and a wrong one here) — the bar must
+    // still correlate to the running task by taskId, recover the duration from
+    // the matched task_start, and render as an error with the errorType label.
+    const events: PipelineEvent[] = [
+      { type: "task_start", taskId: "t1", taskType: "ai.labs.llm", index: 0, timestamp: 1000 },
+      { type: "task_failed", taskId: "t1", taskType: "ai.labs.llm", index: 99, errorType: "timeout", timestamp: 1300 },
+    ];
+    const turn: PipelineTurn = { turnIndex: 0, events, totalDurationMs: 0, startTime: 1000 };
+    useDebugStore.setState({ turns: [turn] });
+    renderTrace();
+
+    // Exactly one bar — the failed one replaced (not duplicated) the running task
+    const bars = screen.getAllByTestId("task-bar");
+    expect(bars.length).toBe(1);
+
+    // The errorType label is shown (uppercase, destructive-colored) in place of a duration
+    const label = screen.getByText("timeout");
+    expect(label.className).toContain("uppercase");
+    expect(label.className).toContain("text-destructive");
+
+    // The bar fill itself is styled destructive
+    expect(bars[0]!.querySelector(".bg-destructive")).not.toBeNull();
+  });
+
   // ── De-duplication of actions ──────────────────────────────────────
   it("de-duplicates actions across multiple events", () => {
     const events: PipelineEvent[] = [

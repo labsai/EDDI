@@ -344,6 +344,58 @@ describe("ConversationDetailPage", () => {
     expect(screen.getByTestId("delete-conversation-btn")).toBeInTheDocument();
   });
 
+  // Regression: the detail-page delete dialog defaults to a SOFT delete; only
+  // checking the permanent option escalates to deletePermanently=true.
+  it("soft-deletes by default (deletePermanently=false)", async () => {
+    let deletedUrl = "";
+    server.use(
+      http.delete("*/conversationstore/conversations/:id", ({ request }) => {
+        deletedUrl = request.url;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    renderConvDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("delete-conversation-btn")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("delete-conversation-btn"));
+
+    // The permanent checkbox starts unchecked
+    expect(await screen.findByTestId("delete-permanent-checkbox")).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(deletedUrl).toContain("deletePermanently=false");
+    });
+  });
+
+  it("passes deletePermanently=true when the permanent checkbox is checked", async () => {
+    let deletedUrl = "";
+    server.use(
+      http.delete("*/conversationstore/conversations/:id", ({ request }) => {
+        deletedUrl = request.url;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    renderConvDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("delete-conversation-btn")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("delete-conversation-btn"));
+
+    await user.click(await screen.findByTestId("delete-permanent-checkbox"));
+    // Confirm label escalates to "Delete permanently" once the box is checked
+    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+
+    await waitFor(() => {
+      expect(deletedUrl).toContain("deletePermanently=true");
+    });
+  });
+
   it("export markdown creates a download", async () => {
     renderConvDetail();
     const user = userEvent.setup();
