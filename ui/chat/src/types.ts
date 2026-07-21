@@ -158,4 +158,10 @@ export interface ChatConfig {
   enableNewConversation?: boolean;
   /** Show agent name in header (fetched from descriptor). Default: `true` */
   showAgentName?: boolean;
+  /**
+   * Bearer token for the EDDI API. Required when the deployment enables OIDC:
+   * conversation ownership is enforced server-side, so an anonymous client can
+   * be locked out of the conversation it just started.
+   */
+  authToken?: string;
 }

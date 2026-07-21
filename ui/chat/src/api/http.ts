@@ -6,10 +6,22 @@
    ────────────────────────────────────────────── */
 
 let _baseUrl = "";
+let _authToken: string | null = null;
 
 /** Set the API base URL (e.g. from ChatConfig). Call once at startup. */
 export function setBaseUrl(url: string): void {
   _baseUrl = url.replace(/\/$/, "");
+}
+
+/**
+ * Set the bearer token sent with every request, or null to send none.
+ *
+ * Conversation ownership is enforced server-side: an unauthenticated client
+ * can be locked out of the very conversation it started, so a deployment with
+ * OIDC enabled must supply a token here.
+ */
+export function setAuthToken(token: string | null): void {
+  _authToken = token && token.trim() ? token.trim() : null;
 }
 
 export function buildUrl(path: string): string {
@@ -38,6 +50,14 @@ export class ApiError extends Error {
   }
 }
 
+/** Add the bearer token without disturbing caller-supplied headers. */
+function withAuth(init: RequestInit | undefined): RequestInit | undefined {
+  if (!_authToken) return init;
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${_authToken}`);
+  return { ...init, headers };
+}
+
 /**
  * Fetch that throws ApiError on a non-2xx status, reading the body first so
  * the error carries it.
@@ -47,7 +67,7 @@ export async function request(
   init: RequestInit | undefined,
   context: string,
 ): Promise<Response> {
-  const res = await fetch(buildUrl(path), init);
+  const res = await fetch(buildUrl(path), withAuth(init));
   if (!res.ok) {
     let body = "";
     try {

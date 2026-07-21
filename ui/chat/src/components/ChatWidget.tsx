@@ -27,6 +27,7 @@ import {
   fetchAgentDescriptor,
   setBaseUrl,
 } from "@/api/chat-api";
+import { setAuthToken } from "@/api/http";
 import {
   isDemoMode,
   demoStartConversation,
@@ -149,6 +150,8 @@ export function ChatWidget() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const initializedRef = useRef(false);
+  /** Controller for the in-flight SSE read, so it can be stopped on demand. */
+  const abortRef = useRef<AbortController | null>(null);
 
   /* ─── Apply query param config + colors on mount ── */
   useEffect(() => {
@@ -161,10 +164,15 @@ export function ChatWidget() {
   }, [searchParams, dispatch]);
 
 
-  /* ─── Set base URL on mount ─────────────────── */
+  /* ─── Set base URL + auth on mount ──────────── */
   useEffect(() => {
     setBaseUrl(apiServer ?? state.config.apiBaseUrl ?? "");
   }, [apiServer, state.config.apiBaseUrl]);
+
+  useEffect(() => {
+    // Query param is a convenience for embedding; config is the real channel.
+    setAuthToken(searchParams.get("token") ?? state.config.authToken ?? null);
+  }, [searchParams, state.config.authToken]);
 
   /* ─── SSE event handler (declared early to avoid reference issues) ──
      Returns `true` when the stream is logically complete (done / error),
@@ -506,6 +514,7 @@ export function ChatWidget() {
           // Proxies (Vite dev, nginx) may not forward the SSE close signal,
           // so reader.read() would hang forever without this.
           const abort = new AbortController();
+          abortRef.current = abort;
           const turn = newTurn();
           let streamDone = false;
 
@@ -832,6 +841,28 @@ export function ChatWidget() {
     }
   }, [dispatch, state.conversationId]);
 
+  /* ─── Stop generating ───────────────────────── */
+  const handleStop = useCallback(async () => {
+    // Abort the local read first so tokens stop arriving immediately, then ask
+    // the server to stop producing them.
+    abortRef.current?.abort();
+    abortRef.current = null;
+    dispatch({ type: "FINISH_STREAMING" });
+    dispatch({ type: "SET_PROCESSING", value: false });
+    dispatch({ type: "SET_THINKING", value: false });
+
+    if (!state.conversationId || isDemo) return;
+    try {
+      await cancelConversation(state.conversationId);
+      dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
+    } catch (err) {
+      // 409 = nothing to cancel; the turn finished as we clicked.
+      if (!(err instanceof ApiError && err.status === 409)) {
+        console.error("Stop failed:", err);
+      }
+    }
+  }, [dispatch, state.conversationId, isDemo]);
+
   /* ─── Auto-scroll ───────────────────────────── */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -946,6 +977,17 @@ export function ChatWidget() {
                   )}
                 </div>
                 <div className="chat-actions__right">
+                  {state.isProcessing && !isPaused && (
+                    <button
+                      className="chat-actions__btn chat-actions__btn--stop"
+                      onClick={handleStop}
+                      title="Stop generating"
+                      aria-label="Stop generating"
+                      data-testid="chat-stop"
+                    >
+                      ■
+                    </button>
+                  )}
                   {state.config.enableNewConversation !== false && (
                     <button
                       className="chat-actions__btn"

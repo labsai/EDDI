@@ -7,7 +7,7 @@
    ────────────────────────────────────────────── */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { ChatWidget } from "./ChatWidget";
 import { ChatProvider } from "@/store/chat-store";
@@ -122,5 +122,57 @@ describe("ChatWidget", () => {
 
     expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /reject/i })).toBeNull();
+  });
+});
+
+describe("ChatWidget — stop generating", () => {
+  /** Backend whose stream opens and then never produces a `done`. */
+  function mockHangingStream(onCancel: () => void) {
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/cancel")) {
+        onCancel();
+        return new Response(null, { status: 200 });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/stream")) {
+        // Opens, emits one token, then stays open indefinitely.
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(new TextEncoder().encode("event: token\ndata: thinking…\n\n"));
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+  }
+
+  it("offers a stop control while the agent is responding, and cancels server-side", async () => {
+    // An unbounded SSE reader with no stop control means a runaway turn can
+    // only be escaped by reloading the page.
+    let cancelled = false;
+    mockHangingStream(() => {
+      cancelled = true;
+    });
+
+    renderWidget();
+    const input = await screen.findByTestId("chat-input");
+
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+
+    const stop = await screen.findByTestId("chat-stop");
+    fireEvent.click(stop);
+
+    await waitFor(() => expect(cancelled).toBe(true));
   });
 });
