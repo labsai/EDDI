@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.Counter;
@@ -119,7 +120,7 @@ public class PromptSnippetService {
         try {
             // Use descriptor store to enumerate all snippet resources
             List<DocumentDescriptor> descriptors = descriptorStore.readDescriptors(
-                    "ai.labs.snippet", "", 0, 0, false);
+                    "ai.labs.snippet", "", 0, IDescriptorStore.NO_LIMIT, false);
 
             if (descriptors == null || descriptors.isEmpty()) {
                 return Collections.emptyMap();

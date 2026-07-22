@@ -193,7 +193,7 @@ class MongoResourceStorageBranchTest {
         }
 
         @Test
-        @DisplayName("null sortField → empty sort document; limit < 1 → defaults to 20")
+        @DisplayName("null sortField → empty sort document; limit < 1 → unlimited up to the ceiling")
         void nullSortAndDefaultLimit() throws Exception {
             IResourceFilter.QueryFilter qf = mock(IResourceFilter.QueryFilter.class);
             when(qf.getField()).thenReturn("name");
@@ -210,11 +210,11 @@ class MongoResourceStorageBranchTest {
             when(iterable.skip(anyInt())).thenReturn(iterable);
             doNothing().when(iterable).forEach(any(java.util.function.Consumer.class));
 
-            // sortField=null, skip=0, limit=0 → effectiveLimit=20, skip=0
+            // sortField=null, skip=0, limit=0 → "no caller limit" → the ceiling
             List<IResourceStore.IResourceId> result = storage.findResources(
                     new IResourceFilter.QueryFilters[]{qfs}, null, 0, 0);
 
-            verify(iterable).limit(20);
+            verify(iterable).limit(IResourceStorage.MAX_RESULT_LIMIT);
             verify(iterable).skip(0);
         }
     }

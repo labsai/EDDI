@@ -48,11 +48,14 @@ class SerializationCustomizerInstantFormatTest {
         return mapper;
     }
 
-    /** Exactly what PersistenceMapperProducer builds. */
+    /**
+     * The REAL producer, not a reconstruction. Building a look-alike here once
+     * masked the thing under test: the fixture set WRITE_DATES_AS_TIMESTAMPS
+     * itself, so it would have passed even if the producer had left Instants as ISO
+     * strings.
+     */
     private static ObjectMapper persistenceMapper() {
-        ObjectMapper mapper = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
-        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, true);
-        return mapper;
+        return new PersistenceMapperProducer().persistenceMapper();
     }
 
     @Nested

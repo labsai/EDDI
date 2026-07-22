@@ -33,12 +33,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class UsageSnapshotSerializationTest {
 
     /**
-     * Mirrors the production mapper: the shared customizer plus the
-     * write-dates-as-timestamps flag Quarkus applies from application.properties.
+     * The real REST/CDI mapper — {@code customize()}, not the shared
+     * {@code configureObjectMapper} recipe. Since the persistence/REST mapper
+     * split, {@code configureObjectMapper} alone builds the <em>persistence</em>
+     * mapper (no Instant override); only {@code customize()} applies the REST-only
+     * formatting. Calling the static directly here would silently stop exercising
+     * the mapper this test claims to pin.
      */
     private static ObjectMapper productionMapper() {
-        ObjectMapper mapper = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
+        ObjectMapper mapper = new ObjectMapper();
         mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, true);
+        new SerializationCustomizer(false).customize(mapper);
         return mapper;
     }
 

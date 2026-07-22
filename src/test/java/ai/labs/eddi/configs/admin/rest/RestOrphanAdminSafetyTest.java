@@ -123,6 +123,34 @@ class RestOrphanAdminSafetyTest {
         }
 
         @Test
+        @DisplayName("a type that never stops paging aborts the purge instead of truncating")
+        void ceilingAbortsPurgeRatherThanTruncating() throws Exception {
+            // Every page full, forever: the walk must hit MAX_PAGES and raise, not
+            // quietly return a partial set. A truncated scan of the REFERENCE side is
+            // what makes live resources look unreferenced, so it must never reach the
+            // delete loop.
+            AgentConfiguration readableAgent = new AgentConfiguration();
+            readableAgent.setWorkflows(List.of());
+
+            when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(fullPage("ai.labs.agent"));
+            // Every descriptor must read cleanly, so the ONLY thing that can mark the
+            // scan incomplete is the page ceiling. Without this the mock returns null,
+            // the traversal NPEs, and the test passes for the wrong reason even with
+            // the ceiling removed.
+            when(agentStore.read(anyString(), any())).thenReturn(readableAgent);
+
+            WebApplicationException thrown = assertThrows(WebApplicationException.class, () -> restOrphanAdmin.purgeOrphans(false));
+
+            assertEquals(409, thrown.getResponse().getStatus());
+            assertTrue(thrown.getResponse().getEntity().toString().contains("exceeded"),
+                    "the refusal must name the page ceiling, got: " + thrown.getResponse().getEntity());
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
+
+        @Test
         @DisplayName("stops on the first partial page")
         void stopsOnPartialPage() throws Exception {
             when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))

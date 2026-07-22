@@ -389,7 +389,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
             sql.append(" ORDER BY data->>'" + sanitizeJsonPath(sortField) + "' DESC");
         }
 
-        int effectiveLimit = limit < 1 ? 20 : limit;
+        int effectiveLimit = IResourceStorage.resolveLimit(limit);
         sql.append(" LIMIT ").append(effectiveLimit);
         if (skip > 0) {
             sql.append(" OFFSET ").append(skip);

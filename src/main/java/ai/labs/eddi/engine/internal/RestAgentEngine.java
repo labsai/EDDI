@@ -243,7 +243,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             // branch it fell through to the generic handler below and the api-call
             // quota surfaced as a 500 instead of a 429. Body and headers mirror the
             // mapper so both quota denials look identical to clients.
-            LOGGER.warnf("Quota exceeded for conversation %s: %s", conversationId, e.getMessage());
+            LOGGER.warnf("Quota exceeded for conversation %s: %s", sanitize(conversationId), e.getMessage());
             response.resume(Response.status(TOO_MANY_REQUESTS)
                     .entity(Map.of("error", "quota_exceeded", "message", e.getMessage()))
                     .type(MediaType.APPLICATION_JSON).header("Retry-After", "60").build());

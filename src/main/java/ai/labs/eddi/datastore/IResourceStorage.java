@@ -12,6 +12,35 @@ import java.util.List;
  * @author ginccc
  */
 public interface IResourceStorage<T> {
+
+    /**
+     * Hard safety ceiling for any single {@link #findResources} query. Applies even
+     * when the caller asks for "no limit" — an unbounded query against a large
+     * collection is a memory risk, so the storage layer never returns more than
+     * this many ids in one call.
+     * <p>
+     * Callers that must be exhaustive on collections this large have to page (see
+     * {@code RestOrphanAdmin} for the pattern).
+     */
+    int MAX_RESULT_LIMIT = 10_000;
+
+    /**
+     * Resolve a caller-supplied limit into the concrete number of rows a backend
+     * should fetch.
+     * <p>
+     * {@code limit <= 0} is the explicit "no caller-imposed limit" sentinel and
+     * resolves to {@link #MAX_RESULT_LIMIT}; a positive limit is honoured but still
+     * clamped to the ceiling. Shared by every backend so the two implementations
+     * cannot drift apart.
+     *
+     * @param limit
+     *            the caller-supplied limit ({@code <= 0} means unlimited)
+     * @return a positive row count, never above {@link #MAX_RESULT_LIMIT}
+     */
+    static int resolveLimit(int limit) {
+        return limit < 1 ? MAX_RESULT_LIMIT : Math.min(limit, MAX_RESULT_LIMIT);
+    }
+
     IResource<T> newResource(T content) throws IOException;
 
     IResource<T> newResource(String id, Integer version, T content) throws IOException;
@@ -124,7 +153,10 @@ public interface IResourceStorage<T> {
      * @param skip
      *            number of results to skip
      * @param limit
-     *            maximum number of results
+     *            maximum number of results; {@code <= 0} means "no caller-imposed
+     *            limit" and returns up to {@link #MAX_RESULT_LIMIT}.
+     *            Implementations must resolve this through
+     *            {@link #resolveLimit(int)}.
      * @return list of matching resource IDs
      */
     default List<IResourceStore.IResourceId> findResources(IResourceFilter.QueryFilters[] filters, String sortField, int skip, int limit) {

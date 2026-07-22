@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.serialization;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 
@@ -27,6 +28,16 @@ public class PersistenceMapperProducer {
     @ApplicationScoped
     @PersistenceMapper
     public ObjectMapper persistenceMapper() {
-        return SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
+        ObjectMapper mapper = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
+
+        // Redundant against today's Jackson default (WRITE_DATES_AS_TIMESTAMPS is
+        // enabled out of the box), but stated explicitly on purpose: the numeric
+        // storage format is a correctness requirement, not a preference. Stores write
+        // epoch-millis for range queries and sort server-side on persisted timestamps,
+        // so silently inheriting a flipped library default would reorder query results
+        // rather than fail. This repo has already been bitten once by an implicit date
+        // format (commit dc117cddc).
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, true);
+        return mapper;
     }
 }

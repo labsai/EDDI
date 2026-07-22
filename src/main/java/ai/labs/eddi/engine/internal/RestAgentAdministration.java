@@ -155,6 +155,29 @@ public class RestAgentAdministration implements IRestAgentAdministration {
      * Fails <em>open</em>: a store outage must not block deployments. The denial is
      * logged and metered either way.
      * </p>
+     *
+     * <p>
+     * <strong>Known limit — bounded overshoot under concurrency.</strong> The count
+     * is read, checked, and only then acted on, with no lock spanning the read and
+     * the eventual write. Concurrent deploys that all observe {@code count == limit
+     * - 1} will all pass, so the cap can be exceeded by up to the number of
+     * simultaneous requests. This does <em>not</em> heal on its own: once over, the
+     * gate simply refuses further deploys until an undeploy brings the count back
+     * down.
+     * </p>
+     *
+     * <p>
+     * A per-tenant lock is deliberately not used, because it would only serialize
+     * within one JVM while the count spans the shared deployment store and every
+     * node's in-memory registry — giving the appearance of a hard guarantee in
+     * exactly the clustered deployments where it would not hold. A real guarantee
+     * needs a distributed lock or a storage-level constraint, and there is no
+     * single row to constrain since the count is derived from two sources. The
+     * overshoot is accepted instead: deploys are rare, human- or agent-initiated
+     * admin operations rather than a hot path, and the gate's purpose — stopping
+     * runaway growth such as an LLM creating sub-agents in a loop — survives a
+     * small transient overrun.
+     * </p>
      */
     private void enforceAgentQuota(Deployment.Environment environment, String agentId) {
         Set<String> deployedAgentIds = new HashSet<>();

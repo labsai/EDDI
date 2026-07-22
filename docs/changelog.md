@@ -5,9 +5,9 @@
 
 ---
 
-## 🧪 LLM — make `AgentOrchestrator` injectable; cover agent-mode response metadata (2026-07-21)
+## 🧪 LLM — make `AgentOrchestrator` injectable; cover agent-mode response metadata (2026-07-22)
 
-**Repo:** EDDI (`refactor/agent-orchestrator-injectable`, branched from `fix/orphan-scan-and-quota-defects`)
+**Repo:** EDDI (`refactor/agent-orchestrator-injectable`; branched from `fix/orphan-scan-and-quota-defects`, which has since merged to `main` — this branch now targets `main` directly)
 
 Follow-up to the token-usage fix below, which shipped without unit coverage.
 
@@ -32,9 +32,9 @@ Every `AgentOrchestrator` field is `final` except the two `volatile` attachment 
 
 ### Tests
 
-New `LlmTaskAgentModeMetadataTest` (6 tests) covering the standard agent branch, the `skipCascade` agent branch, the legacy fallback when the orchestrator declines, and the HITL resume continuation (non-null and null).
+New `LlmTaskAgentModeMetadataTest` (7 tests) covering the standard agent branch, the `skipCascade` agent branch, the legacy fallback when the orchestrator declines, the HITL resume continuation (non-null and null), and a null tool trace.
 
-Validated by mutation rather than by observing green: reverting `15b7a08a7` and re-running turns **four** of the six red. The other two (`agentMode_emptyMetadata_publishesEmptyMap`, `agentReturnsNull_fallsBackToLegacyChatExecutor`) pass with and without the fix by design — they pin behaviour the fix did not alter, and are regression guards, not discriminators. Each says so at its own assertion, so the distinction is visible in the file a future reader actually opens, not only here.
+Validated by mutation rather than by observing green: reverting `15b7a08a7` and re-running turns **four** of the seven red. The other two (`agentMode_emptyMetadata_publishesEmptyMap`, `agentReturnsNull_fallsBackToLegacyChatExecutor`) pass with and without the fix by design — they pin behaviour the fix did not alter, and are regression guards, not discriminators. Each says so at its own assertion, so the distinction is visible in the file a future reader actually opens, not only here.
 
 ### Review pass — what it changed
 
@@ -62,6 +62,39 @@ CDI wiring **is validated locally**, by `./mvnw package -DskipTests`. Augmentati
 `@ApplicationScoped` was chosen over `@Singleton` to match repo convention (AGENTS.md §4.1 rule 4) and because a normal scope's client proxy is the safer way to introduce a 29-dependency bean into a dense graph — lazy resolution tolerates ordering that a pseudo-scope resolves eagerly.
 
 > **Correction (same-day review):** an earlier revision of this entry justified the choice by claiming the chain `LlmTask → AgentOrchestrator → IConversationService → IAgentFactory → lifecycle tasks` is cyclic and that a pseudo-scope could break it. That reasoning does not hold and should not be relied on: `ILifecycleTask` is only ever consumed through `Instance<ILifecycleTask>` / `Provider<ILifecycleTask>` (`LlmModule`, `WorkflowStoreClientLibrary`, `ApiCallsModule`), which is lazy and already breaks any cycle at that edge, and `AgentFactory` injects only `IAgentStoreClientLibrary` + `IDeploymentListener`. The conclusion stands; the stated reason was wrong.
+
+---
+
+## 🔍 More PR review follow-ups (2026-07-22)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+- **`UsageSnapshotSerializationTest.productionMapper()` stopped mirroring the real REST mapper.** It called `SerializationCustomizer.configureObjectMapper(...)` directly — which, since the persistence/REST mapper split earlier in this branch, builds the *persistence* recipe (no `Instant` override), not the REST/CDI one. The assertions still passed, because `costMonth` is a `YearMonth` with `@JsonFormat` on the field directly and is unaffected by the `Instant` `configOverride` — but the test's stated purpose ("pins the REST wire shape") was no longer true, and it provided zero coverage of the actual production mapper. Same class of defect fixed earlier in `SerializationCustomizerInstantFormatTest` (`a186dc903`): the fixture now builds the mapper via `new SerializationCustomizer(false).customize(mapper)`, matching how Quarkus actually constructs it.
+- **Inline FQN in `DescriptorStoreTest`.** `new java.util.ArrayList<>()` where `java.util.List` was already imported. Added the top-level import; this file came in via the `origin/main` merge, not authored on this branch, but the convention applies regardless of origin.
+
+---
+
+## 🔀 Merge `origin/main` into `fix/orphan-scan-and-quota-defects` — changelog conflict resolution (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+Brought the branch up to date with `origin/main`, which had picked up the `fix/descriptor-store-limit-semantics` PR (`limit=0` now means "unlimited" in `DescriptorStore.readDescriptors`, with a `MAX_RESULT_LIMIT` safety ceiling) via a background task spawned earlier in this effort. Both that PR and this branch touch `DescriptorStore.readDescriptors`, so `docs/changelog.md` conflicted at the top (both sides prepend); `DescriptorStore.java` and its test merged automatically without conflict — this branch's `includeDeleted` inclusion-flag fix and main's `resolveDescriptorLimit`/ceiling-warning logic touch disjoint parts of the same method. Kept both changelog blocks whole, this branch's newest-first on top, main's independent entry below.
+
+## 🔍 PR review follow-ups — a vacuous test found and fixed (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+Addressing CodeRabbit and Copilot review comments. One of them exposed a test that could not fail.
+
+**The `MAX_PAGES` ceiling test was vacuous.** CodeRabbit noted the new page ceiling had no coverage. Adding a test made it pass immediately — but mutation-checking it (disabling the ceiling so the walk truncates silently) showed it *still* passed. Cause: the fixture left `agentStore.read` unstubbed, so the traversal NPE'd on a null config, marked the scan incomplete, and produced the expected 409 **for the wrong reason**. Stubbing the agent read so the ceiling is the only possible failure source, plus asserting the refusal message names it, makes the test load-bearing — the mutant now dies with "Expected WebApplicationException to be thrown, but nothing was thrown."
+
+**Copilot's `WRITE_DATES_AS_TIMESTAMPS` finding: premise wrong, instinct right.** It claimed the produced `@PersistenceMapper` could change the on-disk shape. It cannot — Jackson enables that feature by default, so the producer already emitted numeric. But the real defect was next door: `SerializationCustomizerInstantFormatTest` *reconstructed* the producer instead of calling it, and set the flag itself — so it would have passed even if the producer were broken. The test now builds the mapper via `new PersistenceMapperProducer().persistenceMapper()`, and the producer states the flag explicitly. Relying on a library default for a persistence-format guarantee is precisely what `dc117cddc` was reverted for. Mutation-checked: flipping the producer to ISO now fails two tests.
+
+**TOCTOU on the agent quota — documented, not fixed, and the earlier claim corrected.** CodeRabbit correctly flagged that concurrent deploys observing `count == limit - 1` all pass. An internal note had called this "self-correcting"; that was wrong — once over, the gate merely refuses further deploys until an undeploy brings the count down. The javadoc now states the bound honestly and explains why a per-tenant lock is *not* used: it would serialize within one JVM while the count spans the shared store and every node's registry, giving the appearance of a hard guarantee exactly where it would not hold. Accepted because deploys are rare admin operations and the gate's purpose — stopping runaway growth such as an LLM creating sub-agents in a loop — survives a small transient overrun.
+
+**Log injection.** `sanitize(conversationId)` added to the new quota-denial log line in `RestAgentEngine`, matching the rest of the class (lines 331, 368, 389, 436).
+
+**Not actioned:** the advisory note that the orphan endpoint blocks a request thread. Pre-existing, explicitly raised as advice rather than a blocker, and moving it to `AsyncResponse` with a polling status endpoint is a separate change.
 
 ---
 
@@ -263,6 +296,56 @@ A `MAX_PAGES` ceiling (100 pages / 20 000 rows per type) now bounds the walk, si
 ### Tests
 
 New `RestOrphanAdminSafetyTest` (7 tests): page index advances by 1 and a second page is actually requested; walk stops on the first partial page; an unreadable Agent aborts the purge with 409 and deletes nothing; a *missing* Agent resource does not abort; a complete scan purges normally; `scanOrphans` tolerates an incomplete reference set and never deletes; a workflow referenced by an Agent is never purged. Fixtures use 24-char hex ids because `RestUtilities.extractResourceId` returns a null id otherwise, which would make the assertions pass vacuously. All 27 pre-existing orphan tests unchanged and green.
+
+---
+
+## 🐛 Fix: `readDescriptors(limit = 0)` silently returned only 20 descriptors (2026-07-21)
+
+**Repo:** EDDI (`fix/descriptor-store-limit-semantics`)
+
+### Summary
+
+`DescriptorStore.readDescriptors` resolved its limit with `(limit == null || limit < 1) ? 20 : limit`, so a caller passing `0` to mean "give me everything" silently received the first 20 rows. The same `limit < 1 ? 20` fallback was duplicated in `MongoResourceStorage.findResources`, `PostgresResourceStorage.findResources`, and `ResourceFilter.readResources` — four independent copies of a magic default, none of them documented.
+
+Three production call sites were affected in a user-visible way:
+
+- **`PromptSnippetService.loadAllSnippets`** — a deployment with more than 20 prompt snippets never got the rest into the `{snippets.*}` template namespace. Silent: templates just rendered empty.
+- **`RestExportService.exportSnippets`** — agent export dropped any referenced snippet outside the first 20, producing an incomplete ZIP that imports without error.
+- **`RestAgentStore.populateCapabilityRegistry`** — only the first 20 agents were scanned for capabilities at startup, so capability-based discovery/delegation silently missed agents.
+
+Three further call sites (`ChannelTargetRouter`, `ChannelConnectorMigration`, `RestChannelIntegrationStore`) passed a magic `1000` to dodge the cap; the channel-uniqueness check among them would have let a duplicate `channelId` through past that many configs.
+
+### Fix — explicit sentinel plus a hard ceiling
+
+Option (a) from the two candidates, because the storage layer supports a bounded unlimited query cleanly and paging every caller would have been six copies of `RestOrphanAdmin`'s batch loop:
+
+- **`IDescriptorStore.NO_LIMIT` (`0`)** and **`DEFAULT_LIMIT` (`20`)** define the contract in one place, with `resolveDescriptorLimit(Integer)`: `null` → default page, `<= 0` → unlimited, `> 0` → honoured.
+- **`IResourceStorage.MAX_RESULT_LIMIT` (`10_000`)** is the hard safety ceiling, applied through the shared static `IResourceStorage.resolveLimit(int)` that both backends now call — the two implementations can no longer drift apart.
+- **Truncation is no longer silent**: `DescriptorStore` logs a WARN naming the descriptor type when a result set hits the ceiling. The original defect was not the number 20, it was that nothing said anything.
+- All six "give me everything" call sites now pass `IDescriptorStore.NO_LIMIT` instead of `0` or `1000`, so intent is readable at the call site. `RestOrphanAdmin` keeps its explicit 200-row batch loop — it genuinely pages.
+
+### Key Design Decisions
+
+- **`null` and `0` deliberately mean different things.** `null` is "caller expressed no opinion" → default page; `0` is "no limit". Collapsing them would have made `?limit=` omission return everything.
+- **Redefining `0` is safe for the REST API** because every REST endpoint already declares `@QueryParam("limit") @DefaultValue("20")`. JAX-RS, not the store fallback, supplies the REST default, so no endpoint's behaviour changes when the parameter is omitted. Only internal callers and an explicit `?limit=0` are affected — and `?limit=0` now means what it reads like.
+- **Ceiling over true unbounded**: an unbounded query on a large `descriptors` collection is a memory risk, and `readDescriptors` issues one `read()` per descriptor. 10,000 is high enough that no realistic deployment hits it, and the WARN makes it loud if one does.
+- **Legacy `mongo/ResourceFilter` updated too**, so both descriptor-store implementations obey one contract rather than diverging.
+- **The ceiling warning sanitizes `type`.** Self-review caught that the new WARN logged `type` unsanitized — and `type` reaches `readDescriptors` straight from `@QueryParam("type")` on `IRestDocumentDescriptorStore`. That is the CWE-117 log-injection pattern that commit `d71de742` remediated across 13 files (the commit that also last touched this very method), so the new log line now uses the `LogSanitizer.sanitize` helper that commit introduced. Reachability is hard (10,000 matching descriptors), but CodeQL taint analysis is flow-based, not reachability-gated, and the repo's convention is to sanitize unconditionally.
+- **The warning states impact, not just cause.** Its reader is an operator who cannot "page" anything — the actionable fact for them is that the returned list is incomplete and dependent features are missing entries, so the message leads with that.
+
+### Review follow-ups (Copilot + CodeRabbit)
+
+- **`index` javadoc overstated the contract.** It claimed any `index > 0` with `NO_LIMIT` "yields an empty list". It does not: the effective limit is the ceiling, so `index=1` returns rows 10,000–20,000. The claim was only true for collections smaller than the ceiling — the common case mistaken for the contract. Reworded to say a non-zero index pages in ceiling-sized chunks.
+- **Integer overflow in the legacy `ResourceFilter` skip.** `index * limit` was int arithmetic; raising the effective limit from 20 to 10,000 dropped the overflow threshold from `index > ~107M` to `index > ~214,748`, where the skip goes negative. Now uses the same `long` cast + `Math.min` guard that `d71de742` added to `DescriptorStore.readDescriptors`, so both paths match. Reachability is low (this is the legacy store path), but the fix is three lines and removes a CodeQL-shaped pattern.
+- **Removed a duplicate test.** The added `nullLimitUsesDefaultPageSize` re-tested exactly what the pre-existing `defaultsLimitWhenNull` already covered. Deleted it and updated the pre-existing test to assert against `DEFAULT_LIMIT` instead of a literal `20`, keeping coverage and dropping the magic number.
+
+### Verification
+
+- `./mvnw clean compile` — clean
+- 976 unit tests across the datastore package and every affected call site — 0 failures, 1 pre-existing skip
+- New tests pin the semantics: `null` → 20, `NO_LIMIT` → ceiling (with an explicit `assertNotEquals(DEFAULT_LIMIT)` regression guard), negative → ceiling, oversized → clamped, `skip == index * effectiveLimit`, results not post-truncated; plus helper-level tests and backend-level assertions (Mongo `iterable.limit(...)`, Postgres `LIMIT` in the generated SQL)
+- Two pre-existing tests asserted the old `limit=0 → 20` behaviour (`ResourceFilterTest`, `MongoResourceStorageBranchTest`) and were updated to the new contract — they were pinning the bug
+- `./mvnw formatter:format` + `./mvnw validate` clean
 
 ---
 
