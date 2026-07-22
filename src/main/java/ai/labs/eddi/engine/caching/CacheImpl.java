@@ -15,12 +15,18 @@ import java.util.concurrent.TimeUnit;
 /**
  * Caffeine-backed implementation of {@link ICache}.
  * <p>
- * TTL-aware put methods use Caffeine's {@code policy().expireVariably()} when
- * available, but since Caffeine's standard builder doesn't support per-entry
- * TTL out of the box without a custom Expiry, we store entries normally and
- * rely on the global max-size eviction. For tool caching (the only consumer
- * using TTL puts), the ToolCacheService already tracks expiry internally via
- * {@code CachedResult.expiresAt}.
+ * <strong>The TTL-aware overloads ignore their TTL.</strong> Caffeine's
+ * standard builder has no per-entry expiry without a custom {@code Expiry}, so
+ * every {@code (lifespan, unit)} overload below delegates to its untimed
+ * counterpart and entries are removed by size-based eviction alone.
+ * <p>
+ * Nothing compensates for this downstream: {@code ToolCacheService} — the only
+ * consumer that passes a TTL — computes a per-tool TTL, hands it to
+ * {@link #put(Object, Object, long, TimeUnit)} and then never re-checks it, so
+ * a cached tool result lives until it is evicted for capacity. (An earlier
+ * version of this javadoc claimed the service tracked expiry itself via a
+ * {@code CachedResult.expiresAt} field. No such field exists; the wrapper
+ * records only {@code cachedAt}, which is used for a debug log line.)
  */
 public class CacheImpl<K, V> implements ICache<K, V> {
     private final String cacheName;
@@ -38,11 +44,11 @@ public class CacheImpl<K, V> implements ICache<K, V> {
 
     // --- TTL-aware operations ---
     // Caffeine's standard API doesn't support per-entry TTL without a custom
-    // Expiry.
-    // These delegate to the non-TTL versions since:
-    // 1. ToolCacheService tracks expiry internally (CachedResult.expiresAt)
+    // Expiry, so these delegate to the non-TTL versions and the lifespan argument
+    // is discarded. Consequences, stated plainly:
+    // 1. ToolCacheService's per-tool TTLs do not actually expire anything
     // 2. Other consumers don't use TTL puts at all
-    // 3. Global max-size eviction is the primary eviction strategy
+    // 3. Size-based eviction is therefore the ONLY eviction strategy
 
     @Override
     public V put(K key, V value, long lifespan, TimeUnit unit) {
