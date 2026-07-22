@@ -5,6 +5,15 @@
 
 ---
 
+## 🔍 More PR review follow-ups (2026-07-22)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+- **`UsageSnapshotSerializationTest.productionMapper()` stopped mirroring the real REST mapper.** It called `SerializationCustomizer.configureObjectMapper(...)` directly — which, since the persistence/REST mapper split earlier in this branch, builds the *persistence* recipe (no `Instant` override), not the REST/CDI one. The assertions still passed, because `costMonth` is a `YearMonth` with `@JsonFormat` on the field directly and is unaffected by the `Instant` `configOverride` — but the test's stated purpose ("pins the REST wire shape") was no longer true, and it provided zero coverage of the actual production mapper. Same class of defect fixed earlier in `SerializationCustomizerInstantFormatTest` (`a186dc903`): the fixture now builds the mapper via `new SerializationCustomizer(false).customize(mapper)`, matching how Quarkus actually constructs it.
+- **Inline FQN in `DescriptorStoreTest`.** `new java.util.ArrayList<>()` where `java.util.List` was already imported. Added the top-level import; this file came in via the `origin/main` merge, not authored on this branch, but the convention applies regardless of origin.
+
+---
+
 ## 🔀 Merge `origin/main` into `fix/orphan-scan-and-quota-defects` — changelog conflict resolution (2026-07-21)
 
 **Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)

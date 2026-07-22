@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -212,7 +213,7 @@ class DescriptorStoreTest {
         @DisplayName("results are not post-truncated to the default page size")
         void returnsMoreThanDefaultPageSize() throws Exception {
             int count = IDescriptorStore.DEFAULT_LIMIT + 5;
-            List<IResourceStore.IResourceId> ids = new java.util.ArrayList<>();
+            List<IResourceStore.IResourceId> ids = new ArrayList<>();
             for (int i = 0; i < count; i++) {
                 IResourceStore.IResourceId id = mock(IResourceStore.IResourceId.class);
                 when(id.getId()).thenReturn("res-" + i);
