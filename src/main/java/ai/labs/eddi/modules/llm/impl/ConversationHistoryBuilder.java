@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.ConversationLog;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.TokenCountEstimator;
+import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -31,7 +32,11 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * <li><strong>Token-aware</strong> (Strategy 1): pack messages into a token
  * budget with anchored opening steps</li>
  * </ul>
+ * <p>
+ * Stateless — managed so it can be injected into the {@link AgentOrchestrator}
+ * bean. Direct construction remains valid and is what the unit tests use.
  */
+@ApplicationScoped
 class ConversationHistoryBuilder {
 
     private static final Logger LOGGER = Logger.getLogger(ConversationHistoryBuilder.class);

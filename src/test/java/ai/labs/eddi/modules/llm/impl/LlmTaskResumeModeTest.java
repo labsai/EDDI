@@ -5,7 +5,6 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -19,17 +18,16 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.model.chat.ChatModel;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
-import java.lang.reflect.Field;
 import java.util.*;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
@@ -99,27 +97,15 @@ class LlmTaskResumeModeTest {
         var identityMaskingService = mock(IdentityMaskingService.class);
         when(identityMaskingService.apply(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
+        // The orchestrator mock is a constructor argument, so the resume path can be
+        // verified without executing the real (Task 9) loop.
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
-                mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class),
-                mock(PdfReaderTool.class), mock(WeatherTool.class), mock(FetchToolResponsePageTool.class),
-                mock(IApiCallExecutor.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
-                ragContextProvider, mock(IUserMemoryStore.class),
-                new TokenCounterFactory(), mock(ConversationSummarizer.class),
+                mock(IApiCallExecutor.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                ragContextProvider, new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 promptSnippetService, globalVariableResolver, counterweightService,
-                identityMaskingService, mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null, null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
-                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
-
-        // The orchestrator is created internally via `new` — inject the mock so the
-        // resume path can be verified without executing the real (Task 9) loop.
-        Field orchestratorField = LlmTask.class.getDeclaredField("agentOrchestrator");
-        orchestratorField.setAccessible(true);
-        orchestratorField.set(llmTask, agentOrchestrator);
+                identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),
+                new SimpleMeterRegistry());
 
         when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData d = mock(IData.class);
