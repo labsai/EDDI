@@ -709,3 +709,55 @@ describe("ADD_SNAPSHOT_MESSAGE dedupes against messages rendered by any path", (
     expect(next.messages).toHaveLength(2);
   });
 });
+
+describe("ADD_SNAPSHOT_MESSAGE suppresses the user's own echo", () => {
+  it("does not re-add the user bubble a snapshot re-read carries", () => {
+    // A snapshot revisit carries input:initial as well as the outputs, so the
+    // user's message came back and was appended a second time.
+    const state = {
+      ...initialState,
+      messages: [
+        { id: "u1", role: "user" as const, content: "book a flight", timestamp: 1 },
+        { id: "a1", role: "agent" as const, content: "Here are 3 flights.", timestamp: 2 },
+      ],
+    };
+
+    const next = chatReducer(state, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: { id: "u2", role: "user", content: "book a flight", timestamp: 3 },
+    });
+
+    expect(next.messages).toHaveLength(2);
+  });
+
+  it("still suppresses the agent reply on the same re-read", () => {
+    const state = {
+      ...initialState,
+      messages: [
+        { id: "u1", role: "user" as const, content: "book a flight", timestamp: 1 },
+        { id: "a1", role: "agent" as const, content: "Here are 3 flights.", timestamp: 2 },
+      ],
+    };
+
+    const next = chatReducer(state, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: { id: "a2", role: "agent", content: "Here are 3 flights.", timestamp: 3 },
+    });
+
+    expect(next.messages).toHaveLength(2);
+  });
+
+  it("does not let a user text suppress an agent message with the same words", () => {
+    const state = {
+      ...initialState,
+      messages: [{ id: "u1", role: "user" as const, content: "hello", timestamp: 1 }],
+    };
+
+    const next = chatReducer(state, {
+      type: "ADD_SNAPSHOT_MESSAGE",
+      message: { id: "a1", role: "agent", content: "hello", timestamp: 2 },
+    });
+
+    expect(next.messages).toHaveLength(2);
+  });
+});

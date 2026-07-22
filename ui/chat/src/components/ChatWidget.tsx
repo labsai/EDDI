@@ -540,6 +540,12 @@ export function ChatWidget() {
       // second one — two streams writing into the same transcript.
       if (isProcessingRef.current) return;
 
+      // Conversation identity for THIS turn. Every async continuation below
+      // must re-check it: New Conversation can land while a request is in
+      // flight, and an unguarded continuation then grafts the abandoned turn
+      // onto the conversation that replaced it.
+      const sendGen = generationRef.current;
+
       // Attachments staged in the composer travel with THIS turn as
       // attachment_N context entries — the only path the backend reads.
       const attachments = state.pendingAttachments;
@@ -627,6 +633,7 @@ export function ChatWidget() {
             text,
             context,
           );
+          if (sendGen !== generationRef.current) return;
           dispatch({ type: "SET_THINKING", value: false });
           processSnapshot(snapshot);
           dispatch({ type: "SET_PROCESSING", value: false });
@@ -739,6 +746,7 @@ export function ChatWidget() {
             userId,
             context,
           );
+          if (sendGen !== generationRef.current) return;
           dispatch({ type: "SET_THINKING", value: false });
           processSnapshot(snapshot);
           dispatch({ type: "SET_PROCESSING", value: false });
@@ -839,6 +847,7 @@ export function ChatWidget() {
     // conversation-scoped) and are undefined on the managed route, where these
     // guards made undo/redo/retry silently inert.
     if (!state.conversationId) return;
+    const gen = generationRef.current;
     if (isDemo) return; // Demo mode doesn't support undo
 
     try {
@@ -850,6 +859,9 @@ export function ChatWidget() {
       // Rebuild from the shape the endpoint really returns. An empty result
       // means "could not rebuild", NOT "the conversation is empty" — replacing
       // a populated transcript with [] is how this wiped the whole chat.
+      // A New Conversation while this was in flight must not have its
+      // transcript replaced by the old conversation's history.
+      if (gen !== generationRef.current) return;
       const msgs = stepsToMessages(snapshot.conversationSteps, secretTextsRef.current);
       if (msgs.length) {
         dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
@@ -879,6 +891,7 @@ export function ChatWidget() {
   /* ─── Redo ──────────────────────────────────── */
   const handleRedo = useCallback(async () => {
     if (!state.conversationId) return;
+    const gen = generationRef.current;
     if (isDemo) return;
 
     try {
@@ -890,6 +903,9 @@ export function ChatWidget() {
       // Rebuild from the shape the endpoint really returns. An empty result
       // means "could not rebuild", NOT "the conversation is empty" — replacing
       // a populated transcript with [] is how this wiped the whole chat.
+      // A New Conversation while this was in flight must not have its
+      // transcript replaced by the old conversation's history.
+      if (gen !== generationRef.current) return;
       const msgs = stepsToMessages(snapshot.conversationSteps, secretTextsRef.current);
       if (msgs.length) {
         dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
@@ -1029,10 +1045,12 @@ export function ChatWidget() {
 
   const handleRetry = useCallback(async () => {
     if (!state.conversationId) return;
+    const gen = generationRef.current;
     dispatch({ type: "SET_PROCESSING", value: true });
     try {
       await rerunLastStep(state.conversationId);
       const snapshot = await readConversation("", "", state.conversationId, true);
+      if (gen !== generationRef.current) return;
       if (snapshot.conversationState) {
         dispatch({ type: "SET_CONVERSATION_STATE", state: snapshot.conversationState });
       }

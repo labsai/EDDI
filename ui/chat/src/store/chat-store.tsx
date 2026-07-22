@@ -171,10 +171,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const incoming = action.message.content.trim();
       if (!incoming) return state;
 
+      // The window is the trailing turn: agent messages after the last user
+      // bubble, plus that bubble itself. Including it matters because a
+      // snapshot re-read also carries the user's own input, and a role-blind
+      // window could never suppress that echo.
       let start = state.messages.length;
       while (start > 0 && state.messages[start - 1].role === "agent") start -= 1;
+      if (start > 0 && state.messages[start - 1].role === "user") start -= 1;
 
       for (let i = start; i < state.messages.length; i++) {
+        // Compare like with like: a user echo may only suppress a user bubble.
+        if (state.messages[i].role !== action.message.role) continue;
         const existing = state.messages[i].content.trim();
         // Equality, or containment as a blank-line-delimited segment: the
         // `done` handler joins a step's whole output list into ONE bubble,
