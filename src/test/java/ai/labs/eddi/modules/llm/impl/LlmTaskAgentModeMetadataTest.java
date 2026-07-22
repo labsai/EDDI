@@ -64,13 +64,22 @@ import static org.mockito.MockitoAnnotations.openMocks;
  * never enough — the metadata dimension had to be exercised explicitly.
  * <p>
  * <strong>Which of these actually discriminate.</strong> Reverting the fix
- * (commit {@code 15b7a08a7}) turns four of the six red. The other two —
- * {@code agentReturnsNull_fallsBackToLegacyChatExecutor} and
- * {@code agentMode_emptyMetadata_publishesEmptyMap} — pass either way and are
- * regression guards, not discriminators; each says so at its assertion. The fix
- * has three separately-revertable call sites (the {@code skipCascade} branch,
- * the standard branch, and {@code executeResume}); there is a discriminating
- * test per site, so a partial revert cannot slip through.
+ * (commit {@code 15b7a08a7}) turns <strong>five of the seven</strong> red —
+ * measured, not reasoned. The two that survive are
+ * {@code agentMode_emptyMetadata_publishesEmptyMap} and
+ * {@code agentReturnsNull_fallsBackToLegacyChatExecutor}; they pin behaviour
+ * the fix did not alter and are regression guards, not discriminators. Each
+ * says so at its own assertion.
+ * <p>
+ * The fix has three separately-revertable call sites (the {@code skipCascade}
+ * branch, the standard branch, and {@code executeResume}); there is a
+ * discriminating test per site, so a partial revert cannot slip through either.
+ * <p>
+ * If you change any assertion here, <em>re-measure</em> rather than adjusting
+ * this count by inspection: an earlier revision of this javadoc claimed "four
+ * of six" and was wrong twice over — stale after the defensive copy demoted the
+ * empty-metadata test to a guard, and again after the null-trace test added a
+ * discriminator back.
  */
 @DisplayName("LlmTask agent-mode response metadata")
 class LlmTaskAgentModeMetadataTest {
