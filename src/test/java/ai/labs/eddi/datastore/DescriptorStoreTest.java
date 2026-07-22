@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -212,7 +213,7 @@ class DescriptorStoreTest {
         @DisplayName("results are not post-truncated to the default page size")
         void returnsMoreThanDefaultPageSize() throws Exception {
             int count = IDescriptorStore.DEFAULT_LIMIT + 5;
-            List<IResourceStore.IResourceId> ids = new java.util.ArrayList<>();
+            List<IResourceStore.IResourceId> ids = new ArrayList<>();
             for (int i = 0; i < count; i++) {
                 IResourceStore.IResourceId id = mock(IResourceStore.IResourceId.class);
                 when(id.getId()).thenReturn("res-" + i);
@@ -254,6 +255,45 @@ class DescriptorStoreTest {
             assertEquals(IResourceStorage.MAX_RESULT_LIMIT, IResourceStorage.resolveLimit(Integer.MAX_VALUE));
             assertEquals(1, IResourceStorage.resolveLimit(1));
         }
+    }
+
+    @Test
+    @DisplayName("readDescriptors — includeDeleted=false constrains `deleted` to false")
+    void readDescriptorsExcludesDeleted() throws Exception {
+        when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        store.readDescriptors("agents", null, 0, 20, false);
+
+        var captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        verify(resourceStorage).findResources(captor.capture(), anyString(), anyInt(), anyInt());
+        assertTrue(hasDeletedFilter(captor.getValue()), "expected a `deleted` constraint when includeDeleted=false");
+    }
+
+    @Test
+    @DisplayName("readDescriptors — includeDeleted=true drops the `deleted` constraint entirely")
+    void readDescriptorsIncludesDeleted() throws Exception {
+        when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        store.readDescriptors("agents", null, 0, 20, true);
+
+        // It previously added eq(deleted, true), which matched ONLY soft-deleted rows —
+        // so a caller scanning with false and purging with true saw disjoint sets.
+        var captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        verify(resourceStorage).findResources(captor.capture(), anyString(), anyInt(), anyInt());
+        assertFalse(hasDeletedFilter(captor.getValue()), "includeDeleted=true must not constrain on `deleted` at all");
+    }
+
+    private static boolean hasDeletedFilter(IResourceFilter.QueryFilters[] filters) {
+        for (IResourceFilter.QueryFilters group : filters) {
+            for (IResourceFilter.QueryFilter f : group.getQueryFilters()) {
+                if ("deleted".equals(f.getField())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     // ==================== findByOriginId ====================

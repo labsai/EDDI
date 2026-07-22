@@ -47,7 +47,14 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         List<IResourceFilter.QueryFilter> queryFiltersRequired = new LinkedList<>();
         String filterURI = "eddi://" + type + ".*";
         queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filterURI));
-        queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_DELETED, includeDeleted));
+        // includeDeleted is an INCLUSION flag, not an equality filter: true means "do
+        // not constrain on `deleted` at all" (live AND soft-deleted), false means live
+        // only. It previously added eq(deleted, includeDeleted), so includeDeleted=true
+        // matched ONLY soft-deleted descriptors — making a scan and a purge that
+        // differed on the flag operate on disjoint sets.
+        if (!includeDeleted) {
+            queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_DELETED, false));
+        }
         IResourceFilter.QueryFilters required = new IResourceFilter.QueryFilters(queryFiltersRequired);
 
         List<IResourceFilter.QueryFilter> queryFiltersOptional = new LinkedList<>();

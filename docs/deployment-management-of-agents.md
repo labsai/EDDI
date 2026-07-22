@@ -296,13 +296,13 @@ GET /administration/orphans
 → 200 OK
 ```
 
-Returns a report listing all unreferenced resources across all stores (packages, behavior sets, HTTP calls, output sets, langchains, property setters, dictionaries, parsers).
+Returns a report listing all unreferenced resources across all stores (workflows, behavior sets, HTTP calls, output sets, LLMs, property setters, dictionaries, parsers).
 
-| Element        | Value                                                                         |
-| -------------- | ----------------------------------------------------------------------------- |
-| HTTP Method    | `GET`                                                                         |
-| API endpoint   | `/administration/orphans`                                                     |
-| includeDeleted | (`Query parameter`) `Boolean` default `false`. Include soft-deleted resources |
+| Element        | Value                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| HTTP Method    | `GET`                                                                                     |
+| API endpoint   | `/administration/orphans`                                                                 |
+| includeDeleted | (`Query parameter`) `Boolean` default `false`. `true` also includes soft-deleted resources |
 
 **Example Response:**
 
@@ -334,10 +334,26 @@ DELETE /administration/orphans
 → 200 OK
 ```
 
-Permanently deletes all orphaned resources. This is **irreversible**.
+Permanently deletes all orphaned resources. This is **irreversible** — it removes the current
+document *and* its entire version history.
 
-| Element        | Value                                                                                 |
-| -------------- | ------------------------------------------------------------------------------------- |
-| HTTP Method    | `DELETE`                                                                              |
-| API endpoint   | `/administration/orphans`                                                             |
-| includeDeleted | (`Query parameter`) `Boolean` default `true`. Include soft-deleted resources in purge |
+| Element        | Value                                                                                                    |
+| -------------- | -------------------------------------------------------------------------------------------------------- |
+| HTTP Method    | `DELETE`                                                                                                 |
+| API endpoint   | `/administration/orphans`                                                                                |
+| includeDeleted | (`Query parameter`) `Boolean` default `false`. `true` also purges soft-deleted resources                 |
+| 409 Conflict   | Returned when the reference scan is incomplete; **nothing is deleted**. Body: `{"error":"incomplete_scan"}` |
+
+Pass the **same** `includeDeleted` value you used for the scan, so the purge acts on the set you
+reviewed.
+
+> **Changed in 6.1.x:** `includeDeleted` was previously an *equality* filter — `true` matched only
+> soft-deleted resources instead of adding them to the live ones — and this endpoint defaulted to
+> `true` while the scan defaulted to `false`, so a scan followed by a purge operated on **disjoint**
+> sets. `true` now means "live and soft-deleted", and the default is `false`. A client relying on the
+> old default now purges *less*; pass `includeDeleted=true` to restore the wider sweep.
+
+The purge refuses with **409** rather than proceeding when the referenced-resource scan could not be
+completed (an unreadable Agent or workflow, or a store type exceeding the scan ceiling). A partial
+reference set makes live, in-use resources look unreferenced, so purging against one could destroy
+working configuration.

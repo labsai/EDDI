@@ -334,6 +334,19 @@ class MongoTenantQuotaStoreTest {
         }
 
         @Test
+        @DisplayName("should return denied at exactly the limit, matching checkCostBudget")
+        void exactlyAtLimit() {
+            Document result = new Document("monthlyCostUsd", 100.0);
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any())).thenReturn(result);
+
+            QuotaCheckResult qResult = sut.tryAddCost(TENANT_ID, 10.0, 100.0);
+
+            // TenantQuotaService.checkCostBudget denies on `currentCost >= limit`, so
+            // post-call accounting must use >= too or the two disagree at the boundary.
+            assertFalse(qResult.allowed(), "at exactly the limit the budget is spent");
+        }
+
+        @Test
         @DisplayName("should return denied when budget exceeded")
         void overBudget() {
             Document result = new Document("monthlyCostUsd", 150.0);

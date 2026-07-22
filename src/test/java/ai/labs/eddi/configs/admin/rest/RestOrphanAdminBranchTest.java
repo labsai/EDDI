@@ -586,15 +586,15 @@ class RestOrphanAdminBranchTest {
     }
 
     // =========================================================
-    // buildReferencedUrisSet — exception handling
+    // scanReferencedUris — exception handling
     // =========================================================
 
     @Nested
-    @DisplayName("buildReferencedUrisSet — error handling")
+    @DisplayName("scanReferencedUris — error handling")
     class BuildReferencedUrisSetErrors {
 
         @Test
-        @DisplayName("global exception in buildReferencedUrisSet is caught")
+        @DisplayName("global exception in scanReferencedUris is caught")
         void globalException() throws Exception {
             when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), anyString(), anyInt(), anyInt(), eq(false)))
                     .thenThrow(new IResourceStore.ResourceStoreException("db error"));

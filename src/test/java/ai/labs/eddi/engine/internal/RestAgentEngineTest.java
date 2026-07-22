@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -338,6 +339,30 @@ class RestAgentEngineTest {
             var captor = ArgumentCaptor.forClass(Response.class);
             verify(asyncResponse).resume(captor.capture());
             assertEquals(403, captor.getValue().getStatus());
+        }
+
+        @Test
+        @DisplayName("should resume with 429 quota_exceeded, not 500, when the api-call quota denies")
+        void quotaExceeded() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new QuotaExceededException("API rate limit (5/min) exceeded for tenant 'default'"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            // say() is resumed via AsyncResponse, so QuotaExceededExceptionMapper never
+            // runs — without an explicit catch this fell through to the generic handler
+            // and surfaced as a 500.
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(429, resumed.getStatus());
+            assertEquals("60", resumed.getHeaderString("Retry-After"));
+            assertEquals(Map.of("error", "quota_exceeded", "message", "API rate limit (5/min) exceeded for tenant 'default'"),
+                    resumed.getEntity());
         }
 
         @Test

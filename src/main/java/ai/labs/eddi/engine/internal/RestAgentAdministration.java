@@ -22,6 +22,8 @@ import ai.labs.eddi.engine.runtime.ThreadContext;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import ai.labs.eddi.engine.runtime.model.DeploymentEvent;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -50,15 +52,18 @@ public class RestAgentAdministration implements IRestAgentAdministration {
     private final IDeploymentListener deploymentListener;
     private final IScheduleStore scheduleStore;
     private final IRuntime runtime;
+    private final TenantQuotaService tenantQuotaService;
 
     private static final Logger log = Logger.getLogger(RestAgentAdministration.class);
 
     @Inject
     public RestAgentAdministration(IRuntime runtime, IAgentFactory agentFactory, IDeploymentStore deploymentStore,
             IConversationMemoryStore conversationMemoryStore, IRestConversationStore restConversationStore,
-            IDocumentDescriptorStore documentDescriptorStore, IDeploymentListener deploymentListener, IScheduleStore scheduleStore) {
+            IDocumentDescriptorStore documentDescriptorStore, IDeploymentListener deploymentListener, IScheduleStore scheduleStore,
+            TenantQuotaService tenantQuotaService) {
         this.runtime = runtime;
         this.agentFactory = agentFactory;
+        this.tenantQuotaService = tenantQuotaService;
         this.deploymentStore = deploymentStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.restConversationStore = restConversationStore;
@@ -74,6 +79,12 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNull(autoDeploy, "autoDeploy");
+
+        // MUST sit before the try below: the catch(Exception) there rethrows as
+        // InternalServerErrorException, which would turn the mapper's 429 into a 500.
+        // It must also stay on the request thread — anything inside the submitted
+        // Callable runs on the runtime executor and can never produce a status code.
+        enforceAgentQuota(environment, agentId);
 
         try {
             Future<Void> deployFuture = deploy(environment, agentId, version, autoDeploy);
@@ -99,7 +110,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
                 // Return the actual status after waiting
                 Status status = checkDeploymentStatus(environment, agentId, version);
-                var responseBody = new java.util.LinkedHashMap<String, Object>();
+                var responseBody = new LinkedHashMap<String, Object>();
                 responseBody.put("status", status.toString());
                 responseBody.put("agentId", agentId);
                 responseBody.put("version", version);
@@ -114,6 +125,91 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * Reject a deployment that would push the tenant past
+     * {@code maxAgentsPerTenant}.
+     *
+     * <p>
+     * Counts <em>distinct agent ids</em>, so redeploying an agent or bumping its
+     * version is always free — necessary because the old-version undeploy sweep
+     * legitimately keeps two versions of one agent deployed while the previous one
+     * drains.
+     * </p>
+     *
+     * <p>
+     * The count unions two sources, and needs both. Persisted {@code deployed} rows
+     * are the source of truth across restarts, but they are only written when
+     * {@code autoDeploy=true} — while the in-memory deploy is unconditional (see
+     * {@link #deploy}). Counting rows alone would therefore let a caller deploy
+     * unlimited agents with {@code autoDeploy=false}, and those agents are
+     * genuinely live: {@code getLatestReadyAgent} serves them without ever
+     * consulting the deployment store, and a lazy re-deploy re-materialises them
+     * after a restart. Counting live agents alone would be per-JVM and would miss
+     * deployments owned by other cluster nodes.
+     * </p>
+     *
+     * <p>
+     * Fails <em>open</em>: a store outage must not block deployments. The denial is
+     * logged and metered either way.
+     * </p>
+     *
+     * <p>
+     * <strong>Known limit — bounded overshoot under concurrency.</strong> The count
+     * is read, checked, and only then acted on, with no lock spanning the read and
+     * the eventual write. Concurrent deploys that all observe {@code count == limit
+     * - 1} will all pass, so the cap can be exceeded by up to the number of
+     * simultaneous requests. This does <em>not</em> heal on its own: once over, the
+     * gate simply refuses further deploys until an undeploy brings the count back
+     * down.
+     * </p>
+     *
+     * <p>
+     * A per-tenant lock is deliberately not used, because it would only serialize
+     * within one JVM while the count spans the shared deployment store and every
+     * node's in-memory registry — giving the appearance of a hard guarantee in
+     * exactly the clustered deployments where it would not hold. A real guarantee
+     * needs a distributed lock or a storage-level constraint, and there is no
+     * single row to constrain since the count is derived from two sources. The
+     * overshoot is accepted instead: deploys are rare, human- or agent-initiated
+     * admin operations rather than a hot path, and the gate's purpose — stopping
+     * runaway growth such as an LLM creating sub-agents in a loop — survives a
+     * small transient overrun.
+     * </p>
+     */
+    private void enforceAgentQuota(Deployment.Environment environment, String agentId) {
+        Set<String> deployedAgentIds = new HashSet<>();
+
+        try {
+            for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)) {
+                if (info.getAgentId() != null) {
+                    deployedAgentIds.add(info.getAgentId());
+                }
+            }
+
+            for (Deployment.Environment env : Deployment.Environment.values()) {
+                for (IAgent agent : agentFactory.getAllLatestAgents(env)) {
+                    if (agent.getAgentId() != null && agent.getDeploymentStatus() == READY) {
+                        deployedAgentIds.add(agent.getAgentId());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warnf("Agent quota check: could not determine the deployed-agent count, allowing deploy of %s: %s", agentId, e.getMessage());
+            return;
+        }
+
+        // Redeploys and version bumps of an already-counted agent are always allowed.
+        if (deployedAgentIds.contains(agentId)) {
+            return;
+        }
+
+        var result = tenantQuotaService.checkAgentQuota(tenantQuotaService.getDefaultTenantId(), deployedAgentIds.size());
+        if (!result.allowed()) {
+            log.warnf("Denying deployment of Agent %s to %s: %s", agentId, environment, result.reason());
+            throw new QuotaExceededException(result.reason());
         }
     }
 

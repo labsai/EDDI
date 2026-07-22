@@ -28,9 +28,12 @@ import static ai.labs.eddi.engine.model.Deployment.Environment;
 public interface IRestAgentAdministration {
     @POST
     @Path("/{environment}/deploy/{agentId}")
-    @Operation(summary = "Deploy an agent", description = "Deploys the specified agent version to the given environment.")
+    @Operation(summary = "Deploy an agent", description = "Deploys the specified agent version to the given environment. "
+            + "Subject to the tenant's maxAgentsPerTenant quota, which counts distinct agent ids — "
+            + "redeploying an agent or bumping its version never consumes additional capacity.")
     @APIResponse(responseCode = "200", description = "Agent deployed (or accepted if async).")
     @APIResponse(responseCode = "404", description = "Agent not found.")
+    @APIResponse(responseCode = "429", description = "Tenant agent quota exceeded; undeploy an agent before deploying another.")
     // @formatter:off
     Response deployAgent(@PathParam("environment") Environment environment,
             @PathParam("agentId") String agentId,

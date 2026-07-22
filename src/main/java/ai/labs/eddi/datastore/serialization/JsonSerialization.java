@@ -19,7 +19,7 @@ public final class JsonSerialization implements IJsonSerialization {
     private final ObjectMapper objectMapper;
 
     @Inject
-    public JsonSerialization(ObjectMapper objectMapper) {
+    public JsonSerialization(@PersistenceMapper ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 

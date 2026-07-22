@@ -5,6 +5,240 @@
 
 ---
 
+## 🔍 More PR review follow-ups (2026-07-22)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+- **`UsageSnapshotSerializationTest.productionMapper()` stopped mirroring the real REST mapper.** It called `SerializationCustomizer.configureObjectMapper(...)` directly — which, since the persistence/REST mapper split earlier in this branch, builds the *persistence* recipe (no `Instant` override), not the REST/CDI one. The assertions still passed, because `costMonth` is a `YearMonth` with `@JsonFormat` on the field directly and is unaffected by the `Instant` `configOverride` — but the test's stated purpose ("pins the REST wire shape") was no longer true, and it provided zero coverage of the actual production mapper. Same class of defect fixed earlier in `SerializationCustomizerInstantFormatTest` (`a186dc903`): the fixture now builds the mapper via `new SerializationCustomizer(false).customize(mapper)`, matching how Quarkus actually constructs it.
+- **Inline FQN in `DescriptorStoreTest`.** `new java.util.ArrayList<>()` where `java.util.List` was already imported. Added the top-level import; this file came in via the `origin/main` merge, not authored on this branch, but the convention applies regardless of origin.
+
+---
+
+## 🔀 Merge `origin/main` into `fix/orphan-scan-and-quota-defects` — changelog conflict resolution (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+Brought the branch up to date with `origin/main`, which had picked up the `fix/descriptor-store-limit-semantics` PR (`limit=0` now means "unlimited" in `DescriptorStore.readDescriptors`, with a `MAX_RESULT_LIMIT` safety ceiling) via a background task spawned earlier in this effort. Both that PR and this branch touch `DescriptorStore.readDescriptors`, so `docs/changelog.md` conflicted at the top (both sides prepend); `DescriptorStore.java` and its test merged automatically without conflict — this branch's `includeDeleted` inclusion-flag fix and main's `resolveDescriptorLimit`/ceiling-warning logic touch disjoint parts of the same method. Kept both changelog blocks whole, this branch's newest-first on top, main's independent entry below.
+
+## 🔍 PR review follow-ups — a vacuous test found and fixed (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+Addressing CodeRabbit and Copilot review comments. One of them exposed a test that could not fail.
+
+**The `MAX_PAGES` ceiling test was vacuous.** CodeRabbit noted the new page ceiling had no coverage. Adding a test made it pass immediately — but mutation-checking it (disabling the ceiling so the walk truncates silently) showed it *still* passed. Cause: the fixture left `agentStore.read` unstubbed, so the traversal NPE'd on a null config, marked the scan incomplete, and produced the expected 409 **for the wrong reason**. Stubbing the agent read so the ceiling is the only possible failure source, plus asserting the refusal message names it, makes the test load-bearing — the mutant now dies with "Expected WebApplicationException to be thrown, but nothing was thrown."
+
+**Copilot's `WRITE_DATES_AS_TIMESTAMPS` finding: premise wrong, instinct right.** It claimed the produced `@PersistenceMapper` could change the on-disk shape. It cannot — Jackson enables that feature by default, so the producer already emitted numeric. But the real defect was next door: `SerializationCustomizerInstantFormatTest` *reconstructed* the producer instead of calling it, and set the flag itself — so it would have passed even if the producer were broken. The test now builds the mapper via `new PersistenceMapperProducer().persistenceMapper()`, and the producer states the flag explicitly. Relying on a library default for a persistence-format guarantee is precisely what `dc117cddc` was reverted for. Mutation-checked: flipping the producer to ISO now fails two tests.
+
+**TOCTOU on the agent quota — documented, not fixed, and the earlier claim corrected.** CodeRabbit correctly flagged that concurrent deploys observing `count == limit - 1` all pass. An internal note had called this "self-correcting"; that was wrong — once over, the gate merely refuses further deploys until an undeploy brings the count down. The javadoc now states the bound honestly and explains why a per-tenant lock is *not* used: it would serialize within one JVM while the count spans the shared store and every node's registry, giving the appearance of a hard guarantee exactly where it would not hold. Accepted because deploys are rare admin operations and the gate's purpose — stopping runaway growth such as an LLM creating sub-agents in a loop — survives a small transient overrun.
+
+**Log injection.** `sanitize(conversationId)` added to the new quota-denial log line in `RestAgentEngine`, matching the rest of the class (lines 331, 368, 389, 436).
+
+**Not actioned:** the advisory note that the orphan endpoint blocks a request thread. Pre-existing, explicitly raised as advice rather than a blocker, and moving it to `AsyncResponse` with a polling status endpoint is a separate change.
+
+---
+
+## 🔢 LLM — stop discarding agent-mode token usage (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+`AgentOrchestrator` sums `TokenUsage` across every model call in the tool loop and returns it on `ExecutionResult.responseMetadata()` — on both the live path and the resume path. `LlmTask` then read `.response()` and `.trace()` from that result and **never `.responseMetadata()`**, so agent-mode token accounting was computed and dropped on the floor. Only the legacy-chat and cascade branches surfaced theirs.
+
+Net effect: any agent with tools enabled reported `{}` for `responseMetadataObjectName`, and no per-turn token figure existed for the paths that dominate real usage. This is the prerequisite for monthly cost metering — there was nothing to meter.
+
+Both agent branches now read the metadata, and `executeResume` surfaces it the same way `executeTask` does (it previously built no metadata map at all).
+
+### Known gap, deliberately documented rather than papered over
+
+A turn that pauses for tool approval loses its pre-pause usage: `ToolApprovalRequiredException` escapes before the metadata is assembled and carries no usage, and `resumeToolLoop` starts a fresh accumulator. So a paused turn under-reports by its pre-pause segment. Closing that requires threading the step into `runToolCallLoop` so usage is written incrementally — out of scope here.
+
+### Safety check
+
+`responseMetadata` also feeds `applyResponseValidation`, which branches on `warning` and `streamingTimeout`. `AgentOrchestrator` puts **only** `tokenUsage` into the map (`AgentOrchestrator.java:470,826`), so both of those keys stay absent exactly as they were with the previously-empty map — validation behaviour is unchanged.
+
+### Verification limits
+
+Not unit-covered: `LlmTask` constructs its `AgentOrchestrator` internally rather than receiving it injected, so `executeIfToolsEnabled` cannot be stubbed to return a non-null result at the `LlmTask` unit level, and every existing `LlmTask` test therefore exercises the legacy branch. The change was verified by reading both sides of the contract and by the safety check above; all 184 `LlmTask` tests stay green. Making this properly testable means injecting `AgentOrchestrator` — a worthwhile refactor of an already 29-argument constructor, but a separate change.
+
+---
+
+## 🕐 Serialization — split the persistence mapper from the REST mapper; Instant is ISO-8601 on the wire (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+⚠️ **REST contract change**, and it requires a companion EDDI-Manager fix (below).
+
+Every `java.time.Instant` on every endpoint rendered as a **1970 date** in the Manager. With `quarkus.jackson.write-dates-as-timestamps=true` (`application.properties:174`) plus `JavaTimeModule`, an `Instant` serializes as fractional epoch **seconds** (`1719964800.123`), while clients call `new Date(value)`, which expects **millis**. Affected `nextFire`, `lastFired`, `pausedAt`, `createdAt`, `updatedAt`, transcript timestamps — essentially every timestamp in the UI.
+
+The obvious fix — a `configOverride(Instant.class)` in the shared `configureObjectMapper` — is the trap. `JsonSerialization` `@Inject`s the **same CDI `ObjectMapper`**, and it backs `DocumentBuilder` for every Mongo write, every Postgres JSONB column, the backup/export writer, and the `{json:serialize}` Qute extension available to agent authors. That would change **on-disk formats**. Concretely, `GroupConversation.lastModified` is a persisted `Instant` that `GroupConversationStore` sorts **server-side** on: Mongo's BSON cross-type ordering ranks all Doubles before all Strings, and Postgres does `ORDER BY data->>'lastModified'` lexicographically — so old numeric rows and new ISO rows would interleave wrongly, silently, with no backfill. Commit `dc117cddc` ("keep numeric date format") already reverted a broader version of this once for breaking `findDueSchedules`.
+
+So the two mappers are now separated:
+
+- New `@PersistenceMapper` qualifier + `PersistenceMapperProducer`, built from the same `configureObjectMapper` recipe **without** the date override. `JsonSerialization` injects that.
+- The `Instant` → ISO override moved into `SerializationCustomizer.customize()` — the REST/CDI path only, never the shared static.
+
+### Design decisions
+
+- **`java.util.Date` deliberately untouched.** It already emits epoch millis and its consumers (e.g. `DocumentDescriptor.lastModifiedOn`) are correct today; widening the override would break working paths. The wire therefore carries two encodings by design: `Instant` = ISO-8601 string, `Date` = epoch-millis number.
+- **`application.properties:174` must stay.** Quarkus's own default for `write-dates-as-timestamps` is `false`, so that line is what *prevents* Quarkus disabling the feature globally. Deleting it as "redundant documentation" would flip persistence to ISO — the exact break this change avoids.
+- **A qualified CDI producer, not `new ObjectMapper()` inside `JsonSerialization`.** Keeps the persistence mapper a first-class, overridable bean and leaves the existing direct-construction test fixtures working unchanged.
+- **Deserialization is unaffected in both directions** — `InstantDeserializer` dispatches on the JSON token type, not the shape hint — so rows written numerically still parse.
+
+### Required companion change (EDDI-Manager repo)
+
+The Schedules dashboard sorts arithmetically: `(a.nextFire ?? 0) - (b.nextFire ?? 0)`, which yields `NaN` on ISO strings, leaving the "next fire" tile showing an arbitrary schedule. Change it to `new Date(a.nextFire) - new Date(b.nextFire)`, which works with **both** encodings and can therefore land before or after this commit. Every other consumer (`new Date(x).toLocaleString()`) becomes correct automatically. The vendored bundle under `META-INF/resources/assets/` is a build artifact and was deliberately not hand-edited.
+
+### Verification limits
+
+CDI wiring for the new qualified producer **cannot be validated locally** — `quarkus:build` augmentation needs a loopback socket, which this environment refuses, and the repo has only one non-IT `@QuarkusTest`. CI is the gate for that specific aspect. The format behaviour itself is fully covered by unit tests.
+
+### Tests
+
+New `SerializationCustomizerInstantFormatTest` (7 tests) asserts both halves: the REST mapper emits ISO and keeps `Date` numeric; the persistence mapper stays numeric and **does not inherit** the REST override despite sharing `configureObjectMapper`; and both still read the old numeric form.
+
+---
+
+## 🎫 Tenancy — enforce `maxAgentsPerTenant` on deploy (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+`TenantQuota.maxAgentsPerTenant` was persisted end-to-end by all three stores and round-tripped through the REST API, but **nothing ever read it** — `TenantQuotaService` had no agent method at all. Operators could set the limit and get silent no-enforcement.
+
+New `TenantQuotaService.checkAgentQuota(tenantId, currentDistinctAgents)` gates `RestAgentAdministration.deployAgent`, denying with `QuotaExceededException` → **429** `{"error":"quota_exceeded"}` via the existing mapper.
+
+### Design decisions
+
+- **A read-only gate, not an atomic counter.** The deployed-agent count is a *stock* derived by counting current deployments, not a per-window *flow*. A stored counter would drift irrecoverably: the 10s re-deploy sweep, the 24h old-version undeploy, `TeardownAgentTool`, `GroupConversationService` and the lazy re-deploy on first use all add or remove deployments without passing any acquire/release point. Modelled on `checkCostBudget`, so no `ITenantQuotaStore` method was added and the three store implementations are untouched.
+- **Placement is forced, not stylistic.** The gate sits between the null-checks and the `try`. Inside the `try`, `catch (Exception) → InternalServerErrorException` would convert the 429 into a **500**; inside the submitted `Callable` it runs off the request thread and could never produce a status code at all.
+- **Counts distinct agent ids**, so redeploys and version bumps are free — required because the old-version undeploy sweep legitimately keeps two versions of one agent deployed while the previous drains.
+- **The count unions persisted rows with live agents, and needs both.** `autoDeploy=false` never writes a `deployed` row, but the in-memory deploy is unconditional — so a rows-only count let a caller deploy unlimited agents with one query parameter. Those agents are genuinely live: `getLatestReadyAgent` serves them without consulting the store, and `ConversationService.getAgent` lazily re-deploys them after a restart, so the bypass is **durable**, not merely transient. Conversely, a live-agents-only count would be per-JVM and would miss other cluster nodes.
+- **Fails open.** A store outage must not block deployments; the denial is logged and metered either way.
+- **The two CDI callers surface the reason.** `AgentSetupService.deployAndWait` and `McpAdminTools.deployAgent` call the bean directly, so the exception mapper never runs — both now return the quota reason instead of "check server logs", which an agent designer (or a model driving `create_sub_agent`) cannot act on and would retry in a loop.
+- **Scheduled sweeps stay ungated by construction** — they call `IAgentFactory` directly, so lowering the limit never undeploys anything. The limit gates *new* agents only.
+
+### Not addressed
+
+Single-tenant only: the gate resolves `getDefaultTenantId()`, exactly as the conversation and api-call quotas already do. This is a deployment-wide cap, not per-organisation, until the multi-tenancy plan's Phase 1 lands. Do not describe it as multi-tenant enforcement.
+
+### Tests
+
+New `RestAgentAdministrationQuotaTest` (8 tests): denial throws `QuotaExceededException` and submits nothing to the runtime; two versions of one agent count once; redeploy skips the quota entirely; **live agents with no `deployed` row still count** (the loophole); no double counting; non-`READY` agents skipped; null agent ids skipped; store error fails open. Mutation-checked — reverting to a rows-only count fails exactly the loophole test. `TenantQuotaServiceTest` gains 5 tests including parity with `checkCostBudget` on not inflating the `allowed` counter. Both existing `RestAgentAdministration*Test` classes updated for the new constructor arg in the same commit.
+
+---
+
+## 🧹 Orphan admin — `includeDeleted` becomes a true inclusion flag; purge default flipped (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+⚠️ **REST behaviour change on `DELETE /administration/orphans`.**
+
+`DescriptorStore.readDescriptors` treated `includeDeleted` as an **equality** filter — `eq("deleted", includeDeleted)` — so `includeDeleted=true` matched *only* soft-deleted descriptors rather than adding them to the live ones. Two consequences:
+
+- The parameter did not mean what its name, its `@Parameter` text, and `docs/deployment-management-of-agents.md` all said it meant.
+- The shipped Manager scans with `includeDeleted=false` and purges with `includeDeleted=true`, so **the set shown to the user and the set deleted were disjoint**. The UI listed live orphans and then purged soft-deleted ones.
+
+`true` now drops the `deleted` constraint entirely (live **and** soft-deleted); `false` constrains to live only. Every other caller in `src/main` passes a literal `false` — verified by enumerating all ~35 call sites — so their behaviour is bit-for-bit unchanged.
+
+**`purgeOrphans`'s `@DefaultValue` flipped from `true` to `false`.** Left at `true`, the semantics fix would have made the parameterless `DELETE` dramatically *more* destructive — combined with the page-walk fix two commits earlier, from "purge ≤200 already-soft-deleted rows" to "permanently wipe every unreferenced resource, unbounded". Flipping the default makes the bare call the conservative one and matches `scanOrphans`, so a scan and a purge with no parameters now describe the same set.
+
+### Client impact
+
+A client that relied on the old default now purges **less**: live-but-unreferenced orphans only, not soft-deleted ones. Pass `includeDeleted=true` explicitly to also purge soft-deleted resources. EDDI-Manager should send the flag explicitly, matching whichever set it is displaying.
+
+### Tests
+
+`DescriptorStoreTest` gains two tests capturing the actual `QueryFilters` and asserting the `deleted` constraint is present for `false` and **absent** for `true`; mutation-checked by restoring the equality filter, which fails the second. `RestOrphanAdminSafetyTest` gains two tests pinning the flag's propagation. All 86 tests across every descriptor-store consumer green.
+
+---
+
+## 🔍 Review follow-ups on the orphan/tenancy fixes (2026-07-21)
+
+**Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)
+
+Self-review of the three preceding commits found three defects, all fixed here.
+
+- **The 409 refusal carried no body.** `purgeOrphans` threw `new WebApplicationException(String, Response.Status)`, whose response has **no entity** — so an operator saw a bare 409 and the reason existed only in the server log. Confirmed empirically by mutation: reverting to that constructor makes the new `hasEntity()` assertion fail. Now builds the `Response` explicitly with `{"error":"incomplete_scan","message":…}`.
+- **Broken javadoc link.** The page-walk javadoc still referenced `buildReferencedUrisSet()`, renamed to `scanReferencedUris()` in the same commit. Also updated three now-inaccurate `@DisplayName`s in `RestOrphanAdminBranchTest`.
+- **Postgres had no at-limit test.** The `>` → `>=` change was mutation-verified on Mongo but not Postgres. Added `PostgresTenantQuotaStoreTest.exactlyAtLimit` and mutation-checked it too.
+
+Also documented why a `MAX_PAGES` trip during orphan *collection* is safely swallowed while the same failure in the *reference* scan blocks the purge: a type that cannot be enumerated yields fewer delete candidates (under-delete), whereas a missing reference promotes a live resource to "orphan" (over-delete).
+
+**Verification:** full clean suite `tests=11273 failures=8 errors=288 skipped=3` across the same 15 classes as the pre-change baseline — all environmental (loopback sockets, network egress, model downloads). Zero regressions. Checkstyle clean on every changed file; `javadoc:javadoc` builds.
+
+---
+
+## 🚦 Engine — return 429 instead of 500 when the api-call quota denies a turn (2026-07-21)
+
+**Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)
+
+`ConversationService.say`/`sayStreaming` throw `QuotaExceededException` when `acquireApiCallSlot()` denies, and `QuotaExceededExceptionMapper` maps that to **429** with `{"error":"quota_exceeded"}` and `Retry-After: 60`. But `say()` is resumed through a JAX-RS `AsyncResponse`, so the exception is caught inside `RestAgentEngine.sayInternal` and never reaches the `@Provider` mapper. Its catch chain lists `AgentMismatchException`, `AgentNotReadyException`, `ConversationEndedException`, `ConversationAwaitingApprovalException`, `ProcessingRestrictedException` and `ResourceNotFoundException` — but not `QuotaExceededException` — so the denial fell through to `catch (Exception e)` and surfaced as **500 "An internal error occurred"**.
+
+Only the *conversation-start* quota ever produced a real 429: `startConversationWithContext` is synchronous and its narrower catch block lets the exception escape to the mapper. The per-minute API rate limit — the quota an operator is most likely to actually hit — was indistinguishable from a server fault, so clients had no way to back off correctly.
+
+Added an explicit `catch (QuotaExceededException)` that resumes with the same status, body and `Retry-After` header as the mapper, so both quota denials look identical on the wire.
+
+### Design decisions
+
+- **Mirror the mapper rather than re-throw.** There is no way to route an already-captured async exception back through the provider chain, so the branch duplicates the mapper's three-line response. Kept adjacent constants and a comment so the two stay in sync.
+- **Streaming is not covered here.** `sayStreaming` throws the same exception, but by then the SSE response has already committed HTTP 200, so no status code can be sent — it currently emits a generic `error` event. Giving that event a distinguishable quota type is a separate, client-visible change and is tracked, not slipped in.
+
+### Tests
+
+New `RestAgentEngineTest.quotaExceeded` asserts 429, the `Retry-After: 60` header and the exact entity map. Mutation-checked: replacing the new catch with an unrelated exception type makes it fail with `InternalServerError An internal error occurred` — reproducing the original bug — so the test is not vacuous. All 43 `RestAgentEngineTest` tests green.
+
+---
+
+## 💵 Tenancy — align the at-limit cost comparison and fix costMonth JSON shape (2026-07-21)
+
+**Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)
+
+Two independent defects in the tenant cost-budget surface.
+
+**1. The two production quota stores disagreed with the gate at exactly the limit.** `TenantQuotaService.checkCostBudget` denies on `currentCost >= limit`, and `InMemoryTenantQuotaStore.tryAddCost` matches it — but `MongoTenantQuotaStore` and `PostgresTenantQuotaStore` used `totalCost > limit`. At exactly the budget the pre-call gate denied while post-call accounting allowed. `docs/changelog.md` records the in-memory store being deliberately moved to `>=` for this reason; the two DB stores were never updated. Both now use `>=`.
+
+Verified by mutation: reverting the Mongo comparison to `>` makes the new `exactlyAtLimit` test fail with `expected: <false> but was: <true>`, so the test is not vacuous.
+
+**2. `UsageSnapshot.costMonth` serialized as a JSON array.** Under `quarkus.jackson.write-dates-as-timestamps=true` (`application.properties:174`) Jackson's `YearMonthSerializer` takes its `useTimestamp` branch and emits `[2026,7]` instead of `"2026-07"`. Both stores already persist the value as an ISO string (`YearMonth.toString()` / `YearMonth.parse`, never through Jackson), so the REST representation was the only place that disagreed. Annotated the record component with `@JsonFormat(shape = JsonFormat.Shape.STRING)`.
+
+### Design decisions
+
+- **Annotation, not a mapper-wide override.** A `configOverride(Instant.class)` on `SerializationCustomizer` would have fixed every temporal field at once, but that customizer's mapper is *also* the persistence mapper — `JsonSerialization` `@Inject`s the same CDI `ObjectMapper`, which backs `DocumentBuilder` for every Mongo write and Postgres JSONB column. Changing it would alter on-disk formats. Concretely, `GroupConversation.lastModified` is an `Instant` persisted through it and `GroupConversationStore` sorts *server-side* on that field, so mixed old-numeric/new-string rows would sort wrongly and silently in both backends. Commit `dc117cddc` ("keep numeric date format") already reverted a broader version of this change once, for breaking `findDueSchedules`. The wider Instant-format cleanup is therefore left out and tracked separately — it needs the persistence mapper decoupled from the REST mapper first, plus a coordinated EDDI-Manager change (the Schedules dashboard sorts `nextFire` arithmetically, which yields `NaN` on ISO strings).
+- **`costMonth` is safe in isolation** precisely because neither store round-trips `YearMonth` through Jackson — verified before changing it.
+
+### Tests
+
+New `UsageSnapshotSerializationTest` asserts the shape on the *real* record (not a stand-in holder) through a mapper wired exactly as production is, plus a round-trip. New `MongoTenantQuotaStoreTest.exactlyAtLimit`. All 131 tenancy tests green.
+
+---
+
+## 🛡️ Orphan admin — fix page-walk truncation and refuse to purge on an incomplete scan (2026-07-21)
+
+**Repo:** EDDI (`claude/eddi-backend-manager-coverage-0598fe`)
+
+Two defects in `RestOrphanAdmin` that together could permanently delete live configuration.
+
+**1. The descriptor page walk never advanced past page 0.** `readAllDescriptors` advanced its cursor with `index += batch.size()`, but `DescriptorStore.readDescriptors` treats that argument as a *page* index (`skip = index * effectiveLimit`, `DescriptorStore.java:61`). The second iteration therefore asked for page 200 — `skip = 40 000` — which always came back empty, so every store type was silently truncated at 200 rows. Fixed to `pageIndex++`.
+
+The dangerous half of this was not the orphan list but `buildReferencedUrisSet`: the *referenced* set was truncated the same way, so on any deployment with more than 200 agents or 200 workflows, live in-use resources were classified as orphans — and `purgeOrphans` deletes with `permanent=true`, which is `deleteAllPermanently(id)` (current document *and* all history).
+
+A `MAX_PAGES` ceiling (100 pages / 20 000 rows per type) now bounds the walk, since the scan is a synchronous one-read-per-descriptor traversal on a blocking JAX-RS method. Hitting the ceiling raises `ResourceStoreException` rather than truncating silently — a truncated scan must not be used to decide what to delete.
+
+**2. The reference scan failed open.** Every read error while building the referenced-URI set was swallowed (two at `debug` level), and the partially-built set was returned as if complete. Because that set is what *protects* a resource, each swallowed error made **more** things look orphaned. One unreadable workflow could mark every rules/apicalls/output/llm/property/dictionary/parser resource in the database as an orphan.
+
+`scanReferencedUris()` now returns a `ReferenceScan` record carrying a `complete` flag, and `purgeOrphans` refuses with **409 Conflict** when the scan is incomplete, naming the cause. `scanOrphans` (read-only) still returns its best-effort report — only the irreversible path is gated. A `ResourceNotFoundException` is explicitly *not* treated as incompleteness: a descriptor whose resource is gone is a genuine orphan.
+
+### Design decisions
+
+- **Fail closed on the destructive path only.** Read-only callers tolerate a partial picture; a permanent delete may not.
+- **Ceiling raises rather than truncates.** Silent truncation is what made the original bug invisible.
+- **No change to `includeDeleted` semantics in this commit.** It is currently an equality filter (`Filters.eq("deleted", flag)`), so `scanOrphans` (defaults to `false`) and `purgeOrphans` (defaults to `true`) operate on *disjoint* sets. Fixing that is a real behaviour change to an irreversible endpoint and is deliberately left to its own commit — with the page-walk now complete, redefining the flag without also flipping the `true` default would turn the default `DELETE /administration/orphans` from "purge ≤200 already-soft-deleted rows" into "permanently wipe every unreferenced resource, unbounded".
+
+### Tests
+
+New `RestOrphanAdminSafetyTest` (7 tests): page index advances by 1 and a second page is actually requested; walk stops on the first partial page; an unreadable Agent aborts the purge with 409 and deletes nothing; a *missing* Agent resource does not abort; a complete scan purges normally; `scanOrphans` tolerates an incomplete reference set and never deletes; a workflow referenced by an Agent is never purged. Fixtures use 24-char hex ids because `RestUtilities.extractResourceId` returns a null id otherwise, which would make the assertions pass vacuously. All 27 pre-existing orphan tests unchanged and green.
+
+---
+
 ## 🐛 Fix: `readDescriptors(limit = 0)` silently returned only 20 descriptors (2026-07-21)
 
 **Repo:** EDDI (`fix/descriptor-store-limit-semantics`)
