@@ -630,50 +630,72 @@ In addition to acting as an MCP server, EDDI agents can also **consume external 
 
 ### Configuration
 
-Add `mcpServers` to a LangChain task configuration:
+External MCP servers are configured as **`mcpcalls` workflow extensions** — a first-class, versioned configuration resource (the MCP equivalent of `httpcalls`). There is **no** inline MCP server array on the LLM task.
+
+**Step 1 — create an `mcpcalls` configuration** (`POST /mcpcallsstore/mcpcalls`), one per MCP server:
 
 ```json
 {
-  "tasks": [
-    {
-      "type": "anthropic",
-      "mcpServers": [
-        {
-          "url": "http://localhost:7070/mcp",
-          "name": "eddi-docs",
-          "apiKey": "${vault:mcp-api-key}",
-          "timeoutMs": 30000
-        },
-        {
-          "url": "https://tools.example.com/mcp",
-          "name": "external-tools"
-        }
-      ]
-    }
+  "mcpServerUrl": "http://localhost:7070/mcp",
+  "name": "eddi-docs",
+  "transport": "http",
+  "apiKey": "${vault:mcp-api-key}",
+  "timeoutMs": 30000,
+  "toolsWhitelist": ["read_docs", "list_docs"],
+  "toolsBlacklist": []
+}
+```
+
+| Field            | Type       | Required | Default   | Description                                                                                                              |
+| ---------------- | ---------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `mcpServerUrl`   | string     | **Yes**  | —         | MCP server URL                                                                                                           |
+| `name`           | string     | No       | —         | Human-readable name for logging                                                                                          |
+| `transport`      | string     | No       | `"http"`  | Informational only today — `McpToolProviderManager` always connects via Streamable HTTP                                  |
+| `apiKey`         | string     | No       | —         | API key, sent as `Authorization: Bearer <key>`. Resolved through global variables and `${vault:key}` references           |
+| `timeoutMs`      | long       | No       | `30000`   | Connection and request timeout in milliseconds                                                                           |
+| `toolsWhitelist` | string[]   | No       | —         | If non-empty, only these tool names are exposed (names as returned by the server's `tools/list`)                          |
+| `toolsBlacklist` | string[]   | No       | —         | Tool names to exclude. Applied *after* the whitelist                                                                     |
+| `mcpCalls`       | object[]   | No       | —         | Deterministic, action-triggered tool bindings (see *Pipeline mode* below). Omit for agent-mode-only servers               |
+
+**Step 2 — add an `mcpcalls` step to the agent's workflow**, before the LLM step:
+
+```json
+{
+  "workflowSteps": [
+    { "type": "eddi://ai.labs.parser",   "config": { "uri": "eddi://ai.labs.parser/parserstore/parsers/<id>?version=1" } },
+    { "type": "eddi://ai.labs.behavior", "config": { "uri": "eddi://ai.labs.rules/rulestore/rulesets/<id>?version=1" } },
+    { "type": "eddi://ai.labs.mcpcalls", "config": { "uri": "eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/<id>?version=1" } },
+    { "type": "eddi://ai.labs.llm",      "config": { "uri": "eddi://ai.labs.llm/llmstore/llms/<id>?version=1" } }
   ]
 }
 ```
 
-| Field       | Type   | Required | Default            | Description                                                                        |
-| ----------- | ------ | -------- | ------------------ | ---------------------------------------------------------------------------------- |
-| `url`       | string | **Yes**  | —                  | MCP server URL (Streamable HTTP transport)                                         |
-| `name`      | string | No       | URL                | Human-readable name for logging                                                    |
-| `transport` | string | No       | `"streamableHttp"` | Transport type (only `streamableHttp` supported)                                   |
-| `apiKey`    | string | No       | —                  | API key, sent as `Authorization: Bearer <key>`. Supports `${vault:key}` references |
-| `timeoutMs` | long   | No       | `30000`            | Connection and request timeout in milliseconds                                     |
+A workflow may contain any number of `mcpcalls` steps — one per MCP server.
+
+### Two Modes, One Configuration
+
+- **Agent mode** — `AgentOrchestrator.discoverMcpCallTools()` traverses the agent → workflow → every `mcpcalls` step at execution time, connects to each server, applies that config's whitelist/blacklist, and hands the surviving tools to the LLM. The LLM calls them reactively. Controlled by `enableMcpCallTools` on the LLM task (`langchain.json`), **default `true`** — no per-server opt-in is needed:
+
+  ```json
+  { "tasks": [ { "type": "anthropic", "enableMcpCallTools": false } ] }
+  ```
+
+- **Pipeline mode** — `McpCallsTask` (`eddi://ai.labs.mcpcalls`, pipeline position `Parser → Rules → HttpCalls → McpCalls → LLM → Output`) matches behavior-rule actions against `mcpCalls[].actions` and invokes the named tool deterministically, with **no LLM involved**. Only active when `mcpCalls` is non-empty.
+
+Both modes read the same `mcpcalls` configuration; they are not mutually exclusive.
 
 ### Using `setup_agent` with MCP Servers
 
 ```
 setup_agent(
-  name: "My Agent",
+  agentName: "My Agent",
   systemPrompt: "You are helpful",
-  mcpServers: "http://localhost:7070/mcp, https://tools.example.com/mcp",
+  mcpServerUrls: "http://localhost:7070/mcp, https://tools.example.com/mcp",
   ...
 )
 ```
 
-The `mcpServers` parameter accepts a comma-separated list of URLs.
+The `mcpServerUrls` parameter accepts a comma-separated list of URLs. For each URL, `AgentSetupService` creates one `mcpcalls` configuration (`transport: "http"`, `timeoutMs: 30000`, no whitelist/blacklist, no `mcpCalls` bindings — i.e. agent-mode only) and inserts a matching `eddi://ai.labs.mcpcalls` step into the generated workflow ahead of the LLM step. Nothing is written inline into the LLM configuration.
 
 ### Architecture
 

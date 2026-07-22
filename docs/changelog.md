@@ -5,6 +5,47 @@
 
 ---
 
+## 🧹 Remove dead `eddi.audit.retentionDays`; correct MCP-client and GDPR-retention docs (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D15** — one dead configuration property plus two pieces of documentation that described behaviour the code does not have.
+
+### (a) `eddi.audit.retentionDays` was a silent no-op — removed
+
+**⚠️ Operator-visible.** `src/main/resources/application.properties` shipped `eddi.audit.retentionDays=-1` (and a `%dev.` twin) since the per-category-retention work. **No Java code has ever read it.** `AuditLedgerService` declares four `eddi.audit.*` `@ConfigProperty` values — `enabled`, `flush-interval-seconds`, `dead-letter-path`, `agent-signing-enabled` — and this is not one of them. Anyone who set `eddi.audit.retentionDays=90` (or `EDDI_AUDIT_RETENTIONDAYS=90`) expecting old audit entries to be purged **was getting nothing at all**: no sweep ran, no entry was ever deleted, and no warning was logged. Drop the property from your deployment; if you need time-limited audit storage, do it at the operational/database layer (archival job, partition drop, storage-level TTL).
+
+**Design decision — do NOT implement the sweep; delete the knob.** The audit ledger is append-only *on purpose*. `IAuditStore`'s contract states that implementations "MUST NOT provide update or delete operations", justified by EU AI Act Arts. 17/19 (immutable decision traceability) and GDPR Art. 17(3)(e); `pseudonymizeByUserId` is documented as the sole permitted mutation, and both the MongoDB and PostgreSQL stores enforce insert-only semantics. Wiring a retention sweep would have required breaking that contract to satisfy a property nobody asked for. Removing the property makes the config honest instead.
+
+**Why this one mattered more than a typical dead key:** its sibling `eddi.usermemories.deleteOlderThanDays` **is** read and does drive a real scheduled sweep. Two adjacent, identically-shaped keys where one works and one silently does nothing is exactly the kind of asymmetry an operator cannot detect from the outside.
+
+**Regression test:** new `AuditRetentionConfigTest` (`src/test/java/ai/labs/eddi/engine/audit/`), three assertions, no Quarkus container required:
+1. Every `eddi.audit.*` key declared in `application.properties` (with any `%profile.` prefix stripped) must appear as a quoted string literal somewhere in `src/main/java` — i.e. something actually reads it. This is the general guard: it fails if *anyone* re-adds an unread `eddi.audit.*` property, not just this one. It carries a **vacuity guard** — the scan must first prove it can find `"eddi.audit.enabled"`, a key production demonstrably declares, otherwise a broken scanner would make the whole assertion pass for the wrong reason.
+2. `eddi.audit.retentionDays` specifically is absent, with a failure message explaining why it can never be implemented.
+3. `IAuditStore` declares no `delete*`/`remove*`/`purge*`/`drop*`/`truncate*`/`expire*` method — this pins the append-only design decision the docs now state, so a future contract change has to be deliberate and update the compliance doc alongside it.
+
+All three were mutation-checked: re-adding the two property lines fails (1) and (2); adding a `default long deleteOlderThan(long)` to `IAuditStore` fails (3).
+
+### (b) `docs/mcp-server.md` documented an MCP-client config shape that no longer exists
+
+The "MCP Client — Agents as MCP Consumers" section still described an inline `mcpServers` array on a langchain task. That field and its `getMcpServers()` accessor were deleted in **43ba59811** ("Remove inline mcpServers from LlmConfiguration.Task") without a matching docs update, so the documented JSON has been silently unusable ever since. The section also named a `setup_agent(mcpServers:)` parameter; the real one is **`mcpServerUrls`** (`McpSetupTools.java`).
+
+Rewrote the section against the code rather than the old prose. External MCP servers are configured as **`mcpcalls` workflow extensions** — a versioned configuration resource (`eddi://ai.labs.mcpcalls`, `POST /mcpcallsstore/mcpcalls`), the MCP equivalent of `httpcalls` — referenced from a workflow step ahead of the LLM step. The field table now matches `McpCallsConfiguration`: `mcpServerUrl` (not `url`), `name`, `transport` (default `"http"`, and documented honestly as *informational only* — `McpToolProviderManager.createTransport` unconditionally builds a `StreamableHttpMcpTransport` and never branches on it, so the previously documented `"streamableHttp"` default and "only `streamableHttp` supported" note were both wrong in different directions), `apiKey`, `timeoutMs`, `toolsWhitelist`, `toolsBlacklist`, `mcpCalls`. Added the dual-mode explanation the docs never had: **agent mode** (`AgentOrchestrator.discoverMcpCallTools()` traverses agent → workflow → every `mcpcalls` step at execution time and applies each config's whitelist/blacklist; gated by `enableMcpCallTools` on the LLM task, default `true`) versus **pipeline mode** (`McpCallsTask` matches behavior-rule actions against `mcpCalls[].actions` and invokes tools deterministically, no LLM involved). Corrected the `setup_agent` block to `mcpServerUrls` and documented what `AgentSetupService` actually does with it: one `mcpcalls` config per comma-separated URL (`transport: "http"`, `timeoutMs: 30000`, no whitelist/blacklist, no `mcpCalls` bindings) plus a matching `eddi://ai.labs.mcpcalls` workflow step — nothing is written inline into the LLM configuration.
+
+Also fixed the same drift in `docs/architecture.md`, which claimed "MCP server connections are configured per LLM task".
+
+**Left alone deliberately:** the four other `mcpServers` occurrences in `docs/mcp-server.md` (lines ~179/193/211/224) are the *client-side* `mcpServers` key in Claude Desktop / Antigravity config files — correct as written and unrelated. `HANDOFF.md` and the historical changelog entries that mention the old inline field are append-only records of past work and were not rewritten.
+
+### (c) `docs/gdpr-compliance.md` promised deletion that cannot happen
+
+The retention block documented `eddi.audit.retentionDays` as "delete entries older than N days" — a published compliance statement describing an operation the store forbids. Removed it and replaced it with what is actually true: the audit ledger has no retention property by design, EDDI never time-expires audit entries, and erasure requests are satisfied by pseudonymizing the `userId` via `IAuditStore.pseudonymizeByUserId` on the cascading-erasure path. Added an operator note that the old property was never read, and reworded the per-category bullet list so it no longer implies a configurable audit purge exists.
+
+**Note for reviewers:** this narrows a published compliance claim (EDDI no longer offers even a nominal "time-limited audit retention" option). That is the honest direction — it aligns the doc with `IAuditStore`'s contract — but it is a documentation-visible policy statement and deserves a human read, not a silent patch.
+
+**Blast radius:** zero runtime behaviour change. No Java production code was modified; the only non-doc edit is the removal of a property nothing read. `./mvnw clean compile` clean, `./mvnw validate` clean, 145 tests green across `AuditRetentionConfigTest`, `AuditLedgerServiceTest`, `AuditLedgerServiceExtendedTest`, `AuditLedgerServiceBranchTest`, `AuditHmacTest`, `McpSetupToolsTest`, `McpToolProviderManagerTest`, `McpCallsTaskTest`.
+
+---
+
 ## 🗑️ Delete unused `EddiChatMemoryStore` — dead since Phase 6E (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

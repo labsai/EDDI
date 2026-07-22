@@ -107,17 +107,27 @@ eddi.conversations.maximumLifeTimeOfIdleConversationsInDays=90
 
 # User memories — delete entries older than N days (default: -1, disabled)
 eddi.usermemories.deleteOlderThanDays=-1
-
-# Audit ledger — delete entries older than N days (default: -1, disabled)
-# WARNING: EU AI Act requires indefinite audit retention. Only enable if
-# your jurisdiction explicitly requires time-limited retention.
-eddi.audit.retentionDays=-1
 ```
 
 **Per-category retention** allows different retention periods for:
 - **Conversations** — 365 days (default)
 - **User memories** — disabled by default (configure per-deployment)
-- **Audit entries** — disabled by default (retained for EU AI Act compliance)
+
+**The audit ledger has no retention property — by design.** `IAuditStore` is an
+append-only contract that deliberately exposes no update or delete operation, so
+EDDI never time-expires audit entries. Erasure requests are satisfied by
+**pseudonymizing** the `userId` (`IAuditStore.pseudonymizeByUserId`), which the
+cascading-erasure path invokes — not by deleting entries. See
+[Audit Ledger Legal Basis](#audit-ledger-legal-basis) below for the legal basis.
+If your jurisdiction requires time-limited audit retention, implement it at the
+operational or database layer (archival job, partition drop, storage-level TTL);
+EDDI provides no application-level audit purge.
+
+> **Operator note:** earlier releases shipped an `eddi.audit.retentionDays`
+> property in `application.properties`. No code ever read it, so setting it was a
+> silent no-op — no audit entry was ever deleted by it. The property has been
+> removed; if your deployment sets `eddi.audit.retentionDays` (or
+> `EDDI_AUDIT_RETENTIONDAYS`), drop it and use database-level archival instead.
 
 **Data minimization (Art. 5(1)(e)):** Review the default retention periods
 and reduce them to the minimum necessary for your use case.
