@@ -5,6 +5,61 @@
 
 ---
 
+## 🧹 Delete the dead `enableParallelExecution` config and the parallel tool machinery (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D10**. Two LLM task knobs and ~250 lines of the machinery behind them were removed. Nothing in `src/main` read any of it.
+
+### What was dead, and why wiring it was not an option
+
+`LlmConfiguration.Task` declared `enableParallelExecution` (default `false`) and `parallelExecutionTimeoutMs` (default `30000`), with getters and setters and **zero production readers** — the only Java references outside the declaration were POJO round-trip assertions in two test classes.
+
+The machinery they were meant to switch on was `ToolExecutionService.executeToolsParallel` / `executeToolsParallelAndWait`, which took `(Object[] toolInstances, Method[] methods, Object[][] args)` and fanned out over a ten-thread `ExecutorService`. That signature cannot be fed from the live dispatch path. Agent-mode tools are invoked by langchain4j through `ToolExecutor.execute(ToolExecutionRequest, memoryId)`, which yields a `(name, jsonArguments)` pair; for MCP, A2A and dynamic tools there is no Java `Method` behind the tool **at all**, so no `(instance, Method, Object[])` triple exists to pass. This was never a wire-up away from working — it was a second, incompatible execution model that had been left in the tree.
+
+Concurrent tool calls remain a reasonable future feature. They belong at the `AgentOrchestrator` dispatch loop, batching `ToolExecutionRequest`s, not in a reflection path.
+
+### Deleted
+
+- `LlmConfiguration.Task` — both fields and their four accessors. The class javadoc now carries a historical note explaining the removal and the back-compat guarantee.
+- `ToolExecutionService` — `executeToolsParallel`, `executeToolsParallelAndWait`, and **the full cascade they were the only callers of**: `executeTool(Object, Method, Object[], String, ToolExecutionTrace)`, `serializeArguments`, the `IJsonSerialization` injection, the ten-thread `ExecutorService` and its `@PreDestroy shutdown()`. `executeToolWrapped` is now the single entry point, and the class no longer allocates a thread pool per bean for nothing.
+- Five meters: `eddi.tool.execution.parallel` (the only one registered eagerly, at `@PostConstruct`) plus `…parallel.count`, `…parallel.duration`, `…parallel.timeout` and `…parallel.error`, all four of which were created lazily at increment sites that could not be reached and therefore never appeared on `/q/metrics` at all.
+- The corresponding rows in `docs/metrics.md` and `docs/monitoring/monitoring-guide.md`, and the **"Parallel Execution" panel** (`id: 33`) from `grafana-data/dashboards/eddi-operations.json` — an addition to the original scope, found while tracing the metric names. The two surviving panels in that dashboard row were widened from `w:8` to `w:12` to fill it.
+
+### Design decisions
+
+- **The cascade was taken deliberately, not stopped at the two named methods.** Half-deleting would have left `executeTool`, `serializeArguments`, an injected serializer and a thread pool alive with no production caller — the worst of both outcomes. The trade was ~15 reflection-based tests across three classes; every one of them exercised a path production cannot enter (see below).
+- **`@PostConstruct init()` is kept**, now registering nothing and only logging. Every remaining meter in the class is per-tool (tagged `tool`) and created lazily on first use, so there is nothing left to pre-register; the startup log is pre-existing behaviour and removing it is an unrelated change.
+- **`synchronized` stays on `ToolExecutionTrace.addToolCall` / `addFailedToolCall`.** Its javadoc justified the keyword by naming `executeToolsParallel` as the concurrent writer, so it would have become a comment pointing at deleted code. The rationale is restated on its true footing: the trace is a shared mutable accumulator that publishes no happens-before edge of its own; today's tool loop writes single-threaded, so the guard is defensive rather than load-bearing, and the cost of keeping it is nil against silent corruption of an audit artefact.
+- **No `ExtensionDescriptor` change was needed** — `LlmTask.getExtensionDescriptor()` only ever exposed `uri`.
+
+### Stored configurations stay valid
+
+Every mapper that reads an LLM configuration — REST, Postgres JSONB, `@PersistenceMapper`, and the Mongo BSON mapper — is built from `SerializationCustomizer.configureObjectMapper`, which sets `FAIL_ON_UNKNOWN_PROPERTIES=false`. A `langchain.json` already in MongoDB carrying `"enableParallelExecution": true` still deserializes; the key is ignored on read and dropped on the next save.
+
+New `LlmConfigurationParallelExecutionLegacyFieldsTest` is the tripwire for that invariant: it loads a legacy document through both the JSON and the Mongo BSON mapper and asserts the surrounding live fields (`defaultRateLimit`, `toolRateLimits`, `maxToolIterations`, …) still populate. Verified non-vacuous by flipping `FAIL_ON_UNKNOWN_PROPERTIES` to `true` locally — all three deserialization tests then fail with `UnrecognizedPropertyException`. The same class asserts via `java.beans.Introspector` that `Task` exposes no `enableParallelExecution` / `parallelExecutionTimeoutMs` bean property, so a getter/setter pair cannot quietly put the knob back on the REST contract.
+
+### Tests
+
+- **Removed:** the `ParallelTests` / `ParallelAndWaitTests` / `ParallelExec` nested classes and every `executeTool(Object, Method, …)` and `serializeArguments` test across `ToolExecutionServiceTest`, `ToolExecutionServiceBranchTest` and `ToolExecutionServiceExtendedTest`, plus the two `shutdown()` tests. **None of them covered anything still live** — they were the only callers of those methods anywhere outside the class, so they exercised a path production can never enter and stayed green whether the "feature" worked, was broken, or was disabled. Two were vacuous even on their own terms: `parallelTimeout` passed zero tools (`new Object[0]`), so `allOf()` completed immediately and the `TimeoutException` branch it claimed to cover was never taken; and `concurrentToolsShareTraceWithoutCorruption` spent 50 rounds × 32 tasks of CI wall-clock defending against a shared-trace race that no production code path can produce. The four POJO assertions on `getEnableParallelExecution() == false` / `getParallelExecutionTimeoutMs() == 30000L` pinned defaults nothing read.
+- **Added (fails before the deletion, passes after):** `ToolExecutionServiceTest.ParallelMachineryRemovedTests` — no `executeToolsParallel*` and no `executeTool` on the public API, and no meter whose id starts with `eddi.tool.execution.parallel` after `init()`. Mutation-checked by restoring the old `ToolExecutionService`: all three fail, the meter one reporting `expected: <[]> but was: <[eddi.tool.execution.parallel]>`.
+- `LlmConfigurationParallelExecutionLegacyFieldsTest` mutation-checked by restoring the old `LlmConfiguration`: `rewriteDropsRemovedParallelKeys` and `taskExposesNoParallelExecutionBeanProperty` both fail.
+
+### Operator-visible changes
+
+- **Five Prometheus series disappear** rather than reading zero: `eddi_tool_execution_parallel_total`, `…_parallel_count_total`, `…_parallel_duration_seconds`, `…_parallel_timeout_total`, `…_parallel_error_total`. Only the first was ever exported, and it could only ever be `0`. Any dashboard or alert rule referencing them outside this repo will show "no data" — no signal is lost.
+- **No agent behaviour changes.** Both deleted fields were inert at every value, so no configuration executes differently.
+
+### Follow-up required in EDDI-Manager (different repo) — the one user-visible risk
+
+The Manager's LLM editor renders a **"Parallel Tool Execution" checkbox** (i18n key `llmEditor.parallelExecution`, `data-testid` `enable-parallel-execution`) plus a conditional `parallelExecutionTimeoutMs` input. That checkbox is now **backed by nothing on the server**.
+
+Worse than inert: because the mapper uses `JsonInclude.NON_NULL` and the field no longer exists, the key is accepted on POST, silently dropped, and never echoed back — so the checkbox **visibly resets to unchecked on every reload**. Before this change it at least persisted while doing nothing. Removing the control in EDDI-Manager should land in the same release.
+
+**Yes — the checked-in Manager bundles in *this* repo also carry it.** Both `src/main/resources/META-INF/resources/assets/index-B36D6B8M.js` (the one `manage.html` loads) and `index-CHgQ1fX-.js` (a second bundle graph, reachable only through chunk imports such as `cssMode-BPLGavJr.js`) contain one `enableParallelExecution` occurrence and one `data-testid="enable-parallel-execution"` each. They are **built artifacts and were deliberately not hand-patched** — the fix is to remove the control in the EDDI-Manager source, rebuild, and re-vendor both bundles. Same follow-up shape as the `injectionStrategy` `<select>` recorded in the D8 entry below.
+
+---
+
 ## 📝 State plainly that `TenantQuotaService.recordCost` has no callers (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

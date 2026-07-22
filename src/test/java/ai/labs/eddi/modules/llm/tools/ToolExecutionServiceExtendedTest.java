@@ -4,23 +4,18 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
-import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.modules.llm.model.ToolExecutionTrace;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Extended tests for {@link ToolExecutionService} covering executeTool,
- * executeToolWrapped, rate limiting, caching, cost tracking, serialization
- * fallback, and parallel execution.
+ * Extended tests for {@link ToolExecutionService} covering executeToolWrapped,
+ * rate limiting, caching and cost tracking.
  */
 @DisplayName("ToolExecutionService Extended Tests")
 class ToolExecutionServiceExtendedTest {
@@ -29,7 +24,6 @@ class ToolExecutionServiceExtendedTest {
     private ToolCacheService cacheService;
     private ToolRateLimiter rateLimiter;
     private ToolCostTracker costTracker;
-    private IJsonSerialization jsonSerialization;
 
     @BeforeEach
     void setUp() {
@@ -37,124 +31,12 @@ class ToolExecutionServiceExtendedTest {
         cacheService = mock(ToolCacheService.class);
         rateLimiter = mock(ToolRateLimiter.class);
         costTracker = mock(ToolCostTracker.class);
-        jsonSerialization = mock(IJsonSerialization.class);
 
         service.cacheService = cacheService;
         service.rateLimiter = rateLimiter;
         service.costTracker = costTracker;
-        service.jsonSerialization = jsonSerialization;
         service.meterRegistry = new SimpleMeterRegistry();
         service.init();
-    }
-
-    // Simple tool for reflection tests
-    public static class SampleTool {
-        public String greet(String name) {
-            return "Hello, " + name + "!";
-        }
-
-        public String fail() {
-            throw new RuntimeException("Tool failure");
-        }
-    }
-
-    private Method greetMethod() throws NoSuchMethodException {
-        return SampleTool.class.getMethod("greet", String.class);
-    }
-
-    private Method failMethod() throws NoSuchMethodException {
-        return SampleTool.class.getMethod("fail");
-    }
-
-    @Nested
-    @DisplayName("executeTool")
-    class ExecuteTool {
-
-        @Test
-        @DisplayName("should execute tool successfully")
-        void executesSuccessfully() throws Exception {
-            when(rateLimiter.tryAcquire("SampleTool")).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn(null);
-            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.001);
-            when(jsonSerialization.serialize(any())).thenReturn("[\"World\"]");
-
-            SampleTool tool = new SampleTool();
-            ToolExecutionTrace trace = new ToolExecutionTrace();
-
-            String result = service.executeTool(tool, greetMethod(), new Object[]{"World"}, "conv-1", trace);
-
-            assertEquals("Hello, World!", result);
-            verify(cacheService).put(eq("SampleTool"), anyString(), eq("Hello, World!"));
-        }
-
-        @Test
-        @DisplayName("should return cached result when available")
-        void returnsCachedResult() throws Exception {
-            when(rateLimiter.tryAcquire("SampleTool")).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn("Cached!");
-            when(jsonSerialization.serialize(any())).thenReturn("[\"arg\"]");
-
-            ToolExecutionTrace trace = new ToolExecutionTrace();
-            String result = service.executeTool(new SampleTool(), greetMethod(), new Object[]{"arg"}, "conv-1", trace);
-
-            assertEquals("Cached!", result);
-            verify(cacheService, never()).put(anyString(), anyString(), anyString());
-        }
-
-        @Test
-        @DisplayName("should return error when rate limited")
-        void returnsErrorWhenRateLimited() throws Exception {
-            when(rateLimiter.tryAcquire("SampleTool")).thenReturn(false);
-            when(jsonSerialization.serialize(any())).thenReturn("[]");
-
-            ToolExecutionTrace trace = new ToolExecutionTrace();
-            String result = service.executeTool(new SampleTool(), greetMethod(), new Object[]{"test"}, "conv-1", trace);
-
-            assertTrue(result.startsWith("Error:"));
-            assertTrue(result.contains("Rate limit"));
-        }
-
-        @Test
-        @DisplayName("should handle tool execution exception")
-        void handlesToolException() throws Exception {
-            when(rateLimiter.tryAcquire("SampleTool")).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn(null);
-            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.0);
-            when(jsonSerialization.serialize(any())).thenReturn("[]");
-
-            ToolExecutionTrace trace = new ToolExecutionTrace();
-            String result = service.executeTool(new SampleTool(), failMethod(), new Object[]{}, "conv-1", trace);
-
-            assertTrue(result.contains("Error executing tool"));
-        }
-
-        @Test
-        @DisplayName("should fall back to toString when serialization fails")
-        void fallsBackOnSerializationError() throws Exception {
-            when(rateLimiter.tryAcquire("SampleTool")).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn(null);
-            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.0);
-            when(jsonSerialization.serialize(any())).thenThrow(new RuntimeException("JSON error"));
-
-            ToolExecutionTrace trace = new ToolExecutionTrace();
-            String result = service.executeTool(new SampleTool(), greetMethod(), new Object[]{"World"}, "conv-1", trace);
-
-            assertEquals("Hello, World!", result);
-        }
-
-        @Test
-        @DisplayName("should handle null args array")
-        void handlesNullArgs() throws Exception {
-            when(rateLimiter.tryAcquire("SampleTool")).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn(null);
-            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.0);
-
-            ToolExecutionTrace trace = new ToolExecutionTrace();
-            // null args → serializeArguments returns "[]" without calling jsonSerialization
-            String result = service.executeTool(new SampleTool(), failMethod(), null, "conv-1", trace);
-            // fail() will throw, but serialization should handle null args
-            assertTrue(result.contains("Error"));
-        }
     }
 
     @Nested
@@ -244,23 +126,6 @@ class ToolExecutionServiceExtendedTest {
     }
 
     @Nested
-    @DisplayName("parallel execution")
-    class ParallelExec {
-
-        @Test
-        @DisplayName("should throw on mismatched array lengths")
-        void throwsOnMismatch() {
-            assertThrows(IllegalArgumentException.class,
-                    () -> service.executeToolsParallel(
-                            new Object[]{new SampleTool()},
-                            new Method[]{},
-                            new Object[][]{},
-                            "conv-1",
-                            new ToolExecutionTrace()));
-        }
-    }
-
-    @Nested
     @DisplayName("getCostTracker")
     class CostTrackerAccess {
 
@@ -268,17 +133,6 @@ class ToolExecutionServiceExtendedTest {
         @DisplayName("should return injected cost tracker")
         void returnsCostTracker() {
             assertSame(costTracker, service.getCostTracker());
-        }
-    }
-
-    @Nested
-    @DisplayName("shutdown")
-    class ShutdownTest {
-
-        @Test
-        @DisplayName("should shutdown gracefully")
-        void shutsDown() {
-            assertDoesNotThrow(() -> service.shutdown());
         }
     }
 }

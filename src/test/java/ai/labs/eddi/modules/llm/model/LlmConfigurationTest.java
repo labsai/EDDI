@@ -63,8 +63,6 @@ class LlmConfigurationTest {
             assertTrue(task.getEnableToolCaching());
             assertTrue(task.getEnableRateLimiting());
             assertEquals(100, task.getDefaultRateLimit());
-            assertFalse(task.getEnableParallelExecution());
-            assertEquals(30000L, task.getParallelExecutionTimeoutMs());
             assertNull(task.getMaxToolIterations());
             assertNull(task.getModelCascade());
             assertNull(task.getToolResponseLimits());
@@ -115,8 +113,6 @@ class LlmConfigurationTest {
             task.setEnableRateLimiting(false);
             task.setDefaultRateLimit(50);
             task.setToolRateLimits(Map.of("calc", 10));
-            task.setEnableParallelExecution(true);
-            task.setParallelExecutionTimeoutMs(60000L);
             task.setMaxToolIterations(20);
             task.setParameters(Map.of("systemMessage", "Hello"));
 
@@ -142,8 +138,6 @@ class LlmConfigurationTest {
             assertFalse(task.getEnableRateLimiting());
             assertEquals(50, task.getDefaultRateLimit());
             assertEquals(Map.of("calc", 10), task.getToolRateLimits());
-            assertTrue(task.getEnableParallelExecution());
-            assertEquals(60000L, task.getParallelExecutionTimeoutMs());
             assertEquals(20, task.getMaxToolIterations());
             assertEquals("Hello", task.getSystemMessage());
         }

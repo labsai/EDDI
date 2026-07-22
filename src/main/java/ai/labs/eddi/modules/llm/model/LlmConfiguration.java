@@ -61,6 +61,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
     /**
      * Task configuration supporting both simple chat and advanced agent features.
      * The task automatically switches to agent mode when tools are configured.
+     *
+     * <p>
+     * Historical note: this class used to declare {@code enableParallelExecution}
+     * and {@code parallelExecutionTimeoutMs}. Neither was ever read — the tool loop
+     * in {@code AgentOrchestrator} dispatches through
+     * {@code ToolExecutor.execute(ToolExecutionRequest, memoryId)} one call at a
+     * time, and the reflection-based parallel machinery they were meant to switch
+     * on took an {@code (instance, Method, Object[])} triple that no live dispatch
+     * path can produce (MCP and A2A tools have no Java {@code Method} at all). Both
+     * were removed along with that machinery rather than wired. Stored
+     * configurations that still carry either key remain valid: every mapper that
+     * deserializes an LLM configuration is built from
+     * {@code SerializationCustomizer.configureObjectMapper}, which sets
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES=false}, so the leftover keys are ignored on
+     * read and dropped on the next write.
+     * </p>
      */
     public static class Task {
         // === Core Configuration (Required) ===
@@ -253,12 +269,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /** Per-tool rate limits */
         private Map<String, Integer> toolRateLimits;
-
-        /** Enable parallel tool execution */
-        private Boolean enableParallelExecution = false;
-
-        /** Timeout for parallel execution (ms) */
-        private Long parallelExecutionTimeoutMs = 30000L;
 
         /**
          * Maximum number of tool-calling loop iterations before forcing a final answer
@@ -609,22 +619,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolRateLimits(Map<String, Integer> toolRateLimits) {
             this.toolRateLimits = toolRateLimits;
-        }
-
-        public Boolean getEnableParallelExecution() {
-            return enableParallelExecution;
-        }
-
-        public void setEnableParallelExecution(Boolean enableParallelExecution) {
-            this.enableParallelExecution = enableParallelExecution;
-        }
-
-        public Long getParallelExecutionTimeoutMs() {
-            return parallelExecutionTimeoutMs;
-        }
-
-        public void setParallelExecutionTimeoutMs(Long parallelExecutionTimeoutMs) {
-            this.parallelExecutionTimeoutMs = parallelExecutionTimeoutMs;
         }
 
         public Integer getMaxToolIterations() {

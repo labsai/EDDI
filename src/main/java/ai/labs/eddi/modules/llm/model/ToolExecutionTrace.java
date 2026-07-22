@@ -357,11 +357,16 @@ public class ToolExecutionTrace {
      * Add a successful tool call to the trace.
      *
      * <p>
-     * {@code synchronized} because a single trace is shared across all tasks of a
-     * parallel tool run (ToolExecutionService.executeToolsParallel passes one trace
-     * to every concurrent executeTool call). Without it, the backing
-     * ArrayList/HashMap and the primitive accumulators race — most visibly
-     * HashMap.computeIfAbsent throwing a ConcurrentModificationException.
+     * {@code synchronized} because a trace instance is a shared mutable accumulator
+     * with no ownership guarantee: it is created per agent turn and handed to
+     * whatever records into it. The class publishes no happens-before edge of its
+     * own, so without this the backing ArrayList/HashMap and the primitive
+     * accumulators would race under any concurrent writer — most visibly
+     * HashMap.computeIfAbsent in {@link #updateMetrics} throwing a
+     * ConcurrentModificationException. Today's tool loop writes from one thread at
+     * a time, so this is defensive rather than load-bearing; keep it, because the
+     * cost is nil and the failure mode is silent corruption of an audit artefact.
+     * </p>
      */
     public synchronized void addToolCall(String toolName, String arguments, String result, long executionTimeMs, double cost, boolean fromCache) {
         ToolCall call = new ToolCall();
@@ -389,8 +394,8 @@ public class ToolExecutionTrace {
 
     /**
      * Add a failed tool call to the trace. {@code synchronized} for the same reason
-     * as {@link #addToolCall} — it is the other writer invoked concurrently from a
-     * shared trace during parallel tool execution.
+     * as {@link #addToolCall} — it is the other writer into the same shared mutable
+     * state.
      */
     public synchronized void addFailedToolCall(String toolName, String arguments, String error, long executionTimeMs, double cost) {
         ToolCall call = new ToolCall();

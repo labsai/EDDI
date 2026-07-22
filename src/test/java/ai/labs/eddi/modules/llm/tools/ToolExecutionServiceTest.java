@@ -4,8 +4,6 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
-import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.modules.llm.model.ToolExecutionTrace;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -14,7 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -34,9 +33,6 @@ class ToolExecutionServiceTest {
     @Mock
     private ToolCostTracker costTracker;
 
-    @Mock
-    private IJsonSerialization jsonSerialization;
-
     private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
@@ -50,7 +46,6 @@ class ToolExecutionServiceTest {
         setField(service, "rateLimiter", rateLimiter);
         setField(service, "costTracker", costTracker);
         setField(service, "meterRegistry", meterRegistry);
-        setField(service, "jsonSerialization", jsonSerialization);
 
         service.init();
     }
@@ -284,138 +279,6 @@ class ToolExecutionServiceTest {
         }
     }
 
-    // ==================== executeTool (reflection-based) ====================
-
-    @Nested
-    @DisplayName("executeTool")
-    class ExecuteToolTests {
-
-        @Test
-        @DisplayName("should execute tool method via reflection successfully")
-        void successfulExecution() throws Exception {
-            when(rateLimiter.tryAcquire("ExecuteToolTests")).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn(null);
-            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.001);
-            when(jsonSerialization.serialize(any())).thenReturn("[\"arg1\"]");
-
-            var trace = new ToolExecutionTrace();
-            Method method = ExecuteToolTests.class.getDeclaredMethod("dummyTool", String.class);
-            method.setAccessible(true);
-
-            String result = service.executeTool(this, method, new Object[]{"arg1"}, "conv-1", trace);
-
-            assertEquals("result:arg1", result);
-            assertFalse(trace.getToolCalls().isEmpty());
-            assertTrue(trace.getToolCalls().get(0).isSuccess());
-        }
-
-        @Test
-        @DisplayName("should return rate limit error")
-        void rateLimited() throws Exception {
-            when(rateLimiter.tryAcquire("ExecuteToolTests")).thenReturn(false);
-            when(jsonSerialization.serialize(any())).thenReturn("[]");
-
-            var trace = new ToolExecutionTrace();
-            Method method = ExecuteToolTests.class.getDeclaredMethod("dummyTool", String.class);
-            method.setAccessible(true);
-
-            String result = service.executeTool(this, method, new Object[]{"arg1"}, "conv-1", trace);
-
-            assertTrue(result.startsWith("Error:"));
-            assertTrue(result.contains("Rate limit exceeded"));
-            assertTrue(trace.isHasErrors());
-        }
-
-        @Test
-        @DisplayName("should return cached result and mark trace as from cache")
-        void cachedResult() throws Exception {
-            when(rateLimiter.tryAcquire("ExecuteToolTests")).thenReturn(true);
-            when(jsonSerialization.serialize(any())).thenReturn("[\"cached-args\"]");
-            when(cacheService.get(eq("ExecuteToolTests"), anyString())).thenReturn("cached-result");
-
-            var trace = new ToolExecutionTrace();
-            Method method = ExecuteToolTests.class.getDeclaredMethod("dummyTool", String.class);
-            method.setAccessible(true);
-
-            String result = service.executeTool(this, method, new Object[]{"cached-args"}, "conv-1", trace);
-
-            assertEquals("cached-result", result);
-            assertTrue(trace.getToolCalls().get(0).isFromCache());
-        }
-
-        @Test
-        @DisplayName("should handle tool method that returns null")
-        void nullResult() throws Exception {
-            when(rateLimiter.tryAcquire("ExecuteToolTests")).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn(null);
-            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.0);
-            when(jsonSerialization.serialize(any())).thenReturn("[]");
-
-            var trace = new ToolExecutionTrace();
-            Method method = ExecuteToolTests.class.getDeclaredMethod("nullTool");
-            method.setAccessible(true);
-
-            String result = service.executeTool(this, method, new Object[]{}, "conv-1", trace);
-
-            assertEquals("null", result);
-        }
-
-        @Test
-        @DisplayName("should handle null args array")
-        void nullArgs() throws Exception {
-            when(rateLimiter.tryAcquire("ExecuteToolTests")).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn(null);
-            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.0);
-
-            var trace = new ToolExecutionTrace();
-            Method method = ExecuteToolTests.class.getDeclaredMethod("noArgTool");
-            method.setAccessible(true);
-
-            String result = service.executeTool(this, method, null, "conv-1", trace);
-
-            assertEquals("no-arg-result", result);
-        }
-
-        @Test
-        @DisplayName("should handle tool method that throws exception")
-        void toolThrows() throws Exception {
-            when(rateLimiter.tryAcquire("ExecuteToolTests")).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn(null);
-            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.0);
-            when(jsonSerialization.serialize(any())).thenReturn("[]");
-
-            var trace = new ToolExecutionTrace();
-            Method method = ExecuteToolTests.class.getDeclaredMethod("failingTool");
-            method.setAccessible(true);
-
-            String result = service.executeTool(this, method, new Object[]{}, "conv-1", trace);
-
-            assertTrue(result.contains("Error executing tool"));
-            assertTrue(trace.isHasErrors());
-        }
-
-        // Helper methods for reflection-based executeTool tests
-        @SuppressWarnings("unused")
-        private String dummyTool(String arg) {
-            return "result:" + arg;
-        }
-
-        @SuppressWarnings("unused")
-        private String nullTool() {
-            return null;
-        }
-
-        @SuppressWarnings("unused")
-        private String noArgTool() {
-            return "no-arg-result";
-        }
-
-        @SuppressWarnings("unused")
-        private String failingTool() {
-            throw new RuntimeException("tool exploded");
-        }
-    }
-
     // ==================== getCostTracker ====================
 
     @Nested
@@ -429,92 +292,66 @@ class ToolExecutionServiceTest {
         }
     }
 
-    // ==================== executeToolsParallel ====================
-
-    @Nested
-    @DisplayName("executeToolsParallel")
-    class ParallelTests {
-
-        @Test
-        @DisplayName("should throw on mismatched array lengths")
-        void mismatchedArrays() {
-            assertThrows(IllegalArgumentException.class,
-                    () -> service.executeToolsParallel(
-                            new Object[1], new java.lang.reflect.Method[2], new Object[1][],
-                            "conv-1", null));
-        }
-
-        @Test
-        @DisplayName("should throw on all different array lengths")
-        void allDifferentLengths() {
-            assertThrows(IllegalArgumentException.class,
-                    () -> service.executeToolsParallel(
-                            new Object[1], new java.lang.reflect.Method[3], new Object[2][],
-                            "conv-1", null));
-        }
-
-        @Test
-        @DisplayName("should return empty array from executeToolsParallelAndWait on timeout")
-        void parallelTimeout() {
-            when(rateLimiter.tryAcquire(anyString())).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn(null);
-            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.0);
-
-            var trace = new ToolExecutionTrace();
-
-            // Use a method that takes a very long time
-            String[] results = service.executeToolsParallelAndWait(
-                    new Object[0], new java.lang.reflect.Method[0], new Object[0][],
-                    "conv-1", trace, 100);
-
-            // Empty arrays → no futures → allOf completes immediately → empty result
-            assertEquals(0, results.length);
-        }
-    }
-
-    // ==================== shutdown ====================
-
-    @Nested
-    @DisplayName("shutdown")
-    class ShutdownTests {
-
-        @Test
-        @DisplayName("should complete without error")
-        void shutdownCompletes() {
-            assertDoesNotThrow(() -> service.shutdown());
-        }
-    }
-
-    // ==================== serializeArguments (via executeTool)
+    // ==================== removed parallel-execution machinery
     // ====================
 
+    /**
+     * Tripwire for the deletion of the reflection-based parallel tool machinery
+     * ({@code executeToolsParallel}, {@code executeToolsParallelAndWait} and the
+     * {@code executeTool(Object, Method, …)} they wrapped).
+     *
+     * <p>
+     * None of it was reachable from production: the live dispatch path is
+     * langchain4j's {@code ToolExecutor.execute(ToolExecutionRequest, memoryId)},
+     * which hands over a {@code (name, jsonArguments)} pair, while those methods
+     * required an {@code (instance, java.lang.reflect.Method, Object[])} triple
+     * that MCP, A2A and dynamic tools cannot produce at all. Its only callers were
+     * its own tests, so the deleted coverage guarded a path production could never
+     * enter.
+     * </p>
+     *
+     * <p>
+     * These assertions fail if any of it is reintroduced by a merge or a revert —
+     * including the always-zero {@code eddi.tool.execution.parallel} meter, which
+     * used to be registered eagerly in {@link ToolExecutionService#init()} and so
+     * appeared on {@code /q/metrics} advertising a feature that did not exist.
+     * </p>
+     */
     @Nested
-    @DisplayName("serializeArguments edge cases")
-    class SerializeArgumentsTests {
+    @DisplayName("dead parallel machinery stays deleted")
+    class ParallelMachineryRemovedTests {
 
         @Test
-        @DisplayName("should handle serialization failure gracefully with toString fallback")
-        void serializationFails() throws Exception {
-            when(rateLimiter.tryAcquire(anyString())).thenReturn(true);
-            when(cacheService.get(anyString(), anyString())).thenReturn(null);
-            when(costTracker.trackToolCall(anyString(), anyString())).thenReturn(0.0);
-            // Force serialization to fail → fallback to toString
-            when(jsonSerialization.serialize(any())).thenThrow(new RuntimeException("serialize failed"));
-
-            var trace = new ToolExecutionTrace();
-            Method method = SerializeArgumentsTests.class.getDeclaredMethod("helperTool", String.class);
-            method.setAccessible(true);
-
-            String result = service.executeTool(this, method, new Object[]{"val"}, "conv-1", trace);
-
-            assertEquals("helper:val", result);
-            // Verify it still recorded something in the trace
-            assertFalse(trace.getToolCalls().isEmpty());
+        @DisplayName("no executeToolsParallel* method survives on the public API")
+        void noParallelMethods() {
+            assertTrue(Arrays.stream(ToolExecutionService.class.getMethods())
+                    .noneMatch(m -> m.getName().startsWith("executeToolsParallel")),
+                    "executeToolsParallel/AndWait were deleted as unreachable; reintroducing them "
+                            + "re-adds a dispatch path no live tool call can reach");
         }
 
-        @SuppressWarnings("unused")
-        private String helperTool(String arg) {
-            return "helper:" + arg;
+        @Test
+        @DisplayName("no reflection-based executeTool(Object, Method, ...) survives")
+        void noReflectionExecuteTool() {
+            assertTrue(Arrays.stream(ToolExecutionService.class.getMethods())
+                    .noneMatch(m -> m.getName().equals("executeTool")),
+                    "the reflection overload was deleted with its only caller (executeToolsParallel); "
+                            + "executeToolWrapped is the single entry point");
+        }
+
+        @Test
+        @DisplayName("startup registers no eddi.tool.execution.parallel* meter")
+        void noParallelMetersRegistered() {
+            // setUp() already ran init(); every remaining meter is created lazily at a
+            // reachable increment site, so nothing parallel-shaped may exist.
+            var parallelMeters = meterRegistry.getMeters().stream()
+                    .map(m -> m.getId().getName())
+                    .filter(name -> name.startsWith("eddi.tool.execution.parallel"))
+                    .toList();
+
+            assertEquals(List.of(), parallelMeters,
+                    "these series could only ever report zero and were removed from /q/metrics, "
+                            + "docs/metrics.md, the monitoring guide and the Grafana dashboard");
         }
     }
 }
