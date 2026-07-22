@@ -5,6 +5,23 @@
 
 ---
 
+## 📝 State plainly that `TenantQuotaService.recordCost` has no callers (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D9**, part 3 of 3 — documentation only, no behaviour change.
+
+`TenantQuotaService.recordCost(tenantId, cost)` is the post-call half of the monthly cost budget. It has **zero production callers** — the only references outside its own declaration are in `TenantQuotaServiceTest`. Its pre-call twin `checkCostBudget` *is* wired (`AgentOrchestrator` calls it before each LLM turn), but it reads `ITenantQuotaStore.getMonthlyCost`, which nothing ever writes. So `eddi.tenant.quota.max-monthly-cost-usd` currently cannot deny anything, at any value, on any backend — while the code reads as if cost budgets work.
+
+**Decision: keep the method, document the gap loudly — do not delete it, and do not wire it here.**
+
+- *Not deleted*, because removing it would take away the seam without taking away the gap: `checkCostBudget` stays wired, `ITenantQuotaStore.tryAddCost` stays on the interface, all three stores implement it, and it is now covered by `TenantQuotaStoreParityTest`. A reader would be left with a half-system and no marker.
+- *Not wired*, because there is nothing meaningful to meter yet. Built-in tool executions are priced at $0.00, and there is no token-cost metering for LLM turns at all — wiring today would add write load and record zeros. The candidate call sites are the `ChatResponse`-holding seams tracked as C5 in `docs/superpowers/specs/2026-07-21-manager-coverage-backend-design.md`, whose own notes named the Mongo E11000 (fixed in part 1 of this item) as its blocker. That blocker is now gone.
+
+Both `recordCost` and `checkCostBudget` carry javadoc saying this outright, including the two things that must land first.
+
+---
+
 ## 🐛 Deny tenant quotas **at** the limit on the Postgres store (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)
