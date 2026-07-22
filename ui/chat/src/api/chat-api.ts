@@ -177,11 +177,16 @@ export async function* sendMessageStreaming(
           if (line.startsWith("event:")) {
             eventType = line.slice(6).trim() as SSEEventType;
           } else if (line.startsWith("data:")) {
-            // Per the SSE spec exactly ONE optional space after the colon is
-            // the delimiter. Everything after it is payload — trimming here
-            // destroys significant indentation in code blocks and markdown.
-            const raw = line.slice(5);
-            dataLines.push(raw.startsWith(" ") ? raw.slice(1) : raw);
+            // Everything after the colon is payload, taken verbatim.
+            //
+            // The SSE spec lets a client strip ONE leading space because
+            // servers conventionally write "data: value". EDDI's writer does
+            // not: resteasy-reactive's SseUtil.serialiseField is
+            // `sb.append(field).append(":")` followed by the raw value
+            // (SseUtil.java:84), with no delimiter. Stripping here therefore
+            // deleted a space that belongs to the token — and LLM streams emit
+            // " word" constantly, so words ran together.
+            dataLines.push(line.slice(5));
           }
         }
 

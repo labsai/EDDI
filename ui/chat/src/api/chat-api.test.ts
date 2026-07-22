@@ -29,24 +29,33 @@ async function collect(chunks: string[]): Promise<SSEEvent[]> {
 }
 
 describe("sendMessageStreaming — SSE parsing", () => {
-  it("preserves leading whitespace in a token payload", async () => {
-    // Per the SSE spec exactly ONE space after "data:" is the delimiter.
-    // Everything after it belongs to the payload — indentation is significant
-    // for code blocks and nested markdown.
-    const events = await collect(["event: token\ndata:     indented\n\n"]);
+  it("keeps a leading space — RESTEasy writes no delimiter space", async () => {
+    // EDDI's writer is resteasy-reactive SseUtil.serialiseField, which does
+    // `sb.append(field).append(":")` then the value — NO delimiter space
+    // (verified in resteasy-reactive-3.37.1 sources, SseUtil.java:84).
+    // A leading space on the wire therefore belongs to the token, and LLM
+    // streams emit " word" constantly. Stripping one per the SSE spec's
+    // server-side convention deleted it and ran words together.
+    const events = await collect(["event: token\ndata: world\n\n"]);
+
+    expect(events).toEqual([{ type: "token", data: " world" }]);
+  });
+
+  it("preserves deeper indentation verbatim", async () => {
+    const events = await collect(["event: token\ndata:    indented\n\n"]);
 
     expect(events).toEqual([{ type: "token", data: "    indented" }]);
   });
 
   it("preserves trailing whitespace in a token payload", async () => {
-    const events = await collect(["event: token\ndata: word \n\n"]);
+    const events = await collect(["event: token\ndata:word \n\n"]);
 
     expect(events).toEqual([{ type: "token", data: "word " }]);
   });
 
   it("joins multi-line data with newlines, preserving each line's indentation", async () => {
     const events = await collect([
-      "event: token\ndata: def f():\ndata:     return 1\n\n",
+      "event: token\ndata:def f():\ndata:    return 1\n\n",
     ]);
 
     expect(events).toEqual([
@@ -55,13 +64,13 @@ describe("sendMessageStreaming — SSE parsing", () => {
   });
 
   it("reassembles a frame split across chunk boundaries", async () => {
-    const events = await collect(["event: tok", "en\ndata: hello", "\n\n"]);
+    const events = await collect(["event: tok", "en\ndata:hello", "\n\n"]);
 
     expect(events).toEqual([{ type: "token", data: "hello" }]);
   });
 
   it("normalizes CRLF line endings", async () => {
-    const events = await collect(["event: token\r\ndata: hi\r\n\r\n"]);
+    const events = await collect(["event: token\r\ndata:hi\r\n\r\n"]);
 
     expect(events).toEqual([{ type: "token", data: "hi" }]);
   });
@@ -69,7 +78,7 @@ describe("sendMessageStreaming — SSE parsing", () => {
   it("surfaces an unknown event type rather than mislabelling it a token", async () => {
     // The parser used to default eventType to "token", so any unrecognised
     // event's payload was appended to the agent's message as visible text.
-    const events = await collect(["event: cascade_step_start\ndata: {}\n\n"]);
+    const events = await collect(["event: cascade_step_start\ndata:{}\n\n"]);
 
     expect(events).toEqual([{ type: "cascade_step_start", data: "{}" }]);
   });

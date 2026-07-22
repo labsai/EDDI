@@ -71,7 +71,7 @@ describe("ChatWidget", () => {
   it("mounts and starts a conversation", async () => {
     mockBackend({
       conversationState: "READY",
-      conversationSteps: [{ output: "Hello!" }],
+      conversationSteps: [{ conversationStep: [{ key: "output:text:P:1", value: ["Hello!"] }], timestamp: "2026-07-21T10:00:00Z" }],
     });
 
     renderWidget();
@@ -122,6 +122,82 @@ describe("ChatWidget", () => {
 
     expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /reject/i })).toBeNull();
+  });
+});
+
+describe("ChatWidget — undo must never wipe the transcript", () => {
+  const realStep = (key: string, value: unknown) => ({
+    conversationStep: [{ key, value }],
+    timestamp: "2026-07-21T10:00:00Z",
+  });
+
+  it("rebuilds the transcript from the real step shape instead of blanking it", async () => {
+    // The rebuild used to read step.input/step.output — fields the backend
+    // never sends — so `msgs` was always [] and REPLACE_MESSAGES erased the
+    // entire conversation. Master hid this because res.json() threw on undo's
+    // empty 200 body; the requestJson fix removed that accidental guard.
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/undo")) return new Response(null, { status: 200 });
+      return new Response(
+        JSON.stringify({
+          conversationState: "READY",
+          undoAvailable: true,
+          redoAvailable: false,
+          conversationSteps: [
+            realStep("input:initial", "hi"),
+            realStep("output:text:P:1", ["Hello!"]),
+          ],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+    await screen.findByText("Hello!");
+
+    await waitFor(() => expect(screen.getByTestId("undo-btn")).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId("undo-btn"));
+
+    // The transcript must survive and still show the rebuilt content.
+    await waitFor(() => {
+      expect(screen.getAllByText("Hello!").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("Starting conversation…")).toBeNull();
+  });
+
+  it("leaves the transcript intact when the rebuild yields nothing", async () => {
+    // A shape the mapper cannot read must not blank the chat.
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/undo")) return new Response(null, { status: 200 });
+      return new Response(
+        JSON.stringify({
+          conversationState: "READY",
+          undoAvailable: true,
+          conversationOutputs: [{ output: ["Only answer"], quickReplies: [] }],
+          conversationSteps: [{ somethingElse: true }],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+    await screen.findByText("Only answer");
+
+    await waitFor(() => expect(screen.getByTestId("undo-btn")).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId("undo-btn"));
+
+    await waitFor(() => {});
+    expect(screen.getByText("Only answer")).toBeInTheDocument();
   });
 });
 
@@ -368,7 +444,7 @@ describe("ChatWidget — managed-agent route", () => {
         JSON.stringify({
           conversationId: "managed-conv-9",
           conversationState: "READY",
-          conversationSteps: [{ output: "Hi from managed" }],
+          conversationSteps: [{ conversationStep: [{ key: "output:text:P:1", value: ["Hi from managed"] }], timestamp: "2026-07-21T10:00:00Z" }],
         }),
         { status: 200 },
       );

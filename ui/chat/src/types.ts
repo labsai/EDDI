@@ -82,12 +82,29 @@ export interface SSEEvent {
   data: string;
 }
 
-/** Simplified conversation step from GET response. */
+/**
+ * One datum inside a conversation step, as the backend actually sends it.
+ * Mirrors SimpleConversationMemorySnapshot.ConversationStepData.
+ */
+export interface ConversationStepData {
+  key: string;
+  value: unknown;
+  timestamp?: string;
+  originWorkflowId?: string;
+}
+
+/**
+ * A conversation step from GET /agents/{conversationId}.
+ *
+ * Mirrors SimpleConversationMemorySnapshot.SimpleConversationStep, which has
+ * exactly these two properties. It notably does NOT have `input` or `output` —
+ * this type previously declared both, and code that read them silently got
+ * `undefined`, which is how undo/redo came to replace the transcript with an
+ * empty list.
+ */
 export interface ConversationStep {
-  input?: string;
-  output?: string;
-  actions?: string[];
-  quickReplies?: QuickReply[];
+  conversationStep?: ConversationStepData[];
+  timestamp?: string;
 }
 
 /** Conversation snapshot returned by the backend. */

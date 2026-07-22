@@ -37,6 +37,7 @@ import {
   demoGetQuickReplies,
 } from "@/api/demo-api";
 import { buildAttachmentContext } from "@/api/attachments-api";
+import { stepsToMessages } from "@/api/snapshot";
 import { cancelConversation, type ApprovalStatus } from "@/api/hitl-api";
 import { useHitlPolling } from "@/hooks/useHitlPolling";
 import { PausedCard } from "./PausedCard";
@@ -179,6 +180,19 @@ export function ChatWidget() {
    */
   const conversationStateRef = useRef(state.conversationState);
   conversationStateRef.current = state.conversationState;
+  /**
+   * Mirrors isProcessing for reads at click time. The composer disables itself
+   * while busy, but QuickReplies and SecretInput call handleSend directly, so
+   * the guard has to live in handleSend rather than in each caller.
+   */
+  const isProcessingRef = useRef(state.isProcessing);
+  isProcessingRef.current = state.isProcessing;
+  /**
+   * Bumped whenever the widget switches conversation. Async continuations
+   * capture it and bail if it moved, so an abandoned stream cannot write into
+   * the conversation that replaced it.
+   */
+  const generationRef = useRef(0);
   /**
    * Raw input of in-flight turns, keyed by the user message's id. A single
    * slot let a late-failing turn withdraw a newer, unrelated message.
@@ -429,31 +443,16 @@ export function ChatWidget() {
         });
       }
 
-      // Handle the "conversationSteps" format (from GET responses / welcome messages)
+      // The "conversationSteps" format (GET responses / welcome messages).
+      // Mapped through stepsToMessages because each step is
+      // { conversationStep: [{key, value}], timestamp } — NOT {input, output},
+      // which this code used to read and always got undefined for.
       if (snapshot.conversationSteps?.length) {
-        for (const step of snapshot.conversationSteps) {
-          if (step.input) {
-            dispatch({
-              type: "ADD_MESSAGE",
-              message: {
-                id: `user-${Date.now()}-${Math.random()}`,
-                role: "user",
-                content: step.input,
-                timestamp: Date.now(),
-              },
-            });
-          }
-          if (step.output) {
-            dispatch({
-              type: "ADD_MESSAGE",
-              message: {
-                id: `agent-${Date.now()}-${Math.random()}`,
-                role: "agent",
-                content: step.output,
-                timestamp: Date.now(),
-              },
-            });
-          }
+        for (const message of stepsToMessages(snapshot.conversationSteps)) {
+          dispatch({
+            type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
+            message,
+          });
         }
       }
     },
@@ -518,6 +517,11 @@ export function ChatWidget() {
   /* ─── Send message ──────────────────────────── */
   const handleSend = useCallback(
     async (text: string, isSecret?: boolean) => {
+      // Re-entrancy guard. QuickReplies and SecretInput bypass the composer's
+      // disabled state, so a click during an in-flight turn used to start a
+      // second one — two streams writing into the same transcript.
+      if (isProcessingRef.current) return;
+
       // Attachments staged in the composer travel with THIS turn as
       // attachment_N context entries — the only path the backend reads.
       const attachments = state.pendingAttachments;
@@ -630,6 +634,7 @@ export function ChatWidget() {
           // so reader.read() would hang forever without this.
           const abort = new AbortController();
           abortRef.current = abort;
+          const gen = generationRef.current;
           const turn = newTurn(conversationStateRef.current, turnId);
           let streamDone = false;
 
@@ -644,6 +649,10 @@ export function ChatWidget() {
 
           try {
             for await (const event of events) {
+              // New Conversation (or another swap) happened mid-stream: stop
+              // writing tokens, state and undo/redo into the conversation that
+              // replaced this one.
+              if (gen !== generationRef.current) break;
               const isDone = handleSSEEvent(event, turn);
               if (isDone) {
                 streamDone = true;
@@ -665,13 +674,15 @@ export function ChatWidget() {
           // conversationState and conversationOutputs — undoAvailable and
           // redoAvailable are absent, so without this re-read the undo/redo
           // buttons stay permanently greyed out on the streaming path.
+          if (gen !== generationRef.current) return;
           try {
             const after = await readConversation(
-              environment,
-              agentId,
+              "",
+              "",
               state.conversationId,
               true,
             );
+            if (gen !== generationRef.current) return;
             dispatch({
               type: "SET_UNDO_REDO",
               undoAvailable: after.undoAvailable ?? false,
@@ -805,40 +816,25 @@ export function ChatWidget() {
 
   /* ─── Undo ──────────────────────────────────── */
   const handleUndo = useCallback(async () => {
-    if (!environment || !agentId || !state.conversationId) return;
+    // environment/agentId are unused by the API layer (v6 paths are
+    // conversation-scoped) and are undefined on the managed route, where these
+    // guards made undo/redo/retry silently inert.
+    if (!state.conversationId) return;
     if (isDemo) return; // Demo mode doesn't support undo
 
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
       // undo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
-      await undoConversation(environment, agentId, state.conversationId);
-      const snapshot = await readConversation(
-        environment,
-        agentId,
-        state.conversationId,
-      );
+      await undoConversation("", "", state.conversationId);
+      const snapshot = await readConversation("", "", state.conversationId);
 
-      // Rebuild messages from the full snapshot
-      const msgs: ChatMessage[] = [];
-      for (const step of snapshot.conversationSteps ?? []) {
-        if (step.input) {
-          msgs.push({
-            id: `user-${msgs.length}-${Date.now()}`,
-            role: "user",
-            content: step.input,
-            timestamp: Date.now(),
-          });
-        }
-        if (step.output) {
-          msgs.push({
-            id: `agent-${msgs.length}-${Date.now()}`,
-            role: "agent",
-            content: step.output,
-            timestamp: Date.now(),
-          });
-        }
+      // Rebuild from the shape the endpoint really returns. An empty result
+      // means "could not rebuild", NOT "the conversation is empty" — replacing
+      // a populated transcript with [] is how this wiped the whole chat.
+      const msgs = stepsToMessages(snapshot.conversationSteps);
+      if (msgs.length) {
+        dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
       }
-      dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
       dispatch({
         type: "SET_UNDO_REDO",
         undoAvailable: snapshot.undoAvailable ?? false,
@@ -863,39 +859,22 @@ export function ChatWidget() {
 
   /* ─── Redo ──────────────────────────────────── */
   const handleRedo = useCallback(async () => {
-    if (!environment || !agentId || !state.conversationId) return;
+    if (!state.conversationId) return;
     if (isDemo) return;
 
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
       // redo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
-      await redoConversation(environment, agentId, state.conversationId);
-      const snapshot = await readConversation(
-        environment,
-        agentId,
-        state.conversationId,
-      );
+      await redoConversation("", "", state.conversationId);
+      const snapshot = await readConversation("", "", state.conversationId);
 
-      const msgs: ChatMessage[] = [];
-      for (const step of snapshot.conversationSteps ?? []) {
-        if (step.input) {
-          msgs.push({
-            id: `user-${msgs.length}-${Date.now()}`,
-            role: "user",
-            content: step.input,
-            timestamp: Date.now(),
-          });
-        }
-        if (step.output) {
-          msgs.push({
-            id: `agent-${msgs.length}-${Date.now()}`,
-            role: "agent",
-            content: step.output,
-            timestamp: Date.now(),
-          });
-        }
+      // Rebuild from the shape the endpoint really returns. An empty result
+      // means "could not rebuild", NOT "the conversation is empty" — replacing
+      // a populated transcript with [] is how this wiped the whole chat.
+      const msgs = stepsToMessages(snapshot.conversationSteps);
+      if (msgs.length) {
+        dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
       }
-      dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
       dispatch({
         type: "SET_UNDO_REDO",
         undoAvailable: snapshot.undoAvailable ?? true,
@@ -925,6 +904,13 @@ export function ChatWidget() {
 
   /* ─── Restart conversation ──────────────────── */
   const handleRestart = useCallback(async () => {
+    // Abandon any in-flight turn first. Without this the old stream kept
+    // writing tokens, conversation state and undo/redo flags into the NEW
+    // conversation.
+    abortRef.current?.abort();
+    abortRef.current = null;
+    generationRef.current += 1;
+    pendingTurnsRef.current.clear();
     dispatch({ type: "CLEAR_MESSAGES" });
     // Re-init conversation
     try {
@@ -1023,16 +1009,11 @@ export function ChatWidget() {
     state.conversationState === "EXECUTION_INTERRUPTED";
 
   const handleRetry = useCallback(async () => {
-    if (!environment || !agentId || !state.conversationId) return;
+    if (!state.conversationId) return;
     dispatch({ type: "SET_PROCESSING", value: true });
     try {
       await rerunLastStep(state.conversationId);
-      const snapshot = await readConversation(
-        environment,
-        agentId,
-        state.conversationId,
-        true,
-      );
+      const snapshot = await readConversation("", "", state.conversationId, true);
       if (snapshot.conversationState) {
         dispatch({ type: "SET_CONVERSATION_STATE", state: snapshot.conversationState });
       }
@@ -1058,6 +1039,9 @@ export function ChatWidget() {
     // the server to stop producing them.
     abortRef.current?.abort();
     abortRef.current = null;
+    // Stopping before the first token left an empty bubble rendering
+    // "No response", implying the agent answered with nothing.
+    dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
     dispatch({ type: "FINISH_STREAMING" });
     dispatch({ type: "SET_PROCESSING", value: false });
     dispatch({ type: "SET_THINKING", value: false });

@@ -156,19 +156,36 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "ADD_SNAPSHOT_MESSAGE": {
       // Used ONLY by reads that deliberately revisit an already-rendered step
-      // (retry, post-approval refresh). Matching is on agent-message CONTENT,
-      // not on a sourceKey: the text being re-read may have first reached the
-      // transcript through the streaming `done` handler, which uses plain
-      // ADD_MESSAGE and stamps no key — so a key-only comparison could never
-      // see the very placeholder this exists to suppress.
+      // (retry, post-approval refresh).
+      //
+      // Matching is on agent-message CONTENT, because the text being re-read may
+      // have first reached the transcript via the streaming `done` handler,
+      // which stamps no identifier of any kind.
+      //
+      // The comparison is scoped to the TRAILING run of agent messages — those
+      // after the last user bubble. Both real duplication cases put the
+      // duplicate there, whereas a repeated utterance from an earlier turn is
+      // always separated by an intervening user message. Scanning the whole
+      // transcript swallowed legitimate repeats (a fallback said twice, a
+      // re-asked prompt).
       const incoming = action.message.content.trim();
-      if (
-        incoming &&
-        state.messages.some(
-          (m) => m.role === "agent" && m.content.trim() === incoming,
-        )
-      ) {
-        return state;
+      if (!incoming) return state;
+
+      let start = state.messages.length;
+      while (start > 0 && state.messages[start - 1].role === "agent") start -= 1;
+
+      for (let i = start; i < state.messages.length; i++) {
+        const existing = state.messages[i].content.trim();
+        // Equality, or containment as a blank-line-delimited segment: the
+        // `done` handler joins a step's whole output list into ONE bubble,
+        // while this path receives one entry at a time, so the two producers
+        // would otherwise never compare equal for a multi-entry step.
+        if (
+          existing === incoming ||
+          existing.split("\n\n").some((seg) => seg.trim() === incoming)
+        ) {
+          return state;
+        }
       }
       return { ...state, messages: [...state.messages, action.message] };
     }
