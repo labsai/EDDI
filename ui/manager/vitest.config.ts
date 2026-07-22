@@ -26,6 +26,7 @@ export default mergeConfig(
           "src/test/**",
           "src/**/*.d.ts",
           "src/main.tsx",
+          "src/app.tsx",
           "src/lib/auth-config.ts",
         ],
         thresholds: {

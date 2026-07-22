@@ -7,7 +7,7 @@
 #    1. Runs `npm run build` to produce the production bundle
 #    2. Cleans up old hashed assets from previous builds.
 #    3. Copies the entire new assets folder into EDDI's assets/ directory.
-#    4. Updates manage.html with the new hashed filenames
+#    4. Updates manage.html, welcome.html, and workforce.html with the new hashed filenames
 #
 # USAGE
 #    ./deploy-to-local-eddi-repo.sh
@@ -145,6 +145,26 @@ SED_INPLACE=(sed -i '')
 
 echo -e "\n  ${GREEN}Updated manage.html${NC}"
 
+# Update welcome.html references (same bundles, different shell)
+WELCOME_HTML="$RESOURCE_DIR/welcome.html"
+if [[ -f "$WELCOME_HTML" ]]; then
+    "${SED_INPLACE[@]}" \
+        -e 's|src="/\(scripts/js\|assets\)/index-[^"]*\.js"|src="/assets/'"$NEW_JS_NAME"'"|g' \
+        -e 's|href="/\(scripts/css\|assets\)/index-[^"]*\.css"|href="/assets/'"$NEW_CSS_NAME"'"|g' \
+        "$WELCOME_HTML"
+    echo -e "  ${GREEN}Updated welcome.html${NC}"
+fi
+
+# Update workforce.html references (same bundles, different shell)
+WORKFORCE_HTML="$RESOURCE_DIR/workforce.html"
+if [[ -f "$WORKFORCE_HTML" ]]; then
+    "${SED_INPLACE[@]}" \
+        -e 's|src="/\(scripts/js\|assets\)/index-[^"]*\.js"|src="/assets/'"$NEW_JS_NAME"'"|g' \
+        -e 's|href="/\(scripts/css\|assets\)/index-[^"]*\.css"|href="/assets/'"$NEW_CSS_NAME"'"|g' \
+        "$WORKFORCE_HTML"
+    echo -e "  ${GREEN}Updated workforce.html${NC}"
+fi
+
 # Update index.html if it contains asset references (no-op when it is a redirect page)
 if grep -q 'index-.*\.js\|index-.*\.css' "$INDEX_HTML" 2>/dev/null; then
     "${SED_INPLACE[@]}" \
@@ -179,6 +199,8 @@ if [[ "$answer" =~ ^[Yy]$ ]]; then
     done < <(find "$DIST_ASSETS" -maxdepth 1 -type f -print0)
 
     git add "src/main/resources/META-INF/resources/manage.html"
+    git add "src/main/resources/META-INF/resources/welcome.html" 2>/dev/null || true
+    git add "src/main/resources/META-INF/resources/workforce.html" 2>/dev/null || true
     git add "src/main/resources/META-INF/resources/index.html"
 
     # Stage the specific old files that were deleted

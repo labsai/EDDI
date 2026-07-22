@@ -86,8 +86,8 @@ export function App() {
           path="/manage/resources/:type/:id"
           element={<ResourceDetailPage />}
         />
-        <Route path="/" element={<Navigate to="/manage" replace />} />
-        <Route path="*" element={<Navigate to="/manage" replace />} />
+        <Route path="/" element={<Navigate to="/welcome" replace />} />
+        <Route path="*" element={<Navigate to="/welcome" replace />} />
       </Route>
     </Routes>
     <CommandPalette />
