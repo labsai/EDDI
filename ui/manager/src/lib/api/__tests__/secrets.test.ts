@@ -29,14 +29,24 @@ describe("listSecrets", () => {
     expect(Array.isArray(result)).toBe(true);
   });
 
-  it("returns empty array on non-ok response", async () => {
+  it("throws on non-ok response (does not mask errors as an empty vault)", async () => {
     server.use(
       http.get("*/secretstore/secrets/:tenantId", () =>
-        new HttpResponse(null, { status: 500 })
+        HttpResponse.json({ error: "Boom" }, { status: 500 })
       )
     );
-    const result = await listSecrets("default");
-    expect(result).toEqual([]);
+    await expect(listSecrets("default")).rejects.toThrow("Boom");
+  });
+
+  it("throws the vault-not-configured message on 503", async () => {
+    server.use(
+      http.get("*/secretstore/secrets/:tenantId", () =>
+        new HttpResponse(null, { status: 503 })
+      )
+    );
+    await expect(listSecrets("default")).rejects.toThrow(
+      "Secrets vault is not configured",
+    );
   });
 });
 

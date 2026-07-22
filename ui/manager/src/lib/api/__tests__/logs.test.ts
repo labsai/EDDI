@@ -87,17 +87,22 @@ describe("logs API", () => {
 
   // ─── getInstanceId ──────────────────────────────────────────────
   describe("getInstanceId", () => {
-    it("fetches instance info", async () => {
-      // Note: the MSW handler is at */administration/logs/instance-id
-      // but the source code calls /administration/logs/instance
-      // This is a potential bug — let's override to match the actual call
+    it("requests the backend /instance-id path", async () => {
+      // Backend serves this at /instance-id
+      // (IRestLogAdmin.getInstanceId @Path("/instance-id")). Requesting
+      // /instance would 404 in production.
+      let hitPath: string | null = null;
       server.use(
+        http.get("*/administration/logs/instance-id", ({ request }) => {
+          hitPath = new URL(request.url).pathname;
+          return HttpResponse.json({ instanceId: "inst-abc-123" });
+        }),
         http.get("*/administration/logs/instance", () =>
-          HttpResponse.json({ instanceId: "inst-abc-123" })
+          HttpResponse.json({ instanceId: "WRONG-PATH" })
         )
       );
       const result = await getInstanceId();
-      expect(result).toBeDefined();
+      expect(hitPath).toContain("/administration/logs/instance-id");
       expect(result.instanceId).toBe("inst-abc-123");
     });
   });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
@@ -7,12 +7,9 @@ import {
   useRecentLogs,
   useHistoryLogs,
   useInstanceId,
+  useLogStream,
 } from "@/hooks/use-logs";
 import { http, HttpResponse } from "msw";
-
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterAll(() => server.close());
-afterEach(() => server.resetHandlers());
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -208,9 +205,9 @@ describe("useHistoryLogs", () => {
 });
 
 describe("useInstanceId", () => {
-  it("fetches the instance ID", async () => {
+  it("fetches the instance ID from /instance-id", async () => {
     server.use(
-      http.get("*/logs/instance", () => {
+      http.get("*/logs/instance-id", () => {
         return HttpResponse.json({ instanceId: "node-abc-123" });
       }),
     );
@@ -224,7 +221,7 @@ describe("useInstanceId", () => {
 
   it("returns instanceId value", async () => {
     server.use(
-      http.get("*/logs/instance", () => {
+      http.get("*/logs/instance-id", () => {
         return HttpResponse.json({ instanceId: "instance-xyz-789" });
       }),
     );
@@ -238,7 +235,7 @@ describe("useInstanceId", () => {
 
   it("handles error response", async () => {
     server.use(
-      http.get("*/logs/instance", () => {
+      http.get("*/logs/instance-id", () => {
         return new HttpResponse(null, { status: 500 });
       })
     );
@@ -247,5 +244,52 @@ describe("useInstanceId", () => {
       wrapper: createWrapper(),
     });
     await waitFor(() => expect(result.current.isError).toBe(true));
+  });
+});
+
+describe("useLogStream", () => {
+  /** A ReadableStream that emits one SSE block then stays open (no reconnect). */
+  function openStream(block: string): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    return new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(block));
+        // Intentionally do not close — keeps the connection "live" so the
+        // stream doesn't hit EOF and trigger a reconnect during the test.
+      },
+    });
+  }
+
+  let fetchSpy: ReturnType<typeof vi.spyOn> | undefined;
+  afterEach(() => {
+    fetchSpy?.mockRestore();
+    fetchSpy = undefined;
+  });
+
+  it("handles a single named 'log' SSE event exactly once (no double-dispatch)", async () => {
+    const entry = {
+      level: "INFO",
+      message: "single log line",
+      loggerName: "test",
+      timestamp: Date.now(),
+    };
+    const block = `event: log\ndata: ${JSON.stringify(entry)}\n\n`;
+    // Bypass MSW: BearerEventSource uses fetch + ReadableStream directly.
+    fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() =>
+        Promise.resolve(new Response(openStream(block), { status: 200 })),
+      ) as ReturnType<typeof vi.spyOn>;
+
+    // A filter avoids seeding from the session log store, so entries start empty.
+    const { result, unmount } = renderHook(
+      () => useLogStream({ level: "INFO" }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => expect(result.current.entries.length).toBe(1));
+    expect(result.current.entries[0]!.message).toBe("single log line");
+
+    unmount();
   });
 });

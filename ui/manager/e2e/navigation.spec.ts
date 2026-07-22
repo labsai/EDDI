@@ -3,7 +3,7 @@ import { waitForApp } from "./e2e-helpers";
 
 test.describe("Navigation", () => {
   test("loads dashboard by default", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/manage");
     await waitForApp(page);
     await expect(page).toHaveURL(/\/manage/);
     // Use heading instead of getByText to avoid matching sidebar "Dashboard"
@@ -33,11 +33,23 @@ test.describe("Navigation", () => {
   test("navigates to conversations page via sidebar", async ({ page }) => {
     await page.goto("/manage");
     await waitForApp(page);
+    // Exact match: the sidebar also has an "Active Conversations" link, so a
+    // /conversations/i regex resolves to two elements and trips strict mode.
     await page
       .getByTestId("sidebar")
-      .getByRole("link", { name: /conversations/i })
+      .getByRole("link", { name: "Conversations", exact: true })
       .click();
     await expect(page).toHaveURL(/\/manage\/conversations/);
+  });
+
+  test("navigates to active conversations page via sidebar", async ({ page }) => {
+    await page.goto("/manage");
+    await waitForApp(page);
+    await page
+      .getByTestId("sidebar")
+      .getByRole("link", { name: "Active Conversations", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/manage\/conversations\/monitoring/);
   });
 
   test("navigates to resources page via sidebar", async ({ page }) => {

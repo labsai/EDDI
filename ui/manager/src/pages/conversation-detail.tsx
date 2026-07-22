@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AttachmentsSection } from "@/components/conversations/attachments-section";
 import {
   useSimpleConversation,
   useDeleteConversation,
@@ -64,6 +65,7 @@ export function ConversationDetailPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deletePermanent, setDeletePermanent] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
   // i18n labels
@@ -92,16 +94,21 @@ export function ConversationDetailPage() {
 
   function handleDelete() {
     deleteMutation.mutate(
-      { id: id! },
+      { id: id!, permanent: deletePermanent },
       {
         onSuccess: () => {
-          toast.success(t("common.delete") + " \u2713");
+          toast.success(
+            deletePermanent
+              ? t("conversations.permanentDeleteSuccess", "Permanently deleted")
+              : t("conversations.softDeleteSuccess", "Conversation deleted")
+          );
           navigate("/manage/conversations");
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
     setShowDeleteDialog(false);
+    setDeletePermanent(false);
   }
 
   function handleExportMarkdown() {
@@ -284,6 +291,13 @@ export function ConversationDetailPage() {
           />
         )}
 
+      {/* Attachments the conversation owns (browse / download / delete) */}
+      {id && (
+        <section className="rounded-xl border bg-card p-5 shadow-sm">
+          <AttachmentsSection conversationId={id} />
+        </section>
+      )}
+
       {/* Chat-style conversation */}
       <section className="rounded-xl border bg-card shadow-sm" data-testid="conversation-chat">
         <div className="flex items-center gap-2 border-b border-border p-5">
@@ -347,14 +361,40 @@ export function ConversationDetailPage() {
       {/* Delete confirmation dialog */}
       <AlertDialog
         open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
+        onOpenChange={(open) => {
+          setShowDeleteDialog(open);
+          if (!open) setDeletePermanent(false);
+        }}
         title={t("conversations.confirmDelete", "Delete Conversation")}
-        description={t("conversations.confirmDeleteDescription", "This conversation and its history will be permanently removed.")}
-        confirmLabel={t("common.delete")}
+        description={t(
+          "conversations.confirmDeleteSoft",
+          "By default this is a soft delete — the conversation is hidden from listings but its stored data is kept on the server."
+        )}
+        confirmLabel={
+          deletePermanent
+            ? t("conversations.deletePermanentAction", "Delete permanently")
+            : t("common.delete")
+        }
         cancelLabel={t("common.cancel")}
         onConfirm={handleDelete}
         isPending={deleteMutation.isPending}
-      />
+      >
+        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 accent-destructive"
+            checked={deletePermanent}
+            onChange={(e) => setDeletePermanent(e.target.checked)}
+            data-testid="delete-permanent-checkbox"
+          />
+          <span className="text-muted-foreground">
+            {t(
+              "conversations.deletePermanentLabel",
+              "Permanently delete — also erases attachments, the memory snapshot and approval history. This cannot be undone."
+            )}
+          </span>
+        </label>
+      </AlertDialog>
     </div>
   );
 }
@@ -548,9 +588,18 @@ function PropertiesSection({
   );
 }
 
-/** Simple JSON syntax highlighter using regex — returns HTML string */
+/** Simple JSON syntax highlighter using regex — returns HTML string.
+ *
+ * The output is injected via dangerouslySetInnerHTML, and `json` can contain
+ * attacker-controlled conversation content (user input / agent output), so we
+ * HTML-escape first — otherwise a string value like `<img src=x onerror=…>`
+ * would execute as markup (stored XSS). `&` must be escaped before `<`/`>`. */
 function syntaxHighlightJson(json: string): string {
-  return json.replace(
+  const escaped = json
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return escaped.replace(
     /("(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
     (match) => {
       let cls = "color: var(--color-amber-400)"; // number

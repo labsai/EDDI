@@ -1953,13 +1953,13 @@ export const handlers = [
 
   http.get("*/groupstore/groups/styles", () => {
     return HttpResponse.json({
-      ROUND_TABLE: { label: "Round Table", phases: ["OPINION", "SYNTHESIS"] },
-      PEER_REVIEW: { label: "Peer Review", phases: ["OPINION", "CRITIQUE", "REVISION", "SYNTHESIS"] },
-      DEVIL_ADVOCATE: { label: "Devil's Advocate", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
-      DELPHI: { label: "Delphi", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
-      DEBATE: { label: "Debate", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
-      TASK_FORCE: { label: "Task Force", phases: ["PLAN", "EXECUTE", "VERIFY", "SYNTHESIS"] },
-      CUSTOM: { label: "Custom", phases: [] },
+      ROUND_TABLE: { label: "Collaborative Council", phases: ["OPINION", "SYNTHESIS"] },
+      PEER_REVIEW: { label: "Quality Review", phases: ["OPINION", "CRITIQUE", "REVISION", "SYNTHESIS"] },
+      DEVIL_ADVOCATE: { label: "Stress Test", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
+      DELPHI: { label: "Expert Forecast", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
+      DEBATE: { label: "Structured Deliberation", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
+      TASK_FORCE: { label: "Operational Task Force", phases: ["PLAN", "EXECUTE", "VERIFY", "SYNTHESIS"] },
+      CUSTOM: { label: "Custom Framework", phases: [] },
     });
   }),
 
@@ -2264,15 +2264,20 @@ export const handlers = [
   }),
 
   http.get("*/schedulestore/schedules/admin/failed", () => {
+    const now = Date.now();
     return HttpResponse.json([
       {
         id: "fire-fail-1",
         scheduleId: "sched-3",
-        scheduleName: "Failed Report",
-        agentId: "agent1",
-        firedAt: Date.now() - 604800000,
-        success: false,
-        error: "Agent not deployed in production environment",
+        fireId: "f-3-1",
+        fireTime: new Date(now - 604800000).toISOString(),
+        startedAt: new Date(now - 604800000).toISOString(),
+        completedAt: new Date(now - 604799000).toISOString(),
+        status: "DEAD_LETTERED",
+        conversationId: null,
+        errorMessage: "Agent not deployed in production environment",
+        attemptNumber: 3,
+        cost: 0,
       },
     ]);
   }),
@@ -2336,28 +2341,31 @@ export const handlers = [
   }),
 
   http.get("*/schedulestore/schedules/:id/fires", () => {
+    const now = Date.now();
     return HttpResponse.json([
       {
         id: "fire-1",
         scheduleId: "sched-1",
-        scheduleName: "Daily Health Check",
-        agentId: "agent1",
+        fireId: "f-1-1",
+        fireTime: new Date(now - 43200000).toISOString(),
+        startedAt: new Date(now - 43200000).toISOString(),
+        completedAt: new Date(now - 43195000).toISOString(),
+        status: "COMPLETED",
         conversationId: "conv-fire-001",
-        firedAt: Date.now() - 43200000,
-        completedAt: Date.now() - 43195000,
-        durationMs: 5000,
-        success: true,
+        attemptNumber: 1,
+        cost: 0.0012,
       },
       {
         id: "fire-2",
         scheduleId: "sched-1",
-        scheduleName: "Daily Health Check",
-        agentId: "agent1",
+        fireId: "f-1-2",
+        fireTime: new Date(now - 129600000).toISOString(),
+        startedAt: new Date(now - 129600000).toISOString(),
+        completedAt: new Date(now - 129594000).toISOString(),
+        status: "COMPLETED",
         conversationId: "conv-fire-002",
-        firedAt: Date.now() - 129600000,
-        completedAt: Date.now() - 129594000,
-        durationMs: 6000,
-        success: true,
+        attemptNumber: 1,
+        cost: 0.0015,
       },
     ]);
   }),
@@ -3135,11 +3143,14 @@ const MOCK_AUDIT_ENTRIES = [
     input: { "user:message": "Hello there", "conversation:history": 3 },
     output: { "llm:response": "Hi there! How can I help you today?" },
     llmDetail: {
-      "compiled_prompt": "You are a helpful assistant.\n\nUser: Hello there",
-      "model_response": "Hi there! How can I help you today?",
-      "model_name": "gpt-5.4-mini",
-      "input_tokens": 42,
-      "output_tokens": 12,
+      compiledPrompt: "System: You are a helpful assistant.\n\nUser: Hello there",
+      modelResponse: "Hi there! How can I help you today?",
+      modelName: "gpt-5.4-mini",
+      tokenUsage: {
+        inputTokens: 42,
+        outputTokens: 12,
+      },
+      temperature: 0.7,
     },
     toolCalls: null,
     actions: ["greet", "chat"],
@@ -3352,26 +3363,27 @@ const FIRE_LOGS_MOCK = [
   {
     id: "fire-1",
     scheduleId: "sched-1",
-    scheduleName: "Daily Health Check",
-    agentId: "agent1",
+    fireId: "f-1-1",
+    fireTime: new Date(Date.now() - 86400000).toISOString(),
+    startedAt: new Date(Date.now() - 86400000).toISOString(),
+    completedAt: new Date(Date.now() - 86399000).toISOString(),
+    status: "COMPLETED",
     conversationId: "conv-123",
-    firedAt: Date.now() - 86400000,
-    completedAt: Date.now() - 86399000,
-    durationMs: 1000,
-    success: true,
-    error: null,
+    attemptNumber: 1,
+    cost: 0.001,
   },
   {
     id: "fire-2",
     scheduleId: "sched-1",
-    scheduleName: "Daily Health Check",
-    agentId: "agent1",
+    fireId: "f-1-2",
+    fireTime: new Date(Date.now() - 172800000).toISOString(),
+    startedAt: new Date(Date.now() - 172800000).toISOString(),
+    completedAt: new Date(Date.now() - 172799500).toISOString(),
+    status: "FAILED",
     conversationId: "conv-124",
-    firedAt: Date.now() - 172800000,
-    completedAt: Date.now() - 172799500,
-    durationMs: 500,
-    success: false,
-    error: "Connection timeout",
+    errorMessage: "Connection timeout",
+    attemptNumber: 2,
+    cost: 0,
   },
 ];
 
@@ -3436,7 +3448,9 @@ export const scheduleHandlers = [
 
   // Admin - failed fires
   http.get("*/schedulestore/schedules/admin/failed", () => {
-    return HttpResponse.json(FIRE_LOGS_MOCK.filter((l) => !l.success));
+    return HttpResponse.json(
+      FIRE_LOGS_MOCK.filter((l) => l.status !== "COMPLETED")
+    );
   }),
 
   // Retry dead letter

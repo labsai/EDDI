@@ -9,6 +9,7 @@ import {
   disableSchedule,
   fireNow,
   retryDeadLetter,
+  dismissDeadLetter,
   getFireLogs,
   getFailedFires,
 } from "@/lib/api/schedules";
@@ -116,6 +117,17 @@ export function useRetryDeadLetter() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: retryDeadLetter,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.all });
+      qc.invalidateQueries({ queryKey: KEYS.failed });
+    },
+  });
+}
+
+export function useDismissDeadLetter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: dismissDeadLetter,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.invalidateQueries({ queryKey: KEYS.failed });

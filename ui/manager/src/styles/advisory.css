@@ -1,0 +1,209 @@
+/* ─── Workforce Design Tokens ─────────────────────────────────────
+ * Scoped under .Workforce so they don't leak into the rest of the app.
+ * All tokens reference the EDDI global design system (gold/black CI).
+ * ────────────────────────────────────────────────────────────────── */
+
+.Workforce {
+  /* Surface & background — inherit from EDDI theme */
+  --br-bg: var(--color-background);
+  --br-surface: var(--color-card);
+  --br-surface-hover: var(--color-muted);
+  --br-border: var(--color-border);
+
+  /* Typography — inherit from EDDI theme */
+  --br-text: var(--color-foreground);
+  --br-text-secondary: var(--color-muted-foreground);
+
+  /* Accent — EDDI gold */
+  --br-accent: var(--color-primary);
+  --br-accent-hover: var(--color-accent);
+  --br-accent-fg: var(--color-primary-foreground);
+  --br-accent-subtle: color-mix(in srgb, var(--color-primary) 10%, transparent);
+
+  /* Glass effect */
+  --br-glass-bg: color-mix(in srgb, var(--color-card) 80%, transparent);
+  --br-glass-blur: blur(16px);
+  --br-glass-border: color-mix(in srgb, var(--color-border) 40%, transparent);
+
+  /* Shadows — subtle on light, deeper on dark (handled by theme naturally) */
+  --br-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --br-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07),
+    0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --br-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08),
+    0 4px 6px -4px rgba(0, 0, 0, 0.05);
+}
+
+/* ─── Dark Mode Overrides ─────────────────────────────────────── */
+
+.dark .Workforce {
+  --br-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --br-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4),
+    0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --br-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5),
+    0 4px 6px -4px rgba(0, 0, 0, 0.3);
+}
+
+/* ─── Keyframe Animations ─────────────────────────────────────── */
+
+@keyframes br-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes br-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes br-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes br-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes br-drawer-in-rtl {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes br-fab-in {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Stagger utility — set --stagger-delay on each child */
+.br-stagger {
+  animation: br-fade-in 300ms ease-out both;
+  animation-delay: var(--stagger-delay, 0ms);
+}
+
+/* ─── Micro-animation Utilities ──────────────────────────────────── */
+
+@keyframes br-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.br-card-enter {
+  animation: br-card-in 300ms ease-out both;
+  animation-delay: var(--enter-delay, 0ms);
+}
+
+@keyframes br-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.br-section-enter {
+  animation: br-section-in 350ms ease-out both;
+  animation-delay: var(--enter-delay, 0ms);
+}
+
+.br-card-premium {
+  transition: box-shadow 300ms ease, border-color 300ms ease, transform 200ms ease;
+}
+.br-card-premium:hover {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 15%, transparent),
+              0 8px 25px -5px rgba(0, 0, 0, 0.12);
+}
+.dark .br-card-premium:hover {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 20%, transparent),
+              0 8px 25px -5px rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes br-message-in {
+    from { opacity: 1; transform: none; }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes br-fade-in {
+    from { opacity: 1; }
+    to { opacity: 1; }
+  }
+  @keyframes confetti-fall {
+    from { opacity: 0; transform: none; }
+    to { opacity: 0; transform: none; }
+  }
+  @keyframes br-card-in {
+    from { opacity: 1; transform: none; }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes br-section-in {
+    from { opacity: 1; transform: none; }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+/* ─── Utility Classes ─────────────────────────────────────────── */
+
+.br-glass {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  background: var(--br-glass-bg);
+  border: 1px solid var(--br-glass-border);
+}
+
+.br-surface {
+  background: var(--br-surface);
+  border: 1px solid var(--br-border);
+  border-radius: 0.75rem;
+}
+
+/* ─── Confetti Animation ─────────────────────────────────────── */
+
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}

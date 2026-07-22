@@ -5,6 +5,9 @@ import {
   deleteSecret,
   getVaultHealth,
   rotateSecret,
+  rotateDek,
+  rotateKek,
+  resetTenant,
 } from "@/lib/api/secrets";
 
 /* ─── Query Keys ─── */
@@ -95,6 +98,55 @@ export function useRotateSecret() {
       qc.invalidateQueries({
         queryKey: secretKeys.list(vars.tenantId),
       });
+    },
+  });
+}
+
+/**
+ * Rotate the tenant's Data Encryption Key (DEK). Safe/no-restart — re-encrypts
+ * the tenant's secrets. Invalidates the tenant list (rotation timestamps change).
+ */
+export function useRotateDek() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { tenantId: string }) => rotateDek(args.tenantId),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({
+        queryKey: secretKeys.list(vars.tenantId),
+      });
+    },
+  });
+}
+
+/**
+ * Rotate the master key (KEK). Re-encrypts every tenant's DEK, so invalidate all
+ * secret queries and re-check vault health.
+ */
+export function useRotateKek() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { oldKey: string; newKey: string }) =>
+      rotateKek({ oldKey: args.oldKey, newKey: args.newKey }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: secretKeys.all });
+      qc.invalidateQueries({ queryKey: secretKeys.health });
+    },
+  });
+}
+
+/**
+ * Reset the vault for a tenant. DESTRUCTIVE — deletes all secrets and the DEK.
+ * Invalidates the tenant list and all secret queries.
+ */
+export function useResetTenant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { tenantId: string }) => resetTenant(args.tenantId),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({
+        queryKey: secretKeys.list(vars.tenantId),
+      });
+      qc.invalidateQueries({ queryKey: secretKeys.all });
     },
   });
 }

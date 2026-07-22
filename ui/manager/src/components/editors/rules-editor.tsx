@@ -37,18 +37,35 @@ export interface RulesConfig {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
+// Backend condition IDs (ai.labs.eddi.modules.rules.impl.conditions.*.ID).
+// RuleDeserialization matches these EXACTLY (case-sensitive) — a wrong value
+// throws "No condition for type ..." and yields an unloadable ruleset.
 const CONDITION_TYPES = [
   "inputmatcher",
   "actionmatcher",
+  "contextmatcher",
+  "contentTypeMatcher",
+  "occurrence",
+  "dynamicvaluematcher",
+  "sizematcher",
+  "dependency",
   "negation",
   "connector",
-  "occurrence",
-  "dynamicValueMatcher",
   "deploymentContext",
   "capabilityMatch",
 ] as const;
 
-const EXECUTION_STRATEGIES = ["currentStepOnly", "lastStepOnly", "anyStep"] as const;
+// Backend RuleGroup.ExecutionStrategy enum — the ONLY two values valueOf() accepts.
+const EXECUTION_STRATEGIES = ["executeUntilFirstSuccess", "executeAll"] as const;
+type ExecutionStrategy = (typeof EXECUTION_STRATEGIES)[number];
+const STRATEGY_LABELS: Record<ExecutionStrategy, string> = {
+  executeUntilFirstSuccess: "Until first success",
+  executeAll: "Execute all",
+};
+const isKnownStrategy = (v: string | undefined): v is ExecutionStrategy =>
+  (EXECUTION_STRATEGIES as readonly string[]).includes(v ?? "");
+const isKnownCondition = (v: string | undefined): boolean =>
+  (CONDITION_TYPES as readonly string[]).includes(v ?? "");
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -258,8 +275,20 @@ function ConditionEditor({
       case "capabilityMatch":
         configs = { skill: "", strategy: "highest_confidence", attributes: "" };
         break;
+      case "contextmatcher":
+        configs = { context: "", contextType: "string", string: "" };
+        break;
+      case "contentTypeMatcher":
+        configs = { mimeType: "", minCount: "1" };
+        break;
+      case "sizematcher":
+        configs = { valuePath: "", min: "", max: "" };
+        break;
+      case "dependency":
+        configs = { reference: "" };
+        break;
       default:
-        // negation, connector, dynamicValueMatcher — no preset configs
+        // negation, connector, dynamicvaluematcher — no preset configs
         configs = {};
         break;
     }
@@ -290,6 +319,11 @@ function ConditionEditor({
           className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
           data-testid="condition-type-select"
         >
+          {!isKnownCondition(condition.type) && condition.type && (
+            <option value={condition.type} disabled>
+              {condition.type} {t("rulesEditor.invalidValue", "(invalid)")}
+            </option>
+          )}
           {CONDITION_TYPES.map((ct) => (
             <option key={ct} value={ct}>
               {ct === "deploymentContext"
@@ -559,7 +593,11 @@ export function RulesEditor({
       ...data,
       behaviorGroups: [
         ...(data.behaviorGroups ?? []),
-        { name: "", executionStrategy: "currentStepOnly", behaviorRules: [] },
+        {
+          name: "",
+          executionStrategy: "executeUntilFirstSuccess",
+          behaviorRules: [],
+        },
       ],
     });
   }, [data, onChange]);
@@ -667,7 +705,11 @@ export function RulesEditor({
                 className="h-8 flex-1 rounded-md border border-input bg-background px-3 text-sm font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
               <select
-                value={group.executionStrategy ?? "currentStepOnly"}
+                value={
+                  isKnownStrategy(group.executionStrategy)
+                    ? group.executionStrategy
+                    : group.executionStrategy || "executeUntilFirstSuccess"
+                }
                 onChange={(e) =>
                   updateGroup(gi, {
                     ...group,
@@ -676,10 +718,18 @@ export function RulesEditor({
                 }
                 disabled={readOnly}
                 className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                data-testid="group-strategy-select"
               >
+                {!isKnownStrategy(group.executionStrategy) &&
+                  group.executionStrategy && (
+                    <option value={group.executionStrategy} disabled>
+                      {group.executionStrategy}{" "}
+                      {t("rulesEditor.invalidValue", "(invalid)")}
+                    </option>
+                  )}
                 {EXECUTION_STRATEGIES.map((s) => (
                   <option key={s} value={s}>
-                    {s}
+                    {t(`rulesEditor.strategy_${s}`, STRATEGY_LABELS[s])}
                   </option>
                 ))}
               </select>

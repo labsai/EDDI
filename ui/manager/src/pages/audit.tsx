@@ -513,10 +513,57 @@ export function AuditPage() {
     PAGE_SIZE,
   );
 
-  const entries = mode === "conversation" ? convQuery.data : agentQuery.data;
+  const pageEntries = mode === "conversation" ? convQuery.data : agentQuery.data;
   const isLoading = mode === "conversation" ? convQuery.isLoading : agentQuery.isLoading;
   const isFetching = mode === "conversation" ? convQuery.isFetching : agentQuery.isFetching;
   const hasSearched = mode === "conversation" ? !!searchValue : !!activeAgentId;
+
+  // ─── Paging accumulator ──────────────────────────────────────
+  // `skip` lives in the react-query key, so each "Load more" fetches a fresh
+  // window. Keep every fetched page (keyed by its skip offset) and render the
+  // flattened union so paging *appends* rather than replacing earlier rows.
+  const [pages, setPages] = useState<Record<number, AuditEntry[]>>({});
+
+  // Reset the accumulator whenever the search context changes. `skip` is reset
+  // by whatever changes the context (the search handlers *and* the mode
+  // toggles) so that it lands in the SAME render batch as the context change.
+  // Resetting it here instead would be too late: the merge effect below would
+  // run once more with the stale offset and immediately re-populate the
+  // accumulator this effect just cleared.
+  useEffect(() => {
+    setPages({});
+  }, [mode, searchValue, activeAgentId, activeAgentVersion]);
+
+  // Merge each freshly-fetched page. Same-skip refetches (auto-refresh) replace
+  // that page; a new skip appends a page.
+  useEffect(() => {
+    if (!pageEntries) return;
+    setPages((prev) => {
+      if (prev[skip] === pageEntries) return prev;
+      return { ...prev, [skip]: pageEntries };
+    });
+  }, [pageEntries, skip]);
+
+  const entries = useMemo(
+    () =>
+      Object.keys(pages)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .flatMap((k) => pages[k]!),
+    [pages],
+  );
+
+  // Only show the "Load more" affordance while the highest-skip page came back
+  // full (a partial page means we've reached the end).
+  const hasMore = useMemo(() => {
+    const skips = Object.keys(pages).map(Number);
+    if (skips.length === 0) return false;
+    const maxSkip = Math.max(...skips);
+    return (pages[maxSkip]?.length ?? 0) >= PAGE_SIZE;
+  }, [pages]);
+
+  // Skeleton only for the very first page; later pages keep prior rows visible.
+  const showInitialLoading = isLoading && entries.length === 0;
 
   // Group entries by step (conversation mode) or by conversation then step (agent mode)
   const stepGroups = useMemo(() => {
@@ -636,7 +683,7 @@ export function AuditPage() {
             <button
               type="button"
               onClick={handleExport}
-              disabled={!entries || entries.length === 0}
+              disabled={entries.length === 0}
               className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
               data-testid="export-btn"
             >
@@ -653,7 +700,10 @@ export function AuditPage() {
         <div className="mb-3 flex items-center gap-2" data-tour="audit-mode-toggle">
           <button
             type="button"
-            onClick={() => setMode("agent")}
+            onClick={() => {
+              setMode("agent");
+              setSkip(0);
+            }}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
               mode === "agent"
                 ? "bg-primary text-primary-foreground shadow-sm"
@@ -666,7 +716,10 @@ export function AuditPage() {
           </button>
           <button
             type="button"
-            onClick={() => setMode("conversation")}
+            onClick={() => {
+              setMode("conversation");
+              setSkip(0);
+            }}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
               mode === "conversation"
                 ? "bg-primary text-primary-foreground shadow-sm"
@@ -752,7 +805,7 @@ export function AuditPage() {
       </div>
 
       {/* Summary strip */}
-      {hasSearched && entries && entries.length > 0 && (
+      {hasSearched && entries.length > 0 && (
         <div className="flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3" data-testid="summary-strip">
           {/* Context label */}
           {activeAgentName && mode === "agent" && (
@@ -800,7 +853,7 @@ export function AuditPage() {
       )}
 
       {/* Integrity trust banner */}
-      {hasSearched && entries && entries.length > 0 && (
+      {hasSearched && entries.length > 0 && (
         <div
           className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
             stats.signed === stats.count
@@ -869,8 +922,8 @@ export function AuditPage() {
         </div>
       )}
 
-      {/* Loading state */}
-      {isLoading && hasSearched && <LoadingSkeleton />}
+      {/* Loading state — only for the first page; later pages keep prior rows. */}
+      {showInitialLoading && hasSearched && <LoadingSkeleton />}
 
       {/* Empty state - no search yet */}
       {!hasSearched && (
@@ -890,7 +943,7 @@ export function AuditPage() {
       )}
 
       {/* Empty state - no results */}
-      {hasSearched && !isLoading && entries && entries.length === 0 && (
+      {hasSearched && !isLoading && entries.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 py-16">
           <ShieldCheck className="h-12 w-12 text-muted-foreground/30" />
           <p className="mt-4 text-sm font-medium text-foreground/60">
@@ -903,7 +956,7 @@ export function AuditPage() {
       )}
 
       {/* Timeline view */}
-      {hasSearched && !isLoading && entries && entries.length > 0 && (
+      {hasSearched && entries.length > 0 && (
         <div className="space-y-4" data-testid="audit-timeline">
           {mode === "agent" && conversationGroups.size > 0 ? (
             /* Agent mode with multiple conversations — group by conversation */
@@ -930,7 +983,7 @@ export function AuditPage() {
           )}
 
           {/* Load more */}
-          {entries.length >= PAGE_SIZE && (
+          {hasMore && (
             <div className="flex justify-center">
               <button
                 type="button"

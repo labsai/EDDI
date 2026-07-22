@@ -68,6 +68,7 @@ const navSections = [
     items: [
       { path: "/manage/logs", icon: ScrollText, labelKey: "nav.logs" },
       { path: "/manage/conversations", icon: MessagesSquare, labelKey: "nav.conversations" },
+      { path: "/manage/conversations/monitoring", icon: Activity, labelKey: "nav.activeConversations", fallback: "Active Conversations" },
       { path: "/manage/coordinator", icon: Activity, labelKey: "nav.coordinator" },
       { path: "/manage/approvals", icon: HandMetal, labelKey: "nav.approvals" },
       { path: "/manage/audit", icon: ShieldCheck, labelKey: "nav.audit" },
@@ -183,10 +184,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             </text>
           </svg>
         ) : (
+          // The wordmark is a pure-white glyph: keep it white on the dark
+          // sidebar (dark mode) but invert to near-black on the white sidebar
+          // (light mode) so it stays visible.
           <img
             src="/logo_eddi.png"
             alt="EDDI"
-            className="h-7 w-auto"
+            className="h-7 w-auto invert dark:invert-0"
           />
         )}
       </div>
@@ -220,11 +224,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             {/* Section items — hidden when section is collapsed (only in expanded sidebar) */}
             {(!collapsed ? !collapsedSections.has(idx) : true) && (
               <div id={`sidebar-section-${idx}`} className="space-y-0.5">
-                {section.items.map((item) => (
+                {section.items.map((item) => {
+                  const label =
+                    "fallback" in item
+                      ? t(item.labelKey, { defaultValue: item.fallback as string })
+                      : t(item.labelKey);
+                  return (
                   <NavLink
                     key={item.path}
                     to={item.path}
-                    end={item.path === "/manage"}
+                    // `end` on the parent conversations route so it isn't kept
+                    // active on the /monitoring child route.
+                    end={item.path === "/manage" || item.path === "/manage/conversations"}
                     className={({ isActive }) =>
                       cn(
                         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all",
@@ -235,13 +246,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                         collapsed && "justify-center px-2"
                       )
                     }
-                    aria-label={collapsed ? t(item.labelKey) : undefined}
-                    title={collapsed ? t(item.labelKey) : undefined}
+                    aria-label={collapsed ? label : undefined}
+                    title={collapsed ? label : undefined}
                   >
                     <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-                    {!collapsed && <span>{t(item.labelKey)}</span>}
+                    {!collapsed && <span>{label}</span>}
                   </NavLink>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

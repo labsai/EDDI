@@ -19,6 +19,9 @@ import {
   RefreshCw,
   FileText,
   Bot,
+  ShieldAlert,
+  KeySquare,
+  RotateCw,
 } from "lucide-react";
 import {
   useSecrets,
@@ -26,8 +29,13 @@ import {
   useDeleteSecret,
   useVaultHealth,
   useRotateSecret,
+  useRotateDek,
+  useRotateKek,
+  useResetTenant,
 } from "@/hooks/use-secrets";
 import type { SecretMetadata } from "@/lib/api/secrets";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { getErrorMessage } from "@/lib/api-client";
 
 const DEFAULT_TENANT = "default";
 
@@ -51,15 +59,50 @@ export function SecretsPage() {
   const [rotateValue, setRotateValue] = useState("");
   const [rotateVisible, setRotateVisible] = useState(false);
   const [newAllowedAgents, setNewAllowedAgents] = useState<string[]>([]);
+  const [newAgentInput, setNewAgentInput] = useState("");
+
+  /* ─── Key-lifecycle (danger zone) state ─── */
+  const [showRotateDek, setShowRotateDek] = useState(false);
+  const [showRotateKek, setShowRotateKek] = useState(false);
+  const [showResetTenant, setShowResetTenant] = useState(false);
+  const [kekOldKey, setKekOldKey] = useState("");
+  const [kekNewKey, setKekNewKey] = useState("");
+  const [kekOldVisible, setKekOldVisible] = useState(false);
+  const [kekNewVisible, setKekNewVisible] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState("");
+  const [kekResult, setKekResult] = useState<number | null>(null);
 
   /* ─── Queries ─── */
-  const { data: secrets, isLoading } = useSecrets(tenantId);
+  const {
+    data: secrets,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useSecrets(tenantId);
   const { data: vaultHealth } = useVaultHealth();
   const storeMut = useStoreSecret();
   const deleteMut = useDeleteSecret();
   const rotateMut = useRotateSecret();
+  const rotateDekMut = useRotateDek();
+  const rotateKekMut = useRotateKek();
+  const resetTenantMut = useResetTenant();
 
   const vaultDown = vaultHealth?.available === false;
+  const secretCount = secrets?.length ?? 0;
+  const kekValid = kekOldKey.trim().length > 0 && kekNewKey.length >= 8;
+
+  /* The KEK-rotation result is tenant-agnostic advice about the running instance,
+   * but leaving it up while switching tenants is confusing. Clear it on switch. */
+  useEffect(() => {
+    setKekResult(null);
+  }, [tenantId]);
+
+  /* Drop any pending (un-committed) allowed-agent text once the create dialog
+   * closes so it doesn't reappear the next time the dialog is opened. */
+  useEffect(() => {
+    if (!showCreate) setNewAgentInput("");
+  }, [showCreate]);
 
   /* ─── Copy vault reference ─── */
   const copyRef = useCallback(
@@ -83,13 +126,21 @@ export function SecretsPage() {
   /* ─── Handlers ─── */
   const handleCreate = useCallback(() => {
     if (!newKeyName.trim() || !newValue.trim()) return;
+    // Flush any typed-but-not-Entered agent so it isn't silently dropped
+    // (which would leave the secret unrestricted / available to ALL agents).
+    const pendingAgent = newAgentInput.trim().replace(/,$/, "");
+    const finalAllowedAgents =
+      pendingAgent && !newAllowedAgents.includes(pendingAgent)
+        ? [...newAllowedAgents, pendingAgent]
+        : newAllowedAgents;
     storeMut.mutate(
       {
         tenantId,
         keyName: newKeyName.trim(),
         value: newValue.trim(),
         description: newDescription.trim() || undefined,
-        allowedAgents: newAllowedAgents.length > 0 ? newAllowedAgents : undefined,
+        allowedAgents:
+          finalAllowedAgents.length > 0 ? finalAllowedAgents : undefined,
       },
       {
         onSuccess: () => {
@@ -105,12 +156,13 @@ export function SecretsPage() {
           setNewDescription("");
           setValueVisible(false);
           setNewAllowedAgents([]);
+          setNewAgentInput("");
         },
         onError: (err) =>
           toast.error(err instanceof Error ? err.message : String(err)),
       },
     );
-  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, storeMut, t]);
+  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, newAgentInput, storeMut, t]);
 
   const handleDelete = useCallback(() => {
     if (!deleteTarget) return;
@@ -134,6 +186,70 @@ export function SecretsPage() {
       },
     );
   }, [deleteTarget, deleteMut, t]);
+
+  /* ─── Key-lifecycle handlers ─── */
+  const handleRotateDek = useCallback(() => {
+    rotateDekMut.mutate(
+      { tenantId },
+      {
+        onSuccess: (data) => {
+          toast.success(
+            t("secrets.rotateDekSuccess", {
+              count: data.secretsReEncrypted,
+              defaultValue: `Encryption key rotated — ${data.secretsReEncrypted} secret(s) re-encrypted`,
+            }),
+          );
+          setShowRotateDek(false);
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      },
+    );
+  }, [tenantId, rotateDekMut, t]);
+
+  const handleRotateKek = useCallback(() => {
+    if (!kekValid) return;
+    rotateKekMut.mutate(
+      { oldKey: kekOldKey, newKey: kekNewKey },
+      {
+        onSuccess: (data) => {
+          setKekResult(data.deksReEncrypted);
+          toast.success(
+            t("secrets.rotateKekSuccess", {
+              count: data.deksReEncrypted,
+              defaultValue: `Master key rotated — ${data.deksReEncrypted} DEK(s) re-encrypted. Update EDDI_VAULT_MASTER_KEY and restart.`,
+            }),
+          );
+          setShowRotateKek(false);
+          setKekOldKey("");
+          setKekNewKey("");
+          setKekOldVisible(false);
+          setKekNewVisible(false);
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      },
+    );
+  }, [kekValid, kekOldKey, kekNewKey, rotateKekMut, t]);
+
+  const handleResetTenant = useCallback(() => {
+    if (resetConfirm !== tenantId) return;
+    resetTenantMut.mutate(
+      { tenantId },
+      {
+        onSuccess: (data) => {
+          toast.success(
+            t("secrets.resetTenantSuccess", {
+              count: data.secretsDeleted,
+              tenant: tenantId,
+              defaultValue: `Vault reset for "${tenantId}" — ${data.secretsDeleted} secret(s) permanently deleted`,
+            }),
+          );
+          setShowResetTenant(false);
+          setResetConfirm("");
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      },
+    );
+  }, [resetConfirm, tenantId, resetTenantMut, t]);
 
   const formatDate = (iso: string | null) => {
     if (!iso) return "—";
@@ -429,8 +545,33 @@ export function SecretsPage() {
         </div>
       )}
 
+      {/* Error state — distinct from the empty state so a 500/503/403 is not
+          mistaken for an empty vault. */}
+      {isError && !vaultDown && (
+        <div
+          className="space-y-3 rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center"
+          data-testid="secrets-error"
+        >
+          <AlertTriangle className="mx-auto h-10 w-10 text-destructive" />
+          <p className="text-lg font-medium text-foreground">
+            {t("secrets.loadError", "Couldn't load secrets")}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {getErrorMessage(error)}
+          </p>
+          <button
+            onClick={() => refetch()}
+            className="inline-flex items-center gap-2 rounded-lg border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            data-testid="secrets-error-retry"
+          >
+            <RefreshCw className="h-4 w-4" />
+            {t("common.retry", "Retry")}
+          </button>
+        </div>
+      )}
+
       {/* Empty state */}
-      {secrets && secrets.length === 0 && (
+      {!isError && secrets && secrets.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border p-12 text-center">
           <KeyRound className="h-12 w-12 text-muted-foreground/30" />
           <p className="mt-4 text-lg font-medium text-foreground">
@@ -444,6 +585,318 @@ export function SecretsPage() {
           </p>
         </div>
       )}
+
+      {/* ─── Key lifecycle / Danger zone ─── */}
+      {!vaultDown && (
+        <div
+          className="space-y-4 rounded-xl border border-destructive/30 bg-destructive/5 p-5"
+          data-testid="key-lifecycle-danger-zone"
+        >
+          <div className="flex items-start gap-2.5">
+            <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">
+                {t("secrets.dangerZoneTitle", "Encryption key lifecycle")}
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t(
+                  "secrets.dangerZoneDesc",
+                  "Operational recovery actions for the vault's cryptographic keys. Use these to rotate keys or recover access after the master key changed. Distinct from rotating an individual secret's value above.",
+                )}
+              </p>
+            </div>
+          </div>
+
+          {/* KEK rotation success — unmissable restart instruction */}
+          {kekResult !== null && (
+            <div
+              className="relative space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 pe-10"
+              data-testid="kek-rotation-result"
+              role="status"
+            >
+              <button
+                type="button"
+                onClick={() => setKekResult(null)}
+                className="absolute inset-e-2 top-2 rounded-md p-1 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
+                aria-label={t("common.dismiss", "Dismiss")}
+                data-testid="dismiss-kek-result"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <p className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                {t("secrets.kekResultTitle", {
+                  count: kekResult,
+                  defaultValue: `Master key rotated — ${kekResult} DEK(s) re-encrypted`,
+                })}
+              </p>
+              <p className="text-xs text-foreground">
+                {t(
+                  "secrets.kekResultInstruction",
+                  "Action required: set the EDDI_VAULT_MASTER_KEY environment variable to the NEW master key and restart EDDI. Until you do, the running instance still uses the old key in memory.",
+                )}
+              </p>
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            {/* Rotate DEK */}
+            <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+              <div className="flex items-center gap-2">
+                <RotateCw className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                <span className="text-sm font-medium text-foreground">
+                  {t("secrets.rotateDekTitle", "Rotate encryption key (DEK)")}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "secrets.rotateDekBlurb",
+                  "Safe — no restart. Generates a new per-tenant data encryption key and re-encrypts every secret for this tenant.",
+                )}
+              </p>
+              <button
+                onClick={() => setShowRotateDek(true)}
+                className="mt-auto inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 dark:text-emerald-300 transition-colors hover:bg-emerald-500/20"
+                data-testid="open-rotate-dek"
+              >
+                <RotateCw className="h-3.5 w-3.5" />
+                {t("secrets.rotateDekAction", "Rotate DEK")}
+              </button>
+            </div>
+
+            {/* Rotate KEK */}
+            <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+              <div className="flex items-center gap-2">
+                <KeySquare className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                <span className="text-sm font-medium text-foreground">
+                  {t("secrets.rotateKekTitle", "Rotate master key (KEK)")}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "secrets.rotateKekBlurb",
+                  "Re-encrypts all tenant DEKs with a new master key. Requires updating EDDI_VAULT_MASTER_KEY and restarting afterwards.",
+                )}
+              </p>
+              <button
+                onClick={() => setShowRotateKek(true)}
+                className="mt-auto inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500/20"
+                data-testid="open-rotate-kek"
+              >
+                <KeySquare className="h-3.5 w-3.5" />
+                {t("secrets.rotateKekAction", "Rotate master key")}
+              </button>
+            </div>
+
+            {/* Reset tenant */}
+            <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-card p-3">
+              <div className="flex items-center gap-2">
+                <Trash2 className="h-4 w-4 text-destructive" />
+                <span className="text-sm font-medium text-foreground">
+                  {t("secrets.resetTenantTitle", "Reset vault for this tenant")}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "secrets.resetTenantBlurb",
+                  "Destructive last resort. Permanently deletes all secrets and the DEK so the vault can start fresh — use after a lost or changed master key.",
+                )}
+              </p>
+              <button
+                onClick={() => setShowResetTenant(true)}
+                className="mt-auto inline-flex items-center justify-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
+                data-testid="open-reset-tenant"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t("secrets.resetTenantAction", "Reset vault")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Rotate DEK confirmation ─── */}
+      <AlertDialog
+        open={showRotateDek}
+        onOpenChange={(open) => setShowRotateDek(open)}
+        variant="warning"
+        title={t("secrets.rotateDekConfirmTitle", "Rotate encryption key (DEK)?")}
+        description={t("secrets.rotateDekConfirmDesc", {
+          tenant: tenantId,
+          count: secretCount,
+          defaultValue: `This generates a new data encryption key for tenant "${tenantId}" and re-encrypts its ${secretCount} secret(s). This is safe and takes effect immediately — no restart is required.`,
+        })}
+        confirmLabel={t("secrets.rotateDekConfirm", "Rotate DEK now")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        onConfirm={handleRotateDek}
+        isPending={rotateDekMut.isPending}
+      />
+
+      {/* ─── Rotate KEK dialog ─── */}
+      <AlertDialog
+        open={showRotateKek}
+        onOpenChange={(open) => {
+          setShowRotateKek(open);
+          if (!open) {
+            setKekOldKey("");
+            setKekNewKey("");
+            setKekOldVisible(false);
+            setKekNewVisible(false);
+          }
+        }}
+        variant="warning"
+        title={t("secrets.rotateKekConfirmTitle", "Rotate master key (KEK)?")}
+        description={t(
+          "secrets.rotateKekConfirmDesc",
+          "Re-encrypts every tenant's data encryption key with a new master key. The secret values themselves are unchanged.",
+        )}
+        confirmLabel={t("secrets.rotateKekConfirm", "Rotate master key now")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        onConfirm={handleRotateKek}
+        isPending={rotateKekMut.isPending}
+        confirmDisabled={!kekValid}
+      >
+        <div className="space-y-3">
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <p className="text-xs text-amber-800 dark:text-amber-200">
+              {t(
+                "secrets.kekTlsWarning",
+                "Both keys are sent in the request body. Only perform this over a TLS (HTTPS) connection so the keys are not exposed in transit.",
+              )}
+            </p>
+          </div>
+          <div>
+            <label
+              htmlFor="kek-old-key"
+              className="mb-1.5 block text-xs font-medium text-muted-foreground"
+            >
+              {t("secrets.kekOldKeyLabel", "Current master key")}
+            </label>
+            <div className="relative">
+              <input
+                id="kek-old-key"
+                type={kekOldVisible ? "text" : "password"}
+                value={kekOldKey}
+                onChange={(e) => setKekOldKey(e.target.value)}
+                placeholder={t("secrets.kekOldKeyPlaceholder", "Current EDDI_VAULT_MASTER_KEY")}
+                className="h-9 w-full rounded-lg border border-input bg-background pe-10 ps-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                data-testid="kek-old-key-input"
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                onClick={() => setKekOldVisible(!kekOldVisible)}
+                className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label={
+                  kekOldVisible
+                    ? t("secrets.hideValue", "Hide value")
+                    : t("secrets.showValue", "Show value")
+                }
+                data-testid="kek-old-key-eye"
+              >
+                {kekOldVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label
+              htmlFor="kek-new-key"
+              className="mb-1.5 block text-xs font-medium text-muted-foreground"
+            >
+              {t("secrets.kekNewKeyLabel", "New master key")}
+            </label>
+            <div className="relative">
+              <input
+                id="kek-new-key"
+                type={kekNewVisible ? "text" : "password"}
+                value={kekNewKey}
+                onChange={(e) => setKekNewKey(e.target.value)}
+                placeholder={t("secrets.kekNewKeyPlaceholder", "New key — at least 8 characters")}
+                className="h-9 w-full rounded-lg border border-input bg-background pe-10 ps-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                data-testid="kek-new-key-input"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setKekNewVisible(!kekNewVisible)}
+                className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label={
+                  kekNewVisible
+                    ? t("secrets.hideValue", "Hide value")
+                    : t("secrets.showValue", "Show value")
+                }
+                data-testid="kek-new-key-eye"
+              >
+                {kekNewVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              </button>
+            </div>
+            {kekNewKey.length > 0 && kekNewKey.length < 8 && (
+              <p className="mt-1 text-xs text-destructive" data-testid="kek-new-key-error">
+                {t("secrets.kekNewKeyTooShort", "New master key must be at least 8 characters.")}
+              </p>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              "secrets.kekRestartHint",
+              "After rotation you must update EDDI_VAULT_MASTER_KEY to the new key and restart EDDI.",
+            )}
+          </p>
+        </div>
+      </AlertDialog>
+
+      {/* ─── Reset tenant dialog (type-to-confirm) ─── */}
+      <AlertDialog
+        open={showResetTenant}
+        onOpenChange={(open) => {
+          setShowResetTenant(open);
+          if (!open) setResetConfirm("");
+        }}
+        variant="destructive"
+        title={t("secrets.resetTenantConfirmTitle", "Reset vault for this tenant?")}
+        description={t("secrets.resetTenantConfirmDesc", {
+          tenant: tenantId,
+          count: secretCount,
+          defaultValue: `This permanently deletes all ${secretCount} secret(s) and the data encryption key for tenant "${tenantId}". Use this as the recovery step when the master key was lost or changed and the old key is unavailable. This cannot be undone.`,
+        })}
+        confirmLabel={t("secrets.resetTenantConfirm", "Reset vault permanently")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        onConfirm={handleResetTenant}
+        isPending={resetTenantMut.isPending}
+        confirmDisabled={resetConfirm !== tenantId}
+      >
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span data-testid="reset-secret-count">
+              {t("secrets.resetSecretCount", {
+                count: secretCount,
+                defaultValue: `${secretCount} secret(s) will be permanently lost`,
+              })}
+            </span>
+          </div>
+          <label
+            htmlFor="reset-confirm"
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            {t("secrets.resetConfirmLabel", {
+              tenant: tenantId,
+              defaultValue: `Type the tenant name "${tenantId}" to confirm`,
+            })}
+          </label>
+          <input
+            id="reset-confirm"
+            type="text"
+            value={resetConfirm}
+            onChange={(e) => setResetConfirm(e.target.value)}
+            placeholder={tenantId}
+            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/50"
+            data-testid="reset-confirm-input"
+            autoComplete="off"
+          />
+        </div>
+      </AlertDialog>
 
       {/* ─── Create dialog ─── */}
       {showCreate && (
@@ -633,6 +1086,8 @@ export function SecretsPage() {
                   <input
                     id="new-allowed-agents"
                     type="text"
+                    value={newAgentInput}
+                    onChange={(e) => setNewAgentInput(e.target.value)}
                     placeholder={t("secrets.allowedAgentsPlaceholder", "Type agent ID and press Enter (empty = all agents)")}
                     className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                     data-testid="new-allowed-agents-input"
@@ -640,12 +1095,11 @@ export function SecretsPage() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === ",") {
                         e.preventDefault();
-                        const input = e.currentTarget;
-                        const val = input.value.trim().replace(/,$/,"");
+                        const val = newAgentInput.trim().replace(/,$/,"");
                         if (val && !newAllowedAgents.includes(val)) {
                           setNewAllowedAgents((prev) => [...prev, val]);
-                          input.value = "";
                         }
+                        setNewAgentInput("");
                       }
                     }}
                   />

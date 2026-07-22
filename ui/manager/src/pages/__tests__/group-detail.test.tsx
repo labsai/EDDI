@@ -1,5 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { renderPage } from "@/test/test-utils";
 import { GroupDetailPage } from "@/pages/group-detail";
 import { server } from "@/test/mocks/server";
@@ -56,7 +58,7 @@ describe("GroupDetailPage", () => {
     renderGroupDetail();
 
     await waitFor(() => {
-      const matches = screen.getAllByText(/Peer Review/);
+      const matches = screen.getAllByText(/Quality Review/);
       expect(matches.length).toBeGreaterThanOrEqual(1);
     });
   });
@@ -357,6 +359,298 @@ describe("GroupDetailPage", () => {
       // The dot should have a rounded-full class (visual indicator)
       expect(dot.className).toContain("rounded-full");
     });
+  });
+
+  // ─── Cancel-discussion confirmation gate ──────────────────────────
+
+  it("the hover Cancel (X) does not abort the discussion on a single click — it confirms first", async () => {
+    const user = userEvent.setup();
+    const cancelSpy = vi.fn();
+    server.use(
+      http.get("*/groups/:groupId/conversations", () => {
+        return HttpResponse.json([
+          {
+            id: "conv-cancel-1",
+            originalQuestion: "In-progress discussion",
+            state: "IN_PROGRESS",
+            created: Date.now(),
+          },
+        ]);
+      }),
+      http.post("*/groups/:groupId/conversations/:gcId/cancel", () => {
+        cancelSpy();
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+
+    renderGroupDetail();
+
+    // The cancel "X" only renders for IN_PROGRESS/AWAITING_APPROVAL discussions.
+    const cancelButton = await screen.findByRole("button", { name: "Cancel discussion" });
+    await user.click(cancelButton);
+    // A single click must NOT hit the cancel endpoint.
+    expect(cancelSpy).not.toHaveBeenCalled();
+
+    // A confirmation dialog is shown instead.
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText("Cancel this discussion? Any in-progress work is aborted."),
+    ).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel discussion" }));
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledTimes(1));
+  });
+
+  it("dismissing the cancel confirmation leaves the discussion untouched", async () => {
+    const user = userEvent.setup();
+    const cancelSpy = vi.fn();
+    server.use(
+      http.get("*/groups/:groupId/conversations", () => {
+        return HttpResponse.json([
+          {
+            id: "conv-cancel-2",
+            originalQuestion: "In-progress discussion",
+            state: "IN_PROGRESS",
+            created: Date.now(),
+          },
+        ]);
+      }),
+      http.post("*/groups/:groupId/conversations/:gcId/cancel", () => {
+        cancelSpy();
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+
+    renderGroupDetail();
+
+    const cancelButton = await screen.findByRole("button", { name: "Cancel discussion" });
+    await user.click(cancelButton);
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Go back" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(cancelSpy).not.toHaveBeenCalled();
+  });
+
+  // ─── Post-COMPLETED lifecycle action bar ──────────────────────────
+
+  function makeLifecycleConv(
+    overrides: Partial<Record<string, unknown>> = {},
+  ) {
+    const now = Date.now();
+    return {
+      id: "gc-life",
+      groupId: "grp1",
+      userId: "admin",
+      state: "COMPLETED",
+      originalQuestion: "Is the redesign production-ready?",
+      transcript: [
+        {
+          speakerAgentId: "moderator",
+          speakerDisplayName: "Moderator",
+          content: "Lifecycle transcript answer",
+          phaseIndex: 2,
+          phaseName: "Synthesis",
+          type: "SYNTHESIS",
+          timestamp: new Date(now - 60000).toISOString(),
+          errorReason: null,
+          targetAgentId: null,
+        },
+      ],
+      memberConversationIds: {},
+      currentPhaseIndex: 2,
+      currentPhaseName: "Synthesis",
+      synthesizedAnswer: "Lifecycle transcript answer",
+      depth: 0,
+      round: 1,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      availableActions: ["followup", "continue", "close"],
+      created: new Date(now - 600000).toISOString(),
+      lastModified: new Date(now - 60000).toISOString(),
+      ...overrides,
+    };
+  }
+
+  function useLifecycleConv(conv: Record<string, unknown>) {
+    server.use(
+      http.get("*/groups/:groupId/conversations", () =>
+        HttpResponse.json([
+          {
+            id: conv.id,
+            groupId: "grp1",
+            userId: "admin",
+            state: conv.state,
+            originalQuestion: conv.originalQuestion,
+            created: conv.created,
+            lastModified: conv.lastModified,
+          },
+        ]),
+      ),
+      http.get("*/groups/:groupId/conversations/:convId", () =>
+        HttpResponse.json(conv),
+      ),
+    );
+  }
+
+  it("renders the action bar for a COMPLETED conversation with exactly the backend availableActions", async () => {
+    useLifecycleConv(makeLifecycleConv());
+    renderGroupDetail();
+
+    // All three backend-provided actions render.
+    expect(await screen.findByTestId("action-continue")).toBeInTheDocument();
+    expect(screen.getByTestId("action-followup")).toBeInTheDocument();
+    expect(screen.getByTestId("action-close")).toBeInTheDocument();
+  });
+
+  it("renders only Close for a FAILED conversation (availableActions=['close'])", async () => {
+    useLifecycleConv(
+      makeLifecycleConv({ state: "FAILED", availableActions: ["close"] }),
+    );
+    renderGroupDetail();
+
+    expect(await screen.findByTestId("action-close")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-continue")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("action-followup")).not.toBeInTheDocument();
+  });
+
+  it("a CLOSED conversation shows no further actions", async () => {
+    useLifecycleConv(
+      makeLifecycleConv({ state: "CLOSED", availableActions: [] }),
+    );
+    renderGroupDetail();
+
+    // Wait for the selected conversation to actually load (its synthesis card
+    // renders once the single-conversation GET resolves) — so the "no actions"
+    // assertion is meaningful, not just a not-yet-rendered false pass.
+    await screen.findByTestId("synthesis-card");
+    expect(screen.queryByTestId("discussion-actions")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("action-close")).not.toBeInTheDocument();
+  });
+
+  it("Continue calls the /continue endpoint (new round) with the typed question", async () => {
+    const user = userEvent.setup();
+    let capturedGcId = "";
+    let capturedBody: { question?: string } = {};
+    useLifecycleConv(makeLifecycleConv());
+    server.use(
+      http.post(
+        "*/groups/:groupId/conversations/:gcId/continue",
+        async ({ request, params }) => {
+          capturedGcId = params.gcId as string;
+          capturedBody = (await request.json()) as { question?: string };
+          return HttpResponse.json(makeLifecycleConv({ round: 2 }));
+        },
+      ),
+    );
+
+    renderGroupDetail();
+    await user.click(await screen.findByTestId("action-continue"));
+    await user.type(
+      await screen.findByTestId("group-continue-input"),
+      "Reassess after the security patch",
+    );
+    await user.click(screen.getByTestId("group-continue-submit"));
+
+    await waitFor(() => expect(capturedGcId).toBe("gc-life"));
+    expect(capturedBody.question).toBe("Reassess after the security patch");
+  });
+
+  it("Follow up with a member calls the /followup endpoint with target + question", async () => {
+    const user = userEvent.setup();
+    let capturedGcId = "";
+    let capturedBody: { question?: string; targetAgentId?: string } = {};
+    useLifecycleConv(makeLifecycleConv());
+    server.use(
+      http.post(
+        "*/groups/:groupId/conversations/:gcId/followup",
+        async ({ request, params }) => {
+          capturedGcId = params.gcId as string;
+          capturedBody = (await request.json()) as {
+            question?: string;
+            targetAgentId?: string;
+          };
+          return HttpResponse.json(makeLifecycleConv());
+        },
+      ),
+    );
+
+    renderGroupDetail();
+    await user.click(await screen.findByTestId("action-followup"));
+    // grp1 members are agent1 (Support Agent) and agent2 (FAQ Agent).
+    await user.selectOptions(
+      await screen.findByTestId("group-followup-member"),
+      "agent2",
+    );
+    await user.type(
+      screen.getByTestId("group-followup-input"),
+      "Clarify the rollback plan",
+    );
+    await user.click(screen.getByTestId("group-followup-submit"));
+
+    await waitFor(() => expect(capturedGcId).toBe("gc-life"));
+    expect(capturedBody.targetAgentId).toBe("agent2");
+    expect(capturedBody.question).toBe("Clarify the rollback plan");
+  });
+
+  it("Close is confirmed before firing the /close endpoint", async () => {
+    const user = userEvent.setup();
+    const closeSpy = vi.fn();
+    useLifecycleConv(makeLifecycleConv());
+    server.use(
+      http.post(
+        "*/groups/:groupId/conversations/:gcId/close",
+        ({ params }) => {
+          closeSpy(params.gcId);
+          return HttpResponse.json(
+            makeLifecycleConv({ state: "CLOSED", availableActions: [] }),
+          );
+        },
+      ),
+    );
+
+    renderGroupDetail();
+    await user.click(await screen.findByTestId("action-close"));
+    // A single click must NOT hit the close endpoint — it confirms first.
+    expect(closeSpy).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(/permanently ends all member conversations/i),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Close discussion" }),
+    );
+    await waitFor(() => expect(closeSpy).toHaveBeenCalledWith("gc-life"));
+  });
+
+  it("maps a 409 continue failure to a friendly retry message", async () => {
+    const user = userEvent.setup();
+    const errorSpy = vi.spyOn(toast, "error").mockImplementation(() => "");
+    useLifecycleConv(makeLifecycleConv());
+    server.use(
+      http.post("*/groups/:groupId/conversations/:gcId/continue", () =>
+        HttpResponse.json({ message: "conflict" }, { status: 409 }),
+      ),
+    );
+
+    renderGroupDetail();
+    await user.click(await screen.findByTestId("action-continue"));
+    await user.type(
+      await screen.findByTestId("group-continue-input"),
+      "Another round",
+    );
+    await user.click(screen.getByTestId("group-continue-submit"));
+
+    await waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Another operation is still in progress/i),
+      );
+    });
+    errorSpy.mockRestore();
   });
 
   it("conversation state uses STATE_CONFIG for label and color", async () => {

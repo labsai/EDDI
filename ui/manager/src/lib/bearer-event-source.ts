@@ -108,7 +108,11 @@ export class BearerEventSource {
     // Named-event listeners
     const handlers = this.listeners.get(event.type);
     if (handlers) handlers.forEach((fn) => fn(event));
-    // onmessage gets ALL events (mirrors native EventSource behaviour)
-    this.onmessage?.(event);
+    // onmessage fires ONLY for the default "message" type — this mirrors native
+    // EventSource semantics. Named events (with an `event:` field) are delivered
+    // exclusively to their addEventListener handlers, so a caller that registers
+    // both addEventListener("log", fn) and onmessage = fn (as an unnamed-event
+    // fallback) does not receive named "log" events twice.
+    if (event.type === "message") this.onmessage?.(event);
   }
 }

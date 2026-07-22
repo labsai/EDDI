@@ -98,7 +98,7 @@ describe("CreateGroupDialog", () => {
     expect(nextBtn).toBeEnabled();
 
     // Select Discussion Style
-    const styleBtn = screen.getByText("Peer Review");
+    const styleBtn = screen.getByText("Quality Review");
     await user.click(styleBtn);
 
     // Transition to members

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useSearchParams, Link } from "react-router-dom";
+import { useSearchParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -73,6 +73,7 @@ interface PendingAttachment {
 export function ChatPanel() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -645,39 +646,6 @@ export function ChatPanel() {
           </div>
         )}
 
-        {/* Undo / Redo action bar — near the input */}
-        {conversationId && (
-          <div className="flex items-center gap-1 border-t border-border px-4 py-1">
-            <button
-              onClick={() => undoConversation.mutate()}
-              disabled={!undoAvailable || isProcessing}
-              className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
-                undoAvailable && !isProcessing
-                  ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  : "text-muted-foreground/30 cursor-not-allowed"
-              )}
-              title={t("chat.undo")}
-              data-testid="undo-btn"
-            >
-              <Undo2 className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => redoConversation.mutate()}
-              disabled={!redoAvailable || isProcessing}
-              className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
-                redoAvailable && !isProcessing
-                  ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  : "text-muted-foreground/30 cursor-not-allowed"
-              )}
-              title={t("chat.redo")}
-              data-testid="redo-btn"
-            >
-              <Redo2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
 
         {/* Awaiting-approval notice — input is disabled while a turn is paused
             for human approval; the decision is made on the conversation's
@@ -691,13 +659,15 @@ export function ChatPanel() {
             <span className="text-amber-600 dark:text-amber-400">
               {pauseReason || t("hitl.chatPaused", "This conversation is awaiting human approval.")}
             </span>
-            <Link
-              to={`/manage/conversationview/${conversationId}`}
-              className="ms-auto rounded-md bg-amber-500/10 px-2.5 py-1 font-medium text-amber-600 hover:bg-amber-500/20 transition-colors dark:text-amber-400"
-              data-testid="chat-pause-review"
-            >
-              {t("hitl.review", "Review")}
-            </Link>
+            {!location.pathname.startsWith("/workforce") && (
+              <Link
+                to={`/manage/conversationview/${conversationId}`}
+                className="ms-auto rounded-md bg-amber-500/10 px-2.5 py-1 font-medium text-amber-600 hover:bg-amber-500/20 transition-colors dark:text-amber-400"
+                data-testid="chat-pause-review"
+              >
+                {t("hitl.review", "Review")}
+              </Link>
+            )}
           </div>
         )}
 
@@ -728,6 +698,8 @@ export function ChatPanel() {
             pendingAttachments={pendingAttachments}
             onRemoveAttachment={handleRemoveAttachment}
             hasReadyAttachment={hasReadyAttachment}
+            onUndo={conversationId && undoAvailable && !isProcessing ? () => undoConversation.mutate() : undefined}
+            onRedo={conversationId && redoAvailable && !isProcessing ? () => redoConversation.mutate() : undefined}
           />
         )}
       </div>
@@ -840,6 +812,8 @@ function ChatInputWithSecretToggle({
   pendingAttachments = [],
   onRemoveAttachment,
   hasReadyAttachment = false,
+  onUndo,
+  onRedo,
 }: {
   onSend: (message: string, isSecret?: boolean) => void;
   disabled?: boolean;
@@ -853,6 +827,8 @@ function ChatInputWithSecretToggle({
   pendingAttachments?: PendingAttachment[];
   onRemoveAttachment?: (id: string) => void;
   hasReadyAttachment?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -949,6 +925,37 @@ function ChatInputWithSecretToggle({
         >
           {isSecretMode ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
         </button>
+
+        {/* Undo / Redo — inline with input icons, only when available */}
+        {(onUndo || onRedo) && (
+          <>
+            <div className="h-5 w-px bg-border/50 shrink-0" />
+            {onUndo && (
+              <button
+                type="button"
+                onClick={onUndo}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                title={t("chat.undo", "Undo")}
+                aria-label={t("chat.undo", "Undo")}
+                data-testid="undo-btn"
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {onRedo && (
+              <button
+                type="button"
+                onClick={onRedo}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                title={t("chat.redo", "Redo")}
+                aria-label={t("chat.redo", "Redo")}
+                data-testid="redo-btn"
+              >
+                <Redo2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </>
+        )}
 
         {isSecretMode ? (
           /* Secret mode: password input with eye toggle */

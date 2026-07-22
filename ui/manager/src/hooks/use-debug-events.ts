@@ -10,7 +10,12 @@ export interface ToolTraceEntry {
 }
 
 export interface PipelineEvent {
-  type: "task_start" | "task_complete" | "cascade_step_start" | "cascade_escalation";
+  type:
+    | "task_start"
+    | "task_complete"
+    | "task_failed"
+    | "cascade_step_start"
+    | "cascade_escalation";
   taskId: string;
   taskType: string;
   index: number;
@@ -18,6 +23,10 @@ export interface PipelineEvent {
   actions?: string[];
   confidence?: number;
   toolTrace?: ToolTraceEntry[];
+  /** task_failed: classified failure kind (timeout|transport|rate_limit|content_filter|unknown). */
+  errorType?: string;
+  /** task_failed: redacted human-readable error summary. */
+  errorSummary?: string;
   // ── Cascade-specific (model cascade SSE events) ──
   /** Model name for the cascade step (e.g. "gpt-4o-mini"). */
   modelName?: string;

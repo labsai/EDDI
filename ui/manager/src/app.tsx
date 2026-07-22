@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { DashboardPage } from "@/pages/dashboard";
@@ -7,6 +7,7 @@ import { AgentDetailPage } from "@/pages/agent-detail";
 import { WorkflowsPage } from "@/pages/workflows";
 import { WorkflowDetailPage } from "@/pages/workflow-detail";
 import { ConversationsPage } from "@/pages/conversations";
+import { ConversationMonitoringPage } from "@/pages/conversation-monitoring";
 import { ConversationDetailPage } from "@/pages/conversation-detail";
 import { ChatPage } from "@/pages/chat";
 import { ResourcesPage } from "@/pages/resources";
@@ -35,14 +36,52 @@ import { SyncPage } from "@/pages/sync-page";
 import { ChannelsPage } from "@/pages/channels";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 import { ApprovalsPage } from "@/pages/approvals";
+import { LandingPage } from "@/pages/landing-page";
+
+import { WorkforceLayout } from "@/components/workforce/workforce-layout";
+import { WorkforceDashboard } from "@/pages/workforce/workforce-dashboard";
+import { WorkforceWizard } from "@/pages/workforce/workforce-wizard";
+import { WorkforceBoard } from "@/pages/workforce/workforce-board";
+import { WorkforceThread } from "@/pages/workforce/workforce-thread";
+import { WorkforceSettings } from "@/pages/workforce/workforce-settings";
+import { WorkforceHistory } from "@/pages/workforce/workforce-history";
+import { WorkforceAnalytics } from "@/pages/workforce/workforce-analytics";
+import { WorkforceChat } from "@/pages/workforce/workforce-chat";
+
+/** Redirect /workforce/* → /workforce/* preserving sub-paths */
+function WorkforceRedirect() {
+  const { "*": rest } = useParams();
+  const sub = rest ? `/${rest}` : "";
+  return <Navigate to={`/workforce${sub}`} replace />;
+}
 
 export function App() {
   const location = useLocation();
   return (
     <ErrorBoundary resetKey={location.key}>
     <Routes>
+      {/* Landing — workspace chooser */}
+      <Route path="/welcome" element={<LandingPage />} />
+      <Route path="/" element={<Navigate to="/welcome" replace />} />
+
       {/* Studio — full-screen breakout, no sidebar/topbar chrome */}
       <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />
+
+      {/* Workforce — standalone app, no Manager chrome */}
+      <Route path="/workforce" element={<WorkforceLayout />}>
+        <Route index element={<WorkforceDashboard />} />
+        <Route path="new" element={<WorkforceWizard />} />
+        <Route path="analytics" element={<WorkforceAnalytics />} />
+        <Route path="chat" element={<WorkforceChat />} />
+        <Route path=":boardId" element={<WorkforceBoard />} />
+        <Route path=":boardId/thread/:memberId" element={<WorkforceThread />} />
+        <Route path=":boardId/settings" element={<WorkforceSettings />} />
+        <Route path=":boardId/history" element={<WorkforceHistory />} />
+      </Route>
+
+      {/* Legacy /Workforce redirect → /workforce */}
+      <Route path="/workforce/*" element={<WorkforceRedirect />} />
+      <Route path="/Workforce" element={<Navigate to="/workforce" replace />} />
 
       <Route element={<AppLayout />}>
         <Route path="/manage" element={<DashboardPage />} />
@@ -52,6 +91,7 @@ export function App() {
         <Route path="/manage/workflows" element={<WorkflowsPage />} />
         <Route path="/manage/workflowview/:id" element={<WorkflowDetailPage />} />
         <Route path="/manage/conversations" element={<ConversationsPage />} />
+        <Route path="/manage/conversations/monitoring" element={<ConversationMonitoringPage />} />
         <Route path="/manage/coordinator" element={<CoordinatorPage />} />
         <Route path="/manage/schedules" element={<SchedulesPage />} />
         <Route path="/manage/logs" element={<LogsPage />} />
@@ -86,11 +126,13 @@ export function App() {
           path="/manage/resources/:type/:id"
           element={<ResourceDetailPage />}
         />
-        <Route path="/" element={<Navigate to="/welcome" replace />} />
-        <Route path="*" element={<Navigate to="/welcome" replace />} />
       </Route>
+
+      {/* Catch-all → welcome */}
+      <Route path="*" element={<Navigate to="/welcome" replace />} />
     </Routes>
     <CommandPalette />
     </ErrorBoundary>
   );
 }
+

@@ -1,7 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { server } from "@/test/mocks/server";
 import { type ReactNode } from "react";
 import {
   useDeleteUserData,
@@ -10,10 +9,6 @@ import {
   useUnrestrictProcessing,
   useIsProcessingRestricted,
 } from "@/hooks/use-gdpr";
-
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterAll(() => server.close());
-afterEach(() => server.resetHandlers());
 
 function createWrapper() {
   const queryClient = new QueryClient({

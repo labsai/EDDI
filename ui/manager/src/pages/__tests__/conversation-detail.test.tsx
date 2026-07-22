@@ -177,6 +177,49 @@ describe("ConversationDetailPage", () => {
     });
   });
 
+  it("HTML-escapes conversation content in the raw step view (no stored XSS)", async () => {
+    // A payload stored in conversation memory must render as inert text — never
+    // as live markup — when an operator expands a step's raw-data view.
+    server.use(
+      http.get("*/conversationstore/conversations/simple/:id", () =>
+        HttpResponse.json({
+          agentId: "agent1",
+          agentVersion: 1,
+          conversationId: "conv1",
+          conversationState: "READY",
+          conversationSteps: [
+            {
+              conversationStep: [
+                {
+                  key: "input:initial",
+                  value: "<img src=x onerror=alert(1)>",
+                  timestamp: new Date().toISOString(),
+                  originWorkflowId: null,
+                },
+              ],
+              timestamp: new Date().toISOString(),
+            },
+          ],
+          conversationOutputs: [],
+        })
+      )
+    );
+
+    renderConvDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByText("Step 1")).toBeInTheDocument();
+    });
+    await user.click(screen.getByText("Step 1"));
+
+    const rawBlock = await screen.findByTestId("step-raw-1");
+    // Escaped, not executed: no live <img> node, angle brackets are entities.
+    expect(rawBlock.querySelector("img")).toBeNull();
+    expect(rawBlock.innerHTML).toContain("&lt;img");
+    expect(rawBlock.innerHTML).not.toContain("<img");
+  });
+
   it("renders conversation properties section when available", async () => {
     renderConvDetail();
 
@@ -342,6 +385,58 @@ describe("ConversationDetailPage", () => {
 
     // Use the data-testid we added to the delete button
     expect(screen.getByTestId("delete-conversation-btn")).toBeInTheDocument();
+  });
+
+  // Regression: the detail-page delete dialog defaults to a SOFT delete; only
+  // checking the permanent option escalates to deletePermanently=true.
+  it("soft-deletes by default (deletePermanently=false)", async () => {
+    let deletedUrl = "";
+    server.use(
+      http.delete("*/conversationstore/conversations/:id", ({ request }) => {
+        deletedUrl = request.url;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    renderConvDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("delete-conversation-btn")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("delete-conversation-btn"));
+
+    // The permanent checkbox starts unchecked
+    expect(await screen.findByTestId("delete-permanent-checkbox")).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(deletedUrl).toContain("deletePermanently=false");
+    });
+  });
+
+  it("passes deletePermanently=true when the permanent checkbox is checked", async () => {
+    let deletedUrl = "";
+    server.use(
+      http.delete("*/conversationstore/conversations/:id", ({ request }) => {
+        deletedUrl = request.url;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    renderConvDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("delete-conversation-btn")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("delete-conversation-btn"));
+
+    await user.click(await screen.findByTestId("delete-permanent-checkbox"));
+    // Confirm label escalates to "Delete permanently" once the box is checked
+    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+
+    await waitFor(() => {
+      expect(deletedUrl).toContain("deletePermanently=true");
+    });
   });
 
   it("export markdown creates a download", async () => {
