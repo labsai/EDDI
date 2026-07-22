@@ -27,6 +27,9 @@ import java.util.function.Supplier;
 public class ToolExecutionService {
     private static final Logger LOGGER = Logger.getLogger(ToolExecutionService.class);
 
+    /** Default timeout for individual tool execution (30 seconds) */
+    public static final long DEFAULT_TOOL_TIMEOUT_MS = 30_000;
+
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
 
     @Inject
@@ -70,6 +73,7 @@ public class ToolExecutionService {
         String toolName = method.getDeclaringClass().getSimpleName();
         String arguments = serializeArguments(args);
         long startTime = System.currentTimeMillis();
+        double cost = 0.0; // hoisted for visibility in catch blocks
 
         try {
             // 1. Check rate limit
@@ -99,7 +103,7 @@ public class ToolExecutionService {
             }
 
             // 3. Track cost
-            double cost = costTracker.trackToolCall(toolName, conversationId);
+            cost = costTracker.trackToolCall(toolName, conversationId);
 
             // 4. Execute tool
             Object result = method.invoke(toolInstance, args);
@@ -123,11 +127,9 @@ public class ToolExecutionService {
 
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            // Cost was already tracked in step 3 above (if we got past rate limit and
-            // cache)
             String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
 
-            trace.addFailedToolCall(toolName, arguments, error, executionTime, 0.0);
+            trace.addFailedToolCall(toolName, arguments, error, executionTime, cost);
 
             // Record failure metrics
             meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
@@ -272,6 +274,126 @@ public class ToolExecutionService {
             meterRegistry.counter("eddi.tool.execution.parallel.error").increment();
             LOGGER.error("Parallel tool execution error", e);
             return new String[0];
+        }
+    }
+
+    /**
+     * Execute a tool with a configurable timeout. The tool execution is submitted
+     * to the executor service and waits up to {@code timeoutMs} milliseconds.
+     * If the tool exceeds the timeout, it is interrupted and a timeout error is
+     * returned. This prevents a single slow or hanging tool from blocking the
+     * entire agent pipeline.
+     *
+     * @param toolInstance  the tool object instance
+     * @param method        the method to invoke
+     * @param args          method arguments
+     * @param conversationId conversation identifier for cost tracking
+     * @param trace         execution trace for observability
+     * @param timeoutMs     maximum time to wait in milliseconds
+     * @return tool result string or error message
+     */
+    public String executeToolWithTimeout(Object toolInstance, Method method, Object[] args,
+                                         String conversationId, ToolExecutionTrace trace, long timeoutMs) {
+        String toolName = method.getDeclaringClass().getSimpleName();
+        String arguments = serializeArguments(args);
+        long startTime = System.currentTimeMillis();
+
+        double cost = 0.0; // scoped for visibility in catch blocks
+        try {
+            // 1. Check rate limit
+            if (!rateLimiter.tryAcquire(toolName)) {
+                String error = "Rate limit exceeded for tool: " + toolName;
+                long executionTime = System.currentTimeMillis() - startTime;
+                trace.addFailedToolCall(toolName, arguments, error, executionTime, 0.0);
+                meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+                meterRegistry.counter("eddi.tool.execution.ratelimited", "tool", toolName).increment();
+                return "Error: " + error;
+            }
+
+            // 2. Check cache
+            String cachedResult = cacheService.get(toolName, arguments);
+            if (cachedResult != null) {
+                long executionTime = System.currentTimeMillis() - startTime;
+                trace.addToolCall(toolName, arguments, cachedResult, executionTime, cost, true);
+                meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
+                meterRegistry.counter("eddi.tool.execution.cached", "tool", toolName).increment();
+                LOGGER.info(String.format("Tool '%s' served from cache (%dms)", toolName, executionTime));
+                return cachedResult;
+            }
+
+            // 3. Track cost
+            cost = costTracker.trackToolCall(toolName, conversationId);
+
+            // 4. Execute tool with timeout
+            Future<Object> future = executorService.submit(() -> method.invoke(toolInstance, args));
+            Object result;
+            try {
+                result = future.get(timeoutMs, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                // Note: Future.cancel(true) sends an interrupt but does not guarantee
+                // task termination if the tool ignores interrupts. The executor thread
+                // will eventually be recycled on executor shutdown.
+                future.cancel(true);
+                long executionTime = System.currentTimeMillis() - startTime;
+                String error = "Tool execution timed out after " + timeoutMs + "ms";
+                trace.addFailedToolCall(toolName, arguments, error, executionTime, cost);
+                meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+                meterRegistry.counter("eddi.tool.execution.timeout", "tool", toolName).increment();
+                LOGGER.warn(String.format("Tool '%s' timed out after %dms", toolName, executionTime));
+                return "Error: " + error;
+            } catch (InterruptedException e) {
+                future.cancel(true);
+                Thread.currentThread().interrupt(); // restore interrupt status
+                long executionTime = System.currentTimeMillis() - startTime;
+                String error = "Tool execution interrupted";
+                trace.addFailedToolCall(toolName, arguments, error, executionTime, cost);
+                meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+                LOGGER.warn(String.format("Tool '%s' interrupted after %dms", toolName, executionTime));
+                return "Error: " + error;
+            } catch (ExecutionException e) {
+                // Unwrap the underlying cause from the Future wrapper
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                long executionTime = System.currentTimeMillis() - startTime;
+                String error = cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
+                trace.addFailedToolCall(toolName, arguments, error, executionTime, cost);
+                meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+                LOGGER.error(String.format("Tool '%s' failed (%dms): %s", toolName, executionTime, error), cause);
+                return "Error executing tool: " + error;
+            }
+
+            String resultString = result != null ? result.toString() : "null";
+            long executionTime = System.currentTimeMillis() - startTime;
+
+            // 5. Cache result
+            cacheService.put(toolName, arguments, resultString);
+
+            // 6. Update trace
+            trace.addToolCall(toolName, arguments, resultString, executionTime, cost, false);
+
+            // 7. Record success metrics
+            meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
+            meterRegistry.timer("eddi.tool.execution.duration", "tool", toolName)
+                    .record(executionTime, TimeUnit.MILLISECONDS);
+
+            LOGGER.info(String.format("Tool '%s' executed successfully (%dms, $%.4f)", toolName, executionTime, cost));
+
+            return resultString;
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); // restore interrupt status
+            long executionTime = System.currentTimeMillis() - startTime;
+            String error = e.getMessage() != null ? e.getMessage() : "interrupted";
+            trace.addFailedToolCall(toolName, arguments, error, executionTime, cost);
+            meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+            LOGGER.error(String.format("Tool '%s' interrupted (%dms): %s", toolName, executionTime, error), e);
+            return "Error executing tool: " + error;
+        } catch (Exception e) {
+            long executionTime = System.currentTimeMillis() - startTime;
+            String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            trace.addFailedToolCall(toolName, arguments, error, executionTime, cost);
+            meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+            LOGGER.error(String.format("Tool '%s' failed (%dms): %s", toolName, executionTime, error), e);
+            return "Error executing tool: " + error;
         }
     }
 
