@@ -721,7 +721,7 @@ describe("WorkforceThread – Attachment Features", () => {
       setupMocks({
         sendMessage: vi
           .spyOn(chatApi, "sendMessage")
-          .mockRejectedValue(new Error("Network error")),
+          .mockRejectedValue(new Error("Network error")) as any,
       });
       renderThread();
       await waitForInit();

@@ -33,6 +33,7 @@ const STATE_BADGE: Record<
   FAILED: { label: "Failed", variant: "destructive" },
   CANCELLED: { label: "Cancelled", variant: "secondary" },
   AWAITING_APPROVAL: { label: "Awaiting Approval", variant: "warning" },
+CLOSED: { label: "Closed", variant: "secondary" },
 };
 
 function stateI18nKey(state: GroupConversationState): string {
@@ -44,6 +45,7 @@ function stateI18nKey(state: GroupConversationState): string {
     FAILED: "Workforce.history.failed",
     CANCELLED: "Workforce.history.cancelled",
     AWAITING_APPROVAL: "Workforce.history.awaitingApproval",
+  CLOSED: "Closed",
   };
   return map[state] ?? "Workforce.history.created";
 }

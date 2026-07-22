@@ -17,6 +17,7 @@ const BADGE_CLASSES: Record<GroupConversationState, string> = {
   CREATED: "bg-muted text-muted-foreground",
   CANCELLED: "bg-muted text-muted-foreground",
   AWAITING_APPROVAL: "bg-muted text-muted-foreground",
+CLOSED: "Closed",
 };
 
 const STATE_LABELS: Record<GroupConversationState, string> = {
@@ -27,6 +28,7 @@ const STATE_LABELS: Record<GroupConversationState, string> = {
   CREATED: "Created",
   CANCELLED: "Cancelled",
   AWAITING_APPROVAL: "Pending",
+CLOSED: "Closed",
 };
 
 function formatRelative(dateStr: string, t: (key: string, fallback: string, opts?: Record<string, unknown>) => string): string {

@@ -141,6 +141,7 @@ const ALL_OUTCOMES: GroupConversationState[] = [
   "CREATED",
   "CANCELLED",
   "AWAITING_APPROVAL",
+  "CLOSED",
 ];
 
 const OUTCOME_LABELS: Record<GroupConversationState, string> = {
@@ -151,6 +152,7 @@ const OUTCOME_LABELS: Record<GroupConversationState, string> = {
   CREATED: "Created",
   CANCELLED: "Cancelled",
   AWAITING_APPROVAL: "Pending",
+CLOSED: "Closed",
 };
 
 interface AnalyticsFilterBarProps {
