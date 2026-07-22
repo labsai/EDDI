@@ -1244,7 +1244,8 @@ a:hover { opacity: 0.85; }
   opacity: 0.75;
 }
 
-/* Visually hidden, still announced. */
+/* Visually hidden, still announced. `clip` is deprecated but kept alongside
+   clip-path for browsers that do not support the latter. */
 .chat-sr-only {
   position: absolute;
   width: 1px;
@@ -1253,6 +1254,7 @@ a:hover { opacity: 0.85; }
   padding: 0;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }
@@ -1366,7 +1368,7 @@ a:hover { opacity: 0.85; }
   margin: 0 12px 8px;
   padding: 10px 12px;
   border: 1px solid var(--chat-border);
-  border-left: 3px solid #d9822b;
+  border-left: 3px solid var(--chat-warning);
   border-radius: 10px;
   background: var(--chat-surface);
 }

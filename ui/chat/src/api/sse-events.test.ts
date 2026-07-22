@@ -185,7 +185,10 @@ describe("isSkippedTurn — the prior-state guard applies only where it is ambig
     expect(isSkippedTurn({ conversationState: "IN_PROGRESS" }, 0, "READY")).toBe(true);
   });
 
-  it("detects a drop into an ended conversation even if we thought it was READY", () => {
+  it("does NOT treat a turn that ended the conversation as a drop", () => {
+    // Unlike IN_PROGRESS, ENDED is reachable legitimately: the turn was
+    // consumed and the agent closed the conversation. Only a turn that produced
+    // no tokens AND landed in a state it could not have caused is a drop.
     expect(isSkippedTurn({ conversationState: "ENDED" }, 0, "READY")).toBe(false);
   });
 

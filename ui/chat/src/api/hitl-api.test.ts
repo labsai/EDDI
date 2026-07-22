@@ -40,6 +40,14 @@ describe("parseIsoDuration", () => {
     ["PT30S", 30_000],
     ["PT1H30M", 90 * 60_000],
     ["PT2H15M30S", (2 * 3600 + 15 * 60 + 30) * 1000],
+    // The day component was matched and then discarded, so a multi-day
+    // approval window showed a deadline that was days early.
+    ["P1DT1H", (24 + 1) * 60 * 60_000],
+    ["P2DT3H4M5S", (2 * 86400 + 3 * 3600 + 4 * 60 + 5) * 1000],
+    // Duration.parse accepts a bare day span; requiring `T` reported no
+    // deadline at all for one.
+    ["P2D", 2 * 24 * 60 * 60_000],
+    ["P1D", 24 * 60 * 60_000],
   ])("parses %s", (input, expected) => {
     expect(parseIsoDuration(input)).toBe(expected);
   });
@@ -47,6 +55,9 @@ describe("parseIsoDuration", () => {
   it("returns null for an empty or unparseable value", () => {
     expect(parseIsoDuration("")).toBeNull();
     expect(parseIsoDuration("nonsense")).toBeNull();
+    // A bare "P" carries no components — not a zero-length duration.
+    expect(parseIsoDuration("P")).toBeNull();
+    expect(parseIsoDuration("PT")).toBeNull();
   });
 });
 

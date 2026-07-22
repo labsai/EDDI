@@ -83,7 +83,15 @@ secret turn from an ordinary one.
    `ConversationMemoryUtilities` emit `SECRET_INPUT_PLACEHOLDER` for
    `input:initial` on those steps when `returnDetailed=false`. Keeps the
    plaintext available to the lifecycle (so `PropertySetterTask` can still vault
-   it) while never putting it on the wire.
+   it) while keeping it off the **non-detailed** wire.
+
+   Note the trust boundary this draws: `returnDetailed=true` bypasses the
+   key-prefix allowlist entirely, so a detailed read would still return the
+   plaintext. That is defensible only if detailed reads are treated as an
+   operator-level capability. If any end-user-reachable client can request
+   `returnDetailed=true`, this option is not sufficient on its own and option 2
+   (scrub at rest) is the one to take. Whichever is chosen, the acceptance check
+   below must be run against **both** `returnDetailed=false` and `=true`.
 2. **Scrub at rest.** After the vaulting step, overwrite the stored
    `input:initial` with the placeholder for secret turns, so it is not merely
    filtered but not retained.
@@ -97,6 +105,9 @@ A conversation with one secret turn, read via
 `GET /agents/{conversationId}?returnDetailed=false`, must not contain the
 plaintext anywhere in the response body. Add a backend test asserting exactly
 that; the chat UI's `src/api/snapshot.test.ts` covers only the client-side mask.
+
+Add the same assertion for `returnDetailed=true` if detailed reads are reachable
+by anything other than an operator — see the trust-boundary note under option 1.
 
 ---
 
@@ -213,8 +224,13 @@ traps worth knowing before starting:
   `CLEAR_MESSAGES` and `REPLACE_MESSAGES`. React double-invokes reducers under
   StrictMode and replays pending actions from the last committed state, so those
   revocations fire on discarded renders and kill URLs a retained render still
-  uses. This branch's reducer is pure throughout — keep it that way and put
-  revocation in a `useEffect` cleanup keyed on the URL set.
+  uses. This branch's reducer is pure throughout — keep it that way and drive
+  revocation from an effect instead.
+- **Revoke the difference, not the whole set.** An effect cleanup keyed on the
+  URL set runs on *every* change to that set, so revoking everything it captured
+  would kill previews that are still on screen — remove one of five chips and
+  the other four go blank. Diff previous against current and revoke only what
+  left the set; revoke the whole set only on unmount.
 - **Do not hand a preview URL to the sent message and then forget it.** PR #28
   did exactly that, deliberately, and never revoked it — an unbounded leak
   proportional to every image sent in the session.

@@ -179,14 +179,24 @@ export function ChatWidget() {
    * skipped-turn detection compared against an out-of-date state.
    */
   const conversationStateRef = useRef(state.conversationState);
-  conversationStateRef.current = state.conversationState;
   /**
    * Mirrors isProcessing for reads at click time. The composer disables itself
    * while busy, but QuickReplies and SecretInput call handleSend directly, so
    * the guard has to live in handleSend rather than in each caller.
    */
   const isProcessingRef = useRef(state.isProcessing);
-  isProcessingRef.current = state.isProcessing;
+  /**
+   * Synced after commit, not during render. Assigning during render is impure:
+   * a render React discards — StrictMode's double invoke, or a concurrent
+   * re-render that never commits — would leave these holding state the user
+   * never saw, and handleSend would then guard against it. Every reader is a
+   * click handler, which cannot run before the commit, so this is timing
+   * equivalent and strictly safer.
+   */
+  useEffect(() => {
+    conversationStateRef.current = state.conversationState;
+    isProcessingRef.current = state.isProcessing;
+  }, [state.conversationState, state.isProcessing]);
   /**
    * Bumped whenever the widget switches conversation. Async continuations
    * capture it and bail if it moved, so an abandoned stream cannot write into

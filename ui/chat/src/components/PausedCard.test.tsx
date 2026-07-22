@@ -1,7 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PausedCard } from "./PausedCard";
+import { ChatProvider } from "@/store/chat-store";
 import type { ApprovalStatus } from "@/api/hitl-api";
+
+/**
+ * PausedCard renders purely from props today, but the repo convention is that
+ * component tests mount inside the provider so they stay valid if it ever
+ * starts reading chat context.
+ */
+function renderCard(ui: React.ReactElement) {
+  return render(<ChatProvider>{ui}</ChatProvider>);
+}
 
 const NOW = Date.parse("2026-07-21T10:00:00Z");
 
@@ -26,7 +36,7 @@ const status = (over: Partial<ApprovalStatus> = {}): ApprovalStatus => ({
 
 describe("PausedCard", () => {
   it("explains that a reviewer must act", () => {
-    render(<PausedCard status={status()} onCancel={vi.fn()} />);
+    renderCard(<PausedCard status={status()} onCancel={vi.fn()} />);
 
     expect(screen.getByTestId("paused-card")).toHaveTextContent(
       /reviewer must approve/i,
@@ -34,8 +44,7 @@ describe("PausedCard", () => {
   });
 
   it("names the gated tool on a TOOL_CALL pause", () => {
-    render(
-      <PausedCard
+    renderCard(<PausedCard
         status={status({
           pauseDetails: {
             type: "TOOL_CALL",
@@ -61,14 +70,13 @@ describe("PausedCard", () => {
   });
 
   it("shows when the pause will auto-decide", () => {
-    render(<PausedCard status={status()} onCancel={vi.fn()} />);
+    renderCard(<PausedCard status={status()} onCancel={vi.fn()} />);
 
     expect(screen.getByTestId("paused-deadline")).toHaveTextContent("15m");
   });
 
   it("shows no deadline when the pause waits indefinitely", () => {
-    render(
-      <PausedCard
+    renderCard(<PausedCard
         status={status({ approvalTimeout: "", timeoutPolicy: "WAIT_INDEFINITELY" })}
         onCancel={vi.fn()}
       />,
@@ -79,7 +87,7 @@ describe("PausedCard", () => {
 
   it("offers cancelling as the way out of the pause", () => {
     const onCancel = vi.fn();
-    render(<PausedCard status={status()} onCancel={onCancel} />);
+    renderCard(<PausedCard status={status()} onCancel={onCancel} />);
 
     fireEvent.click(screen.getByTestId("paused-cancel"));
 
@@ -87,7 +95,7 @@ describe("PausedCard", () => {
   });
 
   it("does not offer approve or reject — deciding is the reviewer's job", () => {
-    render(<PausedCard status={status()} onCancel={vi.fn()} />);
+    renderCard(<PausedCard status={status()} onCancel={vi.fn()} />);
 
     // Read-only by design: an end user approving their own gate defeats the
     // oversight the pause exists to provide. Deciding lives in Manager UI.
@@ -96,7 +104,7 @@ describe("PausedCard", () => {
   });
 
   it("announces itself to assistive technology", () => {
-    render(<PausedCard status={status()} onCancel={vi.fn()} />);
+    renderCard(<PausedCard status={status()} onCancel={vi.fn()} />);
 
     expect(screen.getByTestId("paused-card")).toHaveAttribute("role", "status");
   });

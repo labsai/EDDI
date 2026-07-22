@@ -51,17 +51,31 @@ export interface ApprovalStatus {
   pauseDetails: PauseDetails | null;
 }
 
-const ISO_DURATION = /^P(?:\d+D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/;
+/**
+ * The day component is captured, not merely tolerated.
+ *
+ * It used to be matched and discarded, so `P1DT1H` read as one hour instead of
+ * 25 — the deadline shown to the user was a day early. The `T` section is also
+ * optional now: the backend parses `approvalTimeout` with `Duration.parse`,
+ * which accepts a bare `P2D`, and that previously failed to match at all and
+ * reported no deadline.
+ */
+const ISO_DURATION =
+  /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/;
 
-/** Parse an ISO-8601 duration's time components into milliseconds. */
+/** Parse an ISO-8601 duration into milliseconds. */
 export function parseIsoDuration(value: string): number | null {
   if (!value) return null;
   const m = ISO_DURATION.exec(value.trim());
   if (!m) return null;
-  const [, h, min, s] = m;
-  if (!h && !min && !s) return null;
+  const [, d, h, min, s] = m;
+  if (!d && !h && !min && !s) return null;
   return (
-    (Number(h ?? 0) * 3600 + Number(min ?? 0) * 60 + Number(s ?? 0)) * 1000
+    (Number(d ?? 0) * 86400 +
+      Number(h ?? 0) * 3600 +
+      Number(min ?? 0) * 60 +
+      Number(s ?? 0)) *
+    1000
   );
 }
 
