@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
@@ -10,10 +10,6 @@ import {
   useLogStream,
 } from "@/hooks/use-logs";
 import { http, HttpResponse } from "msw";
-
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterAll(() => server.close());
-afterEach(() => server.resetHandlers());
 
 function createWrapper() {
   const queryClient = new QueryClient({

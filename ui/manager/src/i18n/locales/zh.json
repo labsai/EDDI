@@ -99,12 +99,12 @@
       "noRecentAgents": "暂无 Agent，创建您的第一个 Agent！"
     },
     "agents": {
-    "undeployPreviousVersionsHint": "同时从环境中移除此代理的所有早期版本。",
-    "undeployPreviousVersionsLabel": "取消部署此版本及所有先前版本",
-    "undeployEndConversationsHint": "立即终止此部署上所有进行中的对话。此操作无法撤销。",
-    "undeployEndConversationsLabel": "结束所有活动对话",
-    "confirmUndeployDescription": "版本 {{version}} 将从 {{environment}} 取消部署。",
-    "confirmUndeploy": "取消部署此代理？",
+      "undeployPreviousVersionsHint": "同时从环境中移除此代理的所有早期版本。",
+      "undeployPreviousVersionsLabel": "取消部署此版本及所有先前版本",
+      "undeployEndConversationsHint": "立即终止此部署上所有进行中的对话。此操作无法撤销。",
+      "undeployEndConversationsLabel": "结束所有活动对话",
+      "confirmUndeployDescription": "版本 {{version}} 将从 {{environment}} 取消部署。",
+      "confirmUndeploy": "取消部署此代理？",
       "title": "代理",
       "subtitle": "管理您的会话式 AI Agents"
     },
@@ -113,11 +113,11 @@
       "subtitle": "配置 Workflows 和扩展"
     },
     "conversations": {
-    "permanentDeleteSuccess": "已永久删除",
-    "softDeleteSuccess": "对话已删除",
-    "deletePermanentAction": "永久删除",
-    "deletePermanentLabel": "永久删除——同时清除附件、记忆快照和审批历史。此操作无法撤销。",
-    "confirmDeleteSoft": "默认情况下这是软删除——对话会从列表中隐藏，但其数据仍保留在服务器上。",
+      "permanentDeleteSuccess": "已永久删除",
+      "softDeleteSuccess": "对话已删除",
+      "deletePermanentAction": "永久删除",
+      "deletePermanentLabel": "永久删除——同时清除附件、记忆快照和审批历史。此操作无法撤销。",
+      "confirmDeleteSoft": "默认情况下这是软删除——对话会从列表中隐藏，但其数据仍保留在服务器上。",
       "title": "对话",
       "subtitle": "查看和管理 Agent 会话"
     },
@@ -2023,10 +2023,10 @@
         "step3Desc": "在界面上原生处理所有配置触发任务：暂停、重新执行并模拟检验。"
       },
       "quotas": {
-    "saveSuccess": "配额已保存",
-    "resetSuccess": "使用计数器已重置",
-    "resetConfirmDesc": "立即将租户“default”的所有使用计数器（对话、API 调用、每月费用）清零。此操作无法撤销。",
-    "resetConfirmTitle": "重置使用计数器？",
+        "saveSuccess": "配额已保存",
+        "resetSuccess": "使用计数器已重置",
+        "resetConfirmDesc": "立即将租户“default”的所有使用计数器（对话、API 调用、每月费用）清零。此操作无法撤销。",
+        "resetConfirmTitle": "重置使用计数器？",
         "title": "配额导览",
         "step1Title": "硬性限制配置",
         "step1Desc": "对每个租户指定最大的每日限制、请求、智能体数和财务上限阈值，以保持安全性。",
@@ -2045,7 +2045,7 @@
         "step3Desc": "检查故障任务并重新提交，将崩溃系统隔离控制住稳定安全环境。"
       },
       "orphans": {
-    "confirmPurgeAll": "永久删除全部 {{count}} 个孤立资源？服务器会清除所有孤立项——不应用您的选择。此操作无法撤销。",
+        "confirmPurgeAll": "永久删除全部 {{count}} 个孤立资源？服务器会清除所有孤立项——不应用您的选择。此操作无法撤销。",
         "title": "无主孤儿对象导览",
         "step1Title": "扫描触发点",
         "step1Desc": "平台启动数据表结构扫描，在寻找任何失效的无来源游离配置数据和文件。",
@@ -2980,5 +2980,14 @@
     "importSelected": "导入所选组",
     "importing": "正在导入…",
     "selectGroups": "选择要作为独立 API 调用扩展导入的 API 组"
+  },
+  "Workforce": {
+    "thread": {
+      "fileTooLarge": "文件必须小于20MB",
+      "fileTypeNotAllowed": "不支持此文件类型",
+      "attachmentLimit": "每条消息最多 {{max}} 个附件",
+      "notForwarded": "文件已存储但太大，无法发送给模型",
+      "uploadFailed": "上传失败：{{error}}"
+    }
   }
 }

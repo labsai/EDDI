@@ -5,8 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { CostDashboard } from "@/components/debugger/cost-dashboard";
+import { server } from "@/test/mocks/server";
+import { http, HttpResponse } from "msw";
 
-function renderDashboard(conversationId: string | null = "conv-1") {
+function renderDashboard(conversationId: string | null = "conv1") {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -30,43 +32,85 @@ describe("CostDashboard", () => {
     localStorage.clear();
   });
 
-  it("renders component wrapper with data-testid", async () => {
+  // ── Empty / null states ────────────────────────────────────────────
+  it("renders empty state when conversationId is null", () => {
+    renderDashboard(null);
+    expect(screen.getByText(/Send a message to see cost metrics/i)).toBeInTheDocument();
+  });
+
+  it("renders empty state when conversationId is empty string", () => {
+    renderDashboard("");
+    expect(screen.getByText(/Send a message to see cost metrics/i)).toBeInTheDocument();
+  });
+
+  // ── Stat cards ─────────────────────────────────────────────────────
+  it("renders cost-dashboard container with data-testid", async () => {
     renderDashboard();
     await waitFor(() => {
       expect(screen.getByTestId("cost-dashboard")).toBeInTheDocument();
     });
   });
 
-  it("renders empty state when conversationId is null", () => {
-    renderDashboard(null);
-    expect(screen.getByTestId("cost-dashboard")).toBeInTheDocument();
-    expect(screen.getByText(/Send a message to see cost metrics/i)).toBeInTheDocument();
-  });
-
-  it("displays 'This Turn' section when audit data loads", async () => {
-    renderDashboard("conv-1");
+  it("displays Total Cost stat card", async () => {
+    renderDashboard();
     await waitFor(
       () => {
         const dashboard = screen.getByTestId("cost-dashboard");
-        expect(within(dashboard).getByText(/This Turn/i)).toBeInTheDocument();
+        expect(within(dashboard).getByText(/Total Cost/i)).toBeInTheDocument();
       },
       { timeout: 5000 },
     );
   });
 
-  it("displays 'Conversation Total' section", async () => {
-    renderDashboard("conv-1");
+  it("displays Total Tokens stat card", async () => {
+    renderDashboard();
     await waitFor(
       () => {
         const dashboard = screen.getByTestId("cost-dashboard");
-        expect(within(dashboard).getByText(/Conversation Total/i)).toBeInTheDocument();
+        expect(within(dashboard).getByText(/Total Tokens/i)).toBeInTheDocument();
       },
       { timeout: 5000 },
     );
   });
 
+  it("displays Turns stat card", async () => {
+    renderDashboard();
+    await waitFor(
+      () => {
+        const dashboard = screen.getByTestId("cost-dashboard");
+        expect(within(dashboard).getByText(/Turns/i)).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it("displays Avg Latency stat card", async () => {
+    renderDashboard();
+    await waitFor(
+      () => {
+        const dashboard = screen.getByTestId("cost-dashboard");
+        expect(within(dashboard).getByText(/Avg Latency/i)).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  // ── Token distribution ─────────────────────────────────────────────
+  it("displays token distribution bar with input/output", async () => {
+    renderDashboard();
+    await waitFor(
+      () => {
+        const dashboard = screen.getByTestId("cost-dashboard");
+        expect(within(dashboard).getByText(/Input/i)).toBeInTheDocument();
+        expect(within(dashboard).getByText(/Output/i)).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  // ── Dollar cost values ─────────────────────────────────────────────
   it("displays dollar-sign cost values", async () => {
-    renderDashboard("conv-1");
+    renderDashboard();
     await waitFor(
       () => {
         const dashboard = screen.getByTestId("cost-dashboard");
@@ -77,30 +121,20 @@ describe("CostDashboard", () => {
     );
   });
 
-  it("displays 'Tool Usage' section", async () => {
-    renderDashboard("conv-1");
+  // ── Per-turn table ─────────────────────────────────────────────────
+  it("displays per-turn table with model name", async () => {
+    renderDashboard();
     await waitFor(
       () => {
         const dashboard = screen.getByTestId("cost-dashboard");
-        expect(within(dashboard).getByText(/Tool Usage/i)).toBeInTheDocument();
+        expect(within(dashboard).getAllByText(/5\.4-mini/i).length).toBeGreaterThan(0);
       },
       { timeout: 5000 },
     );
   });
 
-  it("displays 'Tool Calls' count in Conversation Total", async () => {
-    renderDashboard("conv-1");
-    await waitFor(
-      () => {
-        const dashboard = screen.getByTestId("cost-dashboard");
-        expect(within(dashboard).getByText(/Tool Calls/i)).toBeInTheDocument();
-      },
-      { timeout: 5000 },
-    );
-  });
-
-  it("displays token metrics labels", async () => {
-    renderDashboard("conv-1");
+  it("displays token counts in per-turn table", async () => {
+    renderDashboard();
     await waitFor(
       () => {
         const dashboard = screen.getByTestId("cost-dashboard");
@@ -111,24 +145,20 @@ describe("CostDashboard", () => {
     );
   });
 
-  it("displays 'Duration' in This Turn section", async () => {
-    renderDashboard("conv-1");
-    await waitFor(
-      () => {
-        const dashboard = screen.getByTestId("cost-dashboard");
-        expect(within(dashboard).getByText(/Duration/i)).toBeInTheDocument();
-      },
-      { timeout: 5000 },
+  // ── Error state ────────────────────────────────────────────────────
+  it("shows error state when both APIs fail", async () => {
+    server.use(
+      http.get("*/llm/tools/costs/conversation/*", () => {
+        return new HttpResponse(null, { status: 500 });
+      }),
+      http.get("*/auditstore/*", () => {
+        return new HttpResponse(null, { status: 500 });
+      }),
     );
-  });
-
-  it("displays 'Cache' section with hit rate", async () => {
-    renderDashboard("conv-1");
+    renderDashboard("conv-err");
     await waitFor(
       () => {
-        const dashboard = screen.getByTestId("cost-dashboard");
-        expect(within(dashboard).getByText(/Cache/)).toBeInTheDocument();
-        expect(within(dashboard).getByText(/Hit Rate/i)).toBeInTheDocument();
+        expect(screen.getByTestId("cost-dashboard-error")).toBeInTheDocument();
       },
       { timeout: 5000 },
     );

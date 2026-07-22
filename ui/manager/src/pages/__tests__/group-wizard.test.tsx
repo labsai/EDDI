@@ -273,8 +273,8 @@ describe("GroupWizardPage", () => {
 
     // Style selector shows style labels (not a select element, it's a grid of buttons)
     expect(screen.getByText("Discussion Style")).toBeInTheDocument();
-    expect(screen.getByText("Peer Review")).toBeInTheDocument();
-    expect(screen.getByText("Round Table")).toBeInTheDocument();
+    expect(screen.getByText("Quality Review")).toBeInTheDocument();
+    expect(screen.getByText("Collaborative Council")).toBeInTheDocument();
   });
 
   // ── Create group mutation ──────────────────────────────────────────

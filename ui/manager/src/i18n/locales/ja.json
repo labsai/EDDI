@@ -99,12 +99,12 @@
       "noRecentAgents": "Agent がまだありません。最初の Agent を作成しましょう！"
     },
     "agents": {
-    "undeployPreviousVersionsHint": "この環境からこのエージェントの以前のすべてのバージョンも削除します。",
-    "undeployPreviousVersionsLabel": "このバージョンと以前のすべてのバージョンをアンデプロイ",
-    "undeployEndConversationsHint": "このデプロイの進行中の会話をすべて直ちに終了します。元に戻せません。",
-    "undeployEndConversationsLabel": "アクティブな会話をすべて終了",
-    "confirmUndeployDescription": "バージョン {{version}} を {{environment}} からアンデプロイします。",
-    "confirmUndeploy": "エージェントをアンデプロイしますか？",
+      "undeployPreviousVersionsHint": "この環境からこのエージェントの以前のすべてのバージョンも削除します。",
+      "undeployPreviousVersionsLabel": "このバージョンと以前のすべてのバージョンをアンデプロイ",
+      "undeployEndConversationsHint": "このデプロイの進行中の会話をすべて直ちに終了します。元に戻せません。",
+      "undeployEndConversationsLabel": "アクティブな会話をすべて終了",
+      "confirmUndeployDescription": "バージョン {{version}} を {{environment}} からアンデプロイします。",
+      "confirmUndeploy": "エージェントをアンデプロイしますか？",
       "title": "エージェント",
       "subtitle": "会話型 AI Agents を管理"
     },
@@ -113,11 +113,11 @@
       "subtitle": "Workflows と拡張機能を設定"
     },
     "conversations": {
-    "permanentDeleteSuccess": "完全に削除しました",
-    "softDeleteSuccess": "会話を削除しました",
-    "deletePermanentAction": "完全に削除",
-    "deletePermanentLabel": "完全に削除 — 添付ファイル、メモリスナップショット、承認履歴も消去します。元に戻せません。",
-    "confirmDeleteSoft": "デフォルトではソフト削除です。会話は一覧から非表示になりますが、保存データはサーバーに残ります。",
+      "permanentDeleteSuccess": "完全に削除しました",
+      "softDeleteSuccess": "会話を削除しました",
+      "deletePermanentAction": "完全に削除",
+      "deletePermanentLabel": "完全に削除 — 添付ファイル、メモリスナップショット、承認履歴も消去します。元に戻せません。",
+      "confirmDeleteSoft": "デフォルトではソフト削除です。会話は一覧から非表示になりますが、保存データはサーバーに残ります。",
       "title": "会話",
       "subtitle": "Agent の会話を確認・管理"
     },
@@ -2023,10 +2023,10 @@
         "step3Desc": "一時停止、再開、編集、テスト実行など、自動化トリガーを直接管理します。"
       },
       "quotas": {
-    "saveSuccess": "クォータを保存しました",
-    "resetSuccess": "使用カウンターをリセットしました",
-    "resetConfirmDesc": "テナント「default」のすべての使用カウンター（会話、API 呼び出し、月間コスト）を直ちにゼロにします。元に戻せません。",
-    "resetConfirmTitle": "使用カウンターをリセットしますか？",
+        "saveSuccess": "クォータを保存しました",
+        "resetSuccess": "使用カウンターをリセットしました",
+        "resetConfirmDesc": "テナント「default」のすべての使用カウンター（会話、API 呼び出し、月間コスト）を直ちにゼロにします。元に戻せません。",
+        "resetConfirmTitle": "使用カウンターをリセットしますか？",
         "title": "クォータ ツアー",
         "step1Title": "構成の制限",
         "step1Desc": "このテナントの合計エージェント数、1日の会話数、トークンコストに対するハードリミットを定義します。",
@@ -2045,7 +2045,7 @@
         "step3Desc": "失敗したタスクを検査し、システムの安定性を維持するために体系的に破棄または再試行します。"
       },
       "orphans": {
-    "confirmPurgeAll": "{{count}} 件すべての孤立リソースを完全に削除しますか？サーバーはすべてを削除し、選択は適用されません。この操作は元に戻せません。",
+        "confirmPurgeAll": "{{count}} 件すべての孤立リソースを完全に削除しますか？サーバーはすべてを削除し、選択は適用されません。この操作は元に戻せません。",
         "title": "孤立オブジェクト ツアー",
         "step1Title": "スキャンのトリガー",
         "step1Desc": "プラットフォームのスキャンを開始し、どのエージェントからも切断された無関係な設定を検出します。",
@@ -2980,5 +2980,14 @@
     "importSelected": "選択したグループをインポート",
     "importing": "インポート中…",
     "selectGroups": "個別の API 呼び出し拡張としてインポートする API グループを選択"
+  },
+  "Workforce": {
+    "thread": {
+      "fileTooLarge": "ファイルは20MB以下にしてください",
+      "fileTypeNotAllowed": "このファイルタイプはサポートされていません",
+      "attachmentLimit": "メッセージあたり最大{{max}}件の添付",
+      "notForwarded": "ファイルは保存されましたがモデルに送信するには大きすぎます",
+      "uploadFailed": "アップロード失敗：{{error}}"
+    }
   }
 }

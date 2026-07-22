@@ -99,12 +99,12 @@
       "noRecentAgents": "Aún no hay agents. ¡Cree su primer agent!"
     },
     "agents": {
-    "undeployPreviousVersionsHint": "También elimina del entorno todas las versiones anteriores de este agente.",
-    "undeployPreviousVersionsLabel": "Retirar esta y todas las versiones anteriores",
-    "undeployEndConversationsHint": "Termina de inmediato todas las conversaciones en curso de este despliegue. No se puede deshacer.",
-    "undeployEndConversationsLabel": "Finalizar todas las conversaciones activas",
-    "confirmUndeployDescription": "La versión {{version}} se retirará de {{environment}}.",
-    "confirmUndeploy": "¿Retirar el despliegue del agente?",
+      "undeployPreviousVersionsHint": "También elimina del entorno todas las versiones anteriores de este agente.",
+      "undeployPreviousVersionsLabel": "Retirar esta y todas las versiones anteriores",
+      "undeployEndConversationsHint": "Termina de inmediato todas las conversaciones en curso de este despliegue. No se puede deshacer.",
+      "undeployEndConversationsLabel": "Finalizar todas las conversaciones activas",
+      "confirmUndeployDescription": "La versión {{version}} se retirará de {{environment}}.",
+      "confirmUndeploy": "¿Retirar el despliegue del agente?",
       "title": "Agentes",
       "subtitle": "Gestione sus agents de IA conversacional"
     },
@@ -113,11 +113,11 @@
       "subtitle": "Configure workflows y extensiones de agents"
     },
     "conversations": {
-    "permanentDeleteSuccess": "Eliminado permanentemente",
-    "softDeleteSuccess": "Conversación eliminada",
-    "deletePermanentAction": "Eliminar permanentemente",
-    "deletePermanentLabel": "Eliminar permanentemente — también borra los adjuntos, la instantánea de memoria y el historial de aprobaciones. No se puede deshacer.",
-    "confirmDeleteSoft": "De forma predeterminada, es un borrado lógico: la conversación se oculta de las listas, pero sus datos se conservan en el servidor.",
+      "permanentDeleteSuccess": "Eliminado permanentemente",
+      "softDeleteSuccess": "Conversación eliminada",
+      "deletePermanentAction": "Eliminar permanentemente",
+      "deletePermanentLabel": "Eliminar permanentemente — también borra los adjuntos, la instantánea de memoria y el historial de aprobaciones. No se puede deshacer.",
+      "confirmDeleteSoft": "De forma predeterminada, es un borrado lógico: la conversación se oculta de las listas, pero sus datos se conservan en el servidor.",
       "title": "Conversaciones",
       "subtitle": "Vea y gestione las conversaciones de los agents"
     },
@@ -2023,10 +2023,10 @@
         "step3Desc": "Controle sus tareas automáticamente: pause, reanude, edite o fuerce su ejecución en cualquier momento."
       },
       "quotas": {
-    "saveSuccess": "Cuota guardada",
-    "resetSuccess": "Contadores de uso restablecidos",
-    "resetConfirmDesc": "Pone a cero de inmediato todos los contadores de uso (conversaciones, llamadas API, coste mensual) del inquilino «default». No se puede deshacer.",
-    "resetConfirmTitle": "¿Restablecer los contadores de uso?",
+        "saveSuccess": "Cuota guardada",
+        "resetSuccess": "Contadores de uso restablecidos",
+        "resetConfirmDesc": "Pone a cero de inmediato todos los contadores de uso (conversaciones, llamadas API, coste mensual) del inquilino «default». No se puede deshacer.",
+        "resetConfirmTitle": "¿Restablecer los contadores de uso?",
         "title": "Tour de Cuotas",
         "step1Title": "Límites de uso",
         "step1Desc": "Defina restricciones como máximo de agentes, conversaciones u otros límites de token para este Tenant.",
@@ -2045,7 +2045,7 @@
         "step3Desc": "Inspeccione las tareas fallidas en la cola de dead-letter, descártelas o reinténtelas para mantener la plataforma estable."
       },
       "orphans": {
-    "confirmPurgeAll": "¿Eliminar permanentemente TODOS los {{count}} recursos huérfanos? El servidor purga todos — tu selección no se aplica. Esto no se puede deshacer.",
+        "confirmPurgeAll": "¿Eliminar permanentemente TODOS los {{count}} recursos huérfanos? El servidor purga todos — tu selección no se aplica. Esto no se puede deshacer.",
         "title": "Tour de Huérfanos",
         "step1Title": "Escaneo de sistema",
         "step1Desc": "Active el escaneo para buscar recursos o configuraciones que ya no estén conectadas ni utilizadas.",
@@ -2980,5 +2980,14 @@
     "importSelected": "Importar grupos seleccionados",
     "importing": "Importando…",
     "selectGroups": "Seleccione grupos de API para importarlos como extensiones de Llamada API independientes"
+  },
+  "Workforce": {
+    "thread": {
+      "fileTooLarge": "El archivo debe ser menor de 20MB",
+      "fileTypeNotAllowed": "Este tipo de archivo no es compatible",
+      "attachmentLimit": "Máximo {{max}} archivos adjuntos por mensaje",
+      "notForwarded": "Archivo almacenado pero demasiado grande para el modelo",
+      "uploadFailed": "Error al subir: {{error}}"
+    }
   }
 }

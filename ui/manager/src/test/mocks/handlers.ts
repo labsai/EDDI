@@ -1953,13 +1953,13 @@ export const handlers = [
 
   http.get("*/groupstore/groups/styles", () => {
     return HttpResponse.json({
-      ROUND_TABLE: { label: "Round Table", phases: ["OPINION", "SYNTHESIS"] },
-      PEER_REVIEW: { label: "Peer Review", phases: ["OPINION", "CRITIQUE", "REVISION", "SYNTHESIS"] },
-      DEVIL_ADVOCATE: { label: "Devil's Advocate", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
-      DELPHI: { label: "Delphi", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
-      DEBATE: { label: "Debate", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
-      TASK_FORCE: { label: "Task Force", phases: ["PLAN", "EXECUTE", "VERIFY", "SYNTHESIS"] },
-      CUSTOM: { label: "Custom", phases: [] },
+      ROUND_TABLE: { label: "Collaborative Council", phases: ["OPINION", "SYNTHESIS"] },
+      PEER_REVIEW: { label: "Quality Review", phases: ["OPINION", "CRITIQUE", "REVISION", "SYNTHESIS"] },
+      DEVIL_ADVOCATE: { label: "Stress Test", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
+      DELPHI: { label: "Expert Forecast", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
+      DEBATE: { label: "Structured Deliberation", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
+      TASK_FORCE: { label: "Operational Task Force", phases: ["PLAN", "EXECUTE", "VERIFY", "SYNTHESIS"] },
+      CUSTOM: { label: "Custom Framework", phases: [] },
     });
   }),
 
@@ -3143,11 +3143,14 @@ const MOCK_AUDIT_ENTRIES = [
     input: { "user:message": "Hello there", "conversation:history": 3 },
     output: { "llm:response": "Hi there! How can I help you today?" },
     llmDetail: {
-      "compiled_prompt": "You are a helpful assistant.\n\nUser: Hello there",
-      "model_response": "Hi there! How can I help you today?",
-      "model_name": "gpt-5.4-mini",
-      "input_tokens": 42,
-      "output_tokens": 12,
+      compiledPrompt: "System: You are a helpful assistant.\n\nUser: Hello there",
+      modelResponse: "Hi there! How can I help you today?",
+      modelName: "gpt-5.4-mini",
+      tokenUsage: {
+        inputTokens: 42,
+        outputTokens: 12,
+      },
+      temperature: 0.7,
     },
     toolCalls: null,
     actions: ["greet", "chat"],

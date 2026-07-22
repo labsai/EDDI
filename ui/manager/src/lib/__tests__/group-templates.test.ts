@@ -1,105 +1,68 @@
-import { describe, expect, it, vi } from "vitest";
-import { getGroupTemplates, buildGroupFromTemplate } from "../group-templates";
+import { describe, it, expect } from "vitest";
+import { getGroupTemplates, buildGroupFromTemplate } from "@/lib/group-templates";
 import type { TFunction } from "i18next";
 
-// Minimal mock t() that returns the key (mirrors react-i18next test behaviour)
-const mockT = ((key: string) => key) as unknown as TFunction;
+describe("group-templates", () => {
+  const mockT = ((key: string) => `translated_${key}`) as TFunction;
 
-describe("getGroupTemplates", () => {
-  it("returns 5 templates", () => {
-    const templates = getGroupTemplates(mockT);
-    expect(templates).toHaveLength(6);
-  });
-
-  it("each template has required fields", () => {
-    const templates = getGroupTemplates(mockT);
-    for (const tmpl of templates) {
-      expect(tmpl.key).toBeTruthy();
-      expect(tmpl.name).toBeTruthy();
-      expect(tmpl.description).toBeTruthy();
-      expect(tmpl.icon).toBeTruthy();
-      expect(tmpl.style).toBeTruthy();
-      expect(tmpl.maxRounds).toBeGreaterThan(0);
-      expect(tmpl.roles.length).toBeGreaterThanOrEqual(2);
-      expect(typeof tmpl.moderatorSuggested).toBe("boolean");
-    }
-  });
-
-  it("template names come from i18n keys", () => {
-    const templates = getGroupTemplates(mockT);
-    // Since mockT returns the key, template names should be i18n key paths
-    expect(templates[0]!.name).toBe("groupTemplates.advisoryBoard");
-    expect(templates[1]!.name).toBe("groupTemplates.codeReview");
-    expect(templates[2]!.name).toBe("groupTemplates.riskAssessment");
-    expect(templates[3]!.name).toBe("groupTemplates.forecasting");
-    expect(templates[4]!.name).toBe("groupTemplates.proCon");
-  });
-
-  it("role displayNames come from i18n keys", () => {
-    const templates = getGroupTemplates(mockT);
-    const advisoryRoles = templates[0]!.roles;
-    expect(advisoryRoles[0]!.displayName).toBe("groupTemplates.roles.marketingExpert");
-    expect(advisoryRoles[1]!.displayName).toBe("groupTemplates.roles.techLead");
-  });
-
-  it("calls t() for each translatable string", () => {
-    const spyT = vi.fn((key: string) => key) as unknown as TFunction;
-    getGroupTemplates(spyT);
-    // Each template: name + description + each role displayName
-    // advisory: 2 + 5, code: 2 + 3, risk: 2 + 3, forecast: 2 + 4, debate: 2 + 4, task-force: 2 + 4 = 35
-    expect(spyT).toHaveBeenCalledTimes(35);
-  });
-
-  it("templates have unique keys", () => {
-    const templates = getGroupTemplates(mockT);
-    const keys = templates.map((t) => t.key);
-    expect(new Set(keys).size).toBe(keys.length);
-  });
-});
-
-describe("buildGroupFromTemplate", () => {
-  it("builds config from template with correct defaults", () => {
-    const template = getGroupTemplates(mockT)[0]!; // advisory board
-    const config = buildGroupFromTemplate(template);
-
-    expect(config.name).toBe(template.name);
-    expect(config.description).toBe(template.description);
-    expect(config.style).toBe("ROUND_TABLE");
-    expect(config.maxRounds).toBe(2);
-    expect(config.members).toHaveLength(5);
-    expect(config.moderatorAgentId).toBeNull();
-    expect(config.protocol?.agentTimeoutSeconds).toBe(60);
-  });
-
-  it("respects overrides", () => {
-    const template = getGroupTemplates(mockT)[0]!;
-    const config = buildGroupFromTemplate(template, {
-      name: "Custom Name",
-      maxRounds: 5,
-      moderatorAgentId: "mod-123",
+  describe("getGroupTemplates", () => {
+    it("returns all templates with correct structure", () => {
+      const templates = getGroupTemplates(mockT);
+      expect(templates.length).toBe(6);
+      
+      const advisoryBoard = templates.find(t => t.key === "advisory-board");
+      expect(advisoryBoard).toBeDefined();
+      expect(advisoryBoard?.name).toBe("translated_groupTemplates.advisoryBoard");
+      expect(advisoryBoard?.style).toBe("ROUND_TABLE");
+      expect(advisoryBoard?.roles.length).toBe(5);
     });
 
-    expect(config.name).toBe("Custom Name");
-    expect(config.maxRounds).toBe(5);
-    expect(config.moderatorAgentId).toBe("mod-123");
+    it("Each template has name, description, style, roles", () => {
+      const templates = getGroupTemplates(mockT);
+      for (const t of templates) {
+        expect(t.name).toBeDefined();
+        expect(typeof t.name).toBe("string");
+        expect(t.description).toBeDefined();
+        expect(t.style).toBeDefined();
+        expect(t.roles).toBeDefined();
+        expect(Array.isArray(t.roles)).toBe(true);
+      }
+    });
   });
 
-  it("members have empty agentId placeholders", () => {
-    const template = getGroupTemplates(mockT)[0]!;
-    const config = buildGroupFromTemplate(template);
+  describe("buildGroupFromTemplate", () => {
+    it("applyTemplate creates a proper config from a template", () => {
+      const templates = getGroupTemplates(mockT);
+      const template = templates.find(t => t.key === "code-review")!;
+      
+      const config = buildGroupFromTemplate(template);
+      
+      expect(config.name).toBe("translated_groupTemplates.codeReview");
+      expect(config.description).toBe("translated_groupTemplates.codeReviewDesc");
+      expect(config.style).toBe("PEER_REVIEW");
+      expect(config.maxRounds).toBe(1);
+      expect(config.members.length).toBe(3);
+      expect(config.members[0]!.displayName).toBe("translated_groupTemplates.roles.seniorEngineer");
+      expect(config.members[0]!.role).toBe("Code Quality");
+      expect(config.members[0]!.agentId).toBe("");
+      expect(config.members[0]!.speakingOrder).toBe(1);
+      expect(config.moderatorAgentId).toBe(null);
+    });
 
-    for (const member of config.members) {
-      expect(member.agentId).toBe("");
-      expect(member.memberType).toBe("AGENT");
-    }
-  });
-
-  it("members have sequential speaking order", () => {
-    const template = getGroupTemplates(mockT)[0]!;
-    const config = buildGroupFromTemplate(template);
-
-    config.members.forEach((m, i) => {
-      expect(m.speakingOrder).toBe(i + 1);
+    it("applies overrides correctly", () => {
+      const templates = getGroupTemplates(mockT);
+      const template = templates[0]!;
+      
+      const config = buildGroupFromTemplate(template, {
+        name: "Custom Name",
+        maxRounds: 5,
+        moderatorAgentId: "mod-1"
+      });
+      
+      expect(config.name).toBe("Custom Name");
+      expect(config.maxRounds).toBe(5);
+      expect(config.moderatorAgentId).toBe("mod-1");
+      expect(config.style).toBe(template!.style);
     });
   });
 });

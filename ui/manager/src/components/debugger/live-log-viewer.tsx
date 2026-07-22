@@ -155,6 +155,9 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
           aria-label={connected ? t("logViewer.connected", "Connected") : t("logViewer.disconnected", "Disconnected")}
           role="status"
         />
+        <span className="text-[10px] font-mono text-muted-foreground tabular-nums">
+          {filteredLogs.length}
+        </span>
 
         {/* Level filters */}
         {["ERROR", "WARN", "INFO", "DEBUG"].map((level) => (
@@ -178,7 +181,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
 
         {/* Search */}
         <div className="relative">
-          <Search className="absolute inset-s-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <Search className="absolute start-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             value={searchQuery}
@@ -220,8 +223,13 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
         style={{ maxHeight: "35vh" }}
       >
         {filteredLogs.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground text-xs">
-            {t("logViewer.waiting", "Waiting for logs...")}
+          <div className="flex flex-col items-center gap-2 py-8 text-center">
+            <ScrollText className="h-6 w-6 text-muted-foreground/30" />
+            <p className="text-xs text-muted-foreground">
+              {logs.length === 0
+                ? t("logViewer.waiting", "Waiting for logs...")
+                : t("logViewer.noMatch", "No logs match your filter")}
+            </p>
           </div>
         ) : (
           filteredLogs.map((entry, idx) => (

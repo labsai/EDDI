@@ -99,12 +99,12 @@
       "noRecentAgents": "Aucun agent pour l'instant. Créez votre premier agent !"
     },
     "agents": {
-    "undeployPreviousVersionsHint": "Retire également toutes les versions antérieures de cet agent de l’environnement.",
-    "undeployPreviousVersionsLabel": "Retirer cette version et toutes les précédentes",
-    "undeployEndConversationsHint": "Termine immédiatement toute conversation en cours sur ce déploiement. Irréversible.",
-    "undeployEndConversationsLabel": "Terminer toutes les conversations actives",
-    "confirmUndeployDescription": "La version {{version}} sera retirée de {{environment}}.",
-    "confirmUndeploy": "Retirer l’agent du déploiement ?",
+      "undeployPreviousVersionsHint": "Retire également toutes les versions antérieures de cet agent de l’environnement.",
+      "undeployPreviousVersionsLabel": "Retirer cette version et toutes les précédentes",
+      "undeployEndConversationsHint": "Termine immédiatement toute conversation en cours sur ce déploiement. Irréversible.",
+      "undeployEndConversationsLabel": "Terminer toutes les conversations actives",
+      "confirmUndeployDescription": "La version {{version}} sera retirée de {{environment}}.",
+      "confirmUndeploy": "Retirer l’agent du déploiement ?",
       "title": "Agents",
       "subtitle": "Gérez vos agents d'IA conversationnelle"
     },
@@ -113,11 +113,11 @@
       "subtitle": "Configurez les workflows et extensions des agents"
     },
     "conversations": {
-    "permanentDeleteSuccess": "Supprimé définitivement",
-    "softDeleteSuccess": "Conversation supprimée",
-    "deletePermanentAction": "Supprimer définitivement",
-    "deletePermanentLabel": "Supprimer définitivement — efface aussi les pièces jointes, l’instantané mémoire et l’historique d’approbation. Irréversible.",
-    "confirmDeleteSoft": "Par défaut, il s’agit d’une suppression logique — la conversation est masquée des listes mais ses données restent sur le serveur.",
+      "permanentDeleteSuccess": "Supprimé définitivement",
+      "softDeleteSuccess": "Conversation supprimée",
+      "deletePermanentAction": "Supprimer définitivement",
+      "deletePermanentLabel": "Supprimer définitivement — efface aussi les pièces jointes, l’instantané mémoire et l’historique d’approbation. Irréversible.",
+      "confirmDeleteSoft": "Par défaut, il s’agit d’une suppression logique — la conversation est masquée des listes mais ses données restent sur le serveur.",
       "title": "Conversations",
       "subtitle": "Consultez et gérez les conversations des agents"
     },
@@ -2023,10 +2023,10 @@
         "step3Desc": "Démarrez et interrompez une activité en direct aux horaires des serveurs intégrés."
       },
       "quotas": {
-    "saveSuccess": "Quota enregistré",
-    "resetSuccess": "Compteurs d’usage réinitialisés",
-    "resetConfirmDesc": "Met immédiatement à zéro tous les compteurs d’usage (conversations, appels API, coût mensuel) pour le locataire « default ». Irréversible.",
-    "resetConfirmTitle": "Réinitialiser les compteurs d’usage ?",
+        "saveSuccess": "Quota enregistré",
+        "resetSuccess": "Compteurs d’usage réinitialisés",
+        "resetConfirmDesc": "Met immédiatement à zéro tous les compteurs d’usage (conversations, appels API, coût mensuel) pour le locataire « default ». Irréversible.",
+        "resetConfirmTitle": "Réinitialiser les compteurs d’usage ?",
         "title": "Visite des Quotas",
         "step1Title": "Règlements limites",
         "step1Desc": "Plafonnez de potentielles brèches financières en plafonnant un compte Agent spécifique.",
@@ -2045,7 +2045,7 @@
         "step3Desc": "Restituez d'anciennes interruptions, retirez-les ou soumettez-les à un exécuteur pour validation."
       },
       "orphans": {
-    "confirmPurgeAll": "Supprimer définitivement TOUTES les {{count}} ressources orphelines ? Le serveur purge tout — votre sélection n’est pas appliquée. Action irréversible.",
+        "confirmPurgeAll": "Supprimer définitivement TOUTES les {{count}} ressources orphelines ? Le serveur purge tout — votre sélection n’est pas appliquée. Action irréversible.",
         "title": "Visite des Objets Orphelins",
         "step1Title": "Exploration complète",
         "step1Desc": "Localisez instantanément vos données devenues errantes au sein des configurations.",
@@ -2980,5 +2980,14 @@
     "importSelected": "Importer les groupes sélectionnés",
     "importing": "Importation…",
     "selectGroups": "Sélectionnez les groupes d'API à importer comme extensions d'appel API distinctes"
+  },
+  "Workforce": {
+    "thread": {
+      "fileTooLarge": "Le fichier doit faire moins de 20 Mo",
+      "fileTypeNotAllowed": "Ce type de fichier n'est pas pris en charge",
+      "attachmentLimit": "Maximum {{max}} pièces jointes par message",
+      "notForwarded": "Fichier stocké mais trop volumineux pour le modèle",
+      "uploadFailed": "Échec du téléchargement : {{error}}"
+    }
   }
 }

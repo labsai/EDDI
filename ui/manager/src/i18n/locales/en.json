@@ -99,12 +99,12 @@
       "noRecentAgents": "No agents yet. Create your first agent!"
     },
     "agents": {
-    "undeployPreviousVersionsHint": "Also removes every earlier version of this agent from the environment.",
-    "undeployPreviousVersionsLabel": "Undeploy this and all previous versions",
-    "undeployEndConversationsHint": "Immediately terminates every in-progress conversation on this deployment. This cannot be undone.",
-    "undeployEndConversationsLabel": "End all active conversations",
-    "confirmUndeployDescription": "Version {{version}} will be undeployed from {{environment}}.",
-    "confirmUndeploy": "Undeploy agent?",
+      "undeployPreviousVersionsHint": "Also removes every earlier version of this agent from the environment.",
+      "undeployPreviousVersionsLabel": "Undeploy this and all previous versions",
+      "undeployEndConversationsHint": "Immediately terminates every in-progress conversation on this deployment. This cannot be undone.",
+      "undeployEndConversationsLabel": "End all active conversations",
+      "confirmUndeployDescription": "Version {{version}} will be undeployed from {{environment}}.",
+      "confirmUndeploy": "Undeploy agent?",
       "title": "Agents",
       "subtitle": "Manage your conversational AI agents"
     },
@@ -113,11 +113,11 @@
       "subtitle": "Configure agent workflows and task pipelines"
     },
     "conversations": {
-    "permanentDeleteSuccess": "Permanently deleted",
-    "softDeleteSuccess": "Conversation deleted",
-    "deletePermanentAction": "Delete permanently",
-    "deletePermanentLabel": "Permanently delete — also erases attachments, the memory snapshot and approval history. This cannot be undone.",
-    "confirmDeleteSoft": "By default this is a soft delete — the conversation is hidden from listings but its stored data is kept on the server.",
+      "permanentDeleteSuccess": "Permanently deleted",
+      "softDeleteSuccess": "Conversation deleted",
+      "deletePermanentAction": "Delete permanently",
+      "deletePermanentLabel": "Permanently delete — also erases attachments, the memory snapshot and approval history. This cannot be undone.",
+      "confirmDeleteSoft": "By default this is a soft delete — the conversation is hidden from listings but its stored data is kept on the server.",
       "title": "Conversations",
       "subtitle": "View and manage agent conversations"
     },
@@ -2094,10 +2094,10 @@
         "step3Desc": "Manage your automated triggers natively: pause, resume, edit, or test-fire them."
       },
       "quotas": {
-    "saveSuccess": "Quota saved",
-    "resetSuccess": "Usage counters reset",
-    "resetConfirmDesc": "This immediately zeroes all usage counters (conversations, API calls, monthly cost) for tenant \"default\". This cannot be undone.",
-    "resetConfirmTitle": "Reset usage counters?",
+        "saveSuccess": "Quota saved",
+        "resetSuccess": "Usage counters reset",
+        "resetConfirmDesc": "This immediately zeroes all usage counters (conversations, API calls, monthly cost) for tenant \"default\". This cannot be undone.",
+        "resetConfirmTitle": "Reset usage counters?",
         "title": "Quotas Tour",
         "step1Title": "Configuration Constraints",
         "step1Desc": "Define hard limits on total agents, daily conversations, and token costs for this tenant.",
@@ -2116,7 +2116,7 @@
         "step3Desc": "Inspect failed tasks and systematically discard or retry them to maintain system stability."
       },
       "orphans": {
-    "confirmPurgeAll": "Permanently delete ALL {{count}} orphaned resources? The server purges every orphan — your selection is not applied. This cannot be undone.",
+        "confirmPurgeAll": "Permanently delete ALL {{count}} orphaned resources? The server purges every orphan — your selection is not applied. This cannot be undone.",
         "title": "Orphans Tour",
         "step1Title": "Trigger Scan",
         "step1Desc": "Start a platform scan to detect loose configs disconnected from any agent.",
@@ -3007,5 +3007,14 @@
     "importSelected": "Import Selected Groups",
     "importing": "Importing…",
     "selectGroups": "Select API groups to import as separate API Call extensions"
+  },
+  "Workforce": {
+    "thread": {
+      "fileTooLarge": "File must be under 20MB",
+      "fileTypeNotAllowed": "This file type is not supported",
+      "attachmentLimit": "Maximum {{max}} attachments per message",
+      "notForwarded": "File stored but too large to send to model",
+      "uploadFailed": "Upload failed: {{error}}"
+    }
   }
 }

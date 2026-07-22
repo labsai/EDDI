@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
@@ -19,10 +19,6 @@ import {
   useDeleteGroupConversation,
   useDeleteGroupWithMembers,
 } from "@/hooks/use-groups";
-
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterAll(() => server.close());
-afterEach(() => server.resetHandlers());
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -82,8 +78,8 @@ describe("useDiscussionStyles", () => {
     server.use(
       http.get("*/groupstore/groups/styles", () => {
         return HttpResponse.json([
-          { name: "ROUND_TABLE", label: "Round Table" },
-          { name: "DEBATE", label: "Debate" },
+          { name: "ROUND_TABLE", label: "Collaborative Council" },
+          { name: "DEBATE", label: "Structured Deliberation" },
         ]);
       }),
     );

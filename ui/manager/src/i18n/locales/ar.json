@@ -99,12 +99,12 @@
       "noRecentAgents": "لا توجد Agents بعد. أنشئ أول Agent!"
     },
     "agents": {
-    "undeployPreviousVersionsHint": "يزيل أيضًا كل إصدار سابق لهذا الوكيل من البيئة.",
-    "undeployPreviousVersionsLabel": "إلغاء نشر هذا الإصدار وجميع الإصدارات السابقة",
-    "undeployEndConversationsHint": "ينهي فورًا كل محادثة جارية على هذا النشر. لا يمكن التراجع.",
-    "undeployEndConversationsLabel": "إنهاء جميع المحادثات النشطة",
-    "confirmUndeployDescription": "سيتم إلغاء نشر الإصدار {{version}} من {{environment}}.",
-    "confirmUndeploy": "إلغاء نشر الوكيل؟",
+      "undeployPreviousVersionsHint": "يزيل أيضًا كل إصدار سابق لهذا الوكيل من البيئة.",
+      "undeployPreviousVersionsLabel": "إلغاء نشر هذا الإصدار وجميع الإصدارات السابقة",
+      "undeployEndConversationsHint": "ينهي فورًا كل محادثة جارية على هذا النشر. لا يمكن التراجع.",
+      "undeployEndConversationsLabel": "إنهاء جميع المحادثات النشطة",
+      "confirmUndeployDescription": "سيتم إلغاء نشر الإصدار {{version}} من {{environment}}.",
+      "confirmUndeploy": "إلغاء نشر الوكيل؟",
       "title": "الوكلاء",
       "subtitle": "إدارة Agents الذكاء الاصطناعي"
     },
@@ -113,11 +113,11 @@
       "subtitle": "تكوين Workflows وإضافات Agents"
     },
     "conversations": {
-    "permanentDeleteSuccess": "تم الحذف نهائيًا",
-    "softDeleteSuccess": "تم حذف المحادثة",
-    "deletePermanentAction": "حذف نهائي",
-    "deletePermanentLabel": "حذف نهائي — يمحو أيضًا المرفقات ولقطة الذاكرة وسجل الموافقات. لا يمكن التراجع.",
-    "confirmDeleteSoft": "افتراضيًا هذا حذف مبدئي — تُخفى المحادثة من القوائم لكن تبقى بياناتها على الخادم.",
+      "permanentDeleteSuccess": "تم الحذف نهائيًا",
+      "softDeleteSuccess": "تم حذف المحادثة",
+      "deletePermanentAction": "حذف نهائي",
+      "deletePermanentLabel": "حذف نهائي — يمحو أيضًا المرفقات ولقطة الذاكرة وسجل الموافقات. لا يمكن التراجع.",
+      "confirmDeleteSoft": "افتراضيًا هذا حذف مبدئي — تُخفى المحادثة من القوائم لكن تبقى بياناتها على الخادم.",
       "title": "محادثات",
       "subtitle": "عرض وإدارة محادثات Agents"
     },
@@ -2023,10 +2023,10 @@
         "step3Desc": "راقب مشغليك ذاتيا واوقف تشغيلها وأكمل او حتى احذف منها للتحذير الخاص بك كاختبار فعلي لها."
       },
       "quotas": {
-    "saveSuccess": "تم حفظ الحصة",
-    "resetSuccess": "تمت إعادة تعيين عدّادات الاستخدام",
-    "resetConfirmDesc": "يصفّر فورًا جميع عدّادات الاستخدام (المحادثات، طلبات API، التكلفة الشهرية) للمستأجر \"default\". لا يمكن التراجع.",
-    "resetConfirmTitle": "إعادة تعيين عدّادات الاستخدام؟",
+        "saveSuccess": "تم حفظ الحصة",
+        "resetSuccess": "تمت إعادة تعيين عدّادات الاستخدام",
+        "resetConfirmDesc": "يصفّر فورًا جميع عدّادات الاستخدام (المحادثات، طلبات API، التكلفة الشهرية) للمستأجر \"default\". لا يمكن التراجع.",
+        "resetConfirmTitle": "إعادة تعيين عدّادات الاستخدام؟",
         "title": "جولة الحصص",
         "step1Title": "معوقات البناء",
         "step1Desc": "حدد قيوداً صريحة على استهلاك وكلاءك يومياً أو في المحادثات للحصص المضافة أو الرموز من هذا الحساب.",
@@ -2045,7 +2045,7 @@
         "step3Desc": "تحقق من الأعمال البائسة وقرر الحذف تماما، أو العودة لإعادتها بغرض توازن واستكمال للنظام الخاص بنا."
       },
       "orphans": {
-    "confirmPurgeAll": "حذف جميع الموارد اليتيمة البالغ عددها {{count}} نهائيًا؟ يحذف الخادم كل العناصر — لا يُطبَّق تحديدك. لا يمكن التراجع عن هذا.",
+        "confirmPurgeAll": "حذف جميع الموارد اليتيمة البالغ عددها {{count}} نهائيًا؟ يحذف الخادم كل العناصر — لا يُطبَّق تحديدك. لا يمكن التراجع عن هذا.",
         "title": "جولة محطة اليتيمات",
         "step1Title": "بحث مشعب",
         "step1Desc": "تحضير و إعطـاء صلاحيات شاملة للمنصة و أكتشاف بيانات التكوينات التي ليست في أي وكالة.",
@@ -2980,5 +2980,14 @@
     "importSelected": "استيراد المجموعات المحددة",
     "importing": "جارٍ الاستيراد…",
     "selectGroups": "اختر مجموعات API لاستيرادها كإضافات استدعاء API منفصلة"
+  },
+  "Workforce": {
+    "thread": {
+      "fileTooLarge": "يجب أن يكون الملف أقل من 20 ميغابايت",
+      "fileTypeNotAllowed": "نوع الملف هذا غير مدعوم",
+      "attachmentLimit": "الحد الأقصى {{max}} مرفقات لكل رسالة",
+      "notForwarded": "تم تخزين الملف لكنه كبير جداً للنموذج",
+      "uploadFailed": "فشل الرفع: {{error}}"
+    }
   }
 }

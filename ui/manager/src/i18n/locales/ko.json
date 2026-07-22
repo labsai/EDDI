@@ -99,12 +99,12 @@
       "noRecentAgents": "아직 Agent가 없습니다. 첫 번째 Agent를 만들어 보세요!"
     },
     "agents": {
-    "undeployPreviousVersionsHint": "환경에서 이 에이전트의 이전 모든 버전도 제거합니다.",
-    "undeployPreviousVersionsLabel": "이 버전과 이전 모든 버전 배포 해제",
-    "undeployEndConversationsHint": "이 배포의 진행 중인 모든 대화를 즉시 종료합니다. 되돌릴 수 없습니다.",
-    "undeployEndConversationsLabel": "활성 대화 모두 종료",
-    "confirmUndeployDescription": "버전 {{version}}이(가) {{environment}}에서 배포 해제됩니다.",
-    "confirmUndeploy": "에이전트 배포를 해제하시겠습니까?",
+      "undeployPreviousVersionsHint": "환경에서 이 에이전트의 이전 모든 버전도 제거합니다.",
+      "undeployPreviousVersionsLabel": "이 버전과 이전 모든 버전 배포 해제",
+      "undeployEndConversationsHint": "이 배포의 진행 중인 모든 대화를 즉시 종료합니다. 되돌릴 수 없습니다.",
+      "undeployEndConversationsLabel": "활성 대화 모두 종료",
+      "confirmUndeployDescription": "버전 {{version}}이(가) {{environment}}에서 배포 해제됩니다.",
+      "confirmUndeploy": "에이전트 배포를 해제하시겠습니까?",
       "title": "에이전트",
       "subtitle": "대화형 AI Agents 관리"
     },
@@ -113,11 +113,11 @@
       "subtitle": "Workflows 및 확장 기능 구성"
     },
     "conversations": {
-    "permanentDeleteSuccess": "영구적으로 삭제되었습니다",
-    "softDeleteSuccess": "대화가 삭제되었습니다",
-    "deletePermanentAction": "영구 삭제",
-    "deletePermanentLabel": "영구 삭제 — 첨부 파일, 메모리 스냅샷, 승인 기록도 삭제됩니다. 되돌릴 수 없습니다.",
-    "confirmDeleteSoft": "기본적으로 소프트 삭제입니다. 대화는 목록에서 숨겨지지만 저장된 데이터는 서버에 남습니다.",
+      "permanentDeleteSuccess": "영구적으로 삭제되었습니다",
+      "softDeleteSuccess": "대화가 삭제되었습니다",
+      "deletePermanentAction": "영구 삭제",
+      "deletePermanentLabel": "영구 삭제 — 첨부 파일, 메모리 스냅샷, 승인 기록도 삭제됩니다. 되돌릴 수 없습니다.",
+      "confirmDeleteSoft": "기본적으로 소프트 삭제입니다. 대화는 목록에서 숨겨지지만 저장된 데이터는 서버에 남습니다.",
       "title": "대화",
       "subtitle": "Agent 대화 보기 및 관리"
     },
@@ -2023,10 +2023,10 @@
         "step3Desc": "작동을 멈추고 지연시키며 수정 또는 파이어 작동을 스스로 체크하며 자동화된 트리거들을 직접 운영 관리 해보세요."
       },
       "quotas": {
-    "saveSuccess": "할당량이 저장되었습니다",
-    "resetSuccess": "사용량 카운터가 재설정되었습니다",
-    "resetConfirmDesc": "테넌트 \"default\"의 모든 사용량 카운터(대화, API 호출, 월간 비용)를 즉시 0으로 만듭니다. 되돌릴 수 없습니다.",
-    "resetConfirmTitle": "사용량 카운터를 재설정하시겠습니까?",
+        "saveSuccess": "할당량이 저장되었습니다",
+        "resetSuccess": "사용량 카운터가 재설정되었습니다",
+        "resetConfirmDesc": "테넌트 \"default\"의 모든 사용량 카운터(대화, API 호출, 월간 비용)를 즉시 0으로 만듭니다. 되돌릴 수 없습니다.",
+        "resetConfirmTitle": "사용량 카운터를 재설정하시겠습니까?",
         "title": "할당량 배정의 투어",
         "step1Title": "구성 제약조건",
         "step1Desc": "이 테넌트에 대한 총 에이전트, 지속적인 대화들, 그리고 지불해야 될 토큰 비용에 관하여 한계선을 정확히 정의하세요.",
@@ -2045,7 +2045,7 @@
         "step3Desc": "안좋은 결과물을 초례한 일들을 조사 또는 일련으로 치우거나 재시도를 통하여 본 시스템을 안정적으로 지켜주세요."
       },
       "orphans": {
-    "confirmPurgeAll": "고아 리소스 {{count}}개를 모두 영구 삭제하시겠습니까? 서버는 모든 항목을 삭제하며 선택은 적용되지 않습니다. 되돌릴 수 없습니다.",
+        "confirmPurgeAll": "고아 리소스 {{count}}개를 모두 영구 삭제하시겠습니까? 서버는 모든 항목을 삭제하며 선택은 적용되지 않습니다. 되돌릴 수 없습니다.",
         "title": "고아객체 투어",
         "step1Title": "스캔의 불꽃",
         "step1Desc": "플랫폼 스캔을 시작해보고 혹여라도 에이전트로부터 연결이 끊긴 미흡했던 설정값들을 다시 재발견해줍니다.",
@@ -2980,5 +2980,14 @@
     "importSelected": "선택한 그룹 가져오기",
     "importing": "가져오는 중…",
     "selectGroups": "별도의 API 호출 확장으로 가져올 API 그룹을 선택하세요"
+  },
+  "Workforce": {
+    "thread": {
+      "fileTooLarge": "파일은 20MB 미만이어야 합니다",
+      "fileTypeNotAllowed": "이 파일 유형은 지원되지 않습니다",
+      "attachmentLimit": "메시지당 최대 {{max}}개 첨부 파일",
+      "notForwarded": "파일이 저장되었지만 모델에 전송하기에 너무 큽니다",
+      "uploadFailed": "업로드 실패: {{error}}"
+    }
   }
 }

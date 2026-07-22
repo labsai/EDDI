@@ -11,7 +11,7 @@ describe("MemoryInspector", () => {
   it("shows empty state when no conversationId", () => {
     renderWithProviders(<MemoryInspector conversationId={null} />);
     expect(
-      screen.getByText("Start a conversation to inspect memory")
+      screen.getByText("No memory data available")
     ).toBeInTheDocument();
   });
 
@@ -70,7 +70,7 @@ describe("MemoryInspector", () => {
     await waitFor(() => {
       expect(screen.getByTestId("memory-inspector")).toBeInTheDocument();
     });
-    expect(screen.getByText("Conversation Memory")).toBeInTheDocument();
+    // Redesigned component has step tabs — first tab is auto-selected
     expect(screen.getByText(/Step 1/)).toBeInTheDocument();
   });
 
@@ -91,7 +91,7 @@ describe("MemoryInspector", () => {
     await waitFor(() => {
       expect(screen.getByTestId("memory-inspector")).toBeInTheDocument();
     });
-    expect(screen.getByText("No memory data available")).toBeInTheDocument();
+    expect(screen.getByText(/No memory data/)).toBeInTheDocument();
   });
 
   it("has a refresh button", async () => {
@@ -171,9 +171,9 @@ describe("MemoryInspector", () => {
     await waitFor(() => {
       expect(screen.getByTestId("memory-inspector")).toBeInTheDocument();
     });
-    // Step 1 is expanded by default, shows groups
-    expect(screen.getByText("Input")).toBeInTheDocument();
-    expect(screen.getByText("wf1")).toBeInTheDocument();
+    // Redesigned component: first step tab is auto-selected, shows key-value rows
+    expect(screen.getByText(/Step 1/)).toBeInTheDocument();
+    // Keys from mock data visible in the StepTable
     expect(screen.getByText("input:initial")).toBeInTheDocument();
     expect(screen.getByText("output:text")).toBeInTheDocument();
   });

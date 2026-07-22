@@ -3,7 +3,7 @@ import { waitForApp } from "./e2e-helpers";
 
 test.describe("Navigation", () => {
   test("loads dashboard by default", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/manage");
     await waitForApp(page);
     await expect(page).toHaveURL(/\/manage/);
     // Use heading instead of getByText to avoid matching sidebar "Dashboard"

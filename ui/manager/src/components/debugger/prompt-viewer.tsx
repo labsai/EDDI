@@ -8,10 +8,7 @@ import {
   Copy,
   Check,
   RotateCcw,
-  Bot,
-  User,
   Wrench,
-  Cpu,
   ChevronDown,
   AlertTriangle,
 } from "lucide-react";
@@ -212,6 +209,12 @@ function PromptDetail({
             {modelName}
           </span>
         )}
+        {typeof llm?.temperature === 'number' && (
+          <span>
+            <strong className="text-foreground">{t("promptViewer.temperature", "Temp")}:</strong>{" "}
+            {llm.temperature as number}
+          </span>
+        )}
         {entry.cost > 0 && (
           <span>
             <strong className="text-foreground">{t("promptViewer.cost", "Cost")}:</strong>{" "}
@@ -253,43 +256,76 @@ function PromptDetail({
 // ==================== Message Card ====================
 
 const ROLE_CONFIG = {
-  system: { icon: Cpu, labelKey: "promptViewer.roleSystem", fallback: "System Prompt", color: "border-emerald-500/30 bg-emerald-500/5" },
-  user: { icon: User, labelKey: "promptViewer.roleUser", fallback: "User", color: "border-blue-500/30 bg-blue-500/5" },
-  assistant: { icon: Bot, labelKey: "promptViewer.roleAssistant", fallback: "Assistant", color: "border-primary/30 bg-primary/5" },
-  tool: { icon: Wrench, labelKey: "promptViewer.roleTool", fallback: "Tool Result", color: "border-amber-500/30 bg-amber-500/5" },
+  system: { labelKey: "promptViewer.roleSystem", fallback: "SYSTEM", borderClass: "border-primary", textClass: "text-primary" },
+  user: { labelKey: "promptViewer.roleUser", fallback: "USER", borderClass: "border-blue-500", textClass: "text-blue-500" },
+  assistant: { labelKey: "promptViewer.roleAssistant", fallback: "ASSISTANT", borderClass: "border-emerald-500", textClass: "text-emerald-500" },
+  tool: { labelKey: "promptViewer.roleTool", fallback: "TOOL", borderClass: "border-amber-500", textClass: "text-amber-500" },
 } as const;
 
 function MessageCard({ role, content }: { role: string; content: string }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(role === "system" || role === "user");
+  // System collapsed by default, others expanded
+  const [expanded, setExpanded] = useState(role !== "system");
+  const [copied, setCopied] = useState(false);
   const config = ROLE_CONFIG[role as keyof typeof ROLE_CONFIG] ?? ROLE_CONFIG.assistant;
-  const Icon = config.icon;
-  const label = t(config.labelKey, config.fallback);
-  const isLong = content.length > 300;
+  const label = t(config.labelKey, config.fallback).toUpperCase();
+  
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Ignored
+    }
+  };
 
   return (
-    <div className={cn("rounded-lg border p-2.5", config.color)}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        aria-expanded={expanded}
-        className="flex w-full items-center gap-1.5 text-start"
-      >
-        <Icon className="h-3.5 w-3.5 shrink-0 text-foreground/60" />
-        <span className="text-[11px] font-semibold text-foreground/80">{label}</span>
-        {isLong && (
-          <ChevronDown
-            className={cn(
-              "ms-auto h-3 w-3 text-muted-foreground transition-transform",
-              expanded && "rotate-180",
-            )}
-          />
+    <div className={cn("flex flex-col border-s-2 bg-card/30 ps-3 py-2 mb-2", config.borderClass)}>
+      <div className="flex items-center justify-between">
+        <span className={cn("text-[10px] font-bold tracking-wider", config.textClass)}>
+          {label}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+          {copied ? t("common.copied", "Copied") : t("common.copy", "Copy")}
+        </button>
+      </div>
+
+      <div className="mt-1">
+        {expanded ? (
+          <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-all max-h-[200px] overflow-y-auto mt-1">
+            {content}
+          </pre>
+        ) : (
+          <div className="relative">
+            <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-all line-clamp-2 mt-1">
+              {content}
+            </pre>
+            {content.split('\n').length > 2 || content.length > 100 ? (
+              <button
+                onClick={() => setExpanded(true)}
+                className="text-[10px] text-muted-foreground hover:text-foreground mt-1 underline"
+              >
+                {t("promptViewer.showMore", "Show more")}
+              </button>
+            ) : null}
+          </div>
         )}
-      </button>
-      {expanded && (
-        <pre className="mt-1.5 text-[10px] font-mono text-foreground/70 whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
-          {content}
-        </pre>
-      )}
+        {expanded && (
+          <button
+            onClick={() => setExpanded(false)}
+            className="text-[10px] text-muted-foreground hover:text-foreground mt-2 flex items-center gap-1"
+          >
+            <ChevronDown className="h-3 w-3 rotate-180" />
+            {t("promptViewer.collapse", "Collapse")}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

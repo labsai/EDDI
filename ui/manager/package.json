@@ -55,12 +55,12 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "diff": "^8.0.4",
-    "dompurify": "^3.3.3",
+    "dompurify": "^3.4.11",
     "i18next": "^24.2.2",
     "i18next-browser-languagedetector": "^8.0.4",
     "keycloak-js": "^26.2.3",
     "lucide-react": "^0.474.0",
-    "monaco-editor": "^0.55.1",
+    "monaco-editor": "^0.56.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-i18next": "^15.4.1",
@@ -106,5 +106,10 @@
     "workerDirectory": [
       "public"
     ]
+  },
+  "overrides": {
+    "monaco-editor": {
+      "dompurify": "$dompurify"
+    }
   }
 }

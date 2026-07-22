@@ -99,12 +99,12 @@
       "noRecentAgents": "Nenhum agent ainda. Crie seu primeiro agent!"
     },
     "agents": {
-    "undeployPreviousVersionsHint": "Também remove do ambiente todas as versões anteriores deste agente.",
-    "undeployPreviousVersionsLabel": "Remover esta e todas as versões anteriores",
-    "undeployEndConversationsHint": "Encerra imediatamente todas as conversas em andamento desta implantação. Não pode ser desfeito.",
-    "undeployEndConversationsLabel": "Encerrar todas as conversas ativas",
-    "confirmUndeployDescription": "A versão {{version}} será removida de {{environment}}.",
-    "confirmUndeploy": "Cancelar a implantação do agente?",
+      "undeployPreviousVersionsHint": "Também remove do ambiente todas as versões anteriores deste agente.",
+      "undeployPreviousVersionsLabel": "Remover esta e todas as versões anteriores",
+      "undeployEndConversationsHint": "Encerra imediatamente todas as conversas em andamento desta implantação. Não pode ser desfeito.",
+      "undeployEndConversationsLabel": "Encerrar todas as conversas ativas",
+      "confirmUndeployDescription": "A versão {{version}} será removida de {{environment}}.",
+      "confirmUndeploy": "Cancelar a implantação do agente?",
       "title": "Agentes",
       "subtitle": "Gerencie seus agents de IA conversacional"
     },
@@ -113,11 +113,11 @@
       "subtitle": "Configure workflows e extensões de agents"
     },
     "conversations": {
-    "permanentDeleteSuccess": "Excluído permanentemente",
-    "softDeleteSuccess": "Conversa excluída",
-    "deletePermanentAction": "Excluir permanentemente",
-    "deletePermanentLabel": "Excluir permanentemente — também apaga anexos, o snapshot de memória e o histórico de aprovações. Não pode ser desfeito.",
-    "confirmDeleteSoft": "Por padrão, esta é uma exclusão reversível — a conversa é ocultada das listas, mas seus dados são mantidos no servidor.",
+      "permanentDeleteSuccess": "Excluído permanentemente",
+      "softDeleteSuccess": "Conversa excluída",
+      "deletePermanentAction": "Excluir permanentemente",
+      "deletePermanentLabel": "Excluir permanentemente — também apaga anexos, o snapshot de memória e o histórico de aprovações. Não pode ser desfeito.",
+      "confirmDeleteSoft": "Por padrão, esta é uma exclusão reversível — a conversa é ocultada das listas, mas seus dados são mantidos no servidor.",
       "title": "Conversas",
       "subtitle": "Visualize e gerencie as conversas dos agents"
     },
@@ -2023,10 +2023,10 @@
         "step3Desc": "Edite, reative ou teste a aplicação instantaneamente livre lógico seguro."
       },
       "quotas": {
-    "saveSuccess": "Cota salva",
-    "resetSuccess": "Contadores de uso redefinidos",
-    "resetConfirmDesc": "Zera imediatamente todos os contadores de uso (conversas, chamadas de API, custo mensal) do tenant \"default\". Não pode ser desfeito.",
-    "resetConfirmTitle": "Redefinir os contadores de uso?",
+        "saveSuccess": "Cota salva",
+        "resetSuccess": "Contadores de uso redefinidos",
+        "resetConfirmDesc": "Zera imediatamente todos os contadores de uso (conversas, chamadas de API, custo mensal) do tenant \"default\". Não pode ser desfeito.",
+        "resetConfirmTitle": "Redefinir os contadores de uso?",
         "title": "Tour de Cotas",
         "step1Title": "Limite Tarifário",
         "step1Desc": "Construção de faturamento sem abusos ou gastos exponenciais Cloud atreladas.",
@@ -2045,7 +2045,7 @@
         "step3Desc": "Ataques de rotinas travadas prontas ao descarte rápido seguro de banco relacional livre local seguro autônomo limpo virtual lógico dinâmico veloz."
       },
       "orphans": {
-    "confirmPurgeAll": "Excluir permanentemente TODOS os {{count}} recursos órfãos? O servidor limpa todos — sua seleção não é aplicada. Isso não pode ser desfeito.",
+        "confirmPurgeAll": "Excluir permanentemente TODOS os {{count}} recursos órfãos? O servidor limpa todos — sua seleção não é aplicada. Isso não pode ser desfeito.",
         "title": "Tour de Órfãos",
         "step1Title": "Caçador Virtual Aberto",
         "step1Desc": "Mapeia esquemas isolados de ligações diretas a cadeias vitais seguras.",
@@ -2980,5 +2980,14 @@
     "importSelected": "Importar grupos selecionados",
     "importing": "Importando…",
     "selectGroups": "Selecione grupos de API para importar como extensões separadas de Chamada de API"
+  },
+  "Workforce": {
+    "thread": {
+      "fileTooLarge": "O arquivo deve ter menos de 20MB",
+      "fileTypeNotAllowed": "Este tipo de arquivo não é suportado",
+      "attachmentLimit": "Máximo de {{max}} anexos por mensagem",
+      "notForwarded": "Arquivo armazenado mas grande demais para o modelo",
+      "uploadFailed": "Falha no upload: {{error}}"
+    }
   }
 }

@@ -99,12 +99,12 @@
       "noRecentAgents": "Noch keine Agents. Erstellen Sie Ihren ersten Agent!"
     },
     "agents": {
-    "undeployPreviousVersionsHint": "Entfernt außerdem jede frühere Version dieses Agenten aus der Umgebung.",
-    "undeployPreviousVersionsLabel": "Diese und alle vorherigen Versionen zurückziehen",
-    "undeployEndConversationsHint": "Beendet sofort jede laufende Unterhaltung dieses Deployments. Dies kann nicht rückgängig gemacht werden.",
-    "undeployEndConversationsLabel": "Alle aktiven Unterhaltungen beenden",
-    "confirmUndeployDescription": "Version {{version}} wird aus {{environment}} zurückgezogen.",
-    "confirmUndeploy": "Agent zurückziehen?",
+      "undeployPreviousVersionsHint": "Entfernt außerdem jede frühere Version dieses Agenten aus der Umgebung.",
+      "undeployPreviousVersionsLabel": "Diese und alle vorherigen Versionen zurückziehen",
+      "undeployEndConversationsHint": "Beendet sofort jede laufende Unterhaltung dieses Deployments. Dies kann nicht rückgängig gemacht werden.",
+      "undeployEndConversationsLabel": "Alle aktiven Unterhaltungen beenden",
+      "confirmUndeployDescription": "Version {{version}} wird aus {{environment}} zurückgezogen.",
+      "confirmUndeploy": "Agent zurückziehen?",
       "title": "Agenten",
       "subtitle": "Verwalten Sie Ihre KI-Agents"
     },
@@ -113,11 +113,11 @@
       "subtitle": "Workflows und Erweiterungen konfigurieren"
     },
     "conversations": {
-    "permanentDeleteSuccess": "Endgültig gelöscht",
-    "softDeleteSuccess": "Unterhaltung gelöscht",
-    "deletePermanentAction": "Endgültig löschen",
-    "deletePermanentLabel": "Endgültig löschen – entfernt auch Anhänge, den Speicher-Snapshot und den Genehmigungsverlauf. Dies kann nicht rückgängig gemacht werden.",
-    "confirmDeleteSoft": "Standardmäßig ist dies ein weiches Löschen – die Unterhaltung wird aus den Listen ausgeblendet, ihre gespeicherten Daten bleiben aber auf dem Server.",
+      "permanentDeleteSuccess": "Endgültig gelöscht",
+      "softDeleteSuccess": "Unterhaltung gelöscht",
+      "deletePermanentAction": "Endgültig löschen",
+      "deletePermanentLabel": "Endgültig löschen – entfernt auch Anhänge, den Speicher-Snapshot und den Genehmigungsverlauf. Dies kann nicht rückgängig gemacht werden.",
+      "confirmDeleteSoft": "Standardmäßig ist dies ein weiches Löschen – die Unterhaltung wird aus den Listen ausgeblendet, ihre gespeicherten Daten bleiben aber auf dem Server.",
       "title": "Gespräche",
       "subtitle": "Agent-Gespräche anzeigen und verwalten"
     },
@@ -2023,10 +2023,10 @@
         "step3Desc": "Jobs pausieren, reaktivieren oder testen."
       },
       "quotas": {
-    "saveSuccess": "Kontingent gespeichert",
-    "resetSuccess": "Nutzungszähler zurückgesetzt",
-    "resetConfirmDesc": "Setzt sofort alle Nutzungszähler (Unterhaltungen, API-Aufrufe, monatliche Kosten) für den Mandanten „default“ auf null. Dies kann nicht rückgängig gemacht werden.",
-    "resetConfirmTitle": "Nutzungszähler zurücksetzen?",
+        "saveSuccess": "Kontingent gespeichert",
+        "resetSuccess": "Nutzungszähler zurückgesetzt",
+        "resetConfirmDesc": "Setzt sofort alle Nutzungszähler (Unterhaltungen, API-Aufrufe, monatliche Kosten) für den Mandanten „default“ auf null. Dies kann nicht rückgängig gemacht werden.",
+        "resetConfirmTitle": "Nutzungszähler zurücksetzen?",
         "title": "Quota-Tour",
         "step1Title": "Sicherheitslimits",
         "step1Desc": "Setzen Sie harte Obergrenzen für Kosten, Logs oder Chat-Durchsatz.",
@@ -2045,7 +2045,7 @@
         "step3Desc": "Abgestützte Tasks überprüfen, wieder einreihen (replay) oder löschen."
       },
       "orphans": {
-    "confirmPurgeAll": "ALLE {{count}} verwaisten Ressourcen dauerhaft löschen? Der Server löscht alle — Ihre Auswahl wird nicht angewendet. Dies kann nicht rückgängig gemacht werden.",
+        "confirmPurgeAll": "ALLE {{count}} verwaisten Ressourcen dauerhaft löschen? Der Server löscht alle — Ihre Auswahl wird nicht angewendet. Dies kann nicht rückgängig gemacht werden.",
         "title": "Orphans-Tour",
         "step1Title": "Scan-Tool",
         "step1Desc": "Entfernen Sie unverlinkte Fragmente der Konfiguration.",
@@ -2980,5 +2980,14 @@
     "importSelected": "Ausgewählte Gruppen importieren",
     "importing": "Wird importiert…",
     "selectGroups": "API-Gruppen zum Importieren als separate API-Aufruf-Erweiterungen auswählen"
+  },
+  "Workforce": {
+    "thread": {
+      "fileTooLarge": "Datei muss kleiner als 20MB sein",
+      "fileTypeNotAllowed": "Dieser Dateityp wird nicht unterstützt",
+      "attachmentLimit": "Maximal {{max}} Anhänge pro Nachricht",
+      "notForwarded": "Datei gespeichert, aber zu groß für das Modell",
+      "uploadFailed": "Upload fehlgeschlagen: {{error}}"
+    }
   }
 }
