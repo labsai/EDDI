@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
 
 /**
@@ -19,6 +20,12 @@ import static org.mockito.Mockito.*;
  */
 @DisplayName("ToolExecutionService Extended Tests")
 class ToolExecutionServiceExtendedTest {
+
+    /**
+     * Stand-in scope tag; the resolution table itself is tested in
+     * ToolCacheServiceTest.
+     */
+    private static final String SCOPE = "u:0123456789abcdef0123456789abcdef";
 
     private ToolExecutionService service;
     private ToolCacheService cacheService;
@@ -47,13 +54,13 @@ class ToolExecutionServiceExtendedTest {
         @DisplayName("should execute with all features enabled")
         void executesWithAllFeatures() {
             when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
-            when(cacheService.get("myTool", "arg1")).thenReturn(null);
+            when(cacheService.get(SCOPE, "myTool", "arg1")).thenReturn(null);
 
-            String result = service.executeToolWrapped("myTool", "arg1", "conv-1",
+            String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
                     () -> "wrapped result", true, true, true, 60);
 
             assertEquals("wrapped result", result);
-            verify(cacheService).put("myTool", "arg1", "wrapped result");
+            verify(cacheService).put(SCOPE, "myTool", "arg1", "wrapped result");
             verify(costTracker).trackToolCall("myTool", "conv-1");
         }
 
@@ -61,9 +68,9 @@ class ToolExecutionServiceExtendedTest {
         @DisplayName("should return cached when caching enabled")
         void returnsCachedWhenEnabled() {
             when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
-            when(cacheService.get("myTool", "arg1")).thenReturn("cached");
+            when(cacheService.get(SCOPE, "myTool", "arg1")).thenReturn("cached");
 
-            String result = service.executeToolWrapped("myTool", "arg1", "conv-1",
+            String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
                     () -> "should not run", true, true, false, 60);
 
             assertEquals("cached", result);
@@ -74,11 +81,11 @@ class ToolExecutionServiceExtendedTest {
         void skipsCacheWhenDisabled() {
             when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
 
-            String result = service.executeToolWrapped("myTool", "arg1", "conv-1",
+            String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
                     () -> "direct result", true, false, false, 60);
 
             assertEquals("direct result", result);
-            verify(cacheService, never()).get(anyString(), anyString());
+            verify(cacheService, never()).get(nullable(String.class), anyString(), anyString());
         }
 
         @Test
@@ -86,7 +93,7 @@ class ToolExecutionServiceExtendedTest {
         void rateLimited() {
             when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(false);
 
-            String result = service.executeToolWrapped("myTool", "arg1", "conv-1",
+            String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
                     () -> "should not run", true, false, false, 60);
 
             assertTrue(result.contains("Rate limit exceeded"));
@@ -95,7 +102,7 @@ class ToolExecutionServiceExtendedTest {
         @Test
         @DisplayName("should skip rate limiting when disabled")
         void skipsRateLimitWhenDisabled() {
-            String result = service.executeToolWrapped("myTool", "arg1", "conv-1",
+            String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
                     () -> "no rate limit", false, false, false, 0);
 
             assertEquals("no rate limit", result);
@@ -105,7 +112,7 @@ class ToolExecutionServiceExtendedTest {
         @Test
         @DisplayName("should skip cost when conversationId is null")
         void skipsCostWhenNoConversation() {
-            String result = service.executeToolWrapped("myTool", "arg1", null,
+            String result = service.executeToolWrapped("myTool", "arg1", SCOPE, null,
                     () -> "result", false, false, true, 0);
 
             assertEquals("result", result);
@@ -115,7 +122,7 @@ class ToolExecutionServiceExtendedTest {
         @Test
         @DisplayName("should handle exception from supplier")
         void handlesException() {
-            String result = service.executeToolWrapped("myTool", "arg1", "conv-1",
+            String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
                     () -> {
                         throw new RuntimeException("boom");
                     }, false, false, false, 0);

@@ -44,6 +44,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
 
 /**
@@ -136,10 +137,10 @@ class AgentOrchestratorToolPauseTest {
                 .thenReturn(QuotaCheckResult.OK);
         // executeToolWrapped actually runs the supplied executor so we can verify
         // which tool method was invoked.
-        when(toolExecutionService.executeToolWrapped(anyString(), anyString(), any(), any(Supplier.class),
+        when(toolExecutionService.executeToolWrapped(anyString(), anyString(), nullable(String.class), any(), any(Supplier.class),
                 anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
                 .thenAnswer(inv -> {
-                    Supplier<String> sup = inv.getArgument(3);
+                    Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
                 });
     }

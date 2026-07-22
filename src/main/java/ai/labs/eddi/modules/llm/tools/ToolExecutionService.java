@@ -76,7 +76,13 @@ public class ToolExecutionService {
      * @param toolName
      *            name of the tool being executed
      * @param arguments
-     *            serialized arguments (used as cache key)
+     *            serialized arguments (part of the cache key)
+     * @param cacheScopeTag
+     *            identity partition for the cache key, from
+     *            {@link ToolCacheService#resolveScopeTag}. {@code null} means no
+     *            usable identity was available and the cache is bypassed entirely —
+     *            never substitute a placeholder, that would collapse every
+     *            anonymous caller back into one shared partition
      * @param conversationId
      *            conversation ID for cost tracking
      * @param toolExecution
@@ -91,10 +97,19 @@ public class ToolExecutionService {
      *            rate limit (calls per minute)
      * @return the tool execution result
      */
-    public String executeToolWrapped(String toolName, String arguments, String conversationId, Supplier<String> toolExecution,
-                                     boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking, int rateLimit) {
+    public String executeToolWrapped(String toolName, String arguments, String cacheScopeTag, String conversationId,
+                                     Supplier<String> toolExecution, boolean enableRateLimiting, boolean enableCaching,
+                                     boolean enableCostTracking, int rateLimit) {
 
         long startTime = System.currentTimeMillis();
+
+        // Caching additionally requires a scope tag to partition the entry by. When
+        // one cannot be resolved the cache is skipped on both the read and the write
+        // side, so an unattributable result is neither served nor stored.
+        boolean cacheable = enableCaching && cacheScopeTag != null;
+        if (enableCaching && cacheScopeTag == null) {
+            meterRegistry.counter("eddi.tool.cache.bypassed", "tool", toolName).increment();
+        }
 
         try {
             // 1. Check rate limit
@@ -105,8 +120,8 @@ public class ToolExecutionService {
             }
 
             // 2. Check cache
-            if (enableCaching) {
-                String cachedResult = cacheService.get(toolName, arguments);
+            if (cacheable) {
+                String cachedResult = cacheService.get(cacheScopeTag, toolName, arguments);
                 if (cachedResult != null) {
                     meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
                     meterRegistry.counter("eddi.tool.execution.cached", "tool", toolName).increment();
@@ -118,8 +133,8 @@ public class ToolExecutionService {
             String result = toolExecution.get();
 
             // 4. Cache result
-            if (enableCaching) {
-                cacheService.put(toolName, arguments, result);
+            if (cacheable) {
+                cacheService.put(cacheScopeTag, toolName, arguments, result);
             }
 
             // 5. Track cost

@@ -51,6 +51,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
 
 /**
@@ -139,10 +140,10 @@ class AgentOrchestratorResumeToolLoopTest {
                 .thenAnswer(inv -> inv.getArgument(1));
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
-        when(toolExecutionService.executeToolWrapped(anyString(), anyString(), any(), any(Supplier.class),
+        when(toolExecutionService.executeToolWrapped(anyString(), anyString(), nullable(String.class), any(), any(Supplier.class),
                 anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
                 .thenAnswer(inv -> {
-                    Supplier<String> sup = inv.getArgument(3);
+                    Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
                 });
     }

@@ -42,6 +42,7 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
+import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
@@ -1141,7 +1142,13 @@ class AgentOrchestrator {
                     ? toolRateLimits.get(toolRequest.name())
                     : defaultRateLimit;
 
-            toolResult = toolExecutionService.executeToolWrapped(toolRequest.name(), toolRequest.arguments(), conversationId,
+            // Partition the tool-result cache by identity, so one user's result can never
+            // be served back to another. A null tag means no usable identity was
+            // available; ToolExecutionService then bypasses the cache entirely.
+            String cacheScopeTag = ToolCacheService.resolveScopeTag(toolRequest.name(), task.getToolCacheScopes(),
+                    task.getDefaultToolCacheScope(), memory != null ? memory.getUserId() : null, conversationId);
+
+            toolResult = toolExecutionService.executeToolWrapped(toolRequest.name(), toolRequest.arguments(), cacheScopeTag, conversationId,
                     () -> executor.execute(toolRequest, null), enableRateLimiting, enableCaching, enableCostTracking, rateLimit);
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";

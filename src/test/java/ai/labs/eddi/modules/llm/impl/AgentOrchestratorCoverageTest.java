@@ -54,6 +54,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
 
 /**
@@ -146,10 +147,10 @@ class AgentOrchestratorCoverageTest {
                 .thenAnswer(inv -> inv.getArgument(1));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         lenient().when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
-        lenient().when(toolExecutionService.executeToolWrapped(anyString(), anyString(), any(), any(Supplier.class),
+        lenient().when(toolExecutionService.executeToolWrapped(anyString(), anyString(), nullable(String.class), any(), any(Supplier.class),
                 anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
                 .thenAnswer(inv -> {
-                    Supplier<String> sup = inv.getArgument(3);
+                    Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
                 });
     }
@@ -403,8 +404,77 @@ class AgentOrchestratorCoverageTest {
 
         assertEquals("four", result.response());
         // executeToolWrapped invoked with all-false flags.
-        verify(toolExecutionService).executeToolWrapped(eq("calculate"), anyString(), any(),
+        verify(toolExecutionService).executeToolWrapped(eq("calculate"), anyString(), nullable(String.class), any(),
                 any(Supplier.class), eq(false), eq(false), eq(false), anyInt());
+    }
+
+    // ─── D5: cache scope tag handed to ToolExecutionService ───
+
+    /**
+     * Runs one tool call and returns the {@code cacheScopeTag} the orchestrator
+     * passed to {@link ToolExecutionService#executeToolWrapped}.
+     */
+    private String capturedCacheScopeTag(LlmConfiguration.Task task) throws Exception {
+        ChatModel chatModel = mock(ChatModel.class);
+        var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"2+2\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(calcReq))
+                .thenReturn(text("four"));
+        when(calculatorTool.calculate("2+2")).thenReturn("4");
+
+        orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        // nullable(): anyString() would not match a null tag, so a regression that
+        // stopped passing one would make this verification match zero invocations.
+        ArgumentCaptor<String> scopeTag = ArgumentCaptor.forClass(String.class);
+        verify(toolExecutionService).executeToolWrapped(eq("calculate"), anyString(), scopeTag.capture(), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt());
+        return scopeTag.getValue();
+    }
+
+    @Test
+    void toolCall_defaultScope_passesPerUserCacheTag() throws Exception {
+        when(memory.getUserId()).thenReturn("alice");
+
+        String tag = capturedCacheScopeTag(calcOnlyTask());
+
+        assertNotNull(tag, "a user-scoped tool call must carry a cache scope tag");
+        assertTrue(tag.startsWith("u:"), "default scope is USER, expected a 'u:' tag but got: " + tag);
+        assertFalse(tag.contains("alice"), "the raw userId must not travel into the cache key");
+        assertNotEquals(tag, capturedCacheScopeTagForOtherUser(), "two users must not share a cache partition");
+    }
+
+    /** Same call as above for a different userId, on a fresh orchestrator state. */
+    private String capturedCacheScopeTagForOtherUser() throws Exception {
+        reset(toolExecutionService, calculatorTool);
+        lenient().when(toolExecutionService.executeToolWrapped(anyString(), anyString(), nullable(String.class), any(), any(Supplier.class),
+                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                .thenAnswer(inv -> {
+                    Supplier<String> sup = inv.getArgument(4);
+                    return sup.get();
+                });
+        when(memory.getUserId()).thenReturn("bob");
+        return capturedCacheScopeTag(calcOnlyTask());
+    }
+
+    @Test
+    void toolCall_globalScopeOptIn_passesSharedCacheTag() throws Exception {
+        when(memory.getUserId()).thenReturn("alice");
+        var task = calcOnlyTask();
+        task.setToolCacheScopes(Map.of("calculate", "global"));
+
+        assertEquals("g", capturedCacheScopeTag(task),
+                "an explicit per-tool GLOBAL opt-in is the only way back to a shared partition");
+    }
+
+    @Test
+    void toolCall_noIdentityAtAll_passesNullCacheTagSoCacheIsBypassed() throws Exception {
+        when(memory.getUserId()).thenReturn(null);
+        when(memory.getConversationId()).thenReturn(null);
+
+        assertNull(capturedCacheScopeTag(calcOnlyTask()),
+                "with neither a userId nor a conversationId there is nothing to partition on; "
+                        + "the tag must stay null so ToolExecutionService skips the cache entirely");
     }
 
     @Test
@@ -424,7 +494,7 @@ class AgentOrchestratorCoverageTest {
 
         assertEquals("six", result.response());
         // per-tool override (7) wins over defaultRateLimit (50).
-        verify(toolExecutionService).executeToolWrapped(eq("calculate"), anyString(), any(),
+        verify(toolExecutionService).executeToolWrapped(eq("calculate"), anyString(), nullable(String.class), any(),
                 any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), eq(7));
     }
 

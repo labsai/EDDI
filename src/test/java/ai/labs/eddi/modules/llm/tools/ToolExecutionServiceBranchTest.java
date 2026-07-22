@@ -23,6 +23,12 @@ import static org.mockito.Mockito.*;
 @DisplayName("ToolExecutionService Branch Coverage Tests")
 class ToolExecutionServiceBranchTest {
 
+    /**
+     * Stand-in scope tag; the resolution table itself is tested in
+     * ToolCacheServiceTest.
+     */
+    private static final String SCOPE = "u:0123456789abcdef0123456789abcdef";
+
     private ToolExecutionService service;
     private ToolCacheService cacheService;
     private ToolRateLimiter rateLimiter;
@@ -53,7 +59,7 @@ class ToolExecutionServiceBranchTest {
         @Test
         @DisplayName("exception with null message uses class name")
         void exceptionWithNullMessage() {
-            String result = service.executeToolWrapped("myTool", "args", "conv-1",
+            String result = service.executeToolWrapped("myTool", "args", SCOPE, "conv-1",
                     () -> {
                         throw new NullPointerException();
                     },
@@ -66,9 +72,9 @@ class ToolExecutionServiceBranchTest {
         @DisplayName("cost tracking enabled with non-null conversationId")
         void costTrackingEnabled() {
             when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
-            when(cacheService.get("myTool", "args")).thenReturn(null);
+            when(cacheService.get(SCOPE, "myTool", "args")).thenReturn(null);
 
-            service.executeToolWrapped("myTool", "args", "conv-1",
+            service.executeToolWrapped("myTool", "args", SCOPE, "conv-1",
                     () -> "result", true, true, true, 60);
 
             verify(costTracker).trackToolCall("myTool", "conv-1");
