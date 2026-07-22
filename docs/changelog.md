@@ -5,6 +5,57 @@
 
 ---
 
+## 🧹 Delete dead RAG `injectionStrategy` / `contextTemplate` config (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D8** — two RAG configuration knobs on `LlmConfiguration` that **never had any effect**, removed rather than implemented.
+
+### What was dead, and how it was verified
+
+`LlmConfiguration.KnowledgeBaseReference` declared `injectionStrategy` and `contextTemplate`; `LlmConfiguration.RagDefaults` declared `injectionStrategy` (defaulting to `"system_message"`). Every one of them was write-only:
+
+- `RagContextProvider.retrieveContext` reads exactly two override fields off a `KnowledgeBaseReference` / `RagDefaults` — `maxResults` and `minScore`. It never calls `getInjectionStrategy()` or `getContextTemplate()`.
+- `LlmTask` (the provider's only production caller) unconditionally does `systemMessage += "\n\n## Relevant Context:\n" + ragContext`. There is no branch, so no strategy value could have changed anything.
+- Formatting is fixed in `RagContextProvider.formatRagContext` (`### Source: <kb>` headings); no templating engine is reachable from that path, so `contextTemplate` had nowhere to be applied even in principle.
+- Grep across `src/main` returns **zero** reads of either accessor. No REST resource, no `ExtensionDescriptor` (`LlmTask.getExtensionDescriptor()` registers only the `uri` `ConfigValue`), no MCP tool, no migration, no sample agent config in `src/main/resources/initial-agents` or `docs/agent-configs` referenced them. The only Java references were POJO getter/setter round-trip assertions in `LlmConfigurationTest` and `LlmConfigurationModelsTest` — tests that assert a setter stores what you set and would stay green under any behaviour whatsoever.
+
+### Design decision — delete, not wire
+
+Wiring `injectionStrategy` would have meant shipping user-message injection, and that is not a free "finish the feature" change: RAG context routed to the system message is **not** counted against `maxContextTokens` (`ConversationHistoryBuilder` budgets only the assembled history), while context routed into the user message **is**. Turning the knob on would therefore silently change how much conversation history survives windowing for anyone who had already saved `user_message`, with no config edit on their part. `contextTemplate` was worse still — it had zero reads *and* zero UI, and honouring it would have required introducing a templating engine into `RagContextProvider` plus inventing the `{{context}}` semantics the field name implied. Deleting a knob nothing honours is cheaper and more honest than inventing the semantics it advertised. The intended behaviour (system-message injection) is exactly what already happens, so nothing observable changes for any agent.
+
+### ⚠️ Follow-up required in the EDDI-Manager repo (not fixable here)
+
+The Manager UI bundles checked into this repo — `src/main/resources/META-INF/resources/assets/index-B36D6B8M.js` and `index-CHgQ1fX-.js`, loaded by `manage.html` — render an **Injection** `<select>` (System Message / User Message) bound to `injectionStrategy`, for both `knowledgeBases[]` and `ragDefaults`. Relevant strings: the i18n key `llmEditor.injectionStrategy`, the value expression `injectionStrategy??"system_message"`, and the two `onChange` writers `injectionStrategy:<e>.target.value`. `contextTemplate` has no UI presence in either bundle.
+
+**These bundles were deliberately not edited.** They are minified Vite build artifacts (~7 MB, single ~319 000-character lines, mangled identifiers) produced by a separate repo; hand-patching a built artifact is both unsafe and immediately undone by the next Manager release. The dropdown must be removed **in the EDDI-Manager source** and the rebuilt bundles re-committed here.
+
+**Until that lands**, the shipped dashboard still offers the control, and its value is discarded on save — the same thing that happened before this change (the backend ignored it then too), so this is a pre-existing cosmetic defect made no worse, not a regression introduced here. Agent designers should ignore the Injection dropdown.
+
+### Stored-configuration compatibility
+
+**No migration, no operator action.** Every mapper that deserializes an LLM configuration is built from `SerializationCustomizer.configureObjectMapper`, which sets `FAIL_ON_UNKNOWN_PROPERTIES=false` — the REST/CDI mapper (`customize`), the `@PersistenceMapper` used for Postgres JSONB (`PersistenceMapperProducer`), and the MongoDB BSON mapper (`PersistenceModule.buildMongoClientOptions`) all share that one static recipe. Existing `langchain.json` documents in MongoDB/Postgres, and agent ZIPs exported before this change, keep loading unchanged; the leftover keys are ignored on read and dropped on the next save.
+
+### Regression test
+
+New `LlmConfigurationRagLegacyFieldsTest` (`src/test/java/ai/labs/eddi/modules/llm/model/`), 3 tests, pure-unit (no Testcontainers), mirroring the production mapper wiring the way `HitlTimeoutPolicySerializationTest` does. It deserializes a realistic stored `langchain.json` carrying all three removed keys across both RAG modes:
+
+1. `storedConfigWithRemovedRagKeysDeserializesViaJsonMapper` — loads through the REST / Postgres-JSONB / `@PersistenceMapper` recipe, with the surviving fields (`name`, `maxResults`, `minScore`, `enableWorkflowRag`) asserted intact.
+2. `storedConfigWithRemovedRagKeysDeserializesViaBsonMapper` — the raw document is encoded to BSON first, so the decoder sees exactly what an existing `llms` collection holds.
+3. `rewriteDropsRemovedRagKeys` — re-serializing a legacy config must not resurrect either key, and the result must still round-trip (so the two `assertFalse`s cannot pass on an empty/broken rewrite).
+
+**This class is the tripwire for the whole deletion.** (1) and (2) fail the moment anyone flips `FAIL_ON_UNKNOWN_PROPERTIES` on the shared recipe — which would break every stored configuration, not just RAG ones. All three were mutation-checked: flipping that flag to `true` fails all three with `UnrecognizedPropertyException: Unrecognized field "injectionStrategy" ... (3 known properties: "minScore", "maxResults", "name")`; re-adding the fields to `KnowledgeBaseReference` fails (3) with `AssertionFailedError: injectionStrategy was deleted because nothing honoured it; a config rewrite must not resurrect it`; re-adding only `RagDefaults.injectionStrategy` fails (3) the same way.
+
+The pre-existing POJO round-trips in `LlmConfigurationTest` / `LlmConfigurationModelsTest` were trimmed to the surviving fields — they were the vacuous coverage that let these two fields look tested for as long as they did.
+
+### Documentation
+
+`docs/rag.md` never documented either field, so nothing was wrong there — but it also never said where retrieved context *goes*, which is the gap that made an unread "injection strategy" knob plausible in the first place. Added a **Context Injection** subsection stating that vector-RAG context is always appended to the system message under `## Relevant Context:` with no per-KB or per-task switch, plus a note for operators whose stored configs still carry the removed keys. The historical `docs/changelog.md` entry that listed this pair under "Feature exists but knob unwired" was left as-is — it is an append-only record of past work.
+
+**Files:** `src/main/java/ai/labs/eddi/modules/llm/model/LlmConfiguration.java`, `src/test/java/ai/labs/eddi/modules/llm/model/LlmConfigurationRagLegacyFieldsTest.java` (new), `src/test/java/ai/labs/eddi/modules/llm/model/LlmConfigurationTest.java`, `src/test/java/ai/labs/eddi/modules/llm/model/LlmConfigurationModelsTest.java`, `docs/rag.md`
+
+---
+
 ## 🧹 Remove dead `eddi.audit.retentionDays`; correct MCP-client and GDPR-retention docs (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

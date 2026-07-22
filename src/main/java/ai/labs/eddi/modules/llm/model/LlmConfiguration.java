@@ -1025,6 +1025,20 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
     /**
      * Reference from an LLM task to a specific knowledge base in the workflow. The
      * name must match a RagConfiguration.name in the workflow.
+     *
+     * <p>
+     * Historical note: this class used to declare {@code injectionStrategy} and
+     * {@code contextTemplate}. Neither was ever read by
+     * {@code RagContextProvider.retrieveContext} or {@code LlmTask} — retrieved RAG
+     * context has always been appended to the system message unconditionally — so
+     * both were removed rather than wired (removing a knob nothing honoured is
+     * cheaper than inventing the semantics it implied). Stored configurations that
+     * still carry either key remain valid: every mapper that deserializes an LLM
+     * configuration is built from
+     * {@code SerializationCustomizer.configureObjectMapper}, which sets
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES=false}, so the leftover keys are ignored on
+     * read and dropped on the next write.
+     * </p>
      */
     public static class KnowledgeBaseReference {
         /** Name of the RagConfiguration resource in the workflow */
@@ -1035,12 +1049,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /** Override: min similarity score (null = use KB default) */
         private Double minScore;
-
-        /** Override: injection strategy — "system_message" (default), "user_message" */
-        private String injectionStrategy;
-
-        /** Override: custom context template (null = use default formatting) */
-        private String contextTemplate;
 
         public String getName() {
             return name;
@@ -1065,31 +1073,20 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public void setMinScore(Double minScore) {
             this.minScore = minScore;
         }
-
-        public String getInjectionStrategy() {
-            return injectionStrategy;
-        }
-
-        public void setInjectionStrategy(String injectionStrategy) {
-            this.injectionStrategy = injectionStrategy;
-        }
-
-        public String getContextTemplate() {
-            return contextTemplate;
-        }
-
-        public void setContextTemplate(String contextTemplate) {
-            this.contextTemplate = contextTemplate;
-        }
     }
 
     /**
      * Default retrieval parameters for enableWorkflowRag=true mode.
+     *
+     * <p>
+     * Historical note: this class used to declare {@code injectionStrategy}. It was
+     * never read — see the note on {@link KnowledgeBaseReference} — and stored
+     * configurations that still carry the key deserialize unchanged.
+     * </p>
      */
     public static class RagDefaults {
         private Integer maxResults = 5;
         private Double minScore = 0.6;
-        private String injectionStrategy = "system_message";
 
         public Integer getMaxResults() {
             return maxResults;
@@ -1105,14 +1102,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMinScore(Double minScore) {
             this.minScore = minScore;
-        }
-
-        public String getInjectionStrategy() {
-            return injectionStrategy;
-        }
-
-        public void setInjectionStrategy(String injectionStrategy) {
-            this.injectionStrategy = injectionStrategy;
         }
     }
 

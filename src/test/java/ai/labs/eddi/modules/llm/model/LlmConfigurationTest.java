@@ -297,8 +297,6 @@ class LlmConfigurationTest {
             assertNull(ref.getName());
             assertNull(ref.getMaxResults());
             assertNull(ref.getMinScore());
-            assertNull(ref.getInjectionStrategy());
-            assertNull(ref.getContextTemplate());
         }
 
         @Test
@@ -307,14 +305,10 @@ class LlmConfigurationTest {
             ref.setName("product-docs");
             ref.setMaxResults(5);
             ref.setMinScore(0.7);
-            ref.setInjectionStrategy("system_message");
-            ref.setContextTemplate("Context:\n{{context}}");
 
             assertEquals("product-docs", ref.getName());
             assertEquals(5, ref.getMaxResults());
             assertEquals(0.7, ref.getMinScore());
-            assertEquals("system_message", ref.getInjectionStrategy());
-            assertEquals("Context:\n{{context}}", ref.getContextTemplate());
         }
     }
 
@@ -329,7 +323,6 @@ class LlmConfigurationTest {
             var rag = new RagDefaults();
             assertEquals(5, rag.getMaxResults());
             assertEquals(0.6, rag.getMinScore());
-            assertEquals("system_message", rag.getInjectionStrategy());
         }
 
         @Test
@@ -337,11 +330,9 @@ class LlmConfigurationTest {
             var rag = new RagDefaults();
             rag.setMaxResults(10);
             rag.setMinScore(0.5);
-            rag.setInjectionStrategy("user_message");
 
             assertEquals(10, rag.getMaxResults());
             assertEquals(0.5, rag.getMinScore());
-            assertEquals("user_message", rag.getInjectionStrategy());
         }
     }
 
