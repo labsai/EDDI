@@ -5,6 +5,70 @@
 
 ---
 
+## 🔒 Scope the tool-result cache per identity — one user's tool result no longer reaches another (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D5**, the highest-severity item in the langchain4j remediation backlog. `ToolCacheService` built its cache key as `toolName + ":" + arguments` and nothing else. That is a single global namespace: if user A asked `getAccountBalance` with `{"account":"main"}` and user B later made the byte-identical call, B was served A's cached result verbatim, with no execution and no authorization check in between. Every agent with `enableToolCaching` (default `true`) and a tool whose output depends on *who* is asking was affected.
+
+### The fix
+
+Every cache key now starts with a **scope tag**:
+
+```
+key = scopeTag + "|" + toolName + ":" + (arguments.length() > 2048 ? sha256(arguments) : arguments)
+```
+
+| Scope          | Tag                                    | Reused by                                      |
+| -------------- | -------------------------------------- | ---------------------------------------------- |
+| `user`         | `u:<first 32 hex of SHA-256(userId)>`  | only the same authenticated user (the default) |
+| `conversation` | `c:<conversationId>`                   | only the conversation that produced the entry  |
+| `global`       | `g`                                    | everyone — opt-in only                         |
+
+Resolution per tool call is `task.toolCacheScopes[<tool>]` → `task.defaultToolCacheScope` → `user`. Both are new lenient-`String` fields on `LlmConfiguration.Task`; the recognized tokens live in the new `ToolCacheScope` enum (`fromConfig` / `resolve`, following the existing `CascadingStrategy` pattern). Unrecognized or misspelled tokens fall through to `user` rather than failing the agent load — a typo must never silently *widen* a tool's audience.
+
+**Fail-closed identity handling.** `user` scope with no usable user id degrades to the narrower `c:<conversationId>` partition. If neither a user id nor a conversation id is available, `resolveScopeTag` returns `null` and the cache is **bypassed entirely** — no `get`, no `put`. `null` is never turned into `""` or `"unknown"`: that would recreate exactly one shared partition for every anonymous request, i.e. the same bug under a new name. A new `eddi.tool.cache.bypassed` counter (tagged `tool`) makes the bypass visible on `/q/metrics`.
+
+### Changed files
+
+- **`ToolCacheScope`** (new, `modules/llm/tools`) — the recognized scope tokens plus lenient parsing and the per-tool → task-default → `USER` resolution chain.
+- **`ToolCacheService`** — `get`/`put`/`invalidate` now take the scope tag as their first argument. The old unscoped signatures were **deleted, not overloaded**: an overload lets a future caller silently reintroduce the global key. `resolveScopeTag(...)` is a static on this class so the orchestrator can build the tag without injecting the cache.
+- **`ToolExecutionService.executeToolWrapped`** — takes `cacheScopeTag` (3rd parameter, next to the other cache-key inputs) and gates both the read and the write on it being non-null.
+- **`AgentOrchestrator.executeSingleToolCallResult`** — a four-line insertion above the `executeToolWrapped` call resolves the tag from `task` + `memory.getUserId()` + `conversationId`. Because the live tool loop and the HITL resume path already share this one method, both are covered by that single change and no call site or method signature in the orchestrator moved.
+- **`CacheFactory`** — `tool-results` was absent from `CACHE_SIZES` and silently got the 1 000-entry default. Raised to 10 000: scoping multiplies the keyspace by the number of active users, and 1 000 would thrash.
+- **`CacheImpl`** — javadoc and inline comment corrected. They claimed the TTL overloads were safe because "the ToolCacheService already tracks expiry internally via `CachedResult.expiresAt`". **No such field exists** — the wrapper only records `cachedAt`, for a debug log. The comments now state plainly that the TTL argument is discarded and size-based eviction is the only eviction strategy.
+- **Docs** — `security.md` (both the "SHA-256 key" and "within the same conversation" claims were factually false), `langchain.md`, `agent-father-langchain-tools-guide.md`, `metrics.md`, `monitoring/monitoring-guide.md`.
+
+### Design decisions
+
+- **No name-based "pure tool ⇒ GLOBAL" default table.** Agent-mode tool names are `@Tool` *method* names (`calculate`, `getCurrentWeather`), not class names — the existing `contains`-matcher in `getSmartTTL` already fails to recognize them. Guessing purity from a name would hand out cross-user reuse by accident. `global` is opt-in via config only.
+- **No `TENANT` scope.** `TenantQuotaService` is still a single-tenant stub; a tenant partition today would be indistinguishable from `global`.
+- **No global kill-switch flag.** The opt-out is per tool: `"toolCacheScopes": {"<tool>": "global"}`. A deployment-wide "disable scoping" switch is a foot-gun that re-opens the leak for every tool at once.
+- **Scope tag first in the key.** Entries belonging to different identities cannot collide regardless of tool name or arguments.
+- **The user id is hashed, not stored.** Cache keys are visible in heap dumps and debug logs; 32 hex characters of SHA-256 is enough to partition without carrying the identifier around.
+
+### ⚠️ Operator-visible behaviour change (deploy-time)
+
+- **Cross-user tool-result sharing stops.** This is the point of the change, and it is not configurable away except per tool.
+- **Cache hit rate will drop and tool cost will rise.** Entries that were previously shared by the whole deployment are now per user. Expect more misses, more outbound tool/API calls and a higher external spend, proportional to how much cross-user reuse the agent was silently relying on. Watch `eddi_tool_cache_hits_total` / `eddi_tool_cache_misses_total` after deploying.
+- **Any agent that depended on cross-user reuse must opt that tool in explicitly** with `"toolCacheScopes": {"<tool>": "global"}` — and only where the result genuinely does not depend on the caller.
+- **Existing `tool-results` entries are dropped.** The cache is in-process and the key format changed, so the first requests after a restart are misses either way.
+- **New meter:** `eddi_tool_cache_bypassed_total{tool="…"}`. A sustained non-zero rate means tool calls are running with neither a user id nor a conversation id and are paying full tool cost every time — fix the caller, do not widen the scope.
+- **No config migration needed.** `toolCacheScopes` and `defaultToolCacheScope` are optional; stored configs without them behave as `user` scope.
+
+### Not in scope (deliberately)
+
+- **Cache TTLs still do not expire anything** (next item, D5b). `CacheImpl` discards the lifespan argument, so scoped entries are removed by size eviction only. Nothing in this change or its tests implies otherwise.
+- **`ToolRateLimiter` remains cross-user.** Its token buckets are keyed by tool name alone, so one user can exhaust another's budget for a tool. Same class of defect, separate fix — flagged here rather than folded in.
+
+### Tests
+
+`ToolCacheServiceTest` gained the headline regression test `differentUsers_produceDifferentKeys` (same tool, same arguments, two identities ⇒ two distinct captured keys), a read-side twin (`get_otherUser_missesEntry`), the twelve-case scope-resolution table, and five null-scope bypass tests. Two pre-existing vacuous tests were replaced: `longArgs_sha256Key` asserted only `startsWith("calculator:")` and `length < 200` — true for any truncation — and now asserts the exact key against an independently computed SHA-256 oracle; `shortArgs_readableKey` was a byte-identical duplicate of `put_storesInCache` and now asserts the full `scopeTag|tool:args` shape. A `UnscopedApiRemovedTests` tripwire fails if the deleted global-key signatures ever come back. `ToolExecutionServiceTest` covers the bypass at the wrapper level; `AgentOrchestratorCoverageTest` captures the scope tag the orchestrator actually passes for the default, `global` and no-identity cases.
+
+Every behavioural test was mutation-checked: reverting the key scoping, replacing `null` with a placeholder, dropping either null-guard, removing the blank-user-id degradation, dropping the userId at the orchestrator, and ignoring the per-tool scope map each produce failures (e.g. `expected: not equal but was: <getAccountBalance:{"account":"main"}>` and `expected: <fresh result> but was: <SOMEONE ELSES RESULT>`).
+
+---
+
 ## 🧹 Delete the dead `enableParallelExecution` config and the parallel tool machinery (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

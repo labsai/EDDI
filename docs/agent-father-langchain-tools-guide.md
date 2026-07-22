@@ -162,6 +162,8 @@ All tool invocations flow through a unified pipeline that provides enterprise-gr
 | `defaultRateLimit`         | int     | `100`     | Default calls/minute for each tool           |
 | `toolRateLimits`           | map     | `{}`      | Per-tool overrides, e.g. `{"websearch": 30}` |
 | `enableToolCaching`        | boolean | `true`    | Cache identical tool calls                   |
+| `defaultToolCacheScope`    | string  | `user`    | Who may reuse a cached result: `user`, `conversation` or `global` |
+| `toolCacheScopes`          | map     | `{}`      | Per-tool overrides, e.g. `{"calculate": "global"}` |
 | `enableCostTracking`       | boolean | `true`    | Track cost per conversation                  |
 | `maxBudgetPerConversation` | number  | unlimited | Maximum spend per conversation               |
 
@@ -178,6 +180,24 @@ All tool invocations flow through a unified pipeline that provides enterprise-gr
   "maxBudgetPerConversation": 2.0
 }
 ```
+
+### Cache scoping
+
+Tool results are cached **per user** by default: a cached result is only ever
+served back to the identity that produced it, so one user's tool output can
+never reach another. Widen a tool only when its result depends purely on its
+arguments and never on who is asking:
+
+```json
+{
+  "enableToolCaching": true,
+  "toolCacheScopes": { "calculate": "global" }
+}
+```
+
+`conversation` narrows reuse further, to the single conversation that produced
+the entry. If no user id and no conversation id are available for a call, the
+cache is skipped entirely for it rather than falling back to a shared bucket.
 
 ---
 

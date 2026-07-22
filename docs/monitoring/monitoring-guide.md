@@ -66,6 +66,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 | `eddi_tool_cache_size` | Gauge | Current cache entry count |
 | `eddi_tool_cache_get_duration` | Timer | Cache lookup latency |
 | `eddi_tool_cache_put_duration` | Timer | Cache write latency |
+| `eddi_tool_cache_bypassed` | Counter | Tool calls that skipped the cache because no identity was available to scope the entry to |
 
 ### Secrets Vault
 

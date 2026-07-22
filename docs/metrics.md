@@ -91,7 +91,15 @@ eddi_tool_cache_puts_total                  # Cache puts (per tool)
 eddi_tool_cache_get_duration_seconds        # Get latency (timer)
 eddi_tool_cache_put_duration_seconds        # Put latency (timer)
 eddi_tool_cache_size                        # Current entries (gauge)
+eddi_tool_cache_bypassed_total              # Calls that skipped the cache (per tool)
 ```
+
+> `eddi_tool_cache_bypassed_total` counts tool calls where caching was enabled
+> but no identity could be derived to scope the entry to, so the cache was
+> skipped on both the read and the write side. A sustained non-zero rate means
+> tool calls are running without a user id **or** a conversation id and are
+> paying full tool cost every time — investigate the caller rather than widening
+> the cache scope.
 
 ### Rate Limiting Metrics
 
