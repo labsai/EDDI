@@ -198,7 +198,7 @@ public class LlmTask implements ILifecycleTask {
                 restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore,
                 toolResponseTruncator, tenantQuotaService, memorySnapshotService,
                 agentSetupService, capabilityRegistryService, conversationService, agentFactory, agentStore,
-                hitlToolJournalStore, conversationHistoryBuilder);
+                hitlToolJournalStore, conversationHistoryBuilder, tokenCounterFactory);
         this.ragContextProvider = ragContextProvider;
         this.tokenCounterFactory = tokenCounterFactory;
         this.apiCallExecutor = apiCallExecutor;
@@ -1089,8 +1089,12 @@ public class LlmTask implements ILifecycleTask {
      * Resolve the model name from provider-specific parameter keys. Different
      * providers use different keys: OpenAI uses "modelName", Ollama uses "model",
      * Bedrock/HuggingFace use "modelId", Azure uses "deploymentName".
+     * <p>
+     * Package-private rather than private so {@code AgentOrchestrator} can resolve
+     * the same model name when it picks a token estimator for the in-turn
+     * tool-context budget — one resolution table, not two that can drift.
      */
-    private static String resolveModelName(Map<String, String> processedParams) {
+    static String resolveModelName(Map<String, String> processedParams) {
         String name = processedParams.get("modelName");
         if (name != null)
             return name;

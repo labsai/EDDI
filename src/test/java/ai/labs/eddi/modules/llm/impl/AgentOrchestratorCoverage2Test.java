@@ -149,7 +149,7 @@ class AgentOrchestratorCoverage2Test {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
                 null, null, null, null, null,
-                journalStore, historyBuilder);
+                journalStore, historyBuilder, new TokenCounterFactory());
 
         lenient().when(memory.getConversationId()).thenReturn("conv-1");
         lenient().when(memory.getAgentId()).thenReturn(null);

@@ -5,6 +5,55 @@
 
 ---
 
+## 🧱 The in-turn tool context finally has a ceiling — `maxToolContextTokens` (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D6b** (the bug half of D6; the cross-turn history-lossiness half is an improvement and stays out of scope). `AgentOrchestrator.runToolCallLoop` grew ONE `currentMessages` list by an `AiMessage` plus one `ToolExecutionResultMessage` per tool call per iteration, and nothing between the loop head and `chatModel.chat` ever inspected its size, character count or token count. The only in-loop ceilings were the iteration counter (default 10) and the dollar budgets. Per-result truncation did not save it: `ToolResponseTruncator.truncateIfNeeded` returns the result unchanged when `limits == null`, and `Task.toolResponseLimits` has no default — so on an ordinary agent every tool result entered the context in full. A tool-heavy turn could therefore blow past the model context window mid-loop and hard-fail with a provider `400`, after the tool side effects had already fired.
+
+### The fix
+
+New per-task config field **`maxToolContextTokens`** (default **60000**) on `LlmConfiguration.Task`. Before each model call the loop meters the accumulated *tool* traffic and, while it exceeds the ceiling, evicts the **oldest complete tool exchange** — a requesting `AiMessage` **together with all of its `ToolExecutionResultMessage`s** — until the traffic fits or only the most recent exchange remains.
+
+- **The pairing invariant is the whole reason eviction is subtle.** Dropping a result without its requesting `AiMessage` leaves a dangling `tool_call_id`; dropping the `AiMessage` without its results leaves an unanswered tool call. Either half is itself a provider `400` — the eviction would *cause* the failure it exists to prevent. Exchanges are therefore located as `[AiMessage, results…]` index ranges and removed whole. Pinned by its own test.
+- **The most recent exchange is never evicted.** When it alone exceeds the ceiling the request goes through unchanged (the model asked for those results and must see them) and the overrun is logged `still_over_budget`. That case is what `toolResponseLimits` is for.
+- **Only tool traffic is counted.** System / user / assistant-prose messages are never candidates — conversation history is governed by `maxContextTokens` / `conversationHistoryLimit`, and nothing in this guard may drop a history message.
+
+### Token accounting extended, not duplicated
+
+`TokenCounterFactory.extractText` returned `""` for both tool message shapes — an `AiMessage` announcing tool calls has a `null` `text()`, and `ToolExecutionResultMessage` hit the `default` arm — so the entire in-turn tool context weighed **zero tokens** to every caller. Extended so an `AiMessage` contributes its prose plus each requested tool name and argument JSON, and a `ToolExecutionResultMessage` contributes its tool name plus the whole payload. The SAME `TokenCounterFactory` `LlmTask` uses for history windowing is injected into `AgentOrchestrator` and reused — one accounting rule for both halves of the request, not a second estimator. `LlmTask.resolveModelName` was widened from `private` to package-private so the orchestrator picks the same estimator (tiktoken for OpenAI/Azure, chars÷4 elsewhere) rather than a drifting copy.
+
+### Design decisions
+
+- **Config field, not a constant** (Golden Rule 1). The ceiling is an agent-designer knob with a sensible default; `-1`/`0` disables it and restores pre-6.1 unbounded behaviour.
+- **Default 60000 preserves today's behaviour.** High enough that no ordinary tool-using turn is touched — the eviction path is byte-for-byte inert below the ceiling, guarded by a test that compares the default-budget message lists against the guard-disabled (`-1`) lists — and low enough to keep a runaway loop inside a 128k window after the system prompt, history and completion are added.
+- **Eviction over refusal.** Refusing the turn would strand the side effects already committed by earlier tool calls; evicting the oldest results lets the loop finish with the freshest evidence. The loss is made observable rather than prevented.
+- **No gap-marker message injected.** A mid-transcript `SystemMessage` is not portable across the twelve providers (several hoist system content to a top-level field) and a `UserMessage` would fabricate a turn; the loss is surfaced through trace + metric + WARN instead.
+- **Per-attempt `IdentityHashMap` token memo** on the call stack — the orchestrator is an `@ApplicationScoped` singleton and stays stateless; without the memo a 10-iteration loop retokenizes the first result ten times.
+- **Estimator resolution fails safe.** An unresolved global-variable model type or an unknown model name that makes a provider tokenizer refuse to construct falls back to the approximate estimator rather than aborting the turn — a safety ceiling that throws is worse than an approximate one.
+
+### Operator-visible behaviour changes
+
+1. **A tool-heavy turn that used to hard-fail on a provider context-window `400` now completes**, dropping its oldest tool exchanges once in-turn tool traffic passes `maxToolContextTokens`.
+2. **New trace entry `tool_context_evicted`** (token counts before/after, exchanges + messages dropped, `withinBudget`), **new counter `eddi.llm.tool_context.evictions`** (tag `outcome=within_budget|still_over_budget`), and a **`WARN` `llm.tool_context.evicted`** with conversation id + remediation hint. A steady stream signals: lower `maxToolIterations`, set `toolResponseLimits`, or raise `maxToolContextTokens`.
+3. **Default budget is inert for normal turns.** Agents whose in-turn tool traffic stays under 60000 tokens are byte-for-byte unchanged; `-1`/`0` disables the guard entirely.
+
+New field only; nothing removed. `FAIL_ON_UNKNOWN_PROPERTIES=false` keeps rolling deploys and ZIP imports safe both directions. No `ExtensionDescriptor` change (it exposes only `uri`), so no Manager UI work.
+
+### Tests
+
+`AgentOrchestratorToolContextBudgetTest` (new): the end-to-end regression drives the real loop with a mock model that requests a tool every iteration and asserts every request reaching `chatModel.chat` is within the ceiling (fails today — unbounded growth); the pairing invariant across every captured request; byte-identical message lists under the default budget vs. the guard disabled; and trace/metric observability. Plus isolation tests of `enforceToolContextBudget` for oldest-first order, whole-exchange (multi-call) eviction, history never evicted, and the unfittable-newest report. `TokenCounterFactoryTest` gains a `tool messages` nest asserting names/arguments/payloads are now counted.
+
+Every behavioural test was mutation-checked by reverting the corresponding production change and confirming failure: disabling the guard call (`request 3 carried 636 tokens … <=500 expected: <true> but was: <false>`); shrinking exchange ranges to the `AiMessage` alone and, separately, clearing only the `AiMessage` index on removal (`orphan ToolExecutionResultMessage id=c1 … its requesting AiMessage was evicted without it`); and reverting `extractText` to the pre-fix `""` for tool messages (`the payload is what fills the context window … expected: <true> but was: <false>`, and the guard measuring 0 tokens so it never evicts).
+
+The nine existing `AgentOrchestrator*Test` constructors and three `historyBuilder`-style call sites gained the new `TokenCounterFactory` argument.
+
+**Files:** `AgentOrchestrator.java`, `TokenCounterFactory.java`, `LlmConfiguration.java`, `LlmTask.java`, `docs/langchain.md`, plus `AgentOrchestratorToolContextBudgetTest` (new), `TokenCounterFactoryTest`, and the nine `AgentOrchestrator*Test` constructor call sites.
+
+**Out of scope:** the cross-turn half of D6 (tool messages absent from `ConversationHistoryBuilder`) — an improvement, not a bug; summarizing evicted tool results instead of dropping them; a provider-reported hard context limit feeding the default.
+
+---
+
 ## 💸 `maxBudgetPerConversation` can finally bind — canonical tool names at the executor boundary (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

@@ -123,7 +123,7 @@ class AgentOrchestratorToolPauseTest {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
                 null, null, null, null, null,
-                journalStore, new ConversationHistoryBuilder());
+                journalStore, new ConversationHistoryBuilder(), new TokenCounterFactory());
 
         when(memory.getConversationId()).thenReturn("conv-1");
         when(memory.getAgentId()).thenReturn(null);

@@ -131,7 +131,7 @@ class AgentOrchestratorResumeToolLoopTest {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
                 null, null, null, null, null,
-                journalStore, historyBuilder);
+                journalStore, historyBuilder, new TokenCounterFactory());
 
         when(memory.getConversationId()).thenReturn("conv-1");
         when(memory.getAgentId()).thenReturn(null);

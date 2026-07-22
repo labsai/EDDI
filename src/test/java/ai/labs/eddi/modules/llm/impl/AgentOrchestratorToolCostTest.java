@@ -156,7 +156,7 @@ class AgentOrchestratorToolCostTest {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 null,
                 null, null, null, null, null,
-                journalStore, new ConversationHistoryBuilder());
+                journalStore, new ConversationHistoryBuilder(), new TokenCounterFactory());
 
         lenient().when(memory.getConversationId()).thenReturn(CONVERSATION_ID);
         lenient().when(memory.getCurrentStep()).thenReturn(currentStep);

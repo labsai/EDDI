@@ -325,6 +325,36 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private Integer maxToolIterations;
 
+        /**
+         * Aggregate token ceiling for the <em>in-turn tool-call context</em>: every
+         * {@code AiMessage} that carries tool-execution requests together with its
+         * {@code ToolExecutionResultMessage}s, accumulated across all iterations of the
+         * tool-calling loop (and across a HITL pause, which replays the same
+         * transcript).
+         * <p>
+         * Conversation history is deliberately NOT counted here — it is already
+         * governed by {@link #maxContextTokens} / {@link #conversationHistoryLimit},
+         * and nothing in this guard may ever drop a system, user or assistant-prose
+         * message.
+         * <p>
+         * When the accumulated tool traffic exceeds this ceiling, the OLDEST complete
+         * tool exchange — the requesting {@code AiMessage} <em>together with all of its
+         * results</em> — is dropped before the next model call, repeatedly, until the
+         * traffic fits or only the most recent exchange remains. The most recent
+         * exchange is never dropped, so a single oversized tool result still reaches
+         * the model exactly as it does today; use {@link #toolResponseLimits} for that
+         * case.
+         * <p>
+         * Default: 60000 — high enough that no ordinary tool-using turn is touched, low
+         * enough to keep a runaway loop inside a 128k context window once the system
+         * prompt, the conversation history and the model's own completion are added.
+         * Set {@code -1} (or {@code 0}) to disable the guard entirely and restore the
+         * pre-6.1 unbounded behaviour.
+         *
+         * @since 6.1.0
+         */
+        private Integer maxToolContextTokens = 60_000;
+
         // === Multi-Model Cascade ===
 
         /**
@@ -708,6 +738,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMaxToolIterations(Integer maxToolIterations) {
             this.maxToolIterations = maxToolIterations;
+        }
+
+        public Integer getMaxToolContextTokens() {
+            return maxToolContextTokens;
+        }
+
+        public void setMaxToolContextTokens(Integer maxToolContextTokens) {
+            this.maxToolContextTokens = maxToolContextTokens;
         }
 
         public ModelCascadeConfig getModelCascade() {

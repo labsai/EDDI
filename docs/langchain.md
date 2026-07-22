@@ -436,6 +436,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `tools`                    | string[] | Custom HTTP call tool URIs to enable             | (none)                 |
 | **Context Control**        |          |                                                  |                        |
 | `conversationHistoryLimit` | int      | Max conversation turns in context                | 10                     |
+| `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
 | **Cost & Performance**     |          |                                                  |                        |
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Only enforced when `enforceBudget` is on | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed | false (`eddi.tools.budget.enforce-by-default`) |
@@ -793,6 +794,60 @@ This agent:
 - **All other providers**: Uses an approximate tokenizer (characters ÷ 4)
 
 When `maxContextTokens` is -1 (default), the existing `conversationHistoryLimit` step-count behavior applies. **Full backward compatibility is guaranteed.**
+
+### In-Turn Tool Context Budget
+
+`maxContextTokens` and `conversationHistoryLimit` bound the **conversation history** — the
+turns already on the record. They do **not** bound the messages a single tool-using turn
+accumulates *while it runs*. Inside one turn the agent loop appends the model's tool-call
+request and every tool result, iteration after iteration, up to `maxToolIterations`. Verbose
+tools (web scrapes, full PDF dumps, raw API bodies) can push that in-turn context past the
+model's context window and hard-fail the whole turn with a provider `400` — mid-loop, after
+the tool side effects have already happened. Per-tool `toolResponseLimits` help only when they
+are configured; they have no default, so an ordinary agent runs unbounded.
+
+`maxToolContextTokens` puts an **aggregate** ceiling on that in-turn tool traffic:
+
+- It counts only tool traffic — every `AiMessage` that carries tool-call requests plus its
+  `ToolExecutionResultMessage`s, summed across all iterations of this turn (and across a HITL
+  pause, which replays the same transcript). System, user and assistant-prose messages are
+  never counted or touched here — that is what `maxContextTokens` governs.
+- When the ceiling is exceeded, the **oldest complete tool exchange** — a requesting
+  `AiMessage` **together with all of its results** — is dropped before the next model call,
+  repeatedly, until the traffic fits. Requests and their results are always evicted together:
+  dropping one without the other leaves a dangling `tool_call_id` that itself provokes the
+  `400` the budget exists to prevent.
+- The **most recent** exchange is never evicted. If it alone exceeds the ceiling the request
+  is sent unchanged (the model asked for those results and must see them) and the overrun is
+  logged — reach for `toolResponseLimits` or a lower `maxToolIterations` in that case.
+- The same token estimator used for conversation windowing is reused, so a budget expressed in
+  tokens means the same thing in both halves of the request (tiktoken for OpenAI/Azure,
+  characters ÷ 4 elsewhere).
+
+**Default: `60000`.** High enough that no ordinary tool-using turn is ever touched — the guard
+is byte-for-byte inert below the ceiling, so agents that work today are unaffected — and low
+enough to keep a runaway loop inside a 128k context window once the system prompt, the
+conversation history and the model's own completion are added. Set `-1` (or `0`) to disable the
+guard and restore the pre-6.1 unbounded behaviour.
+
+**Observability.** Eviction is never silent: it emits a `tool_context_evicted` entry in the
+execution trace (with token counts before/after, exchanges and messages dropped, and whether
+the result is within budget), increments the `eddi.llm.tool_context.evictions` counter (tagged
+`outcome=within_budget|still_over_budget`), and logs a `WARN` (`llm.tool_context.evicted`)
+carrying the conversation id and the remediation hint. Because eviction removes tool results the
+model can no longer see, treat a steady stream of these as a signal to lower `maxToolIterations`,
+set `toolResponseLimits`, or raise `maxToolContextTokens`.
+
+```json
+{
+  "type": "LANGCHAIN",
+  "parameters": { "modelName": "gpt-4o" },
+  "enableBuiltInTools": true,
+  "builtInToolsWhitelist": ["websearch", "webscraper"],
+  "maxToolIterations": 10,
+  "maxToolContextTokens": 60000
+}
+```
 
 ---
 

@@ -141,7 +141,7 @@ class AgentOrchestratorCoverageTest {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
                 null, null, null, null, null,
-                journalStore, historyBuilder);
+                journalStore, historyBuilder, new TokenCounterFactory());
 
         lenient().when(memory.getConversationId()).thenReturn("conv-1");
         lenient().when(memory.getAgentId()).thenReturn(null);
@@ -703,7 +703,7 @@ class AgentOrchestratorCoverageTest {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 null,
                 null, null, null, null, null,
-                journalStore, historyBuilder);
+                journalStore, historyBuilder, new TokenCounterFactory());
 
         var task = calcOnlyTask();
         ChatModel chatModel = mock(ChatModel.class);
@@ -731,7 +731,7 @@ class AgentOrchestratorCoverageTest {
                 userMemoryStore, toolResponseTruncator, null,
                 memorySnapshotService,
                 null, null, null, null, null,
-                journalStore, historyBuilder);
+                journalStore, historyBuilder, new TokenCounterFactory());
 
         var task = calcOnlyTask();
         ChatModel chatModel = mock(ChatModel.class);
