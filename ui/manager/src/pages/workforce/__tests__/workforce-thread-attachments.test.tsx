@@ -466,10 +466,10 @@ describe("WorkforceThread – Attachment Features", () => {
       await waitForInit();
 
       expect(
-        screen.getByText(/Start a conversation/i),
+        screen.getByText(/Chat with Test Agent/i),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/Send a message to begin/i),
+        screen.getByText(/Send a message to begin chatting/i),
       ).toBeInTheDocument();
     });
 
