@@ -5,6 +5,26 @@
 
 ---
 
+## 🗑️ Delete unused `EddiChatMemoryStore` — dead since Phase 6E (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Removed `src/main/java/ai/labs/eddi/modules/llm/memory/EddiChatMemoryStore.java` and its two test classes (`EddiChatMemoryStoreTest`, `EddiChatMemoryStoreExtendedTest`). The package `ai.labs.eddi.modules.llm.memory` is now gone entirely — those three files were its only occupants.
+
+**Why it was dead.** The class's own javadoc describes it as "a quarkus-langchain4j `ChatMemoryStore`", but that extension was dropped in **Phase 6E (2026-03-15)** in favour of plain `dev.langchain4j` core. Nothing in `pom.xml` pulls `io.quarkiverse.langchain4j`, so the machinery that would have discovered and used a `ChatMemoryStore` bean — `AiServices`, `ChatMemoryProvider`, `@MemoryId` — is not on the classpath at all. A repo-wide grep confirms none of those four symbols appears anywhere else in the codebase, and `ChatMemoryStore` itself occurred only in the deleted class's own `implements` clause and import. The bean was `@ApplicationScoped`, so CDI instantiated it, but nothing ever injected it and no code path called `getMessages`/`updateMessages`/`deleteMessages`.
+
+**What actually does this job.** The production LLM history path is `ConversationHistoryBuilder` (used by `AgentOrchestrator`/`LlmTask`), which performs the same EDDI-snapshot → langchain4j-`ChatMessage` conversion via the same `ConversationLogGenerator`, but with windowing, token budgeting and multimodal content that the deleted stub lacked. If EDDI ever re-adopts `quarkus-langchain4j` (see `planning/native-image-migration.md`), the bridge would be rebuilt from `ConversationHistoryBuilder`, not from this stub — so nothing of value is lost.
+
+**The 14 deleted tests asserted nothing about shipped behaviour.** Both test classes only pinned a bean with zero production consumers, and several were vacuous on their own terms: `getMessages_emptySnapshot_returnsEmpty` and `GetMessages#returnsMessagesFromSnapshot` both fed in an *empty* `conversationSteps` list and asserted an empty result, never once exercising the role/`ContentType` conversion loop; the two `updateMessages` "no-op" tests called `verifyNoInteractions` on a mock that a single-`LOGGER.trace` method could not possibly touch. Net effect on the suite: 14 fewer tests, and the coverage gate should move neutral-to-positive because the deleted class contributed an entirely *uncovered* conversion block.
+
+**Design decision — the changelog is append-only.** Five earlier entries in this file (from the 2026 test-coverage pushes that created and tidied these test classes) mention `EddiChatMemoryStore`. Those were left untouched: they are accurate records of past work, and rewriting history to hide a since-deleted class would make the log unreliable. This entry is the forward record of the removal.
+
+**Operator impact:** none. No configuration key, REST endpoint, agent JSON field, or persisted document references the class or its package, and no runtime code path could reach it. Nothing to migrate.
+
+**Shared collaborators deliberately untouched:** `ConversationLogGenerator` (5 other production consumers), `IConversationMemoryStore`, `ConversationMemorySnapshot`.
+
+---
+
 ## 🔍 More PR review follow-ups (2026-07-22)
 
 **Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
