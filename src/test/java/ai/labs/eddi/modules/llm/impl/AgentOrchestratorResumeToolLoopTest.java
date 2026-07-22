@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
@@ -140,7 +141,7 @@ class AgentOrchestratorResumeToolLoopTest {
                 .thenAnswer(inv -> inv.getArgument(1));
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
-        when(toolExecutionService.executeToolWrapped(anyString(), anyString(), nullable(String.class), any(), any(Supplier.class),
+        when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(), any(Supplier.class),
                 anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
                 .thenAnswer(inv -> {
                     Supplier<String> sup = inv.getArgument(4);
@@ -269,6 +270,43 @@ class AgentOrchestratorResumeToolLoopTest {
         verify(journalStore).markExecuted("conv-1", "epoch-1", "c1", "42");
         verify(journalStore).markExecuted("conv-1", "epoch-1", "c2", "4");
         verify(chatModel, times(1)).chat(any(ChatRequest.class));
+    }
+
+    /**
+     * The HITL resume path rebuilds its own {@code ToolSetup} and threads its own
+     * copy of the canonical-name map. If it is missed, prices and cache TTLs are
+     * resolved on the live path but not after a human approval — "budget enforced
+     * on live turns, ignored after approval" — which is exactly the kind of split
+     * that only shows up in production.
+     */
+    @Test
+    @DisplayName("resume: an approved call carries the canonical slug, same as the live path")
+    void resumeCarriesCanonicalToolName() throws Exception {
+        var task = twoToolTask();
+        task.setDefaultRateLimit(100);
+        task.setToolRateLimits(Map.of("calculator", 9));
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), eq("reviewer-1")))
+                .thenReturn(true);
+        when(calculatorTool.calculate("6*7")).thenReturn("42");
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("42"));
+
+        orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+
+        ArgumentCaptor<ToolInvocation> invocation = ArgumentCaptor.forClass(ToolInvocation.class);
+        ArgumentCaptor<Integer> rateLimit = ArgumentCaptor.forClass(Integer.class);
+        verify(toolExecutionService).executeToolWrapped(invocation.capture(), anyString(), nullable(String.class), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), rateLimit.capture());
+
+        assertEquals("calculate", invocation.getValue().dispatchName());
+        assertEquals("calculator", invocation.getValue().canonicalName(),
+                "the resume path must resolve the slug too, or pricing and TTLs differ after a human approval");
+        assertEquals(9, rateLimit.getValue(),
+                "a slug-keyed toolRateLimits entry must bind on the resume path as well");
     }
 
     @Test

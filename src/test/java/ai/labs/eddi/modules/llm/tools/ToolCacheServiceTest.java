@@ -152,6 +152,66 @@ class ToolCacheServiceTest {
         }
     }
 
+    // ==================== Canonical name vs cache key ====================
+
+    /**
+     * The TTL table is keyed on configuration slugs, but tools are dispatched under
+     * {@code @Tool} method names. Resolving the TTL under the slug while keeping
+     * the KEY on the dispatch name is the only combination that is correct: a
+     * slug-keyed cache would make {@code searchWeb}, {@code searchNews} and
+     * {@code searchWikipedia} share one entry and serve each other's results.
+     */
+    @Nested
+    @DisplayName("canonical name drives TTL, dispatch name drives the key")
+    class CanonicalPutTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("TTL comes from the canonical slug")
+        void ttlFromCanonicalName() {
+            service.put(SCOPE_A, new ToolInvocation("calculate", "calculator", null), "2+2", "4");
+
+            // 604800s is calculator's configured TTL; 300L here would mean the dispatch
+            // name fell through to the default and the TTL table is still unreachable.
+            verify(cache).put(eq(SCOPE_A + "|calculate:2+2"), any(), eq(604800L), eq(TimeUnit.SECONDS));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("sibling methods of one tool never share a cache key")
+        void siblingMethodsDoNotCollide() {
+            service.put(SCOPE_A, new ToolInvocation("searchWeb", "websearch", null), "{\"q\":\"eddi\"}", "web hits");
+            service.put(SCOPE_A, new ToolInvocation("searchNews", "websearch", null), "{\"q\":\"eddi\"}", "news hits");
+
+            ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
+            verify(cache, times(2)).put(keys.capture(), any(), anyLong(), any());
+
+            assertEquals(2, keys.getAllValues().stream().distinct().count(),
+                    "keying on the canonical slug would collapse these two searches onto one entry "
+                            + "and serve news results to a web-search call");
+            assertTrue(keys.getAllValues().contains(SCOPE_A + "|searchWeb:{\"q\":\"eddi\"}"));
+            assertTrue(keys.getAllValues().contains(SCOPE_A + "|searchNews:{\"q\":\"eddi\"}"));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a tool with no slug falls back to its own name for the TTL")
+        void unmappedToolFallsBackToItsOwnName() {
+            service.put(SCOPE_A, ToolInvocation.of("my_http_tool"), "args", "result");
+
+            verify(cache).put(eq(SCOPE_A + "|my_http_tool:args"), any(), eq(300L), eq(TimeUnit.SECONDS));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a null scope tag still stores nothing")
+        void nullScopeStillBypasses() {
+            service.put(null, new ToolInvocation("calculate", "calculator", null), "2+2", "4");
+
+            verify(cache, never()).put(any(), any(), anyLong(), any());
+        }
+    }
+
     // ==================== Cache Key ====================
 
     @Nested

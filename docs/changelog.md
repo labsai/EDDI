@@ -5,6 +5,63 @@
 
 ---
 
+## 💸 `maxBudgetPerConversation` can finally bind — canonical tool names at the executor boundary (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D2**. A built-in tool has two names, and the engine only ever carried one of them past the dispatch loop.
+
+`ToolCostTracker`'s price table and `ToolCacheService`'s smart-TTL table are keyed on the eight **whitelist slugs** (`websearch`, `pdfreader`, `calculator`, …). The only production call path passed `toolRequest.name()` — the bare `@Tool` **method** name (`searchWeb`, `extractTextFromPdf`, `calculate`), because no priced tool class declares `@Tool(name = …)`. Zero keys overlapped. Consequences, all live until now:
+
+- **Every built-in priced at $0.00**, so `maxBudgetPerConversation` could never trip no matter how much tool work a conversation did, and `eddi.tool.costs` never carried a non-zero value.
+- **`toolRateLimits` in its documented slug form was inert.** `docs/langchain.md`, `docs/security.md` and `docs/agent-father-langchain-tools-guide.md` all show `{"websearch": 30}`; the lookup only ever saw `searchWeb`, so the entry was discarded and `defaultRateLimit` (100) applied.
+- **Cache TTLs mostly fell through to the flat 300s default.** `getSmartTTL` substring-matches, which is why the mismatch went unnoticed for so long: `getCurrentDateTime` happens to contain "datetime" and resolved correctly, while `calculate` does not contain "calculator" and did not.
+
+### The fix
+
+New `ToolNameResolver` — stateless, all-static, an **exhaustive and exact** switch from the 16 built-in tool class simple names to their whitelist slugs. No substring fallback: a lookup that is right by coincidence for some inputs is worse than one that is wrong for all of them, because it never looks broken. `AgentOrchestrator.buildToolSetup` populates a `toolCanonicalNames` map (dispatch name → slug) from the **already proxy-unwrapped** `toolClass`; using `tool.getClass()` would yield `…_ClientProxy` and reintroduce the same defect in a new coat. The map rides on `ToolSetup`, so the live loop and the HITL resume path share it.
+
+A new `ToolInvocation(dispatchName, canonicalName, priceOverride)` record carries both names through `ToolExecutionService`. The split is load-bearing:
+
+| Resolved from the **canonical slug** | Resolved from the **dispatch name** |
+| --- | --- |
+| per-call price, cache TTL | cache key, rate-limit bucket, metric tags, per-tool and per-conversation cost breakdown, failure logs |
+
+Canonicalising the cache key would collapse `searchWeb`, `searchNews` and `searchWikipedia` onto one entry and serve each other's results for identical arguments — a correctness bug traded for a naming tidy-up. The legacy `String`-first overloads of `executeToolWrapped`, `trackToolCall` and `put` are retained and delegate via `ToolInvocation.of(name)`.
+
+### Design decisions
+
+- **`enforceBudget` is opt-in, default `false`** (deployment fallback `eddi.tools.budget.enforce-by-default`). Enforcement is deliberately *not* inferred from `maxBudgetPerConversation` being set. That ceiling has been inert for its entire shipped life, so no stored config has ever had a tool call refused by it; switching enforcement on together with the prices would newly abort tool calls on live agents. Cost tracking runs regardless of the flag. Read through `ConfigProvider` in a `static final`, not `@ConfigProperty` — `AgentOrchestrator` is constructed with `new` by `LlmTask` and is not a CDI bean, so an injection annotation would never fire while looking configurable.
+- **Metric tags keep the dispatch name.** `eddi.tool.calls{tool=…}` and `eddi.tool.costs{tool=…}` could have moved to slugs to aggregate the three web searches into one series. They did not: every other `tool`-tagged meter in the module (`eddi.tool.execution.success`, `eddi.tool.cache.hits.by_tool`, `eddi.tool.execution.duration`) reports the dispatched method name, so moving these two would split the tag vocabulary in half, make the series un-joinable and break existing dashboards for a marginal analytical gain. Slug-level totals stay available as a PromQL sum.
+- **`toolRateLimits` and `toolPricing` accept either name, dispatch first.** A dispatch-name entry is the more specific statement (`{"searchNews": 5}` pins one operation) and wins over the tool-wide slug entry.
+- **Rate-limit *buckets* stay per dispatch name; only the *limit value* is slug-resolved.** `{"websearch": 30}` therefore yields three independent 30/min buckets rather than one shared allowance. Documented explicitly rather than left for an operator to discover.
+- **Operator prices are clamped at `Math.max(0.0, …)`.** `toolPricing` values come from agent JSON; a negative one would credit the conversation and make any ceiling unreachable by construction.
+
+### Operator-visible behaviour changes
+
+1. **`toolRateLimits` slug keys start binding.** A config carrying `{"websearch": 30}` was previously ignored; from this release it applies — 30/min to each of `searchWeb`, `searchNews`, `searchWikipedia`. Method-name keys are unchanged. Review any agent that has been running under `defaultRateLimit` while believing it was rate-limited.
+2. **Built-in cache TTLs change from a mostly-flat 300s to the intended per-tool values.** `datetime` operations **tighten**: `convertTimezone`, `addTime`, `listTimezones` and `calculateDateDifference` go 300s → 60s. Others loosen to their configured values: `calculator` 300s → 7d, `searchWeb`/`searchWikipedia` 300s → 1800s, `webscraper` 300s → 1h, `pdfreader`/`dataformatter`/`textsummarizer` 300s → 24h. One value loosens unintuitively: `searchNews` used to substring-match the `news` entry at 600s and now takes `websearch`'s 1800s. `weather`, `getCurrentDateTime` and `formatDateTime` are unchanged.
+3. **`eddi.tool.costs` becomes non-zero for priced built-ins** and `GET /llm/toolhistory/costs` starts reporting real numbers: `websearch` $0.001, `webscraper` $0.002, `pdfreader` $0.001, `weather` $0.0005 per call. Tag *values* are unchanged (see above), so dashboards keep working — a series that previously only ever recorded zero now carries a value.
+4. **`maxBudgetPerConversation` covers TOOL cost only** and stays inert unless `enforceBudget: true` is added. LLM token spend remains run-scoped under the cascade's `maxCostPerRun`; the two are not summed.
+
+New config fields `enforceBudget` (Boolean) and `toolPricing` (`Map<String, Double>`) on `LlmConfiguration.Task`. No field removed; `FAIL_ON_UNKNOWN_PROPERTIES=false` keeps rolling deploys and ZIP imports safe in both directions. No `ExtensionDescriptor` change (it exposes only `uri`), so no Manager UI work.
+
+### Tests
+
+`ToolNameResolverTest` (new) asserts all 16 classes against their real `getSimpleName()` — renaming a tool class without updating the resolver now fails here instead of silently reverting that tool to $0.00 and a 300s TTL — plus `CalculatorTool_ClientProxy → null` and exact-match-only guards.
+
+`AgentOrchestratorToolCostTest` (new) is the load-bearing one: a **real** `ToolCostTracker` and a **real** `ToolExecutionService` driven through the actual dispatch loop. It is the only test that can show `maxBudgetPerConversation` is reachable at all. The pre-existing budget test stubs `isWithinBudget` to `false` on a mock, so its refusal comes from the stub and it passed just as happily against the broken behaviour; it is kept for gate wiring and now says so in its javadoc.
+
+Every new behavioural test was mutation-checked by reverting the corresponding production change and confirming failure: pricing by dispatch name (`expected: <0.001> but was: <0.0>`), dropping the slug rate-limit fallback (`expected: <7> but was: <100>`), removing the `enforceBudget` gate (`Wanted but not invoked: isWithinBudget`), removing the negative-price clamp (`expected: <0.0> but was: <-10.0>`), keying the cache on the slug (`expected: <2> but was: <1>` distinct keys), dropping the canonical map on the HITL resume path (`expected: <calculator> but was: <calculate>`), and adding a substring fallback to the resolver (`expected: <null> but was: <calculator>`).
+
+Verifications that would have gone vacuous after the signature change were repointed rather than left to pass silently: the four `executeToolWrapped(anyString(), …)` stubs in the orchestrator tests (an unmatched stub returns `null` and nulls out tool results without failing) and `verify(costTracker, never()).trackToolCall(anyString(), anyString())`, which after the change verified an overload production no longer calls.
+
+**Files:** `ToolNameResolver.java` and `ToolInvocation.java` (new), `ToolCostTracker.java`, `ToolCacheService.java`, `ToolExecutionService.java`, `AgentOrchestrator.java`, `LlmConfiguration.java`, `docs/langchain.md`, `docs/security.md`, `docs/agent-father-langchain-tools-guide.md`, plus `ToolNameResolverTest` and `AgentOrchestratorToolCostTest` (new) and 7 updated test classes.
+
+**Out of scope:** folding cascade LLM-token cost into `ToolCostTracker` so `maxBudgetPerConversation` becomes a true total ceiling (separate follow-up); rate-limit bucket sharing across a tool's operations; the `<=`/pre-check budget boundary; `getSmartTTL`'s substring fallback, which still serves unmapped http/mcp/a2a tool names.
+
+---
+
 ## ⏳ Cache entries finally expire — `CacheImpl` honours per-entry TTLs (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

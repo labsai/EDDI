@@ -267,8 +267,31 @@ public class ToolCacheService {
      *            nothing
      */
     public void put(String scopeTag, String toolName, String arguments, String result) {
-        long ttlSeconds = getSmartTTL(toolName);
-        put(scopeTag, toolName, arguments, result, ttlSeconds, TimeUnit.SECONDS);
+        put(scopeTag, ToolInvocation.of(toolName), arguments, result);
+    }
+
+    /**
+     * Put result in cache with the smart TTL of the invocation's <em>canonical</em>
+     * tool, keyed on its <em>dispatch</em> name.
+     *
+     * <p>
+     * The two names must not be conflated here. The TTL is a property of the tool
+     * ({@code websearch} results go stale in 30 minutes), so it is looked up under
+     * the slug — which is the only way a built-in ever matches
+     * {@code TOOL_TTL_SECONDS}, since its dispatch name is a method name. The key,
+     * however, must stay on the dispatch name: {@code searchWeb},
+     * {@code searchNews} and {@code searchWikipedia} all canonicalise to
+     * {@code websearch}, and keying on the slug would make them share one entry and
+     * serve each other's results for identical arguments.
+     * </p>
+     *
+     * @param scopeTag
+     *            partition tag from {@link #resolveScopeTag}; {@code null} stores
+     *            nothing
+     */
+    public void put(String scopeTag, ToolInvocation invocation, String arguments, String result) {
+        long ttlSeconds = getSmartTTL(invocation.canonicalName());
+        put(scopeTag, invocation.dispatchName(), arguments, result, ttlSeconds, TimeUnit.SECONDS);
     }
 
     /**

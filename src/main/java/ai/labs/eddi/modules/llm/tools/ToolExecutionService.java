@@ -100,7 +100,36 @@ public class ToolExecutionService {
     public String executeToolWrapped(String toolName, String arguments, String cacheScopeTag, String conversationId,
                                      Supplier<String> toolExecution, boolean enableRateLimiting, boolean enableCaching,
                                      boolean enableCostTracking, int rateLimit) {
+        return executeToolWrapped(ToolInvocation.of(toolName), arguments, cacheScopeTag, conversationId, toolExecution,
+                enableRateLimiting, enableCaching, enableCostTracking, rateLimit);
+    }
 
+    /**
+     * Execute a tool with optional rate limiting, caching, and cost tracking.
+     *
+     * <p>
+     * Identical to the overload above except that the call carries both of its
+     * names (see {@link ToolInvocation}). Everything that identifies the
+     * <em>call</em> — the rate limit bucket, the cache key, the metric tags, the
+     * failure log — stays on the dispatch name; only the price and the cache TTL
+     * are resolved from the canonical slug. Notably the rate-limit BUCKET is
+     * per-dispatch-name even when the configured limit came from a slug, so
+     * {@code {"websearch": 30}} yields three independent 30/min buckets for
+     * {@code searchWeb}, {@code searchNews} and {@code searchWikipedia} rather than
+     * one shared allowance.
+     * </p>
+     *
+     * @param invocation
+     *            the tool call, carrying dispatch name, canonical slug and any
+     *            operator price override
+     * @see #executeToolWrapped(String, String, String, String, Supplier, boolean,
+     *      boolean, boolean, int)
+     */
+    public String executeToolWrapped(ToolInvocation invocation, String arguments, String cacheScopeTag, String conversationId,
+                                     Supplier<String> toolExecution, boolean enableRateLimiting, boolean enableCaching,
+                                     boolean enableCostTracking, int rateLimit) {
+
+        String toolName = invocation.dispatchName();
         long startTime = System.currentTimeMillis();
 
         // Caching additionally requires a scope tag to partition the entry by. When
@@ -132,14 +161,14 @@ public class ToolExecutionService {
             // 3. Execute tool
             String result = toolExecution.get();
 
-            // 4. Cache result
+            // 4. Cache result (TTL from the canonical slug, key from the dispatch name)
             if (cacheable) {
-                cacheService.put(cacheScopeTag, toolName, arguments, result);
+                cacheService.put(cacheScopeTag, invocation, arguments, result);
             }
 
-            // 5. Track cost
+            // 5. Track cost (price from the canonical slug or the operator override)
             if (enableCostTracking && conversationId != null) {
-                costTracker.trackToolCall(toolName, conversationId);
+                costTracker.trackToolCall(invocation, conversationId);
             }
 
             long executionTime = System.currentTimeMillis() - startTime;

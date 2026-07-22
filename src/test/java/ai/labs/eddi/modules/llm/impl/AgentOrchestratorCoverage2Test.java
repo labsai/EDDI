@@ -23,6 +23,7 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -158,8 +159,10 @@ class AgentOrchestratorCoverage2Test {
                 .thenAnswer(inv -> inv.getArgument(1));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         lenient().when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
-        lenient().when(toolExecutionService.executeToolWrapped(anyString(), anyString(), nullable(String.class), any(), any(Supplier.class),
-                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+        lenient()
+                .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
+                        any(Supplier.class),
+                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
                 .thenAnswer(inv -> {
                     Supplier<String> sup = inv.getArgument(4);
                     return sup.get();

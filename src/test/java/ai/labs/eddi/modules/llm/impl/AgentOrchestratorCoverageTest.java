@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -38,6 +39,7 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatcher;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -50,7 +52,9 @@ import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -147,8 +151,10 @@ class AgentOrchestratorCoverageTest {
                 .thenAnswer(inv -> inv.getArgument(1));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         lenient().when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
-        lenient().when(toolExecutionService.executeToolWrapped(anyString(), anyString(), nullable(String.class), any(), any(Supplier.class),
-                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+        lenient()
+                .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
+                        any(Supplier.class),
+                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
                 .thenAnswer(inv -> {
                     Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
@@ -336,10 +342,18 @@ class AgentOrchestratorCoverageTest {
         assertTrue(notFound, "missing executor must yield a 'not found' tool_result");
     }
 
+    /**
+     * Gate wiring only: the refusal here comes from a stubbed
+     * {@code isWithinBudget}, not from accumulated cost. That the budget can be
+     * reached by real spend at all is proved by
+     * {@code AgentOrchestratorToolCostTest}, which drives the same loop against a
+     * REAL {@link ai.labs.eddi.modules.llm.tools.ToolCostTracker}.
+     */
     @Test
     void toolCall_perConversationBudgetExceeded_returnsBudgetError() throws Exception {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
+        task.setEnforceBudget(true);
         var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
         when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
         when(costTracker.isWithinBudget(eq("conv-1"), eq(1.0))).thenReturn(false);
@@ -403,9 +417,20 @@ class AgentOrchestratorCoverageTest {
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
 
         assertEquals("four", result.response());
-        // executeToolWrapped invoked with all-false flags.
-        verify(toolExecutionService).executeToolWrapped(eq("calculate"), anyString(), nullable(String.class), any(),
+        // executeToolWrapped invoked with all-false flags, and carrying BOTH names:
+        // the dispatched method name plus the whitelist slug it is configured under.
+        verify(toolExecutionService).executeToolWrapped(argThat(calculateInvocation()), anyString(), nullable(String.class), any(),
                 any(Supplier.class), eq(false), eq(false), eq(false), anyInt());
+    }
+
+    /**
+     * Matches the invocation for CalculatorTool#calculate. Asserting both names is
+     * the point: {@code calculate} is what langchain4j dispatches,
+     * {@code calculator} is what {@code builtInToolsWhitelist}/{@code toolPricing}
+     * use, and the whole defect was that only the former ever reached the executor.
+     */
+    private static ArgumentMatcher<ToolInvocation> calculateInvocation() {
+        return inv -> inv != null && "calculate".equals(inv.dispatchName()) && "calculator".equals(inv.canonicalName());
     }
 
     // ─── D5: cache scope tag handed to ToolExecutionService ───
@@ -427,7 +452,7 @@ class AgentOrchestratorCoverageTest {
         // nullable(): anyString() would not match a null tag, so a regression that
         // stopped passing one would make this verification match zero invocations.
         ArgumentCaptor<String> scopeTag = ArgumentCaptor.forClass(String.class);
-        verify(toolExecutionService).executeToolWrapped(eq("calculate"), anyString(), scopeTag.capture(), any(),
+        verify(toolExecutionService).executeToolWrapped(argThat(calculateInvocation()), anyString(), scopeTag.capture(), any(),
                 any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt());
         return scopeTag.getValue();
     }
@@ -447,8 +472,10 @@ class AgentOrchestratorCoverageTest {
     /** Same call as above for a different userId, on a fresh orchestrator state. */
     private String capturedCacheScopeTagForOtherUser() throws Exception {
         reset(toolExecutionService, calculatorTool);
-        lenient().when(toolExecutionService.executeToolWrapped(anyString(), anyString(), nullable(String.class), any(), any(Supplier.class),
-                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+        lenient()
+                .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
+                        any(Supplier.class),
+                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
                 .thenAnswer(inv -> {
                     Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
@@ -477,12 +504,13 @@ class AgentOrchestratorCoverageTest {
                         + "the tag must stay null so ToolExecutionService skips the cache entirely");
     }
 
-    @Test
-    void toolCall_perToolRateLimitOverride_usesConfiguredLimit() throws Exception {
-        var task = calcOnlyTask();
-        task.setDefaultRateLimit(50);
-        task.setToolRateLimits(Map.of("calculate", 7));
+    // ─── D2: canonical (slug) tool naming at the executor boundary ───
 
+    /**
+     * Runs one {@code calculate} call for the given task and returns the rate limit
+     * the orchestrator handed to {@link ToolExecutionService#executeToolWrapped}.
+     */
+    private int capturedRateLimit(LlmConfiguration.Task task) throws Exception {
         ChatModel chatModel = mock(ChatModel.class);
         var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"3+3\"}").build();
         when(chatModel.chat(any(ChatRequest.class)))
@@ -491,11 +519,132 @@ class AgentOrchestratorCoverageTest {
         when(calculatorTool.calculate("3+3")).thenReturn("6");
 
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
-
         assertEquals("six", result.response());
-        // per-tool override (7) wins over defaultRateLimit (50).
-        verify(toolExecutionService).executeToolWrapped(eq("calculate"), anyString(), nullable(String.class), any(),
-                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), eq(7));
+
+        ArgumentCaptor<Integer> rateLimit = ArgumentCaptor.forClass(Integer.class);
+        verify(toolExecutionService).executeToolWrapped(argThat(calculateInvocation()), anyString(), nullable(String.class), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), rateLimit.capture());
+        return rateLimit.getValue();
+    }
+
+    @Test
+    void toolCall_perToolRateLimitOverride_usesConfiguredLimit() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultRateLimit(50);
+        task.setToolRateLimits(Map.of("calculate", 7));
+
+        // per-tool override on the DISPATCH name (7) wins over defaultRateLimit (50).
+        assertEquals(7, capturedRateLimit(task));
+    }
+
+    /**
+     * The documented form. Every docs page tells operators to key
+     * {@code toolRateLimits} on the same slugs as {@code builtInToolsWhitelist} —
+     * but the lookup only ever saw the dispatched {@code @Tool} method name, which
+     * for a built-in is never equal to its slug. Every slug-keyed limit was
+     * therefore silently discarded in favour of the default.
+     */
+    @Test
+    void toolCall_rateLimitKeyedOnCanonicalSlug_binds() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultRateLimit(100);
+        task.setToolRateLimits(Map.of("calculator", 7));
+
+        assertEquals(7, capturedRateLimit(task),
+                "a toolRateLimits entry keyed on the documented 'calculator' slug must reach the executor; "
+                        + "falling back to the default means slug-keyed limits are inert");
+    }
+
+    @Test
+    void toolCall_dispatchNameRateLimitWinsOverSlug() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultRateLimit(100);
+        task.setToolRateLimits(Map.of("calculator", 7, "calculate", 3));
+
+        assertEquals(3, capturedRateLimit(task),
+                "the more specific dispatch-name key must win over the tool-wide slug key");
+    }
+
+    @Test
+    void toolCall_noRateLimitEntry_fallsBackToDefault() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultRateLimit(42);
+        task.setToolRateLimits(Map.of("websearch", 7));
+
+        assertEquals(42, capturedRateLimit(task));
+    }
+
+    @Test
+    void toolCall_toolPricingOverride_reachesTheExecutor() throws Exception {
+        var task = calcOnlyTask();
+        task.setToolPricing(Map.of("calculator", 0.05));
+
+        ChatModel chatModel = mock(ChatModel.class);
+        var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"3+3\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(calcReq))
+                .thenReturn(text("six"));
+        when(calculatorTool.calculate("3+3")).thenReturn("6");
+
+        orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        ArgumentCaptor<ToolInvocation> invocation = ArgumentCaptor.forClass(ToolInvocation.class);
+        verify(toolExecutionService).executeToolWrapped(invocation.capture(), anyString(), nullable(String.class), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt());
+        assertEquals(0.05, invocation.getValue().priceOverride(),
+                "a toolPricing entry keyed on the canonical slug must travel with the invocation");
+    }
+
+    @Test
+    void buildToolSetup_mapsDispatchNamesToCanonicalSlugs() {
+        var setup = orchestrator.buildToolSetup(twoToolTask(), memory);
+
+        assertEquals("calculator", setup.toolCanonicalNames().get("calculate"),
+                "the whole defect was that 'calculate' never resolved to the 'calculator' slug");
+        assertEquals("calculator", setup.toolCanonicalNames().get("convertUnits"));
+        assertEquals("datetime", setup.toolCanonicalNames().get("getCurrentDateTime"));
+        assertEquals("datetime", setup.toolCanonicalNames().get("listTimezones"));
+        // Mockito mocks are subclasses, not CDI proxies, but the guarantee is the same:
+        // the map is built from the UNWRAPPED bean class, never from tool.getClass().
+        assertFalse(setup.toolCanonicalNames().containsValue("CalculatorTool"),
+                "a class simple name must never leak into the canonical-name map");
+    }
+
+    // ─── D2: enforceBudget is opt-in ───
+
+    /**
+     * {@code maxBudgetPerConversation} has never been able to refuse a call (every
+     * built-in priced at $0.00), so switching enforcement on for stored configs
+     * that merely carry the number would newly break live agents. It must stay
+     * inert until {@code enforceBudget} is set — and the budget check must not even
+     * be consulted, otherwise a future refactor could reintroduce enforcement
+     * through a side effect.
+     */
+    @Test
+    void toolCall_budgetSetButNotEnforced_neverConsultsTheBudget() throws Exception {
+        var task = calcOnlyTask();
+        task.setMaxBudgetPerConversation(1.0);
+        var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
+        lenient().when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
+        lenient().when(costTracker.isWithinBudget(anyString(), anyDouble())).thenReturn(false);
+
+        ChatModel chatModel = mock(ChatModel.class);
+        var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"1+1\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(calcReq))
+                .thenReturn(text("two"));
+        when(calculatorTool.calculate("1+1")).thenReturn("2");
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        assertEquals("two", result.response());
+        verify(calculatorTool).calculate("1+1");
+        // nullable(): the conversationId argument is legally null on some paths and
+        // anyString() would not match it, making this verification vacuously true.
+        verify(costTracker, never()).isWithinBudget(nullable(String.class), anyDouble());
+        assertTrue(result.trace().stream()
+                .noneMatch(e -> String.valueOf(e.get("error")).contains("Budget exceeded")),
+                "no budget error may be produced while enforceBudget is unset");
     }
 
     @Test
@@ -603,7 +752,7 @@ class AgentOrchestratorCoverageTest {
     // ═══════════════════════════════════════════════════════════════════
 
     private AgentOrchestrator.ToolSetup setupWith(List<ToolSpecification> all, List<ToolSpecification> builtIn) {
-        return new AgentOrchestrator.ToolSetup(all, Map.of(), Map.of(), builtIn);
+        return new AgentOrchestrator.ToolSetup(all, Map.of(), Map.of(), builtIn, Map.of());
     }
 
     private ToolSpecification spec(String name) {

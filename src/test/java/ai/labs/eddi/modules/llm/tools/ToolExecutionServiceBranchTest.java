@@ -77,7 +77,7 @@ class ToolExecutionServiceBranchTest {
             service.executeToolWrapped("myTool", "args", SCOPE, "conv-1",
                     () -> "result", true, true, true, 60);
 
-            verify(costTracker).trackToolCall("myTool", "conv-1");
+            verify(costTracker).trackToolCall(ToolInvocation.of("myTool"), "conv-1");
         }
     }
 }

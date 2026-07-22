@@ -250,8 +250,34 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         // === Budget & Cost Control ===
 
-        /** Maximum budget per conversation (in dollars) */
+        /**
+         * Maximum TOOL budget per conversation, in dollars. Covers per-call tool prices
+         * only — LLM token spend is governed separately and per run by the model
+         * cascade's {@code maxCostPerRun}. Inert unless {@link #enforceBudget} is on.
+         */
         private Double maxBudgetPerConversation;
+
+        /**
+         * Enforce {@link #maxBudgetPerConversation}. Defaults to the deployment-wide
+         * {@code eddi.tools.budget.enforce-by-default} property, itself {@code false}.
+         * <p>
+         * Opt-in on purpose. The ceiling has been inert since it shipped because every
+         * built-in priced at $0.00, so no stored config has ever had its tool calls
+         * refused by it. Now that prices resolve, switching enforcement on by default —
+         * or inferring it from {@code maxBudgetPerConversation} being present — would
+         * start aborting tool calls on live agents whose operators set a number that
+         * never did anything. Cost tracking runs regardless of this flag.
+         */
+        private Boolean enforceBudget;
+
+        /**
+         * Per-call tool prices in USD, overriding
+         * {@code ToolCostTracker.DEFAULT_TOOL_PRICES}. Keyed on the canonical built-in
+         * slug (the same tokens as {@code builtInToolsWhitelist}), or on an individual
+         * dispatch name for finer control — a dispatch-name entry wins over a slug
+         * entry for the same call. Negative values are clamped to 0.0.
+         */
+        private Map<String, Double> toolPricing;
 
         /** Enable cost tracking */
         private Boolean enableCostTracking = true;
@@ -602,6 +628,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMaxBudgetPerConversation(Double maxBudgetPerConversation) {
             this.maxBudgetPerConversation = maxBudgetPerConversation;
+        }
+
+        public Boolean getEnforceBudget() {
+            return enforceBudget;
+        }
+
+        public void setEnforceBudget(Boolean enforceBudget) {
+            this.enforceBudget = enforceBudget;
+        }
+
+        public Map<String, Double> getToolPricing() {
+            return toolPricing;
+        }
+
+        public void setToolPricing(Map<String, Double> toolPricing) {
+            this.toolPricing = toolPricing;
         }
 
         public Boolean getEnableCostTracking() {

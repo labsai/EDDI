@@ -44,6 +44,8 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.modules.llm.tools.ToolInvocation;
+import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
@@ -62,6 +64,7 @@ import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.Metrics;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -108,6 +111,29 @@ class AgentOrchestrator {
     private static final int DEFAULT_TRANSCRIPT_MAX_BYTES = PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT;
     /** Approver-facing pause reason cap (chars). */
     private static final int PAUSE_REASON_MAX_CHARS = 500;
+
+    /**
+     * Deployment-wide fallback for {@code LlmConfiguration.Task#getEnforceBudget()}
+     * ({@code eddi.tools.budget.enforce-by-default}, default {@code false}).
+     * <p>
+     * Read through {@link ConfigProvider} rather than {@code @ConfigProperty}
+     * because AgentOrchestrator is not a CDI bean — {@code LlmTask} constructs it
+     * with {@code new}, so an injection annotation here would never fire and the
+     * field would stay {@code false} while looking configurable.
+     */
+    private static final boolean BUDGET_ENFORCE_DEFAULT = resolveBudgetEnforceDefault();
+
+    private static boolean resolveBudgetEnforceDefault() {
+        try {
+            return ConfigProvider.getConfig()
+                    .getOptionalValue("eddi.tools.budget.enforce-by-default", Boolean.class)
+                    .orElse(false);
+        } catch (Exception e) {
+            // No MicroProfile config available (plain unit test JVM): fail open, which is
+            // also the documented default.
+            return false;
+        }
+    }
 
     // Stateless helpers — safe to instantiate directly (no CDI needed).
     private final ToolApprovalGate toolApprovalGate = new ToolApprovalGate();
@@ -372,6 +398,7 @@ class AgentOrchestrator {
         boolean enableCostTracking = task.getEnableCostTracking() != null ? task.getEnableCostTracking() : true;
         int defaultRateLimit = task.getDefaultRateLimit() != null ? task.getDefaultRateLimit() : 100;
         Map<String, Integer> toolRateLimits = task.getToolRateLimits();
+        Map<String, String> toolCanonicalNames = setup.toolCanonicalNames();
         Double maxBudget = task.getMaxBudgetPerConversation();
         List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
 
@@ -406,8 +433,8 @@ class AgentOrchestrator {
                 // Full per-request pipeline (checkpoint, budget, executeToolWrapped,
                 // truncation, trace). Its own auto-checkpoint fires ONLY here.
                 String result = executeSingleToolCallResult(req, memory, trace, toolExecutors, toolRateLimits,
-                        defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking,
-                        task, isLazy, builtInSpecs, activeSpecs);
+                        toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                        enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                 journalStore.markExecuted(conversationId, pauseEpoch, c.getCallId(), capUtf8(result, JOURNAL_RESULT_MAX_BYTES));
                 String envelope = amended != null ? amendedEnvelope(result) : result;
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), envelope));
@@ -670,9 +697,16 @@ class AgentOrchestrator {
      * @param builtInSpecs
      *            built-in specs only (copy taken before external merge — LAZY needs
      *            it to activate discovered built-ins)
+     * @param toolCanonicalNames
+     *            dispatch name → configuration slug, for built-ins only. Lets the
+     *            executor boundary price a call and pick its cache TTL under the
+     *            token the agent designer actually configured
+     *            ({@code searchWeb → websearch}); tools that are configured under
+     *            their dispatch name (http/mcp/a2a) are simply absent
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
-            Map<String, String> toolSources, List<ToolSpecification> builtInSpecs) {
+            Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
+            Map<String, String> toolCanonicalNames) {
     }
 
     /**
@@ -708,6 +742,7 @@ class AgentOrchestrator {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> toolExecutors = new HashMap<>();
         Map<String, String> toolSources = new HashMap<>();
+        Map<String, String> toolCanonicalNames = new HashMap<>();
 
         for (Object tool : tools) {
             // CDI proxies don't carry @Tool annotations — resolve to actual bean class
@@ -715,6 +750,11 @@ class AgentOrchestrator {
             if (toolClass.getName().contains("_ClientProxy") || toolClass.getName().contains("$$")) {
                 toolClass = toolClass.getSuperclass();
             }
+
+            // Resolved from the UNWRAPPED class on purpose: tool.getClass() would be
+            // "CalculatorTool_ClientProxy" under CDI, which no resolver case matches, and
+            // every built-in would silently fall back to its dispatch name again.
+            String canonicalToolName = ToolNameResolver.canonicalForClass(toolClass.getSimpleName());
 
             var specs = ToolSpecifications.toolSpecificationsFrom(toolClass);
             toolSpecs.addAll(specs);
@@ -726,6 +766,7 @@ class AgentOrchestrator {
                     String toolName = toolAnnotation.name().isEmpty() ? method.getName() : toolAnnotation.name();
                     toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
                     toolSources.put(toolName, sourceForBuiltInTool(tool));
+                    toolCanonicalNames.put(toolName, canonicalToolName != null ? canonicalToolName : toolName);
                 }
             }
         }
@@ -754,7 +795,7 @@ class AgentOrchestrator {
             a2aTools.executors().keySet().forEach(name -> toolSources.put(name, "a2a"));
         }
 
-        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs);
+        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames));
     }
 
     /**
@@ -858,6 +899,7 @@ class AgentOrchestrator {
 
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
         Map<String, String> toolSources = setup.toolSources();
+        Map<String, String> toolCanonicalNames = setup.toolCanonicalNames();
         List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
 
         boolean enableRateLimiting = task.getEnableRateLimiting() != null ? task.getEnableRateLimiting() : true;
@@ -949,7 +991,7 @@ class AgentOrchestrator {
                             // 1) execute the ungated calls of this batch normally
                             for (ToolExecutionRequest allowedReq : gateResult.allowed()) {
                                 executeSingleToolCall(allowedReq, memory, currentMessages, trace, toolExecutors,
-                                        toolRateLimits, defaultRateLimit, maxBudget, conversationId,
+                                        toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
                                         enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
@@ -993,7 +1035,7 @@ class AgentOrchestrator {
                         }
 
                         executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors,
-                                toolRateLimits, defaultRateLimit, maxBudget, conversationId,
+                                toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
                                 enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                     }
                 } else {
@@ -1055,14 +1097,15 @@ class AgentOrchestrator {
     void executeSingleToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
                                Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
+                               Map<String, String> toolCanonicalNames,
                                int defaultRateLimit, Double maxBudget, String conversationId,
                                boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                LlmConfiguration.Task task, boolean isLazy,
                                List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
         // Live path: run the full pipeline, then append the raw result verbatim.
         String toolResult = executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
-                defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking,
-                task, isLazy, builtInSpecs, activeSpecs);
+                toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
         currentMessages.add(ToolExecutionResultMessage.from(toolRequest, toolResult));
     }
 
@@ -1080,6 +1123,7 @@ class AgentOrchestrator {
     String executeSingleToolCallResult(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                        List<Map<String, Object>> trace,
                                        Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
+                                       Map<String, String> toolCanonicalNames,
                                        int defaultRateLimit, Double maxBudget, String conversationId,
                                        boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                        LlmConfiguration.Task task, boolean isLazy,
@@ -1102,8 +1146,15 @@ class AgentOrchestrator {
         callStep.put("arguments", toolRequest.arguments());
         trace.add(callStep);
 
-        // Check per-conversation budget before executing tool
-        if (maxBudget != null && conversationId != null
+        // Check per-conversation TOOL budget before executing tool.
+        //
+        // Opt-in: until enforceBudget is set, maxBudgetPerConversation is recorded but
+        // never refuses a call. The ceiling could not bind before this release (every
+        // built-in priced at $0.00), so enforcing it by default would newly abort tool
+        // calls on agents whose stored config has carried the number harmlessly for
+        // versions. Cost tracking itself is unaffected by the flag.
+        boolean enforceBudget = task.getEnforceBudget() != null ? task.getEnforceBudget() : BUDGET_ENFORCE_DEFAULT;
+        if (enforceBudget && maxBudget != null && conversationId != null
                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
             String budgetError = "Budget exceeded for conversation " + conversationId;
             LOGGER.warn(sanitize(budgetError));
@@ -1138,9 +1189,13 @@ class AgentOrchestrator {
         ToolExecutor executor = toolExecutors.get(toolRequest.name());
         String toolResult;
         if (executor != null) {
-            int rateLimit = (toolRateLimits != null && toolRateLimits.containsKey(toolRequest.name()))
-                    ? toolRateLimits.get(toolRequest.name())
-                    : defaultRateLimit;
+            // A built-in is DISPATCHED under its @Tool method name ("calculate") but
+            // CONFIGURED under its whitelist slug ("calculator"). Resolve the slug once,
+            // here, and hand both names down: only the price and the cache TTL are looked
+            // up by slug, everything that identifies the individual call is not.
+            String canonicalName = ToolNameResolver.canonical(toolRequest.name(), toolCanonicalNames);
+            int rateLimit = resolveRateLimit(toolRateLimits, toolRequest.name(), canonicalName, defaultRateLimit);
+            Double priceOverride = resolveOverride(task.getToolPricing(), toolRequest.name(), canonicalName);
 
             // Partition the tool-result cache by identity, so one user's result can never
             // be served back to another. A null tag means no usable identity was
@@ -1148,7 +1203,8 @@ class AgentOrchestrator {
             String cacheScopeTag = ToolCacheService.resolveScopeTag(toolRequest.name(), task.getToolCacheScopes(),
                     task.getDefaultToolCacheScope(), memory != null ? memory.getUserId() : null, conversationId);
 
-            toolResult = toolExecutionService.executeToolWrapped(toolRequest.name(), toolRequest.arguments(), cacheScopeTag, conversationId,
+            var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
+            toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
                     () -> executor.execute(toolRequest, null), enableRateLimiting, enableCaching, enableCostTracking, rateLimit);
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
@@ -1171,6 +1227,50 @@ class AgentOrchestrator {
         }
 
         return toolResult;
+    }
+
+    /**
+     * Resolves the per-minute rate limit for one call: an entry keyed on the
+     * dispatch name wins, then the canonical slug, then the task default.
+     *
+     * <p>
+     * Dispatch-name-first keeps a config that pins a single method
+     * ({@code {"searchNews": 5}}) more specific than one that covers the whole tool
+     * ({@code {"websearch": 30}}), and is what makes the documented slug form bind
+     * at all — a built-in's dispatch name never equals its slug.
+     * </p>
+     *
+     * <p>
+     * Note that only the LIMIT is slug-resolved; the bucket itself lives in
+     * {@code ToolRateLimiter} under the dispatch name. {@code {"websearch": 30}}
+     * therefore grants {@code searchWeb}, {@code searchNews} and
+     * {@code searchWikipedia} 30 calls/min <em>each</em>, not 30 between them.
+     * </p>
+     */
+    static int resolveRateLimit(Map<String, Integer> toolRateLimits, String dispatchName, String canonicalName,
+                                int defaultRateLimit) {
+        if (toolRateLimits == null) {
+            return defaultRateLimit;
+        }
+        Integer limit = toolRateLimits.get(dispatchName);
+        if (limit == null) {
+            limit = toolRateLimits.get(canonicalName);
+        }
+        return limit != null ? limit : defaultRateLimit;
+    }
+
+    /**
+     * Resolves an operator price override for one call, dispatch name before
+     * canonical slug (same precedence as {@link #resolveRateLimit}). Returns
+     * {@code null} when no override applies, leaving the default price table in
+     * charge.
+     */
+    static Double resolveOverride(Map<String, Double> toolPricing, String dispatchName, String canonicalName) {
+        if (toolPricing == null) {
+            return null;
+        }
+        Double price = toolPricing.get(dispatchName);
+        return price != null ? price : toolPricing.get(canonicalName);
     }
 
     // ─── Tool-approval gate helpers ───

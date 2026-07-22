@@ -60,8 +60,8 @@ class ToolExecutionServiceExtendedTest {
                     () -> "wrapped result", true, true, true, 60);
 
             assertEquals("wrapped result", result);
-            verify(cacheService).put(SCOPE, "myTool", "arg1", "wrapped result");
-            verify(costTracker).trackToolCall("myTool", "conv-1");
+            verify(cacheService).put(SCOPE, ToolInvocation.of("myTool"), "arg1", "wrapped result");
+            verify(costTracker).trackToolCall(ToolInvocation.of("myTool"), "conv-1");
         }
 
         @Test
@@ -116,7 +116,7 @@ class ToolExecutionServiceExtendedTest {
                     () -> "result", false, false, true, 0);
 
             assertEquals("result", result);
-            verify(costTracker, never()).trackToolCall(anyString(), anyString());
+            verify(costTracker, never()).trackToolCall(any(ToolInvocation.class), anyString());
         }
 
         @Test

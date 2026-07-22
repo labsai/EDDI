@@ -81,8 +81,8 @@ class ToolExecutionServiceTest {
                     true, true, true, 60);
 
             assertEquals("tool result", result);
-            verify(cacheService).put(SCOPE, "testTool", "args", "tool result");
-            verify(costTracker).trackToolCall("testTool", "conv-1");
+            verify(cacheService).put(SCOPE, ToolInvocation.of("testTool"), "args", "tool result");
+            verify(costTracker).trackToolCall(ToolInvocation.of("testTool"), "conv-1");
         }
 
         @Test
@@ -97,7 +97,7 @@ class ToolExecutionServiceTest {
                     true, true, true, 60);
 
             assertEquals("cached", result);
-            verify(cacheService, never()).put(nullable(String.class), anyString(), anyString(), anyString());
+            verify(cacheService, never()).put(nullable(String.class), any(ToolInvocation.class), anyString(), anyString());
         }
 
         @Test
@@ -140,7 +140,7 @@ class ToolExecutionServiceTest {
 
             assertEquals("result", result);
             verify(cacheService, never()).get(nullable(String.class), anyString(), anyString());
-            verify(cacheService, never()).put(nullable(String.class), anyString(), anyString(), anyString());
+            verify(cacheService, never()).put(nullable(String.class), any(ToolInvocation.class), anyString(), anyString());
         }
 
         @Test
@@ -154,7 +154,7 @@ class ToolExecutionServiceTest {
                     () -> "result",
                     true, true, false, 60);
 
-            verify(costTracker, never()).trackToolCall(anyString(), anyString());
+            verify(costTracker, never()).trackToolCall(any(ToolInvocation.class), anyString());
         }
 
         @Test
@@ -168,7 +168,7 @@ class ToolExecutionServiceTest {
                     () -> "result",
                     true, true, true, 60);
 
-            verify(costTracker, never()).trackToolCall(anyString(), anyString());
+            verify(costTracker, never()).trackToolCall(any(ToolInvocation.class), anyString());
         }
 
         @Test
@@ -286,6 +286,92 @@ class ToolExecutionServiceTest {
         }
     }
 
+    // ==================== canonical vs dispatch name ====================
+
+    /**
+     * A built-in tool has two names — the {@code @Tool} method the model dispatches
+     * on ({@code searchWeb}) and the slug it is configured under
+     * ({@code websearch}) — and this class is the boundary where the two must be
+     * used for different things. Getting that split wrong in either direction is a
+     * real defect: canonicalising the cache key makes three different searches
+     * share one entry, and dispatching the price lookup on the method name (the
+     * shipped behaviour) prices every built-in at $0.00.
+     */
+    @Nested
+    @DisplayName("canonical name routing")
+    class CanonicalNameTests {
+
+        private static final ToolInvocation SEARCH_WEB = new ToolInvocation("searchWeb", "websearch", null);
+
+        @Test
+        @DisplayName("prices under the canonical slug, keyed under the dispatch name")
+        void pricesUnderSlugKeysUnderDispatchName() {
+            when(rateLimiter.tryAcquire("searchWeb", 60)).thenReturn(true);
+            when(cacheService.get(SCOPE, "searchWeb", "args")).thenReturn(null);
+
+            var result = service.executeToolWrapped(SEARCH_WEB, "args", SCOPE, "conv-1",
+                    () -> "hits", true, true, true, 60);
+
+            assertEquals("hits", result);
+            // The cache key must stay on the dispatch name — searchNews and
+            // searchWikipedia canonicalise to the same slug and would collide.
+            verify(cacheService).get(SCOPE, "searchWeb", "args");
+            verify(cacheService).put(SCOPE, SEARCH_WEB, "args", "hits");
+            // The price, however, is a property of the tool, so the whole invocation
+            // (carrying the slug) goes to the tracker.
+            verify(costTracker).trackToolCall(SEARCH_WEB, "conv-1");
+        }
+
+        @Test
+        @DisplayName("rate limits the dispatch name, never the slug")
+        void rateLimitBucketIsPerDispatchName() {
+            when(rateLimiter.tryAcquire("searchWeb", 30)).thenReturn(true);
+
+            service.executeToolWrapped(SEARCH_WEB, "args", SCOPE, "conv-1",
+                    () -> "hits", true, false, false, 30);
+
+            // {"websearch": 30} configures the LIMIT; the BUCKET stays per method, so
+            // searchWeb/searchNews/searchWikipedia get 30/min each, not 30 between them.
+            verify(rateLimiter).tryAcquire("searchWeb", 30);
+            verify(rateLimiter, never()).tryAcquire("websearch", 30);
+        }
+
+        @Test
+        @DisplayName("reports metrics under the dispatch name so dashboards keep working")
+        void metricsUseDispatchName() {
+            when(rateLimiter.tryAcquire("searchWeb", 60)).thenReturn(true);
+
+            service.executeToolWrapped(SEARCH_WEB, "args", SCOPE, "conv-1",
+                    () -> "hits", true, false, false, 60);
+
+            assertNotNull(meterRegistry.find("eddi.tool.execution.success").tag("tool", "searchWeb").counter());
+            assertNull(meterRegistry.find("eddi.tool.execution.success").tag("tool", "websearch").counter());
+        }
+
+        @Test
+        @DisplayName("carries the operator price override through to the tracker")
+        void priceOverrideIsCarried() {
+            var priced = new ToolInvocation("searchWeb", "websearch", 0.05);
+            when(rateLimiter.tryAcquire("searchWeb", 60)).thenReturn(true);
+
+            service.executeToolWrapped(priced, "args", SCOPE, "conv-1",
+                    () -> "hits", true, false, true, 60);
+
+            verify(costTracker).trackToolCall(priced, "conv-1");
+        }
+
+        @Test
+        @DisplayName("the legacy String overload behaves like an identity invocation")
+        void legacyOverloadDelegates() {
+            when(rateLimiter.tryAcquire("plainTool", 60)).thenReturn(true);
+
+            service.executeToolWrapped("plainTool", "args", SCOPE, "conv-1",
+                    () -> "ok", true, false, true, 60);
+
+            verify(costTracker).trackToolCall(ToolInvocation.of("plainTool"), "conv-1");
+        }
+    }
+
     // ==================== null cache scope tag ====================
 
     /**
@@ -325,7 +411,7 @@ class ToolExecutionServiceTest {
                     () -> "fresh result",
                     true, true, true, 60);
 
-            verify(cacheService, never()).put(nullable(String.class), anyString(), anyString(), anyString());
+            verify(cacheService, never()).put(nullable(String.class), any(ToolInvocation.class), anyString(), anyString());
         }
 
         @Test
@@ -381,7 +467,7 @@ class ToolExecutionServiceTest {
                     true, true, true, 60);
 
             verify(rateLimiter).tryAcquire("testTool", 60);
-            verify(costTracker).trackToolCall("testTool", "conv-1");
+            verify(costTracker).trackToolCall(ToolInvocation.of("testTool"), "conv-1");
         }
     }
 
