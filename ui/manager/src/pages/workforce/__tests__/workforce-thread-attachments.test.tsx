@@ -102,6 +102,14 @@ async function waitForInit() {
   await waitFor(() => {
     expect(screen.getAllByText(/Test Agent/i).length).toBeGreaterThan(0);
   });
+  // Also wait for conversationId to be set (textarea becomes enabled).
+  // Without this, pickFile may fire before handleFileChange has a valid
+  // conversationId, silently returning without uploading — a race that only
+  // surfaces under CI CPU saturation.
+  await waitFor(() => {
+    const textarea = screen.getByRole("textbox");
+    expect(textarea).not.toBeDisabled();
+  });
 }
 
 function createMockFile(
@@ -211,12 +219,9 @@ describe("WorkforceThread – Attachment Features", () => {
       const file = createMockFile("doc.pdf", 1024, "application/pdf");
       pickFile(file);
 
+      // Wait for both the upload call AND the rendered chip
       await waitFor(() => {
         expect(uploadSpy).toHaveBeenCalledWith("conv-test-123", file);
-      });
-
-      // File name should appear in attachment chip
-      await waitFor(() => {
         expect(screen.getByText("doc.pdf")).toBeInTheDocument();
       });
     });
