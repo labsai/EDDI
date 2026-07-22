@@ -12,7 +12,7 @@ import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { SecretInput } from "./SecretInput";
 import { QuickReplies } from "./QuickReplies";
-import { TypingIndicator, ThinkingIndicator, EscalatingIndicator } from "./Indicators";
+import { TypingIndicator, ThinkingIndicator } from "./Indicators";
 import { ScrollToBottom } from "./ScrollToBottom";
 import { ChatHeader } from "./ChatHeader";
 
@@ -574,16 +574,19 @@ export function ChatWidget() {
 
       // Add user message (display masked if secret). Attachments are named in
       // the transcript so the user can see what was actually sent.
-      // A file above the forward limit was stored but will not be inlined to
-      // the model. Say so on the turn itself — the backend records the skip in
-      // attachments:errors, which is written setPublic(false), so this is the
-      // last chance to tell the user before they wonder why the agent ignored
-      // their file.
+      // A file above the forward limit was stored but will not be inlined. The
+      // model gets a note in its place rather than the bytes, so the agent may
+      // or may not be able to reach the content — say the part we know is true.
+      // "assistant", not "model": nothing else user-facing here uses that word.
+      //
+      // Note this line lives in the bubble TEXT, so it does not survive an
+      // undo/redo — stepsToMessages rebuilds user bubbles from the raw
+      // input:initial. Do not treat it as a durable record.
       const attachmentLine = attachments.length
         ? attachments
             .map((a) =>
               a.forwardableInline === false
-                ? `📎 ${a.fileName} — too large to send to the model`
+                ? `📎 ${a.fileName} — too large to send directly`
                 : `📎 ${a.fileName}`,
             )
             .join("\n")
@@ -1180,11 +1183,9 @@ export function ChatWidget() {
               />
             ) : (
               <>
-                {state.isEscalating ? (
-                  <EscalatingIndicator />
-                ) : state.isThinking ? (
-                  <ThinkingIndicator />
-                ) : null}
+                {(state.isThinking || state.isEscalating) && (
+                  <ThinkingIndicator escalating={state.isEscalating} />
+                )}
                 {state.isProcessing && !state.isThinking && !state.isEscalating && (
                   <TypingIndicator />
                 )}

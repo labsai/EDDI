@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+  within,
+} from "@testing-library/react";
 import { ChatInput } from "./ChatInput";
 import { ChatProvider, useChatState } from "@/store/chat-store";
 import {
@@ -192,7 +199,10 @@ describe("ChatInput — attachments", () => {
     await attach("huge.pdf");
 
     expect(await screen.findByTestId("attachment-warn")).toHaveTextContent(
-      "too large to send to the model",
+      "too large to send directly",
+    );
+    expect(await screen.findByTestId("attachment-chip")).toHaveClass(
+      "chat-attachments__chip--warn",
     );
   });
 
@@ -208,6 +218,17 @@ describe("ChatInput — attachments", () => {
     await screen.findByTestId("attachment-chip");
 
     expect(screen.queryByTestId("attachment-warn")).not.toBeInTheDocument();
+  });
+
+  it("marks the file input as multi-select", async () => {
+    // Asserted directly because jsdom does not enforce `multiple`:
+    // fireEvent.change can hand a component several files whether or not the
+    // attribute is present, so the batch tests below would pass without it.
+    // This is the only assertion that pins the attribute that makes the real
+    // OS picker allow more than one file.
+    renderInput({ conversationId: "conv-1" });
+
+    expect(screen.getByTestId("chat-file-input")).toHaveAttribute("multiple");
   });
 
   it("uploads every file from a single multi-file pick", async () => {
@@ -234,7 +255,13 @@ describe("ChatInput — attachments", () => {
         MAX_ATTACHMENTS_PER_TURN,
       ),
     );
-    expect(screen.getByText(/2 not attached/)).toBeInTheDocument();
+    // Names them: slice() keeps OS-determined FileList order, so a bare count
+    // would leave the user guessing which two were dropped.
+    expect(
+      within(screen.getByTestId("transcript")).getByText(
+        /Not attached: f5\.pdf, f6\.pdf/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("shows a placeholder chip while the upload is still in flight", async () => {
@@ -280,17 +307,151 @@ describe("ChatInput — attachments", () => {
     );
     await attach("late.pdf");
 
-    expect(
-      await screen.findByText(/Delete some attachments first/),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId("transcript")).getByText(
+          /Delete some attachments first/,
+        ),
+      ).toBeInTheDocument(),
+    );
   });
 
-  it("announces chip changes to assistive tech", async () => {
-    await attach();
+  it.each([
+    ["a bare 413 with no JSON envelope", new ApiError(413, "<html>413</html>", "x"), /too large to upload/],
+    ["a 400 ATTACHMENT_TOO_LARGE", new ApiError(400, JSON.stringify({ error: "File too large: 9", code: "ATTACHMENT_TOO_LARGE" }), "x"), /too large to upload/],
+    ["a 403", new ApiError(403, "", "x"), /not allowed to attach/],
+    ["a 401", new ApiError(401, "", "x"), /not allowed to attach/],
+    ["a non-ApiError", new Error("socket hang up"), /Failed to upload/],
+  ])("explains %s", async (_label, err, expected) => {
+    vi.mocked(uploadAttachment).mockRejectedValueOnce(err);
+    await attach("doc.pdf");
 
-    expect(await screen.findByTestId("attachment-chips")).toHaveAttribute(
-      "aria-live",
-      "polite",
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId("transcript")).getByText(expected),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("refuses a further pick once the cap is already full", async () => {
+    // The batch-overflow path and the already-full path are different branches.
+    renderInput({ conversationId: "conv-1" });
+    fireEvent.change(screen.getByTestId("chat-file-input"), {
+      target: { files: Array.from({ length: 5 }, (_, i) => pdf(`f${i}.pdf`)) },
+    });
+    await waitFor(() =>
+      expect(screen.getAllByTestId("attachment-chip")).toHaveLength(5),
+    );
+
+    fireEvent.change(screen.getByTestId("chat-file-input"), {
+      target: { files: [pdf("one-too-many.pdf")] },
+    });
+
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId("transcript")).getByText(
+          /You can attach at most 5 files per message\.$/,
+        ),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getAllByTestId("attachment-chip")).toHaveLength(5);
+  });
+
+  it("keeps the live region mounted before anything is attached", async () => {
+    // A live region that appears together with its content is not announced,
+    // so this one must already exist while the composer is empty.
+    renderInput({ conversationId: "conv-1" });
+
+    expect(screen.getByTestId("chat-live")).toHaveAttribute("aria-live", "polite");
+    expect(screen.queryByTestId("attachment-chips")).not.toBeInTheDocument();
+  });
+
+  it("announces an attachment and its removal", async () => {
+    await attach("invoice.pdf");
+    await screen.findByTestId("attachment-chip");
+    expect(screen.getByTestId("chat-live")).toHaveTextContent("invoice.pdf attached.");
+
+    fireEvent.click(screen.getByTestId("attachment-remove"));
+
+    expect(screen.getByTestId("chat-live")).toHaveTextContent("invoice.pdf removed.");
+  });
+
+  it("announces an upload failure, which only ever REMOVES a chip", async () => {
+    // The default aria-relevant does not cover removals, so a failure had no
+    // other route to a screen reader.
+    vi.mocked(uploadAttachment).mockRejectedValueOnce(
+      new ApiError(400, JSON.stringify({ error: "Bad type", code: "ATTACHMENT_REJECTED" }), "x"),
+    );
+    await attach("virus.exe");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-live")).toHaveTextContent("virus.exe was rejected"),
+    );
+    expect(screen.queryByTestId("attachment-chip-uploading")).not.toBeInTheDocument();
+  });
+
+  it("refuses to send while an upload is still in flight", async () => {
+    // Sending here would go out with NO attachment context, then CLEAR_ATTACHMENTS
+    // would fire and the upload would land as a chip belonging to the NEXT turn —
+    // leaving the user looking at a file they believe they already sent.
+    let release: (v: unknown) => void = () => {};
+    vi.mocked(uploadAttachment).mockImplementationOnce(
+      () => new Promise((res) => { release = res; }) as never,
+    );
+    const { onSend } = renderInput({ conversationId: "conv-1" });
+    fireEvent.change(screen.getByTestId("chat-file-input"), {
+      target: { files: [pdf("slow.pdf")] },
+    });
+    await screen.findByTestId("attachment-chip-uploading");
+
+    const input = screen.getByTestId("chat-input");
+    fireEvent.change(input, { target: { value: "here you go" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByTestId("chat-send")).toBeDisabled();
+
+    await act(async () => {
+      release({
+        storageRef: "ref-slow", fileName: "slow.pdf",
+        mimeType: "application/pdf", sizeBytes: 3, forwardableInline: true,
+      });
+    });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    expect(onSend).toHaveBeenCalled();
+  });
+
+  it("deletes against the conversation the upload reported, not the current one", async () => {
+    // An upload started before New Conversation lands afterwards and stages
+    // into the fresh composer. Deleting it against the new id is refused by the
+    // store's owner check, and the original blob leaks against the very quota
+    // this is meant to protect.
+    vi.mocked(uploadAttachment).mockResolvedValueOnce({
+      storageRef: "ref-old",
+      fileName: "old.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 3,
+      conversationId: "conv-OLD",
+    });
+    renderInput({ conversationId: "conv-NEW" });
+    fireEvent.change(screen.getByTestId("chat-file-input"), {
+      target: { files: [pdf("old.pdf")] },
+    });
+    await screen.findByTestId("attachment-chip");
+
+    fireEvent.click(screen.getByTestId("attachment-remove"));
+
+    expect(vi.mocked(deleteAttachment)).toHaveBeenCalledWith("conv-OLD", "ref-old");
+  });
+
+  it("moves focus to the attach button when the last chip is removed", async () => {
+    await attach();
+    await screen.findByTestId("attachment-chip");
+
+    fireEvent.click(screen.getByTestId("attachment-remove"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-attach-btn")).toHaveFocus(),
     );
   });
 });

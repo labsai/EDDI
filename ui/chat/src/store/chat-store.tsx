@@ -237,11 +237,18 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "SET_PROCESSING":
       return { ...state, isProcessing: action.value };
 
+    // Both are dispatched unconditionally on every token, so bail out when the
+    // value is unchanged rather than allocating a new state object (and
+    // re-rendering every consumer) once per token.
     case "SET_THINKING":
-      return { ...state, isThinking: action.value };
+      return state.isThinking === action.value
+        ? state
+        : { ...state, isThinking: action.value };
 
     case "SET_ESCALATING":
-      return { ...state, isEscalating: action.value };
+      return state.isEscalating === action.value
+        ? state
+        : { ...state, isEscalating: action.value };
 
     case "CLEAR_MESSAGES":
       return {
@@ -250,6 +257,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         conversationId: null,
         quickReplies: [],
         conversationState: null,
+        // A cleared conversation is not processing anything. This used to be
+        // lowered only as a side effect of the abandoned stream's
+        // FINISH_STREAMING safety net, which meant New Conversation mid-stream
+        // left the FRESH conversation with a disabled composer, a dead Enter
+        // key and a Stop button for a turn that was not running.
+        isProcessing: false,
         isThinking: false,
         isEscalating: false,
         undoAvailable: false,

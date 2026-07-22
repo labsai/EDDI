@@ -72,17 +72,34 @@ src/
   pending-approval placeholder and rejection message as bare strings.
 - **Attachments reach the model ONLY via `attachment_N` context keys** whose
   `value` is an object carrying `storageRef`. A ref in the message text is
-  silently ignored. Cap 5 per turn. Omit `fileName` when empty — the extractor
-  backfills the stored name only when the key is absent.
-- **Upload cap ≠ forward cap** (20 MiB vs 10 MiB by default). A file in between
-  is stored, returns 201, and is then dropped at forward time. The skip is
-  recorded in `attachments:errors`, which every writer marks `setPublic(false)`,
-  so the turn can never reveal it — the upload response's `forwardableInline`
-  is the only signal the client ever gets. Surface it.
+  silently ignored. Omit `fileName` when empty — the extractor backfills the
+  stored name only when the key is **absent** (`getFileName() == null`); `""` is
+  a String and suppresses the fallback.
+- **The per-turn cap of 5 is a default, not a contract** —
+  `eddi.attachments.max-per-turn` is a `@ConfigProperty` and no endpoint exposes
+  the effective value. Same for the 20 MiB upload / 10 MiB forward caps. Do not
+  write client code that treats any of them as fixed truth.
+- **Upload cap ≠ forward cap.** A file in between is stored, returns 201, and is
+  skipped at forward time — but the model is **not** left unaware: the forwarder
+  substitutes a text note (`AttachmentForwarder` → `TextContent.from(...)`)
+  saying the file was not sent and that `readAttachment` can fetch it. Surface
+  `forwardableInline` so the user knows the bytes were not inlined, but do not
+  claim the agent cannot see the file. Note it is an incomplete signal: a
+  separate `max-forward-aggregate-bytes` cap can skip a file that reported
+  `true`.
+- **`setPublic(false)` is NOT a wire filter.** `isPublic()` is never read as a
+  predicate anywhere in the backend — it is only copied into the snapshot. What
+  actually keeps a key out of the response is the key-prefix allowlist in
+  `ConversationMemoryUtilities.convertSimpleConversationMemory`, and
+  `returnDetailed=true` bypasses it entirely. This client asks for
+  `returnDetailed=false`, which is a client choice.
 - **Failures answer `{error, code}`** — parse both (`errorPayload` in `http.ts`).
-  `ATTACHMENT_REJECTED` is a catch-all covering MIME rejection, the
-  per-conversation file/byte quotas and empty files; only `error` says which.
-  A body-less 413 can also arrive from Quarkus before the attachment layer runs.
+  `ATTACHMENT_REJECTED` is a catch-all: a declared-vs-detected MIME **mismatch**
+  (there is no type allowlist — an unknown type passes), the per-conversation
+  file/byte quotas, empty files, and on Postgres any wrapped `SQLException`, so
+  a database outage also arrives as a 400 "rejection". Only `error` says which.
+  A body-less 413 from Quarkus is possible but not the normal path — this repo
+  raises `max-body-size` to 25M precisely so in-cap uploads do not hit it.
 - **A 409 means the input was never consumed** — restore it, do not leave it in
   the transcript as if sent.
 

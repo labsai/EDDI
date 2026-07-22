@@ -254,6 +254,35 @@ describe("cascade escalation", () => {
 
     expect(chatReducer(state, { type: "CLEAR_MESSAGES" }).isEscalating).toBe(false);
   });
+
+  it("SET_ESCALATING returns the SAME state object when unchanged", () => {
+    // Dispatched on every token; a fresh object each time re-renders every
+    // consumer of the store for nothing.
+    const state: ChatState = { ...initialState, isEscalating: false };
+
+    expect(chatReducer(state, { type: "SET_ESCALATING", value: false })).toBe(state);
+    expect(chatReducer(state, { type: "SET_THINKING", value: false })).toBe(state);
+  });
+});
+
+describe("CLEAR_MESSAGES resets the turn flags", () => {
+  it("clears isProcessing — a cleared conversation is not mid-turn", () => {
+    // This was only ever lowered as a side effect of the abandoned stream's
+    // FINISH_STREAMING. Guarding that continuation stranded the flag and the
+    // NEW conversation opened with a disabled composer and a live Stop button.
+    const state: ChatState = {
+      ...initialState,
+      isProcessing: true,
+      isThinking: true,
+      isEscalating: true,
+    };
+
+    const result = chatReducer(state, { type: "CLEAR_MESSAGES" });
+
+    expect(result.isProcessing).toBe(false);
+    expect(result.isThinking).toBe(false);
+    expect(result.isEscalating).toBe(false);
+  });
 });
 
 /* ─── Pending attachments ───────────────────── */

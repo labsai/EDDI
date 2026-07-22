@@ -15,14 +15,31 @@ export interface AttachmentResult {
   mimeType: string;
   sizeBytes: number;
   /**
+   * The conversation this blob belongs to, as reported by the upload.
+   *
+   * Kept because it is not necessarily the conversation that is current when
+   * the user removes the chip: an upload started before New Conversation lands
+   * afterwards and stages into the fresh composer. Deleting such a chip against
+   * the current id is refused by the store's owner check and the original blob
+   * leaks — exactly the quota this is meant to protect.
+   */
+  conversationId?: string;
+  /**
    * False when the file was stored but is too large to inline to the model.
    *
    * The upload cap and the forward cap are different limits (20 MiB and 10 MiB
-   * by default), so a file in between uploads with a 201 and is then dropped at
-   * forward time with a ForwardSkipException. That drop is recorded in
-   * `attachments:errors`, which every writer marks setPublic(false) — so the
-   * widget can never learn about it from the turn. This flag, returned on the
-   * upload itself, is the only signal we get.
+   * by default), so a file in between uploads with a 201 and is then skipped at
+   * forward time. The model still receives a text note in its place saying the
+   * file was not sent and that `readAttachment` can fetch it — so whether the
+   * agent can use the content depends on its tool configuration. Either way the
+   * bytes are not inlined, which is what the user needs to know up front.
+   *
+   * Not a complete signal: there is also an aggregate cap
+   * (`max-forward-aggregate-bytes`, 20 MiB default) that this flag cannot see,
+   * so several individually-forwardable files can still push the last one out.
+   * The per-turn skip record lands in `attachments:errors`, which the widget
+   * does not read — it asks for `returnDetailed=false`, and the projection's
+   * key-prefix allowlist only admits that key when detailed is requested.
    */
   forwardableInline?: boolean;
 }
@@ -31,6 +48,15 @@ export interface AttachmentResult {
  * Backend cap per turn — AttachmentContextExtractor's
  * DEFAULT_MAX_ATTACHMENTS_PER_TURN. Extra attachments are dropped server-side,
  * so the UI must not pretend they were sent.
+ *
+ * Caveat, stated plainly because this repo rejected a client-side upload-size
+ * pre-check on the same grounds: `eddi.attachments.max-per-turn` is a
+ * @ConfigProperty, so this is a default rather than a contract. It is kept
+ * client-side anyway because the failure mode differs — a deployment that
+ * RAISES the cap merely leaves slots unused here, whereas a stale size limit
+ * would refuse uploads the server would have accepted. A deployment that LOWERS
+ * it still gets a correct outcome, just reported by the server rather than
+ * pre-empted. There is no endpoint exposing the effective value.
  */
 export const MAX_ATTACHMENTS_PER_TURN = 5;
 

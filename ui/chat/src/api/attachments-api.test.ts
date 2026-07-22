@@ -6,6 +6,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   buildAttachmentContext,
   uploadAttachment,
+  deleteAttachment,
   MAX_ATTACHMENTS_PER_TURN,
 } from "./attachments-api";
 import { setBaseUrl } from "./http";
@@ -102,5 +103,48 @@ describe("uploadAttachment", () => {
     await expect(
       uploadAttachment("conv-1", new File(["abc"], "a.pdf")),
     ).rejects.toMatchObject({ status: 413 });
+  });
+
+  it("reads forwardableInline off the upload response", async () => {
+    setBaseUrl("");
+    mockFetchResponse(
+      201,
+      '{"storageRef":"r1","fileName":"a.pdf","mimeType":"application/pdf","sizeBytes":3,"forwardableInline":false,"conversationId":"conv-1"}',
+    );
+
+    const result = await uploadAttachment("conv-1", new File(["abc"], "a.pdf"));
+
+    expect(result.forwardableInline).toBe(false);
+    expect(result.conversationId).toBe("conv-1");
+  });
+});
+
+describe("deleteAttachment", () => {
+  it("DELETEs the storageRef under its conversation", async () => {
+    setBaseUrl("");
+    const { calls } = captureFetch(200, '{"storageRef":"r1","deleted":true}');
+
+    await deleteAttachment("conv-1", "r1");
+
+    expect(calls[0].url).toBe("/conversations/conv-1/attachments/r1");
+    expect(calls[0].init?.method).toBe("DELETE");
+  });
+
+  it("encodes both segments, so a ref with a slash cannot rewrite the path", async () => {
+    setBaseUrl("");
+    const { calls } = captureFetch(200, "");
+
+    await deleteAttachment("conv/1", "a/../b");
+
+    expect(calls[0].url).toBe("/conversations/conv%2F1/attachments/a%2F..%2Fb");
+  });
+
+  it("throws ApiError when the server refuses the delete", async () => {
+    setBaseUrl("");
+    mockFetchResponse(403, '{"code":"ATTACHMENT_ACCESS_DENIED"}');
+
+    await expect(deleteAttachment("conv-1", "r1")).rejects.toMatchObject({
+      status: 403,
+    });
   });
 });

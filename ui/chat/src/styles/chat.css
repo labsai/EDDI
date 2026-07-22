@@ -1094,6 +1094,12 @@ a:hover { opacity: 0.85; }
   .quick-replies__btn {
     min-height: 36px;
   }
+
+  /* Removing a chip deletes the upload server-side — worth a full target. */
+  .chat-attachments__remove {
+    min-width: 36px;
+    min-height: 36px;
+  }
 }
 
 /* ── Landscape phone ────────────────────────────── */
@@ -1153,12 +1159,19 @@ a:hover { opacity: 0.85; }
   flex-wrap: wrap;
   gap: 6px;
   padding: 0 12px;
+  /* Five files each wrapping to their own row is ~175px of composer pushed
+     over the transcript, which .chat-messages (flex:1, min-height:0) will
+     happily shrink to nothing. Cap it and scroll instead. */
+  max-height: 5.5rem;
+  overflow-y: auto;
 }
 
 .chat-attachments__chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  /* The warning takes a second row inside the chip — see __warn. */
+  flex-wrap: wrap;
+  gap: 2px 6px;
   max-width: 100%;
   padding: 4px 6px 4px 10px;
   border: 1px solid var(--chat-input-border);
@@ -1179,8 +1192,10 @@ a:hover { opacity: 0.85; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  /* 24px is the WCAG 2.2 AA minimum target, and this button now fires an
+     irreversible server-side delete — a mis-tap is no longer client-only. */
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
   border-radius: 50%;
@@ -1197,21 +1212,56 @@ a:hover { opacity: 0.85; }
   color: var(--chat-text);
 }
 
-/* Stored, but above the forward limit — the model will never see it. */
+/* Stored, but above the forward limit — the assistant will never read it. */
 .chat-attachments__chip--warn {
   border-color: var(--chat-text-accent);
 }
 
+/*
+ * Full-width so it takes its own row inside the chip, below the file name.
+ * On one row it could not shrink (a nowrap flex item's automatic minimum size
+ * is its content), so it won the space fight against __name — which CAN shrink
+ * — and a 44-character file name was ellipsised down to about 14. The name
+ * identifies what is being warned about; it must not be what gets truncated.
+ */
 .chat-attachments__warn {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--chat-text-accent);
   font-size: 0.75rem;
-  white-space: nowrap;
 }
 
-/* Placeholder chip while the bytes are still going up. */
+/* Placeholder chip while the bytes are still going up. A dashed border in the
+   default border colour is ~1.4:1 against the fill, i.e. not perceivable, so
+   the state is carried by colour + opacity + an assistive-only label too. */
 .chat-attachments__chip--uploading {
   color: var(--chat-text-muted);
   border-style: dashed;
+  border-color: var(--chat-text-muted);
+  opacity: 0.75;
+}
+
+/* Visually hidden, still announced. */
+.chat-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .indicator__brain,
+  .indicator__dot {
+    animation: none;
+  }
 }
 
 /* ─── Paused: awaiting human approval ─────────── */

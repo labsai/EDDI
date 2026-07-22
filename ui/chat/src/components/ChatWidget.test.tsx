@@ -870,18 +870,41 @@ describe("ChatWidget — model cascade", () => {
     expect(screen.queryByTestId("escalating-indicator")).not.toBeInTheDocument();
   });
 
-  it("never shows model names, confidence or cost", async () => {
-    // Cascade payloads carry all three. They are operator detail — surfacing
-    // them invites the user to ask which model answered.
+  it("leaks no part of the cascade payload into the page", async () => {
+    // cascade_escalation carries confidence, threshold, a reason code and a
+    // duration (no model name — only cascade_step_start has that). All of it is
+    // operator detail. Asserted over the whole document, not just the
+    // indicator, so it also catches a leak into the bubble or a title.
     mockOpenStream([
+      'event: cascade_step_start\ndata: {"stepIndex":0,"modelName":"gpt-4o-mini","totalSteps":2}\n\n',
       'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"confidence":0.61,' +
         '"threshold":0.7,"reason":"low_confidence","durationMs":812}\n\n',
     ]);
     await send();
 
-    const hint = await screen.findByTestId("escalating-indicator");
-    expect(hint).toHaveTextContent("Thinking harder");
-    expect(hint.textContent).not.toMatch(/0\.6|0\.7|low_confidence|812/);
+    await screen.findByTestId("escalating-indicator");
+    expect(document.body.textContent).not.toMatch(
+      /gpt-4o-mini|0\.61|0\.7|low_confidence|812/,
+    );
+  });
+
+  it("shows the escalation hint INSTEAD of the typing indicator, never both", async () => {
+    // The real wire order, per CascadingModelExecutor: a guaranteed-accept step
+    // streams live, times out, and only THEN escalates — so the hint is raised
+    // over a bubble that already holds partial text. That first token is what
+    // lowers isThinking, which is the only state in which the typing indicator
+    // could compete with the escalation hint.
+    mockOpenStream([
+      "event: token\ndata: partial answer\n\n",
+      'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"reason":"timeout"}\n\n',
+    ]);
+    await send();
+
+    await screen.findByTestId("escalating-indicator");
+    expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
+    // The partial text stays put — the hint annotates the turn, never replaces it.
+    expect(screen.getByText("partial answer")).toBeInTheDocument();
   });
 
   it("does not resurrect the thinking indicator when a later step starts", async () => {
@@ -945,7 +968,61 @@ describe("ChatWidget — an attachment the model will never see", () => {
     fireEvent.click(screen.getByTestId("chat-send"));
 
     expect(
-      await screen.findByText(/huge\.pdf — too large to send to the model/),
+      await screen.findByText(/huge\.pdf — too large to send directly/),
     ).toBeInTheDocument();
+  });
+});
+
+describe("ChatWidget — New Conversation during a live stream", () => {
+  it("leaves the fresh conversation with a usable composer", async () => {
+    // The abandoned turn's FINISH_STREAMING safety net used to be the only
+    // thing lowering isProcessing. Guarding it (correctly) stranded the flag,
+    // so the NEW conversation opened with a disabled composer, a dead Enter
+    // key and a Stop button for a turn that was not running. CLEAR_MESSAGES
+    // now clears it, which is where it always belonged.
+    let starts = 0;
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        starts += 1;
+        return new Response(null, {
+          status: 201,
+          headers: { Location: `/agents/conv-${starts}` },
+        });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/stream")) {
+        // Opens, emits one token, then stays open — the turn never finishes.
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(new TextEncoder().encode("event: token\ndata: partial…\n\n"));
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+    const input = await screen.findByTestId("chat-input");
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    await screen.findByTestId("chat-stop");
+
+    fireEvent.click(screen.getByTestId("restart-btn"));
+
+    await waitFor(() => expect(starts).toBe(2));
+    // The composer must accept the next turn.
+    await waitFor(() =>
+      expect(screen.queryByTestId("chat-stop")).not.toBeInTheDocument(),
+    );
+    const fresh = screen.getByTestId("chat-input");
+    fireEvent.change(fresh, { target: { value: "second turn" } });
+    await waitFor(() => expect(screen.getByTestId("chat-send")).toBeEnabled());
   });
 });
