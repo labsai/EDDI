@@ -17,8 +17,12 @@ public class CacheFactory implements ICacheFactory {
     private final ConcurrentHashMap<String, Cache<?, ?>> caches = new ConcurrentHashMap<>();
 
     // Cache size configs (previously in infinispan-embedded.xml)
+    //
+    // "tool-results" is sized well above the 1_000 default: since tool-result
+    // entries are partitioned per user (see ToolCacheService), the keyspace is
+    // multiplied by the number of active users, and the default would thrash.
     private static final Map<String, Long> CACHE_SIZES = Map.of("userConversations", 10_000L, "agentTriggers", 1_000L, "conversationState", 1_000L,
-            "local", 1_000L, "parser", 1_000L);
+            "local", 1_000L, "parser", 1_000L, "tool-results", 10_000L);
 
     private static final long DEFAULT_MAX_SIZE = 1_000L;
 
