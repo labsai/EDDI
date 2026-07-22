@@ -43,7 +43,7 @@ describe("useTemplates", () => {
     // Persisted properly
     const { result: result2 } = renderHook(() => useTemplates());
     expect(result2.current.templates.length).toBe(1);
-    expect(result2.current.templates[0].id).toBe(savedId!);
+    expect(result2.current.templates[0]!.id).toBe(savedId!);
 
     // Delete
     act(() => {

@@ -42,16 +42,16 @@ describe("group-templates", () => {
       expect(config.style).toBe("PEER_REVIEW");
       expect(config.maxRounds).toBe(1);
       expect(config.members.length).toBe(3);
-      expect(config.members[0].displayName).toBe("translated_groupTemplates.roles.seniorEngineer");
-      expect(config.members[0].role).toBe("Code Quality");
-      expect(config.members[0].agentId).toBe("");
-      expect(config.members[0].speakingOrder).toBe(1);
+      expect(config.members[0]!.displayName).toBe("translated_groupTemplates.roles.seniorEngineer");
+      expect(config.members[0]!.role).toBe("Code Quality");
+      expect(config.members[0]!.agentId).toBe("");
+      expect(config.members[0]!.speakingOrder).toBe(1);
       expect(config.moderatorAgentId).toBe(null);
     });
 
     it("applies overrides correctly", () => {
       const templates = getGroupTemplates(mockT);
-      const template = templates[0];
+      const template = templates[0]!;
       
       const config = buildGroupFromTemplate(template, {
         name: "Custom Name",
@@ -62,7 +62,7 @@ describe("group-templates", () => {
       expect(config.name).toBe("Custom Name");
       expect(config.maxRounds).toBe(5);
       expect(config.moderatorAgentId).toBe("mod-1");
-      expect(config.style).toBe(template.style);
+      expect(config.style).toBe(template!.style);
     });
   });
 });
