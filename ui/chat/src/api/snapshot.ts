@@ -18,6 +18,9 @@ import type { ChatMessage, ConversationStep } from "@/types";
 const INPUT_INITIAL = "input:initial";
 const OUTPUT_PREFIX = "output";
 
+/** Same mask the composer shows when a secret turn is sent. */
+export const SECRET_MASK = "●●●●●●●●";
+
 let seq = 0;
 function makeMessage(role: "user" | "agent", content: string): ChatMessage {
   seq += 1;
@@ -34,6 +37,7 @@ function makeMessage(role: "user" | "agent", content: string): ChatMessage {
  */
 export function stepsToMessages(
   steps: ConversationStep[] | undefined | null,
+  secretTexts: ReadonlySet<string> = new Set(),
 ): ChatMessage[] {
   if (!Array.isArray(steps)) return [];
 
@@ -48,7 +52,15 @@ export function stepsToMessages(
 
       if (key === INPUT_INITIAL) {
         const text = typeof entry.value === "string" ? entry.value.trim() : "";
-        if (text) messages.push(makeMessage("user", text));
+        if (!text) continue;
+        // `input:initial` is the RAW message, always — Conversation.java:337
+        // stores it unmasked even for a secret turn, and the masked copy
+        // (conversationOutput["input"]) is filtered off the wire entirely. So a
+        // rebuild would print the user's password in clear unless we mask it
+        // here from what the session knows was secret.
+        messages.push(
+          makeMessage("user", secretTexts.has(text) ? SECRET_MASK : text),
+        );
         continue;
       }
 

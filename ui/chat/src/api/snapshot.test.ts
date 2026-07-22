@@ -111,3 +111,27 @@ describe("stepsToMessages", () => {
     expect(msgs).toEqual([]);
   });
 });
+
+describe("stepsToMessages — secret turns must never be re-rendered in clear", () => {
+  it("masks a user input the caller knows was sent as a secret", () => {
+    // The backend stores input:initial as PLAINTEXT unconditionally
+    // (Conversation.java:337); only conversationOutput["input"] is masked, and
+    // that key is filtered off the wire. So the client must mask it itself.
+    const msgs = stepsToMessages(
+      [step([{ key: "input:initial", value: "hunter2" }])],
+      new Set(["hunter2"]),
+    );
+
+    expect(msgs[0].content).toBe("●●●●●●●●");
+    expect(msgs.some((m) => m.content.includes("hunter2"))).toBe(false);
+  });
+
+  it("leaves ordinary input untouched", () => {
+    const msgs = stepsToMessages(
+      [step([{ key: "input:initial", value: "what is 2+2" }])],
+      new Set(["hunter2"]),
+    );
+
+    expect(msgs[0].content).toBe("what is 2+2");
+  });
+});

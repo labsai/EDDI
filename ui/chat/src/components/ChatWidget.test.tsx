@@ -125,6 +125,57 @@ describe("ChatWidget", () => {
   });
 });
 
+describe("ChatWidget — a realistic snapshot carries BOTH lists", () => {
+  /**
+   * Every REST response the widget consumes populates conversationOutputs AND
+   * conversationSteps from the same memory (ConversationMemoryUtilities
+   * :172-209); only a `returningFields` query param nulls one out, and this
+   * client never sends one.
+   *
+   * Every previous fixture set one list or the other, which is precisely why a
+   * double-render could not be caught.
+   */
+  const realistic = {
+    conversationId: "conv-1",
+    conversationState: "READY",
+    conversationOutputs: [
+      { output: [{ type: "text", text: "Welcome!" }], quickReplies: [] },
+    ],
+    conversationSteps: [
+      {
+        conversationStep: [
+          { key: "input:initial", value: "hi" },
+          { key: "actions", value: ["welcome"] },
+          { key: "output:text:welcome:0", value: [{ type: "text", text: "Welcome!" }] },
+        ],
+        timestamp: "2026-07-21T10:00:00Z",
+      },
+    ],
+  };
+
+  it("renders each reply exactly once", async () => {
+    mockBackend(realistic);
+
+    renderWidget();
+    await screen.findByText("Welcome!");
+    await waitFor(() => {});
+
+    expect(screen.getAllByText("Welcome!")).toHaveLength(1);
+  });
+
+  it("does not echo the user's input a second time from the step list", async () => {
+    mockBackend(realistic);
+
+    renderWidget();
+    await screen.findByText("Welcome!");
+    await waitFor(() => {});
+
+    // "hi" appears only in conversationSteps; rendering it would duplicate a
+    // turn the user already sees, and for a secret turn it is the raw password.
+    expect(screen.queryByText("hi")).toBeNull();
+  });
+});
+
 describe("ChatWidget — undo must never wipe the transcript", () => {
   const realStep = (key: string, value: unknown) => ({
     conversationStep: [{ key, value }],

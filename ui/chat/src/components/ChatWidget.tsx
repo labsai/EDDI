@@ -194,6 +194,16 @@ export function ChatWidget() {
    */
   const generationRef = useRef(0);
   /**
+   * Raw texts sent this session with secret mode on. The backend stores
+   * `input:initial` unmasked, so a transcript rebuild would print them in
+   * clear; this is the only thing that can mask them client-side.
+   *
+   * Session-scoped by nature: after a reload the widget no longer knows which
+   * past turns were secret, so a rebuild of an older conversation can still
+   * surface them. Masking them properly needs a backend change.
+   */
+  const secretTextsRef = useRef<Set<string>>(new Set());
+  /**
    * Raw input of in-flight turns, keyed by the user message's id. A single
    * slot let a late-failing turn withdraw a newer, unrelated message.
    */
@@ -443,12 +453,20 @@ export function ChatWidget() {
         });
       }
 
-      // The "conversationSteps" format (GET responses / welcome messages).
-      // Mapped through stepsToMessages because each step is
-      // { conversationStep: [{key, value}], timestamp } — NOT {input, output},
-      // which this code used to read and always got undefined for.
-      if (snapshot.conversationSteps?.length) {
-        for (const message of stepsToMessages(snapshot.conversationSteps)) {
+      // conversationSteps is a FALLBACK, not an additional source. The backend
+      // populates BOTH lists from the same memory for every response
+      // (ConversationMemoryUtilities:172-209) and only nulls one out when the
+      // caller passes returningFields, which this client never sends. Rendering
+      // both showed every reply twice — and echoed the user's `input:initial`,
+      // which is the raw text even for a secret turn.
+      //
+      // This block was inert before the step shape was corrected, which is why
+      // the duplication only appeared once the mapping started working.
+      else if (snapshot.conversationSteps?.length) {
+        for (const message of stepsToMessages(
+          snapshot.conversationSteps,
+          secretTextsRef.current,
+        )) {
           dispatch({
             type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
             message,
@@ -556,6 +574,7 @@ export function ChatWidget() {
         attachments,
         isSecret: !!isSecret,
       });
+      if (isSecret && text.trim()) secretTextsRef.current.add(text.trim());
       const withdrawTurn = () => {
         const pending = pendingTurnsRef.current.get(turnId);
         pendingTurnsRef.current.delete(turnId);
@@ -831,7 +850,7 @@ export function ChatWidget() {
       // Rebuild from the shape the endpoint really returns. An empty result
       // means "could not rebuild", NOT "the conversation is empty" — replacing
       // a populated transcript with [] is how this wiped the whole chat.
-      const msgs = stepsToMessages(snapshot.conversationSteps);
+      const msgs = stepsToMessages(snapshot.conversationSteps, secretTextsRef.current);
       if (msgs.length) {
         dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
       }
@@ -871,7 +890,7 @@ export function ChatWidget() {
       // Rebuild from the shape the endpoint really returns. An empty result
       // means "could not rebuild", NOT "the conversation is empty" — replacing
       // a populated transcript with [] is how this wiped the whole chat.
-      const msgs = stepsToMessages(snapshot.conversationSteps);
+      const msgs = stepsToMessages(snapshot.conversationSteps, secretTextsRef.current);
       if (msgs.length) {
         dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
       }
