@@ -2238,7 +2238,7 @@
       "fromSession": "De la sesión de {{boardName}}",
       "questionLabel": "Pregunta",
       "responseLabel": "Respuesta",
-      "fileTooLarge": "El archivo es demasiado grande. El tamaño máximo es 10MB.",
+      "fileTooLarge": "El archivo debe ser menor de 20MB",
       "unsupportedFile": "Este tipo de archivo no es compatible.",
       "history": "Historial de conversaciones",
       "currentSession": "Sesión actual",
@@ -2250,7 +2250,11 @@
       "removeAttachment": "Remove attachment",
       "attachFile": "Attach file",
       "send": "Send message",
-      "emptyTitle": "Start a conversation"
+      "emptyTitle": "Start a conversation",
+      "fileTypeNotAllowed": "Este tipo de archivo no es compatible",
+      "attachmentLimit": "Máximo {{max}} archivos adjuntos por mensaje",
+      "notForwarded": "Archivo almacenado pero demasiado grande para el modelo",
+      "uploadFailed": "Error al subir: {{error}}"
     },
     "sidebar": {
       "boards": "Grupos de trabajo",

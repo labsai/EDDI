@@ -228,19 +228,26 @@ function ThreadInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Ref tracks latest pending so the unmount cleanup sees current state
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+
+  // Ref tracks conversationId for stale-upload detection
+  const convIdRef = useRef(conversationId);
+  convIdRef.current = conversationId;
+
   const trimmed = message.trim();
   const readyCount = pending.filter((a) => a.status === "ready").length;
   const canSend = (trimmed.length > 0 || readyCount > 0) && !disabled;
   const hasUploading = pending.some((a) => a.status === "uploading");
 
-  // Cleanup preview URLs on unmount
+  // Cleanup preview URLs on unmount (uses ref to avoid stale closure)
   useEffect(() => {
     return () => {
-      pending.forEach((a) => {
+      pendingRef.current.forEach((a) => {
         if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
       });
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Reset pending when conversation changes
@@ -334,8 +341,11 @@ function ThreadInput({
       const entry: PendingAttachment = { id, file, previewUrl, status: "uploading" };
       setPending((prev) => [...prev, entry]);
 
+      const capturedConvId = conversationId;
       try {
         const result = await uploadAttachment(conversationId, file);
+        // Guard: discard result if conversation changed during upload
+        if (convIdRef.current !== capturedConvId) return;
         setPending((prev) =>
           prev.map((a) => (a.id === id ? { ...a, status: "ready" as const, result } : a)),
         );
@@ -345,6 +355,8 @@ function ThreadInput({
           );
         }
       } catch (err) {
+        // Guard: suppress error toast if conversation changed during upload
+        if (convIdRef.current !== capturedConvId) return;
         const msg = err instanceof Error ? err.message : "Upload failed";
         setPending((prev) =>
           prev.map((a) => (a.id === id ? { ...a, status: "error" as const, error: msg } : a)),
@@ -477,6 +489,10 @@ function ThreadInput({
             placeholder ??
             t("Workforce.thread.placeholder", "Type a message...")
           }
+          aria-label={
+            placeholder ??
+            t("Workforce.thread.placeholder", "Type a message...")
+          }
           disabled={disabled}
           rows={1}
           className={cn(
@@ -577,6 +593,21 @@ function WorkforceThread() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initRef = useRef(false);
   const sendingRef = useRef(false);
+
+  // Track latest messages for unmount cleanup of sent-message preview URLs
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  // Revoke all sent-message preview URLs on unmount to prevent SPA memory leaks
+  useEffect(() => {
+    return () => {
+      messagesRef.current.forEach((msg) => {
+        msg.attachments?.forEach((a) => {
+          if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+        });
+      });
+    };
+  }, []);
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
@@ -681,16 +712,16 @@ function WorkforceThread() {
         let snapshot;
 
         if (attachments?.length) {
-          // Build proper attachment context via the EDDI pipeline
-          const refs: AttachmentRef[] = attachments
-            .filter((a) => a.forwardableInline !== false)
-            .map((a) => ({
-              storageRef: a.storageRef,
-              fileName: a.fileName,
-              mimeType: a.mimeType,
-              sizeBytes: a.sizeBytes,
-              forwardableInline: a.forwardableInline,
-            }));
+          // Build attachment context — send ALL attachments (including
+          // non-forwardable ones) so the backend can log the storageRef.
+          // The backend decides whether to inline based on forwardableInline.
+          const refs: AttachmentRef[] = attachments.map((a) => ({
+            storageRef: a.storageRef,
+            fileName: a.fileName,
+            mimeType: a.mimeType,
+            sizeBytes: a.sizeBytes,
+            forwardableInline: a.forwardableInline,
+          }));
           const context = buildAttachmentContext(refs);
           snapshot = await sendMessageWithContext(
             "production",

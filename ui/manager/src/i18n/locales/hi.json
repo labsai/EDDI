@@ -2239,7 +2239,7 @@
       "fromSession": "{{boardName}} सत्र से",
       "questionLabel": "प्रश्न",
       "responseLabel": "प्रतिक्रिया",
-      "fileTooLarge": "फ़ाइल बहुत बड़ी है। अधिकतम आकार 10MB है।",
+      "fileTooLarge": "फ़ाइल 20MB से कम होनी चाहिए",
       "unsupportedFile": "यह फ़ाइल प्रकार समर्थित नहीं है।",
       "history": "बातचीत का इतिहास",
       "currentSession": "वर्तमान सत्र",
@@ -2251,7 +2251,11 @@
       "removeAttachment": "Remove attachment",
       "attachFile": "Attach file",
       "send": "Send message",
-      "emptyTitle": "Start a conversation"
+      "emptyTitle": "Start a conversation",
+      "fileTypeNotAllowed": "यह फ़ाइल प्रकार समर्थित नहीं है",
+      "attachmentLimit": "प्रति संदेश अधिकतम {{max}} अटैचमेंट",
+      "notForwarded": "फ़ाइल संग्रहीत लेकिन मॉडल के लिए बहुत बड़ी",
+      "uploadFailed": "अपलोड विफल: {{error}}"
     },
     "sidebar": {
       "boards": "कार्य दल",

@@ -2236,7 +2236,7 @@
       "fromSession": "{{boardName}} 세션에서",
       "questionLabel": "질문",
       "responseLabel": "응답",
-      "fileTooLarge": "파일이 너무 큽니다. 최대 크기는 10MB입니다.",
+      "fileTooLarge": "파일은 20MB 미만이어야 합니다",
       "unsupportedFile": "지원되지 않는 파일 형식입니다.",
       "history": "대화 기록",
       "currentSession": "현재 세션",
@@ -2248,7 +2248,11 @@
       "removeAttachment": "Remove attachment",
       "attachFile": "Attach file",
       "send": "Send message",
-      "emptyTitle": "Start a conversation"
+      "emptyTitle": "Start a conversation",
+      "fileTypeNotAllowed": "이 파일 유형은 지원되지 않습니다",
+      "attachmentLimit": "메시지당 최대 {{max}}개 첨부 파일",
+      "notForwarded": "파일이 저장되었지만 모델에 전송하기에 너무 큽니다",
+      "uploadFailed": "업로드 실패: {{error}}"
     },
     "sidebar": {
       "boards": "태스크 포스",

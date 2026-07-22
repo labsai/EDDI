@@ -2271,12 +2271,16 @@
       "fromSession": "Aus {{boardName}}-Sitzung",
       "questionLabel": "Frage",
       "responseLabel": "Antwort",
-      "fileTooLarge": "Die Datei ist zu groß. Maximale Größe ist 10 MB.",
+      "fileTooLarge": "Datei muss kleiner als 20MB sein",
       "unsupportedFile": "Dieser Dateityp wird nicht unterstützt.",
       "history": "Gesprächsverlauf",
       "currentSession": "Aktuelle Sitzung",
       "msgs": "Nachr.",
-      "noHistory": "Kein Verlauf verfügbar."
+      "noHistory": "Kein Verlauf verfügbar.",
+      "fileTypeNotAllowed": "Dieser Dateityp wird nicht unterstützt",
+      "attachmentLimit": "Maximal {{max}} Anhänge pro Nachricht",
+      "notForwarded": "Datei gespeichert, aber zu groß für das Modell",
+      "uploadFailed": "Upload fehlgeschlagen: {{error}}"
     },
     "sidebar": {
       "boards": "Task Forces",

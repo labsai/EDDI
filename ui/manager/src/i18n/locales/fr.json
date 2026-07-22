@@ -2271,12 +2271,16 @@
       "fromSession": "De la session {{boardName}}",
       "questionLabel": "Question",
       "responseLabel": "Réponse",
-      "fileTooLarge": "Le fichier est trop volumineux. La taille maximale est de 10 Mo.",
+      "fileTooLarge": "Le fichier doit faire moins de 20 Mo",
       "unsupportedFile": "Ce type de fichier n'est pas pris en charge.",
       "history": "Historique des conversations",
       "currentSession": "Session actuelle",
       "msgs": "msgs",
-      "noHistory": "Aucun historique disponible."
+      "noHistory": "Aucun historique disponible.",
+      "fileTypeNotAllowed": "Ce type de fichier n'est pas pris en charge",
+      "attachmentLimit": "Maximum {{max}} pièces jointes par message",
+      "notForwarded": "Fichier stocké mais trop volumineux pour le modèle",
+      "uploadFailed": "Échec du téléchargement : {{error}}"
     },
     "sidebar": {
       "boards": "Groupes de travail",

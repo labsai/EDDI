@@ -2236,7 +2236,7 @@
       "fromSession": "{{boardName}}セッションから",
       "questionLabel": "質問",
       "responseLabel": "回答",
-      "fileTooLarge": "ファイルが大きすぎます。最大サイズは10MBです。",
+      "fileTooLarge": "ファイルは20MB以下にしてください",
       "unsupportedFile": "このファイル形式はサポートされていません。",
       "history": "会話履歴",
       "currentSession": "現在のセッション",
@@ -2248,7 +2248,11 @@
       "removeAttachment": "Remove attachment",
       "attachFile": "Attach file",
       "send": "Send message",
-      "emptyTitle": "Start a conversation"
+      "emptyTitle": "Start a conversation",
+      "fileTypeNotAllowed": "このファイルタイプはサポートされていません",
+      "attachmentLimit": "メッセージあたり最大{{max}}件の添付",
+      "notForwarded": "ファイルは保存されましたがモデルに送信するには大きすぎます",
+      "uploadFailed": "アップロード失敗：{{error}}"
     },
     "sidebar": {
       "boards": "タスクフォース",

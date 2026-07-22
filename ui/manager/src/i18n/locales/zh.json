@@ -2238,7 +2238,7 @@
       "fromSession": "来自{{boardName}}会话",
       "questionLabel": "问题",
       "responseLabel": "回答",
-      "fileTooLarge": "文件太大。最大大小为10MB。",
+      "fileTooLarge": "文件必须小于20MB",
       "unsupportedFile": "不支持此文件类型。",
       "history": "对话历史",
       "currentSession": "当前会话",
@@ -2250,7 +2250,11 @@
       "removeAttachment": "Remove attachment",
       "attachFile": "Attach file",
       "send": "Send message",
-      "emptyTitle": "Start a conversation"
+      "emptyTitle": "Start a conversation",
+      "fileTypeNotAllowed": "不支持此文件类型",
+      "attachmentLimit": "每条消息最多 {{max}} 个附件",
+      "notForwarded": "文件已存储但太大，无法发送给模型",
+      "uploadFailed": "上传失败：{{error}}"
     },
     "sidebar": {
       "boards": "工作组",

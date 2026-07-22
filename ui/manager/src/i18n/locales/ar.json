@@ -2238,7 +2238,7 @@
       "fromSession": "من جلسة {{boardName}}",
       "questionLabel": "السؤال",
       "responseLabel": "الإجابة",
-      "fileTooLarge": "الملف كبير جداً. الحد الأقصى للحجم هو 10 ميجابايت.",
+      "fileTooLarge": "يجب أن يكون الملف أقل من 20 ميغابايت",
       "unsupportedFile": "نوع الملف هذا غير مدعوم.",
       "history": "سجل المحادثات",
       "currentSession": "الجلسة الحالية",
@@ -2250,7 +2250,11 @@
       "removeAttachment": "Remove attachment",
       "attachFile": "Attach file",
       "send": "Send message",
-      "emptyTitle": "Start a conversation"
+      "emptyTitle": "Start a conversation",
+      "fileTypeNotAllowed": "نوع الملف هذا غير مدعوم",
+      "attachmentLimit": "الحد الأقصى {{max}} مرفقات لكل رسالة",
+      "notForwarded": "تم تخزين الملف لكنه كبير جداً للنموذج",
+      "uploadFailed": "فشل الرفع: {{error}}"
     },
     "sidebar": {
       "boards": "فرق العمل",
