@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import javax.sql.DataSource;
 import java.sql.*;
@@ -421,6 +422,43 @@ class PostgresResourceStorageTest {
                 "name", 0, 10);
 
         assertEquals(1, results.size());
+    }
+
+    @Test
+    void findResources_zeroLimit_meansUnlimitedUpToCeiling() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("name", "test.*");
+        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+                java.util.List.of(filter));
+
+        storage.findResources(
+                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                "name", 0, 0);
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        // limit 0 is the "no caller limit" sentinel — it must not become LIMIT 20
+        assertTrue(sql.getValue().contains("LIMIT " + IResourceStorage.MAX_RESULT_LIMIT),
+                "expected the safety ceiling in: " + sql.getValue());
+    }
+
+    @Test
+    void findResources_oversizedLimit_clampedToCeiling() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("name", "test.*");
+        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+                java.util.List.of(filter));
+
+        storage.findResources(
+                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                "name", 0, IResourceStorage.MAX_RESULT_LIMIT * 2);
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("LIMIT " + IResourceStorage.MAX_RESULT_LIMIT),
+                "expected the safety ceiling in: " + sql.getValue());
     }
 
     @Test

@@ -7,9 +7,12 @@ package ai.labs.eddi.datastore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.StringUtilities;
+import org.jboss.logging.Logger;
 
 import java.util.LinkedList;
 import java.util.List;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Database-agnostic descriptor store. Uses {@link IResourceStorageFactory} to
@@ -19,6 +22,8 @@ import java.util.List;
  * @author ginccc
  */
 public class DescriptorStore<T> implements IDescriptorStore<T> {
+    private static final Logger LOGGER = Logger.getLogger(DescriptorStore.class);
+
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_AGENT_NAME = "agentName";
@@ -62,7 +67,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filter));
         }
 
-        int effectiveLimit = (limit == null || limit < 1) ? 20 : limit;
+        int effectiveLimit = IDescriptorStore.resolveDescriptorLimit(limit);
         int skip;
         if (index != null && index > 0) {
             long skipLong = (long) index * effectiveLimit;
@@ -82,6 +87,16 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
         // Use the storage-level findResources for database-agnostic querying
         List<IResourceStore.IResourceId> matchingIds = resourceStorage.findResources(allFilters, FIELD_LAST_MODIFIED, skip, effectiveLimit);
+
+        if (matchingIds.size() >= IResourceStorage.MAX_RESULT_LIMIT) {
+            // Never truncate silently — a short list that looks complete is
+            // exactly the bug the explicit NO_LIMIT contract exists to prevent.
+            // `type` reaches this method from a @QueryParam, so it is sanitized
+            // before it is logged (CWE-117).
+            LOGGER.warnv("Descriptor query for type ''{0}'' hit the internal {1}-result ceiling — the returned list is "
+                    + "INCOMPLETE and features reading this type will silently miss entries. This query needs to page.",
+                    sanitize(type), IResourceStorage.MAX_RESULT_LIMIT);
+        }
 
         // Read each matching resource
         List<T> ret = new LinkedList<>();
