@@ -14,7 +14,10 @@ import {
   DollarSign,
   Info,
 } from "lucide-react";
+import { toast } from "sonner";
 import { useQuota, useQuotaUsage, useUpdateQuota, useResetUsage } from "@/hooks/use-quotas";
+import { getErrorMessage } from "@/lib/api-client";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import type { TenantQuota } from "@/lib/api/quotas";
 
 const DEFAULT_TENANT = "default";
@@ -29,6 +32,7 @@ export function QuotasPage() {
   // Local form state — initialized from server data
   const [form, setForm] = useState<TenantQuota | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("quotas"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
@@ -56,14 +60,22 @@ export function QuotasPage() {
         onSuccess: (data) => {
           setForm(data);
           setDirty(false);
+          toast.success(t("quotas.saveSuccess", "Quota saved"));
         },
+        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
-  }, [form, updateMutation]);
+  }, [form, updateMutation, t]);
 
   const handleReset = useCallback(() => {
-    resetMutation.mutate(DEFAULT_TENANT);
-  }, [resetMutation]);
+    resetMutation.mutate(DEFAULT_TENANT, {
+      onSuccess: () => {
+        setShowResetConfirm(false);
+        toast.success(t("quotas.resetSuccess", "Usage counters reset"));
+      },
+      onError: (err) => toast.error(getErrorMessage(err)),
+    });
+  }, [resetMutation, t]);
 
   const loading = quotaLoading || usageLoading;
 
@@ -200,7 +212,7 @@ export function QuotasPage() {
                 </h2>
                 <button
                   data-testid="quotas-reset-usage"
-                  onClick={handleReset}
+                  onClick={() => setShowResetConfirm(true)}
                   disabled={resetMutation.isPending}
                   className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
                 >
@@ -244,6 +256,22 @@ export function QuotasPage() {
           </div>
         </>
       )}
+
+      {/* Reset counters confirmation — POST /usage/reset is irreversible */}
+      <AlertDialog
+        open={showResetConfirm}
+        onOpenChange={setShowResetConfirm}
+        variant="destructive"
+        title={t("quotas.resetConfirmTitle", "Reset usage counters?")}
+        description={t(
+          "quotas.resetConfirmDesc",
+          'This immediately zeroes all usage counters (conversations, API calls, monthly cost) for tenant "default". This cannot be undone.',
+        )}
+        confirmLabel={t("quotas.resetCounters", "Reset Counters")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        onConfirm={handleReset}
+        isPending={resetMutation.isPending}
+      />
     </div>
   );
 }

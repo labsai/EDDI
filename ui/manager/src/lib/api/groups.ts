@@ -52,7 +52,20 @@ export type GroupConversationState =
   | "COMPLETED"
   | "FAILED"
   | "CANCELLED"
-  | "AWAITING_APPROVAL";
+  | "AWAITING_APPROVAL"
+  // Terminal — member conversations ended, ephemeral agents cleaned up, no
+  // further follow-ups/continuations (backend GroupConversationState.CLOSED).
+  | "CLOSED";
+
+/**
+ * Post-COMPLETED lifecycle operations the backend exposes on a group
+ * conversation. Mirrors the identifiers returned by the backend's computed
+ * `availableActions` field (GroupConversation.getAvailableActions):
+ *   - COMPLETED           → ["followup", "continue", "close"]
+ *   - FAILED / CANCELLED  → ["close"]
+ *   - all other states    → []
+ */
+export type GroupConversationAction = "followup" | "continue" | "close";
 
 export type TranscriptEntryType =
   | "QUESTION"
@@ -209,6 +222,18 @@ export interface GroupConversation {
   createdAgentIds: string[];
   /** Agent IDs retained by creators (agent-decides policy) */
   retainedAgentIds: string[];
+  /**
+   * Current discussion round (1-based). Incremented by continueGroupDiscussion();
+   * `undefined` on legacy documents that predate the field.
+   */
+  round?: number;
+  /**
+   * Backend-computed list of operations currently available on this conversation
+   * (READ_ONLY, always recomputed from `state` server-side — never trusted from a
+   * stored document). Drives the post-COMPLETED action bar. Absent on responses
+   * from older backends.
+   */
+  availableActions?: GroupConversationAction[];
   created: string;
   lastModified: string;
   // HITL pause fields (set when state === "AWAITING_APPROVAL")
@@ -343,10 +368,83 @@ export function deleteGroupConversation(
   );
 }
 
+// ─── Post-COMPLETED lifecycle (followup / continue / close) ─────────
+//
+// Backend truth (EDDI IRestGroupConversation.java, GroupConversation.java):
+//   Lifecycle: discuss → COMPLETED → [followup | continue]* → close → CLOSED.
+// Each endpoint returns the full, updated GroupConversation (with the recomputed
+// `availableActions`). Concurrency/aborts surface as 409; a member agent that
+// cannot be reached surfaces as 502; a member agent timeout as 504.
+
+/**
+ * Follow up with a single member of a COMPLETED discussion.
+ * POST /groups/{groupId}/conversations/{gcId}/followup
+ * Body: FollowUpRequest { question, targetAgentId, userId }.
+ * `targetAgentId` accepts either a raw agent id OR a member display name.
+ * The agent retains full context; both the question and the reply are appended
+ * to the group transcript (TranscriptEntryType.FOLLOW_UP).
+ * Failures: 400 (missing question/targetAgentId), 404 (conv/member not found),
+ * 409 (not COMPLETED / another op in progress), 502 (agent unreachable),
+ * 504 (agent timeout).
+ */
+export function followupGroupMember(
+  groupId: string,
+  gcId: string,
+  question: string,
+  targetAgentId: string,
+  userId?: string,
+): Promise<GroupConversation> {
+  return api.post<GroupConversation>(
+    `/groups/${groupId}/conversations/${gcId}/followup`,
+    { question, targetAgentId, userId: userId || "manager-user" },
+  );
+}
+
+/**
+ * Continue a COMPLETED discussion with a new question — re-runs all phases as a
+ * NEW round (the round counter increments) with every agent retaining memory of
+ * prior rounds. This is distinct from starting a brand-new discussion.
+ * POST /groups/{groupId}/conversations/{gcId}/continue
+ * Body: DiscussRequest { question, userId }.
+ * NOTE: attachments are NOT supported on a continuation — the backend rejects a
+ * request that carries them with 400 (they are only shared with member agents
+ * when the discussion first starts), so this binding never sends them.
+ * Failures: 400 (missing question / attachments supplied), 404, 409, 502, 504.
+ */
+export function continueGroupDiscussion(
+  groupId: string,
+  gcId: string,
+  question: string,
+  userId?: string,
+): Promise<GroupConversation> {
+  return api.post<GroupConversation>(
+    `/groups/${groupId}/conversations/${gcId}/continue`,
+    { question, userId: userId || "manager-user" },
+  );
+}
+
+/**
+ * Permanently close a group conversation — ends all member conversations and
+ * cleans up ephemeral agents. No further follow-ups/continuations are accepted;
+ * the conversation moves to the terminal CLOSED state.
+ * POST /groups/{groupId}/conversations/{gcId}/close
+ * Failures: 404 (not found), 409 (not in COMPLETED/FAILED/CANCELLED state).
+ */
+export function closeGroupConversation(
+  groupId: string,
+  gcId: string,
+): Promise<GroupConversation> {
+  return api.post<GroupConversation>(
+    `/groups/${groupId}/conversations/${gcId}/close`,
+  );
+}
+
 // ─── SSE Streaming ──────────────────────────────────────────────
 
 export type GroupSSEEventType =
   | "group_start"
+  // Emitted by the /continue/stream endpoint at the start of a new round.
+  | "round_start"
   | "phase_start"
   | "speaker_start"
   | "speaker_complete"
@@ -524,6 +622,30 @@ export async function* streamGroupDiscussion(
 ): AsyncGenerator<GroupSSEEvent> {
   const response = await postSSE(
     `/groups/${groupId}/conversations/stream`,
+    { question, userId: userId || "manager-user" },
+    signal,
+  );
+  yield* readGroupSSE(response);
+}
+
+/**
+ * Continue a COMPLETED discussion (new round) via the SSE streaming endpoint.
+ * POST /groups/{groupId}/conversations/{gcId}/continue/stream
+ * Emits `round_start` (new round marker) followed by the same events as the
+ * initial discussion stream (phase_start, speaker_*, group_complete, …) plus the
+ * HITL events. Mirrors `streamGroupDiscussion`. As with the non-streaming
+ * `continueGroupDiscussion`, attachments are unsupported on a continuation, so
+ * none are sent here (the backend would emit a terminal `group_error`).
+ */
+export async function* streamGroupContinue(
+  groupId: string,
+  gcId: string,
+  question: string,
+  userId?: string,
+  signal?: AbortSignal,
+): AsyncGenerator<GroupSSEEvent> {
+  const response = await postSSE(
+    `/groups/${groupId}/conversations/${gcId}/continue/stream`,
     { question, userId: userId || "manager-user" },
     signal,
   );

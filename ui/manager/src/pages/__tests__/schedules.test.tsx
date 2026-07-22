@@ -18,7 +18,10 @@ describe("SchedulesPage", () => {
   it("renders the page title", async () => {
     renderSchedules();
     await waitFor(() => {
-      expect(screen.getByText("Schedules")).toBeInTheDocument();
+      // "Schedules" also appears as a tab label, so target the h1 heading.
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Schedules" })
+      ).toBeInTheDocument();
     });
   });
 
@@ -464,7 +467,10 @@ describe("SchedulesPage", () => {
       expect(screen.getByTestId("fire-sched-1")).toBeInTheDocument();
     });
 
+    // Fire Now now opens a lightweight inline confirm before firing.
     await user.click(screen.getByTestId("fire-sched-1"));
+    const confirmBtn = await screen.findByTestId("fire-confirm-sched-1");
+    await user.click(confirmBtn);
 
     await waitFor(() => {
       expect(firedId).toBe("sched-1");
@@ -569,22 +575,30 @@ describe("SchedulesPage", () => {
   // ── Fire history expansion ────────────────────────────────────────────
 
   it("expands fire history and shows log entries", async () => {
+    const now = Date.now();
     server.use(
       http.get("*/schedulestore/schedules/:id/fires", () =>
         HttpResponse.json([
           {
             id: "fire-1",
-            firedAt: Date.now() - 60000,
-            durationMs: 250,
-            success: true,
-            error: null,
+            scheduleId: "sched-1",
+            fireTime: new Date(now - 60000).toISOString(),
+            startedAt: new Date(now - 60000).toISOString(),
+            completedAt: new Date(now - 60000 + 250).toISOString(),
+            status: "COMPLETED",
+            attemptNumber: 1,
+            cost: 0,
           },
           {
             id: "fire-2",
-            firedAt: Date.now() - 120000,
-            durationMs: 1500,
-            success: false,
-            error: "Agent timeout",
+            scheduleId: "sched-1",
+            fireTime: new Date(now - 120000).toISOString(),
+            startedAt: new Date(now - 120000).toISOString(),
+            completedAt: new Date(now - 120000 + 1500).toISOString(),
+            status: "FAILED",
+            errorMessage: "Agent timeout",
+            attemptNumber: 2,
+            cost: 0,
           },
         ])
       )
@@ -600,9 +614,46 @@ describe("SchedulesPage", () => {
     await user.click(screen.getAllByText("Fire History")[0]!);
 
     await waitFor(() => {
+      // duration is computed from startedAt/completedAt, not a durationMs field
       expect(screen.getByText("250ms")).toBeInTheDocument();
       expect(screen.getByText("Agent timeout")).toBeInTheDocument();
+      // status badges (symboled text avoids colliding with a "Failed Report" name)
+      expect(screen.getByText("✓ Completed")).toBeInTheDocument();
+      expect(screen.getByText("✗ Failed")).toBeInTheDocument();
     });
+  });
+
+  // Regression: the backend ScheduleFireLog uses fireTime (ISO Instant) / status /
+  // errorMessage — never firedAt/success/durationMs. The old shape rendered
+  // "Invalid Date" and always-failed for every row against a real EDDI.
+  it("renders the real backend fire-log shape without Invalid Date", async () => {
+    server.use(
+      http.get("*/schedulestore/schedules/:id/fires", () =>
+        HttpResponse.json([
+          {
+            id: "f",
+            scheduleId: "sched-1",
+            fireTime: "2026-07-01T09:00:00.000Z",
+            startedAt: "2026-07-01T09:00:00.000Z",
+            completedAt: "2026-07-01T09:00:02.000Z",
+            status: "COMPLETED",
+            attemptNumber: 1,
+            cost: 0,
+          },
+        ])
+      )
+    );
+    renderSchedules();
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getAllByText("Fire History").length).toBeGreaterThanOrEqual(1);
+    });
+    await user.click(screen.getAllByText("Fire History")[0]!);
+    await waitFor(() => {
+      expect(screen.getByText("2000ms")).toBeInTheDocument();
+      expect(screen.getByText("✓ Completed")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Invalid Date")).not.toBeInTheDocument();
   });
 
   it("shows no fire history message for empty logs", async () => {
@@ -649,6 +700,63 @@ describe("SchedulesPage", () => {
       // mock, but let's verify the table renders completely.
       expect(screen.getByTestId("schedules-table")).toBeInTheDocument();
     });
+  });
+});
+
+// ── Regression: Instant encoding (ISO-8601 vs numeric epoch) ────────────────
+// The backend serializes Instant as ISO-8601 (@JsonFormat(shape = STRING)).
+// Subtracting those raw values yields NaN, which makes the "soonest" comparator
+// inconsistent and silently surfaces the wrong schedule.
+
+describe("SchedulesPage — nextFire encodings", () => {
+  const base = {
+    triggerType: "CRON",
+    agentId: "agent1",
+    agentVersion: 0,
+    environment: "production",
+    cronExpression: "0 9 * * *",
+    message: "run",
+    conversationStrategy: "new",
+    enabled: true,
+    fireStatus: "COMPLETED",
+    failCount: 0,
+    timeZone: "UTC",
+  };
+
+  /** The soonest schedule is deliberately NOT first: a NaN comparator leaves
+   *  the array order untouched, so a broken sort surfaces "Later job". */
+  function useSchedules(nextFire: (offsetMs: number) => string | number) {
+    server.use(
+      http.get("*/schedulestore/schedules", () =>
+        HttpResponse.json([
+          { ...base, id: "s-late", name: "Later job", nextFire: nextFire(86_400_000) },
+          { ...base, id: "s-soon", name: "Soonest job", nextFire: nextFire(60_000) },
+          { ...base, id: "s-mid", name: "Middle job", nextFire: nextFire(3_600_000) },
+        ])
+      )
+    );
+  }
+
+  it("surfaces the soonest schedule when nextFire is an ISO-8601 string", async () => {
+    useSchedules((ms) => new Date(Date.now() + ms).toISOString());
+    renderSchedules();
+
+    const card = await screen.findByTestId("schedules-next-fire-card");
+    await waitFor(() =>
+      expect(within(card).getByText("Soonest job")).toBeInTheDocument()
+    );
+    expect(within(card).queryByText("Later job")).not.toBeInTheDocument();
+  });
+
+  it("still surfaces the soonest schedule for the numeric epoch encoding", async () => {
+    useSchedules((ms) => Date.now() + ms);
+    renderSchedules();
+
+    const card = await screen.findByTestId("schedules-next-fire-card");
+    await waitFor(() =>
+      expect(within(card).getByText("Soonest job")).toBeInTheDocument()
+    );
+    expect(within(card).queryByText("Later job")).not.toBeInTheDocument();
   });
 });
 

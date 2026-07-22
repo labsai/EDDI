@@ -289,8 +289,12 @@ export function OrphansPage() {
                     {/* Purge all */}
                     {showPurgeConfirm ? (
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-destructive">
-                          {t("orphans.confirmPurge", "Are you sure?")}
+                        <span className="max-w-md text-sm font-medium text-destructive">
+                          {t("orphans.confirmPurgeAll", {
+                            count: report.orphans.length,
+                            defaultValue:
+                              "Permanently delete ALL {{count}} orphaned resources? The server purges every orphan — your selection is not applied. This cannot be undone.",
+                          })}
                         </span>
                         <button
                           onClick={handlePurge}

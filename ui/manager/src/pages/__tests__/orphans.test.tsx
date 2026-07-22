@@ -180,10 +180,33 @@ describe("OrphansPage", () => {
 
     await user.click(screen.getByTestId("purge-button"));
 
-    // Confirmation dialog should appear
-    expect(screen.getByText("Are you sure?")).toBeInTheDocument();
+    // Confirmation should state the true (all-orphans) scope, not just "Are you sure?"
+    expect(
+      screen.getByText(/Permanently delete ALL 5 orphaned resources/),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("confirm-purge-button")).toBeInTheDocument();
     expect(screen.getByText("Cancel")).toBeInTheDocument();
+  });
+
+  // Regression: the backend DELETE /administration/orphans has no selection param
+  // — it always purges every orphan. The "Delete N selected" path must say so.
+  it("warns that ALL orphans are purged even from the 'Delete selected' action", async () => {
+    renderOrphans();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("scan-button"));
+    await waitFor(() => {
+      expect(screen.getAllByTestId("orphan-checkbox-0").length).toBeGreaterThan(0);
+    });
+    // Select a single orphan, then click "Delete N selected"
+    await user.click(screen.getAllByTestId("orphan-checkbox-0")[0]!);
+    await user.click(screen.getByTestId("delete-selected-btn"));
+    // The confirmation makes clear selection is NOT honored and ALL are deleted
+    expect(
+      screen.getByText(/your selection is not applied/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Permanently delete ALL 5 orphaned resources/),
+    ).toBeInTheDocument();
   });
 
   it("cancel button in purge confirmation hides it", async () => {
@@ -197,10 +220,14 @@ describe("OrphansPage", () => {
     });
 
     await user.click(screen.getByTestId("purge-button"));
-    expect(screen.getByText("Are you sure?")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Permanently delete ALL 5 orphaned resources/),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByText("Cancel"));
-    expect(screen.queryByText("Are you sure?")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Permanently delete ALL 5 orphaned resources/),
+    ).not.toBeInTheDocument();
   });
 
   it("pre-scan button triggers scan too", async () => {

@@ -19,7 +19,8 @@ export interface PropertyInstruction {
   valueInt?: number;
   valueFloat?: number;
   valueBoolean?: boolean;
-  scope?: "step" | "conversation" | "longTerm";
+  scope?: "step" | "conversation" | "longTerm" | "secret";
+  visibility?: "self" | "group" | "global";
   fromObjectPath?: string;
   toObjectPath?: string;
   override?: boolean;
@@ -37,7 +38,8 @@ export interface PropertySetterConfig {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const SCOPES = ["step", "conversation", "longTerm"] as const;
+const SCOPES = ["step", "conversation", "longTerm", "secret"] as const;
+const VISIBILITIES = ["self", "group", "global"] as const;
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -123,6 +125,15 @@ function PropertyRow({
           data-testid="scope-select">
           {SCOPES.map((s) => (<option key={s} value={s}>{s}</option>))}
         </select>
+        {prop.scope === "longTerm" && (
+          <select value={prop.visibility ?? "self"} onChange={(e) => onChange({ ...prop, visibility: e.target.value as PropertyInstruction["visibility"] })}
+            disabled={readOnly}
+            className="h-7 rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+            data-testid="visibility-select"
+            title={t("propertySetterEditor.visibilityTitle", "Which agents can see this longTerm property")}>
+            {VISIBILITIES.map((v) => (<option key={v} value={v}>{v}</option>))}
+          </select>
+        )}
         <input type="text" value={prop.fromObjectPath ?? ""} onChange={(e) => onChange({ ...prop, fromObjectPath: e.target.value })}
           readOnly={readOnly} placeholder={t("propertySetterEditor.fromPath", "From path")}
           className="h-7 w-28 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"

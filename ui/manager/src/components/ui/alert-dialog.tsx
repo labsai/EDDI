@@ -1,4 +1,4 @@
-
+import type { ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { AlertTriangle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,11 @@ interface AlertDialogProps {
   onConfirm: () => void;
   variant?: "destructive" | "warning";
   isPending?: boolean;
+  /** Optional controls rendered between the description and the buttons
+   *  (e.g. a "permanently delete" checkbox). */
+  children?: ReactNode;
+  /** Disable the confirm button (e.g. a required type-to-confirm not satisfied). */
+  confirmDisabled?: boolean;
 }
 
 export function AlertDialog({
@@ -26,6 +31,8 @@ export function AlertDialog({
   onConfirm,
   variant = "destructive",
   isPending = false,
+  children,
+  confirmDisabled = false,
 }: AlertDialogProps) {
   const iconColor =
     variant === "destructive" ? "text-destructive" : "text-amber-500";
@@ -59,6 +66,8 @@ export function AlertDialog({
             </div>
           </div>
 
+          {children && <div className="mt-4 text-start">{children}</div>}
+
           <div className="mt-6 flex gap-3">
             <Button
               variant="outline"
@@ -69,12 +78,12 @@ export function AlertDialog({
               {cancelLabel}
             </Button>
             <Button
-              variant="destructive"
+              variant={variant === "destructive" ? "destructive" : "primary"}
               className="flex-1"
               onClick={() => {
                 onConfirm();
               }}
-              disabled={isPending}
+              disabled={isPending || confirmDisabled}
             >
               {isPending ? "…" : confirmLabel}
             </Button>

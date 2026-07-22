@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import { renderWithProviders } from "@/test/test-utils";
@@ -64,5 +65,92 @@ describe("ApprovalsPage — tool-call pauses", () => {
     // GUEST_CONTEXT has method "none" → useHasRole returns true → admin/approver scope.
     const scope = await screen.findByTestId("approvals-scope");
     expect(scope).toHaveTextContent(/all pending approvals/i);
+  });
+});
+
+describe("ApprovalsPage — confirmation gate on irreversible queue actions", () => {
+  it("Approve on a RULE pause confirms first; the resume fires only after confirming", async () => {
+    const user = userEvent.setup();
+    let resumeBody: unknown = null;
+    server.use(
+      http.post("*/agents/:conversationId/resume", async ({ request }) => {
+        resumeBody = await request.json().catch(() => ({}));
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    mockInbox([rulePause]);
+    renderWithProviders(<ApprovalsPage />);
+
+    await user.click(await screen.findByTestId("approve-conv-rule-1"));
+    // A single click must NOT resume the conversation.
+    expect(resumeBody).toBeNull();
+
+    // A confirmation dialog is shown.
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Approve and resume this conversation?")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(resumeBody).toEqual({ verdict: "APPROVED" }));
+  });
+
+  it("Reject confirms first; nothing is sent until the reviewer confirms", async () => {
+    const user = userEvent.setup();
+    const resumeSpy = vi.fn();
+    server.use(
+      http.post("*/agents/:conversationId/resume", async ({ request }) => {
+        resumeSpy(await request.json().catch(() => ({})));
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    mockInbox([rulePause]);
+    renderWithProviders(<ApprovalsPage />);
+
+    await user.click(await screen.findByTestId("reject-conv-rule-1"));
+    expect(resumeSpy).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Reject" }));
+    await waitFor(() => expect(resumeSpy).toHaveBeenCalledWith({ verdict: "REJECTED" }));
+  });
+
+  it("dismissing the Reject confirmation does not send a decision", async () => {
+    const user = userEvent.setup();
+    const resumeSpy = vi.fn();
+    server.use(
+      http.post("*/agents/:conversationId/resume", () => {
+        resumeSpy();
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    mockInbox([rulePause]);
+    renderWithProviders(<ApprovalsPage />);
+
+    await user.click(await screen.findByTestId("reject-conv-rule-1"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Go back" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(resumeSpy).not.toHaveBeenCalled();
+  });
+
+  it("Cancel confirms first; the cancel endpoint fires only after confirming", async () => {
+    const user = userEvent.setup();
+    const cancelSpy = vi.fn();
+    server.use(
+      http.post("*/agents/:conversationId/cancel", () => {
+        cancelSpy();
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    mockInbox([rulePause]);
+    renderWithProviders(<ApprovalsPage />);
+
+    await user.click(await screen.findByTestId("cancel-conv-rule-1"));
+    // A single click must NOT abort the conversation.
+    expect(cancelSpy).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel conversation" }));
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledTimes(1));
   });
 });

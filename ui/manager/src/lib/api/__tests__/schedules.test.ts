@@ -105,6 +105,25 @@ describe("schedules API", () => {
     it("fires a schedule immediately", async () => {
       await expect(fireNow("sched1")).resolves.toBeUndefined();
     });
+
+    it("returns the ScheduleFireLog the backend responds with", async () => {
+      server.use(
+        http.post("*/schedulestore/schedules/:id/fire", () =>
+          HttpResponse.json({
+            id: "fl-1",
+            scheduleId: "sched1",
+            fireTime: "2026-07-20T09:00:00.000Z",
+            startedAt: "2026-07-20T09:00:00.000Z",
+            completedAt: "2026-07-20T09:00:01.000Z",
+            status: "COMPLETED",
+            attemptNumber: 1,
+            cost: 0.0009,
+          })
+        )
+      );
+      const log = await fireNow("sched1");
+      expect(log).toMatchObject({ status: "COMPLETED", scheduleId: "sched1" });
+    });
   });
 
   // ─── retryDeadLetter ───────────────────────────────────────────

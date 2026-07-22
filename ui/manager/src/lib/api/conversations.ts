@@ -246,13 +246,20 @@ export function parseConversationUri(resource: string): string {
 }
 
 // API functions — using low-level /conversationstore/conversations endpoints
+//
+// NOTE on pagination: the backend treats `index` as a PAGE index (0-based),
+// not a row offset — internally it does readDescriptors(type, filter, index,
+// limit), and its owner-scoping loop advances by `index++` one page at a time.
+// So page N ⇒ index = N. `limit` is the page size and is clamped by the backend
+// to [1, 100] (default 20). See RestConversationStore.readConversationDescriptors.
 export async function getConversationDescriptors(
   limit = 20,
   index = 0,
   filter = "",
   agentId = "",
   agentVersion?: number,
-  conversationState?: ConversationState
+  conversationState?: ConversationState,
+  viewState?: ViewState
 ): Promise<ConversationDescriptor[]> {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -262,12 +269,62 @@ export async function getConversationDescriptors(
   if (agentId) params.set("agentId", agentId);
   if (agentVersion) params.set("agentVersion", String(agentVersion));
   if (conversationState) params.set("conversationState", conversationState);
+  if (viewState) params.set("viewState", viewState);
   const raw = await api.get<ConversationDescriptorRaw[] | { value: ConversationDescriptorRaw[]; Count?: number }>(
     `/conversationstore/conversations?${params.toString()}`
   );
   // Backend may return a raw array or a { value: [...], Count } wrapper
   const items = Array.isArray(raw) ? raw : (raw?.value ?? []);
   return items.map(normalizeDescriptor);
+}
+
+/** Highest page size the backend will honour (it clamps `limit` to this). */
+export const MAX_CONVERSATION_LIMIT = 100;
+
+// ─── Active-conversation monitoring + bulk lifecycle ────────────────
+
+/** Status of an active conversation for a given agent+version.
+ *  Mirrors ai.labs.eddi.engine.memory.model.ConversationStatus. */
+export interface ConversationStatus {
+  conversationId: string;
+  agentId: string;
+  agentVersion: number;
+  conversationState: ConversationState;
+  /** Epoch millis (Jackson serializes java.util.Date as a timestamp). */
+  lastInteraction: number;
+}
+
+/** List active conversations for one agent+version.
+ *  GET /conversationstore/conversations/active/{agentId}?agentVersion=N
+ *  (agentVersion is required by the backend). */
+export function getActiveConversations(
+  agentId: string,
+  agentVersion: number
+): Promise<ConversationStatus[]> {
+  return api.get<ConversationStatus[]>(
+    `/conversationstore/conversations/active/${agentId}?agentVersion=${agentVersion}`
+  );
+}
+
+/** Bulk-end active conversations.
+ *  POST /conversationstore/conversations/end  (body: ConversationStatus[])
+ *  The backend safely ends paused/AWAITING_HUMAN ones through the HITL-aware
+ *  service path; all others are set to ENDED. */
+export function endActiveConversations(
+  statuses: ConversationStatus[]
+): Promise<void> {
+  return api.post<void>(`/conversationstore/conversations/end`, statuses);
+}
+
+/** Bulk-purge ENDED conversations older than N days (admin action).
+ *  DELETE /conversationstore/conversations/?deleteOlderThanDays=N
+ *  Returns the number of conversations permanently deleted. */
+export function purgeEndedConversations(
+  deleteOlderThanDays: number
+): Promise<number> {
+  return api.delete<number>(
+    `/conversationstore/conversations/?deleteOlderThanDays=${deleteOlderThanDays}`
+  );
 }
 
 export function getSimpleConversationLog(

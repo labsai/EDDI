@@ -198,6 +198,51 @@ describe("ConversationsPage", () => {
     });
   });
 
+  // Regression: backend DELETE defaults to a SOFT delete (deletePermanently=false);
+  // the old dialog copy wrongly claimed data was "permanently removed".
+  it("performs a soft delete by default", async () => {
+    let deletedUrl = "";
+    server.use(
+      http.delete("*/conversationstore/conversations/:id", ({ request }) => {
+        deletedUrl = request.url;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    renderConversations();
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByTestId("conversation-grid")).toBeInTheDocument();
+    });
+    await user.click(screen.getAllByLabelText("Delete conversation")[0]!);
+    expect(await screen.findByTestId("delete-permanent-checkbox")).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => {
+      expect(deletedUrl).toContain("deletePermanently=false");
+    });
+  });
+
+  it("passes deletePermanently=true when the permanent option is checked", async () => {
+    let deletedUrl = "";
+    server.use(
+      http.delete("*/conversationstore/conversations/:id", ({ request }) => {
+        deletedUrl = request.url;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    renderConversations();
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByTestId("conversation-grid")).toBeInTheDocument();
+    });
+    await user.click(screen.getAllByLabelText("Delete conversation")[0]!);
+    await user.click(await screen.findByTestId("delete-permanent-checkbox"));
+    // confirm label escalates to "Delete permanently"
+    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await waitFor(() => {
+      expect(deletedUrl).toContain("deletePermanently=true");
+    });
+  });
+
   // --- Error state ---
 
   it("shows error state when API fails", async () => {

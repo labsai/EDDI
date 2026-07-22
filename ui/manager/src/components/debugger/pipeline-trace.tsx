@@ -222,6 +222,8 @@ interface TaskBarData {
   confidence?: number;
   isRunning: boolean;
   auditEntry?: AuditEntry;
+  isError?: boolean;
+  errorType?: string;
 }
 
 function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number }) {
@@ -258,7 +260,7 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
           <div
             className={cn(
               "absolute inset-y-0 start-0 rounded-sm transition-all duration-500",
-              getTaskColor(task.taskType),
+              task.isError ? "bg-destructive" : getTaskColor(task.taskType),
               task.isRunning && "animate-pulse",
             )}
             style={{ width: `${widthPercent}%` }}
@@ -278,9 +280,16 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
           </div>
         </div>
 
-        <span className="w-14 shrink-0 text-end font-mono text-[10px] text-muted-foreground">
-          {task.isRunning ? "..." : formatDuration(task.durationMs)}
-        </span>
+        {/* Error type / Duration */}
+        {task.isError ? (
+          <span className="w-14 shrink-0 truncate text-end font-mono text-[10px] uppercase text-destructive">
+            {task.errorType ?? "error"}
+          </span>
+        ) : (
+          <span className="w-14 shrink-0 text-end font-mono text-[10px] text-muted-foreground">
+            {task.isRunning ? "..." : formatDuration(task.durationMs)}
+          </span>
+        )}
 
         <ChevronDown
           className={cn(
@@ -402,6 +411,25 @@ function buildTaskBars(events: PipelineEvent[], auditEntries: AuditEntry[], step
         auditEntry: audit,
       });
       started.delete(key);
+    } else if (event.type === "task_failed") {
+      // The failed payload has no index — match the start by taskId.
+      let startKey: string | undefined;
+      for (const [k, ev] of started) {
+        if (ev.taskId === event.taskId) {
+          startKey = k;
+          break;
+        }
+      }
+      const start = startKey ? started.get(startKey) : undefined;
+      tasks.push({
+        taskType: event.taskType,
+        durationMs:
+          event.durationMs ?? (start ? event.timestamp - start.timestamp : 0),
+        isRunning: false,
+        isError: true,
+        errorType: event.errorType,
+      });
+      if (startKey) started.delete(startKey);
     }
   }
 

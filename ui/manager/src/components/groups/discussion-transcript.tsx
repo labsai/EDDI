@@ -3,7 +3,6 @@ import { MessageSquareQuote, Copy, CheckCircle2, Code, ArrowRight, ChevronDown, 
 import { useState, useRef, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
 import { PhaseHeader } from "./phase-header";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { AgentResponseCard } from "./agent-response-card";
@@ -518,7 +517,9 @@ export function DiscussionTranscript({
               )}
             >
               <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_hr]:border-border">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                {/* Deliberately NO rehypeRaw: agent-produced synthesis text is
+                    untrusted, so raw HTML stays escaped rather than injected. */}
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {parsedSynthesis}
                 </ReactMarkdown>
               </div>

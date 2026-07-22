@@ -16,6 +16,29 @@ const baseEntry: TranscriptEntry = {
   targetAgentId: null,
 };
 
+describe("AgentResponseCard — untrusted HTML", () => {
+  // Agent/LLM output is attacker-influenceable (e.g. via prompt injection). A
+  // live <iframe srcdoc> would execute script with full app-origin access, and
+  // there is no CSP to fall back on — so raw HTML must never become markup.
+  const hostile =
+    '**note**\n\n<iframe srcdoc="<script>window.__pwn=1</script>"></iframe>\n\n<img src="https://evil.example/leak.png">';
+
+  it("keeps raw HTML escaped on the default (allowHtml off) path", () => {
+    const { container } = renderWithProviders(
+      <AgentResponseCard entry={{ ...baseEntry, content: hostile }} />
+    );
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.querySelector('img[src*="evil.example"]')).toBeNull();
+  });
+
+  it("still strips dangerous HTML on the explicit allowHtml path", () => {
+    const { container } = renderWithProviders(
+      <AgentResponseCard entry={{ ...baseEntry, content: hostile }} allowHtml />
+    );
+    expect(container.querySelector("iframe")).toBeNull();
+  });
+});
+
 describe("AgentResponseCard", () => {
   it("renders the speaker name", () => {
     renderWithProviders(<AgentResponseCard entry={baseEntry} />);

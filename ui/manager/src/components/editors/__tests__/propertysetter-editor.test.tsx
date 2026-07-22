@@ -382,4 +382,87 @@ describe("PropertySetterEditor", () => {
     await user.click(trashBtn!);
     expect(onChange).toHaveBeenCalled();
   });
+
+  // ─── Scope: secret + Visibility (backend Property.Scope / Property.Visibility) ──
+
+  it("scope select includes the 'secret' option", () => {
+    renderWithProviders(
+      <PropertySetterEditor data={populatedConfig} onChange={onChange} />
+    );
+    const select = screen.getAllByTestId("scope-select")[0]!;
+    const options = within(select).getAllByRole("option").map((o) => o.textContent);
+    expect(options).toEqual(["step", "conversation", "longTerm", "secret"]);
+  });
+
+  it("writes scope 'secret' via the scope select", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <PropertySetterEditor data={populatedConfig} onChange={onChange} />
+    );
+    await user.selectOptions(screen.getAllByTestId("scope-select")[0]!, "secret");
+    const arg = onChange.mock.lastCall![0] as PropertySetterConfig;
+    expect(arg.setOnActions[0]!.setProperties[0]!.scope).toBe("secret");
+  });
+
+  it("shows the visibility select only for longTerm-scoped properties", () => {
+    renderWithProviders(
+      <PropertySetterEditor data={populatedConfig} onChange={onChange} />
+    );
+    // populatedConfig: prop[0]=conversation, prop[1]=longTerm -> exactly one visibility select
+    const visibilitySelects = screen.getAllByTestId("visibility-select");
+    expect(visibilitySelects).toHaveLength(1);
+    const options = within(visibilitySelects[0]!)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(options).toEqual(["self", "group", "global"]);
+  });
+
+  it("does not show a visibility select when no property is longTerm", () => {
+    const cfg: PropertySetterConfig = {
+      setOnActions: [
+        {
+          actions: ["a"],
+          setProperties: [
+            { name: "p", valueString: "v", scope: "conversation", override: true },
+          ],
+        },
+      ],
+    };
+    renderWithProviders(<PropertySetterEditor data={cfg} onChange={onChange} />);
+    expect(screen.queryByTestId("visibility-select")).not.toBeInTheDocument();
+  });
+
+  it("writes visibility to the 'visibility' field for a longTerm property", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <PropertySetterEditor data={populatedConfig} onChange={onChange} />
+    );
+    await user.selectOptions(screen.getByTestId("visibility-select"), "group");
+    const arg = onChange.mock.lastCall![0] as PropertySetterConfig;
+    // prop[1] is the longTerm-scoped "lang"
+    expect(arg.setOnActions[0]!.setProperties[1]!.visibility).toBe("group");
+  });
+
+  it("reveals the visibility select after switching a property to longTerm", async () => {
+    const user = userEvent.setup();
+    const cfg: PropertySetterConfig = {
+      setOnActions: [
+        {
+          actions: ["a"],
+          setProperties: [
+            { name: "p", valueString: "v", scope: "conversation", override: true },
+          ],
+        },
+      ],
+    };
+    const { rerender } = renderWithProviders(
+      <PropertySetterEditor data={cfg} onChange={onChange} />
+    );
+    expect(screen.queryByTestId("visibility-select")).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByTestId("scope-select"), "longTerm");
+    // Component is controlled; apply the emitted change back in
+    const arg = onChange.mock.lastCall![0] as PropertySetterConfig;
+    rerender(<PropertySetterEditor data={arg} onChange={onChange} />);
+    expect(screen.getByTestId("visibility-select")).toBeInTheDocument();
+  });
 });

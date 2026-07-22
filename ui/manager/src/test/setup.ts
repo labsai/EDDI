@@ -4,8 +4,11 @@ import { configure } from "@testing-library/react";
 import { afterEach, beforeAll, afterAll, vi } from "vitest";
 import { server } from "./mocks/server";
 
-// Increase default waitFor timeout to handle parallel test load
-configure({ asyncUtilTimeout: 5_000 });
+// Increase default waitFor timeout to handle parallel test load. The suite is
+// large (~3.7k tests) and page tests do async data loading; under full-parallel
+// CPU saturation a 5s waitFor can still flake even though every test passes in
+// isolation, so give it more headroom (passing assertions still resolve instantly).
+configure({ asyncUtilTimeout: 10_000 });
 
 // Mock keycloak-js globally so auth-provider doesn't try to connect
 vi.mock("keycloak-js", () => ({

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, screen, act } from "@testing-library/react";
+import { fireEvent, screen, act, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import type { ToolCallPauseDetails } from "@/lib/api/hitl";
@@ -18,12 +18,23 @@ function toolPause(overrides: Partial<ToolCallPauseDetails> = {}): ToolCallPause
   };
 }
 
+/** Click a labelled button inside the confirmation dialog (Approve/Reject/Cancel).
+ *  Every Approve/Reject/Cancel is gated behind this confirm step, so the tests
+ *  drive it explicitly and also verify nothing fired on the first click. */
+function confirmInDialog(name: string | RegExp) {
+  const dialog = screen.getByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name }));
+}
+
 describe("ApprovalBanner", () => {
   it("submits an APPROVED decision (no note, no task approvals) on the regular surface", () => {
     const onDecide = vi.fn();
     renderWithProviders(<ApprovalBanner surface="regular" onDecide={onDecide} />);
 
     fireEvent.click(screen.getByTestId("approve-button"));
+    // Nothing fires on the first click — a confirmation is shown instead.
+    expect(onDecide).not.toHaveBeenCalled();
+    confirmInDialog("Approve");
     expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined);
   });
 
@@ -32,6 +43,8 @@ describe("ApprovalBanner", () => {
     renderWithProviders(<ApprovalBanner surface="regular" onDecide={onDecide} />);
 
     fireEvent.click(screen.getByTestId("reject-button"));
+    expect(onDecide).not.toHaveBeenCalled();
+    confirmInDialog("Reject");
     expect(onDecide).toHaveBeenCalledWith("REJECTED", undefined, undefined);
   });
 
@@ -42,15 +55,19 @@ describe("ApprovalBanner", () => {
     fireEvent.click(screen.getByTestId("toggle-note"));
     fireEvent.change(screen.getByTestId("approval-note"), { target: { value: "  looks good  " } });
     fireEvent.click(screen.getByTestId("approve-button"));
+    confirmInDialog("Approve");
 
     expect(onDecide).toHaveBeenCalledWith("APPROVED", "looks good", undefined);
   });
 
-  it("invokes onCancel when the cancel button is clicked", () => {
+  it("invokes onCancel when the cancel button is clicked and confirmed", () => {
     const onCancel = vi.fn();
     renderWithProviders(<ApprovalBanner surface="regular" onDecide={vi.fn()} onCancel={onCancel} />);
 
     fireEvent.click(screen.getByTestId("cancel-button"));
+    // Cancel aborts in-flight work — must not fire on the first click.
+    expect(onCancel).not.toHaveBeenCalled();
+    confirmInDialog("Cancel conversation");
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -75,6 +92,7 @@ describe("ApprovalBanner", () => {
     // Reject t2 individually, leave t1 untoggled, then approve overall.
     fireEvent.click(screen.getByTestId("task-reject-t2"));
     fireEvent.click(screen.getByTestId("approve-button"));
+    confirmInDialog("Approve");
 
     expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, {
       t1: "APPROVED",
@@ -95,6 +113,7 @@ describe("ApprovalBanner", () => {
 
     fireEvent.click(screen.getByTestId("reject-all-tasks"));
     fireEvent.click(screen.getByTestId("reject-button"));
+    confirmInDialog("Reject");
 
     expect(onDecide).toHaveBeenCalledWith("REJECTED", undefined, {
       t1: "REJECTED",
@@ -140,9 +159,67 @@ describe("ApprovalBanner", () => {
     expect(screen.getByTestId("reject-button")).not.toBeDisabled();
     expect(screen.getByTestId("cancel-button")).not.toBeDisabled();
     expect(screen.getByTestId("approval-details-pending")).toBeInTheDocument();
-    // Reject stays safe with details unknown (it rejects everything).
+    // Reject stays safe with details unknown (it rejects everything) — still gated by confirm.
     fireEvent.click(screen.getByTestId("reject-button"));
+    confirmInDialog("Reject");
     expect(onDecide).toHaveBeenCalledWith("REJECTED", undefined, undefined);
+  });
+
+  // ── Confirmation gate (regression for one-click irreversible actions) ──
+  describe("confirmation gate", () => {
+    it("Approve on a RULE pause confirms before resuming (not one-click)", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(<ApprovalBanner surface="regular" onDecide={onDecide} />);
+
+      fireEvent.click(screen.getByTestId("approve-button"));
+      expect(onDecide).not.toHaveBeenCalled();
+      // A confirmation dialog is presented.
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getByText("Approve and resume this conversation?")).toBeInTheDocument();
+
+      confirmInDialog("Approve");
+      expect(onDecide).toHaveBeenCalledTimes(1);
+    });
+
+    it("Reject confirms and does not fire until confirmed", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(<ApprovalBanner surface="regular" onDecide={onDecide} />);
+
+      fireEvent.click(screen.getByTestId("reject-button"));
+      expect(onDecide).not.toHaveBeenCalled();
+      expect(screen.getByText("Reject this request? The conversation will not proceed.")).toBeInTheDocument();
+
+      confirmInDialog("Reject");
+      expect(onDecide).toHaveBeenCalledTimes(1);
+    });
+
+    it("dismissing the confirmation does not fire the action", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(<ApprovalBanner surface="regular" onDecide={onDecide} />);
+
+      fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Go back");
+      expect(onDecide).not.toHaveBeenCalled();
+    });
+
+    it("Approve on a TOOL_CALL pause confirms and lists the gated tool names", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} />,
+      );
+
+      fireEvent.click(screen.getByTestId("approve-button"));
+      // Real tools have NOT run yet.
+      expect(onDecide).not.toHaveBeenCalled();
+      const dialog = screen.getByRole("dialog");
+      // The confirmation summarizes which tool(s) will execute.
+      expect(within(dialog).getByText(/sendEmail/)).toBeInTheDocument();
+      expect(within(dialog).getByText(/transfer_funds/)).toBeInTheDocument();
+      expect(within(dialog).getByText(/cannot be undone/i)).toBeInTheDocument();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
+      expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, undefined);
+    });
   });
 
   describe("TOOL_CALL pause", () => {
@@ -163,6 +240,7 @@ describe("ApprovalBanner", () => {
         <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} />,
       );
       fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Approve");
       expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, undefined);
     });
 
@@ -173,6 +251,7 @@ describe("ApprovalBanner", () => {
       );
       fireEvent.click(screen.getByTestId("tool-reject-c2"));
       fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Approve");
       expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, {
         c2: { verdict: "REJECTED" },
       });
@@ -186,6 +265,7 @@ describe("ApprovalBanner", () => {
       // Even if a call was individually toggled APPROVED, Reject rejects the batch.
       fireEvent.click(screen.getByTestId("tool-approve-c1"));
       fireEvent.click(screen.getByTestId("reject-button"));
+      confirmInDialog("Reject");
       expect(onDecide).toHaveBeenCalledWith("REJECTED", undefined, undefined, undefined);
     });
 
@@ -199,6 +279,7 @@ describe("ApprovalBanner", () => {
         target: { value: '{"to":"ops@acme.com"}' },
       });
       fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Approve");
       expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, {
         c1: { verdict: "APPROVED", amendedArguments: '{"to":"ops@acme.com"}' },
       });
@@ -212,6 +293,7 @@ describe("ApprovalBanner", () => {
       fireEvent.click(screen.getByTestId("tool-amend-toggle-c1"));
       fireEvent.change(screen.getByTestId("tool-amend-c1"), { target: { value: "not json" } });
       fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Approve");
       expect(onDecide).not.toHaveBeenCalled();
       expect(screen.getByTestId("approval-submit-error")).toBeInTheDocument();
     });

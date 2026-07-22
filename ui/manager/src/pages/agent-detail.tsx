@@ -85,6 +85,11 @@ export function AgentDetailPage() {
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  // Undeploy confirmation — tracks which environment is being undeployed plus
+  // the two destructive query options (default OFF).
+  const [undeployTarget, setUndeployTarget] = useState<{ environment: string } | null>(null);
+  const [undeployEndConversations, setUndeployEndConversations] = useState(false);
+  const [undeployPreviousVersions, setUndeployPreviousVersions] = useState(false);
 
   // Reset version when navigating to a different agent (React reuses
   // the component, so useState values persist across route param changes).
@@ -146,11 +151,31 @@ export function AgentDetailPage() {
     );
   }
 
-  function handleUndeploy() {
+  function openUndeployDialog(environment: string) {
+    setUndeployTarget({ environment });
+  }
+
+  function closeUndeployDialog() {
+    setUndeployTarget(null);
+    setUndeployEndConversations(false);
+    setUndeployPreviousVersions(false);
+  }
+
+  function confirmUndeploy() {
+    if (!undeployTarget) return;
     undeployMutation.mutate(
-      { agentId: id!, version: resolvedVersion },
       {
-        onSuccess: () => toast.success(t("agents.undeploySuccess", "Agent undeployed")),
+        environment: undeployTarget.environment,
+        agentId: id!,
+        version: resolvedVersion,
+        endAllActiveConversations: undeployEndConversations,
+        undeployAllPreviousVersions: undeployPreviousVersions,
+      },
+      {
+        onSuccess: () => {
+          toast.success(t("agents.undeploySuccess", "Agent undeployed"));
+          closeUndeployDialog();
+        },
         onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
@@ -313,7 +338,7 @@ export function AgentDetailPage() {
 
             {/* Deploy/Undeploy */}
             <button
-              onClick={isDeployed ? handleUndeploy : handleDeploy}
+              onClick={isDeployed ? () => openUndeployDialog("production") : handleDeploy}
               disabled={isBusy}
               className={cn(
                 "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
@@ -495,10 +520,7 @@ export function AgentDetailPage() {
             { environment: env, agentId: id!, version: resolvedVersion },
             { onError: (err) => toast.error(getErrorMessage(err)) }
           )}
-          onUndeploy={(env) => undeployMutation.mutate(
-            { environment: env, agentId: id!, version: resolvedVersion },
-            { onError: (err) => toast.error(getErrorMessage(err)) }
-          )}
+          onUndeploy={(env) => openUndeployDialog(env)}
           isBusy={isBusy}
         />
       )}
@@ -646,6 +668,73 @@ export function AgentDetailPage() {
 
       {/* Raw config (collapsible) */}
       <RawConfigSection agent={agent} />
+
+      {/* Undeploy confirmation dialog */}
+      <AlertDialog
+        open={undeployTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) closeUndeployDialog();
+        }}
+        title={t("agents.confirmUndeploy", "Undeploy agent?")}
+        description={t(
+          "agents.confirmUndeployDescription",
+          "Version {{version}} will be undeployed from {{environment}}.",
+          {
+            version: resolvedVersion,
+            environment: undeployTarget
+              ? t(envLabels[undeployTarget.environment] ?? undeployTarget.environment, undeployTarget.environment)
+              : "",
+          }
+        )}
+        confirmLabel={t("agents.undeploy")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={confirmUndeploy}
+        variant="destructive"
+        isPending={undeployMutation.isPending}
+      >
+        <div className="space-y-3">
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-destructive"
+              checked={undeployEndConversations}
+              onChange={(e) => setUndeployEndConversations(e.target.checked)}
+              data-testid="undeploy-end-conversations-checkbox"
+            />
+            <span className="text-muted-foreground">
+              <span className="block font-medium text-foreground">
+                {t("agents.undeployEndConversationsLabel", "End all active conversations")}
+              </span>
+              <span className="mt-0.5 block text-xs text-destructive">
+                {t(
+                  "agents.undeployEndConversationsHint",
+                  "Immediately terminates every in-progress conversation on this deployment. This cannot be undone."
+                )}
+              </span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-destructive"
+              checked={undeployPreviousVersions}
+              onChange={(e) => setUndeployPreviousVersions(e.target.checked)}
+              data-testid="undeploy-previous-versions-checkbox"
+            />
+            <span className="text-muted-foreground">
+              <span className="block font-medium text-foreground">
+                {t("agents.undeployPreviousVersionsLabel", "Undeploy this and all previous versions")}
+              </span>
+              <span className="mt-0.5 block text-xs">
+                {t(
+                  "agents.undeployPreviousVersionsHint",
+                  "Also removes every earlier version of this agent from the environment."
+                )}
+              </span>
+            </span>
+          </label>
+        </div>
+      </AlertDialog>
 
       {/* Delete confirmation dialog */}
       <AlertDialog
