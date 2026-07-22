@@ -99,7 +99,7 @@ describe("GroupWizardPage", () => {
     });
     expect(
       (screen.getByTestId("gw-name") as HTMLInputElement).value,
-    ).toBe("Strategic Advisory Council");
+    ).toBe("Advisory Board");
   });
 
   it("config step Next is disabled without name", async () => {

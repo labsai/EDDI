@@ -64,7 +64,7 @@ describe("CreateGroupDialog", () => {
     expect(screen.getByText("Create Group")).toBeInTheDocument();
     expect(screen.getByText("Template")).toHaveClass("bg-primary");
     expect(screen.getByText("Start from Scratch")).toBeInTheDocument();
-    expect(screen.getByText("Strategic Advisory Council")).toBeInTheDocument();
+    expect(screen.getByText("Advisory Board")).toBeInTheDocument();
   });
 
   it("allows selecting a template to pre-fill basics step", async () => {
@@ -77,7 +77,7 @@ describe("CreateGroupDialog", () => {
 
     // Should switch to basics step
     expect(screen.getByText("Basics")).toHaveClass("bg-primary");
-    expect(screen.getByTestId("group-name-input")).toHaveValue("Strategic Advisory Council");
+    expect(screen.getByTestId("group-name-input")).toHaveValue("Advisory Board");
   });
 
   it("allows starting blank and validates basics fields", async () => {
@@ -199,7 +199,7 @@ describe("CreateGroupDialog", () => {
 
     // Review step validations
     expect(screen.getByTestId("review-summary")).toBeInTheDocument();
-    expect(screen.getByText("Strategic Advisory Council")).toBeInTheDocument();
+    expect(screen.getByText("Advisory Board")).toBeInTheDocument();
     
     // Create group
     const createBtn = screen.getByRole("button", { name: "Create Group" });
@@ -207,7 +207,7 @@ describe("CreateGroupDialog", () => {
 
     await waitFor(() => {
       expect(mutationPayload).not.toBeNull();
-      expect(mutationPayload!.name).toBe("Strategic Advisory Council");
+      expect(mutationPayload!.name).toBe("Advisory Board");
       expect(mutationPayload!.moderatorAgentId).toBe("agent1");
       expect(mutationPayload!.members).toHaveLength(5);
       expect(mockOnClose).toHaveBeenCalled();

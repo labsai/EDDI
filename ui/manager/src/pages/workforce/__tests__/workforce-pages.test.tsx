@@ -101,7 +101,7 @@ describe("Workforce Pages", () => {
       renderPage("/workforce/new", <WorkforceWizard />, "/workforce/new");
 
       // Starts on template step
-      expect(await screen.findByText(/Choose a Template|Strategic Advisory Council/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Choose a Template|Advisory Board/i)).toBeInTheDocument();
 
       // Find the Next button
       const nextBtn = screen.getByRole("button", { name: /next/i });
@@ -125,7 +125,7 @@ describe("Workforce Pages", () => {
       await user.click(backBtn);
 
       // Back to Step 1
-      expect(await screen.findByText(/Choose a Template|Strategic Advisory Council/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Choose a Template|Advisory Board/i)).toBeInTheDocument();
     });
   });
 });
