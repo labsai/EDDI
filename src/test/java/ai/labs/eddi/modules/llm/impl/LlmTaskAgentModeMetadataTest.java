@@ -285,6 +285,29 @@ class LlmTaskAgentModeMetadataTest {
     }
 
     // ============================================================
+    // 1c. Null trace — ExecutionResult does not enforce non-null
+    // ============================================================
+
+    @Test
+    @DisplayName("agent result with a null trace does not NPE (executeTask matches executeResume's guard)")
+    void agentMode_nullTrace_doesNotThrow() throws Exception {
+        wireStandardMemory();
+        // No production path yields this today — both ExecutionResult construction
+        // sites pass a fresh list — but the record permits it and AgentOrchestratorTest
+        // already constructs `new ExecutionResult(null, null)` as a legal shape.
+        // Unguarded, the `!toolTrace.isEmpty()` check downstream throws.
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", null,
+                        Map.of("tokenUsage", agentTokenUsage())));
+
+        assertDoesNotThrow(() -> llmTask.execute(memory, new LlmConfiguration(List.of(task("taskA")))));
+
+        // The turn still completes normally — metadata is surfaced as usual.
+        assertEquals(agentTokenUsage(), capturedMemoryEntry().get("tokenUsage"),
+                "a null trace must not cost the turn its metadata");
+    }
+
+    // ============================================================
     // 2. Legacy fallback — agent mode declined (null result)
     // ============================================================
 

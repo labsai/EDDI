@@ -538,7 +538,10 @@ public class LlmTask implements ILifecycleTask {
                     memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
             if (agentResult != null) {
                 responseContent = agentResult.response();
-                toolTrace = agentResult.trace();
+                // Null-guarded to match executeResume. No production path returns a null
+                // trace today (both ExecutionResult sites pass a fresh list), but the
+                // record does not enforce it and toolTrace.isEmpty() below would NPE.
+                toolTrace = agentResult.trace() != null ? agentResult.trace() : new ArrayList<>();
                 // AgentOrchestrator sums TokenUsage across every model call in the tool
                 // loop and returns it here; not reading it dropped all agent-mode token
                 // accounting on the floor while the legacy branches below kept theirs.
@@ -570,7 +573,8 @@ public class LlmTask implements ILifecycleTask {
                 // Agent mode — tools execute synchronously, stream final response if sink
                 // available
                 responseContent = agentResult.response();
-                toolTrace = agentResult.trace();
+                // Null-guarded, as in the skipCascade branch above.
+                toolTrace = agentResult.trace() != null ? agentResult.trace() : new ArrayList<>();
                 // See the skipCascade branch above: without this, agent-mode token usage
                 // is computed by AgentOrchestrator and then silently discarded. Copied
                 // for the same mutability reason.
