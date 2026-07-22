@@ -49,6 +49,9 @@
   --chat-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   --chat-scrollbar-thumb: #444;
   --chat-scrollbar-track: transparent;
+
+  /* Recoverable-problem accent (recovery banner). */
+  --chat-warning: #d9822b;
 }
 
 [data-theme="light"] {
@@ -86,4 +89,7 @@
   --chat-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   --chat-scrollbar-thumb: #ccc;
   --chat-scrollbar-track: transparent;
+
+  /* Darkened for the light surface — #d9822b on white is only 2.7:1. */
+  --chat-warning: #a85a12;
 }

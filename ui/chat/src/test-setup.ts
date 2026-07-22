@@ -14,3 +14,6 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => false,
   }),
 });
+
+// jsdom does not implement Element.scrollIntoView (used for auto-scroll)
+Element.prototype.scrollIntoView = () => {};

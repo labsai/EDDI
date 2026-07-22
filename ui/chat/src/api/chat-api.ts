@@ -8,23 +8,18 @@ import type {
   ConversationSnapshot,
   SSEEvent,
   SSEEventType,
+  ContextMap,
 } from "@/types";
+import {
+  ApiError,
+  buildUrl,
+  encodeSegment,
+  request,
+  requestJson,
+  setBaseUrl,
+} from "./http";
 
-let _baseUrl = "";
-
-/** Set the API base URL (e.g. from ChatConfig). Call once at startup. */
-export function setBaseUrl(url: string): void {
-  _baseUrl = url.replace(/\/$/, "");
-}
-
-function buildUrl(path: string): string {
-  return `${_baseUrl}${path}`;
-}
-
-/** Encode a single path segment so /, ?, # in data don't break the URL. */
-function encodeSegment(value: string): string {
-  return encodeURIComponent(value);
-}
+export { setBaseUrl, ApiError };
 
 /* ─── Conversation lifecycle ─────────────────── */
 
@@ -38,11 +33,11 @@ export async function startConversation(
   userId?: string,
 ): Promise<string> {
   const params = userId ? `?userId=${encodeURIComponent(userId)}` : "";
-  const res = await fetch(
-    buildUrl(`/agents/${encodeSegment(agentId)}/start${params}`),
+  const res = await request(
+    `/agents/${encodeSegment(agentId)}/start${params}`,
     { method: "POST" },
+    "Failed to start conversation",
   );
-  if (!res.ok) throw new Error(`Failed to start conversation: ${res.statusText}`);
 
   const location = res.headers.get("Location");
   if (!location) {
@@ -71,11 +66,13 @@ export async function readConversation(
     returnDetailed: "false",
     returnCurrentStepOnly: String(currentStepOnly),
   });
-  const res = await fetch(
-    buildUrl(`/agents/${encodeSegment(conversationId)}?${params}`),
+  const snapshot = await requestJson<ConversationSnapshot>(
+    `/agents/${encodeSegment(conversationId)}?${params}`,
+    undefined,
+    "Failed to read conversation",
   );
-  if (!res.ok) throw new Error(`Failed to read conversation: ${res.statusText}`);
-  return res.json();
+  if (!snapshot) throw new Error("readConversation: empty response body");
+  return snapshot;
 }
 
 /**
@@ -91,7 +88,7 @@ export async function sendMessage(
   conversationId: string,
   message: string,
   userId?: string,
-  context?: Record<string, { type: string; value: string }>,
+  context?: ContextMap,
 ): Promise<ConversationSnapshot> {
   const params = new URLSearchParams({
     returnDetailed: "false",
@@ -101,8 +98,8 @@ export async function sendMessage(
 
   const hasContext = context && Object.keys(context).length > 0;
 
-  const res = await fetch(
-    buildUrl(`/agents/${encodeSegment(conversationId)}?${params}`),
+  const snapshot = await requestJson<ConversationSnapshot>(
+    `/agents/${encodeSegment(conversationId)}?${params}`,
     {
       method: "POST",
       headers: {
@@ -112,9 +109,10 @@ export async function sendMessage(
         ? JSON.stringify({ input: message, context })
         : message,
     },
+    "Failed to send message",
   );
-  if (!res.ok) throw new Error(`Failed to send message: ${res.statusText}`);
-  return res.json();
+  if (!snapshot) throw new Error("sendMessage: empty response body");
+  return snapshot;
 }
 
 /**
@@ -128,7 +126,7 @@ export async function* sendMessageStreaming(
   _agentId: string,
   conversationId: string,
   message: string,
-  context?: Record<string, { type: string; value: string }>,
+  context?: ContextMap,
   signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
   const body: Record<string, unknown> = { input: message };
@@ -136,17 +134,16 @@ export async function* sendMessageStreaming(
     body.context = context;
   }
 
-  const res = await fetch(
-    buildUrl(`/agents/${encodeSegment(conversationId)}/stream`),
+  const res = await request(
+    `/agents/${encodeSegment(conversationId)}/stream`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal,
     },
+    "Streaming failed",
   );
-
-  if (!res.ok) throw new Error(`Streaming failed: ${res.statusText}`);
 
   const reader = res.body?.getReader();
   if (!reader) throw new Error("No readable stream");
@@ -169,23 +166,39 @@ export async function* sendMessageStreaming(
 
       for (const part of parts) {
         if (!part.trim()) continue;
-        let eventType: SSEEventType = "token";
+        let eventType: SSEEventType | null = null;
         const dataLines: string[] = [];
 
         for (const line of part.split("\n")) {
+          if (line.startsWith(":")) {
+            // Comment / keep-alive — carries no event
+            continue;
+          }
           if (line.startsWith("event:")) {
             eventType = line.slice(6).trim() as SSEEventType;
           } else if (line.startsWith("data:")) {
-            // Per SSE spec, join multiple data: lines with newlines
-            dataLines.push(line.slice(5).trim());
+            // Everything after the colon is payload, taken verbatim.
+            //
+            // The SSE spec lets a client strip ONE leading space because
+            // servers conventionally write "data: value". EDDI's writer does
+            // not: resteasy-reactive's SseUtil.serialiseField is
+            // `sb.append(field).append(":")` followed by the raw value
+            // (SseUtil.java:84), with no delimiter. Stripping here therefore
+            // deleted a space that belongs to the token — and LLM streams emit
+            // " word" constantly, so words ran together.
+            dataLines.push(line.slice(5));
           }
         }
 
-        const eventData = dataLines.join("\n");
+        // A frame with neither an event name nor data (bare comment/keep-alive)
+        // is not an event. Defaulting to "token" made every unrecognised frame
+        // render as visible text in the agent's message.
+        if (eventType === null && dataLines.length === 0) continue;
 
-        if (eventData || eventType) {
-          yield { type: eventType, data: eventData };
-        }
+        yield {
+          type: eventType ?? "token",
+          data: dataLines.join("\n"),
+        };
       }
     }
   } finally {
@@ -199,32 +212,55 @@ export async function* sendMessageStreaming(
  * Send a message to a managed agent (intent-based routing).
  * v6: path changed from /managedagents to /agents/managed
  */
-export async function sendManagedAgentMessage(
-  intent: string,
-  userId: string,
-  message?: string,
-): Promise<ConversationSnapshot> {
+function managedPath(intent: string, userId: string): string {
   const params = new URLSearchParams({
     returnDetailed: "false",
     returnCurrentStepOnly: "true",
   });
-  const url = buildUrl(
-    `/agents/managed/${encodeSegment(intent)}/${encodeSegment(userId)}?${params}`,
-  );
+  return `/agents/managed/${encodeSegment(intent)}/${encodeSegment(userId)}?${params}`;
+}
 
-  if (message) {
-    const res = await fetch(url, {
+/** Load (or lazily create) a managed conversation without sending anything. */
+export async function loadManagedConversation(
+  intent: string,
+  userId: string,
+): Promise<ConversationSnapshot> {
+  const snapshot = await requestJson<ConversationSnapshot>(
+    managedPath(intent, userId),
+    { method: "GET" },
+    "Failed to load conversation",
+  );
+  if (!snapshot) throw new Error("loadManagedConversation: empty response body");
+  return snapshot;
+}
+
+/**
+ * Send a message to a managed agent.
+ *
+ * The verb is NOT chosen from the truthiness of `message`: an attachment-only
+ * turn has empty text and must still POST. And `context` must be forwarded —
+ * it is the only path by which an attachment reaches the model.
+ */
+export async function sendManagedAgentMessage(
+  intent: string,
+  userId: string,
+  message: string,
+  context?: ContextMap,
+): Promise<ConversationSnapshot> {
+  const body: Record<string, unknown> = { input: message };
+  if (context && Object.keys(context).length > 0) body.context = context;
+
+  const snapshot = await requestJson<ConversationSnapshot>(
+    managedPath(intent, userId),
+    {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: message }),
-    });
-    if (!res.ok) throw new Error(`Failed to send message: ${res.statusText}`);
-    return res.json();
-  } else {
-    const res = await fetch(url, { method: "GET" });
-    if (!res.ok) throw new Error(`Failed to load conversation: ${res.statusText}`);
-    return res.json();
-  }
+      body: JSON.stringify(body),
+    },
+    "Failed to send message",
+  );
+  if (!snapshot) throw new Error("sendManagedAgentMessage: empty response body");
+  return snapshot;
 }
 
 /**
@@ -233,11 +269,33 @@ export async function sendManagedAgentMessage(
 export async function endConversation(
   conversationId: string,
 ): Promise<void> {
-  const res = await fetch(
-    buildUrl(`/agents/${encodeSegment(conversationId)}/endConversation`),
+  await request(
+    `/agents/${encodeSegment(conversationId)}/endConversation`,
     { method: "POST" },
+    "Failed to end conversation",
   );
-  if (!res.ok) throw new Error(`Failed to end conversation: ${res.statusText}`);
+}
+
+/**
+ * Re-execute the last conversation step.
+ *
+ * The recovery path after a turn fails: without it an ERROR or
+ * EXECUTION_INTERRUPTED conversation is a dead end whose only escape is
+ * starting over and losing the history.
+ */
+export async function rerunLastStep(
+  conversationId: string,
+  language = "en",
+): Promise<ConversationSnapshot | null> {
+  // `language` is REQUIRED: the backend declares it without @DefaultValue and
+  // calls checkNotEmpty(language) before any other work, so omitting it is an
+  // unconditional 400 — the retry could never have worked.
+  const params = new URLSearchParams({ language });
+  return requestJson<ConversationSnapshot>(
+    `/agents/${encodeSegment(conversationId)}/rerun?${params}`,
+    { method: "POST" },
+    "Failed to retry",
+  );
 }
 
 /* ─── Undo / Redo ────────────────────────────── */
@@ -249,13 +307,14 @@ export async function undoConversation(
   _environment: string,
   _agentId: string,
   conversationId: string,
-): Promise<ConversationSnapshot> {
-  const res = await fetch(
-    buildUrl(`/agents/${encodeSegment(conversationId)}/undo`),
+): Promise<ConversationSnapshot | null> {
+  // The backend answers 200 with an EMPTY body; requestJson yields null there.
+  // Callers re-read the snapshot rather than relying on a response payload.
+  return requestJson<ConversationSnapshot>(
+    `/agents/${encodeSegment(conversationId)}/undo`,
     { method: "POST" },
+    "Failed to undo",
   );
-  if (!res.ok) throw new Error(`Failed to undo: ${res.statusText}`);
-  return res.json();
 }
 
 /**
@@ -265,13 +324,12 @@ export async function redoConversation(
   _environment: string,
   _agentId: string,
   conversationId: string,
-): Promise<ConversationSnapshot> {
-  const res = await fetch(
-    buildUrl(`/agents/${encodeSegment(conversationId)}/redo`),
+): Promise<ConversationSnapshot | null> {
+  return requestJson<ConversationSnapshot>(
+    `/agents/${encodeSegment(conversationId)}/redo`,
     { method: "POST" },
+    "Failed to redo",
   );
-  if (!res.ok) throw new Error(`Failed to redo: ${res.statusText}`);
-  return res.json();
 }
 
 /* ─── Agent descriptor ─────────────────────────── */
@@ -296,33 +354,4 @@ export async function fetchAgentDescriptor(
   } catch {
     return {};
   }
-}
-
-/* ─── Attachments ────────────────────────────── */
-
-export interface AttachmentResult {
-  storageRef: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-}
-
-/**
- * Upload a file attachment to a conversation.
- * POST /conversations/{conversationId}/attachments (multipart/form-data)
- */
-export async function uploadAttachment(
-  conversationId: string,
-  file: File,
-): Promise<AttachmentResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const res = await fetch(
-    buildUrl(`/conversations/${encodeSegment(conversationId)}/attachments`),
-    { method: "POST", body: formData },
-  );
-
-  if (!res.ok) throw new Error(`Attachment upload failed: ${res.statusText}`);
-  return res.json();
 }

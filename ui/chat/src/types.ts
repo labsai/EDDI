@@ -12,6 +12,23 @@ export interface ChatMessage {
   isStreaming?: boolean;
 }
 
+/**
+ * Context entries sent alongside a message (EDDI's `Map<String, Context>`).
+ *
+ * `value` is deliberately `unknown`, not `string`: the attachment contract
+ * requires an object-valued context (`{storageRef, fileName}`) under an
+ * `attachment_N` key, which a string-valued type cannot express.
+ * `type` mirrors EDDI's Context.ContextType enum.
+ */
+export type ContextType = "string" | "expressions" | "object" | "array";
+
+export interface ContextEntry {
+  type: ContextType;
+  value: unknown;
+}
+
+export type ContextMap = Record<string, ContextEntry>;
+
 /** A quick-reply button returned by the backend. */
 export interface QuickReply {
   value: string;
@@ -29,19 +46,34 @@ export interface InputField {
   defaultValue?: string;
 }
 
-/** Backend conversation states. */
+/**
+ * Backend conversation states — mirrors EDDI's ConversationState enum
+ * (ai.labs.eddi.engine.memory.model.ConversationState). All six values.
+ */
 export type ConversationState =
   | "READY"
   | "IN_PROGRESS"
   | "ERROR"
-  | "ENDED";
+  | "ENDED"
+  | "EXECUTION_INTERRUPTED"
+  | "AWAITING_HUMAN";
 
-/** SSE event types used by the streaming endpoint. */
+/**
+ * SSE event types emitted by POST /agents/{conversationId}/stream.
+ * Mirrors RestAgentEngineStreaming — all eight.
+ *
+ * Note: there is no "thinking" event. The UI previously declared one and the
+ * backend never emitted it, so the thinking indicator was only ever cleared by
+ * the first token — leaving it spinning forever on a turn that failed or
+ * paused before producing one.
+ */
 export type SSEEventType =
   | "token"
   | "task_start"
   | "task_complete"
-  | "thinking"
+  | "task_failed"
+  | "cascade_step_start"
+  | "cascade_escalation"
   | "done"
   | "error";
 
@@ -50,12 +82,29 @@ export interface SSEEvent {
   data: string;
 }
 
-/** Simplified conversation step from GET response. */
+/**
+ * One datum inside a conversation step, as the backend actually sends it.
+ * Mirrors SimpleConversationMemorySnapshot.ConversationStepData.
+ */
+export interface ConversationStepData {
+  key: string;
+  value: unknown;
+  timestamp?: string;
+  originWorkflowId?: string;
+}
+
+/**
+ * A conversation step from GET /agents/{conversationId}.
+ *
+ * Mirrors SimpleConversationMemorySnapshot.SimpleConversationStep, which has
+ * exactly these two properties. It notably does NOT have `input` or `output` —
+ * this type previously declared both, and code that read them silently got
+ * `undefined`, which is how undo/redo came to replace the transcript with an
+ * empty list.
+ */
 export interface ConversationStep {
-  input?: string;
-  output?: string;
-  actions?: string[];
-  quickReplies?: QuickReply[];
+  conversationStep?: ConversationStepData[];
+  timestamp?: string;
 }
 
 /** Conversation snapshot returned by the backend. */
@@ -126,4 +175,10 @@ export interface ChatConfig {
   enableNewConversation?: boolean;
   /** Show agent name in header (fetched from descriptor). Default: `true` */
   showAgentName?: boolean;
+  /**
+   * Bearer token for the EDDI API. Required when the deployment enables OIDC:
+   * conversation ownership is enforced server-side, so an anonymous client can
+   * be locked out of the conversation it just started.
+   */
+  authToken?: string;
 }

@@ -25,3 +25,6 @@ yarn-debug.log*
 yarn-error.log*
 
 /.idea
+# stray local artefacts
+*.stackdump
+git-log-output.txt
