@@ -271,6 +271,29 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Map<String, Integer> toolRateLimits;
 
         /**
+         * Per-tool cache partitioning, keyed by tool name. Recognized values are
+         * {@code "user"} (default), {@code "conversation"} and {@code "global"} — see
+         * the {@code ToolCacheScope} enum for the authoritative list.
+         * <p>
+         * A cached tool result is only ever served back inside its own partition, so
+         * the default keeps one authenticated user's result away from every other user.
+         * Set a tool to {@code "global"} ONLY when its result depends purely on its
+         * arguments and never on who is asking — that is the explicit, per-tool opt-in
+         * to cross-user reuse.
+         *
+         * @since 6.1.0
+         */
+        private Map<String, String> toolCacheScopes;
+
+        /**
+         * Default cache partition for tools without a {@link #toolCacheScopes} entry.
+         * Unset, blank or unrecognized values mean {@code "user"}.
+         *
+         * @since 6.1.0
+         */
+        private String defaultToolCacheScope;
+
+        /**
          * Maximum number of tool-calling loop iterations before forcing a final answer
          * (default 10).
          */
@@ -619,6 +642,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolRateLimits(Map<String, Integer> toolRateLimits) {
             this.toolRateLimits = toolRateLimits;
+        }
+
+        public Map<String, String> getToolCacheScopes() {
+            return toolCacheScopes;
+        }
+
+        public void setToolCacheScopes(Map<String, String> toolCacheScopes) {
+            this.toolCacheScopes = toolCacheScopes;
+        }
+
+        public String getDefaultToolCacheScope() {
+            return defaultToolCacheScope;
+        }
+
+        public void setDefaultToolCacheScope(String defaultToolCacheScope) {
+            this.defaultToolCacheScope = defaultToolCacheScope;
         }
 
         public Integer getMaxToolIterations() {
