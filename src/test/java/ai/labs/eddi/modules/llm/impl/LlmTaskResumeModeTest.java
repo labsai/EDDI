@@ -21,6 +21,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.model.chat.ChatModel;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -104,7 +105,7 @@ class LlmTaskResumeModeTest {
                 ragContextProvider, new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
 
         when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData d = mock(IData.class);

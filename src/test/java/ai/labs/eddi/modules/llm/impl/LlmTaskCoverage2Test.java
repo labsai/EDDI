@@ -34,6 +34,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.output.TokenUsage;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -131,7 +132,7 @@ class LlmTaskCoverage2Test {
                 ragContextProvider, new TokenCounterFactory(), conversationSummarizer,
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
 
         lenient().when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData d = mock(IData.class);

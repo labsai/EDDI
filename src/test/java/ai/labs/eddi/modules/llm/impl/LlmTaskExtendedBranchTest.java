@@ -25,6 +25,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -99,10 +100,10 @@ class LlmTaskExtendedBranchTest {
         when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(mockSnippetService,
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
         counterweightService.initMetrics();
         var identityMaskingService = new IdentityMaskingService(
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
         identityMaskingService.initMetrics();
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
@@ -111,7 +112,7 @@ class LlmTaskExtendedBranchTest {
                 mock(RagContextProvider.class), new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 mockSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
     }
 
     private IConversationMemory setupMemory(List<String> actions) {
@@ -461,10 +462,10 @@ class LlmTaskExtendedBranchTest {
             when(gvr.getTemplateData()).thenReturn(Map.of());
             var chatModelRegistry = new ChatModelRegistry(jsonBuilders, gvr, secretResolver);
             var cws = new CounterweightService(mock(PromptSnippetService.class),
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                    new SimpleMeterRegistry());
             cws.initMetrics();
             var ims = new IdentityMaskingService(
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                    new SimpleMeterRegistry());
             ims.initMetrics();
 
             var snippetService = mock(PromptSnippetService.class);
@@ -476,7 +477,7 @@ class LlmTaskExtendedBranchTest {
                     mock(RagContextProvider.class), new TokenCounterFactory(), mock(ConversationSummarizer.class),
                     snippetService, gvr, cws,
                     ims, mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                    new SimpleMeterRegistry());
 
             var memory = setupMemory(List.of("action1"));
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());

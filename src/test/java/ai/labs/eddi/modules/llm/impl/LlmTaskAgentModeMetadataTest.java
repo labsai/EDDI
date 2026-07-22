@@ -253,6 +253,11 @@ class LlmTaskAgentModeMetadataTest {
         // agent path in production only.
         assertNotSame(emptyMetaResult.responseMetadata(), stored,
                 "published metadata must be a defensive copy, not the orchestrator's map");
+        // ...and a WRITABLE one. Identity alone is satisfied by an immutable copy
+        // (Map.copyOf), which would still throw the moment downstream code adds a
+        // metadata key — the exact failure the copy exists to prevent.
+        assertDoesNotThrow(() -> stored.put("probe", 1),
+                "published metadata must be writable, not merely a distinct instance");
         // NOTE: unlike the other five, this test passes with and without the fix —
         // pre-fix the published map was LlmTask's own empty HashMap, equally empty and
         // equally a non-alias. It is a guard against NPE and against re-aliasing, not

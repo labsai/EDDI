@@ -29,6 +29,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -95,11 +96,11 @@ class LlmTaskExtendedTest {
         when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(
-                promptSnippetService, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                promptSnippetService, new SimpleMeterRegistry());
         counterweightService.initMetrics();
 
         var identityMaskingService = new IdentityMaskingService(
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
         identityMaskingService.initMetrics();
 
         llmTask = new LlmTask(
@@ -113,7 +114,7 @@ class LlmTaskExtendedTest {
                 promptSnippetService, globalVariableResolver,
                 counterweightService, identityMaskingService,
                 mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
     }
 
     private IConversationMemory createMemoryWithAction(String... actions) throws Exception {
