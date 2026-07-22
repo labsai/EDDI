@@ -1257,6 +1257,15 @@ a:hover { opacity: 0.85; }
   border: 0;
 }
 
+/*
+ * Only the INFINITE animations are suppressed. Those are the ones that keep
+ * moving in the reader's periphery for the whole length of a turn; the one-shot
+ * msgIn entrance (250ms, .message / .indicator) is left alone deliberately.
+ *
+ * Both are safe to disable: neither element depends on its animation to become
+ * visible — msgIn has no fill-mode, so the natural opacity of 1 applies once it
+ * ends, and pulse leaves .indicator__brain at 1 rather than its 0.4 trough.
+ */
 @media (prefers-reduced-motion: reduce) {
   .indicator__brain,
   .indicator__dot {
