@@ -2,7 +2,6 @@ import { memo, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
 import { cn } from "@/lib/utils";
 import type { ChatMessage as ChatMessageType, MessageAttachment } from "@/lib/api/chat";
 import { isImageMime, formatBytes } from "@/lib/api/attachments";
@@ -89,7 +88,9 @@ export const ChatMessage = memo(function ChatMessage({
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
               {message.content ? (
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                /* Deliberately NO rehypeRaw: bot/LLM output is untrusted, so
+                   raw HTML stays escaped rather than being injected live. */
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {message.content}
                 </ReactMarkdown>
               ) : message.isStreaming ? (

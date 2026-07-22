@@ -478,6 +478,55 @@ describe("SecretsPage", () => {
     });
   });
 
+  // ─── Error state (distinct from empty) ────────────────────────────────
+
+  it("shows an error state (not the empty state) when the list request fails", async () => {
+    server.use(
+      http.get("*/secretstore/secrets/:tenantId", () =>
+        HttpResponse.json({ error: "Vault read failed" }, { status: 500 })
+      )
+    );
+
+    renderSecrets();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("secrets-error")).toBeInTheDocument();
+    });
+    // A backend failure must not masquerade as "No secrets found".
+    expect(screen.queryByText("No secrets found")).not.toBeInTheDocument();
+    expect(screen.getByText("Vault read failed")).toBeInTheDocument();
+  });
+
+  // ─── Allowed agents: flush pending input on submit ────────────────────
+
+  it("flushes typed-but-not-Entered Allowed Agents text into the request on submit", async () => {
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.put("*/secretstore/secrets/:tenantId/:keyName", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          reference: "vault:default/flush-key",
+          tenantId: "default",
+          keyName: "flush-key",
+        });
+      })
+    );
+
+    renderSecrets();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("create-secret-button"));
+
+    await user.type(screen.getByTestId("new-key-input"), "flush-key");
+    await user.type(screen.getByTestId("new-value-input"), "flush-value");
+    // Type an agent but DO NOT press Enter — it must not be silently dropped.
+    await user.type(screen.getByTestId("new-allowed-agents-input"), "pending-agent");
+
+    await user.click(screen.getByTestId("confirm-create-button"));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.allowedAgents).toEqual(["pending-agent"]);
+  });
+
   // ─── Vault down state ─────────────────────────────────────────────────
 
   it("shows vault not configured banner when vault is down", async () => {

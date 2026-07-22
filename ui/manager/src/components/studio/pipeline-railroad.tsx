@@ -32,11 +32,16 @@ export function PipelineRailroad({
   // Build stage status from live SSE events
   const stageStatuses = useMemo(() => {
     const statuses = new Map<number, "idle" | "running" | "complete" | "error">();
+    const indexByTaskId = new Map<string, number>();
     for (const event of currentTurnEvents) {
       if (event.type === "task_start") {
         statuses.set(event.index, "running");
+        indexByTaskId.set(event.taskId, event.index);
       } else if (event.type === "task_complete") {
         statuses.set(event.index, "complete");
+      } else if (event.type === "task_failed") {
+        // The failed payload carries no index — recover it from the task_start.
+        statuses.set(indexByTaskId.get(event.taskId) ?? event.index, "error");
       }
     }
     return statuses;

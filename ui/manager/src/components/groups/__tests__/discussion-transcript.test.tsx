@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { DiscussionTranscript } from "../discussion-transcript";
 import type { GroupConversation } from "@/lib/api/groups";
@@ -166,10 +166,19 @@ describe("DiscussionTranscript", () => {
 
     expect(screen.getByTestId("approval-banner")).toBeInTheDocument();
 
+    // Approve/Cancel now require confirming in a dialog before firing.
     fireEvent.click(screen.getByTestId("approve-button"));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }),
+    );
     expect(onApprove).toHaveBeenCalledWith("gc-1", "APPROVED", undefined, undefined);
 
     fireEvent.click(screen.getByTestId("cancel-button"));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Cancel discussion",
+      }),
+    );
     expect(onCancelDiscussion).toHaveBeenCalledWith("gc-1");
   });
 

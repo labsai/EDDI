@@ -149,9 +149,40 @@ describe("CoordinatorPage", () => {
     });
   });
 
-  // --- Discard button verifies API called ---
+  // --- Discard button now gated behind a confirmation dialog ---
 
-  it("calls discard API when discard button is clicked", async () => {
+  it("discard button opens a confirmation dialog and only fires on confirm", async () => {
+    let discardCalled = false;
+    server.use(
+      http.delete("*/administration/coordinator/dead-letters/:id", () => {
+        discardCalled = true;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+
+    renderCoordinator();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discard-1")).toBeInTheDocument();
+    });
+
+    // Clicking discard opens a confirmation dialog — it must NOT fire yet.
+    await user.click(screen.getByTestId("discard-1"));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/cannot be undone/i)).toBeInTheDocument();
+    expect(discardCalled).toBe(false);
+
+    // Confirm inside the dialog fires the discard.
+    await user.click(within(dialog).getByRole("button", { name: /Discard/i }));
+
+    await waitFor(() => {
+      expect(discardCalled).toBe(true);
+    });
+  });
+
+  it("cancelling the discard confirmation does not fire the discard", async () => {
     let discardCalled = false;
     server.use(
       http.delete("*/administration/coordinator/dead-letters/:id", () => {
@@ -169,9 +200,13 @@ describe("CoordinatorPage", () => {
 
     await user.click(screen.getByTestId("discard-1"));
 
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: /Cancel/i }));
+
     await waitFor(() => {
-      expect(discardCalled).toBe(true);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
+    expect(discardCalled).toBe(false);
   });
 
   // --- Payload toggle ---

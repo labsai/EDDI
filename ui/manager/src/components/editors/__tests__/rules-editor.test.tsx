@@ -15,7 +15,7 @@ const populatedConfig: RulesConfig = {
   behaviorGroups: [
     {
       name: "Greeting Group",
-      executionStrategy: "currentStepOnly",
+      executionStrategy: "executeUntilFirstSuccess",
       behaviorRules: [
         {
           name: "Greet Rule",
@@ -93,7 +93,7 @@ describe("RulesEditor", () => {
         behaviorGroups: [
           expect.objectContaining({
             name: "",
-            executionStrategy: "currentStepOnly",
+            executionStrategy: "executeUntilFirstSuccess",
             behaviorRules: [],
           }),
         ],
@@ -191,7 +191,11 @@ describe("RulesEditor", () => {
     const configNoRules: RulesConfig = {
       ...emptyConfig,
       behaviorGroups: [
-        { name: "Empty", executionStrategy: "currentStepOnly", behaviorRules: [] },
+        {
+          name: "Empty",
+          executionStrategy: "executeUntilFirstSuccess",
+          behaviorRules: [],
+        },
       ],
     };
     renderWithProviders(
@@ -199,4 +203,84 @@ describe("RulesEditor", () => {
     );
     expect(screen.getByText("No rules in this group")).toBeInTheDocument();
   });
+
+  // ── Regression: backend RuleGroup.ExecutionStrategy contract ──────────────
+  // Backend enum is {executeAll, executeUntilFirstSuccess}; anything else throws
+  // ExecutionStrategy.valueOf(...) at rules-module instantiation (unloadable bot).
+  it("defaults new groups to the backend-valid executeUntilFirstSuccess strategy", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={emptyConfig} onChange={onChange} />);
+    await user.click(screen.getByTestId("add-group-btn"));
+    const arg = onChange.mock.lastCall![0] as RulesConfig;
+    expect(arg.behaviorGroups[0]!.executionStrategy).toBe("executeUntilFirstSuccess");
+    expect(["currentStepOnly", "lastStepOnly", "anyStep"]).not.toContain(
+      arg.behaviorGroups[0]!.executionStrategy
+    );
+  });
+
+  it("offers only backend-valid execution strategies in the group selector", () => {
+    renderWithProviders(
+      <RulesEditor data={populatedConfig} onChange={onChange} />
+    );
+    const select = screen.getByTestId("group-strategy-select") as HTMLSelectElement;
+    const values = Array.from(select.options)
+      .map((o) => o.value)
+      .filter((v) => !o_disabled(select, v));
+    expect(values).toEqual(
+      expect.arrayContaining(["executeUntilFirstSuccess", "executeAll"])
+    );
+    expect(values).not.toContain("currentStepOnly");
+    expect(values).not.toContain("lastStepOnly");
+    expect(values).not.toContain("anyStep");
+  });
+
+  // ── Regression: backend condition-ID contract (12 IDs, exact casing) ──────
+  it("offers all 12 backend condition types with exact backend casing", () => {
+    renderWithProviders(
+      <RulesEditor data={populatedConfig} onChange={onChange} />
+    );
+    const select = screen.getByTestId(
+      "condition-type-select"
+    ) as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    for (const id of [
+      "inputmatcher",
+      "actionmatcher",
+      "connector",
+      "negation",
+      "contextmatcher",
+      "occurrence",
+      "dynamicvaluematcher",
+      "sizematcher",
+      "dependency",
+      "capabilityMatch",
+      "contentTypeMatcher",
+      "deploymentContext",
+    ]) {
+      expect(values).toContain(id);
+    }
+    // camelCase mis-casing produced unloadable rulesets — must be gone
+    expect(values).not.toContain("dynamicValueMatcher");
+  });
+
+  it("emits backend-correct preset configs when switching to a new condition type", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RulesEditor data={populatedConfig} onChange={onChange} />
+    );
+    await user.selectOptions(
+      screen.getByTestId("condition-type-select"),
+      "contentTypeMatcher"
+    );
+    const arg = onChange.mock.lastCall![0] as RulesConfig;
+    const cond = arg.behaviorGroups[0]!.behaviorRules[0]!.conditions[0]!;
+    expect(cond.type).toBe("contentTypeMatcher");
+    expect(cond.configs).toEqual({ mimeType: "", minCount: "1" });
+  });
 });
+
+/** True if the option with this value is disabled (the surfaced legacy marker). */
+function o_disabled(select: HTMLSelectElement, value: string): boolean {
+  const opt = Array.from(select.options).find((o) => o.value === value);
+  return !!opt?.disabled;
+}

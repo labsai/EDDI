@@ -32,6 +32,24 @@ const agentNoContent: ChatMessageType = {
   isStreaming: false,
 };
 
+describe("ChatMessage — untrusted HTML", () => {
+  it("keeps raw HTML in bot output escaped rather than live markup", () => {
+    // Bot/LLM output is untrusted; a live <iframe srcdoc> would execute script
+    // with full app-origin access (no CSP), so rehypeRaw must stay off.
+    const { container } = renderWithProviders(
+      <ChatMessage
+        message={{
+          ...agentMessage,
+          content:
+            '**hi**\n\n<iframe srcdoc="<script>window.__pwn=1</script>"></iframe>\n\n<img src="https://evil.example/leak.png">',
+        }}
+      />
+    );
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.querySelector('img[src*="evil.example"]')).toBeNull();
+  });
+});
+
 describe("ChatMessage", () => {
   it("renders user message content", () => {
     renderWithProviders(<ChatMessage message={userMessage} />);

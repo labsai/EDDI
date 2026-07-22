@@ -1,12 +1,22 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
+import { Toaster } from "sonner";
+import { server } from "@/test/mocks/server";
 import { renderPage, userEvent } from "@/test/test-utils";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
-function renderChannelDetail(id = "ch1", version = 1) {
+function renderChannelDetail(id = "ch1", version = 1, withToaster = false) {
   return renderPage(
     `/manage/channels/${id}?version=${version}`,
-    <ChannelDetailPage />,
+    withToaster ? (
+      <>
+        <Toaster />
+        <ChannelDetailPage />
+      </>
+    ) : (
+      <ChannelDetailPage />
+    ),
     "/manage/channels/:id",
   );
 }
@@ -300,6 +310,52 @@ describe("ChannelDetailPage", () => {
     await waitFor(() => {
       // The JSON should now be visible
       expect(screen.getByText(/"channelType"/)).toBeInTheDocument();
+    });
+  });
+
+  // ── Regression: save/delete errors must be surfaced, not swallowed ─────────
+  it("shows an error toast when saving fails (no silent failure)", async () => {
+    server.use(
+      http.put("*/channelstore/channels/:id", () =>
+        HttpResponse.json(
+          { message: "Duplicate trigger 'help' across targets" },
+          { status: 400 },
+        ),
+      ),
+    );
+    renderChannelDetail("ch1", 1, true);
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByTestId("save-channel-btn")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("save-channel-btn"));
+    await waitFor(() => {
+      expect(screen.getByText(/Duplicate trigger/)).toBeInTheDocument();
+    });
+  });
+
+  // ── Regression: renaming the default target keeps defaultTargetName valid ──
+  it("keeps defaultTargetName in sync when the default target is renamed", async () => {
+    let saved: { defaultTargetName?: string } | undefined;
+    server.use(
+      http.put("*/channelstore/channels/:id", async ({ request }) => {
+        saved = (await request.json()) as { defaultTargetName?: string };
+        return HttpResponse.json(
+          { location: "/channelstore/channels/ch1?version=2" },
+          { status: 200 },
+        );
+      }),
+    );
+    renderChannelDetail("ch1", 1);
+    const user = userEvent.setup();
+    // ch1 target[0] is named "default" and IS the default target.
+    const nameInput = await screen.findByTestId("target-name-0");
+    expect(nameInput).toHaveValue("default");
+    await user.clear(nameInput);
+    await user.type(nameInput, "renamed");
+    await user.click(screen.getByTestId("save-channel-btn"));
+    await waitFor(() => {
+      expect(saved?.defaultTargetName).toBe("renamed");
     });
   });
 });

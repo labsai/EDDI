@@ -33,6 +33,7 @@ export type SSEEventType =
   | "token"
   | "task_start"
   | "task_complete"
+  | "task_failed"
   | "cascade_step_start"
   | "cascade_escalation"
   | "done"

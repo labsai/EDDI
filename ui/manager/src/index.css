@@ -26,12 +26,14 @@
   --color-input: #e7e5e4;
   --color-ring: #f59e0b;
 
-  /* Sidebar — dark EDDI brand */
-  --color-sidebar: #1c1917;
-  --color-sidebar-foreground: #d6d3d1;
-  --color-sidebar-border: #292524;
-  --color-sidebar-accent: #f59e0b;
-  --color-sidebar-accent-foreground: #0c0a09;
+  /* Sidebar — light in light mode, matches the rest of the app (dark override below) */
+  --color-sidebar: #ffffff;
+  --color-sidebar-foreground: #44403c;
+  --color-sidebar-border: #e7e5e4;
+  /* Darker amber so the active nav label (text-sidebar-accent) stays legible on
+     white (bright #f59e0b is only ~1.8:1); dark mode restores bright gold below. */
+  --color-sidebar-accent: #b45309;
+  --color-sidebar-accent-foreground: #ffffff;
 
   --radius: 0.5rem;
   --font-sans: 'Noto Sans Variable', 'Noto Sans Arabic Variable', 'Noto Sans Thai Variable', 'Noto Sans Devanagari Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', 'Noto Sans SC Variable', 'Noto Sans TC Variable', ui-sans-serif, system-ui, sans-serif;
@@ -54,6 +56,9 @@
   --color-sidebar: #09090b;
   --color-sidebar-foreground: #d4d4d8;
   --color-sidebar-border: #18181b;
+  /* Bright gold reads well on the dark sidebar (restores the brand accent). */
+  --color-sidebar-accent: #f59e0b;
+  --color-sidebar-accent-foreground: #0c0a09;
 }
 
 /* Base styles */
@@ -182,6 +187,11 @@
     backdrop-filter: blur(16px);
     background: rgba(24, 24, 27, 0.95);
     border: 1px solid rgba(245, 158, 11, 0.15);
+    /* This hero card is ALWAYS dark, so pin the sidebar tokens its text/borders
+       read to light values — otherwise light-mode's dark --color-sidebar-*
+       tokens render dark-on-dark (unreadable). */
+    --color-sidebar-foreground: #e4e4e7;
+    --color-sidebar-border: rgba(245, 158, 11, 0.2);
   }
 
   /* Carousel dot transitions */

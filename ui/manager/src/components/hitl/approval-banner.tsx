@@ -12,6 +12,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
 import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@/lib/hitl-config";
 import {
@@ -131,6 +132,10 @@ export function ApprovalBanner({
   const [taskApprovals, setTaskApprovals] = useState<Record<string, string>>({});
   const [callStates, setCallStates] = useState<Record<string, CallState>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Which irreversible action is awaiting confirmation. Approve/Reject/Cancel
+  // must never fire on a single click: resuming a TOOL_CALL pause runs real
+  // gated tools, reject cannot be undone, and cancel aborts in-flight work.
+  const [confirmAction, setConfirmAction] = useState<HitlVerdict | "CANCEL" | null>(null);
 
   // Tick every second so the countdown updates live and flips to "Overdue"
   // while the banner is on screen (the banner shows precisely when paused, so
@@ -222,6 +227,72 @@ export function ApprovalBanner({
   };
 
   const outcomeUnknown = new Set(toolPause?.outcomeUnknown ?? []);
+
+  // Distinct gated tool names for the Approve confirmation on a TOOL_CALL pause,
+  // so the reviewer sees exactly what will execute before it runs.
+  const gatedToolNames = toolPause
+    ? Array.from(new Set(toolPause.calls.map((c) => c.toolName)))
+    : [];
+
+  // Fire the pending action only after the reviewer confirms. Validation and the
+  // exact decision payload (per-call verdicts, amendments, notes, task
+  // approvals) are unchanged — the confirm step is inserted before them.
+  const runConfirmedAction = () => {
+    const action = confirmAction;
+    setConfirmAction(null);
+    if (!action) return;
+    if (action === "CANCEL") {
+      onCancel?.();
+      return;
+    }
+    handleSubmit(action);
+  };
+
+  const confirmDialog = (() => {
+    switch (confirmAction) {
+      case "APPROVED":
+        return isToolCall
+          ? {
+              title: t("hitl.confirmApproveToolTitle", "Approve tool execution?"),
+              description: t(
+                "hitl.confirmApproveToolDescription",
+                "Approving will run: {{toolNames}}. This performs real actions and cannot be undone.",
+                { toolNames: gatedToolNames.join(", ") },
+              ),
+              confirmLabel: t("hitl.approve", "Approve"),
+              variant: "warning" as const,
+            }
+          : {
+              title: t("hitl.confirmApproveTitle", "Approve request?"),
+              description: t("hitl.confirmApproveDescription", "Approve and resume this conversation?"),
+              confirmLabel: t("hitl.approve", "Approve"),
+              variant: "warning" as const,
+            };
+      case "REJECTED":
+        return {
+          title: t("hitl.confirmRejectTitle", "Reject request?"),
+          description: t("hitl.confirmRejectDescription", "Reject this request? The conversation will not proceed."),
+          confirmLabel: t("hitl.reject", "Reject"),
+          variant: "destructive" as const,
+        };
+      case "CANCEL":
+        return surface === "group"
+          ? {
+              title: t("hitl.confirmCancelGroupTitle", "Cancel discussion?"),
+              description: t("hitl.confirmCancelGroupDescription", "Cancel this discussion? Any in-progress work is aborted."),
+              confirmLabel: t("hitl.confirmCancelGroupButton", "Cancel discussion"),
+              variant: "destructive" as const,
+            }
+          : {
+              title: t("hitl.confirmCancelTitle", "Cancel conversation?"),
+              description: t("hitl.confirmCancelDescription", "Cancel this conversation? Any in-progress work is aborted."),
+              confirmLabel: t("hitl.confirmCancelButton", "Cancel conversation"),
+              variant: "destructive" as const,
+            };
+      default:
+        return null;
+    }
+  })();
 
   return (
     <div
@@ -451,7 +522,7 @@ export function ApprovalBanner({
         <button
           type="button"
           disabled={isSubmitting || pauseDetailsPending}
-          onClick={() => handleSubmit("APPROVED")}
+          onClick={() => setConfirmAction("APPROVED")}
           className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
           data-testid="approve-button"
         >
@@ -461,7 +532,7 @@ export function ApprovalBanner({
         <button
           type="button"
           disabled={isSubmitting}
-          onClick={() => handleSubmit("REJECTED")}
+          onClick={() => setConfirmAction("REJECTED")}
           className="inline-flex items-center gap-1.5 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:opacity-50 disabled:cursor-not-allowed"
           data-testid="reject-button"
         >
@@ -472,7 +543,7 @@ export function ApprovalBanner({
           <button
             type="button"
             disabled={isSubmitting}
-            onClick={onCancel}
+            onClick={() => setConfirmAction("CANCEL")}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="cancel-button"
           >
@@ -480,6 +551,22 @@ export function ApprovalBanner({
           </button>
         )}
       </div>
+
+      {/* Confirmation gate — no destructive HITL action fires on a single click. */}
+      {confirmDialog && (
+        <AlertDialog
+          open={confirmAction !== null}
+          onOpenChange={(open) => {
+            if (!open) setConfirmAction(null);
+          }}
+          title={confirmDialog.title}
+          description={confirmDialog.description}
+          confirmLabel={confirmDialog.confirmLabel}
+          cancelLabel={t("hitl.confirmDismiss", "Go back")}
+          variant={confirmDialog.variant}
+          onConfirm={runConfirmedAction}
+        />
+      )}
     </div>
   );
 }

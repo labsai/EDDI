@@ -2264,15 +2264,20 @@ export const handlers = [
   }),
 
   http.get("*/schedulestore/schedules/admin/failed", () => {
+    const now = Date.now();
     return HttpResponse.json([
       {
         id: "fire-fail-1",
         scheduleId: "sched-3",
-        scheduleName: "Failed Report",
-        agentId: "agent1",
-        firedAt: Date.now() - 604800000,
-        success: false,
-        error: "Agent not deployed in production environment",
+        fireId: "f-3-1",
+        fireTime: new Date(now - 604800000).toISOString(),
+        startedAt: new Date(now - 604800000).toISOString(),
+        completedAt: new Date(now - 604799000).toISOString(),
+        status: "DEAD_LETTERED",
+        conversationId: null,
+        errorMessage: "Agent not deployed in production environment",
+        attemptNumber: 3,
+        cost: 0,
       },
     ]);
   }),
@@ -2336,28 +2341,31 @@ export const handlers = [
   }),
 
   http.get("*/schedulestore/schedules/:id/fires", () => {
+    const now = Date.now();
     return HttpResponse.json([
       {
         id: "fire-1",
         scheduleId: "sched-1",
-        scheduleName: "Daily Health Check",
-        agentId: "agent1",
+        fireId: "f-1-1",
+        fireTime: new Date(now - 43200000).toISOString(),
+        startedAt: new Date(now - 43200000).toISOString(),
+        completedAt: new Date(now - 43195000).toISOString(),
+        status: "COMPLETED",
         conversationId: "conv-fire-001",
-        firedAt: Date.now() - 43200000,
-        completedAt: Date.now() - 43195000,
-        durationMs: 5000,
-        success: true,
+        attemptNumber: 1,
+        cost: 0.0012,
       },
       {
         id: "fire-2",
         scheduleId: "sched-1",
-        scheduleName: "Daily Health Check",
-        agentId: "agent1",
+        fireId: "f-1-2",
+        fireTime: new Date(now - 129600000).toISOString(),
+        startedAt: new Date(now - 129600000).toISOString(),
+        completedAt: new Date(now - 129594000).toISOString(),
+        status: "COMPLETED",
         conversationId: "conv-fire-002",
-        firedAt: Date.now() - 129600000,
-        completedAt: Date.now() - 129594000,
-        durationMs: 6000,
-        success: true,
+        attemptNumber: 1,
+        cost: 0.0015,
       },
     ]);
   }),
@@ -3352,26 +3360,27 @@ const FIRE_LOGS_MOCK = [
   {
     id: "fire-1",
     scheduleId: "sched-1",
-    scheduleName: "Daily Health Check",
-    agentId: "agent1",
+    fireId: "f-1-1",
+    fireTime: new Date(Date.now() - 86400000).toISOString(),
+    startedAt: new Date(Date.now() - 86400000).toISOString(),
+    completedAt: new Date(Date.now() - 86399000).toISOString(),
+    status: "COMPLETED",
     conversationId: "conv-123",
-    firedAt: Date.now() - 86400000,
-    completedAt: Date.now() - 86399000,
-    durationMs: 1000,
-    success: true,
-    error: null,
+    attemptNumber: 1,
+    cost: 0.001,
   },
   {
     id: "fire-2",
     scheduleId: "sched-1",
-    scheduleName: "Daily Health Check",
-    agentId: "agent1",
+    fireId: "f-1-2",
+    fireTime: new Date(Date.now() - 172800000).toISOString(),
+    startedAt: new Date(Date.now() - 172800000).toISOString(),
+    completedAt: new Date(Date.now() - 172799500).toISOString(),
+    status: "FAILED",
     conversationId: "conv-124",
-    firedAt: Date.now() - 172800000,
-    completedAt: Date.now() - 172799500,
-    durationMs: 500,
-    success: false,
-    error: "Connection timeout",
+    errorMessage: "Connection timeout",
+    attemptNumber: 2,
+    cost: 0,
   },
 ];
 
@@ -3436,7 +3445,9 @@ export const scheduleHandlers = [
 
   // Admin - failed fires
   http.get("*/schedulestore/schedules/admin/failed", () => {
-    return HttpResponse.json(FIRE_LOGS_MOCK.filter((l) => !l.success));
+    return HttpResponse.json(
+      FIRE_LOGS_MOCK.filter((l) => l.status !== "COMPLETED")
+    );
   }),
 
   // Retry dead letter

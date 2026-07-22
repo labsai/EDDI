@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
@@ -267,8 +267,8 @@ describe("AgentDetailPage", () => {
     });
   });
 
-  // ─── Undeploy flow ──────────────────────────────────────────────────────
-  it("undeploy button calls undeploy API when agent is deployed", async () => {
+  // ─── Undeploy flow — now gated behind a confirmation dialog ─────────────
+  it("undeploy button opens a confirmation dialog and only fires on confirm", async () => {
     let undeployCalled = false;
     server.use(
       http.get("*/administration/:env/deploymentstatus/:agentId", () => {
@@ -289,11 +289,127 @@ describe("AgentDetailPage", () => {
       expect(btn).toHaveTextContent(/Undeploy/i);
     });
 
+    // Clicking the button opens a confirmation dialog — it must NOT fire yet.
     await user.click(screen.getByTestId("deploy-btn"));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/will be undeployed/i)).toBeInTheDocument();
+    expect(undeployCalled).toBe(false);
+
+    // Confirm inside the dialog fires the undeploy.
+    await user.click(within(dialog).getByRole("button", { name: /Undeploy/i }));
 
     await waitFor(() => {
       expect(undeployCalled).toBe(true);
     });
+  });
+
+  it("undeploy dialog names the environment being undeployed", async () => {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", () => {
+        return HttpResponse.json({ status: "READY" });
+      })
+    );
+
+    renderAgentDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deploy-btn")).toHaveTextContent(/Undeploy/i);
+    });
+
+    await user.click(screen.getByTestId("deploy-btn"));
+
+    const dialog = await screen.findByRole("dialog");
+    // Default environment for the main button is "production"
+    expect(within(dialog).getByText(/Production/)).toBeInTheDocument();
+  });
+
+  it("undeploy dialog exposes the two destructive option checkboxes (default off)", async () => {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", () => {
+        return HttpResponse.json({ status: "READY" });
+      })
+    );
+
+    renderAgentDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deploy-btn")).toHaveTextContent(/Undeploy/i);
+    });
+
+    await user.click(screen.getByTestId("deploy-btn"));
+
+    const endBox = await screen.findByTestId("undeploy-end-conversations-checkbox");
+    const prevBox = screen.getByTestId("undeploy-previous-versions-checkbox");
+    expect(endBox).not.toBeChecked();
+    expect(prevBox).not.toBeChecked();
+  });
+
+  it("checking both undeploy options adds the destructive query params to the request", async () => {
+    let undeployUrl: URL | null = null;
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", () => {
+        return HttpResponse.json({ status: "READY" });
+      }),
+      http.post("*/administration/:env/undeploy/:id", ({ request }) => {
+        undeployUrl = new URL(request.url);
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    renderAgentDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deploy-btn")).toHaveTextContent(/Undeploy/i);
+    });
+
+    await user.click(screen.getByTestId("deploy-btn"));
+
+    await screen.findByTestId("undeploy-end-conversations-checkbox");
+    await user.click(screen.getByTestId("undeploy-end-conversations-checkbox"));
+    await user.click(screen.getByTestId("undeploy-previous-versions-checkbox"));
+
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: /Undeploy/i }));
+
+    await waitFor(() => {
+      expect(undeployUrl).not.toBeNull();
+    });
+    expect(undeployUrl!.searchParams.get("endAllActiveConversations")).toBe("true");
+    expect(undeployUrl!.searchParams.get("undeployThisAndAllPreviousAgentVersions")).toBe("true");
+  });
+
+  it("undeploy request omits the destructive flags when options are left unchecked", async () => {
+    let undeployUrl: URL | null = null;
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", () => {
+        return HttpResponse.json({ status: "READY" });
+      }),
+      http.post("*/administration/:env/undeploy/:id", ({ request }) => {
+        undeployUrl = new URL(request.url);
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    renderAgentDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deploy-btn")).toHaveTextContent(/Undeploy/i);
+    });
+
+    await user.click(screen.getByTestId("deploy-btn"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: /Undeploy/i }));
+
+    await waitFor(() => {
+      expect(undeployUrl).not.toBeNull();
+    });
+    expect(undeployUrl!.searchParams.has("endAllActiveConversations")).toBe(false);
+    expect(undeployUrl!.searchParams.has("undeployThisAndAllPreviousAgentVersions")).toBe(false);
   });
 
   // ─── Chat button ────────────────────────────────────────────────────────

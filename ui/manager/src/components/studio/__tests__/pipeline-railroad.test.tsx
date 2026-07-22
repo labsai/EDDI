@@ -103,4 +103,26 @@ describe("PipelineRailroad", () => {
     // The stage-0 should have a running indicator (animate-pulse class on inner div)
     expect(screen.getByTestId("stage-0")).toBeInTheDocument();
   });
+
+  it("marks the recovered stage index as error on task_failed, not the failed payload's index", () => {
+    // task_start for stage 1 (taskId "t2"), then a task_failed whose payload
+    // index is WRONG (0). The status must be recovered from indexByTaskId (→ 1),
+    // so stage 1 becomes error while stage 0 stays idle.
+    useDebugStore.setState({
+      currentTurnEvents: [
+        { type: "task_start", taskId: "t2", taskType: "ai.labs.llm", index: 1, timestamp: Date.now() },
+        { type: "task_failed", taskId: "t2", taskType: "ai.labs.llm", index: 0, errorType: "timeout", timestamp: Date.now() },
+      ],
+    });
+    renderRailroad();
+
+    const stage1Icon = screen.getByTestId("stage-1").querySelector(".h-9")!;
+    const stage0Icon = screen.getByTestId("stage-0").querySelector(".h-9")!;
+
+    // Stage 1 was running, then failed → error: no longer amber/running
+    expect(stage1Icon.className).not.toContain("bg-amber-500/10");
+    expect(stage1Icon.className).not.toContain("animate-pulse");
+    // The error did NOT land on the payload's index (0) — stage 0 stays idle
+    expect(stage0Icon.className).toContain("bg-muted/50");
+  });
 });
