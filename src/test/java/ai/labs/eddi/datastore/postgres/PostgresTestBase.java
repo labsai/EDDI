@@ -54,8 +54,12 @@ public abstract class PostgresTestBase {
      * Creates a minimal {@link Instance<DataSource>} wrapper that returns our test
      * DataSource. Only {@code get()} is implemented — all other Instance methods
      * throw UnsupportedOperationException.
+     * <p>
+     * Public so that cross-store tests outside this package (e.g.
+     * {@code ai.labs.eddi.engine.tenancy.TenantQuotaStoreParityTest}) can reuse the
+     * single shared container instead of starting a second one.
      */
-    protected static Instance<DataSource> createDataSourceInstance() {
+    public static Instance<DataSource> createDataSourceInstance() {
         DataSource ds = createDataSource();
         return new SimpleDataSourceInstance(ds);
     }

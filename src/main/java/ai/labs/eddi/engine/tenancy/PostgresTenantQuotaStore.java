@@ -70,6 +70,73 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             )
             """;
 
+    /**
+     * Materialises the single usage row for a tenant with neutral counters and
+     * correctly truncated window starts. Never touches an existing row.
+     */
+    private static final String ENSURE_USAGE_ROW = """
+            INSERT INTO tenant_usage
+                (tenant_id, conversations_today, day_start,
+                 api_calls_this_minute, minute_start,
+                 monthly_cost_usd, cost_month)
+            VALUES (?, 0, ?, 0, ?, 0.0, NULL)
+            ON CONFLICT (tenant_id) DO NOTHING
+            """;
+
+    private static final String INCREMENT_CONVERSATIONS = """
+            UPDATE tenant_usage SET conversations_today = conversations_today + 1
+            WHERE tenant_id = ? AND day_start = ? AND conversations_today < ?
+            RETURNING conversations_today
+            """;
+
+    /**
+     * Materialise-or-roll for the daily window. The {@code WHERE} on the
+     * {@code DO UPDATE} is load-bearing: without it a row whose window is still
+     * current is rewritten (or reported as updated) even when the counter has
+     * already reached the limit, which silently voids the cap.
+     */
+    private static final String ENSURE_AND_ROLL_DAY_WINDOW = """
+            INSERT INTO tenant_usage
+                (tenant_id, conversations_today, day_start,
+                 api_calls_this_minute, minute_start,
+                 monthly_cost_usd, cost_month)
+            VALUES (?, 0, ?, 0, ?, 0.0, NULL)
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                conversations_today = 0,
+                day_start = ?
+            WHERE tenant_usage.day_start < ?
+            """;
+
+    private static final String INCREMENT_API_CALLS = """
+            UPDATE tenant_usage SET api_calls_this_minute = api_calls_this_minute + 1
+            WHERE tenant_id = ? AND minute_start = ? AND api_calls_this_minute < ?
+            RETURNING api_calls_this_minute
+            """;
+
+    /**
+     * Materialise-or-roll for the per-minute window. See
+     * {@link #ENSURE_AND_ROLL_DAY_WINDOW} for why the {@code WHERE} matters.
+     */
+    private static final String ENSURE_AND_ROLL_MINUTE_WINDOW = """
+            INSERT INTO tenant_usage
+                (tenant_id, conversations_today, day_start,
+                 api_calls_this_minute, minute_start,
+                 monthly_cost_usd, cost_month)
+            VALUES (?, 0, ?, 0, ?, 0.0, NULL)
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                api_calls_this_minute = 0,
+                minute_start = ?
+            WHERE tenant_usage.minute_start < ?
+            """;
+
+    private static final String ADD_COST = """
+            UPDATE tenant_usage SET
+                monthly_cost_usd = CASE WHEN cost_month = ? THEN monthly_cost_usd + ? ELSE ? END,
+                cost_month = ?
+            WHERE tenant_id = ?
+            RETURNING monthly_cost_usd
+            """;
+
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
 
@@ -261,6 +328,21 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     }
 
     // ─── Atomic Usage Operations ───
+    //
+    // All three mutating operations share the same shape, mirroring
+    // MongoTenantQuotaStore so that the two backends cannot drift apart:
+    //
+    // 1. FAST PATH — one conditional UPDATE ... RETURNING (window current AND
+    // counter below the limit). In steady state this is the only statement.
+    // 2. MATERIALISE-OR-ROLL — INSERT ... ON CONFLICT DO UPDATE ... WHERE <window
+    // expired>, which creates the row or resets an expired window to zero, and is
+    // a strict no-op for a row whose window is still current.
+    // 3. RETRY — re-run the fast-path statement.
+    //
+    // Because step 2 resets to ZERO (never to 1) and step 3 does the counting, the
+    // limit is enforced by exactly one predicate — `counter < limit` — in every
+    // path. An at-limit request with a current window falls through both steps and
+    // is denied. `limit == 0` therefore denies without a special case.
 
     @Override
     public QuotaCheckResult tryIncrementConversations(String tenantId, int limit) {
@@ -269,53 +351,27 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         }
 
         long dayStartMs = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        long minuteStartMs = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
 
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
-            // First: try atomic increment within current window
-            try (PreparedStatement ps = conn.prepareStatement(
-                    """
-                            UPDATE tenant_usage SET conversations_today = conversations_today + 1
-                            WHERE tenant_id = ? AND day_start = ? AND conversations_today < ?
-                            RETURNING conversations_today
-                            """)) {
-                ps.setString(1, tenantId);
-                ps.setLong(2, dayStartMs);
-                ps.setInt(3, limit);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return QuotaCheckResult.OK;
-                    }
-                }
+            if (tryConsumeSlot(conn, INCREMENT_CONVERSATIONS, tenantId, dayStartMs, limit)) {
+                return QuotaCheckResult.OK;
             }
 
-            // Window may be stale — try to reset and increment atomically
-            try (PreparedStatement ps = conn.prepareStatement(
-                    """
-                            INSERT INTO tenant_usage
-                                (tenant_id, conversations_today, day_start,
-                                 api_calls_this_minute, minute_start,
-                                 monthly_cost_usd, cost_month)
-                            VALUES (?, 1, ?, 0, ?, 0.0, ?)
-                            ON CONFLICT (tenant_id) DO UPDATE SET
-                                conversations_today = CASE WHEN tenant_usage.day_start < ? THEN 1 ELSE tenant_usage.conversations_today END,
-                                day_start = CASE WHEN tenant_usage.day_start < ? THEN ? ELSE tenant_usage.day_start END
-                            RETURNING conversations_today
-                            """)) {
-                long minuteStart = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
-                String costMonth = YearMonth.now(ZoneOffset.UTC).toString();
+            // Row missing, window expired, or limit reached — materialise / roll, then
+            // retry. A row whose window is still current is left untouched.
+            try (PreparedStatement ps = conn.prepareStatement(ENSURE_AND_ROLL_DAY_WINDOW)) {
                 ps.setString(1, tenantId);
                 ps.setLong(2, dayStartMs);
-                ps.setLong(3, minuteStart);
-                ps.setString(4, costMonth);
+                ps.setLong(3, minuteStartMs);
+                ps.setLong(4, dayStartMs);
                 ps.setLong(5, dayStartMs);
-                ps.setLong(6, dayStartMs);
-                ps.setLong(7, dayStartMs);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next() && rs.getInt(1) <= limit) {
-                        return QuotaCheckResult.OK;
-                    }
-                }
+                ps.executeUpdate();
+            }
+
+            if (tryConsumeSlot(conn, INCREMENT_CONVERSATIONS, tenantId, dayStartMs, limit)) {
+                return QuotaCheckResult.OK;
             }
         } catch (SQLException e) {
             LOGGER.errorf("Failed to increment conversations for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
@@ -330,53 +386,26 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             return QuotaCheckResult.OK;
         }
 
-        long minuteStart = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        long minuteStartMs = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        long dayStartMs = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
 
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
-            try (PreparedStatement ps = conn.prepareStatement(
-                    """
-                            UPDATE tenant_usage SET api_calls_this_minute = api_calls_this_minute + 1
-                            WHERE tenant_id = ? AND minute_start = ? AND api_calls_this_minute < ?
-                            RETURNING api_calls_this_minute
-                            """)) {
-                ps.setString(1, tenantId);
-                ps.setLong(2, minuteStart);
-                ps.setInt(3, limit);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return QuotaCheckResult.OK;
-                    }
-                }
+            if (tryConsumeSlot(conn, INCREMENT_API_CALLS, tenantId, minuteStartMs, limit)) {
+                return QuotaCheckResult.OK;
             }
 
-            // Window may be stale — reset
-            try (PreparedStatement ps = conn.prepareStatement(
-                    """
-                            INSERT INTO tenant_usage
-                                (tenant_id, conversations_today, day_start,
-                                 api_calls_this_minute, minute_start,
-                                 monthly_cost_usd, cost_month)
-                            VALUES (?, 0, ?, 1, ?, 0.0, ?)
-                            ON CONFLICT (tenant_id) DO UPDATE SET
-                                api_calls_this_minute = CASE WHEN tenant_usage.minute_start < ? THEN 1 ELSE tenant_usage.api_calls_this_minute END,
-                                minute_start = CASE WHEN tenant_usage.minute_start < ? THEN ? ELSE tenant_usage.minute_start END
-                            RETURNING api_calls_this_minute
-                            """)) {
-                long dayStart = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
-                String costMonth = YearMonth.now(ZoneOffset.UTC).toString();
+            try (PreparedStatement ps = conn.prepareStatement(ENSURE_AND_ROLL_MINUTE_WINDOW)) {
                 ps.setString(1, tenantId);
-                ps.setLong(2, dayStart);
-                ps.setLong(3, minuteStart);
-                ps.setString(4, costMonth);
-                ps.setLong(5, minuteStart);
-                ps.setLong(6, minuteStart);
-                ps.setLong(7, minuteStart);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next() && rs.getInt(1) <= limit) {
-                        return QuotaCheckResult.OK;
-                    }
-                }
+                ps.setLong(2, dayStartMs);
+                ps.setLong(3, minuteStartMs);
+                ps.setLong(4, minuteStartMs);
+                ps.setLong(5, minuteStartMs);
+                ps.executeUpdate();
+            }
+
+            if (tryConsumeSlot(conn, INCREMENT_API_CALLS, tenantId, minuteStartMs, limit)) {
+                return QuotaCheckResult.OK;
             }
         } catch (SQLException e) {
             LOGGER.errorf("Failed to increment API calls for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
@@ -388,41 +417,39 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     @Override
     public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
         String monthKey = YearMonth.now(ZoneOffset.UTC).toString();
+        long dayStartMs = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        long minuteStartMs = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
 
         ensureSchema();
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(
-                        """
-                                INSERT INTO tenant_usage
-                                    (tenant_id, conversations_today, day_start,
-                                     api_calls_this_minute, minute_start,
-                                     monthly_cost_usd, cost_month)
-                                VALUES (?, 0, ?, 0, ?, ?, ?)
-                                ON CONFLICT (tenant_id) DO UPDATE SET
-                                    monthly_cost_usd = CASE WHEN tenant_usage.cost_month = ? THEN tenant_usage.monthly_cost_usd + ? ELSE ? END,
-                                    cost_month = ?
-                                RETURNING monthly_cost_usd
-                                """)) {
-            long now = Instant.now().toEpochMilli();
-            ps.setString(1, tenantId);
-            ps.setLong(2, now);
-            ps.setLong(3, now);
-            ps.setDouble(4, cost);
-            ps.setString(5, monthKey);
-            ps.setString(6, monthKey);
-            ps.setDouble(7, cost);
-            ps.setDouble(8, cost);
-            ps.setString(9, monthKey);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    double totalCost = rs.getDouble(1);
-                    // >=, not >, to agree with TenantQuotaService.checkCostBudget
-                    // (currentCost >= limit) and InMemoryTenantQuotaStore. With > the
-                    // pre-call gate denied at exactly the limit while post-call
-                    // accounting allowed.
-                    if (limit >= 0 && totalCost >= limit) {
-                        return QuotaCheckResult.denied(
-                                "Monthly cost budget exceeded ($%.2f / $%.2f)".formatted(totalCost, limit));
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            // Materialise the shared usage row first, with correctly truncated window
+            // starts. Seeding raw wall-clock timestamps here would leave day_start /
+            // minute_start ahead of every truncated window value the increment paths
+            // compare against, permanently denying that tenant's conversations.
+            try (PreparedStatement ps = conn.prepareStatement(ENSURE_USAGE_ROW)) {
+                ps.setString(1, tenantId);
+                ps.setLong(2, dayStartMs);
+                ps.setLong(3, minuteStartMs);
+                ps.executeUpdate();
+            }
+
+            try (PreparedStatement ps = conn.prepareStatement(ADD_COST)) {
+                ps.setString(1, monthKey);
+                ps.setDouble(2, cost);
+                ps.setDouble(3, cost);
+                ps.setString(4, monthKey);
+                ps.setString(5, tenantId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        double totalCost = rs.getDouble(1);
+                        // >=, not >, to agree with TenantQuotaService.checkCostBudget
+                        // (currentCost >= limit) and InMemoryTenantQuotaStore. With > the
+                        // pre-call gate denied at exactly the limit while post-call
+                        // accounting allowed.
+                        if (limit >= 0 && totalCost >= limit) {
+                            return QuotaCheckResult.denied(
+                                    "Monthly cost budget exceeded ($%.2f / $%.2f)".formatted(totalCost, limit));
+                        }
                     }
                 }
             }
@@ -433,6 +460,22 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             return QuotaCheckResult.denied("Cost accounting failed — denying request for safety");
         }
         return QuotaCheckResult.OK;
+    }
+
+    /**
+     * Conditional increment: succeeds only when the tenant's window is current and
+     * the counter is still below the limit. Never inserts.
+     */
+    private boolean tryConsumeSlot(Connection conn, String sql, String tenantId, long windowStart, int limit)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tenantId);
+            ps.setLong(2, windowStart);
+            ps.setInt(3, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
     }
 
     // ─── Usage Reporting ───

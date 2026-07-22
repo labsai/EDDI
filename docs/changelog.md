@@ -5,6 +5,44 @@
 
 ---
 
+## 🐛 Deny tenant quotas **at** the limit on the Postgres store (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D9**, part 2 of 3 — on PostgreSQL the daily conversation cap and the per-minute API-call cap were **never enforced at all**.
+
+### The defect
+
+Both increment methods had a fast path (`UPDATE … WHERE window = ? AND counter < ? RETURNING counter`) and, on a miss, a fallback `INSERT … ON CONFLICT (tenant_id) DO UPDATE SET counter = CASE WHEN window_start < ? THEN 1 ELSE counter END … RETURNING counter`, guarded by `if (rs.next() && rs.getInt(1) <= limit)`.
+
+When the window was **not** stale, the `CASE` took its `ELSE` branch and returned the counter **unchanged** — i.e. exactly `limit`, because the fast path only ever increments while `counter < limit`. `limit <= limit` is true, so the store returned OK. And because that path never increments, the counter stayed pinned at `limit` and *every subsequent request also returned OK*. The cap leaked without bound; only the fast path's own `< limit` was ever consulted, and it had already failed.
+
+The two unit tests covering this stubbed the fallback to return `11` against a limit of `10` (and `61` against `60`) — values production can never produce at that point — so they asserted the right verdict through an impossible fixture and stayed green while the quota did nothing.
+
+### The fix
+
+The `ON CONFLICT … DO UPDATE` now carries `WHERE tenant_usage.day_start < ?` (resp. `minute_start`), and resets the counter to **zero** instead of one; the increment statement is then re-run. This mirrors the Mongo store exactly:
+
+1. conditional increment (fast path, the only statement in steady state);
+2. materialise-or-roll — creates the row or resets an expired window, and is a strict no-op for a row whose window is still current;
+3. retry the conditional increment.
+
+The cap is now enforced by a single predicate, `counter < limit`, in every path. A request at the limit with a current window falls through steps 2 and 3 and is denied, and `limit = 0` denies without a special case.
+
+`tryAddCost` got the same materialise-first treatment, which also fixes a latent bug in its `INSERT`: it seeded `day_start` / `minute_start` with a **raw wall-clock timestamp** rather than a truncated window start. A row first created by a cost write therefore had `day_start` *greater* than every truncated value the increment paths compare against — so neither `day_start = ?` nor `day_start < ?` could ever match and that tenant's conversations would have been denied until the next UTC day.
+
+### Tests
+
+- **`TenantQuotaStoreParityTest`** (new, Testcontainers) — runs one boundary sequence through all three `ITenantQuotaStore` implementations (in-memory, Mongo, Postgres) and asserts identical verdicts: allowed below the limit, denied at it, denied for `limit = 0`, unlimited for `limit < 0`, cost denied once spend reaches the budget, and all three counters coexisting. 18 tests. Against the reverted Postgres store exactly the three `postgres:` rows fail (`conversationsDenyAtLimit`, `apiCallsDenyAtLimit`, `zeroLimitDeniesEverything`); the Mongo and in-memory rows stay green, which is the point — this is the only shape that catches a *divergence*.
+- **`PostgresTenantQuotaStoreTest`** — the two impossible fixtures are replaced with faithful ones, plus a structural guard per method asserting the materialise-or-roll SQL carries its expired-window `WHERE`. The behavioural at-limit proof cannot live in a mocked JDBC layer (whether `DO UPDATE` fires is Postgres's decision, not the code's), so the structural guard is what fails there against the old SQL; the parity test carries the behaviour.
+- `PostgresTestBase.createDataSourceInstance()` widened from `protected` to `public` so the parity test can reuse the single shared container instead of starting a second one.
+
+### Operator note — behaviour change
+
+Deployments running `eddi.tenant.quota.enabled=true` **on PostgreSQL** were not enforcing `max-conversations-per-day` or `max-api-calls-per-minute` at all. They will now start returning quota denials (HTTP 429) once a tenant reaches its configured limit. If limits were tuned against the leaky behaviour, they will need revisiting — this reads as a regression but is the cap doing its job for the first time. MongoDB and in-memory deployments are unaffected by this part.
+
+---
+
 ## 🐛 Keep all tenant quota counters in one `tenant_usage` document (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)
