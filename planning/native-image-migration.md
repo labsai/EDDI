@@ -188,6 +188,28 @@ These deps are NOT covered by quarkus-langchain4j and need manual reflection con
 | **jnats** 2.25.2 | NATS coordinator | 🟢 Pure Java TCP client | Likely works; verify with tracing agent |
 | **quarkus-mcp-server-http** 1.11.0 | MCP server | ✅ Quarkus extension handles native | No action needed |
 
+### ⚠️ Caffeine variable expiry — must be verified in the first native build
+
+`CacheFactory` builds **every** cache with `Caffeine.expireAfter(Expiry)` (see
+`WriteExpiry`), because that is what exposes `policy().expireVariably()` and lets
+`CacheImpl` honour the per-entry TTLs of `ICache.put(key, value, lifespan, unit)`
+(backlog item D5b). Caffeine picks a **generated `BoundedLocalCache` subclass**
+per feature combination, and `quarkus-caffeine` registers a *fixed list* of those
+generated classes for reflection at build time. The variable-expiry combinations
+(`…W`/`…S` + expiry-variable flavours) may not be on that list.
+
+- **Symptom if unregistered:** `ClassNotFoundException` / `NoSuchMethodException`
+  from `Caffeine.build()` at first cache creation — i.e. every `@PostConstruct`
+  that calls `cacheFactory.getCache(...)` fails on startup.
+- **Invisible in JVM mode.** `mvnw test` and the JVM-mode CI pipeline cannot
+  catch this; it only appears in a native binary.
+- **Action in Phase 3:** exercise `CacheFactory.getCache(name)` **and**
+  `getCache(name, ttl)` in the first native smoke test. If the generated class is
+  missing, add it via `@RegisterForReflection(classNames = …)` or a
+  `reflect-config.json` entry rather than reverting to `expireAfterWrite` — the
+  per-entry TTL is load-bearing for the tool-result cache, paginated tool
+  responses and A2A nonce replay protection.
+
 ---
 
 ## Execution Plan

@@ -5,6 +5,54 @@
 
 ---
 
+## ⏳ Cache entries finally expire — `CacheImpl` honours per-entry TTLs (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D5b**, the follow-up to D5. Every TTL-bearing `ICache` overload in `CacheImpl` dropped its `lifespan` argument and delegated to the untimed variant. Caffeine's standard builder has no per-entry expiry, so the wrapper simply threw the number away. Consequences, all live in production until now:
+
+- **`ToolCacheService`'s entire smart-TTL table was decorative.** `weather` 300s, `websearch` 1800s, `calculator` 7 days — every one of those values was computed, passed to `cache.put(key, value, ttl, unit)` and discarded. Tool results were removed by 10 000-entry size eviction alone, so a stale or poisoned result could be served indefinitely. `GET /llm/tools/cache/ttl/{toolName}` reported numbers that governed nothing.
+- **`PaginatedResponseStore`'s documented "15-minute TTL" never existed.** Pages lived until the cache filled.
+- **A2A replay nonces had no expiry at all.** `NonceCacheService` carried a comment claiming expiry was "configured externally via Caffeine `expireAfterWrite` in `application.properties`". There is no such configuration anywhere in the repo.
+
+### The fix
+
+`CacheFactory` now builds **every** cache with `Caffeine.expireAfter(Expiry)` instead of leaving expiry unconfigured (size-only caches) or using `expireAfterWrite(ttl)` (TTL caches). That is what exposes Caffeine's `policy().expireVariably()` view, and `CacheImpl` writes every TTL-bearing overload through it. Two entries in one cache can now carry two different lifespans.
+
+- **New `WriteExpiry`** (package-private, `engine/caching`) — the `Expiry` implementation. `never()` for size-only caches (an entry written without a lifespan still never expires on its own); `of(ttl)` for TTL caches (identical observable behaviour to `expireAfterWrite`). `expireAfterRead` returns `currentDuration`, so expiry stays expire-after-**write** and a read never keeps an entry alive.
+- **`CacheImpl`** — `put`/`putIfAbsent` route through `VarExpiration`, which is atomic and returns the replaced value in one operation. `putAll` applies the lifespan per entry. Both `replace` overloads do the replace and then `setExpiresAfter` on success — **not atomic**, and the javadoc says so, because Caffeine has no replace-with-duration primitive. A **negative lifespan means unlimited** per the `ICache` contract and is translated into an effectively infinite duration; forwarding it would make Caffeine throw `IllegalArgumentException`. The false javadoc about `CachedResult.expiresAt` is gone.
+- **`NonceCacheService`** — asks for `getCache(name, maxAge + clockSkew + 60s)` (390s with the defaults) instead of the size-only cache, and the fictional comment about `application.properties` is deleted.
+- **`CacheFactory.CACHE_SIZES`** — `paginated-tool-responses` pinned at 1 000 (entries are whole oversized tool responses; the TTL is now the primary eviction path and the cap only bounds memory) and `nonce-replay-protection` raised to 100 000. The 1 000 default was a security hole: on a busy A2A endpoint a nonce could be size-evicted while its timestamp still passed the freshness check, re-opening the replay window. 100 000 covers ~300 signed requests/second sustained across the whole ~5.5-minute window.
+
+### Design decisions
+
+- **Variable expiry in the factory, not a per-cache workaround.** The alternative — one Caffeine instance per distinct TTL value, keyed like the existing `name:ttl=…` scheme — would have given `tool-results` nine separate caches with nine separate size budgets and no shared eviction. Per-entry expiry is what the `ICache` contract already promised.
+- **`expireAfter` replaces `expireAfterWrite`, it is not added to it.** Caffeine throws `IllegalStateException` at `build()` if both are configured, which would have failed the `@PostConstruct` of `SlackEventHandler`, `ChannelTargetRouter` and `NonceCacheService` on startup. `CacheFactoryTest` pins this.
+- **`maxIdleTime` on the two six-argument overloads is explicitly unsupported.** Caffeine cannot combine a per-entry write duration with a per-entry idle duration. The `lifespan` is honoured (previously both were discarded) and the javadoc states the limitation. These overloads have no callers in EDDI.
+- **A `CacheImpl` over a cache with no variable expiry degrades instead of throwing.** Only reachable by constructing the class directly rather than through `CacheFactory`; the constructor logs a WARN naming the cache.
+- **15 minutes is comfortably longer than a tool-calling loop.** The `PaginatedResponseStore` TTL runs from `store()`, and a loop is bounded by the LLM request timeout — seconds to a couple of minutes. `FetchToolResponsePageTool` already returns "It may have expired (15 minute TTL)" for an unresolvable `responseId`; that message is finally true.
+
+### ⚠️ Operator-visible behaviour change
+
+- **Tool results that were cached forever now expire on the smart-TTL table.** Cache hit rate will fall and real tool invocations — with their external API spend — will rise. The effect is sharpest for the short-TTL tools: `weather` (300s), `news` (600s), `websearch` (1800s), and anything with no table entry (300s default). `calculator`/`pdfreader`/`dataformatter`/`textsummarizer` (24h–7d) barely move. Watch `eddi_tool_cache_hits_total` / `eddi_tool_cache_misses_total`.
+- **This is a correctness fix, not a regression.** Serving a 5-day-old weather reading was never intended behaviour.
+- **Paginated tool responses now expire 15 minutes after they are stored.** An LLM that sits on a `responseId` past that gets the existing "may have expired" error instead of a page.
+- **A2A replay nonces now expire ~6.5 minutes after first use** instead of living until size eviction. Steady-state nonce memory drops; replay protection gets *stronger*, not weaker, because the cache is also 100× deeper.
+- **No configuration change is required or available.** All three TTLs were already the documented intent; nothing new is exposed.
+- **⚠️ GraalVM native image — unverified.** Caffeine picks a generated `BoundedLocalCache` subclass per feature combination, and `quarkus-caffeine` registers a *fixed* list of those classes for reflection at build time. Variable expiry selects a different generated family that may not be on that list; if so, `Caffeine.build()` fails at first cache creation and every `@PostConstruct` calling `getCache(...)` dies at startup. **This cannot fail in JVM mode and is invisible to `mvnw test` and JVM-mode CI.** Logged as a Phase 3 blocker in `planning/native-image-migration.md` — the first native smoke test must exercise both `getCache(name)` and `getCache(name, ttl)`.
+
+### Tests
+
+`CacheImplTest`'s seven `*_delegatesToPut` cases asserted only that a value was readable immediately after a TTL put — true with or without the fix, which made them a codification of the defect. They are replaced by 26 ticker-driven cases covering all seven overloads: entry gone past the lifespan, per-entry (not cache-wide) expiry, expire-after-write rather than after-access, negative lifespan means unlimited, and the degraded no-variable-expiry path. `ToolCacheServiceTest` gains a `Smart TTL is load-bearing` group wired to a **real** `CacheImpl` over a ticker — a 60s `datetime` result dies at 61s while a 7-day `calculator` result does not — which is what finally makes `TOOL_TTL_SECONDS` more than a lookup table. `PaginatedResponseStoreTest` runs against a real cache too and winds past 901s. `CacheFactoryTest` non-vacuously protects the one expiry path that already worked. `NonceCacheServiceTest` captures the TTL and asserts it exceeds `maxAge + clockSkew`. New shared test seam: `TestCaches` (`FakeTicker` + a production-shaped cache).
+
+Every behavioural test above was mutation-checked: with `variableExpiry` forced to `null` (the old behaviour) 10 `CacheImplTest`, 5 `ToolCacheServiceTest` and 2 `PaginatedResponseStoreTest` cases fail; forwarding a negative lifespan straight to Caffeine fails all 5 negative-lifespan cases with `IllegalArgumentException`; dropping `expireAfter` from `getCache(name)` fails `CacheFactoryTest.perEntryTtlIsHonoured`; making `expireAfterRead` reset the clock fails 11 cases; reverting `NonceCacheService` to the size-only cache fails both new nonce cases.
+
+### Docs
+
+`docs/security.md` and `docs/langchain.md` said per-tool TTLs were "computed but not enforced" — corrected. `planning/native-image-migration.md` gains the Caffeine variable-expiry caveat above.
+
+---
+
 ## 🔒 Scope the tool-result cache per identity — one user's tool result no longer reaches another (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

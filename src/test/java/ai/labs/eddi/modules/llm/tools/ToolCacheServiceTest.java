@@ -6,6 +6,8 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.caching.TestCaches;
+import ai.labs.eddi.engine.caching.TestCaches.FakeTicker;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -470,6 +472,118 @@ class ToolCacheServiceTest {
             var stats = service.getStats();
             assertEquals(0, stats.hits);
             assertEquals(0, stats.misses);
+        }
+    }
+
+    // ==================== Smart TTL is load-bearing ====================
+
+    /**
+     * The tests above run against a mocked {@link ICache} because they are about
+     * the <em>key</em> — its shape, its partitioning, and when the cache is
+     * bypassed. A mock can say nothing about expiry, and for a long time nothing
+     * else did either: {@code CacheImpl} discarded every lifespan it was handed
+     * (D5b), so {@code TOOL_TTL_SECONDS} was a lookup table whose values reached
+     * Caffeine and were thrown away. {@code getConfiguredTTL} assertions passed
+     * throughout.
+     * <p>
+     * These tests therefore wire a second service to a <strong>real</strong>
+     * {@code CacheImpl} over a ticker-driven Caffeine cache — the same shape
+     * {@code CacheFactory.getCache("tool-results")} hands out in production — and
+     * assert that two tools with two different table entries actually die at two
+     * different times.
+     */
+    @Nested
+    @DisplayName("Smart TTL is load-bearing")
+    class SmartTtlEnforcementTests {
+
+        /** 60s in the table. */
+        private static final String SHORT_TTL_TOOL = "datetime";
+
+        /** 604800s (7 days) in the table. */
+        private static final String LONG_TTL_TOOL = "calculator";
+
+        private FakeTicker ticker;
+        private ToolCacheService realCacheService;
+
+        @BeforeEach
+        void setUp() throws Exception {
+            ticker = new FakeTicker();
+            ICache<String, Object> realCache = TestCaches.expiring("tool-results", ticker);
+
+            ICacheFactory realCacheFactory = mock(ICacheFactory.class);
+            doReturn(realCache).when(realCacheFactory).getCache("tool-results");
+
+            realCacheService = new ToolCacheService();
+            setField(realCacheService, "cacheFactory", realCacheFactory);
+            setField(realCacheService, "meterRegistry", new SimpleMeterRegistry());
+            realCacheService.init();
+        }
+
+        @Test
+        @DisplayName("a 60s-TTL tool result is gone at 61s while a 7-day one is not")
+        void shortTtlExpiresLongTtlSurvives() {
+            realCacheService.put(SCOPE_A, SHORT_TTL_TOOL, "now", "12:00");
+            realCacheService.put(SCOPE_A, LONG_TTL_TOOL, "2+2", "4");
+
+            assertEquals("12:00", realCacheService.get(SCOPE_A, SHORT_TTL_TOOL, "now"));
+            assertEquals("4", realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"));
+
+            ticker.advanceSeconds(61);
+
+            assertNull(realCacheService.get(SCOPE_A, SHORT_TTL_TOOL, "now"),
+                    "datetime is 60s in TOOL_TTL_SECONDS — a stale clock reading must not be served at 61s");
+            assertEquals("4", realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"),
+                    "calculator is 7 days — the short TTL must not take it down too");
+        }
+
+        @Test
+        @DisplayName("the 7-day tool result does expire, one second past its own TTL")
+        void longTtlExpiresEventually() {
+            realCacheService.put(SCOPE_A, LONG_TTL_TOOL, "2+2", "4");
+
+            ticker.advanceSeconds(604_799);
+            assertEquals("4", realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"), "still inside the 7-day window");
+
+            ticker.advanceSeconds(2);
+            assertNull(realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"));
+        }
+
+        @Test
+        @DisplayName("an explicit TTL passed to put wins over the table")
+        void explicitTtlIsHonoured() {
+            realCacheService.put(SCOPE_A, LONG_TTL_TOOL, "2+2", "4", 30, TimeUnit.SECONDS);
+
+            ticker.advanceSeconds(31);
+
+            assertNull(realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"),
+                    "the caller asked for 30s; the 7-day table entry must not override it");
+        }
+
+        @Test
+        @DisplayName("an expired entry counts as a miss, not a hit")
+        void expiredEntryCountsAsMiss() {
+            realCacheService.put(SCOPE_A, SHORT_TTL_TOOL, "now", "12:00");
+            realCacheService.get(SCOPE_A, SHORT_TTL_TOOL, "now"); // hit
+
+            ticker.advanceSeconds(61);
+            realCacheService.get(SCOPE_A, SHORT_TTL_TOOL, "now"); // must be a miss
+
+            var stats = realCacheService.getStats();
+            assertEquals(1, stats.hits);
+            assertEquals(1, stats.misses);
+        }
+
+        @Test
+        @DisplayName("expiry does not leak across scope partitions")
+        void expiryIsPerEntryNotPerPartition() {
+            realCacheService.put(SCOPE_A, LONG_TTL_TOOL, "2+2", "alice-4");
+            ticker.advanceSeconds(300);
+            realCacheService.put(SCOPE_B, SHORT_TTL_TOOL, "now", "bob-12:00");
+
+            ticker.advanceSeconds(61);
+
+            assertEquals("alice-4", realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"));
+            assertNull(realCacheService.get(SCOPE_B, SHORT_TTL_TOOL, "now"));
         }
     }
 

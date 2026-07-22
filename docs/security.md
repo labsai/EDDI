@@ -246,7 +246,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
   - When `user` scope is in effect but no user id is available, the entry falls back to the narrower `c:` partition. If neither a user id nor a conversation id is available, **no tag can be derived and the cache is bypassed entirely** — nothing is read and nothing is stored. A placeholder is deliberately never substituted, because that would put every unattributable request back into one shared partition
 - **Configuration:** `enableToolCaching` (default `true`), `toolCacheScopes` (per-tool overrides), `defaultToolCacheScope` (task-level default, effectively `user`)
 - **Behaviour:** A cached result is only ever served back inside its own partition. With the default `user` scope, one authenticated user's tool result is never returned to another. Set a tool to `global` only when its result depends purely on its arguments and never on who is asking — that is an explicit, per-tool opt-in to cross-user reuse
-- **Expiry:** Per-tool TTLs are computed and passed down, but the Caffeine-backed `CacheImpl` has no per-entry expiry, so entries are currently removed by size-based eviction only (`tool-results` holds 10 000 entries)
+- **Expiry:** Each entry expires on its own per-tool TTL, measured from the write (`weather` 300s, `websearch` 1800s, `calculator` 7 days, 300s for tools with no table entry — see `GET /llm/tools/cache/ttl/{toolName}`). Size-based eviction (`tool-results` holds 10 000 entries) is the secondary bound. A stale or poisoned result cannot outlive its TTL
 
 ### Cost Tracking
 

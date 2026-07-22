@@ -867,9 +867,10 @@ narrower conversation partition. When neither identity is available the cache is
 bypassed entirely for that call — nothing is read and nothing is stored, and the
 `eddi.tool.cache.bypassed` counter is incremented.
 
-Note that per-tool TTLs are computed but not enforced today: the Caffeine-backed
-cache has no per-entry expiry, so `tool-results` entries are evicted by size
-(10 000 entries) rather than by age.
+Per-tool TTLs are enforced per entry: a cached result is removed once its own
+TTL has elapsed since it was written, independently of the other entries in the
+cache. `GET /llm/tools/cache/ttl/{toolName}` reports the TTL that will be
+applied. Size eviction (10 000 entries) is the secondary bound.
 
 ### Configuration Example
 

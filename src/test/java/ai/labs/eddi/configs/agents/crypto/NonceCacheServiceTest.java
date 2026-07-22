@@ -11,17 +11,24 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @DisplayName("NonceCacheService Tests")
 class NonceCacheServiceTest {
 
+    private static final long MAX_AGE_MS = 300_000L;
+    private static final long CLOCK_SKEW_MS = 30_000L;
+
     private NonceCacheService nonceCacheService;
+    private ICacheFactory cacheFactory;
     private final ConcurrentHashMap<String, Boolean> cacheMap = new ConcurrentHashMap<>();
 
     @SuppressWarnings("unchecked")
@@ -41,7 +48,7 @@ class NonceCacheServiceTest {
         when(mockCache.putIfAbsent(anyString(), any(Boolean.class)))
                 .thenAnswer(inv -> cacheMap.putIfAbsent(inv.getArgument(0), inv.getArgument(1)));
 
-        ICacheFactory cacheFactory = mock(ICacheFactory.class);
+        cacheFactory = mock(ICacheFactory.class);
         when(cacheFactory.getCache(anyString())).thenReturn((ICache) mockCache);
         when(cacheFactory.getCache(anyString(), any())).thenReturn((ICache) mockCache);
 
@@ -50,14 +57,43 @@ class NonceCacheServiceTest {
         // Set config properties via reflection
         var maxAgeField = NonceCacheService.class.getDeclaredField("maxAgeMs");
         maxAgeField.setAccessible(true);
-        maxAgeField.set(nonceCacheService, 300_000L); // 5 min
+        maxAgeField.set(nonceCacheService, MAX_AGE_MS); // 5 min
 
         var clockSkewField = NonceCacheService.class.getDeclaredField("clockSkewMs");
         clockSkewField.setAccessible(true);
-        clockSkewField.set(nonceCacheService, 30_000L); // 30 sec
+        clockSkewField.set(nonceCacheService, CLOCK_SKEW_MS); // 30 sec
 
         // Call @PostConstruct
         nonceCacheService.init();
+    }
+
+    /**
+     * A nonce that is forgotten while its timestamp would still pass the freshness
+     * and clock-skew checks is a nonce that can be replayed. The cache must
+     * therefore be asked for with an explicit TTL that covers the whole window —
+     * asking for the size-only cache leaves the lifetime entirely to eviction.
+     */
+    @Nested
+    @DisplayName("Replay window coverage")
+    class CacheConfigurationTests {
+
+        @Test
+        @DisplayName("the nonce cache is requested WITH a TTL, not from the size-only overload")
+        void usesTtlCache() {
+            verify(cacheFactory).getCache(eq("nonce-replay-protection"), any(Duration.class));
+            verify(cacheFactory, never()).getCache(anyString());
+        }
+
+        @Test
+        @DisplayName("the requested TTL covers maxAge + clockSkew with head-room")
+        void ttlCoversTheReplayWindow() {
+            ArgumentCaptor<Duration> ttl = ArgumentCaptor.forClass(Duration.class);
+            verify(cacheFactory).getCache(eq("nonce-replay-protection"), ttl.capture());
+
+            assertTrue(ttl.getValue().toMillis() > MAX_AGE_MS + CLOCK_SKEW_MS,
+                    "a TTL of " + ttl.getValue() + " would forget a nonce that is still replayable "
+                            + "(maxAge " + MAX_AGE_MS + "ms + clockSkew " + CLOCK_SKEW_MS + "ms)");
+        }
     }
 
     @Nested

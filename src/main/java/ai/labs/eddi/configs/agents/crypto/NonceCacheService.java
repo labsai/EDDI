@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 
 /**
@@ -37,6 +38,13 @@ public class NonceCacheService {
     private static final Logger LOGGER = Logger.getLogger(NonceCacheService.class);
     private static final String CACHE_NAME = "nonce-replay-protection";
 
+    /**
+     * Head-room added on top of {@code maxAge + clockSkew} so that a nonce can
+     * never be forgotten while a replay carrying it would still pass the freshness
+     * and clock-skew checks.
+     */
+    private static final long TTL_BUFFER_MS = 60_000L;
+
     @ConfigProperty(name = "eddi.a2a.signing.nonce.max-age-ms", defaultValue = "300000") // 5 min
     long maxAgeMs;
 
@@ -58,11 +66,13 @@ public class NonceCacheService {
 
     @PostConstruct
     void init() {
-        // The cache TTL must be >= maxAge + clockSkew to cover the full replay window.
-        // Minimum required TTL: maxAge + clockSkew + buffer = ~340s with defaults.
-        // This is configured externally via the ICacheFactory cache configuration
-        // (e.g., Caffeine expireAfterWrite in application.properties).
-        this.nonceCache = cacheFactory.getCache(CACHE_NAME);
+        // A nonce only has to be remembered for as long as a replay of it could
+        // still get past the checks above: maxAge covers a back-dated timestamp,
+        // clockSkew a post-dated one. Anything older is rejected on freshness
+        // before the cache is consulted. With the defaults that is 300s + 30s +
+        // 60s buffer = 390s.
+        Duration nonceTtl = Duration.ofMillis(maxAgeMs + clockSkewMs + TTL_BUFFER_MS);
+        this.nonceCache = cacheFactory.getCache(CACHE_NAME, nonceTtl);
 
         replayRejections = meterRegistry.counter("eddi.agent.nonce.replay.rejected");
         freshnessRejections = meterRegistry.counter("eddi.agent.nonce.freshness.rejected");
