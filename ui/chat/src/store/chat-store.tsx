@@ -23,6 +23,13 @@ export interface ChatState {
   quickReplies: QuickReply[];
   isProcessing: boolean;
   isThinking: boolean;
+  /**
+   * True between a `cascade_escalation` event and the next token. The cascade
+   * has given up on a cheaper model and moved to a more capable one; the user
+   * sees only that the agent is working harder, never the model, confidence or
+   * cost — those stay admin-side in EDDI-Manager.
+   */
+  isEscalating: boolean;
   undoAvailable: boolean;
   redoAvailable: boolean;
   agentName: string | null;
@@ -74,6 +81,7 @@ export const initialState: ChatState = {
   quickReplies: [],
   isProcessing: false,
   isThinking: false,
+  isEscalating: false,
   undoAvailable: false,
   redoAvailable: false,
   agentName: null,
@@ -97,6 +105,7 @@ export type ChatAction =
   | { type: "SET_QUICK_REPLIES"; replies: QuickReply[] }
   | { type: "SET_PROCESSING"; value: boolean }
   | { type: "SET_THINKING"; value: boolean }
+  | { type: "SET_ESCALATING"; value: boolean }
   | { type: "SET_UNDO_REDO"; undoAvailable: boolean; redoAvailable: boolean }
   | { type: "REMOVE_EMPTY_STREAMING_MESSAGE" }
   | { type: "REPLACE_MESSAGES"; messages: ChatMessage[] }
@@ -209,7 +218,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const idx = streamingIndex(state.messages);
       const msgs = [...state.messages];
       if (idx !== -1) msgs[idx] = { ...msgs[idx], isStreaming: false };
-      return { ...state, messages: msgs, isProcessing: false, isThinking: false };
+      // Clearing escalation here rather than at each call site is what makes it
+      // safe across every way a turn can end — done, error, stop-generating, a
+      // stream that closed without a done event, and a HITL pause all funnel
+      // through this action.
+      return {
+        ...state,
+        messages: msgs,
+        isProcessing: false,
+        isThinking: false,
+        isEscalating: false,
+      };
     }
 
     case "SET_QUICK_REPLIES":
@@ -221,6 +240,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "SET_THINKING":
       return { ...state, isThinking: action.value };
 
+    case "SET_ESCALATING":
+      return { ...state, isEscalating: action.value };
+
     case "CLEAR_MESSAGES":
       return {
         ...state,
@@ -229,6 +251,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         quickReplies: [],
         conversationState: null,
         isThinking: false,
+        isEscalating: false,
         undoAvailable: false,
         redoAvailable: false,
         activeInputField: null,

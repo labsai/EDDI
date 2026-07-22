@@ -1,8 +1,15 @@
 # Follow-ups after the EDDI feature-parity branch
 
-Two items that are **not** part of `feat/chat-ui-eddi-feature-parity` and should be
+Items that are **not** part of `feat/chat-ui-eddi-feature-parity` and should be
 picked up separately. Written to be actionable without the conversation that
 produced them.
+
+> **2026-07-22:** the branch absorbed the reachable parts of the two other open
+> PRs — #27 (model-cascade hint) and #28 (multimodal attachments), both of which
+> can now be closed as superseded. Three attachment gaps found while comparing
+> them are fixed here (`forwardableInline`, the orphaned-blob leak on chip
+> removal, and the collapsed error taxonomy); items 3 and 4 below are what that
+> comparison surfaced and did **not** fix.
 
 ---
 
@@ -144,3 +151,75 @@ Query params `hideUndo=true` / `hideRedo=true` currently turn them **off**
 You want undo/redo generally available. The defects behind this suggestion are
 fixed; this is belt-and-braces for a first production rollout, not a
 correctness requirement.
+
+---
+
+## 3. Attachment markers do not survive undo/redo
+
+**Repo to change:** `eddi-chat-ui`. Real, and neither open PR solved it correctly.
+
+### What happens
+
+The widget renders a sent attachment by baking a display line into the message
+content (`ChatWidget.tsx`, `attachmentLine`). `ChatMessage` has no `attachments`
+field. Undo and redo both re-read the conversation and dispatch
+`REPLACE_MESSAGES` over the **whole** transcript, and `stepsToMessages`
+(`src/api/snapshot.ts`) rebuilds each user bubble from `input:initial` — the raw
+text the client POSTed, which never carried the `📎` line.
+
+So one undo strips the attachment indication from **every** prior turn, not just
+the undone one. The user's own record of what they sent silently changes.
+
+### Why PR #28's fix was not taken
+
+It carried attachments forward by **position** within the filtered list of user
+messages. That aligns on undo (the list gets shorter) and silently fails on redo
+(the list gets longer — the restored turn reads past the end and gets nothing).
+It shipped a test for the undo direction only. Position is also the wrong key
+here: `WITHDRAW_LAST_USER_MESSAGE` removes user bubbles client-side that the
+server never recorded, so client and server user-message counts can diverge and
+attachments would be stapled onto the wrong bubble.
+
+### Two viable fixes
+
+1. **Client-side, keyed on message id** — add `attachments?: { fileName: string }[]`
+   to `ChatMessage` and carry it forward in `REPLACE_MESSAGES` by id, not index.
+   Cheap; still client-only, so it does not survive a page reload.
+2. **Server-side** — re-read undo/redo with `returnDetailed=true`, the only mode
+   that emits `context:attachment_N` step data
+   (`ConversationMemoryUtilities.java` ~195-196 filters it out otherwise), and
+   map it back. Authoritative and reload-proof, but inflates every undo response
+   with the full pipeline dump.
+
+Option 1 unless reload-fidelity matters.
+
+---
+
+## 4. Optional: image thumbnails for attachments
+
+**Repo to change:** `eddi-chat-ui`. Genuine UX gap; deliberately deferred.
+
+A screenshot currently attaches as the text `📎 shot.png` in both the composer
+chip and the sent bubble. PR #28 rendered real thumbnails, but its approach does
+not port: it kept the raw `File` in component state, whereas this branch's store
+holds only `AttachmentResult` and the `File` is discarded once the upload
+resolves.
+
+Doing it here means a `Map<storageRef, objectUrl>` held in a ref, with revocation
+driven from `REMOVE_ATTACHMENT` / `CLEAR_ATTACHMENTS` / `CLEAR_MESSAGES`. Two
+traps worth knowing before starting:
+
+- **Do not revoke from the reducer.** PR #28 called `URL.revokeObjectURL` inside
+  `CLEAR_MESSAGES` and `REPLACE_MESSAGES`. React double-invokes reducers under
+  StrictMode and replays pending actions from the last committed state, so those
+  revocations fire on discarded renders and kill URLs a retained render still
+  uses. This branch's reducer is pure throughout — keep it that way and put
+  revocation in a `useEffect` cleanup keyed on the URL set.
+- **Do not hand a preview URL to the sent message and then forget it.** PR #28
+  did exactly that, deliberately, and never revoked it — an unbounded leak
+  proportional to every image sent in the session.
+
+The durable alternative (render from the download endpoint) is not a drop-in
+either: downloads are owner/grant-checked and this branch sends auth as an
+`Authorization: Bearer` header, which an `<img src>` cannot carry. It would need
+fetch → blob → object URL.

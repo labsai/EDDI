@@ -1197,6 +1197,23 @@ a:hover { opacity: 0.85; }
   color: var(--chat-text);
 }
 
+/* Stored, but above the forward limit — the model will never see it. */
+.chat-attachments__chip--warn {
+  border-color: var(--chat-text-accent);
+}
+
+.chat-attachments__warn {
+  color: var(--chat-text-accent);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* Placeholder chip while the bytes are still going up. */
+.chat-attachments__chip--uploading {
+  color: var(--chat-text-muted);
+  border-style: dashed;
+}
+
 /* ─── Paused: awaiting human approval ─────────── */
 
 .paused-card {

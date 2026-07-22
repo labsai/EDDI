@@ -218,6 +218,44 @@ describe("REMOVE_EMPTY_STREAMING_MESSAGE", () => {
   });
 });
 
+/* ─── Model cascade escalation ──────────────── */
+
+describe("cascade escalation", () => {
+  it("SET_ESCALATING toggles the flag", () => {
+    const on = chatReducer(initialState, { type: "SET_ESCALATING", value: true });
+    expect(on.isEscalating).toBe(true);
+
+    expect(
+      chatReducer(on, { type: "SET_ESCALATING", value: false }).isEscalating,
+    ).toBe(false);
+  });
+
+  it("FINISH_STREAMING clears it alongside thinking and processing", () => {
+    // Clearing here rather than at each call site is what covers every exit
+    // path — done, error, stop-generating, and a stream that closed without a
+    // done event all reduce through this action.
+    const state: ChatState = {
+      ...initialState,
+      isEscalating: true,
+      isThinking: true,
+      isProcessing: true,
+      messages: [makeMsg({ isStreaming: true })],
+    };
+
+    const result = chatReducer(state, { type: "FINISH_STREAMING" });
+
+    expect(result.isEscalating).toBe(false);
+    expect(result.isThinking).toBe(false);
+    expect(result.isProcessing).toBe(false);
+  });
+
+  it("CLEAR_MESSAGES clears it, so a new conversation never inherits it", () => {
+    const state: ChatState = { ...initialState, isEscalating: true };
+
+    expect(chatReducer(state, { type: "CLEAR_MESSAGES" }).isEscalating).toBe(false);
+  });
+});
+
 /* ─── Pending attachments ───────────────────── */
 
 describe("pending attachments", () => {

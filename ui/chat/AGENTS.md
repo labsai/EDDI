@@ -29,7 +29,7 @@
 ```
 src/
 ├── api/            # API layer
-│   ├── http.ts             # Status-aware fetch core, ApiError, base URL, auth token
+│   ├── http.ts             # Status-aware fetch core, ApiError, errorPayload, auth token
 │   ├── chat-api.ts         # Conversation lifecycle (start, read, send, stream, undo, redo)
 │   ├── hitl-api.ts         # Approval status, cancel, deadline maths, poll cadence
 │   ├── attachments-api.ts  # Upload/delete + attachment_N context construction
@@ -42,7 +42,7 @@ src/
 │   ├── ChatInput.tsx       # Auto-grow textarea, attachment chips, secret mode
 │   ├── PausedCard.tsx      # Awaiting-approval state (read-only, no approve/reject)
 │   ├── QuickReplies.tsx    # Pill buttons for suggested replies
-│   ├── Indicators.tsx      # Typing (dots) + Thinking (brain) indicators
+│   ├── Indicators.tsx      # Typing (dots), Thinking (brain), Escalating (cascade)
 │   └── ScrollToBottom.tsx  # Floating scroll button
 ├── hooks/
 │   ├── useTheme.ts         # Dark/light/system theme with localStorage
@@ -72,7 +72,17 @@ src/
   pending-approval placeholder and rejection message as bare strings.
 - **Attachments reach the model ONLY via `attachment_N` context keys** whose
   `value` is an object carrying `storageRef`. A ref in the message text is
-  silently ignored. Cap 5 per turn.
+  silently ignored. Cap 5 per turn. Omit `fileName` when empty — the extractor
+  backfills the stored name only when the key is absent.
+- **Upload cap ≠ forward cap** (20 MiB vs 10 MiB by default). A file in between
+  is stored, returns 201, and is then dropped at forward time. The skip is
+  recorded in `attachments:errors`, which every writer marks `setPublic(false)`,
+  so the turn can never reveal it — the upload response's `forwardableInline`
+  is the only signal the client ever gets. Surface it.
+- **Failures answer `{error, code}`** — parse both (`errorPayload` in `http.ts`).
+  `ATTACHMENT_REJECTED` is a catch-all covering MIME rejection, the
+  per-conversation file/byte quotas and empty files; only `error` says which.
+  A body-less 413 can also arrive from Quarkus before the attachment layer runs.
 - **A 409 means the input was never consumed** — restore it, do not leave it in
   the transcript as if sent.
 

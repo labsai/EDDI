@@ -44,6 +44,19 @@ describe("buildAttachmentContext", () => {
     });
   });
 
+  it("omits an empty fileName so the backend's own fallback can fire", () => {
+    // The upload endpoint answers with "" when the store has no filename, and
+    // the extractor only backfills the stored name when the key is ABSENT
+    // (getFileName() == null). Passing "" through suppresses the fallback and
+    // the model is handed a file the forwarder labels "unnamed".
+    const context = buildAttachmentContext([{ ...att(0), fileName: "" }]);
+
+    expect(context.attachment_0).toEqual({
+      type: "object",
+      value: { storageRef: "ref-0" },
+    });
+  });
+
   it("omits mimeType — the server resolves it from validated store metadata", () => {
     const value = buildAttachmentContext([att(0)]).attachment_0.value as Record<
       string,

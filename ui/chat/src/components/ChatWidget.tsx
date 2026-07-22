@@ -12,7 +12,7 @@ import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { SecretInput } from "./SecretInput";
 import { QuickReplies } from "./QuickReplies";
-import { TypingIndicator, ThinkingIndicator } from "./Indicators";
+import { TypingIndicator, ThinkingIndicator, EscalatingIndicator } from "./Indicators";
 import { ScrollToBottom } from "./ScrollToBottom";
 import { ChatHeader } from "./ChatHeader";
 
@@ -241,6 +241,8 @@ export function ChatWidget() {
         case "token":
           turn.tokenCount += 1;
           dispatch({ type: "SET_THINKING", value: false });
+          // Text is flowing, so whichever model won the cascade is answering.
+          dispatch({ type: "SET_ESCALATING", value: false });
           dispatch({ type: "APPEND_TO_LAST_AGENT", token: event.data });
           return false;
 
@@ -262,9 +264,19 @@ export function ChatWidget() {
           dispatch({ type: "SET_THINKING", value: false });
           return false;
 
-        // Cascade progress is observability, not chat content.
+        // Step starts are pure observability — task_start already raised the
+        // thinking indicator, and it is guarded on tokenCount so it cannot come
+        // back after text has begun. Raising it again here would undo that: a
+        // guaranteed-accept step may stream live, time out mid-stream, and be
+        // followed by the next step's start.
         case "cascade_step_start":
+          return false;
+
+        // An escalation means a cheaper model was abandoned mid-turn. The wait
+        // that follows is silent — a buffered cascade emits its whole answer as
+        // one token — so say something rather than leave a bare spinner.
         case "cascade_escalation":
+          dispatch({ type: "SET_ESCALATING", value: true });
           return false;
 
         case "done": {
@@ -562,8 +574,19 @@ export function ChatWidget() {
 
       // Add user message (display masked if secret). Attachments are named in
       // the transcript so the user can see what was actually sent.
+      // A file above the forward limit was stored but will not be inlined to
+      // the model. Say so on the turn itself — the backend records the skip in
+      // attachments:errors, which is written setPublic(false), so this is the
+      // last chance to tell the user before they wonder why the agent ignored
+      // their file.
       const attachmentLine = attachments.length
-        ? attachments.map((a) => `📎 ${a.fileName}`).join("\n")
+        ? attachments
+            .map((a) =>
+              a.forwardableInline === false
+                ? `📎 ${a.fileName} — too large to send to the model`
+                : `📎 ${a.fileName}`,
+            )
+            .join("\n")
         : "";
       const displayed = isSecret ? "●●●●●●●●" : text;
       const userMsg: ChatMessage = {
@@ -598,6 +621,8 @@ export function ChatWidget() {
       dispatch({ type: "SET_QUICK_REPLIES", replies: [] });
       dispatch({ type: "SET_PROCESSING", value: true });
       dispatch({ type: "SET_THINKING", value: true });
+      // Start every turn un-escalated, however the previous one ended.
+      dispatch({ type: "SET_ESCALATING", value: false });
 
       try {
         if (isDemo) {
@@ -693,6 +718,13 @@ export function ChatWidget() {
               throw e;
             }
           }
+          // Every continuation past this point belongs to the turn we just
+          // read. If the conversation was swapped mid-stream, this turn is
+          // abandoned — including its safety net, which would otherwise clear
+          // isProcessing/isThinking and un-stream a bubble in the conversation
+          // that replaced it.
+          if (gen !== generationRef.current) return;
+
           // Safety net: finish streaming if the stream closed without a done event
           if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
 
@@ -700,7 +732,6 @@ export function ChatWidget() {
           // conversationState and conversationOutputs — undoAvailable and
           // redoAvailable are absent, so without this re-read the undo/redo
           // buttons stay permanently greyed out on the streaming path.
-          if (gen !== generationRef.current) return;
           try {
             const after = await readConversation(
               "",
@@ -754,6 +785,8 @@ export function ChatWidget() {
       } catch (err) {
         dispatch({ type: "SET_PROCESSING", value: false });
         dispatch({ type: "SET_THINKING", value: false });
+        // This path never reaches FINISH_STREAMING, so clear it here too.
+        dispatch({ type: "SET_ESCALATING", value: false });
 
         if (err instanceof ApiError && err.status === 409) {
           // The turn was refused and NEVER consumed — most often because the
@@ -1147,8 +1180,14 @@ export function ChatWidget() {
               />
             ) : (
               <>
-                {state.isThinking && <ThinkingIndicator />}
-                {state.isProcessing && !state.isThinking && <TypingIndicator />}
+                {state.isEscalating ? (
+                  <EscalatingIndicator />
+                ) : state.isThinking ? (
+                  <ThinkingIndicator />
+                ) : null}
+                {state.isProcessing && !state.isThinking && !state.isEscalating && (
+                  <TypingIndicator />
+                )}
               </>
             )}
 

@@ -50,6 +50,35 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Pull the `{error, code}` envelope EDDI returns on a failure.
+ *
+ * Branching on the code alone is not enough to explain a failure: the backend
+ * collapses every AttachmentStoreException into ATTACHMENT_REJECTED — MIME
+ * rejection, the per-conversation file and byte quotas, and empty files all
+ * arrive under that one code, and only the `error` string says which.
+ *
+ * Returns nulls for a non-ApiError, an empty body, or a non-JSON body (a
+ * container-level 413 never reaches the attachment layer, so it has none).
+ */
+export function errorPayload(err: unknown): {
+  code: string | null;
+  message: string | null;
+} {
+  if (!(err instanceof ApiError) || !err.body.trim()) {
+    return { code: null, message: null };
+  }
+  try {
+    const parsed = JSON.parse(err.body) as { error?: unknown; code?: unknown };
+    return {
+      code: typeof parsed.code === "string" ? parsed.code : null,
+      message: typeof parsed.error === "string" ? parsed.error : null,
+    };
+  } catch {
+    return { code: null, message: null };
+  }
+}
+
 /** Add the bearer token without disturbing caller-supplied headers. */
 function withAuth(init: RequestInit | undefined): RequestInit | undefined {
   if (!_authToken) return init;

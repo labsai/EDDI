@@ -14,6 +14,17 @@ export interface AttachmentResult {
   fileName: string;
   mimeType: string;
   sizeBytes: number;
+  /**
+   * False when the file was stored but is too large to inline to the model.
+   *
+   * The upload cap and the forward cap are different limits (20 MiB and 10 MiB
+   * by default), so a file in between uploads with a 201 and is then dropped at
+   * forward time with a ForwardSkipException. That drop is recorded in
+   * `attachments:errors`, which every writer marks setPublic(false) — so the
+   * widget can never learn about it from the turn. This flag, returned on the
+   * upload itself, is the only signal we get.
+   */
+  forwardableInline?: boolean;
 }
 
 /**
@@ -32,6 +43,11 @@ const ATTACHMENT_PREFIX = "attachment_";
  * Only `storageRef` (plus an optional `fileName` display hint) is sent: for
  * stored blobs the backend resolves the authoritative MIME type and size from
  * validated store metadata and does not trust client-supplied values.
+ *
+ * An empty `fileName` is omitted rather than sent through. The extractor only
+ * backfills the stored name when the key is absent (`getFileName() == null`),
+ * so sending "" suppresses that fallback and the model is handed a file with
+ * no name at all.
  */
 export function buildAttachmentContext(
   attachments: readonly AttachmentResult[],
@@ -40,7 +56,9 @@ export function buildAttachmentContext(
   attachments.slice(0, MAX_ATTACHMENTS_PER_TURN).forEach((a, index) => {
     context[`${ATTACHMENT_PREFIX}${index}`] = {
       type: "object",
-      value: { storageRef: a.storageRef, fileName: a.fileName },
+      value: a.fileName
+        ? { storageRef: a.storageRef, fileName: a.fileName }
+        : { storageRef: a.storageRef },
     };
   });
   return context;

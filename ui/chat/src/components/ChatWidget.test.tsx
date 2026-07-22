@@ -808,3 +808,144 @@ describe("ChatWidget — resume after approval", () => {
     });
   }, 15000);
 });
+
+describe("ChatWidget — model cascade", () => {
+  /**
+   * Backend whose stream emits the given frames and then stays open, so the
+   * transient indicator state is still on screen when we assert.
+   */
+  function mockOpenStream(frames: string[]) {
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/stream")) {
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              const enc = new TextEncoder();
+              for (const f of frames) c.enqueue(enc.encode(f));
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+  }
+
+  async function send(text = "hello") {
+    renderWidget();
+    const input = await screen.findByTestId("chat-input");
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+  }
+
+  it("says the agent is thinking harder once the cascade escalates", async () => {
+    // A buffered cascade emits its whole answer as a single token, so the wait
+    // after an escalation is completely silent — without this the user watches
+    // an unchanging spinner for the length of a second model call.
+    mockOpenStream([
+      'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"reason":"low_confidence"}\n\n',
+    ]);
+    await send();
+
+    expect(await screen.findByTestId("escalating-indicator")).toBeInTheDocument();
+    expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
+  });
+
+  it("drops the escalation hint as soon as text arrives", async () => {
+    mockOpenStream([
+      'event: cascade_escalation\ndata: {"toStep":1}\n\n',
+      "event: token\ndata: Here is the answer\n\n",
+    ]);
+    await send();
+
+    await screen.findByText("Here is the answer");
+    expect(screen.queryByTestId("escalating-indicator")).not.toBeInTheDocument();
+  });
+
+  it("never shows model names, confidence or cost", async () => {
+    // Cascade payloads carry all three. They are operator detail — surfacing
+    // them invites the user to ask which model answered.
+    mockOpenStream([
+      'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"confidence":0.61,' +
+        '"threshold":0.7,"reason":"low_confidence","durationMs":812}\n\n',
+    ]);
+    await send();
+
+    const hint = await screen.findByTestId("escalating-indicator");
+    expect(hint).toHaveTextContent("Thinking harder");
+    expect(hint.textContent).not.toMatch(/0\.6|0\.7|low_confidence|812/);
+  });
+
+  it("does not resurrect the thinking indicator when a later step starts", async () => {
+    // A guaranteed-accept step may stream live, time out mid-stream, and be
+    // followed by the next step's start. Raising the indicator again there
+    // would cover a bubble that already has text in it.
+    mockOpenStream([
+      "event: token\ndata: Partial answer\n\n",
+      'event: cascade_step_start\ndata: {"stepIndex":1,"modelName":"gpt-4o"}\n\n',
+    ]);
+    await send();
+
+    await screen.findByText("Partial answer");
+    expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("escalating-indicator")).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatWidget — an attachment the model will never see", () => {
+  it("marks a stored-but-unforwardable file on the sent turn", async () => {
+    // Upload cap and forward cap are different limits. A file in between is
+    // stored, returns 201, and is then dropped at forward time — a skip the
+    // backend records setPublic(false), so the turn itself can never reveal it.
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (href.includes("/attachments")) {
+        return new Response(
+          JSON.stringify({
+            storageRef: "ref-big",
+            fileName: "huge.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 14_000_000,
+            forwardableInline: false,
+          }),
+          { status: 201 },
+        );
+      }
+      if (href.includes("/stream")) {
+        return new Response(new ReadableStream({ start() {} }), {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+    const fileInput = await screen.findByTestId("chat-file-input");
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["abc"], "huge.pdf", { type: "application/pdf" })] },
+    });
+    await screen.findByTestId("attachment-chip");
+
+    fireEvent.click(screen.getByTestId("chat-send"));
+
+    expect(
+      await screen.findByText(/huge\.pdf — too large to send to the model/),
+    ).toBeInTheDocument();
+  });
+});

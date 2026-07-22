@@ -5,21 +5,31 @@
 
 import { useState, useRef, useCallback, useEffect, type KeyboardEvent } from "react";
 import { useChatState, useChatDispatch } from "@/store/chat-store";
-import { uploadAttachment, MAX_ATTACHMENTS_PER_TURN } from "@/api/attachments-api";
-import { ApiError } from "@/api/http";
+import {
+  uploadAttachment,
+  deleteAttachment,
+  MAX_ATTACHMENTS_PER_TURN,
+} from "@/api/attachments-api";
+import { ApiError, errorPayload } from "@/api/http";
 
 /** Turn an upload failure into copy that names the actual reason. */
 function describeUploadFailure(err: unknown, fileName: string): string {
   if (err instanceof ApiError) {
-    if (err.status === 413 || err.body.includes("ATTACHMENT_TOO_LARGE")) {
+    const { code, message } = errorPayload(err);
+    // Quarkus enforces its own request-body cap before the attachment layer
+    // runs, so an oversize upload can arrive as a bare 413 with no envelope.
+    if (err.status === 413 || code === "ATTACHMENT_TOO_LARGE") {
       return `${fileName} is too large to upload.`;
-    }
-    if (err.body.includes("ATTACHMENT_REJECTED")) {
-      return `${fileName} was rejected — that file type is not accepted.`;
     }
     if (err.status === 401 || err.status === 403) {
       return `You are not allowed to attach files to this conversation.`;
     }
+    // ATTACHMENT_REJECTED is a catch-all: an unaccepted MIME type, the
+    // per-conversation file-count and byte quotas, and empty files all arrive
+    // under it. Only the server's own text separates "that type is not
+    // accepted" from "delete some attachments first", so prefer it to a guess.
+    if (message) return `${fileName} was rejected — ${message}`;
+    if (code) return `${fileName} was rejected.`;
   }
   return `Failed to upload ${fileName}.`;
 }
@@ -92,71 +102,144 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
 
   // ── Attachment upload ──
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  /**
+   * Names of files currently uploading, shown as placeholder chips ahead of the
+   * staged ones. Without them a large file over a slow link leaves the composer
+   * looking untouched for several seconds.
+   */
+  const [uploading, setUploading] = useState<string[]>([]);
+  const isUploading = uploading.length > 0;
 
-  const handleAttach = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !conversationId) return;
-
-    if (pendingAttachments.length >= MAX_ATTACHMENTS_PER_TURN) {
+  const notify = useCallback(
+    (content: string) => {
       dispatch({
         type: "ADD_MESSAGE",
         message: {
           id: `error-${Date.now()}-${Math.random()}`,
           role: "agent",
-          content: `⚠️ You can attach at most ${MAX_ATTACHMENTS_PER_TURN} files per message.`,
+          content,
           timestamp: Date.now(),
         },
       });
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
+    },
+    [dispatch],
+  );
 
-    setIsUploading(true);
-    try {
-      const result = await uploadAttachment(conversationId, file);
-      // Stage it. The ref reaches the agent as an attachment_N context entry
-      // when the next message is sent — embedding it in the message text was
-      // silently ignored by the backend.
-      dispatch({ type: "ADD_ATTACHMENT", attachment: result });
-    } catch (err) {
-      dispatch({
-        type: "ADD_MESSAGE",
-        message: {
-          id: `error-${Date.now()}-${Math.random()}`,
-          role: "agent",
-          content: `⚠️ ${describeUploadFailure(err, file.name)}`,
-          timestamp: Date.now(),
-        },
-      });
-    } finally {
-      setIsUploading(false);
+  const handleAttach = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const picked = Array.from(e.target.files ?? []);
+      // Reset immediately so re-picking the same file still fires a change.
       if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  }, [conversationId, dispatch, pendingAttachments.length]);
+      if (!picked.length || !conversationId) return;
+
+      // Room is computed once for the whole batch. Checking one file at a time
+      // would let a multi-file pick sail past the cap, and the backend drops
+      // the excess server-side — so the UI must not pretend it was sent.
+      const room =
+        MAX_ATTACHMENTS_PER_TURN - pendingAttachments.length - uploading.length;
+      if (room <= 0) {
+        notify(
+          `⚠️ You can attach at most ${MAX_ATTACHMENTS_PER_TURN} files per message.`,
+        );
+        return;
+      }
+      const accepted = picked.slice(0, room);
+      if (accepted.length < picked.length) {
+        notify(
+          `⚠️ You can attach at most ${MAX_ATTACHMENTS_PER_TURN} files per message — ` +
+            `${picked.length - accepted.length} not attached.`,
+        );
+      }
+
+      setUploading((prev) => [...prev, ...accepted.map((f) => f.name)]);
+      await Promise.all(
+        accepted.map(async (file) => {
+          try {
+            const result = await uploadAttachment(conversationId, file);
+            // Stage it. The ref reaches the agent as an attachment_N context
+            // entry when the next message is sent — embedding it in the message
+            // text was silently ignored by the backend.
+            dispatch({ type: "ADD_ATTACHMENT", attachment: result });
+          } catch (err) {
+            notify(`⚠️ ${describeUploadFailure(err, file.name)}`);
+          } finally {
+            // Drop one placeholder by name; duplicates are interchangeable.
+            setUploading((prev) => {
+              const i = prev.indexOf(file.name);
+              return i === -1 ? prev : [...prev.slice(0, i), ...prev.slice(i + 1)];
+            });
+          }
+        }),
+      );
+    },
+    [conversationId, dispatch, notify, pendingAttachments.length, uploading.length],
+  );
+
+  const handleRemoveAttachment = useCallback(
+    (storageRef: string) => {
+      // Delete server-side too. Only unsent attachments are removable here, so
+      // this can never orphan a blob a sent turn still references — whereas
+      // skipping it leaves the file in the store for the life of the
+      // conversation, counting against the per-conversation file and byte
+      // quotas until the user can no longer attach anything at all.
+      // Fire-and-forget: the chip goes regardless of what the server says.
+      if (conversationId) {
+        deleteAttachment(conversationId, storageRef).catch(() => {});
+      }
+      dispatch({ type: "REMOVE_ATTACHMENT", storageRef });
+    },
+    [conversationId, dispatch],
+  );
 
   return (
     <div className="chat-input-wrapper">
-      {pendingAttachments.length > 0 && (
-        <div className="chat-attachments" data-testid="attachment-chips">
+      {(pendingAttachments.length > 0 || isUploading) && (
+        /* A live region: an upload that fails posts its reason into the
+           transcript, which is not announced, so without this a screen-reader
+           user gets no feedback that anything happened at all. */
+        <div
+          className="chat-attachments"
+          data-testid="attachment-chips"
+          role="status"
+          aria-live="polite"
+        >
           {pendingAttachments.map((a) => (
             <span
               key={a.storageRef}
-              className="chat-attachments__chip"
+              className={
+                a.forwardableInline === false
+                  ? "chat-attachments__chip chat-attachments__chip--warn"
+                  : "chat-attachments__chip"
+              }
               data-testid="attachment-chip"
             >
               <span className="chat-attachments__name">📎 {a.fileName}</span>
+              {a.forwardableInline === false && (
+                <span
+                  className="chat-attachments__warn"
+                  data-testid="attachment-warn"
+                >
+                  too large to send to the model
+                </span>
+              )}
               <button
                 type="button"
                 className="chat-attachments__remove"
-                onClick={() =>
-                  dispatch({ type: "REMOVE_ATTACHMENT", storageRef: a.storageRef })
-                }
+                onClick={() => handleRemoveAttachment(a.storageRef)}
                 aria-label={`Remove ${a.fileName}`}
                 data-testid="attachment-remove"
               >
                 ×
               </button>
+            </span>
+          ))}
+          {uploading.map((name, i) => (
+            <span
+              key={`uploading-${i}-${name}`}
+              className="chat-attachments__chip chat-attachments__chip--uploading"
+              data-testid="attachment-chip-uploading"
+            >
+              <span className="chat-attachments__name">⏳ {name}</span>
             </span>
           ))}
         </div>
@@ -166,6 +249,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
       <input
         ref={fileInputRef}
         type="file"
+        multiple
         style={{ display: "none" }}
         onChange={handleAttach}
         data-testid="chat-file-input"

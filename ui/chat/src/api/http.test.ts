@@ -3,7 +3,13 @@
    ────────────────────────────────────────────── */
 
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { request, setAuthToken, setBaseUrl, ApiError } from "./http";
+import {
+  request,
+  setAuthToken,
+  setBaseUrl,
+  ApiError,
+  errorPayload,
+} from "./http";
 import { captureFetch, mockFetchResponse } from "@/test-utils/sse";
 
 const originalFetch = globalThis.fetch;
@@ -88,5 +94,43 @@ describe("ApiError", () => {
 
     expect(err.message).toContain("Send failed");
     expect(err.message).toContain("404");
+  });
+});
+
+describe("errorPayload", () => {
+  const apiError = (body: string) => new ApiError(400, body, "ctx");
+
+  it("splits the backend's {error, code} envelope", () => {
+    const { code, message } = errorPayload(
+      apiError(
+        JSON.stringify({ error: "File too large: 24 bytes", code: "ATTACHMENT_TOO_LARGE" }),
+      ),
+    );
+
+    expect(code).toBe("ATTACHMENT_TOO_LARGE");
+    expect(message).toBe("File too large: 24 bytes");
+  });
+
+  it("returns nulls for a non-JSON body", () => {
+    // Quarkus caps the request body before the attachment layer runs, so an
+    // oversize upload arrives as a bare 413 with an HTML or empty body.
+    expect(errorPayload(apiError("<html>413</html>"))).toEqual({
+      code: null,
+      message: null,
+    });
+  });
+
+  it("returns nulls for an empty body and for a non-ApiError", () => {
+    expect(errorPayload(apiError(""))).toEqual({ code: null, message: null });
+    expect(errorPayload(new Error("boom"))).toEqual({
+      code: null,
+      message: null,
+    });
+  });
+
+  it("ignores non-string error and code fields rather than coercing them", () => {
+    expect(errorPayload(apiError(JSON.stringify({ error: 42, code: [] })))).toEqual(
+      { code: null, message: null },
+    );
   });
 });
