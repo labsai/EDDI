@@ -7,11 +7,14 @@ package ai.labs.eddi.engine.tenancy;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
+import com.mongodb.MongoClientSettings;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.UpdateOptions;
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.mockito.ArgumentCaptor;
@@ -26,6 +29,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -370,16 +374,74 @@ class MongoTenantQuotaStoreTest {
         }
 
         @Test
-        @DisplayName("should handle stale month (null result) by resetting")
-        void staleMonth() {
+        @DisplayName("should not deny when the usage document disappears mid-update")
+        void usageDocumentDisappears() {
+            // Both conditional updates miss: the document was removed between the
+            // materialise and the retry (resetUsage / deleteQuota race). Cost cannot
+            // be accounted, but a bookkeeping race must not cost the caller a 429.
             when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any()))
                     .thenReturn(null);
 
             QuotaCheckResult qResult = sut.tryAddCost(TENANT_ID, 10.0, 100.0);
 
             assertTrue(qResult.allowed());
-            // Two findOneAndUpdate calls: first returns null, second resets
+            // Two conditional adds: one before and one after materialise-and-roll.
             verify(usageCollection, times(2)).findOneAndUpdate(any(Bson.class), any(Bson.class), any());
+        }
+    }
+
+    // ─── Upsert filter discipline ──────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("upsert filter discipline")
+    class UpsertFilterDiscipline {
+
+        /**
+         * {@code tenant_usage} carries a {@code unique(true)} index on
+         * {@code tenantId}. An upsert whose filter also pins a rolling window misses
+         * the tenant's existing document and attempts a SECOND insert, which the server
+         * rejects with E11000 — turning a quota check into a 500 on a live request.
+         * This is the pure-unit guard for that invariant; the end-to-end proof against
+         * a real server is in {@code MongoTenantQuotaStoreContainerTest}.
+         */
+        @Test
+        @DisplayName("every write that may insert is keyed on tenantId alone")
+        void everyUpsertIsKeyedOnTenantIdOnly() {
+            // All conditional updates miss, so every write path is exercised.
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any())).thenReturn(null);
+
+            sut.tryIncrementConversations(TENANT_ID, 10);
+            sut.tryIncrementApiCalls(TENANT_ID, 60);
+            sut.tryAddCost(TENANT_ID, 1.0, 100.0);
+
+            ArgumentCaptor<Bson> findFilters = ArgumentCaptor.forClass(Bson.class);
+            ArgumentCaptor<FindOneAndUpdateOptions> findOptions = ArgumentCaptor.forClass(FindOneAndUpdateOptions.class);
+            verify(usageCollection, atLeast(0))
+                    .findOneAndUpdate(findFilters.capture(), any(Bson.class), findOptions.capture());
+            for (int i = 0; i < findFilters.getAllValues().size(); i++) {
+                if (findOptions.getAllValues().get(i).isUpsert()) {
+                    assertKeyedOnTenantIdOnly(findFilters.getAllValues().get(i));
+                }
+            }
+
+            ArgumentCaptor<Bson> updateFilters = ArgumentCaptor.forClass(Bson.class);
+            ArgumentCaptor<UpdateOptions> updateOptions = ArgumentCaptor.forClass(UpdateOptions.class);
+            verify(usageCollection, atLeast(0))
+                    .updateOne(updateFilters.capture(), any(Bson.class), updateOptions.capture());
+            for (int i = 0; i < updateFilters.getAllValues().size(); i++) {
+                if (updateOptions.getAllValues().get(i).isUpsert()) {
+                    assertKeyedOnTenantIdOnly(updateFilters.getAllValues().get(i));
+                }
+            }
+        }
+
+        private void assertKeyedOnTenantIdOnly(Bson filter) {
+            BsonDocument rendered = filter.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+            assertEquals(Set.of("tenantId"), rendered.keySet(),
+                    "an upsert against tenant_usage must be keyed on tenantId alone — anything narrower "
+                            + "misses the tenant's document and inserts a duplicate (E11000). Was: " + rendered.toJson());
+            assertFalse(rendered.get("tenantId").isDocument(),
+                    "tenantId must be an equality match, was: " + rendered.toJson());
         }
     }
 

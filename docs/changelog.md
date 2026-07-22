@@ -5,6 +5,52 @@
 
 ---
 
+## 🐛 Keep all tenant quota counters in one `tenant_usage` document (2026-07-22)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D9**, part 1 of 3 — `MongoTenantQuotaStore` was raising **E11000 duplicate-key errors on a live request path**, not silently mis-counting.
+
+### The defect
+
+`tenant_usage` holds one document per tenant carrying all three counters, and it has a `unique(true)` index on `tenantId`. But all three mutating methods issued an **upsert whose filter also pinned a rolling window**:
+
+- `tryIncrementConversations` → `and(tenantId, dayStart >= …, conversationsToday < limit)`
+- `tryIncrementApiCalls` → `and(tenantId, minuteStart >= …, apiCallsThisMinute < limit)`
+- `tryAddCost` → `and(tenantId, costMonth == …)`
+
+Whenever the extra predicate did not match — which is *always* the first time a second counter is touched, because the document written by the first method has no `minuteStart` / `costMonth` field at all — the upsert found nothing, tried to insert a second document for the same tenant, and the unique index rejected it. The exception propagates out of the store.
+
+Concretely, with `eddi.tenant.quota.enabled=true` and both `max-conversations-per-day` and `max-api-calls-per-minute` set, `ConversationService.acquireConversationSlot()` succeeded and the very next `acquireApiCallSlot()` threw — a **500 on a user request**, not a quota denial. (Earlier notes described this as "monthly cost silently reads 0.0 forever". That was true before the unique index was added; since then the failure mode is the hard error above.)
+
+### The design
+
+Every write that can insert now filters on the unique-index key and nothing else. Each operation is:
+
+1. **Fast path** — one conditional `findOneAndUpdate` (`window current AND counter < limit`), **no upsert**. In steady state this is the only round trip, so the hot path is unchanged.
+2. **Materialise** — `ensureUsageDocument(tenantId)`, the single write in the class allowed to insert. Filter is `eq("tenantId", …)`; all counters are seeded together via `$setOnInsert`, so whichever operation runs first for a tenant, the other two find their fields present.
+3. **Roll + retry** — reset an expired window to **zero** (conditional, no upsert), then re-run the fast path.
+
+Steps 2–3 only run when the fast path misses (first call for a tenant, window rollover, or a real limit breach). Because the roll resets to zero and step 3 does the counting, the limit is enforced by exactly one predicate — `counter < limit` — in every path; a `limit` of `0` therefore denies without a special case, matching `InMemoryTenantQuotaStore`.
+
+The stale-window filter is `or(exists(field, false), lt(field, windowStart))`, which doubles as repair for legacy documents written by the previous code that are missing a window field entirely.
+
+### Migration hazard, handled
+
+`createIndex(tenantId, unique=true)` was called unguarded in the CDI constructor. Any instance that ran the pre-index build with quotas enabled may already hold duplicate `tenantId` rows, in which case index creation fails and the **whole application fails to start**. It is now wrapped: on failure it logs an ERROR naming the collection and the remediation, and continues. Safe, because correctness no longer depends on the index — it is a safety net against upsert races, not a precondition.
+
+### Tests
+
+- **`MongoTenantQuotaStoreContainerTest`** (new, Testcontainers) — 13 tests. Against the reverted store, 10 of them fail with `E11000 duplicate key error collection: eddi_test.tenant_usage index: tenantId_1`. Covers: conversations→api-calls, conversations→cost, interleaved three-counter accounting, at-limit denial, zero limit, day/minute window rollover, stale cost month, and a legacy document missing its window fields.
+- **`MongoTenantQuotaStoreTest.UpsertFilterDiscipline`** (new, pure unit, no Docker) — renders every captured filter to BSON and asserts each `upsert(true)` write is keyed on `tenantId` alone. Against the reverted store it fails with `expected: <[tenantId]> but was: <[$and]>`.
+- `TryAddCost.staleMonth` was renamed to `usageDocumentDisappears`: its premise (both conditional updates return null) is no longer "stale month" — it is now a concurrent `resetUsage`, which must not cost the caller a denial.
+
+### Operator note
+
+No configuration change. The subsystem ships dormant (`eddi.tenant.quota.enabled=false`, all limits `-1`), so only deployments that opted in were affected — for those, this turns 500s back into correct allow/deny.
+
+---
+
 ## 🧹 Delete dead RAG `injectionStrategy` / `contextTemplate` config (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)
