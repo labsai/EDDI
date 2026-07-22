@@ -6,7 +6,6 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
-import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -24,7 +23,6 @@ import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
-import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
@@ -117,23 +115,11 @@ class LlmTaskCoverageTest {
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
-                mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class),
-                mock(PdfReaderTool.class), mock(WeatherTool.class), mock(FetchToolResponsePageTool.class),
-                mock(IApiCallExecutor.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
-                ragContextProvider, mock(IUserMemoryStore.class),
-                new TokenCounterFactory(), mock(ConversationSummarizer.class),
+                mock(IApiCallExecutor.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                ragContextProvider, new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 promptSnippetService, globalVariableResolver, counterweightService,
-                identityMaskingService, mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null, null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
-                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
-
-        // Substitute the mock so standard / cascade-skip / legacy-fallback paths can
-        // be steered.
-        llmTask.agentOrchestrator = agentOrchestrator;
+                identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
         lenient().when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData d = mock(IData.class);

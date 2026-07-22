@@ -4,10 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.agents.CapabilityRegistryService;
-import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -15,7 +12,6 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.TaskId;
@@ -23,28 +19,21 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
-import ai.labs.eddi.engine.api.IConversationService;
-import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.engine.setup.AgentSetupService;
-import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
-import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
-import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.ChatMessage;
 import io.micrometer.core.instrument.MeterRegistry;
-import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -113,43 +102,20 @@ public class LlmTask implements ILifecycleTask {
     private final GlobalVariableResolver globalVariableResolver;
     private final CounterweightService counterweightService;
     private final IdentityMaskingService identityMaskingService;
-    private final IAttachmentStore attachmentStore;
+
+    /**
+     * The tool-calling agent loop — an injected collaborator, so a test can pass a
+     * mock straight to the constructor. This used to be built here via {@code new}
+     * from 22 constructor parameters that served no other purpose, leaving the
+     * agent-mode branches reachable only through
+     * {@code getDeclaredField("agentOrchestrator")} reflection.
+     */
+    private final AgentOrchestrator agentOrchestrator;
 
     // Field-injected so the many direct-construction unit tests are unaffected;
     // null-guarded at the call site.
     @Inject
     AttachmentForwarder attachmentForwarder;
-
-    @Inject
-    AttachmentTextExtractor attachmentTextExtractor;
-
-    /**
-     * The tool-calling agent loop. Field-injected for the same reason as the
-     * attachment services above: the constructor below still builds one, so the
-     * many direct-construction unit tests keep working unchanged, while CDI
-     * replaces it with the managed {@link AgentOrchestrator} bean in production
-     * (field injection runs after the constructor).
-     * <p>
-     * Package-private and non-final so a test can substitute a mock by plain
-     * assignment — the agent-mode branches used to be reachable only through
-     * {@code getDeclaredField("agentOrchestrator")} reflection.
-     */
-    @Inject
-    AgentOrchestrator agentOrchestrator;
-
-    /**
-     * Wire the attachment services into the AgentOrchestrator after CDI field
-     * injection completes, so the {@code readAttachment} tool can be offered. By
-     * this point {@code agentOrchestrator} is the injected bean, not the
-     * constructor's fallback. Skipped in direct-construction unit tests (no CDI) —
-     * the tool is simply never added there.
-     */
-    @PostConstruct
-    void wireAttachmentServices() {
-        if (agentOrchestrator != null) {
-            agentOrchestrator.setAttachmentServices(attachmentStore, attachmentTextExtractor);
-        }
-    }
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -180,22 +146,15 @@ public class LlmTask implements ILifecycleTask {
     @Inject
     public LlmTask(IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory, IMemoryItemConverter memoryItemConverter,
             ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, PrePostUtils prePostUtils, ChatModelRegistry chatModelRegistry,
-            CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
-            WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
-            FetchToolResponsePageTool fetchToolResponsePageTool,
-            IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
-            A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
-            RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory,
+            IApiCallExecutor apiCallExecutor, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
+            RagContextProvider ragContextProvider, TokenCounterFactory tokenCounterFactory,
             ConversationSummarizer conversationSummarizer,
             PromptSnippetService promptSnippetService,
             GlobalVariableResolver globalVariableResolver,
             CounterweightService counterweightService,
             IdentityMaskingService identityMaskingService,
-            ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
-            MemorySnapshotService memorySnapshotService, IAttachmentStore attachmentStore,
-            AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
-            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
-            MeterRegistry meterRegistry, IHitlToolJournalStore hitlToolJournalStore) {
+            AgentOrchestrator agentOrchestrator, ConversationHistoryBuilder conversationHistoryBuilder,
+            MeterRegistry meterRegistry) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -204,19 +163,10 @@ public class LlmTask implements ILifecycleTask {
         this.prePostUtils = prePostUtils;
 
         this.chatModelRegistry = chatModelRegistry;
-        this.conversationHistoryBuilder = new ConversationHistoryBuilder();
+        this.conversationHistoryBuilder = conversationHistoryBuilder;
         this.legacyChatExecutor = new LegacyChatExecutor();
         this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();
-        // Fallback instance for direct construction (unit tests). Under CDI this is
-        // overwritten by the injected AgentOrchestrator bean right after the
-        // constructor returns — see the field declaration above.
-        this.agentOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, fetchToolResponsePageTool,
-                toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,
-                restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore,
-                toolResponseTruncator, tenantQuotaService, memorySnapshotService,
-                agentSetupService, capabilityRegistryService, conversationService, agentFactory, agentStore,
-                hitlToolJournalStore, conversationHistoryBuilder);
+        this.agentOrchestrator = agentOrchestrator;
         this.ragContextProvider = ragContextProvider;
         this.tokenCounterFactory = tokenCounterFactory;
         this.apiCallExecutor = apiCallExecutor;
@@ -227,7 +177,6 @@ public class LlmTask implements ILifecycleTask {
         this.globalVariableResolver = globalVariableResolver;
         this.counterweightService = counterweightService;
         this.identityMaskingService = identityMaskingService;
-        this.attachmentStore = attachmentStore;
         this.cascadingModelExecutor = new CascadingModelExecutor(chatModelRegistry, globalVariableResolver, templatingEngine, legacyChatExecutor,
                 streamingLegacyChatExecutor, meterRegistry);
     }
@@ -593,7 +542,10 @@ public class LlmTask implements ILifecycleTask {
                 // AgentOrchestrator sums TokenUsage across every model call in the tool
                 // loop and returns it here; not reading it dropped all agent-mode token
                 // accounting on the floor while the legacy branches below kept theirs.
-                responseMetadata = agentResult.responseMetadata();
+                // Copied, not aliased: ExecutionResult's two-arg constructor yields an
+                // immutable Map.of(), so assigning it directly would make any later
+                // metadata write throw only on the agent path, only in production.
+                responseMetadata = new HashMap<>(agentResult.responseMetadata());
                 usedToolMode = true;
                 if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
                     eventSink.onToken(responseContent);
@@ -620,8 +572,9 @@ public class LlmTask implements ILifecycleTask {
                 responseContent = agentResult.response();
                 toolTrace = agentResult.trace();
                 // See the skipCascade branch above: without this, agent-mode token usage
-                // is computed by AgentOrchestrator and then silently discarded.
-                responseMetadata = agentResult.responseMetadata();
+                // is computed by AgentOrchestrator and then silently discarded. Copied
+                // for the same mutability reason.
+                responseMetadata = new HashMap<>(agentResult.responseMetadata());
                 usedToolMode = true;
                 // Stream the final agent response if streaming is active
                 if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
@@ -912,7 +865,7 @@ public class LlmTask implements ILifecycleTask {
         String responseContent = result != null ? result.response() : null;
         List<Map<String, Object>> toolTrace = result != null && result.trace() != null ? result.trace() : new ArrayList<>();
         Map<String, Object> responseMetadata = result != null && result.responseMetadata() != null
-                ? result.responseMetadata()
+                ? new HashMap<>(result.responseMetadata())
                 : new HashMap<>();
 
         // === Store the result EXACTLY like the normal path (executeTask) ===

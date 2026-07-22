@@ -5,11 +5,9 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -20,11 +18,11 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.model.chat.ChatModel;
@@ -64,6 +62,15 @@ import static org.mockito.MockitoAnnotations.openMocks;
  * the two-arg {@link AgentOrchestrator.ExecutionResult} convenience
  * constructor, which hardcodes an empty metadata map. Covering the branch was
  * never enough — the metadata dimension had to be exercised explicitly.
+ * <p>
+ * <strong>Which of these actually discriminate.</strong> Reverting the fix
+ * (commit {@code 15b7a08a7}) turns four of the six red. The other two —
+ * {@code agentReturnsNull_fallsBackToLegacyChatExecutor} and
+ * {@code agentMode_emptyMetadata_publishesEmptyMap} — pass either way and are
+ * regression guards, not discriminators; each says so at its assertion. The fix
+ * has three separately-revertable call sites (the {@code skipCascade} branch,
+ * the standard branch, and {@code executeResume}); there is a discriminating
+ * test per site, so a partial revert cannot slip through.
  */
 @DisplayName("LlmTask agent-mode response metadata")
 class LlmTaskAgentModeMetadataTest {
@@ -129,23 +136,11 @@ class LlmTaskAgentModeMetadataTest {
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
-                mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class),
-                mock(PdfReaderTool.class), mock(WeatherTool.class), mock(FetchToolResponsePageTool.class),
-                mock(IApiCallExecutor.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
-                ragContextProvider, mock(IUserMemoryStore.class),
-                new TokenCounterFactory(), conversationSummarizer,
+                mock(IApiCallExecutor.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                ragContextProvider, new TokenCounterFactory(), conversationSummarizer,
                 promptSnippetService, globalVariableResolver, counterweightService,
-                identityMaskingService, mock(ToolResponseTruncator.class),
-                mock(TenantQuotaService.class),
-                null, null, null, null, null, null, null, new SimpleMeterRegistry(),
-                mock(IHitlToolJournalStore.class));
-
-        // Plain assignment — the orchestrator field is injectable now, so steering
-        // the agent-mode branches no longer needs getDeclaredField reflection.
-        llmTask.agentOrchestrator = agentOrchestrator;
+                identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),
+                new SimpleMeterRegistry());
 
         lenient().when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData<?> d = mock(IData.class);
@@ -167,6 +162,10 @@ class LlmTaskAgentModeMetadataTest {
         params.put("apiKey", "key");
         t.setParameters(params);
         t.setResponseMetadataObjectName(METADATA_KEY);
+        // Without this, isAgentMode() is false and the real orchestrator would always
+        // return null — a non-null agent result would be a shape production could
+        // never produce. Keeps the fixtures honest even though the mock ignores it.
+        t.setEnableBuiltInTools(true);
         return t;
     }
 
@@ -195,9 +194,9 @@ class LlmTaskAgentModeMetadataTest {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> capturedMemoryEntry() {
-        var captor = ArgumentCaptor.forClass(Object.class);
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(prePostUtils).createMemoryEntry(eq(currentStep), captor.capture(), eq(METADATA_KEY), eq("langchain"));
-        return (Map<String, Object>) captor.getValue();
+        return captor.getValue();
     }
 
     // ============================================================
@@ -230,12 +229,59 @@ class LlmTaskAgentModeMetadataTest {
         wireStandardMemory();
         // Two-arg convenience constructor → Map.of(), the shape every pre-existing
         // stub used and the reason the dropped-metadata bug stayed invisible.
+        var emptyMetaResult = new AgentOrchestrator.ExecutionResult("agent answer", new ArrayList<>());
         when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
-                .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", new ArrayList<>()));
+                .thenReturn(emptyMetaResult);
 
         llmTask.execute(memory, new LlmConfiguration(List.of(task("taskA"))));
 
-        assertTrue(capturedMemoryEntry().isEmpty(), "empty orchestrator metadata must surface as an empty map");
+        Map<String, Object> stored = capturedMemoryEntry();
+        assertTrue(stored.isEmpty(), "empty orchestrator metadata must surface as an empty map");
+        // A copy, never the orchestrator's own instance: the two-arg ExecutionResult
+        // constructor yields an immutable Map.of(), and this map is published into
+        // conversation memory and the template namespace where later code may write
+        // to it. Aliasing it would defer an UnsupportedOperationException to the
+        // agent path in production only.
+        assertNotSame(emptyMetaResult.responseMetadata(), stored,
+                "published metadata must be a defensive copy, not the orchestrator's map");
+        // NOTE: unlike the other five, this test passes with and without the fix —
+        // pre-fix the published map was LlmTask's own empty HashMap, equally empty and
+        // equally a non-alias. It is a guard against NPE and against re-aliasing, not
+        // a discriminator.
+    }
+
+    // ============================================================
+    // 1b. skipCascade agent branch — a SECOND, separately-revertable call site
+    // ============================================================
+
+    @Test
+    @DisplayName("skipCascade agent branch surfaces responseMetadata too (distinct call site from the standard branch)")
+    void skipCascadeAgentMode_surfacesResponseMetadata() throws Exception {
+        wireStandardMemory();
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", new ArrayList<>(),
+                        Map.of("tokenUsage", agentTokenUsage())));
+
+        // A cascade that is configured but disabled for agent mode routes execution
+        // down the `else if (skipCascade)` branch, NOT the standard `else` branch —
+        // a separate `responseMetadata = agentResult.responseMetadata()` assignment
+        // that the standard-branch test above cannot reach.
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEnableInAgentMode(false);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step));
+
+        var t = task("taskA"); // the helper already sets enableBuiltInTools → isAgentMode()
+        t.setModelCascade(cascade);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        assertEquals(agentTokenUsage(), capturedMemoryEntry().get("tokenUsage"),
+                "skipCascade agent branch must surface tokenUsage as well");
     }
 
     // ============================================================
