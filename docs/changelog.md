@@ -5,6 +5,24 @@
 
 ---
 
+## 🔍 PR review follow-ups — a vacuous test found and fixed (2026-07-21)
+
+**Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
+
+Addressing CodeRabbit and Copilot review comments. One of them exposed a test that could not fail.
+
+**The `MAX_PAGES` ceiling test was vacuous.** CodeRabbit noted the new page ceiling had no coverage. Adding a test made it pass immediately — but mutation-checking it (disabling the ceiling so the walk truncates silently) showed it *still* passed. Cause: the fixture left `agentStore.read` unstubbed, so the traversal NPE'd on a null config, marked the scan incomplete, and produced the expected 409 **for the wrong reason**. Stubbing the agent read so the ceiling is the only possible failure source, plus asserting the refusal message names it, makes the test load-bearing — the mutant now dies with "Expected WebApplicationException to be thrown, but nothing was thrown."
+
+**Copilot's `WRITE_DATES_AS_TIMESTAMPS` finding: premise wrong, instinct right.** It claimed the produced `@PersistenceMapper` could change the on-disk shape. It cannot — Jackson enables that feature by default, so the producer already emitted numeric. But the real defect was next door: `SerializationCustomizerInstantFormatTest` *reconstructed* the producer instead of calling it, and set the flag itself — so it would have passed even if the producer were broken. The test now builds the mapper via `new PersistenceMapperProducer().persistenceMapper()`, and the producer states the flag explicitly. Relying on a library default for a persistence-format guarantee is precisely what `dc117cddc` was reverted for. Mutation-checked: flipping the producer to ISO now fails two tests.
+
+**TOCTOU on the agent quota — documented, not fixed, and the earlier claim corrected.** CodeRabbit correctly flagged that concurrent deploys observing `count == limit - 1` all pass. An internal note had called this "self-correcting"; that was wrong — once over, the gate merely refuses further deploys until an undeploy brings the count down. The javadoc now states the bound honestly and explains why a per-tenant lock is *not* used: it would serialize within one JVM while the count spans the shared store and every node's registry, giving the appearance of a hard guarantee exactly where it would not hold. Accepted because deploys are rare admin operations and the gate's purpose — stopping runaway growth such as an LLM creating sub-agents in a loop — survives a small transient overrun.
+
+**Log injection.** `sanitize(conversationId)` added to the new quota-denial log line in `RestAgentEngine`, matching the rest of the class (lines 331, 368, 389, 436).
+
+**Not actioned:** the advisory note that the orphan endpoint blocks a request thread. Pre-existing, explicitly raised as advice rather than a blocker, and moving it to `AsyncResponse` with a polling status endpoint is a separate change.
+
+---
+
 ## 🔢 LLM — stop discarding agent-mode token usage (2026-07-21)
 
 **Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
