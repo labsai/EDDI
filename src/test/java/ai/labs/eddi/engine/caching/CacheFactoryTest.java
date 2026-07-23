@@ -114,11 +114,15 @@ class CacheFactoryTest {
 
         @Test
         @DisplayName("a NEGATIVE per-entry lifespan means unlimited, it does not throw")
-        void negativeLifespanIsUnlimited() {
+        void negativeLifespanIsUnlimited() throws InterruptedException {
             ICache<String, String> cache = factory.getCache("negativeTtl");
 
             assertDoesNotThrow(() -> cache.put("key1", "value1", -1, TimeUnit.SECONDS));
-            assertEquals("value1", cache.get("key1"));
+            // Reading immediately would also pass if -1 were mapped to a short positive
+            // TTL. Wait past a plausible one, so only a genuinely unlimited entry survives.
+            Thread.sleep(PAST_TTL_MILLIS);
+            assertEquals("value1", cache.get("key1"),
+                    "a negative lifespan means unlimited — the entry must outlive any positive TTL");
         }
     }
 
@@ -196,14 +200,20 @@ class CacheFactoryTest {
         @Test
         @DisplayName("the nonce cache's capacity covers the TTL it is built with")
         void nonceCacheCapacityCoversItsTtl() {
-            Duration ttl = Duration.ofSeconds(390);
+            // A fractional-second TTL on purpose: maximumSizeFor derives capacity from
+            // ttl.toMillis(), so a regression that truncated to whole seconds — the same
+            // truncation the instance-key test below guards — would under-size the cache
+            // and re-open replay. A whole-second TTL could not detect it. Occupancy is
+            // therefore computed at millisecond precision to match production.
+            Duration ttl = Duration.ofMillis(390_500);
+            double ttlSeconds = ttl.toMillis() / 1000.0;
 
             long capacity = evictionMaximumOf(factory.getCache("nonce-replay-protection", ttl));
 
-            long steadyStateOccupancy = (long) CacheFactory.NONCE_PEAK_SIGNED_RPS * ttl.toSeconds();
+            double steadyStateOccupancy = CacheFactory.NONCE_PEAK_SIGNED_RPS * ttlSeconds;
             assertTrue(capacity >= steadyStateOccupancy,
                     "a capacity of " + capacity + " cannot hold the " + steadyStateOccupancy
-                            + " nonces written during a " + ttl.toSeconds() + "s replay window");
+                            + " nonces written during a " + ttlSeconds + "s replay window");
             assertEquals((long) Math.ceil(steadyStateOccupancy * CacheFactory.RATE_SIZED_EVICTION_HEADROOM), capacity,
                     "the capacity must carry head-room, because eviction is not LRU and drops the newest nonce");
         }

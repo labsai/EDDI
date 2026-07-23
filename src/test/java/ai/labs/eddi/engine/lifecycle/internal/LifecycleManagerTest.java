@@ -30,6 +30,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.Map;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
@@ -1287,8 +1288,12 @@ class LifecycleManagerTest {
             when(modelData.getResult()).thenReturn("gpt-4");
             doReturn(modelData).when(currentStep).getLatestData("audit:model_name");
 
-            IData<java.util.Map<String, Object>> tokenData = mock(IData.class);
-            when(tokenData.getResult()).thenReturn(java.util.Map.of("input", 10, "output", 20));
+            // Match the AUDIT_TOKEN_USAGE contract exactly — {inputTokens, outputTokens,
+            // totalTokens} — since buildAuditEntry copies this map straight into
+            // llmDetail.tokenUsage. A {input, output} fixture would test a shape the
+            // producer never emits.
+            IData<Map<String, Object>> tokenData = mock(IData.class);
+            when(tokenData.getResult()).thenReturn(Map.of("inputTokens", 10, "outputTokens", 20, "totalTokens", 30));
             doReturn(tokenData).when(currentStep).getLatestData("audit:token_usage");
 
             var auditCollector = mock(IAuditEntryCollector.class);
@@ -1304,7 +1309,8 @@ class LifecycleManagerTest {
                 assertTrue(entry.llmDetail().containsKey("modelResponse"));
                 assertTrue(entry.llmDetail().containsKey("modelName"));
                 // containsKey alone passed while the entry carried null: assert the value.
-                assertEquals(java.util.Map.of("input", 10, "output", 20), entry.llmDetail().get("tokenUsage"));
+                assertEquals(Map.of("inputTokens", 10, "outputTokens", 20, "totalTokens", 30),
+                        entry.llmDetail().get("tokenUsage"));
                 return true;
             }));
         }
@@ -1318,7 +1324,7 @@ class LifecycleManagerTest {
                 doReturn(promptData).when(currentStep).getLatestData("audit:compiled_prompt");
                 // Key present but empty-resulted — the loose "data != null" guard would
                 // put a null tokenUsage into llmDetail and ship it to the ledger.
-                IData<java.util.Map<String, Object>> tokenData = mock(IData.class);
+                IData<Map<String, Object>> tokenData = mock(IData.class);
                 when(tokenData.getResult()).thenReturn(null);
                 doReturn(tokenData).when(currentStep).getLatestData("audit:token_usage");
             });
@@ -1361,10 +1367,10 @@ class LifecycleManagerTest {
         @Test
         @DisplayName("audit entry populates toolCalls from memory")
         void auditEntryPopulatesToolCallsFromMemory() throws Exception {
-            var calls = List.of(java.util.Map.<String, Object>of("tool", "calculator", "llmTaskId", "taskA"));
+            var calls = List.of(Map.<String, Object>of("tool", "calculator", "llmTaskId", "taskA"));
             var auditCollector = auditRun(currentStep -> {
-                IData<java.util.Map<String, Object>> toolCallData = mock(IData.class);
-                when(toolCallData.getResult()).thenReturn(java.util.Map.of("calls", calls));
+                IData<Map<String, Object>> toolCallData = mock(IData.class);
+                when(toolCallData.getResult()).thenReturn(Map.of("calls", calls));
                 doReturn(toolCallData).when(currentStep).getLatestData("audit:tool_calls");
             });
 
@@ -1386,8 +1392,8 @@ class LifecycleManagerTest {
             }));
 
             var empty = auditRun(currentStep -> {
-                IData<java.util.Map<String, Object>> toolCallData = mock(IData.class);
-                when(toolCallData.getResult()).thenReturn(java.util.Map.of());
+                IData<Map<String, Object>> toolCallData = mock(IData.class);
+                when(toolCallData.getResult()).thenReturn(Map.of());
                 doReturn(toolCallData).when(currentStep).getLatestData("audit:tool_calls");
             });
             verify(empty).collect(argThat(entry -> {
@@ -1425,7 +1431,7 @@ class LifecycleManagerTest {
          * Runs one lifecycle turn with an audit collector attached, letting the caller
          * stub whatever {@code audit:*} data the case needs on the current step.
          */
-        private IAuditEntryCollector auditRun(java.util.function.Consumer<IConversationMemory.IWritableConversationStep> stubStep)
+        private IAuditEntryCollector auditRun(Consumer<IConversationMemory.IWritableConversationStep> stubStep)
                 throws Exception {
             var manager = new LifecycleManager(componentCache, workflowId);
             var task = mock(ILifecycleTask.class);

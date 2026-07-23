@@ -414,25 +414,40 @@ class MongoTenantQuotaStoreTest {
             sut.tryIncrementApiCalls(TENANT_ID, 60);
             sut.tryAddCost(TENANT_ID, 1.0, 100.0);
 
+            // The store reaches the server through both primitives (findOneAndUpdate
+            // for the conditional fast paths, updateOne for the materialising upsert),
+            // and forcing every conditional to miss drives all three calls onto their
+            // upsert branch — so atLeastOnce() is the honest lower bound. atLeast(0)
+            // would let this whole assertion pass even if the store stopped touching
+            // Mongo entirely.
             ArgumentCaptor<Bson> findFilters = ArgumentCaptor.forClass(Bson.class);
             ArgumentCaptor<FindOneAndUpdateOptions> findOptions = ArgumentCaptor.forClass(FindOneAndUpdateOptions.class);
-            verify(usageCollection, atLeast(0))
+            verify(usageCollection, atLeastOnce())
                     .findOneAndUpdate(findFilters.capture(), any(Bson.class), findOptions.capture());
-            for (int i = 0; i < findFilters.getAllValues().size(); i++) {
-                if (findOptions.getAllValues().get(i).isUpsert()) {
-                    assertKeyedOnTenantIdOnly(findFilters.getAllValues().get(i));
-                }
-            }
 
             ArgumentCaptor<Bson> updateFilters = ArgumentCaptor.forClass(Bson.class);
             ArgumentCaptor<UpdateOptions> updateOptions = ArgumentCaptor.forClass(UpdateOptions.class);
-            verify(usageCollection, atLeast(0))
+            verify(usageCollection, atLeastOnce())
                     .updateOne(updateFilters.capture(), any(Bson.class), updateOptions.capture());
+
+            // Count the upsert filters actually asserted. Verifying the calls happened
+            // is not enough — an upsert-free run would leave every isUpsert() branch
+            // false and the tenantId-only invariant would go unchecked. Guard on it.
+            int upsertsChecked = 0;
+            for (int i = 0; i < findFilters.getAllValues().size(); i++) {
+                if (findOptions.getAllValues().get(i).isUpsert()) {
+                    assertKeyedOnTenantIdOnly(findFilters.getAllValues().get(i));
+                    upsertsChecked++;
+                }
+            }
             for (int i = 0; i < updateFilters.getAllValues().size(); i++) {
                 if (updateOptions.getAllValues().get(i).isUpsert()) {
                     assertKeyedOnTenantIdOnly(updateFilters.getAllValues().get(i));
+                    upsertsChecked++;
                 }
             }
+            assertTrue(upsertsChecked > 0,
+                    "no upsert was exercised, so the tenantId-only invariant was never actually checked");
         }
 
         private void assertKeyedOnTenantIdOnly(Bson filter) {

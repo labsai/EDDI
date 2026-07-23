@@ -5,6 +5,20 @@
 
 ---
 
+## 🧪 De-vacuum three tests and fix a doc/fixture drift (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+CodeRabbit and Copilot flagged a cluster of tests that passed for the wrong reason, plus two documentation/fixture mismatches. Each behavioural change is mutation-checked.
+
+- **`MongoTenantQuotaStoreTest.everyUpsertIsKeyedOnTenantIdOnly` was vacuous.** It verified `findOneAndUpdate`/`updateOne` with `atLeast(0)`, which never fails, and its filter loop asserted nothing when nothing was captured. Now `atLeastOnce()` plus an explicit `upsertsChecked > 0` guard. Mutation: removing the store exercise fails with `Wanted but not invoked`; the old form passed.
+- **`CacheFactoryTest.negativeLifespanIsUnlimited` read immediately** — a negative-lifespan-mapped-to-short-positive-TTL bug would slip through. Now sleeps past `PAST_TTL_MILLIS` and asserts survival. Mutation: mapping negative → 1ms fails with `expected: <value1> but was: <null>`.
+- **`CacheFactoryTest.nonceCacheCapacityCoversItsTtl` used whole seconds**, so a capacity derived from `ttl.toSeconds()` (truncating) instead of `toMillis()` would pass. Now uses a fractional `390_500ms` TTL and millisecond-precision occupancy. Mutation: reverting `maximumSizeFor` to `toSeconds()` fails with `expected: <234300> but was: <234000>`.
+- **`LifecycleManagerTest` audit fixture used `{input, output}`** for `llmDetail.tokenUsage`, a shape production never emits — `buildAuditEntry` copies `audit:token_usage` straight through, and that key's contract is `{inputTokens, outputTokens, totalTokens}`. Fixture and assertion aligned to the real contract, and the inline `java.util.Map` / `Consumer` FQNs replaced with imports (AGENTS.md §4.7).
+- **This changelog's D5 cache-key example** still showed `arguments.length()` directly after `buildKey` gained a null-coalescing guard; the formula now shows `args = arguments == null ? "" : arguments` first.
+
+---
+
 ## 🐛 `ToolNameResolver.canonical` could return null, contradicting its own contract (2026-07-23)
 
 **Repo:** EDDI (`fix/backlog-defect-remediation`)
@@ -712,7 +726,8 @@ Backlog item **D5**, the highest-severity item in the langchain4j remediation ba
 Every cache key now starts with a **scope tag**:
 
 ```text
-key = scopeTag + "|" + toolName + ":" + (arguments.length() > 2048 ? sha256(arguments) : arguments)
+args = (arguments == null ? "" : arguments)
+key  = scopeTag + "|" + toolName + ":" + (args.length() > 2048 ? sha256(args) : args)
 ```
 
 | Scope          | Tag                                    | Reused by                                      |
