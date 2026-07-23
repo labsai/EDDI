@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.output.model.OutputItem;
+import ai.labs.eddi.utils.RuntimeUtilities;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -28,8 +29,8 @@ import java.util.Map;
  * <li>Flat keys like {@code output:text:*} — legacy format</li>
  * <li>{@code reply} key — String or List of Strings</li>
  * </ol>
- * Returns {@code null} when no recognizable text is found (e.g., the output
- * map contains only pipeline metadata like actions, context, or expressions).
+ * Returns {@code null} when no recognizable text is found (e.g., the output map
+ * contains only pipeline metadata like actions, context, or expressions).
  *
  * @since 6.0.0
  */
@@ -51,13 +52,10 @@ public final class ConversationOutputExtractor {
      *         (e.g., pipeline metadata only)
      */
     public static String extractResponse(SimpleConversationMemorySnapshot snapshot) {
-        if (snapshot == null || snapshot.getConversationOutputs() == null) {
+        if (snapshot == null || RuntimeUtilities.isNullOrEmpty(snapshot.getConversationOutputs())) {
             return null;
         }
         List<ConversationOutput> outputs = snapshot.getConversationOutputs();
-        if (outputs.isEmpty()) {
-            return null;
-        }
         ConversationOutput lastOutput = outputs.get(outputs.size() - 1);
         if (lastOutput == null) {
             return null;
@@ -69,25 +67,23 @@ public final class ConversationOutputExtractor {
         Object outputValue = lastOutput.get("output");
         if (outputValue instanceof List<?> list) {
             for (var item : list) {
-                if (item instanceof String s) {
+                if (item instanceof String s && hasText(s)) {
                     texts.add(s);
-                } else if (item instanceof OutputItem oi && oi.toString() != null) {
-                    // TextOutputItem.toString() returns the text field
+                } else if (item instanceof OutputItem oi && hasText(oi.toString())) {
                     texts.add(oi.toString());
-                } else if (item instanceof Map<?, ?> map) {
-                    Object text = map.get("text");
-                    if (text instanceof String s) {
-                        texts.add(s);
-                    }
+                } else if (item instanceof Map<?, ?> map
+                        && map.get("text") instanceof String s && hasText(s)) {
+                    texts.add(s);
                 }
             }
             if (!texts.isEmpty()) {
                 return String.join("\n", texts);
             }
-        } else if (outputValue instanceof String s && !s.isBlank()) {
+        } else if (outputValue instanceof String s && hasText(s)) {
             // Plain string written via addConversationOutputString("output", ...)
             return s;
-        } else if (outputValue instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+        } else if (outputValue instanceof Map<?, ?> map
+                && map.get("text") instanceof String s && hasText(s)) {
             return s;
         }
 
@@ -95,16 +91,18 @@ public final class ConversationOutputExtractor {
         for (var entry : lastOutput.entrySet()) {
             if (entry.getKey() instanceof String key && key.startsWith("output:text:")) {
                 Object val = entry.getValue();
-                if (val instanceof String s) {
+                if (val instanceof String s && hasText(s)) {
                     texts.add(s);
                 } else if (val instanceof List<?> list) {
                     for (var item : list) {
-                        if (item instanceof String s)
+                        if (item instanceof String s && hasText(s))
                             texts.add(s);
-                        else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s)
+                        else if (item instanceof Map<?, ?> map
+                                && map.get("text") instanceof String s && hasText(s))
                             texts.add(s);
                     }
-                } else if (val instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+                } else if (val instanceof Map<?, ?> map
+                        && map.get("text") instanceof String s && hasText(s)) {
                     texts.add(s);
                 }
             }
@@ -116,11 +114,12 @@ public final class ConversationOutputExtractor {
 
         // Format 3: "reply" key — used by some task extensions
         Object replyValue = lastOutput.get("reply");
-        if (replyValue instanceof String s && !s.isBlank()) {
+        if (replyValue instanceof String s && hasText(s)) {
             return s;
         } else if (replyValue instanceof List<?> list) {
             for (var item : list) {
-                if (item instanceof String s) texts.add(s);
+                if (item instanceof String s && hasText(s))
+                    texts.add(s);
             }
             if (!texts.isEmpty()) {
                 return String.join("\n", texts);
@@ -136,5 +135,15 @@ public final class ConversationOutputExtractor {
         LOGGER.debugf("No extractable text from conversation output keys: %s",
                 lastOutput.keySet());
         return null;
+    }
+
+    /**
+     * Returns {@code true} if the string is non-null, non-empty, and not
+     * purely whitespace. Combines {@link RuntimeUtilities#isNullOrEmpty}
+     * with an additional blank check to avoid treating whitespace-only
+     * content as meaningful agent output.
+     */
+    private static boolean hasText(String s) {
+        return !RuntimeUtilities.isNullOrEmpty(s) && !s.isBlank();
     }
 }

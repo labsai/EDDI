@@ -192,6 +192,46 @@ class ConversationOutputExtractorTest {
         assertEquals("Reply line 1\nReply line 2", ConversationOutputExtractor.extractResponse(snapshot));
     }
 
+    @Test
+    void extractResponse_blankReplyString_returnsNull() {
+        var output = new ConversationOutput();
+        output.put("reply", "   ");
+        var snapshot = snapshotWith(output);
+
+        assertNull(ConversationOutputExtractor.extractResponse(snapshot),
+                "Blank reply string should not be treated as meaningful text");
+    }
+
+    @Test
+    void extractResponse_replyListWithOnlyBlankItems_returnsNull() {
+        var output = new ConversationOutput();
+        output.put("reply", List.of("  ", "\t"));
+        var snapshot = snapshotWith(output);
+
+        assertNull(ConversationOutputExtractor.extractResponse(snapshot),
+                "Reply list containing only blank strings should return null");
+    }
+
+    @Test
+    void extractResponse_outputMapWithBlankText_returnsNull() {
+        var output = new ConversationOutput();
+        output.put("output", Map.of("text", "   "));
+        var snapshot = snapshotWith(output);
+
+        assertNull(ConversationOutputExtractor.extractResponse(snapshot),
+                "Map with blank text value should not be treated as meaningful text");
+    }
+
+    @Test
+    void extractResponse_outputListWithBlankMapText_returnsNull() {
+        var output = new ConversationOutput();
+        output.put("output", List.of(Map.of("text", "   ")));
+        var snapshot = snapshotWith(output);
+
+        assertNull(ConversationOutputExtractor.extractResponse(snapshot),
+                "List item Map with blank text should not produce output");
+    }
+
     // --- Multiple outputs: always uses the LAST one ---
 
     @Test
