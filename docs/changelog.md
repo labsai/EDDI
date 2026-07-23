@@ -5,6 +5,18 @@
 
 ---
 
+## 🐛 `ToolNameResolver.canonical` could return null, contradicting its own contract (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Copilot flagged that `canonical(dispatchName, canonicalNames)` used `getOrDefault`, which returns a **stored** null when a key maps to null — so the method could hand back null even though its javadoc promises "callers never need a null check". A null slug would then flow into the price and TTL lookups. The tell was in the test itself: `nullValuedMappingDegrades` was named for degrading to the dispatch name but asserted `assertNull`, documenting the bug as the contract and leaning on `ToolInvocation` to normalise it downstream.
+
+Fixed to treat a null-valued key the same as an absent one (`get` + null fallback), and the test now asserts what its name always said — the result is the dispatch name, never null. Mutation-checked: reverting to `getOrDefault` fails the test with `expected: not <null>`.
+
+The map is built by `AgentOrchestrator.buildToolSetup`, which substitutes the dispatch name and never stores nulls, so this was defence-in-depth rather than a live crash — but a method whose javadoc, code and test display-name all disagreed is exactly the silent inconsistency this branch set out to remove.
+
+---
+
 ## 🔒 Redact secrets from the tool trace before it reaches the SSE stream (2026-07-23)
 
 **Repo:** EDDI (`fix/backlog-defect-remediation`)

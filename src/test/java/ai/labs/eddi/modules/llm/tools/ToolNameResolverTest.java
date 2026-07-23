@@ -137,13 +137,12 @@ class ToolNameResolverTest {
             Map<String, String> withNullValue = new HashMap<>();
             withNullValue.put("searchWeb", null);
 
-            // getOrDefault returns the stored null, so this documents the contract the
-            // orchestrator relies on: it never stores nulls (it substitutes the dispatch
-            // name at build time), and ToolInvocation normalises anything that slips
-            // through.
-            assertNull(ToolNameResolver.canonical("searchWeb", withNullValue));
-            assertNotNull(new ToolInvocation("searchWeb", ToolNameResolver.canonical("searchWeb", withNullValue), null)
-                    .canonicalName());
+            // A key mapped to null must be treated as absent — the javadoc promises
+            // callers never get a null slug, so a null value can't be allowed to leak
+            // into the price/TTL lookups downstream.
+            String canonical = ToolNameResolver.canonical("searchWeb", withNullValue);
+            assertNotNull(canonical);
+            assertEquals("searchWeb", canonical);
         }
     }
 }

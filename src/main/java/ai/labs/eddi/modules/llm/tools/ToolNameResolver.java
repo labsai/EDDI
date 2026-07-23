@@ -93,19 +93,23 @@ public final class ToolNameResolver {
      * <p>
      * Tools with no mapping — http, mcp, a2a and the dynamic-agent tools, whose
      * dispatch name IS their configured name — resolve to themselves, so callers
-     * never need a null check.
+     * never need a null check. A key present with a {@code null} value is treated
+     * the same as an absent key: {@code getOrDefault} would hand back the stored
+     * {@code null}, which would break that guarantee and propagate a null slug into
+     * price and TTL lookups.
      * </p>
      *
      * @param dispatchName
      *            the name the model invoked
      * @param canonicalNames
      *            dispatch name → slug, may be {@code null}
-     * @return the slug, or {@code dispatchName} when there is no mapping
+     * @return the slug, or {@code dispatchName} when there is no (non-null) mapping
      */
     public static String canonical(String dispatchName, Map<String, String> canonicalNames) {
         if (canonicalNames == null) {
             return dispatchName;
         }
-        return canonicalNames.getOrDefault(dispatchName, dispatchName);
+        String slug = canonicalNames.get(dispatchName);
+        return slug != null ? slug : dispatchName;
     }
 }
