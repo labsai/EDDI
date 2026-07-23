@@ -2107,8 +2107,10 @@
     "chooseTemplate": "اختر قالباً أو ابدأ من الصفر.",
     "closeConfirmDescription": "يؤدي الإغلاق إلى إنهاء جميع محادثات الأعضاء نهائياً وتنظيف أي وكلاء مؤقتين. لا يمكن إجراء أي متابعات أو استكمالات إضافية. لا يمكن التراجع.",
     "composeQuestion": "تأليف سؤال",
+    "continueButton": "متابعة",
     "continueHint": "يعيد تشغيل جميع المراحل كجولة جديدة؛ يحتفظ كل وكيل بذاكرة الجولات السابقة. لا يمكن إضافة مرفقات إلى الاستكمال.",
-    "continuePlaceholder": "ماذا ينبغي أن تناقش المجموعة في الجولة التالية؟",
+    "continuePlaceholder": "متابعة هذه المناقشة بسؤال إضافي…",
+    "continueStreamStarted": "بدأت المتابعة — بث مباشر",
     "count": "{{count}} مجموعات",
     "createSuccess": "تم إنشاء المجموعة بنجاح",
     "discussing": "الوكلاء يتناقشون…",
@@ -2116,9 +2118,15 @@
     "expandInput": "توسيع الإدخال",
     "followupHint": "اطرح متابعة مباشرة على أحد الأعضاء. يحتفظ الوكيل بالسياق الكامل من النقاش؛ ويُضاف التبادل إلى النص.",
     "followupPlaceholder": "اطرح على هذا العضو سؤال متابعة…",
+    "inputDisabledApproval": "في انتظار الموافقة…",
+    "inputDisabledClosed": "هذه المناقشة مغلقة",
+    "inputDisabledEnded": "انتهت هذه المناقشة",
+    "inputDisabledInProgress": "المناقشة قيد التقدم…",
     "membersCount": "{{count}} أعضاء",
     "moderator": "المشرف (للتجميع)",
     "namePlaceholder": "مثل: مجلس استشاري",
+    "newDiscussion": "مناقشة جديدة",
+    "newShort": "جديد",
     "noModerator": "بدون مشرف",
     "noResponse": "لا يوجد رد",
     "protocolMaxRetries": "الحد الأقصى لإعادة المحاولة",
@@ -2982,6 +2990,11 @@
     "selectGroups": "اختر مجموعات API لاستيرادها كإضافات استدعاء API منفصلة"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "متابعة هذه المناقشة…",
+      "inputDisabledClosed": "هذه المناقشة مغلقة",
+      "newDiscussion": "مناقشة جديدة"
+    },
     "thread": {
       "fileTooLarge": "يجب أن يكون الملف أقل من 20 ميغابايت",
       "fileTypeNotAllowed": "نوع الملف هذا غير مدعوم",

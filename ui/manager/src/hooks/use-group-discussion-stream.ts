@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   streamGroupDiscussion,
+  streamGroupContinue,
   streamGroupApproval,
   type TranscriptEntry,
   type TranscriptEntryType,
@@ -186,6 +187,36 @@ export function useGroupDiscussionStream() {
     [consumeStream],
   );
 
+  /**
+   * Continue a COMPLETED discussion as a new round via SSE streaming.
+   * Preserves the existing transcript so the new round appends rather than
+   * replaces — same pattern as approveAndStream.
+   */
+  const continueStream = useCallback(
+    async (groupId: string, gcId: string, question: string) => {
+      abortRef.current?.abort();
+      const abort = new AbortController();
+      abortRef.current = abort;
+
+      setStreamState((s) => ({
+        ...s,
+        isStreaming: true,
+        state: "IN_PROGRESS",
+        conversationId: gcId,
+        error: null,
+        errorKind: null,
+        startedAt: s.startedAt ?? new Date().toISOString(),
+        activeSpeakers: new Set(),
+      }));
+
+      await consumeStream(
+        streamGroupContinue(groupId, gcId, question, undefined, abort.signal),
+        abort,
+      );
+    },
+    [consumeStream],
+  );
+
   const abortStream = useCallback(() => {
     abortRef.current?.abort();
     setStreamState((s) => ({
@@ -198,7 +229,7 @@ export function useGroupDiscussionStream() {
   // SSE connection is released and no setState runs after teardown.
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  return { streamState, startStream, approveAndStream, abortStream };
+  return { streamState, startStream, continueStream, approveAndStream, abortStream };
 }
 
 // ─── Event Handler ──────────────────────────────────────────────

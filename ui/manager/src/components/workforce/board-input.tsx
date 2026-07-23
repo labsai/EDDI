@@ -37,6 +37,12 @@ interface BoardInputProps {
   disabled?: boolean;
   placeholder?: string;
   className?: string;
+  /** Controls placeholder text and attachment visibility.
+   *  "new" = start a new discussion (default).
+   *  "continue" = continue the selected discussion (hides attachments). */
+  mode?: "new" | "continue";
+  /** Shown as placeholder when disabled (e.g. "Discussion is closed"). */
+  disabledMessage?: string;
 }
 
 // ─── Send Icon ───────────────────────────────────────────────────
@@ -61,7 +67,7 @@ function SendIcon() {
 
 // ─── Component ───────────────────────────────────────────────────
 
-function BoardInput({ onSend, disabled = false, placeholder, className }: BoardInputProps) {
+function BoardInput({ onSend, disabled = false, placeholder, className, mode = "new", disabledMessage }: BoardInputProps) {
   const { t } = useTranslation();
   const [message, setMessage] = useState("");
   const [attachment, setAttachment] = useState<AttachmentInfo | null>(null);
@@ -170,18 +176,20 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
           aria-hidden="true"
         />
 
-        {/* Attachment button */}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={handleFileSelect}
-          disabled={disabled}
-          className="h-10 w-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-          aria-label={t("Workforce.board.attachFile", "Attach file")}
-        >
-          <Paperclip className="h-5 w-5" />
-        </Button>
+        {/* Attachment button — hidden in continue mode (backend rejects attachments on continuation) */}
+        {mode !== "continue" && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={handleFileSelect}
+            disabled={disabled}
+            className="h-10 w-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+            aria-label={t("Workforce.board.attachFile", "Attach file")}
+          >
+            <Paperclip className="h-5 w-5" />
+          </Button>
+        )}
 
         <textarea
           ref={textareaRef}
@@ -192,10 +200,19 @@ function BoardInput({ onSend, disabled = false, placeholder, className }: BoardI
           }}
           onKeyDown={handleKeyDown}
           placeholder={
-            placeholder ??
-            t("Workforce.board.askYourBoard", "Ask your task force...")
+            disabled && disabledMessage
+              ? disabledMessage
+              : placeholder ??
+                (mode === "continue"
+                  ? t("Workforce.board.continuePlaceholder", "Continue this discussion…")
+                  : t("Workforce.board.askYourBoard", "Ask your task force..."))
           }
-          aria-label={placeholder ?? t("Workforce.board.askYourBoard", "Ask your task force...")}
+          aria-label={
+            placeholder ??
+            (mode === "continue"
+              ? t("Workforce.board.continuePlaceholder", "Continue this discussion…")
+              : t("Workforce.board.askYourBoard", "Ask your task force..."))
+          }
           disabled={disabled}
           rows={1}
           className={cn(

@@ -2107,8 +2107,10 @@
     "chooseTemplate": "Escolha um modelo ou comece do zero.",
     "closeConfirmDescription": "Encerrar termina permanentemente todas as conversas dos membros e limpa quaisquer agentes efêmeros. Não são possíveis mais acompanhamentos ou continuações. Não pode ser desfeito.",
     "composeQuestion": "Redigir pergunta",
+    "continueButton": "Continuar",
     "continueHint": "Reexecuta todas as fases como uma nova rodada; cada agente mantém a memória das rodadas anteriores. Não é possível adicionar anexos a uma continuação.",
-    "continuePlaceholder": "O que o grupo deve discutir na próxima rodada?",
+    "continuePlaceholder": "Continue esta discussão com um acompanhamento…",
+    "continueStreamStarted": "Continuação iniciada — transmissão ao vivo",
     "count": "{{count}} grupos",
     "createSuccess": "Grupo criado com sucesso",
     "discussing": "Os agentes estão discutindo…",
@@ -2116,9 +2118,15 @@
     "expandInput": "Expandir entrada",
     "followupHint": "Faça um acompanhamento direto a um membro. O agente mantém o contexto completo da discussão; a troca é adicionada à transcrição.",
     "followupPlaceholder": "Faça uma pergunta de acompanhamento a este membro…",
+    "inputDisabledApproval": "Aguardando aprovação…",
+    "inputDisabledClosed": "Esta discussão está fechada",
+    "inputDisabledEnded": "Esta discussão foi encerrada",
+    "inputDisabledInProgress": "Discussão em andamento…",
     "membersCount": "{{count}} membros",
     "moderator": "Moderador (para síntese)",
     "namePlaceholder": "ex. Conselho consultivo",
+    "newDiscussion": "Nova discussão",
+    "newShort": "Novo",
     "noModerator": "Sem moderador",
     "noResponse": "Sem resposta",
     "protocolMaxRetries": "Tentativas máx.",
@@ -2982,6 +2990,11 @@
     "selectGroups": "Selecione grupos de API para importar como extensões separadas de Chamada de API"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "Continuar esta discussão…",
+      "inputDisabledClosed": "Esta discussão está fechada",
+      "newDiscussion": "Nova discussão"
+    },
     "thread": {
       "fileTooLarge": "O arquivo deve ter menos de 20MB",
       "fileTypeNotAllowed": "Este tipo de arquivo não é suportado",

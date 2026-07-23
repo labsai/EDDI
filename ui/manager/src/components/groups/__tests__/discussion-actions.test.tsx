@@ -12,13 +12,11 @@ const MEMBERS = [
 function renderActions(
   availableActions: GroupConversationAction[],
   overrides: Partial<{
-    onContinue: (q: string) => void;
     onFollowup: (t: string, q: string) => void;
     onCloseDiscussion: () => void;
     isPending: boolean;
   }> = {},
 ) {
-  const onContinue = overrides.onContinue ?? vi.fn();
   const onFollowup = overrides.onFollowup ?? vi.fn();
   const onCloseDiscussion = overrides.onCloseDiscussion ?? vi.fn();
   renderWithProviders(
@@ -26,18 +24,18 @@ function renderActions(
       availableActions={availableActions}
       members={MEMBERS}
       isPending={overrides.isPending}
-      onContinue={onContinue}
       onFollowup={onFollowup}
       onCloseDiscussion={onCloseDiscussion}
     />,
   );
-  return { onContinue, onFollowup, onCloseDiscussion };
+  return { onFollowup, onCloseDiscussion };
 }
 
 describe("DiscussionActions", () => {
-  it("renders exactly the backend's availableActions (COMPLETED → all three)", () => {
+  it("renders followup and close for a COMPLETED conversation (continue is handled by input)", () => {
     renderActions(["followup", "continue", "close"]);
-    expect(screen.getByTestId("action-continue")).toBeInTheDocument();
+    // "continue" is handled by the context-aware input, not this bar
+    expect(screen.queryByTestId("action-continue")).not.toBeInTheDocument();
     expect(screen.getByTestId("action-followup")).toBeInTheDocument();
     expect(screen.getByTestId("action-close")).toBeInTheDocument();
   });
@@ -53,19 +51,6 @@ describe("DiscussionActions", () => {
     renderActions([]);
     expect(screen.queryByTestId("discussion-actions")).not.toBeInTheDocument();
     expect(screen.queryByTestId("action-close")).not.toBeInTheDocument();
-  });
-
-  it("continue is a separate composer that submits the typed question", async () => {
-    const user = userEvent.setup();
-    const onContinue = vi.fn();
-    renderActions(["followup", "continue", "close"], { onContinue });
-
-    await user.click(screen.getByTestId("action-continue"));
-    const input = await screen.findByTestId("group-continue-input");
-    await user.type(input, "Re-evaluate with the new data");
-    await user.click(screen.getByTestId("group-continue-submit"));
-
-    expect(onContinue).toHaveBeenCalledWith("Re-evaluate with the new data");
   });
 
   it("follow-up submits the selected member and question", async () => {

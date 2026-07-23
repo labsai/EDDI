@@ -2107,8 +2107,10 @@
     "chooseTemplate": "Elija una plantilla o empiece desde cero.",
     "closeConfirmDescription": "Cerrar finaliza permanentemente todas las conversaciones de los miembros y limpia los agentes efímeros. No es posible dar más seguimientos ni continuaciones. No se puede deshacer.",
     "composeQuestion": "Redactar pregunta",
+    "continueButton": "Continuar",
     "continueHint": "Vuelve a ejecutar todas las fases como una nueva ronda; cada agente conserva la memoria de las rondas anteriores. No se pueden añadir adjuntos a una continuación.",
-    "continuePlaceholder": "¿Qué debería debatir el grupo en la siguiente ronda?",
+    "continuePlaceholder": "Continúe esta discusión con un seguimiento…",
+    "continueStreamStarted": "Continuación iniciada — transmisión en vivo",
     "count": "{{count}} grupos",
     "createSuccess": "Grupo creado con éxito",
     "discussing": "Los agentes están debatiendo…",
@@ -2116,9 +2118,15 @@
     "expandInput": "Expandir entrada",
     "followupHint": "Haga un seguimiento directo a un miembro. El agente conserva todo el contexto de la discusión; el intercambio se añade a la transcripción.",
     "followupPlaceholder": "Haga una pregunta de seguimiento a este miembro…",
+    "inputDisabledApproval": "Esperando aprobación…",
+    "inputDisabledClosed": "Esta discusión está cerrada",
+    "inputDisabledEnded": "Esta discusión ha finalizado",
+    "inputDisabledInProgress": "Discusión en curso…",
     "membersCount": "{{count}} miembros",
     "moderator": "Moderador (para la síntesis)",
     "namePlaceholder": "p. ej. Comité asesor",
+    "newDiscussion": "Nueva discusión",
+    "newShort": "Nuevo",
     "noModerator": "Sin moderador",
     "noResponse": "Sin respuesta",
     "protocolMaxRetries": "Reintentos máx.",
@@ -2982,6 +2990,11 @@
     "selectGroups": "Seleccione grupos de API para importarlos como extensiones de Llamada API independientes"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "Continuar esta discusión…",
+      "inputDisabledClosed": "Esta discusión está cerrada",
+      "newDiscussion": "Nueva discusión"
+    },
     "thread": {
       "fileTooLarge": "El archivo debe ser menor de 20MB",
       "fileTypeNotAllowed": "Este tipo de archivo no es compatible",

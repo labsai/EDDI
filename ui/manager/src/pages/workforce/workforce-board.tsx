@@ -1,7 +1,9 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, PanelRightOpen, PanelRightClose } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { ChevronLeft, PanelRightOpen, PanelRightClose, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGroup, useGroupConversations, useGroupConversation } from "@/hooks/use-groups";
 import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
@@ -10,9 +12,15 @@ import { BoardInput } from "@/components/workforce/board-input";
 import { SessionHistory } from "@/components/workforce/session-history";
 import { MembersSheet } from "@/components/workforce/members-sheet";
 import { ExportMenu } from "@/components/workforce/export-menu";
+import { DiscussionActions } from "@/components/groups/discussion-actions";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
+import {
+  followupGroupMember,
+  closeGroupConversation,
+} from "@/lib/api/groups";
+import { getErrorMessage } from "@/lib/api-client";
 
 // ─── Icons ───────────────────────────────────────────────────────
 
@@ -102,10 +110,18 @@ function WorkforceBoard() {
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [showConfig, setShowConfig] = useState(false);
+  const [showConfig, setShowConfig] = useState(() => {
+    const saved = localStorage.getItem("workforce-board-config-panel");
+    return saved !== null ? saved === "true" : true;
+  });
   const membersRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const panelTriggerRef = useRef<HTMLElement | null>(null);
+
+  // Persist panel state to localStorage
+  useEffect(() => {
+    localStorage.setItem("workforce-board-config-panel", String(showConfig));
+  }, [showConfig]);
 
   // ─── Data ──────────────────────────────────────────────────────
   const { data: groupConfig, isLoading: configLoading } = useGroup(boardId ?? "", version);
@@ -114,7 +130,8 @@ function WorkforceBoard() {
     boardId ?? "",
     selectedConvId ?? "",
   );
-  const { streamState, startStream, abortStream } = useGroupDiscussionStream();
+  const { streamState, startStream, continueStream, abortStream } = useGroupDiscussionStream();
+  const queryClient = useQueryClient();
 
   // ─── Auto-select conversation when stream completes ────────────
   useEffect(() => {
@@ -168,20 +185,6 @@ function WorkforceBoard() {
     }
   }, []);
 
-  // ─── Handlers ──────────────────────────────────────────────────
-  const handleSend = useCallback(
-    (question: string) => {
-      if (!boardId) return;
-      startStream(boardId, question);
-    },
-    [boardId, startStream],
-  );
-
-  const handleSelectConversation = useCallback((convId: string) => {
-    setSelectedConvId(convId);
-    setShowHistory(false);
-  }, []);
-
   // ─── Derived state ─────────────────────────────────────────────
   const isStreaming = streamState.isStreaming;
   const hasStreamTranscript = streamState.transcript.length > 0;
@@ -196,6 +199,105 @@ function WorkforceBoard() {
     : selectedConversation?.synthesizedAnswer ?? null;
 
   const members = groupConfig?.members ?? [];
+
+  // ─── Context-aware input mode ─────────────────────────────────
+  const inputMode = useMemo((): "new" | "continue" | "disabled" => {
+    if (isStreaming) return "disabled";
+    if (!selectedConvId) return "new";
+    if (!selectedConversation) return "disabled";
+    const actions = selectedConversation.availableActions ?? [];
+    if (actions.includes("continue")) return "continue";
+    return "disabled";
+  }, [isStreaming, selectedConvId, selectedConversation]);
+
+  const disabledMessage = useMemo(() => {
+    if (isStreaming) return t("groups.inputDisabledInProgress", "Discussion in progress…");
+    if (!selectedConvId) return undefined;
+    if (!selectedConversation) return undefined;
+    const state = selectedConversation.state;
+    if (state === "CLOSED") return t("Workforce.board.inputDisabledClosed", "This discussion is closed");
+    if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
+    if (state === "AWAITING_APPROVAL") return t("groups.inputDisabledApproval", "Awaiting approval…");
+    if (state === "IN_PROGRESS" || state === "SYNTHESIZING") return t("groups.inputDisabledInProgress", "Discussion in progress…");
+    return undefined;
+  }, [isStreaming, selectedConvId, selectedConversation, t]);
+
+  // ─── Handlers ──────────────────────────────────────────────────
+  const handleSend = useCallback(
+    (question: string) => {
+      if (!boardId) return;
+      if (inputMode === "continue" && selectedConvId) {
+        continueStream(boardId, selectedConvId, question);
+        toast.success(t("groups.continueStreamStarted", "Continuation started — streaming live"));
+      } else {
+        setSelectedConvId(null);
+        startStream(boardId, question);
+      }
+    },
+    [boardId, inputMode, selectedConvId, continueStream, startStream, t],
+  );
+
+  const handleSelectConversation = useCallback((convId: string) => {
+    setSelectedConvId(convId);
+    setShowHistory(false);
+  }, []);
+
+  const handleNewDiscussion = useCallback(() => {
+    if (isStreaming) abortStream();
+    setSelectedConvId(null);
+  }, [isStreaming, abortStream]);
+
+  // ─── Lifecycle mutations ──────────────────────────────────────
+  const invalidateConversations = useCallback(() => {
+    if (boardId) {
+      queryClient.invalidateQueries({ queryKey: ["groupConversations", boardId] });
+    }
+  }, [boardId, queryClient]);
+
+  const followupMutation = useMutation({
+    mutationFn: ({
+      gcId,
+      targetAgentId,
+      question,
+    }: {
+      gcId: string;
+      targetAgentId: string;
+      question: string;
+    }) => followupGroupMember(boardId!, gcId, question, targetAgentId),
+    onSuccess: () => {
+      toast.success(t("groups.followupSent", "Follow-up sent"));
+      invalidateConversations();
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+
+  const closeMutation = useMutation({
+    mutationFn: ({ gcId }: { gcId: string }) =>
+      closeGroupConversation(boardId!, gcId),
+    onSuccess: () => {
+      toast.success(t("groups.discussionClosed", "Discussion closed"));
+      invalidateConversations();
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+
+  const handleFollowupMember = useCallback(
+    (targetAgentId: string, question: string) => {
+      if (!boardId || !selectedConvId) return;
+      followupMutation.mutate({ gcId: selectedConvId, targetAgentId, question });
+    },
+    [boardId, selectedConvId, followupMutation],
+  );
+
+  const handleCloseConversation = useCallback(() => {
+    if (!boardId || !selectedConvId) return;
+    closeMutation.mutate({ gcId: selectedConvId });
+  }, [boardId, selectedConvId, closeMutation]);
+
+  const actionPending =
+    followupMutation.isPending ||
+    closeMutation.isPending;
+
 
   // ─── Loading state ─────────────────────────────────────────────
   if (configLoading || !boardId) {
@@ -259,6 +361,17 @@ function WorkforceBoard() {
               {t("Workforce.board.stop", "Stop")}
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleNewDiscussion}
+            className="gap-1"
+            aria-label={t("Workforce.board.newDiscussion", "New Discussion")}
+            data-testid="new-discussion-btn"
+          >
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline text-xs">{t("groups.newShort", "New")}</span>
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -371,8 +484,26 @@ function WorkforceBoard() {
         )}
       </div>
 
+      {/* Post-COMPLETED lifecycle actions (followup, close) */}
+      {!isStreaming &&
+        selectedConversation &&
+        (selectedConversation.availableActions?.length ?? 0) > 0 && (
+          <DiscussionActions
+            availableActions={selectedConversation.availableActions!}
+            members={members}
+            isPending={actionPending}
+            onFollowup={handleFollowupMember}
+            onCloseDiscussion={handleCloseConversation}
+          />
+        )}
+
       {/* Input bar */}
-      <BoardInput onSend={handleSend} disabled={isStreaming} />
+      <BoardInput
+        onSend={handleSend}
+        disabled={inputMode === "disabled"}
+        mode={inputMode === "continue" ? "continue" : "new"}
+        disabledMessage={disabledMessage}
+      />
         </div>
 
         {/* Config panel — right sidebar, read-only */}

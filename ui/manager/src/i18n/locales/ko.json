@@ -2107,8 +2107,10 @@
     "chooseTemplate": "템플릿을 선택하거나 처음부터 시작하세요.",
     "closeConfirmDescription": "종료하면 모든 멤버 대화가 영구적으로 종료되고 임시 에이전트가 정리됩니다. 더 이상의 후속 조치나 계속 진행이 불가능합니다. 되돌릴 수 없습니다.",
     "composeQuestion": "질문 작성",
+    "continueButton": "계속",
     "continueHint": "모든 단계를 새 라운드로 다시 실행합니다. 모든 에이전트는 이전 라운드의 메모리를 유지합니다. 계속 진행에는 첨부 파일을 추가할 수 없습니다.",
-    "continuePlaceholder": "다음 라운드에서 그룹이 무엇을 토론해야 하나요?",
+    "continuePlaceholder": "후속 질문으로 이 토론을 계속하기…",
+    "continueStreamStarted": "이어서 진행 시작 — 라이브 스트리밍 중",
     "count": "{{count}}개 그룹",
     "createSuccess": "그룹이 성공적으로 생성되었습니다",
     "discussing": "에이전트가 토론 중…",
@@ -2116,9 +2118,15 @@
     "expandInput": "입력 확장",
     "followupHint": "한 멤버에게 직접 후속 질문을 합니다. 에이전트는 토론의 전체 컨텍스트를 유지하며, 대화 내용이 기록에 추가됩니다.",
     "followupPlaceholder": "이 멤버에게 후속 질문을 하세요…",
+    "inputDisabledApproval": "승인 대기 중…",
+    "inputDisabledClosed": "이 토론은 닫혔습니다",
+    "inputDisabledEnded": "이 토론은 종료되었습니다",
+    "inputDisabledInProgress": "토론 진행 중…",
     "membersCount": "{{count}}명의 멤버",
     "moderator": "모더레이터 (종합용)",
     "namePlaceholder": "예: 자문 위원회",
+    "newDiscussion": "새 토론",
+    "newShort": "새로 만들기",
     "noModerator": "모더레이터 없음",
     "noResponse": "응답 없음",
     "protocolMaxRetries": "최대 재시도 횟수",
@@ -2982,6 +2990,11 @@
     "selectGroups": "별도의 API 호출 확장으로 가져올 API 그룹을 선택하세요"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "이 토론 계속하기…",
+      "inputDisabledClosed": "이 토론은 닫혔습니다",
+      "newDiscussion": "새 토론"
+    },
     "thread": {
       "fileTooLarge": "파일은 20MB 미만이어야 합니다",
       "fileTypeNotAllowed": "이 파일 유형은 지원되지 않습니다",
