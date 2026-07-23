@@ -39,10 +39,15 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
+import ai.labs.eddi.modules.llm.tools.ToolCacheService;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.modules.llm.tools.ToolInvocation;
+import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
@@ -54,6 +59,7 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.*;
+import dev.langchain4j.model.TokenCountEstimator;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
@@ -63,6 +69,7 @@ import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -75,6 +82,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -118,6 +126,93 @@ class AgentOrchestrator {
     private static final int DEFAULT_TRANSCRIPT_MAX_BYTES = PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT;
     /** Approver-facing pause reason cap (chars). */
     private static final int PAUSE_REASON_MAX_CHARS = 500;
+
+    /**
+     * Fallback for {@code LlmConfiguration.Task#getMaxToolContextTokens()} when a
+     * stored config carries an explicit {@code null} (the POJO's own field default
+     * is the same number, so this only covers deserialized nulls).
+     *
+     * @see #enforceToolContextBudget
+     */
+    static final int DEFAULT_MAX_TOOL_CONTEXT_TOKENS = 60_000;
+
+    /**
+     * Deployment-wide fallback for {@code LlmConfiguration.Task#getEnforceBudget()}
+     * ({@code eddi.tools.budget.enforce-by-default}, default {@code false}).
+     * <p>
+     * Enforcement is <em>opt-in</em>. Until this release every built-in tool priced
+     * at $0.00 (the cost table was keyed on config slugs while the live path passed
+     * {@code @Tool} method names), so a {@code maxBudgetPerConversation} on a
+     * built-in-only agent has never once refused a call. Now that pricing works,
+     * defaulting the gate to on would make those ceilings bind for the first time
+     * and start refusing tool calls mid-conversation on upgrade.
+     * <p>
+     * That is <em>not</em> the whole story, and the other half is why
+     * {@link #warnAboutUnenforcedBudgets} exists: http/MCP/A2A/dynamic tools
+     * dispatch under their configured name, so an agent with a tool called
+     * {@code websearch}, {@code webscraper} or {@code pdfreader} WAS priced and WAS
+     * refused on the previous release. For those agents an opt-in default silently
+     * removes a cost cap that was working. Silence is the unacceptable part, not
+     * the default — so every stored task carrying a ceiling without an explicit
+     * {@code enforceBudget} is named in a startup WARN.
+     * <p>
+     * Turn enforcement on per task with {@code "enforceBudget": true}, or
+     * deployment-wide with {@code eddi.tools.budget.enforce-by-default=true}.
+     * <p>
+     * Read through {@link ConfigProvider} rather than {@code @ConfigProperty}
+     * because the value is {@code static final}: CDI injects into instance fields,
+     * so an injection annotation here would never fire and the constant would sit
+     * at its initializer while looking configurable. (This class became an
+     * {@code @ApplicationScoped} bean in PR #604 — that makes
+     * {@code @ConfigProperty} viable for *instance* state, but not for this one.)
+     */
+    private static final boolean BUDGET_ENFORCE_DEFAULT = resolveBudgetEnforceDefault();
+
+    private static boolean resolveBudgetEnforceDefault() {
+        try {
+            return ConfigProvider.getConfig()
+                    .getOptionalValue("eddi.tools.budget.enforce-by-default", Boolean.class)
+                    .orElse(false);
+        } catch (Exception e) {
+            // No MicroProfile config available (plain unit test JVM): fall back to the
+            // documented default so a test JVM and a deployment agree.
+            return false;
+        }
+    }
+
+    /**
+     * Warns, once per configured task, that a {@code maxBudgetPerConversation}
+     * ceiling is present but not enforced.
+     * <p>
+     * The cost of an opt-in default (see {@link #BUDGET_ENFORCE_DEFAULT}) is that
+     * an operator who genuinely had a working ceiling — one on http/MCP/A2A/dynamic
+     * tools, which were priced by their configured name before this release — loses
+     * it without noticing. This makes that loss loud instead of silent: a ceiling
+     * that records but never refuses is exactly the "config that silently does
+     * nothing" this release set out to remove.
+     *
+     * @param task
+     *            the configured LLM task about to run
+     */
+    private static void warnAboutUnenforcedBudgets(LlmConfiguration.Task task) {
+        if (task.getMaxBudgetPerConversation() == null || task.getEnforceBudget() != null || BUDGET_ENFORCE_DEFAULT) {
+            return;
+        }
+        if (UNENFORCED_BUDGET_WARNED.add(String.valueOf(task.getId()))) {
+            LOGGER.warnf("LLM task '%s' sets maxBudgetPerConversation=%s but enforceBudget is unset, "
+                    + "so the ceiling records cost without ever refusing a tool call. Tool pricing was "
+                    + "repaired in this release; set \"enforceBudget\": true on the task (or "
+                    + "eddi.tools.budget.enforce-by-default=true) to enforce it.",
+                    sanitize(String.valueOf(task.getId())), task.getMaxBudgetPerConversation());
+        }
+    }
+
+    /**
+     * Task ids already named by {@link #warnAboutUnenforcedBudgets}, so a per-turn
+     * check does not emit a per-turn log line. Bounded by the number of configured
+     * tasks, not by traffic.
+     */
+    private static final Set<String> UNENFORCED_BUDGET_WARNED = ConcurrentHashMap.newKeySet();
 
     // Stateless helpers — safe to instantiate directly (no CDI needed).
     private final ToolApprovalGate toolApprovalGate = new ToolApprovalGate();
@@ -187,6 +282,14 @@ class AgentOrchestrator {
     private final IHitlToolJournalStore journalStore;
     private final ConversationHistoryBuilder conversationHistoryBuilder;
 
+    /**
+     * The SAME estimator factory {@code LlmTask} uses to window conversation
+     * history, reused here to meter the in-turn tool context. Deliberately not a
+     * second estimator: one accounting rule for both halves of the request means a
+     * budget expressed in tokens keeps meaning the same thing wherever it is set.
+     */
+    private final TokenCounterFactory tokenCounterFactory;
+
     @Inject
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
@@ -198,7 +301,8 @@ class AgentOrchestrator {
             MemorySnapshotService memorySnapshotService,
             AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
-            IHitlToolJournalStore journalStore, ConversationHistoryBuilder conversationHistoryBuilder) {
+            IHitlToolJournalStore journalStore, ConversationHistoryBuilder conversationHistoryBuilder,
+            TokenCounterFactory tokenCounterFactory) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -228,6 +332,7 @@ class AgentOrchestrator {
         this.agentStore = agentStore;
         this.journalStore = journalStore;
         this.conversationHistoryBuilder = conversationHistoryBuilder;
+        this.tokenCounterFactory = tokenCounterFactory;
     }
 
     /**
@@ -260,6 +365,18 @@ class AgentOrchestrator {
             throws LifecycleException {
         // Backward-compatible overload: no tool-approval gate (config null, index -1).
         return executeIfToolsEnabled(chatModel, systemMessage, chatMessages, task, memory, null, -1);
+    }
+
+    /**
+     * Backward-compatible overload without an explicit JSON response-format policy
+     * — the tool loop's requests carry no response format.
+     */
+    ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, LlmConfiguration.Task task,
+                                          IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                          int transcriptMaxBytes)
+            throws LifecycleException {
+        return executeIfToolsEnabled(chatModel, systemMessage, chatMessages, task, memory, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes,
+                JsonResponseFormatPolicy.DISABLED);
     }
 
     /**
@@ -301,10 +418,16 @@ class AgentOrchestrator {
      *            {@code LlmTask} from {@code eddi.hitl.tool.transcript-max-bytes}
      *            (default
      *            {@link PendingToolCallBatch#TRANSCRIPT_MAX_BYTES_DEFAULT}).
+     * @param jsonPolicy
+     *            decides whether the tool-loop's model requests carry
+     *            {@code ResponseFormat.JSON}. Resolved per request against whether
+     *            that request actually carries tool specifications, so a provider
+     *            that rejects JSON mode alongside function calling (Gemini) is
+     *            never sent both.
      */
     ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, LlmConfiguration.Task task,
                                           IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
-                                          int transcriptMaxBytes)
+                                          int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         // Discover + register all tools (built-in + http + mcp + a2a) — the SAME
@@ -317,7 +440,7 @@ class AgentOrchestrator {
         }
 
         return executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory, effectiveToolApprovals, llmTaskIndex,
-                transcriptMaxBytes);
+                transcriptMaxBytes, jsonPolicy);
     }
 
     /**
@@ -345,17 +468,37 @@ class AgentOrchestrator {
      *            gated calls
      * @param decision
      *            the human decision being applied
-     * @param templateDataObjects
-     *            the template data map (for post-response and fallback rebuild)
      * @return the execution result (final response + tool trace)
      */
     ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
-                                   HitlDecision decision, Map<String, Object> templateDataObjects, boolean toolHitlEnabled)
+                                   HitlDecision decision, boolean toolHitlEnabled)
+            throws LifecycleException {
+        return resumeToolLoop(chatModel, task, memory, batch, decision, toolHitlEnabled, JsonResponseFormatPolicy.DISABLED);
+    }
+
+    /**
+     * As
+     * {@link #resumeToolLoop(ChatModel, LlmConfiguration.Task, IConversationMemory, PendingToolCallBatch, HitlDecision, boolean)},
+     * but carrying the JSON response-format policy so the continuation's requests
+     * match what the live loop would have sent.
+     */
+    ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
+                                   HitlDecision decision, boolean toolHitlEnabled,
+                                   JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         String conversationId = memory.getConversationId();
         String pauseEpoch = batch.getPauseEpoch();
         List<Map<String, Object>> trace = new ArrayList<>();
+
+        // Tool-cost baseline, snapshotted BEFORE the verdict loop below — that loop
+        // runs every human-approved gated call through executeToolWrapped, which
+        // charges the conversation's cost tracker. A baseline taken after it would
+        // already contain those charges, so the delta reported as toolCostUsd (and
+        // hence the audit ledger's dollar figure) would exclude exactly the calls a
+        // human explicitly approved. The live path (executeWithTools) snapshots
+        // before any tool runs; this is the same contract.
+        double toolCostBefore = conversationToolCost(conversationId);
 
         // ── Step 2: rebuild tooling via the shared setup (SAME as the live path) ──
         ToolSetup setup = buildToolSetup(task, memory);
@@ -394,6 +537,7 @@ class AgentOrchestrator {
         boolean enableCostTracking = task.getEnableCostTracking() != null ? task.getEnableCostTracking() : true;
         int defaultRateLimit = task.getDefaultRateLimit() != null ? task.getDefaultRateLimit() : 100;
         Map<String, Integer> toolRateLimits = task.getToolRateLimits();
+        Map<String, String> toolCanonicalNames = setup.toolCanonicalNames();
         Double maxBudget = task.getMaxBudgetPerConversation();
         List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
 
@@ -428,8 +572,8 @@ class AgentOrchestrator {
                 // Full per-request pipeline (checkpoint, budget, executeToolWrapped,
                 // truncation, trace). Its own auto-checkpoint fires ONLY here.
                 String result = executeSingleToolCallResult(req, memory, trace, toolExecutors, toolRateLimits,
-                        defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking,
-                        task, isLazy, builtInSpecs, activeSpecs);
+                        toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                        enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                 journalStore.markExecuted(conversationId, pauseEpoch, c.getCallId(), capUtf8(result, JOURNAL_RESULT_MAX_BYTES));
                 String envelope = amended != null ? amendedEnvelope(result) : result;
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), envelope));
@@ -479,7 +623,8 @@ class AgentOrchestrator {
         // governs the initial pause.
         TokenUsage[] tokenHolder = new TokenUsage[1];
         String response = runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, DEFAULT_TRANSCRIPT_MAX_BYTES, tokenHolder);
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, DEFAULT_TRANSCRIPT_MAX_BYTES, tokenHolder,
+                jsonPolicy);
 
         // ── Step 5: merge the pre-pause trace with the resume trace ──
         List<Map<String, Object>> mergedTrace = new ArrayList<>();
@@ -492,6 +637,7 @@ class AgentOrchestrator {
         if (tokenHolder[0] != null) {
             responseMetadata.put("tokenUsage", tokenUsageMap(tokenHolder[0]));
         }
+        responseMetadata.put("toolCostUsd", toolCostDelta(conversationId, toolCostBefore));
         return new ExecutionResult(response, mergedTrace, responseMetadata);
     }
 
@@ -692,9 +838,16 @@ class AgentOrchestrator {
      * @param builtInSpecs
      *            built-in specs only (copy taken before external merge — LAZY needs
      *            it to activate discovered built-ins)
+     * @param toolCanonicalNames
+     *            dispatch name → configuration slug, for built-ins only. Lets the
+     *            executor boundary price a call and pick its cache TTL under the
+     *            token the agent designer actually configured
+     *            ({@code searchWeb → websearch}); tools that are configured under
+     *            their dispatch name (http/mcp/a2a) are simply absent
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
-            Map<String, String> toolSources, List<ToolSpecification> builtInSpecs) {
+            Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
+            Map<String, String> toolCanonicalNames) {
     }
 
     /**
@@ -730,6 +883,7 @@ class AgentOrchestrator {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> toolExecutors = new HashMap<>();
         Map<String, String> toolSources = new HashMap<>();
+        Map<String, String> toolCanonicalNames = new HashMap<>();
 
         for (Object tool : tools) {
             // CDI proxies don't carry @Tool annotations — resolve to actual bean class
@@ -737,6 +891,11 @@ class AgentOrchestrator {
             if (toolClass.getName().contains("_ClientProxy") || toolClass.getName().contains("$$")) {
                 toolClass = toolClass.getSuperclass();
             }
+
+            // Resolved from the UNWRAPPED class on purpose: tool.getClass() would be
+            // "CalculatorTool_ClientProxy" under CDI, which no resolver case matches, and
+            // every built-in would silently fall back to its dispatch name again.
+            String canonicalToolName = ToolNameResolver.canonicalForClass(toolClass.getSimpleName());
 
             var specs = ToolSpecifications.toolSpecificationsFrom(toolClass);
             toolSpecs.addAll(specs);
@@ -748,6 +907,7 @@ class AgentOrchestrator {
                     String toolName = toolAnnotation.name().isEmpty() ? method.getName() : toolAnnotation.name();
                     toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
                     toolSources.put(toolName, sourceForBuiltInTool(tool));
+                    toolCanonicalNames.put(toolName, canonicalToolName != null ? canonicalToolName : toolName);
                 }
             }
         }
@@ -776,7 +936,7 @@ class AgentOrchestrator {
             a2aTools.executors().keySet().forEach(name -> toolSources.put(name, "a2a"));
         }
 
-        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs);
+        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames));
     }
 
     /**
@@ -817,7 +977,8 @@ class AgentOrchestrator {
      */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, ToolSetup setup,
                                              LlmConfiguration.Task task, IConversationMemory memory,
-                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
+                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
+                                             JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
@@ -840,15 +1001,45 @@ class AgentOrchestrator {
         List<Map<String, Object>> trace = new ArrayList<>();
 
         // Live path: iteration loop starts at 0, no pre-cleared call ids.
+        String conversationId = memory != null ? memory.getConversationId() : null;
+        double toolCostBefore = conversationToolCost(conversationId);
         TokenUsage[] tokenHolder = new TokenUsage[1];
         String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes, tokenHolder);
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes, tokenHolder, jsonPolicy);
 
         Map<String, Object> responseMetadata = new HashMap<>();
         if (tokenHolder[0] != null) {
             responseMetadata.put("tokenUsage", tokenUsageMap(tokenHolder[0]));
         }
+        responseMetadata.put("toolCostUsd", toolCostDelta(conversationId, toolCostBefore));
         return new ExecutionResult(response, trace, responseMetadata);
+    }
+
+    /**
+     * Accumulated tool cost for a conversation, or {@code 0.0} when nothing has
+     * been tracked for it yet — {@link ToolCostTracker#getConversationCosts}
+     * returns null for an untracked conversation.
+     */
+    private double conversationToolCost(String conversationId) {
+        if (conversationId == null || toolExecutionService == null) {
+            return 0.0;
+        }
+        ToolCostTracker tracker = toolExecutionService.getCostTracker();
+        if (tracker == null) {
+            return 0.0;
+        }
+        ToolCostTracker.ConversationCostMetrics metrics = tracker.getConversationCosts(conversationId);
+        return metrics != null ? metrics.getTotalCost() : 0.0;
+    }
+
+    /**
+     * Dollar cost the tools of THIS model call added, as the difference between two
+     * snapshots of the conversation total. Clamped at zero because
+     * {@link ToolCostTracker#resetConversation} can fire between the snapshots and
+     * would otherwise yield a negative "cost".
+     */
+    private double toolCostDelta(String conversationId, double costBefore) {
+        return Math.max(0.0, conversationToolCost(conversationId) - costBefore);
     }
 
     /**
@@ -871,15 +1062,20 @@ class AgentOrchestrator {
      * @param transcriptMaxBytes
      *            the configured cap (bytes) for freezing the transcript into a
      *            {@link PendingToolCallBatch} if this iteration re-pauses
+     * @param jsonPolicy
+     *            decides, per request, whether {@code ResponseFormat.JSON} is set;
+     *            resolved against whether THAT request carries tool specifications
      */
     private String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
                                    List<Map<String, Object>> trace, int startIteration, ToolSetup setup, boolean isLazy,
                                    LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
-                                   int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes, TokenUsage[] tokenHolder)
+                                   int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes, TokenUsage[] tokenHolder,
+                                   JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
         Map<String, String> toolSources = setup.toolSources();
+        Map<String, String> toolCanonicalNames = setup.toolCanonicalNames();
         List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
 
         boolean enableRateLimiting = task.getEnableRateLimiting() != null ? task.getEnableRateLimiting() : true;
@@ -890,8 +1086,24 @@ class AgentOrchestrator {
         Double maxBudget = task.getMaxBudgetPerConversation();
         String conversationId = memory.getConversationId();
 
+        // In-turn tool-context ceiling. Resolved once per loop: <= 0 disables the
+        // guard entirely (and skips estimator construction with it).
+        int toolContextBudget = task.getMaxToolContextTokens() != null
+                ? task.getMaxToolContextTokens()
+                : DEFAULT_MAX_TOOL_CONTEXT_TOKENS;
+        TokenCountEstimator toolContextEstimator = toolContextBudget > 0 ? resolveToolContextEstimator(task) : null;
+
         return AgentExecutionHelper.executeWithRetry(() -> {
+            // A retry REPLAYS this whole lambda, so anything the previous attempt
+            // accumulated must be discarded — otherwise a turn that retried once
+            // reports (and bills) roughly double the tokens it actually used.
+            tokenHolder[0] = null;
             List<ChatMessage> currentMessages = new ArrayList<>(initialMessages);
+            // Per-message token memo, local to this attempt: messages are immutable and
+            // re-counted on every iteration, so without it a 10-iteration loop tokenizes
+            // the first tool result ten times. Lives on the call stack — the orchestrator
+            // is a shared singleton and must stay stateless.
+            Map<ChatMessage, Integer> toolContextTokenMemo = new IdentityHashMap<>();
             int maxIterations = task.getMaxToolIterations() != null ? task.getMaxToolIterations() : 10;
 
             // Engine-enforced counterweight: strict mode caps iterations
@@ -916,10 +1128,30 @@ class AgentOrchestrator {
                     throw new LifecycleException("Agent execution cancelled (interrupted)");
                 }
 
+                // Keep the accumulated tool traffic inside its aggregate ceiling BEFORE
+                // the request is built — this is the only point at which the loop knows
+                // everything it is about to send. Without it the list only ever grows and
+                // a tool-heavy turn hard-fails mid-loop on a provider context-window 400.
+                if (toolContextEstimator != null) {
+                    enforceToolContextBudget(currentMessages, toolContextBudget, toolContextEstimator,
+                            toolContextTokenMemo, trace, conversationId);
+                }
+
                 ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(currentMessages);
 
-                if (!activeSpecs.isEmpty()) {
+                boolean toolsInRequest = !activeSpecs.isEmpty();
+                if (toolsInRequest) {
                     requestBuilder.toolSpecifications(activeSpecs);
+                }
+
+                // API-level JSON, decided against THIS request's tool surface. Baking it
+                // into the model instead would put it on every request the cached model
+                // ever serves — the Gemini 400 documented in docs/changelog.md.
+                if (jsonPolicy != null) {
+                    var responseFormat = jsonPolicy.resolve(toolsInRequest);
+                    if (responseFormat != null) {
+                        requestBuilder.responseFormat(responseFormat);
+                    }
                 }
 
                 ChatRequest chatRequest = requestBuilder.build();
@@ -971,7 +1203,7 @@ class AgentOrchestrator {
                             // 1) execute the ungated calls of this batch normally
                             for (ToolExecutionRequest allowedReq : gateResult.allowed()) {
                                 executeSingleToolCall(allowedReq, memory, currentMessages, trace, toolExecutors,
-                                        toolRateLimits, defaultRateLimit, maxBudget, conversationId,
+                                        toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
                                         enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
@@ -1015,7 +1247,7 @@ class AgentOrchestrator {
                         }
 
                         executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors,
-                                toolRateLimits, defaultRateLimit, maxBudget, conversationId,
+                                toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
                                 enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                     }
                 } else {
@@ -1032,6 +1264,189 @@ class AgentOrchestrator {
             }
             return "Max tool iterations reached";
         }, task, "Agent execution");
+    }
+
+    // ─── In-turn tool-context budget (D6b) ───
+
+    /**
+     * Resolves the estimator used to meter the in-turn tool context, reusing
+     * {@link TokenCounterFactory} so the tool half of a request is counted by the
+     * same rule as the history half.
+     * <p>
+     * The task's declared type/model may still carry unresolved global-variable
+     * references at this point ({@code LlmTask} resolves them for the model lookup,
+     * not for the task POJO), and an unknown model name can make a provider
+     * tokenizer refuse to construct. Both outcomes fall back to the approximate
+     * chars/4 estimator rather than propagating: a safety ceiling that throws is
+     * worse than a slightly imprecise one.
+     */
+    private TokenCountEstimator resolveToolContextEstimator(LlmConfiguration.Task task) {
+        try {
+            Map<String, String> parameters = task.getParameters();
+            String modelName = parameters != null ? LlmTask.resolveModelName(parameters) : null;
+            return tokenCounterFactory.getEstimator(task.getType(), modelName);
+        } catch (Exception e) {
+            LOGGER.debugf("Tool-context budget: falling back to the approximate token estimator (%s)", e.getMessage());
+            return tokenCounterFactory.getEstimator(null, null);
+        }
+    }
+
+    /**
+     * Drops the oldest complete tool exchanges from {@code messages} until the
+     * accumulated in-turn tool context fits inside {@code budgetTokens}.
+     *
+     * <p>
+     * A <em>tool exchange</em> is an {@link AiMessage} carrying tool-execution
+     * requests plus the run of {@link ToolExecutionResultMessage}s that answers it.
+     * Eviction operates on whole exchanges and nothing else, which is the entire
+     * point: dropping a result without its requesting {@code AiMessage} leaves an
+     * unanswerable {@code tool_call_id}, and dropping the {@code AiMessage} without
+     * its results leaves a tool call the provider will reject — the eviction would
+     * then <em>cause</em> the 400 it exists to prevent. System, user and
+     * assistant-prose messages are never candidates; conversation history is
+     * governed by {@code maxContextTokens}/{@code conversationHistoryLimit}, not by
+     * this guard.
+     * </p>
+     *
+     * <p>
+     * The most recent exchange is never evicted. When it alone exceeds the budget
+     * there is nothing eviction can do — the model asked for those results and must
+     * see them — so the method logs the overrun and lets the request through
+     * unchanged, exactly as today. That case is what {@code toolResponseLimits} is
+     * for.
+     * </p>
+     *
+     * <p>
+     * Eviction is silent to the model on purpose: no gap-marker message is
+     * injected. A {@code SystemMessage} mid-transcript is not portable across the
+     * twelve supported providers (several hoist system content to a dedicated
+     * top-level field), and a {@code UserMessage} would fabricate a turn the user
+     * never took. The loss is instead reported to the agent designer through the
+     * execution trace, a Micrometer counter and a WARN log.
+     * </p>
+     *
+     * <p>
+     * Static and fully parameterized — the orchestrator is an application-scoped
+     * singleton and holds no per-conversation state.
+     * </p>
+     *
+     * @param messages
+     *            the live message list; mutated in place
+     * @param budgetTokens
+     *            the aggregate ceiling; callers skip this method entirely when it
+     *            is not positive
+     * @param tokenMemo
+     *            per-attempt cache of message → token count
+     * @param trace
+     *            execution trace; receives one {@code tool_context_evicted} entry
+     *            per eviction round
+     */
+    static void enforceToolContextBudget(List<ChatMessage> messages, int budgetTokens, TokenCountEstimator estimator,
+                                         Map<ChatMessage, Integer> tokenMemo, List<Map<String, Object>> trace,
+                                         String conversationId) {
+
+        List<int[]> exchanges = findToolExchanges(messages);
+        // Nothing to trade away: with one exchange (or none) the only candidate is the
+        // one the model is waiting on.
+        if (exchanges.size() < 2) {
+            return;
+        }
+
+        int total = 0;
+        for (int[] range : exchanges) {
+            for (int i = range[0]; i <= range[1]; i++) {
+                total += tokensOf(messages.get(i), estimator, tokenMemo);
+            }
+        }
+        if (total <= budgetTokens) {
+            return;
+        }
+
+        int tokensBefore = total;
+        int evictedExchanges = 0;
+        int evictedMessages = 0;
+        while (total > budgetTokens && evictedExchanges < exchanges.size() - 1) {
+            int[] range = exchanges.get(evictedExchanges);
+            for (int i = range[0]; i <= range[1]; i++) {
+                total -= tokensOf(messages.get(i), estimator, tokenMemo);
+            }
+            evictedMessages += range[1] - range[0] + 1;
+            evictedExchanges++;
+        }
+
+        // Remove highest index first so the earlier ranges stay valid. Ranges are
+        // removed individually rather than as one span so that anything sitting
+        // between two exchanges is left untouched.
+        for (int k = evictedExchanges - 1; k >= 0; k--) {
+            int[] range = exchanges.get(k);
+            messages.subList(range[0], range[1] + 1).clear();
+        }
+
+        boolean withinBudget = total <= budgetTokens;
+
+        Map<String, Object> evictionStep = new HashMap<>();
+        evictionStep.put("type", "tool_context_evicted");
+        evictionStep.put("evictedExchanges", evictedExchanges);
+        evictionStep.put("evictedMessages", evictedMessages);
+        evictionStep.put("tokensBefore", tokensBefore);
+        evictionStep.put("tokensAfter", total);
+        evictionStep.put("budgetTokens", budgetTokens);
+        evictionStep.put("withinBudget", withinBudget);
+        trace.add(evictionStep);
+
+        try {
+            Metrics.globalRegistry.counter("eddi.llm.tool_context.evictions",
+                    "outcome", withinBudget ? "within_budget" : "still_over_budget").increment(evictedExchanges);
+        } catch (Exception e) {
+            LOGGER.debugf("tool-context eviction metric emit failed: %s", e.getMessage());
+        }
+
+        LOGGER.warnf("llm.tool_context.evicted: conversation '%s' accumulated %d tokens of tool context against "
+                + "maxToolContextTokens=%d; dropped the %d oldest tool exchange(s) (%d messages), now %d tokens.%s "
+                + "The model can no longer see those tool results — lower maxToolIterations, set toolResponseLimits, "
+                + "or raise maxToolContextTokens.",
+                sanitize(conversationId), tokensBefore, budgetTokens, evictedExchanges, evictedMessages, total,
+                withinBudget ? "" : " STILL OVER BUDGET: the most recent exchange alone exceeds the ceiling and is never evicted.");
+    }
+
+    /**
+     * Locates every tool exchange in message order. Each entry is an inclusive
+     * {@code [start, end]} index pair whose {@code start} is an {@link AiMessage}
+     * with tool-execution requests and whose {@code end} is the last
+     * {@link ToolExecutionResultMessage} immediately following it.
+     */
+    private static List<int[]> findToolExchanges(List<ChatMessage> messages) {
+        List<int[]> exchanges = new ArrayList<>();
+        for (int i = 0; i < messages.size(); i++) {
+            if (messages.get(i) instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+                int end = i;
+                while (end + 1 < messages.size() && messages.get(end + 1) instanceof ToolExecutionResultMessage) {
+                    end++;
+                }
+                exchanges.add(new int[]{i, end});
+                i = end;
+            }
+        }
+        return exchanges;
+    }
+
+    /** Memoized token count for one message, falling back to chars/4 on failure. */
+    private static int tokensOf(ChatMessage message, TokenCountEstimator estimator, Map<ChatMessage, Integer> memo) {
+        Integer cached = memo.get(message);
+        if (cached != null) {
+            return cached;
+        }
+        String text = TokenCounterFactory.extractText(message);
+        int tokens;
+        try {
+            tokens = estimator.estimateTokenCountInText(text);
+        } catch (Exception e) {
+            // A provider tokenizer that rejects a payload must not abort the turn; an
+            // approximate count still keeps the ceiling meaningful.
+            tokens = text.length() / 4;
+        }
+        memo.put(message, tokens);
+        return tokens;
     }
 
     /**
@@ -1052,6 +1467,12 @@ class AgentOrchestrator {
     static Integer sumInt(Integer a, Integer b) {
         return (a != null ? a : 0) + (b != null ? b : 0);
     }
+
+    /**
+     * The three token-usage count keys of the map {@link #tokenUsageMap} produces,
+     * in reporting order. Shared by every consumer that merges usage maps.
+     */
+    static final List<String> TOKEN_USAGE_FIELDS = List.of("inputTokens", "outputTokens", "totalTokens");
 
     /**
      * Convert a TokenUsage into a template/audit-friendly map with non-null counts.
@@ -1077,14 +1498,15 @@ class AgentOrchestrator {
     void executeSingleToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
                                Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
+                               Map<String, String> toolCanonicalNames,
                                int defaultRateLimit, Double maxBudget, String conversationId,
                                boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                LlmConfiguration.Task task, boolean isLazy,
                                List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
         // Live path: run the full pipeline, then append the raw result verbatim.
         String toolResult = executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
-                defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking,
-                task, isLazy, builtInSpecs, activeSpecs);
+                toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
         currentMessages.add(ToolExecutionResultMessage.from(toolRequest, toolResult));
     }
 
@@ -1102,6 +1524,7 @@ class AgentOrchestrator {
     String executeSingleToolCallResult(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                        List<Map<String, Object>> trace,
                                        Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
+                                       Map<String, String> toolCanonicalNames,
                                        int defaultRateLimit, Double maxBudget, String conversationId,
                                        boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                        LlmConfiguration.Task task, boolean isLazy,
@@ -1124,8 +1547,17 @@ class AgentOrchestrator {
         callStep.put("arguments", toolRequest.arguments());
         trace.add(callStep);
 
-        // Check per-conversation budget before executing tool
-        if (maxBudget != null && conversationId != null
+        // Check per-conversation TOOL budget before executing tool.
+        //
+        // Enforcement is opt-in: enforceBudget on the task wins, otherwise
+        // BUDGET_ENFORCE_DEFAULT (false unless eddi.tools.budget.enforce-by-default
+        // says so). Built-in tools priced at $0.00 until this release, so enforcing
+        // by default would make those ceilings bind for the first time on upgrade.
+        // A ceiling left unenforced is named once in a startup-style WARN rather
+        // than passing silently. Cost tracking itself is unaffected by the flag.
+        warnAboutUnenforcedBudgets(task);
+        boolean enforceBudget = task.getEnforceBudget() != null ? task.getEnforceBudget() : BUDGET_ENFORCE_DEFAULT;
+        if (enforceBudget && maxBudget != null && conversationId != null
                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
             String budgetError = "Budget exceeded for conversation " + conversationId;
             LOGGER.warn(sanitize(budgetError));
@@ -1160,11 +1592,24 @@ class AgentOrchestrator {
         ToolExecutor executor = toolExecutors.get(toolRequest.name());
         String toolResult;
         if (executor != null) {
-            int rateLimit = (toolRateLimits != null && toolRateLimits.containsKey(toolRequest.name()))
-                    ? toolRateLimits.get(toolRequest.name())
-                    : defaultRateLimit;
+            // A built-in is DISPATCHED under its @Tool method name ("calculate") but
+            // CONFIGURED under its whitelist slug ("calculator"). Resolve the slug once,
+            // here, and hand both names down: only the price and the cache TTL are looked
+            // up by slug, everything that identifies the individual call is not.
+            String canonicalName = ToolNameResolver.canonical(toolRequest.name(), toolCanonicalNames);
+            int rateLimit = resolveRateLimit(toolRateLimits, toolRequest.name(), canonicalName, defaultRateLimit);
+            Double priceOverride = resolveOverride(task.getToolPricing(), toolRequest.name(), canonicalName);
 
-            toolResult = toolExecutionService.executeToolWrapped(toolRequest.name(), toolRequest.arguments(), conversationId,
+            // Partition the tool-result cache by identity, so one user's result can never
+            // be served back to another. A null tag means no usable identity was
+            // available; ToolExecutionService then bypasses the cache entirely. Both
+            // names go in: toolCacheScopes shares its key vocabulary with toolRateLimits
+            // and toolPricing, so a slug-keyed narrowing override has to bind here too.
+            String cacheScopeTag = ToolCacheService.resolveScopeTag(toolRequest.name(), canonicalName, task.getToolCacheScopes(),
+                    task.getDefaultToolCacheScope(), memory != null ? memory.getUserId() : null, conversationId);
+
+            var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
+            toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
                     () -> executor.execute(toolRequest, null), enableRateLimiting, enableCaching, enableCostTracking, rateLimit);
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
@@ -1187,6 +1632,50 @@ class AgentOrchestrator {
         }
 
         return toolResult;
+    }
+
+    /**
+     * Resolves the per-minute rate limit for one call: an entry keyed on the
+     * dispatch name wins, then the canonical slug, then the task default.
+     *
+     * <p>
+     * Dispatch-name-first keeps a config that pins a single method
+     * ({@code {"searchNews": 5}}) more specific than one that covers the whole tool
+     * ({@code {"websearch": 30}}), and is what makes the documented slug form bind
+     * at all — a built-in's dispatch name never equals its slug.
+     * </p>
+     *
+     * <p>
+     * Note that only the LIMIT is slug-resolved; the bucket itself lives in
+     * {@code ToolRateLimiter} under the dispatch name. {@code {"websearch": 30}}
+     * therefore grants {@code searchWeb}, {@code searchNews} and
+     * {@code searchWikipedia} 30 calls/min <em>each</em>, not 30 between them.
+     * </p>
+     */
+    static int resolveRateLimit(Map<String, Integer> toolRateLimits, String dispatchName, String canonicalName,
+                                int defaultRateLimit) {
+        if (toolRateLimits == null) {
+            return defaultRateLimit;
+        }
+        Integer limit = toolRateLimits.get(dispatchName);
+        if (limit == null) {
+            limit = toolRateLimits.get(canonicalName);
+        }
+        return limit != null ? limit : defaultRateLimit;
+    }
+
+    /**
+     * Resolves an operator price override for one call, dispatch name before
+     * canonical slug (same precedence as {@link #resolveRateLimit}). Returns
+     * {@code null} when no override applies, leaving the default price table in
+     * charge.
+     */
+    static Double resolveOverride(Map<String, Double> toolPricing, String dispatchName, String canonicalName) {
+        if (toolPricing == null) {
+            return null;
+        }
+        Double price = toolPricing.get(dispatchName);
+        return price != null ? price : toolPricing.get(canonicalName);
     }
 
     // ─── Tool-approval gate helpers ───

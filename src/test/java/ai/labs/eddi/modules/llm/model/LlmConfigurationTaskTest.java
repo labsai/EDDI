@@ -157,8 +157,6 @@ class LlmConfigurationTaskTest {
             assertTrue(task.getEnableToolCaching());
             assertTrue(task.getEnableRateLimiting());
             assertEquals(100, task.getDefaultRateLimit());
-            assertFalse(task.getEnableParallelExecution());
-            assertEquals(30000L, task.getParallelExecutionTimeoutMs());
         }
     }
 }

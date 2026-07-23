@@ -63,8 +63,6 @@ class LlmConfigurationTest {
             assertTrue(task.getEnableToolCaching());
             assertTrue(task.getEnableRateLimiting());
             assertEquals(100, task.getDefaultRateLimit());
-            assertFalse(task.getEnableParallelExecution());
-            assertEquals(30000L, task.getParallelExecutionTimeoutMs());
             assertNull(task.getMaxToolIterations());
             assertNull(task.getModelCascade());
             assertNull(task.getToolResponseLimits());
@@ -115,8 +113,6 @@ class LlmConfigurationTest {
             task.setEnableRateLimiting(false);
             task.setDefaultRateLimit(50);
             task.setToolRateLimits(Map.of("calc", 10));
-            task.setEnableParallelExecution(true);
-            task.setParallelExecutionTimeoutMs(60000L);
             task.setMaxToolIterations(20);
             task.setParameters(Map.of("systemMessage", "Hello"));
 
@@ -142,8 +138,6 @@ class LlmConfigurationTest {
             assertFalse(task.getEnableRateLimiting());
             assertEquals(50, task.getDefaultRateLimit());
             assertEquals(Map.of("calc", 10), task.getToolRateLimits());
-            assertTrue(task.getEnableParallelExecution());
-            assertEquals(60000L, task.getParallelExecutionTimeoutMs());
             assertEquals(20, task.getMaxToolIterations());
             assertEquals("Hello", task.getSystemMessage());
         }
@@ -297,8 +291,6 @@ class LlmConfigurationTest {
             assertNull(ref.getName());
             assertNull(ref.getMaxResults());
             assertNull(ref.getMinScore());
-            assertNull(ref.getInjectionStrategy());
-            assertNull(ref.getContextTemplate());
         }
 
         @Test
@@ -307,14 +299,10 @@ class LlmConfigurationTest {
             ref.setName("product-docs");
             ref.setMaxResults(5);
             ref.setMinScore(0.7);
-            ref.setInjectionStrategy("system_message");
-            ref.setContextTemplate("Context:\n{{context}}");
 
             assertEquals("product-docs", ref.getName());
             assertEquals(5, ref.getMaxResults());
             assertEquals(0.7, ref.getMinScore());
-            assertEquals("system_message", ref.getInjectionStrategy());
-            assertEquals("Context:\n{{context}}", ref.getContextTemplate());
         }
     }
 
@@ -329,7 +317,6 @@ class LlmConfigurationTest {
             var rag = new RagDefaults();
             assertEquals(5, rag.getMaxResults());
             assertEquals(0.6, rag.getMinScore());
-            assertEquals("system_message", rag.getInjectionStrategy());
         }
 
         @Test
@@ -337,11 +324,9 @@ class LlmConfigurationTest {
             var rag = new RagDefaults();
             rag.setMaxResults(10);
             rag.setMinScore(0.5);
-            rag.setInjectionStrategy("user_message");
 
             assertEquals(10, rag.getMaxResults());
             assertEquals(0.5, rag.getMinScore());
-            assertEquals("user_message", rag.getInjectionStrategy());
         }
     }
 

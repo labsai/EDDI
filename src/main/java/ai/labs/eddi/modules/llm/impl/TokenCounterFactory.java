@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.TokenCountEstimator;
 import dev.langchain4j.model.openai.OpenAiTokenCountEstimator;
@@ -54,17 +55,58 @@ public class TokenCounterFactory {
 
     /**
      * Extract the text content from a ChatMessage for token counting.
+     * <p>
+     * Tool traffic counts too. An {@link AiMessage} that carries tool-execution
+     * requests contributes the requested tool names and their serialized arguments,
+     * and a {@link ToolExecutionResultMessage} contributes the tool name plus the
+     * whole result payload. Both used to fall through to {@code ""} — an
+     * {@code AiMessage} announcing five tool calls has a {@code null}
+     * {@code text()} and every result message hit the {@code default} arm — which
+     * made the entire in-turn tool context weigh zero tokens to every caller of
+     * this class.
      */
     static String extractText(ChatMessage message) {
         return switch (message) {
             case SystemMessage sm -> sm.text();
-            case AiMessage am -> am.text() != null ? am.text() : "";
+            case AiMessage am -> aiMessageText(am);
+            case ToolExecutionResultMessage trm -> toolResultText(trm);
             case UserMessage um -> um.hasSingleText()
                     ? um.singleText()
                     : um.contents().stream().filter(c -> c instanceof TextContent).map(c -> ((TextContent) c).text())
                             .reduce("", (a, b) -> a + " " + b).trim();
             default -> "";
         };
+    }
+
+    /**
+     * An assistant turn's billable text: its own prose plus, when it announces tool
+     * calls, each requested tool name and its serialized argument JSON — the bytes
+     * the provider actually receives back in the next request.
+     */
+    private static String aiMessageText(AiMessage message) {
+        String text = message.text() != null ? message.text() : "";
+        if (!message.hasToolExecutionRequests()) {
+            return text;
+        }
+        StringBuilder builder = new StringBuilder(text);
+        for (ToolExecutionRequest request : message.toolExecutionRequests()) {
+            if (request.name() != null) {
+                builder.append(' ').append(request.name());
+            }
+            if (request.arguments() != null) {
+                builder.append(' ').append(request.arguments());
+            }
+        }
+        return builder.toString().trim();
+    }
+
+    /**
+     * A tool result's billable text: the tool name plus the full result payload.
+     */
+    private static String toolResultText(ToolExecutionResultMessage message) {
+        String text = message.text() != null ? message.text() : "";
+        String toolName = message.toolName();
+        return toolName != null ? (toolName + " " + text).trim() : text;
     }
 
     /**

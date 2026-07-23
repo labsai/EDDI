@@ -29,7 +29,6 @@ class LlmConfigurationModelsTest {
             var rd = new LlmConfiguration.RagDefaults();
             assertEquals(5, rd.getMaxResults());
             assertEquals(0.6, rd.getMinScore());
-            assertEquals("system_message", rd.getInjectionStrategy());
         }
 
         @Test
@@ -37,10 +36,8 @@ class LlmConfigurationModelsTest {
             var rd = new LlmConfiguration.RagDefaults();
             rd.setMaxResults(10);
             rd.setMinScore(0.8);
-            rd.setInjectionStrategy("user_message");
             assertEquals(10, rd.getMaxResults());
             assertEquals(0.8, rd.getMinScore());
-            assertEquals("user_message", rd.getInjectionStrategy());
         }
     }
 
@@ -215,8 +212,6 @@ class LlmConfigurationModelsTest {
             assertNull(kbr.getName());
             assertNull(kbr.getMaxResults());
             assertNull(kbr.getMinScore());
-            assertNull(kbr.getInjectionStrategy());
-            assertNull(kbr.getContextTemplate());
         }
 
         @Test
@@ -225,8 +220,6 @@ class LlmConfigurationModelsTest {
             kbr.setName("product-docs");
             kbr.setMaxResults(10);
             kbr.setMinScore(0.7);
-            kbr.setInjectionStrategy("system_message");
-            kbr.setContextTemplate("Context: {{context}}");
             assertEquals("product-docs", kbr.getName());
             assertEquals(10, kbr.getMaxResults());
         }

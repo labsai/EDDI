@@ -404,6 +404,18 @@ public class AgentSetupService {
             task.setResponseObjectName("aiOutput");
         }
 
+        // No builder-level "responseFormat" parameter is injected here. It was only
+        // ever
+        // read by OpenAILanguageModelBuilder (dead for mistral and azure-openai), and
+        // it
+        // bakes JSON mode into a CACHED model that is then reused for tool-calling and
+        // streaming requests — the shape that produced the Gemini 400 (see
+        // docs/changelog.md, 2026-04-02). convertToObject alone now drives API-level
+        // JSON,
+        // applied per request by JsonResponseFormatPolicy for every execution mode.
+        // A hand-written config may still set responseFormat=json; the builder still
+        // honours it.
+
         switch (modelType) {
             case "ollama" -> {
                 params.put("model", modelId);
@@ -428,9 +440,6 @@ public class AgentSetupService {
                 if (baseUrl != null && !baseUrl.isBlank()) {
                     params.put("endpoint", baseUrl);
                 }
-                if (promptResponseJson != null && supportsResponseFormat(modelType)) {
-                    params.put("responseFormat", "json");
-                }
             }
             case "oracle-genai" -> {
                 params.put("modelName", modelId);
@@ -443,9 +452,6 @@ public class AgentSetupService {
                 }
                 if (baseUrl != null && !baseUrl.isBlank()) {
                     params.put("baseUrl", baseUrl);
-                }
-                if (promptResponseJson != null && supportsResponseFormat(modelType)) {
-                    params.put("responseFormat", "json");
                 }
             }
         }
@@ -653,23 +659,6 @@ public class AgentSetupService {
         // - bedrock: AWS credential chain (env vars, IAM roles)
         // - oracle-genai: OCI config file (~/.oci/config)
         return "ollama".equals(normalized) || "jlama".equals(normalized) || "bedrock".equals(normalized) || "oracle-genai".equals(normalized);
-    }
-
-    /**
-     * Check if the provider supports builder-level responseFormat=json.
-     */
-    public static boolean supportsResponseFormat(String modelType) {
-        // NOTE: Gemini and Gemini-Vertex are intentionally excluded here.
-        // The Gemini API does NOT support combining responseFormat=JSON
-        // (responseMimeType=
-        // application/json) with function calling (tools). Setting responseFormat on
-        // the
-        // model builder causes "Function calling with a response mime type:
-        // 'application/json'
-        // is unsupported" errors. JSON mode is instead enforced at the REQUEST level by
-        // LegacyChatExecutor, which only applies it when no tools are present.
-        return "openai".equals(modelType) || "mistral".equals(modelType)
-                || "azure-openai".equals(modelType);
     }
 
     /**

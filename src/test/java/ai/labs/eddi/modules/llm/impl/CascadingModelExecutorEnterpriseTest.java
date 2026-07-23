@@ -431,4 +431,84 @@ class CascadingModelExecutorEnterpriseTest {
         assertEquals("truncated", result.responseMetadata().get("warning"));
         assertEquals("LENGTH", result.responseMetadata().get("finishReason"));
     }
+
+    // ─── run-total token usage across escalated steps ────────────────
+
+    private static ChatModel modelReturning(String text, int in, int out, int total) {
+        ChatModel model = mock(ChatModel.class);
+        when(model.chat(anyList())).thenReturn(ChatResponse.builder().aiMessage(AiMessage.from(text))
+                .metadata(dev.langchain4j.model.chat.response.ChatResponseMetadata.builder()
+                        .tokenUsage(new dev.langchain4j.model.output.TokenUsage(in, out, total)).build())
+                .build());
+        return model;
+    }
+
+    /**
+     * {@code runCostUsd} has always been a run total while {@code tokenUsage}
+     * reported only the accepted step, so an escalating cascade produced a ledger
+     * entry whose token counts contradicted its own dollar figure — and
+     * under-reported the tokens of every model that was tried and discarded.
+     */
+    @Test
+    @DisplayName("tokenUsage is the sum over every attempted step, not the accepted one")
+    void tokenUsageAccumulatedAcrossEscalatedSteps() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("heuristic");
+        var cheap = new CascadeStep();
+        cheap.setType("cheap");
+        cheap.setConfidenceThreshold(0.9);
+        var mid = new CascadeStep();
+        mid.setType("mid");
+        mid.setConfidenceThreshold(0.9);
+        var strong = new CascadeStep();
+        strong.setType("strong"); // last step → always accepted
+        cascade.setSteps(List.of(cheap, mid, strong));
+
+        ChatModel cheapModel = modelReturning("I'm not sure, I don't know.", 10, 1, 11);
+        ChatModel midModel = modelReturning("Hmm, maybe? I don't know.", 20, 2, 22);
+        ChatModel strongModel = modelReturning("The answer is 42. This is definitely correct and complete.", 30, 3, 33);
+
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheapModel);
+        when(registry.getOrCreate(eq("mid"), anyMap())).thenReturn(midModel);
+        when(registry.getOrCreate(eq("strong"), anyMap())).thenReturn(strongModel);
+
+        var result = run(registry, cascade, new SimpleMeterRegistry());
+
+        assertEquals(2, result.stepUsed(), "the last step must be the accepted one");
+        assertNotNull(result.tokenUsage());
+        assertEquals(60L, ((Number) result.tokenUsage().get("inputTokens")).longValue(),
+                "all three attempted steps' input tokens must be totalled");
+        assertEquals(6L, ((Number) result.tokenUsage().get("outputTokens")).longValue());
+        assertEquals(66L, ((Number) result.tokenUsage().get("totalTokens")).longValue());
+    }
+
+    @Test
+    @DisplayName("a step that reports no token usage leaves the run total untouched")
+    void stepWithoutTokenUsageDoesNotZeroTheRunTotal() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("heuristic");
+        var cheap = new CascadeStep();
+        cheap.setType("cheap");
+        cheap.setConfidenceThreshold(0.9);
+        var strong = new CascadeStep();
+        strong.setType("strong");
+        cascade.setSteps(List.of(cheap, strong));
+
+        ChatModel cheapModel = modelReturning("I'm not sure, I don't know.", 10, 1, 11);
+        // No metadata at all — a provider that reports nothing.
+        ChatModel strongModel = modelReturning("The answer is 42. This is definitely correct and complete.");
+
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheapModel);
+        when(registry.getOrCreate(eq("strong"), anyMap())).thenReturn(strongModel);
+
+        var result = run(registry, cascade, new SimpleMeterRegistry());
+
+        assertNotNull(result.tokenUsage());
+        assertEquals(10L, ((Number) result.tokenUsage().get("inputTokens")).longValue());
+        assertEquals(11L, ((Number) result.tokenUsage().get("totalTokens")).longValue());
+    }
 }

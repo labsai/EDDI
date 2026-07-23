@@ -366,24 +366,32 @@ class GroupConversationServiceBranchCoverageTest {
         }
 
         @Test
-        @DisplayName("should handle serialize exception by falling back to toString")
-        void serializeException() throws Exception {
+        @DisplayName("should complete gracefully when output has no extractable text")
+        void noExtractableText() throws Exception {
             var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
                     new GroupMember("a1", "Alice", 1, null));
             cfg.setModeratorAgentId("mod");
             setupStore(cfg);
 
+            // Exact production scenario: output list contains a null item
+            var nullList = new LinkedList<>(List.of((Object) "placeholder"));
+            nullList.set(0, null); // output=[null]
             Map<String, Object> outputMap = new LinkedHashMap<>();
-            outputMap.put("output", 42); // Not a list, forces fallback
+            outputMap.put("output", nullList);
+            outputMap.put("actions", List.of("send_message", "unknown"));
             stubAgentWithOutputMap("a1", outputMap);
             stubAgent("mod", "Synthesis");
 
-            // serialize throws
-            when(jsonSerialization.serialize(any()))
-                    .thenThrow(new RuntimeException("serialize failed"));
-
             var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
             assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // The a1 transcript entry must have empty content, not raw metadata
+            var a1Entries = result.getTranscript().stream()
+                    .filter(e -> "a1".equals(e.speakerAgentId()))
+                    .toList();
+            assertFalse(a1Entries.isEmpty(), "Expected a transcript entry for agent a1");
+            a1Entries.forEach(e -> assertTrue(
+                    e.content() == null || e.content().isEmpty(),
+                    "Transcript should not contain raw metadata dump, got: " + e.content()));
         }
 
         @Test

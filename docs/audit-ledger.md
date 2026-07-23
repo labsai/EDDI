@@ -83,10 +83,25 @@ Returns the total number of audit entries for a conversation.
 When the vault master key is configured, each audit entry is signed with HMAC-SHA256:
 
 1. A **signing key** is derived from the vault master key using PBKDF2 with a distinct salt (`eddi-audit-hmac-v1`, 600K iterations). This makes the audit signing key cryptographically independent from the vault's KEK.
-2. A **canonical string** is built from all entry fields (excluding the HMAC itself), with map keys sorted alphabetically for deterministic output.
-3. The HMAC is computed and stored as a hex-encoded string.
+2. A **canonical string** is built from all entry fields (excluding the HMAC itself), with map keys sorted alphabetically for deterministic output. Nested maps and lists are canonicalized recursively.
+3. The HMAC is computed and stored as `v2:<64 hex chars>`.
 
 To verify an entry has not been tampered with, recompute the HMAC and compare it to the stored value.
+
+### Canonical form versioning
+
+The stored value carries the version of the canonical form it was computed over, and verification picks the canonicalizer from that tag:
+
+| Stored value      | Canonical form | Written by                |
+| ----------------- | -------------- | ------------------------- |
+| `v2:<hex>`        | v2             | current                   |
+| `<hex>` (no tag)  | v1             | before delimiter escaping |
+
+**v1** joined keys and values with `=`, `,`, `{}`, `[]` and `|` without escaping them, so the map-to-string mapping was not injective: `{"a": "x", "b": "y"}` and `{"a": "x,b=y"}` canonicalize to the same bytes and therefore share one valid HMAC — a tampered entry could verify as intact. That became reachable once `toolCalls` started carrying tool-trace `arguments`/`result` strings, which the model and the user write.
+
+**v2** escapes every delimiter inside keys and scalars and type-tags every value (`s:` scalar, `m` map, `l` list, `n` null), so a string can never render like a nested structure.
+
+Verification never falls back from v2 to v1 — that would hand the collision straight back — and pre-existing untagged rows keep verifying under v1, so an upgrade does not turn the historical ledger into a wall of "tampered".
 
 ## Secret Redaction
 

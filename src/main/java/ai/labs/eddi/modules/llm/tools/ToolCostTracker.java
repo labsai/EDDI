@@ -31,8 +31,15 @@ public class ToolCostTracker {
     @Inject
     MeterRegistry meterRegistry;
 
-    // Cost per tool call (in cents or credits)
-    private static final Map<String, Double> TOOL_COSTS = Map.of("websearch", 0.001, // $0.001 per search
+    /**
+     * Default price in USD per call, keyed on the <em>canonical</em> tool slug —
+     * the same tokens as {@code builtInToolsWhitelist}. Looked up with
+     * {@link ToolInvocation#canonicalName()}, never with the dispatch name: no
+     * built-in declares {@code @Tool(name = …)}, so the dispatch name is a method
+     * name ({@code searchWeb}) that shares no key with this table and would price
+     * every built-in at $0.00.
+     */
+    static final Map<String, Double> DEFAULT_TOOL_PRICES = Map.of("websearch", 0.001, // $0.001 per search
             "weather", 0.0005, // $0.0005 per weather call
             "calculator", 0.0, // Free
             "datetime", 0.0, // Free
@@ -117,10 +124,49 @@ public class ToolCostTracker {
     }
 
     /**
-     * Track cost for a tool call
+     * Track cost for a tool call whose configured slug is unknown — the tool is
+     * priced under its own name.
+     *
+     * <p>
+     * Retained for callers outside the agent dispatch loop (and for tools where
+     * dispatch name and slug are genuinely the same string). The live path uses
+     * {@link #trackToolCall(ToolInvocation, String)}.
+     * </p>
      */
     public double trackToolCall(String toolName, String conversationId) {
-        double cost = TOOL_COSTS.getOrDefault(toolName, 0.0);
+        return trackToolCall(ToolInvocation.of(toolName), conversationId);
+    }
+
+    /**
+     * Track cost for a tool call.
+     *
+     * <p>
+     * The price is resolved from {@link ToolInvocation#canonicalName()} (or the
+     * per-call override), while every accounting key — the per-tool map, the
+     * per-conversation usage breakdown and the {@code tool} metric tag — stays on
+     * {@link ToolInvocation#dispatchName()}. Splitting them this way keeps the
+     * {@code eddi.tool.calls}/{@code eddi.tool.costs} tag vocabulary identical to
+     * every other {@code tool}-tagged meter in this package (which all report the
+     * dispatched method name), so no dashboard or alert has to be rewritten, while
+     * still charging the right amount.
+     * </p>
+     *
+     * @param invocation
+     *            the call being priced
+     * @param conversationId
+     *            conversation to bill
+     * @return the cost charged, in USD
+     */
+    public double trackToolCall(ToolInvocation invocation, String conversationId) {
+        String toolName = invocation.dispatchName();
+        Double priceOverride = invocation.priceOverride();
+
+        // An operator-supplied price is clamped at zero: a negative double would
+        // *credit* the conversation and let maxBudgetPerConversation be evaded
+        // outright.
+        double cost = priceOverride != null
+                ? Math.max(0.0, priceOverride)
+                : DEFAULT_TOOL_PRICES.getOrDefault(invocation.canonicalName(), 0.0);
 
         // Track per-tool costs
         toolCosts.computeIfAbsent(toolName, ToolCostMetrics::new).addCost(cost);

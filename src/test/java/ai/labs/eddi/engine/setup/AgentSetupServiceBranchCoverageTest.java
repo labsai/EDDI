@@ -212,49 +212,6 @@ class AgentSetupServiceBranchCoverageTest {
         }
     }
 
-    // ─── supportsResponseFormat ──────────────────────────────────────────
-
-    @Nested
-    @DisplayName("supportsResponseFormat")
-    class SupportsResponseFormat {
-
-        @Test
-        @DisplayName("openai supports response format")
-        void openai() {
-            assertTrue(AgentSetupService.supportsResponseFormat("openai"));
-        }
-
-        @Test
-        @DisplayName("mistral supports response format")
-        void mistral() {
-            assertTrue(AgentSetupService.supportsResponseFormat("mistral"));
-        }
-
-        @Test
-        @DisplayName("azure-openai supports response format")
-        void azureOpenai() {
-            assertTrue(AgentSetupService.supportsResponseFormat("azure-openai"));
-        }
-
-        @Test
-        @DisplayName("anthropic does not support response format")
-        void anthropic() {
-            assertFalse(AgentSetupService.supportsResponseFormat("anthropic"));
-        }
-
-        @Test
-        @DisplayName("gemini does not support response format")
-        void gemini() {
-            assertFalse(AgentSetupService.supportsResponseFormat("gemini"));
-        }
-
-        @Test
-        @DisplayName("ollama does not support response format")
-        void ollama() {
-            assertFalse(AgentSetupService.supportsResponseFormat("ollama"));
-        }
-    }
-
     // ─── buildPromptResponseJson ─────────────────────────────────────────
 
     @Nested
@@ -547,7 +504,7 @@ class AgentSetupServiceBranchCoverageTest {
         }
 
         @Test
-        @DisplayName("azure-openai sets deploymentName, apiKey, endpoint, responseFormat")
+        @DisplayName("azure-openai sets deploymentName, apiKey, endpoint and no builder responseFormat")
         void azureOpenai() {
             String promptJson = "some json format";
             var config = service.createLlmConfig("azure-openai", "gpt-4", "mykey", "prompt",
@@ -556,7 +513,9 @@ class AgentSetupServiceBranchCoverageTest {
             assertEquals("gpt-4", params.get("deploymentName"));
             assertEquals("mykey", params.get("apiKey"));
             assertEquals("https://myaoi.openai.azure.com", params.get("endpoint"));
-            assertEquals("json", params.get("responseFormat"));
+            assertNull(params.get("responseFormat"),
+                    "AzureOpenAiLanguageModelBuilder never read this key — JSON is applied per request instead");
+            assertEquals("true", params.get("convertToObject"));
         }
 
         @Test
@@ -569,17 +528,19 @@ class AgentSetupServiceBranchCoverageTest {
         }
 
         @Test
-        @DisplayName("default provider (anthropic) sets modelName, apiKey, responseFormat if json")
+        @DisplayName("default provider branch sets modelName, apiKey, baseUrl and no builder responseFormat")
         void defaultProviderWithJson() {
-            // openai is in 'supportsResponseFormat' so it takes the default branch but with
-            // responseFormat
+            // openai takes the default branch. A builder-level responseFormat would be
+            // baked into the CACHED model and travel into tool-calling and streaming
+            // requests; JSON is applied per request instead.
             var config = service.createLlmConfig("openai", "gpt-4", "sk-key", "prompt",
                     false, null, "https://custom.api.com", "json schema", false, false, null);
             var params = config.tasks().get(0).getParameters();
             assertEquals("gpt-4", params.get("modelName"));
             assertEquals("sk-key", params.get("apiKey"));
             assertEquals("https://custom.api.com", params.get("baseUrl"));
-            assertEquals("json", params.get("responseFormat"));
+            assertNull(params.get("responseFormat"));
+            assertEquals("true", params.get("convertToObject"));
         }
 
         @Test

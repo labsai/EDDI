@@ -162,8 +162,12 @@ All tool invocations flow through a unified pipeline that provides enterprise-gr
 | `defaultRateLimit`         | int     | `100`     | Default calls/minute for each tool           |
 | `toolRateLimits`           | map     | `{}`      | Per-tool overrides, e.g. `{"websearch": 30}` |
 | `enableToolCaching`        | boolean | `true`    | Cache identical tool calls                   |
-| `enableCostTracking`       | boolean | `true`    | Track cost per conversation                  |
-| `maxBudgetPerConversation` | number  | unlimited | Maximum spend per conversation               |
+| `defaultToolCacheScope`    | string  | `user`    | Who may reuse a cached result: `user`, `conversation` or `global` |
+| `toolCacheScopes`          | map     | `{}`      | Per-tool overrides, keyed on the dispatch name or the slug, e.g. `{"calculate": "global"}` |
+| `enableCostTracking`       | boolean | `true`    | Track tool cost per conversation             |
+| `toolPricing`              | map     | built-ins | Per-call price in USD, e.g. `{"websearch": 0.005}` |
+| `maxBudgetPerConversation` | number  | unlimited | Ceiling on accumulated **tool** cost per conversation |
+| `enforceBudget`            | boolean | `false`   | Set `true` to actually refuse calls past the ceiling |
 
 ### Example: Restrict web search rate and set a budget
 
@@ -175,9 +179,50 @@ All tool invocations flow through a unified pipeline that provides enterprise-gr
   "defaultRateLimit": 100,
   "toolRateLimits": { "websearch": 20 },
   "enableCostTracking": true,
-  "maxBudgetPerConversation": 2.0
+  "maxBudgetPerConversation": 2.0,
+  "enforceBudget": true
 }
 ```
+
+> A configured `maxBudgetPerConversation` is **report-only until you add
+> `enforceBudget: true`.** Built-in tools priced at $0.00 before v6.1, so these
+> ceilings have never refused a call; enforcing them automatically would start
+> aborting tool calls on upgrade. If you relied on a ceiling that *was* binding
+> (an http/MCP/A2A tool named `websearch`, `webscraper` or `pdfreader` was priced
+> by name and refused), add the flag — the startup log names every task in that
+> position. It covers **tool** cost only; LLM token spend is capped separately by
+> the model cascade's `maxCostPerRun`.
+
+### Which name does a setting expect?
+
+Every built-in tool has a **slug** — the token you list in
+`builtInToolsWhitelist` (`websearch`) — and one or more **dispatch names**, the
+`@Tool` methods the model actually calls (`searchWeb`, `searchNews`,
+`searchWikipedia`). `toolRateLimits` and `toolPricing` accept either: the
+dispatch name is looked up first, then the slug, so a slug entry configures the
+whole tool while a dispatch-name entry pins one operation.
+
+Rate-limit *buckets* stay per dispatch name. `{"websearch": 20}` therefore gives
+each of the three search operations its own 20 calls/minute, not 20 shared
+between them.
+
+### Cache scoping
+
+Tool results are cached **per user** by default: a cached result is only ever
+served back to the identity that produced it, so one user's tool output can
+never reach another. Widen a tool only when its result depends purely on its
+arguments and never on who is asking:
+
+```json
+{
+  "enableToolCaching": true,
+  "toolCacheScopes": { "calculate": "global" }
+}
+```
+
+`conversation` narrows reuse further, to the single conversation that produced
+the entry. If no user id and no conversation id are available for a call, the
+cache is skipped entirely for it rather than falling back to a shared bucket.
 
 ---
 

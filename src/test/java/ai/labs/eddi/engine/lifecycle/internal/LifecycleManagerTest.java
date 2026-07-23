@@ -10,10 +10,12 @@ import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -22,11 +24,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.function.Consumer;
+import java.util.Map;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static org.junit.jupiter.api.Assertions.*;
@@ -1043,12 +1048,19 @@ class LifecycleManagerTest {
                     argThat(summary -> summary.containsKey("actions")));
         }
 
-        @Test
-        @DisplayName("task summary includes toolTrace when present")
-        void summaryWithToolTrace() throws Exception {
+        /**
+         * Runs one lifecycle turn for a single task of the given type over the given
+         * step elements, and returns the summary map handed to {@code onTaskComplete}.
+         * <p>
+         * Deliberately stubs only {@code getAllElements()} — never
+         * {@code getLatestData(...)}. The predecessor of these tests hand-stubbed the
+         * exact key the reader computed, which made it assert the reader against its
+         * own stub instead of against the key LlmTask actually writes.
+         */
+        private Map<String, Object> runAndCaptureSummary(String taskType, List<IData<?>> stepElements) throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn(new TaskId("llm"));
-            when(task.getType()).thenReturn("langchain");
+            when(task.getId()).thenReturn(new TaskId("ai.labs.llm"));
+            when(task.getType()).thenReturn(taskType);
 
             lifecycleManager.addLifecycleTask(task);
 
@@ -1057,21 +1069,116 @@ class LifecycleManagerTest {
             when(memory.getCurrentStep()).thenReturn(currentStep);
             when(memory.getConversationId()).thenReturn("conv1");
             when(memory.getAgentId()).thenReturn("agent1");
+            when(currentStep.getAllElements()).thenReturn(stepElements);
 
             var eventSink = mock(ConversationEventSink.class);
             when(memory.getEventSink()).thenReturn(eventSink);
-
-            // Set up tool trace data
-            var traceData = mock(IData.class);
-            when(traceData.getResult()).thenReturn("trace-data");
-            when(currentStep.getLatestData("langchain:trace:llm")).thenReturn(traceData);
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
             lifecycleManager.executeLifecycle(memory, null);
 
-            verify(eventSink).onTaskComplete(eq(new TaskId("llm")), eq("langchain"), anyLong(),
-                    argThat(summary -> summary.containsKey("toolTrace")));
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> summaryCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(eventSink).onTaskComplete(eq(new TaskId("ai.labs.llm")), eq(taskType), anyLong(),
+                    summaryCaptor.capture());
+            return summaryCaptor.getValue();
+        }
+
+        @Test
+        @DisplayName("langchain task: trace key written by LlmTask reaches the summary")
+        void summaryIncludesToolTraceForLangchainTask() throws Exception {
+            // Exactly the key LlmTask writes for a task with type=openai, id=taskA —
+            // see LlmTaskCoverageTest.resume_nonEmptyTrace_stored (writer half).
+            var call = Map.<String, Object>of("type", "tool_call", "tool", "weather");
+            var result = Map.<String, Object>of("type", "tool_result", "tool", "weather");
+            var summary = runAndCaptureSummary("langchain",
+                    List.<IData<?>>of(new Data<>("langchain:trace:openai:taskA", List.of(call, result))));
+
+            assertEquals(List.of(call, result), summary.get("toolTrace"));
+        }
+
+        @Test
+        @DisplayName("langchain task: multiple trace keys are aggregated in write order")
+        void summaryAggregatesMultipleToolTraceKeys() throws Exception {
+            // LlmTask writes ONE trace key per LLM config task, so a reader that takes
+            // only the latest match (getLatestData) silently drops all but the last.
+            var first = Map.<String, Object>of("type", "tool_call", "tool", "weather");
+            var second = Map.<String, Object>of("type", "tool_call", "tool", "calculator");
+            var summary = runAndCaptureSummary("langchain", List.<IData<?>>of(
+                    new Data<>("langchain:trace:openai:taskA", List.of(first)),
+                    new Data<>("langchain:trace:anthropic:taskB", List.of(second))));
+
+            assertEquals(List.of(first, second), summary.get("toolTrace"));
+        }
+
+        @Test
+        @DisplayName("secrets in tool arguments/results are redacted before reaching the SSE summary")
+        void summaryRedactsSecretsInToolTrace() throws Exception {
+            // The summary feeds the task_complete SSE frame, which — unlike the audit
+            // ledger — has no redaction of its own. Tool arguments/results are LLM- and
+            // user-controlled, so a secret in one must not leave the process verbatim.
+            var apiKey = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            var bearer = "Bearer abcdefghijklmnopqrstuvwxyz0123456789";
+            var call = Map.<String, Object>of("type", "tool_call", "tool", "http",
+                    "arguments", "{\"key\":\"" + apiKey + "\"}");
+            var result = Map.<String, Object>of("type", "tool_result", "tool", "http",
+                    "result", "authorized with " + bearer);
+            var summary = runAndCaptureSummary("langchain",
+                    List.<IData<?>>of(new Data<>("langchain:trace:openai:taskA", List.of(call, result))));
+
+            @SuppressWarnings("unchecked")
+            var trace = (List<Map<String, Object>>) summary.get("toolTrace");
+            assertNotNull(trace);
+            var serialized = trace.toString();
+            assertFalse(serialized.contains(apiKey),
+                    "the raw API key must not reach the SSE summary; saw: " + serialized);
+            assertFalse(serialized.contains(bearer),
+                    "the raw bearer token must not reach the SSE summary; saw: " + serialized);
+            // Non-secret structure is preserved so the live display still works.
+            assertEquals("tool_call", trace.get(0).get("type"));
+            assertEquals("http", trace.get(0).get("tool"));
+        }
+
+        @Test
+        @DisplayName("non-langchain task: trace lingering in the step is NOT reported")
+        void summaryOmitsToolTraceForNonLangchainTask() throws Exception {
+            // Step data survives across tasks, so without the task-type gate every task
+            // running after the LLM task would report the LLM's trace as its own.
+            var summary = runAndCaptureSummary("behavior_rules", List.<IData<?>>of(
+                    new Data<>("langchain:trace:openai:taskA",
+                            List.of(Map.<String, Object>of("type", "tool_call", "tool", "weather")))));
+
+            assertFalse(summary.containsKey("toolTrace"));
+        }
+
+        @Test
+        @DisplayName("langchain task: no trace keys → no toolTrace field")
+        void summaryOmitsToolTraceWhenNoTraceKeys() throws Exception {
+            var summary = runAndCaptureSummary("langchain", List.<IData<?>>of(
+                    new Data<>("input", "hello"),
+                    new Data<>("actions", List.of("greet"))));
+
+            assertFalse(summary.containsKey("toolTrace"));
+        }
+
+        @Test
+        @DisplayName("langchain task: langchain:cascade:trace: is not swept into toolTrace")
+        void summaryIgnoresCascadeTraceKey() throws Exception {
+            var summary = runAndCaptureSummary("langchain", List.<IData<?>>of(
+                    new Data<>("langchain:cascade:trace:taskA",
+                            List.of(Map.<String, Object>of("step", 0, "model", "gpt-4o-mini")))));
+
+            assertFalse(summary.containsKey("toolTrace"));
+        }
+
+        @Test
+        @DisplayName("langchain task: non-List trace result is ignored, not cast")
+        void summaryIgnoresNonListTraceResult() throws Exception {
+            var summary = assertDoesNotThrow(() -> runAndCaptureSummary("langchain",
+                    List.<IData<?>>of(new Data<>("langchain:trace:openai:taskA", "not-a-list"))));
+
+            assertFalse(summary.containsKey("toolTrace"));
         }
 
         @Test
@@ -1181,8 +1288,12 @@ class LifecycleManagerTest {
             when(modelData.getResult()).thenReturn("gpt-4");
             doReturn(modelData).when(currentStep).getLatestData("audit:model_name");
 
-            IData<java.util.Map<String, Object>> tokenData = mock(IData.class);
-            when(tokenData.getResult()).thenReturn(java.util.Map.of("input", 10, "output", 20));
+            // Match the AUDIT_TOKEN_USAGE contract exactly — {inputTokens, outputTokens,
+            // totalTokens} — since buildAuditEntry copies this map straight into
+            // llmDetail.tokenUsage. A {input, output} fixture would test a shape the
+            // producer never emits.
+            IData<Map<String, Object>> tokenData = mock(IData.class);
+            when(tokenData.getResult()).thenReturn(Map.of("inputTokens", 10, "outputTokens", 20, "totalTokens", 30));
             doReturn(tokenData).when(currentStep).getLatestData("audit:token_usage");
 
             var auditCollector = mock(IAuditEntryCollector.class);
@@ -1197,9 +1308,265 @@ class LifecycleManagerTest {
                 assertTrue(entry.llmDetail().containsKey("compiledPrompt"));
                 assertTrue(entry.llmDetail().containsKey("modelResponse"));
                 assertTrue(entry.llmDetail().containsKey("modelName"));
-                assertTrue(entry.llmDetail().containsKey("tokenUsage"));
+                // containsKey alone passed while the entry carried null: assert the value.
+                assertEquals(Map.of("inputTokens", 10, "outputTokens", 20, "totalTokens", 30),
+                        entry.llmDetail().get("tokenUsage"));
                 return true;
             }));
+        }
+
+        @Test
+        @DisplayName("audit entry omits tokenUsage when no LLM call reported any")
+        void auditEntryOmitsTokenUsageWhenAbsent() throws Exception {
+            var auditCollector = auditRun(currentStep -> {
+                IData<String> promptData = mock(IData.class);
+                when(promptData.getResult()).thenReturn("You are a helpful assistant");
+                doReturn(promptData).when(currentStep).getLatestData("audit:compiled_prompt");
+                // Key present but empty-resulted — the loose "data != null" guard would
+                // put a null tokenUsage into llmDetail and ship it to the ledger.
+                IData<Map<String, Object>> tokenData = mock(IData.class);
+                when(tokenData.getResult()).thenReturn(null);
+                doReturn(tokenData).when(currentStep).getLatestData("audit:token_usage");
+            });
+
+            verify(auditCollector).collect(argThat(entry -> {
+                assertNotNull(entry.llmDetail());
+                assertFalse(entry.llmDetail().containsKey("tokenUsage"));
+                return true;
+            }));
+        }
+
+        @Test
+        @DisplayName("audit entry carries cascadeModel and a Double confidence in llmDetail")
+        void auditEntryLlmDetailCarriesConfidenceAndCascadeModel() throws Exception {
+            var auditCollector = auditRun(currentStep -> {
+                IData<String> promptData = mock(IData.class);
+                when(promptData.getResult()).thenReturn("prompt");
+                doReturn(promptData).when(currentStep).getLatestData("audit:compiled_prompt");
+
+                IData<String> cascadeModelData = mock(IData.class);
+                when(cascadeModelData.getResult()).thenReturn("openai/gpt-4o (step 1)");
+                doReturn(cascadeModelData).when(currentStep).getLatestData("audit:cascade_model");
+
+                IData<Double> confidenceData = mock(IData.class);
+                when(confidenceData.getResult()).thenReturn(0.87);
+                doReturn(confidenceData).when(currentStep).getLatestData("audit:confidence");
+            });
+
+            verify(auditCollector).collect(argThat(entry -> {
+                assertEquals("openai/gpt-4o (step 1)", entry.llmDetail().get("cascadeModel"));
+                assertEquals(0.87, entry.llmDetail().get("confidence"));
+                return true;
+            }));
+        }
+
+        /**
+         * {@code toolCalls} was passed as a literal {@code null} to every audit entry
+         * the engine ever produced, with a comment claiming LlmTask set it in memory.
+         */
+        @Test
+        @DisplayName("audit entry populates toolCalls from memory")
+        void auditEntryPopulatesToolCallsFromMemory() throws Exception {
+            var calls = List.of(Map.<String, Object>of("tool", "calculator", "llmTaskId", "taskA"));
+            var auditCollector = auditRun(currentStep -> {
+                IData<Map<String, Object>> toolCallData = mock(IData.class);
+                when(toolCallData.getResult()).thenReturn(Map.of("calls", calls));
+                doReturn(toolCallData).when(currentStep).getLatestData("audit:tool_calls");
+            });
+
+            verify(auditCollector).collect(argThat(entry -> {
+                assertNotNull(entry.toolCalls(), "toolCalls must no longer be hard-coded null");
+                assertEquals(calls, entry.toolCalls().get("calls"));
+                return true;
+            }));
+        }
+
+        @Test
+        @DisplayName("audit entry leaves toolCalls null when the key is absent or empty")
+        void auditEntryToolCallsNullWhenAbsentOrEmpty() throws Exception {
+            var absent = auditRun(currentStep -> {
+            });
+            verify(absent).collect(argThat(entry -> {
+                assertNull(entry.toolCalls());
+                return true;
+            }));
+
+            var empty = auditRun(currentStep -> {
+                IData<Map<String, Object>> toolCallData = mock(IData.class);
+                when(toolCallData.getResult()).thenReturn(Map.of());
+                doReturn(toolCallData).when(currentStep).getLatestData("audit:tool_calls");
+            });
+            verify(empty).collect(argThat(entry -> {
+                assertNull(entry.toolCalls());
+                return true;
+            }));
+        }
+
+        /**
+         * {@code cost} was a literal {@code 0.0} with a comment claiming a
+         * ToolCostTracker integration that never existed.
+         */
+        @Test
+        @DisplayName("audit entry populates cost from memory, and defaults to 0.0 when absent")
+        void auditEntryPopulatesCostFromMemory() throws Exception {
+            var priced = auditRun(currentStep -> {
+                IData<Double> costData = mock(IData.class);
+                when(costData.getResult()).thenReturn(0.0042);
+                doReturn(costData).when(currentStep).getLatestData("audit:cost");
+            });
+            verify(priced).collect(argThat(entry -> {
+                assertEquals(0.0042, entry.cost(), 1e-9, "cost must no longer be hard-coded 0.0");
+                return true;
+            }));
+
+            var free = auditRun(currentStep -> {
+            });
+            verify(free).collect(argThat(entry -> {
+                assertEquals(0.0, entry.cost(), 1e-9);
+                return true;
+            }));
+        }
+
+        /**
+         * Runs one lifecycle turn with an audit collector attached, letting the caller
+         * stub whatever {@code audit:*} data the case needs on the current step.
+         */
+        private IAuditEntryCollector auditRun(Consumer<IConversationMemory.IWritableConversationStep> stubStep)
+                throws Exception {
+            var manager = new LifecycleManager(componentCache, workflowId);
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
+            when(task.getType()).thenReturn("langchain");
+            manager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(memory.getAgentVersion()).thenReturn(1);
+            when(memory.size()).thenReturn(1);
+
+            stubStep.accept(currentStep);
+
+            var auditCollector = mock(IAuditEntryCollector.class);
+            when(memory.getAuditCollector()).thenReturn(auditCollector);
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            manager.executeLifecycle(memory, null);
+            return auditCollector;
+        }
+    }
+
+    /**
+     * The {@code audit:*} keys live on the step, and a step's data is never cleared
+     * between tasks — so every reader of those keys has to be gated on the LLM task
+     * type. Without the gate the ledger (which is append-only, EU AI Act) records
+     * the LLM's dollar cost and tool calls once more for EVERY task that runs after
+     * it in the same step.
+     * <p>
+     * These tests deliberately drive a REAL {@link ConversationMemory} / step and
+     * let the first task write the keys from inside {@code execute}, so the
+     * lingering is the production mechanism rather than a per-key stub.
+     */
+    @Nested
+    @DisplayName("buildAuditEntry — LLM task-type gate")
+    class BuildAuditEntryTaskTypeGateTests {
+
+        private static final double TURN_COST = 0.0042;
+
+        private ILifecycleTask llmTask() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("ai.labs.llm"));
+            when(task.getType()).thenReturn("langchain");
+            doAnswer(invocation -> {
+                var memory = (IConversationMemory) invocation.getArgument(0);
+                var step = memory.getCurrentStep();
+                step.storeData(new Data<>("audit:compiled_prompt", "system\n---\nprompt"));
+                step.storeData(new Data<>("audit:token_usage", Map.<String, Object>of("totalTokens", 120L)));
+                step.storeData(new Data<>("audit:cascade_model", "openai/gpt-4o (step 0)"));
+                step.storeData(new Data<>("audit:confidence", 0.87));
+                step.storeData(new Data<>("audit:tool_calls",
+                        Map.<String, Object>of("calls", List.of(Map.of("tool", "weather", "llmTaskId", "taskA")))));
+                step.storeData(new Data<>("audit:cost", TURN_COST));
+                return null;
+            }).when(task).execute(any(), any());
+            return task;
+        }
+
+        private ILifecycleTask plainTask(String id, String type) {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId(id));
+            when(task.getType()).thenReturn(type);
+            return task;
+        }
+
+        private List<AuditEntry> runPipeline(ILifecycleTask... tasks) throws Exception {
+            for (ILifecycleTask task : tasks) {
+                lifecycleManager.addLifecycleTask(task);
+            }
+            var memory = new ConversationMemory("conv1", "agent1", 1, "user1");
+            var auditCollector = mock(IAuditEntryCollector.class);
+            memory.setAuditCollector(auditCollector);
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            lifecycleManager.executeLifecycle(memory, null);
+
+            ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(auditCollector, times(tasks.length)).collect(captor.capture());
+            return captor.getAllValues();
+        }
+
+        @Test
+        @DisplayName("tasks following the LLM task do NOT re-report its cost, tool calls or llmDetail")
+        void laterTasksDoNotInheritLlmAuditEvidence() throws Exception {
+            var entries = runPipeline(llmTask(), plainTask("ai.labs.output", "output"),
+                    plainTask("ai.labs.templating", "templating"));
+
+            var llmEntry = entries.get(0);
+            assertEquals(TURN_COST, llmEntry.cost(), 1e-9, "the LLM task must still carry the real cost");
+            assertNotNull(llmEntry.toolCalls());
+            assertNotNull(llmEntry.llmDetail());
+
+            for (AuditEntry later : entries.subList(1, entries.size())) {
+                assertEquals(0.0, later.cost(), 1e-9,
+                        "task '" + later.taskType() + "' spent nothing — summing the ledger must not multiply the turn's cost");
+                assertNull(later.toolCalls(),
+                        "task '" + later.taskType() + "' made no tool calls");
+                assertNull(later.llmDetail(),
+                        "task '" + later.taskType() + "' invoked no model");
+            }
+        }
+
+        @Test
+        @DisplayName("a non-LLM task running BEFORE the LLM task is unaffected")
+        void tasksBeforeTheLlmTaskStayEmpty() throws Exception {
+            var entries = runPipeline(plainTask("ai.labs.parser", "input"), llmTask());
+
+            assertEquals(0.0, entries.get(0).cost(), 1e-9);
+            assertNull(entries.get(0).toolCalls());
+            assertEquals(TURN_COST, entries.get(1).cost(), 1e-9);
+        }
+
+        @Test
+        @DisplayName("summary confidence is not re-reported for tasks after the LLM task")
+        void confidenceIsNotInheritedBySubsequentTasks() throws Exception {
+            var llm = llmTask();
+            var output = plainTask("ai.labs.output", "output");
+            lifecycleManager.addLifecycleTask(llm);
+            lifecycleManager.addLifecycleTask(output);
+
+            var memory = new ConversationMemory("conv1", "agent1", 1, "user1");
+            var eventSink = mock(ConversationEventSink.class);
+            memory.setEventSink(eventSink);
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            lifecycleManager.executeLifecycle(memory, null);
+
+            verify(eventSink).onTaskComplete(eq(new TaskId("ai.labs.llm")), eq("langchain"), anyLong(),
+                    argThat(summary -> Double.valueOf(0.87).equals(summary.get("confidence"))));
+            verify(eventSink).onTaskComplete(eq(new TaskId("ai.labs.output")), eq("output"), anyLong(),
+                    argThat(summary -> !summary.containsKey("confidence")));
         }
     }
 

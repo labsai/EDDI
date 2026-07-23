@@ -884,7 +884,7 @@ EDDI provides **bilateral** Model Context Protocol (MCP) integration — it is b
 
 **As MCP Server:** EDDI exposes its full API surface (conversations, administration, diagnostics, scheduling, group discussions) as MCP tools. This enables AI assistants (Claude Desktop, IDE plugins, custom MCP clients) to interact with deployed agents and manage the platform programmatically. Documentation is also exposed as MCP resources (`eddi://docs/{name}`).
 
-**As MCP Client:** Individual agents can consume external MCP servers as tool providers. MCP server connections are configured per LLM task, support vault-based API key resolution, and are subject to the same rate limiting, caching, and cost tracking as built-in tools. Failed MCP connections degrade gracefully — they never kill the pipeline.
+**As MCP Client:** Individual agents can consume external MCP servers as tool providers. MCP server connections are configured as `mcpcalls` workflow extensions (versioned configuration resources, the MCP equivalent of `httpcalls`), support vault-based API key resolution, and are subject to the same rate limiting, caching, and cost tracking as built-in tools. The LLM auto-discovers them from the workflow (`enableMcpCallTools`, default `true`); behavior rules can also trigger specific MCP tools deterministically. Failed MCP connections degrade gracefully — they never kill the pipeline.
 
 See [MCP Server](mcp-server.md) for the full tool reference and client configuration.
 

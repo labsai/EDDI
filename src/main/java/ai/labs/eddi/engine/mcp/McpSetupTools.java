@@ -144,13 +144,6 @@ public class McpSetupTools {
     }
 
     /**
-     * @see AgentSetupService#supportsResponseFormat(String)
-     */
-    public static boolean supportsResponseFormat(String modelType) {
-        return AgentSetupService.supportsResponseFormat(modelType);
-    }
-
-    /**
      * @see AgentSetupService#isLocalLlmProvider(String)
      */
     public static boolean isLocalLlmProvider(String provider) {

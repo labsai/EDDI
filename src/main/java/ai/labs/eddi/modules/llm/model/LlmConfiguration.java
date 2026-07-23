@@ -61,6 +61,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
     /**
      * Task configuration supporting both simple chat and advanced agent features.
      * The task automatically switches to agent mode when tools are configured.
+     *
+     * <p>
+     * Historical note: this class used to declare {@code enableParallelExecution}
+     * and {@code parallelExecutionTimeoutMs}. Neither was ever read — the tool loop
+     * in {@code AgentOrchestrator} dispatches through
+     * {@code ToolExecutor.execute(ToolExecutionRequest, memoryId)} one call at a
+     * time, and the reflection-based parallel machinery they were meant to switch
+     * on took an {@code (instance, Method, Object[])} triple that no live dispatch
+     * path can produce (MCP and A2A tools have no Java {@code Method} at all). Both
+     * were removed along with that machinery rather than wired. Stored
+     * configurations that still carry either key remain valid: every mapper that
+     * deserializes an LLM configuration is built from
+     * {@code SerializationCustomizer.configureObjectMapper}, which sets
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES=false}, so the leftover keys are ignored on
+     * read and dropped on the next write.
+     * </p>
      */
     public static class Task {
         // === Core Configuration (Required) ===
@@ -234,8 +250,40 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         // === Budget & Cost Control ===
 
-        /** Maximum budget per conversation (in dollars) */
+        /**
+         * Maximum TOOL budget per conversation, in dollars. Covers per-call tool prices
+         * only — LLM token spend is governed separately and per run by the model
+         * cascade's {@code maxCostPerRun}. Enforced unless {@link #enforceBudget} (or
+         * the deployment-wide fallback) turns enforcement off.
+         */
         private Double maxBudgetPerConversation;
+
+        /**
+         * Enforce {@link #maxBudgetPerConversation}. Defaults to the deployment-wide
+         * {@code eddi.tools.budget.enforce-by-default} property, itself {@code false}.
+         * <p>
+         * This is an opt-<em>in</em>: without it a ceiling records cost but refuses
+         * nothing. Built-in tools priced at $0.00 until the canonical-slug fix in this
+         * release, so enforcing by default would make those ceilings bind for the first
+         * time and start aborting tool calls mid-conversation on upgrade.
+         * <p>
+         * The cost of that choice is real and is why the engine warns: http, MCP, A2A
+         * and dynamic tools dispatch under their configured name, so a tool named
+         * {@code websearch}/{@code webscraper}/{@code pdfreader} <em>was</em> priced
+         * and refused before this field existed. Every task carrying a ceiling without
+         * this flag is named once in a WARN rather than passing silently. Cost tracking
+         * runs regardless of the flag.
+         */
+        private Boolean enforceBudget;
+
+        /**
+         * Per-call tool prices in USD, overriding
+         * {@code ToolCostTracker.DEFAULT_TOOL_PRICES}. Keyed on the canonical built-in
+         * slug (the same tokens as {@code builtInToolsWhitelist}), or on an individual
+         * dispatch name for finer control — a dispatch-name entry wins over a slug
+         * entry for the same call. Negative values are clamped to 0.0.
+         */
+        private Map<String, Double> toolPricing;
 
         /** Enable cost tracking */
         private Boolean enableCostTracking = true;
@@ -254,17 +302,84 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Per-tool rate limits */
         private Map<String, Integer> toolRateLimits;
 
-        /** Enable parallel tool execution */
-        private Boolean enableParallelExecution = false;
+        /**
+         * Per-tool cache partitioning, keyed by tool name. Recognized values are
+         * {@code "user"} (default), {@code "conversation"} and {@code "global"} — see
+         * the {@code ToolCacheScope} enum for the authoritative list.
+         * <p>
+         * A cached tool result is only ever served back inside its own partition, so
+         * the default keeps one authenticated user's result away from every other user.
+         * Set a tool to {@code "global"} ONLY when its result depends purely on its
+         * arguments and never on who is asking — that is the explicit, per-tool opt-in
+         * to cross-user reuse.
+         *
+         * @since 6.1.0
+         */
+        private Map<String, String> toolCacheScopes;
 
-        /** Timeout for parallel execution (ms) */
-        private Long parallelExecutionTimeoutMs = 30000L;
+        /**
+         * Default cache partition for tools without a {@link #toolCacheScopes} entry.
+         * Unset, blank or unrecognized values mean {@code "user"}.
+         *
+         * @since 6.1.0
+         */
+        private String defaultToolCacheScope;
 
         /**
          * Maximum number of tool-calling loop iterations before forcing a final answer
          * (default 10).
          */
         private Integer maxToolIterations;
+
+        /**
+         * Aggregate token ceiling for the <em>in-turn tool-call context</em>: every
+         * {@code AiMessage} that carries tool-execution requests together with its
+         * {@code ToolExecutionResultMessage}s, accumulated across all iterations of the
+         * tool-calling loop (and across a HITL pause, which replays the same
+         * transcript).
+         * <p>
+         * Conversation history is deliberately NOT counted here — it is already
+         * governed by {@link #maxContextTokens} / {@link #conversationHistoryLimit},
+         * and nothing in this guard may ever drop a system, user or assistant-prose
+         * message.
+         * <p>
+         * When the accumulated tool traffic exceeds this ceiling, the OLDEST complete
+         * tool exchange — the requesting {@code AiMessage} <em>together with all of its
+         * results</em> — is dropped before the next model call, repeatedly, until the
+         * traffic fits or only the most recent exchange remains. The most recent
+         * exchange is never dropped, so a single oversized tool result still reaches
+         * the model exactly as it does today; use {@link #toolResponseLimits} for that
+         * case.
+         * <p>
+         * Default: 60000 — high enough that no ordinary tool-using turn is touched, low
+         * enough to keep a runaway loop inside a 128k context window once the system
+         * prompt, the conversation history and the model's own completion are added.
+         * Set {@code -1} (or {@code 0}) to disable the guard entirely and restore the
+         * pre-6.1 unbounded behaviour.
+         *
+         * @since 6.1.0
+         */
+        private Integer maxToolContextTokens = 60_000;
+
+        /**
+         * Whether an outgoing chat request may carry an API-level JSON response format
+         * when {@code convertToObject=true}. One of {@code "auto"} (default),
+         * {@code "on"} or {@code "off"}.
+         * <p>
+         * {@code auto} defers to the built-in provider matrix in
+         * {@link ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy}, which
+         * also knows which providers reject JSON mode when the same request carries
+         * tool specifications. {@code on} forces the format onto every request of this
+         * task — the escape hatch for a provider or OpenAI-compatible gateway the
+         * built-in table does not know yet, and it bypasses the with-tools guard.
+         * {@code off} keeps enforcement prompt-only.
+         * <p>
+         * This never changes the model instance, only the request, so two tasks that
+         * differ only here still share one cached model.
+         *
+         * @since 6.1.0
+         */
+        private String jsonResponseFormat;
 
         // === Multi-Model Cascade ===
 
@@ -313,8 +428,18 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private ResponseValidation responseValidation;
 
         /**
-         * Timeout in seconds for streaming chat completions. Overrides the default
-         * (120s). Only applies when streaming is active.
+         * Overall wall-clock backstop, in seconds, for a streaming chat completion.
+         * Only applies when streaming is active.
+         * <p>
+         * This is <em>not</em> a duplicate of the {@code timeout} model parameter, and
+         * the two are deliberately kept separate. {@code timeout} (milliseconds) is
+         * handed to the provider's HTTP client and bounds the time to the provider's
+         * first response; this field bounds the entire stream, covering providers whose
+         * native timeout does not fire.
+         * <p>
+         * When unset, the backstop is 120s, raised to cover a longer explicitly
+         * configured {@code timeout} so the backstop never truncates a stream before
+         * the timeout the operator asked for.
          */
         private Integer streamingTimeoutSeconds;
 
@@ -571,6 +696,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.maxBudgetPerConversation = maxBudgetPerConversation;
         }
 
+        public Boolean getEnforceBudget() {
+            return enforceBudget;
+        }
+
+        public void setEnforceBudget(Boolean enforceBudget) {
+            this.enforceBudget = enforceBudget;
+        }
+
+        public Map<String, Double> getToolPricing() {
+            return toolPricing;
+        }
+
+        public void setToolPricing(Map<String, Double> toolPricing) {
+            this.toolPricing = toolPricing;
+        }
+
         public Boolean getEnableCostTracking() {
             return enableCostTracking;
         }
@@ -611,20 +752,20 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.toolRateLimits = toolRateLimits;
         }
 
-        public Boolean getEnableParallelExecution() {
-            return enableParallelExecution;
+        public Map<String, String> getToolCacheScopes() {
+            return toolCacheScopes;
         }
 
-        public void setEnableParallelExecution(Boolean enableParallelExecution) {
-            this.enableParallelExecution = enableParallelExecution;
+        public void setToolCacheScopes(Map<String, String> toolCacheScopes) {
+            this.toolCacheScopes = toolCacheScopes;
         }
 
-        public Long getParallelExecutionTimeoutMs() {
-            return parallelExecutionTimeoutMs;
+        public String getDefaultToolCacheScope() {
+            return defaultToolCacheScope;
         }
 
-        public void setParallelExecutionTimeoutMs(Long parallelExecutionTimeoutMs) {
-            this.parallelExecutionTimeoutMs = parallelExecutionTimeoutMs;
+        public void setDefaultToolCacheScope(String defaultToolCacheScope) {
+            this.defaultToolCacheScope = defaultToolCacheScope;
         }
 
         public Integer getMaxToolIterations() {
@@ -633,6 +774,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMaxToolIterations(Integer maxToolIterations) {
             this.maxToolIterations = maxToolIterations;
+        }
+
+        public Integer getMaxToolContextTokens() {
+            return maxToolContextTokens;
+        }
+
+        public void setMaxToolContextTokens(Integer maxToolContextTokens) {
+            this.maxToolContextTokens = maxToolContextTokens;
+        }
+
+        public String getJsonResponseFormat() {
+            return jsonResponseFormat;
+        }
+
+        public void setJsonResponseFormat(String jsonResponseFormat) {
+            this.jsonResponseFormat = jsonResponseFormat;
         }
 
         public ModelCascadeConfig getModelCascade() {
@@ -1025,6 +1182,20 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
     /**
      * Reference from an LLM task to a specific knowledge base in the workflow. The
      * name must match a RagConfiguration.name in the workflow.
+     *
+     * <p>
+     * Historical note: this class used to declare {@code injectionStrategy} and
+     * {@code contextTemplate}. Neither was ever read by
+     * {@code RagContextProvider.retrieveContext} or {@code LlmTask} — retrieved RAG
+     * context has always been appended to the system message unconditionally — so
+     * both were removed rather than wired (removing a knob nothing honoured is
+     * cheaper than inventing the semantics it implied). Stored configurations that
+     * still carry either key remain valid: every mapper that deserializes an LLM
+     * configuration is built from
+     * {@code SerializationCustomizer.configureObjectMapper}, which sets
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES=false}, so the leftover keys are ignored on
+     * read and dropped on the next write.
+     * </p>
      */
     public static class KnowledgeBaseReference {
         /** Name of the RagConfiguration resource in the workflow */
@@ -1035,12 +1206,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /** Override: min similarity score (null = use KB default) */
         private Double minScore;
-
-        /** Override: injection strategy — "system_message" (default), "user_message" */
-        private String injectionStrategy;
-
-        /** Override: custom context template (null = use default formatting) */
-        private String contextTemplate;
 
         public String getName() {
             return name;
@@ -1065,31 +1230,20 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public void setMinScore(Double minScore) {
             this.minScore = minScore;
         }
-
-        public String getInjectionStrategy() {
-            return injectionStrategy;
-        }
-
-        public void setInjectionStrategy(String injectionStrategy) {
-            this.injectionStrategy = injectionStrategy;
-        }
-
-        public String getContextTemplate() {
-            return contextTemplate;
-        }
-
-        public void setContextTemplate(String contextTemplate) {
-            this.contextTemplate = contextTemplate;
-        }
     }
 
     /**
      * Default retrieval parameters for enableWorkflowRag=true mode.
+     *
+     * <p>
+     * Historical note: this class used to declare {@code injectionStrategy}. It was
+     * never read — see the note on {@link KnowledgeBaseReference} — and stored
+     * configurations that still carry the key deserialize unchanged.
+     * </p>
      */
     public static class RagDefaults {
         private Integer maxResults = 5;
         private Double minScore = 0.6;
-        private String injectionStrategy = "system_message";
 
         public Integer getMaxResults() {
             return maxResults;
@@ -1105,14 +1259,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMinScore(Double minScore) {
             this.minScore = minScore;
-        }
-
-        public String getInjectionStrategy() {
-            return injectionStrategy;
-        }
-
-        public void setInjectionStrategy(String injectionStrategy) {
-            this.injectionStrategy = injectionStrategy;
         }
     }
 

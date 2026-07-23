@@ -11,8 +11,10 @@ import java.util.List;
  * workflow.
  * <p>
  * Tasks should import these constants instead of declaring local string
- * constants. Keys that are task-internal (e.g., "langchain:trace") can remain
- * as local {@code MemoryKey<T>} constants within the task itself.
+ * constants. Keys with a dynamic suffix (e.g.
+ * "langchain:trace:&lt;type&gt;:&lt;id&gt;") are registered here as plain
+ * {@code String} prefixes rather than {@code MemoryKey<T>} constants, because
+ * the full key is only known at runtime.
  *
  * @see MemoryKey
  * @see IConversationMemory.IConversationStep
@@ -67,6 +69,107 @@ public final class MemoryKeys {
 
     /** Prompt sent to the LLM. Written by LlmTask. */
     public static final MemoryKey<String> PROMPT = MemoryKey.of("prompt");
+
+    /**
+     * Prefix for LLM tool-execution trace keys. The full key shape is
+     * {@code langchain:trace:<modelType>:<configTaskId>} — LlmTask writes one such
+     * key <em>per LLM config task</em> it executes, so consumers must aggregate
+     * over all matching keys rather than taking the latest one.
+     * <p>
+     * Written by LlmTask (executeTask / executeResume); read by LifecycleManager
+     * (the {@code task_complete} SSE summary) and by RestToolHistory (replay of
+     * persisted conversation snapshots). The literal value is part of the persisted
+     * snapshot format and must not be changed.
+     * <p>
+     * Deliberately does <em>not</em> match the sibling keys
+     * {@code langchain:cascade:trace:}, {@code rag:trace:} and
+     * {@code rag:httpcall:trace:}.
+     *
+     * @since 6.1.0
+     */
+    public static final String LANGCHAIN_TRACE_PREFIX = "langchain:trace:";
+
+    /**
+     * Lifecycle task type reported by LlmTask. Used to gate reads of
+     * {@link #LANGCHAIN_TRACE_PREFIX} keys, which linger in the conversation step
+     * and would otherwise be attributed to every task that runs after the LLM task
+     * in the same step.
+     *
+     * @since 6.1.0
+     */
+    public static final String TASK_TYPE_LANGCHAIN = "langchain";
+
+    // ---- Audit ledger ----
+
+    /**
+     * Fully rendered system message + prompt of the last LLM call in this step.
+     * Written by LlmTask (executeTask and executeResume) only when an audit
+     * collector is attached; read by LifecycleManager, which gates the ENTIRE
+     * {@code llmDetail} block of the audit entry on its presence — a path that
+     * calls the model without writing this key produces an audit entry with no LLM
+     * evidence at all.
+     *
+     * @since 6.1.0
+     */
+    public static final String AUDIT_COMPILED_PROMPT = "audit:compiled_prompt";
+
+    /** Final LLM response text for the audit ledger. Written by LlmTask. */
+    public static final String AUDIT_MODEL_RESPONSE = "audit:model_response";
+
+    /**
+     * Model that produced the response (the cascade winner when a cascade ran).
+     * Written by LlmTask.
+     */
+    public static final String AUDIT_MODEL_NAME = "audit:model_name";
+
+    /**
+     * Turn-total token usage as {@code {inputTokens, outputTokens, totalTokens}}.
+     * Accumulated by LlmTask across every LLM call of the step (sub-tasks, cascade
+     * steps, tool-loop iterations) — {@code getLatestData} is last-write-wins, so
+     * every contributor must read-modify-write. Read by LifecycleManager into
+     * {@code llmDetail.tokenUsage}.
+     *
+     * @since 6.1.0
+     */
+    public static final String AUDIT_TOKEN_USAGE = "audit:token_usage";
+
+    /**
+     * Turn-total tool-execution evidence, shaped {@code {"calls": [ … ]}} where
+     * each entry is a tool-trace record augmented with its originating
+     * {@code llmTaskId}. Accumulated by LlmTask, read by LifecycleManager into
+     * {@code AuditEntry.toolCalls}.
+     *
+     * @since 6.1.0
+     */
+    public static final String AUDIT_TOOL_CALLS = "audit:tool_calls";
+
+    /**
+     * Turn-total dollar cost ({@code Double}) — configured cascade LLM pricing plus
+     * tracked tool cost. Accumulated by LlmTask, read by LifecycleManager into
+     * {@code AuditEntry.cost}. Absent when nothing priced ran, which the reader
+     * treats as {@code 0.0}.
+     *
+     * @since 6.1.0
+     */
+    public static final String AUDIT_COST = "audit:cost";
+
+    /**
+     * Confidence of the accepted cascade step, as a {@code Double}. Written by
+     * LlmTask when a model cascade ran; read by LifecycleManager for both the
+     * {@code task_complete} SSE summary and {@code llmDetail.confidence}.
+     *
+     * @since 6.1.0
+     */
+    public static final String AUDIT_CONFIDENCE = "audit:confidence";
+
+    /**
+     * Human-readable description of the winning cascade step
+     * ({@code provider/model (step N)}). Written by LlmTask, read by
+     * LifecycleManager into {@code llmDetail.cascadeModel}.
+     *
+     * @since 6.1.0
+     */
+    public static final String AUDIT_CASCADE_MODEL = "audit:cascade_model";
 
     // ---- Output ----
 

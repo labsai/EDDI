@@ -122,7 +122,7 @@ class CascadingModelExecutorCoverageTest {
         when(registry.getOrCreate(anyString(), anyMap())).thenReturn(mock(ChatModel.class));
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
-        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt()))
+        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", List.of(Map.of("type", "tool_call"))));
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null), orchestrator,
@@ -153,7 +153,7 @@ class CascadingModelExecutorCoverageTest {
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
         // Hedging → heuristic ~0.4 < 0.9 → escalate to step 2 (last, accepted).
-        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt()))
+        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("I'm not sure, I don't know.", List.of()));
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null), orchestrator,
@@ -180,7 +180,8 @@ class CascadingModelExecutorCoverageTest {
         when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
-        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt())).thenReturn(null); // no tools
+        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any())).thenReturn(null); // no
+                                                                                                                                                  // tools
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null), orchestrator,
                 Map.of(), false, false, false);
@@ -213,7 +214,7 @@ class CascadingModelExecutorCoverageTest {
         var pause = new ToolApprovalRequiredException("needs human approval", null);
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
         doThrow(pause).when(orchestrator)
-                .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt());
+                .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any());
 
         var thrown = assertThrows(ToolApprovalRequiredException.class,
                 () -> executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null),

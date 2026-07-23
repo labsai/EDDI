@@ -27,6 +27,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
+
 /**
  * REST API for tool execution history, metrics, and management. Phase 4:
  * Exposes tool call history and metrics to clients.
@@ -69,7 +71,7 @@ public class RestToolHistory {
             for (ConversationStepSnapshot step : snapshot.getConversationSteps()) {
                 for (WorkflowRunSnapshot packageRun : step.getWorkflows()) {
                     for (ResultSnapshot data : packageRun.getLifecycleTasks()) {
-                        if (data.getKey() != null && data.getKey().startsWith("langchain:trace:")) {
+                        if (data.getKey() != null && data.getKey().startsWith(LANGCHAIN_TRACE_PREFIX)) {
                             Object result = data.getResult();
                             if (result instanceof List<?> rawList) {
                                 List<Map<String, Object>> stepTrace = new ArrayList<>();
