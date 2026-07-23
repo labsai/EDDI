@@ -1,6 +1,6 @@
 # Putting It All Together
 
-**Version: 6.0.0**
+**Version: 6.2.0**
 
 This guide shows how all of EDDI's components work together to create a complete, functional agent. We'll build a real-world example step-by-step, explaining how each piece connects.
 

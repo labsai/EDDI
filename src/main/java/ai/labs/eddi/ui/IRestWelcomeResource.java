@@ -14,8 +14,8 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.jboss.resteasy.reactive.Cache;
 
 /**
- * Serves the welcome/landing page SPA shell.
- * Users pick between Manager and Workforce here.
+ * Serves the welcome/landing page SPA shell. Users pick between Manager and
+ * Workforce here.
  */
 @Path("/welcome")
 @Produces(MediaType.TEXT_HTML)

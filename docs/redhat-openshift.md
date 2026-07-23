@@ -61,7 +61,7 @@ The certification release process is fully automated:
 
 To trigger a certification release, go to **Actions → Red Hat Certification Release → Run workflow** and provide:
 
-- `version` — EDDI version (e.g., `6.1.0`)
+- `version` — EDDI version (e.g., `6.2.0`)
 - `release` — Incremental release number (e.g., `1`, `2`, `3`)
 - `submit` — Whether to submit results to Red Hat (`true`/`false`)
 - `registry` — Target registry (`docker.io` or `quay.io`)
@@ -171,5 +171,5 @@ For production deployments with MongoDB:
 docker run -d \
   -p 7070:7070 \
   -e QUARKUS_MONGODB_CONNECTION_STRING=mongodb://mongo:27017 \
-  labsai/eddi:6.1.0
+  labsai/eddi:6.2.0
 ```

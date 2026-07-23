@@ -1,6 +1,6 @@
 # Conversation Memory and State Management
 
-**Version: 6.0.0**
+**Version: 6.2.0**
 
 ## Overview
 
