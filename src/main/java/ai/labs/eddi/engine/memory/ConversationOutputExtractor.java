@@ -20,13 +20,14 @@ import java.util.Map;
  * {@code ConverseWithAgentTool}.
  *
  * <p>
- * Handles three output formats:
+ * Handles two output formats:
  * <ol>
  * <li>Nested {@code output} array — items may be plain Strings,
  * {@link OutputItem} POJOs, or Maps with a {@code text} key</li>
  * <li>Flat keys like {@code output:text:*} — legacy format</li>
- * <li>Fallback: {@code toString()} on the entire output map</li>
  * </ol>
+ * Returns {@code null} when no recognizable text is found (e.g., the output
+ * map contains only pipeline metadata like actions, context, or expressions).
  *
  * @since 6.0.0
  */
@@ -106,19 +107,14 @@ public final class ConversationOutputExtractor {
             return String.join("\n", texts);
         }
 
-        // Check if the output contains any actual LLM-generated content.
-        // Output keys follow patterns like "output", "output:text:*", "reply".
-        // If none are present, the map only contains pipeline metadata
-        // (e.g. "actions", "input", "context") — return null to avoid
-        // serializing raw metadata as a group discussion response.
-        boolean hasAnyOutput = lastOutput.keySet().stream()
-                .anyMatch(k -> k instanceof String s &&
-                        (s.startsWith("output") || s.startsWith("reply")));
-        if (!hasAnyOutput) {
-            return null;
-        }
-
-        // Fallback: serialize the entire output map
-        return lastOutput.toString();
+        // No recognizable text found in any standard format.
+        // The output map may only contain pipeline metadata
+        // (e.g. "actions", "input", "context", or "output" with null items).
+        // Return null to avoid serializing raw metadata as a group
+        // discussion response — the toString() fallback produced
+        // unreadable Java map dumps in the UI.
+        LOGGER.debugf("No extractable text from conversation output keys: %s",
+                lastOutput.keySet());
+        return null;
     }
 }

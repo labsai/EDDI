@@ -113,18 +113,33 @@ class ConversationOutputExtractorTest {
         assertNull(ConversationOutputExtractor.extractResponse(snapshot));
     }
 
-    // --- Fallback: output key exists but not extractable as text ---
+    // --- No extractable text: output key exists but content is not text ---
 
     @Test
-    void extractResponse_fallbackToString() {
+    void extractResponse_nonListOutputKey_returnsNull() {
         var output = new ConversationOutput();
         output.put("output", 42); // Not a List → falls through format 1
         var snapshot = snapshotWith(output);
 
-        // Should hit fallback toString() because "output" key exists
-        String result = ConversationOutputExtractor.extractResponse(snapshot);
-        assertNotNull(result, "Should fall back to toString()");
-        assertTrue(result.contains("output"), "Fallback should include the output key");
+        // No recognizable text format → should return null, not toString()
+        assertNull(ConversationOutputExtractor.extractResponse(snapshot),
+                "Non-list output value should not produce a toString() dump");
+    }
+
+    @Test
+    void extractResponse_outputListWithNullItems_returnsNull() {
+        // This is the exact scenario from production: the pipeline produces
+        // output=[null] when the langchain step has no output extension to
+        // copy the LLM response into conversationOutputs.
+        var nullList = new java.util.ArrayList<>();
+        nullList.add(null);
+        var output = new ConversationOutput();
+        output.put("output", nullList);
+        output.put("actions", List.of("send_message", "unknown"));
+        var snapshot = snapshotWith(output);
+
+        assertNull(ConversationOutputExtractor.extractResponse(snapshot),
+                "output=[null] should return null, not dump raw metadata");
     }
 
     // --- Multiple outputs: always uses the LAST one ---
