@@ -6,7 +6,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.modules.output.model.OutputItem;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import org.jboss.logging.Logger;
 
@@ -24,7 +24,7 @@ import java.util.Map;
  * Handles multiple output formats:
  * <ol>
  * <li>Nested {@code output} array — items may be plain Strings,
- * {@link OutputItem} POJOs, or Maps with a {@code text} key</li>
+ * {@link TextOutputItem} POJOs, or Maps with a {@code text} key</li>
  * <li>Plain {@code output} value — String or Map with {@code text} key</li>
  * <li>Flat keys like {@code output:text:*} — legacy format</li>
  * <li>{@code reply} key — String or List of Strings</li>
@@ -69,8 +69,8 @@ public final class ConversationOutputExtractor {
             for (var item : list) {
                 if (item instanceof String s && hasText(s)) {
                     texts.add(s);
-                } else if (item instanceof OutputItem oi && hasText(oi.toString())) {
-                    texts.add(oi.toString());
+                } else if (item instanceof TextOutputItem toi && hasText(toi.getText())) {
+                    texts.add(toi.getText());
                 } else if (item instanceof Map<?, ?> map
                         && map.get("text") instanceof String s && hasText(s)) {
                     texts.add(s);
