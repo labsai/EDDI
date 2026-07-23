@@ -159,21 +159,26 @@ class AgentSetupServiceTest {
     }
 
     @Nested
-    @DisplayName("supportsResponseFormat")
+    @DisplayName("no builder-level responseFormat is injected")
     class ResponseFormatTests {
 
+        /**
+         * A builder-level {@code responseFormat} is baked into the CACHED model
+         * instance and then travels into every request that model serves, including
+         * tool-calling and streaming ones — the shape that produced the Gemini 400.
+         * API-level JSON is now decided per request from {@code convertToObject}, so no
+         * provider gets this parameter injected any more.
+         */
         @ParameterizedTest
-        @ValueSource(strings = {"openai", "mistral", "azure-openai"})
-        @DisplayName("returns true for supported providers")
-        void supported(String modelType) {
-            assertTrue(AgentSetupService.supportsResponseFormat(modelType));
-        }
-
-        @ParameterizedTest
-        @ValueSource(strings = {"anthropic", "gemini", "ollama", "bedrock"})
-        @DisplayName("returns false for unsupported providers")
-        void unsupported(String modelType) {
-            assertFalse(AgentSetupService.supportsResponseFormat(modelType));
+        @ValueSource(strings = {"openai", "mistral", "azure-openai", "anthropic", "gemini", "ollama", "bedrock"})
+        @DisplayName("no provider gets responseFormat baked into the model parameters")
+        void neverInjected(String modelType) {
+            String json = AgentSetupService.buildPromptResponseJson(true, true);
+            LlmConfiguration config = service.createLlmConfig(
+                    modelType, "some-model", "key", "prompt", false, null, null, json, true, true, null);
+            var params = config.tasks().getFirst().getParameters();
+            assertNull(params.get("responseFormat"), modelType + " must not carry a builder-level responseFormat");
+            assertEquals("true", params.get("convertToObject"), modelType + " must still request structured output");
         }
     }
 
@@ -738,14 +743,15 @@ class AgentSetupServiceTest {
         }
 
         @Test
-        @DisplayName("azure-openai with promptResponseJson → has responseFormat=json")
+        @DisplayName("azure-openai with promptResponseJson → convertToObject, no builder responseFormat")
         void azureOpenaiResponseFormat() {
             String json = AgentSetupService.buildPromptResponseJson(true, false);
             LlmConfiguration config = service.createLlmConfig(
                     "azure-openai", "gpt-4", "key", "prompt", false, null, null,
                     json, true, false, null);
             var params = config.tasks().getFirst().getParameters();
-            assertEquals("json", params.get("responseFormat"));
+            assertNull(params.get("responseFormat"));
+            assertEquals("true", params.get("convertToObject"));
         }
 
         @Test

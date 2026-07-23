@@ -6,10 +6,12 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import org.jboss.logging.Logger;
@@ -61,7 +63,7 @@ class StreamingLegacyChatExecutor {
      * @return the full accumulated response text (for memory storage)
      */
     String execute(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
-        return execute(streamingModel, messages, eventSink, null).response();
+        return execute(streamingModel, messages, eventSink, null, JsonResponseFormatPolicy.DISABLED).response();
     }
 
     /**
@@ -84,7 +86,7 @@ class StreamingLegacyChatExecutor {
      * accepted as a successful one.
      */
     StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
-        return executeCapturing(streamingModel, messages, eventSink, null);
+        return executeCapturing(streamingModel, messages, eventSink, null, JsonResponseFormatPolicy.DISABLED);
     }
 
     /**
@@ -99,9 +101,17 @@ class StreamingLegacyChatExecutor {
      * attempt.
      */
     StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink,
-                                  LlmConfiguration.Task task) {
-        var result = execute(streamingModel, messages, eventSink, task, false, 1);
+                                  LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy) {
+        var result = execute(streamingModel, messages, eventSink, task, false, 1, jsonPolicy);
         return new StreamResult(result.response(), result.metadata());
+    }
+
+    /**
+     * Backward-compatible overload without a JSON response-format policy.
+     */
+    StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink,
+                                  LlmConfiguration.Task task) {
+        return executeCapturing(streamingModel, messages, eventSink, task, JsonResponseFormatPolicy.DISABLED);
     }
 
     /**
@@ -116,11 +126,24 @@ class StreamingLegacyChatExecutor {
      *            the sink to emit token events to
      * @param task
      *            task configuration (for timeout and retry settings, may be null)
+     * @param jsonPolicy
+     *            decides whether the streamed request carries
+     *            {@code ResponseFormat.JSON}; {@code null} is treated as
+     *            {@link JsonResponseFormatPolicy#DISABLED}
      * @return a {@link StreamingResult} with the response text and metadata
      */
     StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
+                            ConversationEventSink eventSink, LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy) {
+        return execute(streamingModel, messages, eventSink, task, true, resolveMaxAttempts(task), jsonPolicy);
+    }
+
+    /**
+     * Backward-compatible overload without a JSON response-format policy — the
+     * streamed request carries no response format.
+     */
+    StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
                             ConversationEventSink eventSink, LlmConfiguration.Task task) {
-        return execute(streamingModel, messages, eventSink, task, true, resolveMaxAttempts(task));
+        return execute(streamingModel, messages, eventSink, task, JsonResponseFormatPolicy.DISABLED);
     }
 
     /**
@@ -200,11 +223,19 @@ class StreamingLegacyChatExecutor {
      *            the caller can treat the step as failed.
      * @param maxAttempts
      *            number of attempts; already clamped to >= 1 by the caller.
+     * @param jsonPolicy
+     *            decides whether the streamed request carries
+     *            {@code ResponseFormat.JSON}. Streaming never carries tool
+     *            specifications, so the policy is resolved with
+     *            {@code toolsInRequest=false}.
      */
     private StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
-                                    ConversationEventSink eventSink, LlmConfiguration.Task task, boolean salvagePartialOnError, int maxAttempts) {
+                                    ConversationEventSink eventSink, LlmConfiguration.Task task, boolean salvagePartialOnError, int maxAttempts,
+                                    JsonResponseFormatPolicy jsonPolicy) {
 
-        LOGGER.debug("Executing with streaming (legacy mode)");
+        ResponseFormat responseFormat = jsonPolicy != null ? jsonPolicy.resolve(false) : null;
+
+        LOGGER.debug("Executing with streaming (legacy mode)" + (responseFormat != null ? " with JSON response format" : ""));
 
         long timeoutSeconds = resolveTimeoutSeconds(task);
 
@@ -232,7 +263,11 @@ class StreamingLegacyChatExecutor {
             // memory. Once an attempt is abandoned its handler goes silent.
             var abandoned = new AtomicBoolean(false);
 
-            var chatRequest = ChatRequest.builder().messages(messages).build();
+            var requestBuilder = ChatRequest.builder().messages(messages);
+            if (responseFormat != null) {
+                requestBuilder.responseFormat(responseFormat);
+            }
+            var chatRequest = requestBuilder.build();
 
             streamingModel.chat(chatRequest, new StreamingChatResponseHandler() {
                 @Override

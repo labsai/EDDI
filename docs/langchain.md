@@ -118,7 +118,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `logSizeLimit`             | int     | Conversation history limit                            | -1 (unlimited)    |
 | `includeFirstAgentMessage` | boolean | Include first agent message in context                | true              |
 | **Output Control**         |         |                                                       |                   |
-| `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (OpenAI, Gemini, Mistral), and pre-parse validation | false             |
+| `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
 | `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format | ""                |
 | `addToOutput`              | boolean | Add response to conversation output                   | false             |
 | **Logging**                |         |                                                       |                   |
@@ -1159,10 +1159,44 @@ EDDI uses three complementary mechanisms to ensure reliable JSON output:
 | Layer | Mechanism | Coverage |
 |---|---|---|
 | **1. System Prompt** | Appends `## RESPONSE FORMAT (MANDATORY)` section with schema to every request | All providers |
-| **2. Native API** | Sets `ResponseFormatType.JSON` on `ChatRequest` | OpenAI, Gemini, Mistral, Azure OpenAI |
+| **2. Native API** | Sets `ResponseFormatType.JSON` on the outgoing `ChatRequest` | See the matrix below |
 | **3. Validation** | Pre-parse `startsWith("{")` check before deserialization | All providers |
 
-If a provider doesn't support native JSON mode (e.g., Anthropic), EDDI gracefully falls back to prompt-only enforcement.
+If a provider doesn't support native JSON mode (e.g. Anthropic), EDDI gracefully falls back to prompt-only enforcement.
+
+#### Native JSON mode — provider matrix
+
+Layer 2 is applied **per request**, never baked into the model instance, and it is applied in **all three execution modes**: no-tools (legacy), agent mode (tool-calling) and streaming — including every step of a multi-model cascade, which is evaluated against that step's own provider.
+
+| Provider | No tools (legacy / streaming) | Agent mode (tools present) |
+|---|---|---|
+| `openai` | ✅ | ✅ |
+| `azure-openai` | ✅ | ✅ |
+| `mistral` | ✅ | ✅ |
+| `gemini`, `gemini-vertex` | ✅ | ❌ — the Gemini API rejects `responseMimeType: application/json` together with `tools` |
+| `anthropic`, `bedrock` | ❌ — both reject a JSON format without a schema | ❌ |
+| `ollama`, `jlama`, `huggingface`, `oracle-genai` | ❌ (not verified — opt in with `jsonResponseFormat: "on"`) | ❌ |
+
+#### Overriding the matrix per task
+
+Set `jsonResponseFormat` on the LLM **task** (not in `parameters`):
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | Use the matrix above, including the tools-aware distinction |
+| `on` | Always send the JSON format when `convertToObject=true`, tools included. The escape hatch for a provider or OpenAI-compatible gateway the matrix does not know yet — it also bypasses the Gemini guard, so only use it where you have verified the provider accepts the combination |
+| `off` | Never send it; enforcement stays prompt-only |
+
+```json
+{
+  "id": "classifier",
+  "type": "mistral",
+  "jsonResponseFormat": "auto",
+  "parameters": { "convertToObject": "true" }
+}
+```
+
+> **Do not set a `responseFormat` model parameter.** It is only read by the OpenAI builder and it bakes JSON mode into a **cached** model that is then reused for tool-calling and streaming requests — the cause of the historical Gemini `400 Function calling with a response mime type: 'application/json' is unsupported`. `convertToObject` alone is enough.
 
 ### Basic JSON Mode
 
@@ -1218,8 +1252,8 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 
 ### Tips
 
-- **Streaming**: Not recommended with JSON mode — the UI would show raw JSON building up
-- **Provider compatibility**: OpenAI, Gemini, and Mistral support native JSON mode. Other providers rely on prompt-based enforcement
+- **Streaming**: Not recommended with JSON mode — the UI would show raw JSON building up. It does work (the streamed request carries the format for supported providers), but pair it with `addToOutput: "false"` and a `postResponse`
+- **Provider compatibility**: see the provider matrix above. Unsupported providers rely on prompt-based enforcement
 - **Schema specificity**: The more specific your `responseSchema`, the more reliable the output. Use type hints (`"string"`, `"number"`, `"boolean"`) and descriptions
 
 ---

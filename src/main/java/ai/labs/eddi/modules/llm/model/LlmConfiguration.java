@@ -355,6 +355,26 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private Integer maxToolContextTokens = 60_000;
 
+        /**
+         * Whether an outgoing chat request may carry an API-level JSON response format
+         * when {@code convertToObject=true}. One of {@code "auto"} (default),
+         * {@code "on"} or {@code "off"}.
+         * <p>
+         * {@code auto} defers to the built-in provider matrix in
+         * {@link ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy}, which
+         * also knows which providers reject JSON mode when the same request carries
+         * tool specifications. {@code on} forces the format onto every request of this
+         * task — the escape hatch for a provider or OpenAI-compatible gateway the
+         * built-in table does not know yet, and it bypasses the with-tools guard.
+         * {@code off} keeps enforcement prompt-only.
+         * <p>
+         * This never changes the model instance, only the request, so two tasks that
+         * differ only here still share one cached model.
+         *
+         * @since 6.1.0
+         */
+        private String jsonResponseFormat;
+
         // === Multi-Model Cascade ===
 
         /**
@@ -756,6 +776,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMaxToolContextTokens(Integer maxToolContextTokens) {
             this.maxToolContextTokens = maxToolContextTokens;
+        }
+
+        public String getJsonResponseFormat() {
+            return jsonResponseFormat;
+        }
+
+        public void setJsonResponseFormat(String jsonResponseFormat) {
+            this.jsonResponseFormat = jsonResponseFormat;
         }
 
         public ModelCascadeConfig getModelCascade() {

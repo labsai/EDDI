@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.CascadingStrategy;
 import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -150,7 +151,10 @@ class CascadingModelExecutor {
      * @param templateDataObjects
      *            template data for resolving step / judge parameters
      * @param jsonMode
-     *            whether native JSON response format should be requested
+     *            whether native JSON response format should be requested. Whether
+     *            it is actually sent is decided per step against that step's own
+     *            provider — a cascade routinely escalates across providers, so one
+     *            step may take API-level JSON while the next may not.
      * @param convertToObject
      *            whether the task expects a raw JSON object as output (affects the
      *            effective confidence strategy)
@@ -312,8 +316,13 @@ class CascadingModelExecutor {
                     }
                 }
 
+                // Per-step policy: the provider is the STEP's provider, not the task
+                // default, so an escalation from e.g. mistral to gemini stops sending the
+                // JSON format the moment it would be paired with tools.
+                var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat());
+
                 StepResult stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
-                        memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, jsonMode, stepTimeout,
+                        memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
                         effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
 
                 long durationMs = System.currentTimeMillis() - stepStart;
@@ -538,17 +547,17 @@ class CascadingModelExecutor {
                                               List<ChatMessage> messages, String systemMessage, String evaluationStrategy,
                                               LlmConfiguration.Task task, IConversationMemory memory,
                                               AgentOrchestrator agentOrchestrator, boolean useAgentMode, ChatModel judgeModel,
-                                              HeuristicConfig heuristicConfig, boolean jsonMode, long timeoutMs,
+                                              HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy, long timeoutMs,
                                               ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws Exception {
 
         Future<StepResult> future = TIMEOUT_EXECUTOR.submit(() -> {
             if (useAgentMode) {
                 return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
-                        heuristicConfig, jsonMode, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
+                        heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
             } else {
                 return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
-                        heuristicConfig, jsonMode);
+                        heuristicConfig, jsonPolicy);
             }
         });
 
@@ -574,7 +583,8 @@ class CascadingModelExecutor {
      */
     private StepResult executeLegacyModeStep(ChatModel chatModel, StreamingChatModel streamingModel, ConversationEventSink eventSink,
                                              List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
-                                             LlmConfiguration.Task task, ChatModel judgeModel, HeuristicConfig heuristicConfig, boolean jsonMode)
+                                             LlmConfiguration.Task task, ChatModel judgeModel, HeuristicConfig heuristicConfig,
+                                             JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         // The structured_output wrapper only applies in legacy mode; it never co-occurs
@@ -592,13 +602,13 @@ class CascadingModelExecutor {
         boolean streamedLive = false;
         if (streamingModel != null && eventSink != null) {
             // Stream the always-accepted final step live — tokens emitted via the sink.
-            var streamResult = streamingLegacyChatExecutor.executeCapturing(streamingModel, messages, eventSink, task);
+            var streamResult = streamingLegacyChatExecutor.executeCapturing(streamingModel, messages, eventSink, task, jsonPolicy);
             responseText = streamResult.response() != null ? streamResult.response() : "";
             responseMetadata = streamResult.responseMetadata();
             tokenUsage = extractTokenUsage(responseMetadata);
             streamedLive = true;
         } else {
-            var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
+            var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
             responseText = chatResult.response() != null ? chatResult.response() : "";
             responseMetadata = chatResult.responseMetadata();
             tokenUsage = extractTokenUsage(responseMetadata);
@@ -615,7 +625,7 @@ class CascadingModelExecutor {
      */
     private StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
                                             LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator,
-                                            ChatModel judgeModel, HeuristicConfig heuristicConfig, boolean jsonMode,
+                                            ChatModel judgeModel, HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy,
                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws LifecycleException {
 
@@ -623,7 +633,7 @@ class CascadingModelExecutor {
                 .collect(java.util.stream.Collectors.toList());
 
         var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
-                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
+                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy);
 
         if (agentResult != null) {
             String responseText = agentResult.response();
@@ -635,7 +645,7 @@ class CascadingModelExecutor {
         // Agent mode returned null (no tools enabled) — fall back to legacy (no live
         // stream).
         return executeLegacyModeStep(chatModel, null, null, originalMessages, systemMessage, evaluationStrategy, task, judgeModel, heuristicConfig,
-                jsonMode);
+                jsonPolicy);
     }
 
     @SuppressWarnings("unchecked")

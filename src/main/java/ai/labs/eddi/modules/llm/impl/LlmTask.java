@@ -30,6 +30,7 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
@@ -475,11 +476,14 @@ public class LlmTask implements ILifecycleTask {
         // output.
         boolean addToOutputExplicitlyFalse = "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT));
 
-        // When convertToObject is true, use native JSON response format on the API
-        // level
-        // (supported by OpenAI, Gemini, Mistral). Falls back gracefully for providers
-        // that don't support it.
+        // When convertToObject is true, request a native JSON response format at the
+        // API level. The format is set per REQUEST (never baked into the cached model)
+        // and only for providers whose binding accepts it — including the tools-aware
+        // distinction that keeps Gemini from being sent JSON mode and function calling
+        // together. Every execution mode below gets the same policy, so a tool-enabled
+        // or streaming agent is no longer silently downgraded to prompt-only JSON.
         boolean jsonMode = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        var jsonPolicy = JsonResponseFormatPolicy.of(jsonMode, resolvedType, task.getJsonResponseFormat());
 
         // Execute: try agent mode first, fall back to legacy
         String responseContent;
@@ -568,7 +572,7 @@ public class LlmTask implements ILifecycleTask {
         } else if (skipCascade) {
             // Agent mode with cascade disabled — use normal agent flow
             var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
+                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
             if (agentResult != null) {
                 responseContent = agentResult.response();
                 toolTrace = agentResult.trace();
@@ -581,7 +585,7 @@ public class LlmTask implements ILifecycleTask {
                     eventSink.onToken(responseContent);
                 }
             } else {
-                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
                 responseContent = chatResult.response();
                 responseMetadata = chatResult.responseMetadata();
                 // Forward the buffered response to the stream so an SSE client is not left
@@ -594,7 +598,7 @@ public class LlmTask implements ILifecycleTask {
         } else {
             // === Standard (non-cascade) execution path ===
             var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
+                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
 
             if (agentResult != null) {
                 // Agent mode — tools execute synchronously, stream final response if sink
@@ -613,13 +617,13 @@ public class LlmTask implements ILifecycleTask {
                 // Legacy mode with streaming — try to get a streaming model
                 var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
                 if (streamingModel != null) {
-                    var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task);
+                    var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task, jsonPolicy);
                     responseContent = streamingResult.response();
                     responseMetadata.putAll(streamingResult.metadata());
                 } else {
                     // Streaming not supported by this builder — fall back to sync, emit as single
                     // chunk
-                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
+                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                     if (!addToOutputExplicitlyFalse) {
@@ -628,7 +632,7 @@ public class LlmTask implements ILifecycleTask {
                 }
             } else {
                 // Standard non-streaming legacy mode
-                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
                 responseContent = chatResult.response();
                 responseMetadata = chatResult.responseMetadata();
             }
@@ -978,8 +982,13 @@ public class LlmTask implements ILifecycleTask {
         // === Hand off to the resume loop (Task 9) ===
         // Pass the cluster-wide kill-switch so the continuation's gate resolution
         // matches the live path (executeTask) — a disabled gate stays inert on resume.
+        // Same JSON policy the live loop would have applied — a resumed continuation
+        // must not silently lose the API-level JSON the paused turn was running with.
+        var jsonPolicy = JsonResponseFormatPolicy.of(Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)), resolvedType,
+                task.getJsonResponseFormat());
+
         var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision, templateDataObjects,
-                toolHitlEnabled);
+                toolHitlEnabled, jsonPolicy);
 
         String responseContent = result != null ? result.response() : null;
         List<Map<String, Object>> toolTrace = result != null && result.trace() != null ? result.trace() : new ArrayList<>();

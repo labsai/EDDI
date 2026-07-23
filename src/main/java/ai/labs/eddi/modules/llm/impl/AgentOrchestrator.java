@@ -39,6 +39,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
@@ -288,6 +289,18 @@ class AgentOrchestrator {
     }
 
     /**
+     * Backward-compatible overload without an explicit JSON response-format policy
+     * — the tool loop's requests carry no response format.
+     */
+    ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, LlmConfiguration.Task task,
+                                          IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                          int transcriptMaxBytes)
+            throws LifecycleException {
+        return executeIfToolsEnabled(chatModel, systemMessage, chatMessages, task, memory, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes,
+                JsonResponseFormatPolicy.DISABLED);
+    }
+
+    /**
      * Collect enabled tools and run the tool-calling loop with the tool-approval
      * gate active.
      *
@@ -326,10 +339,16 @@ class AgentOrchestrator {
      *            {@code LlmTask} from {@code eddi.hitl.tool.transcript-max-bytes}
      *            (default
      *            {@link PendingToolCallBatch#TRANSCRIPT_MAX_BYTES_DEFAULT}).
+     * @param jsonPolicy
+     *            decides whether the tool-loop's model requests carry
+     *            {@code ResponseFormat.JSON}. Resolved per request against whether
+     *            that request actually carries tool specifications, so a provider
+     *            that rejects JSON mode alongside function calling (Gemini) is
+     *            never sent both.
      */
     ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, LlmConfiguration.Task task,
                                           IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
-                                          int transcriptMaxBytes)
+                                          int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         // Discover + register all tools (built-in + http + mcp + a2a) — the SAME
@@ -342,7 +361,7 @@ class AgentOrchestrator {
         }
 
         return executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory, effectiveToolApprovals, llmTaskIndex,
-                transcriptMaxBytes);
+                transcriptMaxBytes, jsonPolicy);
     }
 
     /**
@@ -376,6 +395,19 @@ class AgentOrchestrator {
      */
     ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
                                    HitlDecision decision, Map<String, Object> templateDataObjects, boolean toolHitlEnabled)
+            throws LifecycleException {
+        return resumeToolLoop(chatModel, task, memory, batch, decision, templateDataObjects, toolHitlEnabled, JsonResponseFormatPolicy.DISABLED);
+    }
+
+    /**
+     * As
+     * {@link #resumeToolLoop(ChatModel, LlmConfiguration.Task, IConversationMemory, PendingToolCallBatch, HitlDecision, Map, boolean)},
+     * but carrying the JSON response-format policy so the continuation's requests
+     * match what the live loop would have sent.
+     */
+    ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
+                                   HitlDecision decision, Map<String, Object> templateDataObjects, boolean toolHitlEnabled,
+                                   JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         String conversationId = memory.getConversationId();
@@ -507,7 +539,8 @@ class AgentOrchestrator {
         double toolCostBefore = conversationToolCost(costConversationId);
         TokenUsage[] tokenHolder = new TokenUsage[1];
         String response = runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, DEFAULT_TRANSCRIPT_MAX_BYTES, tokenHolder);
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, DEFAULT_TRANSCRIPT_MAX_BYTES, tokenHolder,
+                jsonPolicy);
 
         // ── Step 5: merge the pre-pause trace with the resume trace ──
         List<Map<String, Object>> mergedTrace = new ArrayList<>();
@@ -860,7 +893,8 @@ class AgentOrchestrator {
      */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, ToolSetup setup,
                                              LlmConfiguration.Task task, IConversationMemory memory,
-                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
+                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
+                                             JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
@@ -887,7 +921,7 @@ class AgentOrchestrator {
         double toolCostBefore = conversationToolCost(conversationId);
         TokenUsage[] tokenHolder = new TokenUsage[1];
         String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes, tokenHolder);
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes, tokenHolder, jsonPolicy);
 
         Map<String, Object> responseMetadata = new HashMap<>();
         if (tokenHolder[0] != null) {
@@ -944,11 +978,15 @@ class AgentOrchestrator {
      * @param transcriptMaxBytes
      *            the configured cap (bytes) for freezing the transcript into a
      *            {@link PendingToolCallBatch} if this iteration re-pauses
+     * @param jsonPolicy
+     *            decides, per request, whether {@code ResponseFormat.JSON} is set;
+     *            resolved against whether THAT request carries tool specifications
      */
     private String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
                                    List<Map<String, Object>> trace, int startIteration, ToolSetup setup, boolean isLazy,
                                    LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
-                                   int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes, TokenUsage[] tokenHolder)
+                                   int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes, TokenUsage[] tokenHolder,
+                                   JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
@@ -1017,8 +1055,19 @@ class AgentOrchestrator {
 
                 ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(currentMessages);
 
-                if (!activeSpecs.isEmpty()) {
+                boolean toolsInRequest = !activeSpecs.isEmpty();
+                if (toolsInRequest) {
                     requestBuilder.toolSpecifications(activeSpecs);
+                }
+
+                // API-level JSON, decided against THIS request's tool surface. Baking it
+                // into the model instead would put it on every request the cached model
+                // ever serves — the Gemini 400 documented in docs/changelog.md.
+                if (jsonPolicy != null) {
+                    var responseFormat = jsonPolicy.resolve(toolsInRequest);
+                    if (responseFormat != null) {
+                        requestBuilder.responseFormat(responseFormat);
+                    }
                 }
 
                 ChatRequest chatRequest = requestBuilder.build();

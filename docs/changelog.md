@@ -5,6 +5,61 @@
 
 ---
 
+## 🧮 `convertToObject` finally reaches agent mode and streaming (2026-07-23)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D7**. `jsonMode` was computed once in `LlmTask` from `convertToObject` and handed to exactly one collaborator — `LegacyChatExecutor`, i.e. the three no-tools, non-streaming call sites. `AgentOrchestrator.executeIfToolsEnabled`, `StreamingLegacyChatExecutor.execute` and the cascade's agent-mode / live-streaming steps all built their `ChatRequest` without ever looking at it.
+
+The visible consequence: `AgentSetupService` sets `enableBuiltInTools(true)` in the same method that sets `convertToObject=true`, so a tool-enabled agent took the agent path and got **no** API-level JSON at all. With `addToOutput=false` the quickReplies/sentiment `postResponse` then degraded **silently** — the model returned prose, `startsWith("{")` failed, and the raw text was stored as a string.
+
+Why only mistral and azure-openai were bitten: `AgentSetupService.supportsResponseFormat` approved `openai`, `mistral` and `azure-openai` and injected a builder-level `responseFormat=json` model parameter — but `OpenAILanguageModelBuilder` is the **only** builder that reads that key. For mistral and azure-openai the parameter was dead. openai got JSON in every mode purely because the parameter was baked into its cached `ChatModel`.
+
+**What changed:**
+
+| Component | Change |
+|---|---|
+| **`JsonResponseFormatPolicy`** (new, `modules/llm/capability`) | Decides per request whether `ResponseFormat.JSON` may be set. Carries `(requested, provider, override)` and resolves against whether *that* request carries tool specifications |
+| **`AgentOrchestrator`** | `executeIfToolsEnabled` / `resumeToolLoop` / `runToolCallLoop` take the policy; the tool loop sets `responseFormat` on each `ChatRequest`, gated on `!activeSpecs.isEmpty()`. Previous arities kept as delegating overloads |
+| **`StreamingLegacyChatExecutor`** | `execute` / `executeCapturing` take the policy; the streamed `ChatRequest` now carries the format |
+| **`LegacyChatExecutor`** | The `boolean jsonMode` parameter becomes the policy, so an unsupported provider is no longer sent a format it will reject |
+| **`CascadingModelExecutor`** | Builds a policy **per step** from that step's resolved `modelType` — a cascade routinely escalates across providers |
+| **`LlmTask`** | Builds one policy from `convertToObject` + the resolved provider + the task override and passes it to all three modes, plus the HITL resume path |
+| **`LlmConfiguration.Task.jsonResponseFormat`** | New config field: `auto` (default) / `on` / `off` |
+| **`AgentSetupService`** | Stopped injecting `responseFormat=json`; `supportsResponseFormat` deleted (its only remaining caller was the test-compat delegate `McpSetupTools.supportsResponseFormat`, also deleted) |
+
+**The provider matrix**, read off the langchain4j 1.18.0 bindings rather than assumed:
+
+| Provider | Schemaless request JSON | With tools | Evidence |
+|---|---|---|---|
+| openai | yes | yes | `OpenAiUtils#toOpenAiResponseFormat` → `json_object` |
+| azure-openai | yes | yes | `InternalAzureOpenAiHelper#toAzureOpenAiResponseFormat` → `ChatCompletionsJsonResponseFormat` |
+| mistral | yes | yes | `MistralAiMapper#toMistralAiResponseFormat` → `JSON_OBJECT` |
+| gemini, gemini-vertex | yes | **no** | maps to `responseMimeType=application/json`, which the API rejects alongside `tools` |
+| anthropic, bedrock | no | no | both throw `UnsupportedFeatureException` for JSON without a schema |
+| ollama, jlama, huggingface, oracle-genai | no | no | unverified against the provider API — opt in per task with `jsonResponseFormat: "on"` |
+
+**Design decisions:**
+
+- **Request level, never builder level.** The changelog entry of 2026-04-02 records a Gemini `400 Function calling with a response mime type: 'application/json' is unsupported` caused by a builder-level `responseFormat` baked into a **cached** model that was later reused with tools. A cached model is shared across turns, tasks and execution modes, so anything mode-specific must live on the request. D11 has since made the model cache key finer-grained, which does not change this: identity is not the issue, reuse across *modes* is.
+- **The matrix is tools-aware, not provider-aware only.** Gemini's answer differs depending on whether the same request also carries `toolSpecifications`, so the decision is taken inside the tool loop where that is known, against `!activeSpecs.isEmpty()` rather than against "is this agent mode".
+- **`supportsResponseFormat` was retired, not narrowed.** After request-level threading the builder parameter is dead for mistral/azure-openai and redundant-plus-hazardous for openai, which leaves no provider for which the matrix entry does anything. `OpenAILanguageModelBuilder` still honours a hand-written `responseFormat=json`, so existing stored configs are unaffected.
+- **`on` bypasses the tools guard.** An operator forcing the format onto an unlisted provider or an OpenAI-compatible gateway is making a deliberate choice; documented as such.
+
+**Operator-visible behaviour changes:**
+
+- Tool-enabled and streaming agents on **openai**, **azure-openai** and **mistral** now send `response_format: json_object` (or the Azure/Mistral equivalent) whenever `convertToObject=true`. Expect *more* reliable JSON, and for azure/mistral a real behaviour change on the wire.
+- **anthropic** and **bedrock** no longer receive a schemaless JSON format on the no-tools path. Previously the request was sent, rejected, and silently retried through `LegacyChatExecutor`'s fallback — one wasted round trip per turn, now avoided. Enforcement there was and remains prompt-only.
+- **gemini** keeps API-level JSON when no tools are present and is never sent it together with tools.
+- Newly created agents (`setup_agent`, `create_api_agent`, `POST /administration/agents/setup*`) no longer carry a `responseFormat` model parameter. Existing stored configs keep theirs and keep working.
+- New optional task field `jsonResponseFormat` (`auto` | `on` | `off`).
+
+**Tests:** `JsonResponseFormatPolicyTest` (20) and `JsonResponseFormatThreadingTest` (12) are new; three wiring tests added to `LlmTaskCoverageTest`. Every behavioural assertion was mutation-checked (strip the agent-mode format; strip the streaming format; make the matrix tools-blind; approve every provider; drop openai from the matrix; make `LlmTask` pass `DISABLED`) — each mutation fails the tests that cover it.
+
+**Files:** 8 modified in `src/main`, 1 new (`JsonResponseFormatPolicy`), 8 test files touched (incl. 52 Mockito matcher lists widened for the new parameter — an unmatched stub returns null instead of failing, so `verify(never(...))` sites had to move too), `docs/langchain.md`, `docs/changelog.md`.
+
+---
+
 ## ⏱️ `timeout`, `logRequests` and `logResponses` become part of a model's identity (2026-07-23)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

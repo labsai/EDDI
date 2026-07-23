@@ -203,7 +203,7 @@ class LlmTaskAuditLedgerTest {
     }
 
     private void agentReturns(String response, List<Map<String, Object>> trace, Map<String, Object> metadata) throws Exception {
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult(response, trace, metadata));
     }
 
@@ -238,7 +238,7 @@ class LlmTaskAuditLedgerTest {
     @DisplayName("two LLM calls in one turn sum rather than overwrite")
     void tokenUsageAccumulatedAcrossSubTasks() throws Exception {
         // Legacy (no-tools) path: each config sub-task drives one model call.
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt())).thenReturn(null);
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any())).thenReturn(null);
         when(chatModel.chat(anyList()))
                 .thenReturn(response("first", 10, 20, 30))
                 .thenReturn(response("second", 1, 2, 3));
@@ -255,7 +255,7 @@ class LlmTaskAuditLedgerTest {
     @Test
     @DisplayName("a provider that omits a count does not zero what earlier calls contributed")
     void tokenUsageAccumulationHandlesNullCounts() throws Exception {
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt())).thenReturn(null);
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any())).thenReturn(null);
         when(chatModel.chat(anyList()))
                 .thenReturn(response("first", 10, 20, 30))
                 .thenReturn(response("second", null, null, null));
@@ -373,7 +373,7 @@ class LlmTaskAuditLedgerTest {
 
         List<Map<String, Object>> trace = new ArrayList<>();
         trace.add(Map.of("type", "tool_call", "tool", "calculator"));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed", trace,
                         Map.of("tokenUsage", Map.of("inputTokens", 7, "outputTokens", 3, "totalTokens", 10),
                                 "toolCostUsd", 0.005)));
