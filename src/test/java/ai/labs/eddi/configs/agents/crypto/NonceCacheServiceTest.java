@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.crypto;
 
+import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -93,6 +94,30 @@ class NonceCacheServiceTest {
             assertTrue(ttl.getValue().toMillis() > MAX_AGE_MS + CLOCK_SKEW_MS,
                     "a TTL of " + ttl.getValue() + " would forget a nonce that is still replayable "
                             + "(maxAge " + MAX_AGE_MS + "ms + clockSkew " + CLOCK_SKEW_MS + "ms)");
+        }
+
+        /**
+         * A TTL that covers the replay window is worthless if the cache cannot hold the
+         * nonces written during it — size eviction forgets them just as effectively as
+         * expiry would, and Caffeine's frequency-based admission drops the newest (most
+         * replayable) ones first. This joins the TTL this service actually asks for to
+         * the capacity {@link CacheFactory} actually builds, so changing either one
+         * alone fails here.
+         */
+        @Test
+        @DisplayName("the real CacheFactory sizes the nonce cache for the TTL this service requests")
+        void cacheCapacityCoversTheRequestedTtl() {
+            ArgumentCaptor<Duration> ttl = ArgumentCaptor.forClass(Duration.class);
+            verify(cacheFactory).getCache(eq("nonce-replay-protection"), ttl.capture());
+
+            long requiredEntries = (long) CacheFactory.NONCE_PEAK_SIGNED_RPS * ttl.getValue().toSeconds();
+            long capacity = CacheFactory.maximumSizeFor("nonce-replay-protection", ttl.getValue());
+
+            assertTrue(capacity >= requiredEntries,
+                    "a " + ttl.getValue().toSeconds() + "s replay window at "
+                            + CacheFactory.NONCE_PEAK_SIGNED_RPS + " signed requests/s holds " + requiredEntries
+                            + " nonces, but the cache is capped at " + capacity
+                            + " — the overflow is replayable inside its own freshness window");
         }
     }
 

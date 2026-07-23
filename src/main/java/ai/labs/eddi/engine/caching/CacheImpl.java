@@ -57,6 +57,15 @@ public class CacheImpl<K, V> implements ICache<K, V> {
         return cacheName;
     }
 
+    /**
+     * The Caffeine cache this wrapper delegates to, for asserting the eviction and
+     * expiry policy it was actually built with. Package-private: {@link ICache} is
+     * deliberately policy-agnostic.
+     */
+    Cache<K, V> backingCache() {
+        return cache;
+    }
+
     // --- TTL-aware operations ---
     // These route through Caffeine's variable-expiry view so the lifespan applies
     // to the individual entry rather than to the cache as a whole.

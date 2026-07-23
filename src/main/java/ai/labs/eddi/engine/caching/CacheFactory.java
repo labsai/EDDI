@@ -35,14 +35,65 @@ public class CacheFactory implements ICacheFactory {
             // they age out.
             Map.entry("paginated-tool-responses", 1_000L),
 
-            // Replay protection is only as strong as the cache is deep: evicting a
-            // nonce while its timestamp would still pass the freshness check re-opens
-            // the replay window. 100_000 entries covers roughly 300 signed requests
-            // per second sustained across the full ~5.5-minute window (330s * 300 =
-            // 99_000); entries are a short string plus a shared Boolean.
+            // Floor only — the real capacity is derived from the TTL the cache is
+            // asked for, see RATE_SIZED_CACHES. This entry applies solely if something
+            // ever takes the nonce cache from the size-only getCache(name) overload.
             Map.entry("nonce-replay-protection", 100_000L));
 
     private static final long DEFAULT_MAX_SIZE = 1_000L;
+
+    /**
+     * Peak sustained rate of signed A2A envelopes the nonce cache is sized to
+     * survive, in requests per second.
+     */
+    public static final int NONCE_PEAK_SIGNED_RPS = 300;
+
+    /**
+     * Head-room multiplier applied on top of the steady-state occupancy of a
+     * rate-sized cache.
+     * <p>
+     * Sizing at exactly {@code rps * ttl} is not enough, because Caffeine's
+     * W-TinyLFU admission is <em>frequency</em>-based rather than LRU. A nonce is
+     * written once via {@code putIfAbsent} and never read, so every entry ties at
+     * the same estimated frequency and, once the cache is full, the admission
+     * filter rejects the <em>candidate</em> — the newly inserted nonce is dropped
+     * while older ones stay. Retention then degrades non-uniformly and precisely
+     * for the most recent nonces, which are the replayable ones. Keeping the cap
+     * out of reach for the whole window is the only way to avoid that.
+     */
+    static final double RATE_SIZED_EVICTION_HEADROOM = 2.0;
+
+    /**
+     * Caches whose capacity is a function of the TTL they are requested with,
+     * mapped to the peak write rate (entries per second) they must absorb.
+     * <p>
+     * Replay protection is only as strong as the cache is deep: forgetting a nonce
+     * while a replay carrying it would still pass the freshness and clock-skew
+     * checks re-opens the replay window. Deriving the size from the requested TTL
+     * means a future change to {@code NonceCacheService}'s TTL cannot silently
+     * outgrow a hard-coded capacity.
+     */
+    private static final Map<String, Integer> RATE_SIZED_CACHES = Map.of("nonce-replay-protection", NONCE_PEAK_SIGNED_RPS);
+
+    /**
+     * Maximum entry count for {@code cacheName} when built with {@code ttl}
+     * ({@code null} for the size-only overload).
+     * <p>
+     * For a rate-sized cache this is
+     * {@code peakRps * ttlSeconds * RATE_SIZED_EVICTION_HEADROOM}, never below the
+     * cache's configured floor. For every other cache it is the configured size.
+     */
+    public static long maximumSizeFor(String cacheName, Duration ttl) {
+        long configured = CACHE_SIZES.getOrDefault(cacheName, DEFAULT_MAX_SIZE);
+        Integer peakRps = RATE_SIZED_CACHES.get(cacheName);
+        if (peakRps == null || ttl == null || ttl.isNegative() || ttl.isZero()) {
+            return configured;
+        }
+
+        double ttlSeconds = ttl.toMillis() / 1000.0;
+        long required = (long) Math.ceil(peakRps * ttlSeconds * RATE_SIZED_EVICTION_HEADROOM);
+        return Math.max(configured, required);
+    }
 
     @Override
     @SuppressWarnings("unchecked")
@@ -54,7 +105,7 @@ public class CacheFactory implements ICacheFactory {
         // without a lifespan still never expire on their own.
         Cache<K, V> cache = (Cache<K, V>) caches.computeIfAbsent(name,
                 n -> Caffeine.newBuilder()
-                        .maximumSize(CACHE_SIZES.getOrDefault(n, DEFAULT_MAX_SIZE))
+                        .maximumSize(maximumSizeFor(n, null))
                         .expireAfter(WriteExpiry.<Object, Object>never())
                         .recordStats()
                         .build());
@@ -76,7 +127,7 @@ public class CacheFactory implements ICacheFactory {
         // expire after ttl exactly as expireAfterWrite would have expired them.
         Cache<K, V> cache = (Cache<K, V>) caches.computeIfAbsent(cacheKey,
                 n -> Caffeine.newBuilder()
-                        .maximumSize(CACHE_SIZES.getOrDefault(name, DEFAULT_MAX_SIZE))
+                        .maximumSize(maximumSizeFor(name, ttl))
                         .expireAfter(WriteExpiry.<Object, Object>of(ttl))
                         .recordStats()
                         .build());

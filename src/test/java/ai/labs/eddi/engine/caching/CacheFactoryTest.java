@@ -39,6 +39,16 @@ class CacheFactoryTest {
         factory = new CacheFactory();
     }
 
+    /**
+     * The maximum entry count Caffeine was actually built with — asserting the
+     * factory's arithmetic in isolation would not catch it failing to reach
+     * {@code Caffeine.maximumSize}.
+     */
+    private static long evictionMaximumOf(ICache<?, ?> cache) {
+        return ((CacheImpl<?, ?>) cache).backingCache().policy().eviction()
+                .orElseThrow(() -> new AssertionError("cache was built without a size bound")).getMaximum();
+    }
+
     @Nested
     @DisplayName("getCache(name)")
     class GetCache {
@@ -168,6 +178,50 @@ class CacheFactoryTest {
 
             assertNull(cache.get("short"), "the 1ms per-entry lifespan must win over the 1h cache TTL");
             assertEquals("value", cache.get("default"), "the 1h cache TTL must still apply to untimed entries");
+        }
+
+        /**
+         * D2: replay protection is only as strong as the cache is deep. The nonce cache
+         * must be able to hold every nonce written during the TTL it was asked for — a
+         * fixed capacity below {@code peakRps * ttl} forgets nonces that are still
+         * replayable, and because Caffeine's admission filter is frequency-based rather
+         * than LRU it forgets the <em>newest</em> ones.
+         */
+        @Test
+        @DisplayName("the nonce cache's capacity covers the TTL it is built with")
+        void nonceCacheCapacityCoversItsTtl() {
+            Duration ttl = Duration.ofSeconds(390);
+
+            long capacity = evictionMaximumOf(factory.getCache("nonce-replay-protection", ttl));
+
+            long steadyStateOccupancy = (long) CacheFactory.NONCE_PEAK_SIGNED_RPS * ttl.toSeconds();
+            assertTrue(capacity >= steadyStateOccupancy,
+                    "a capacity of " + capacity + " cannot hold the " + steadyStateOccupancy
+                            + " nonces written during a " + ttl.toSeconds() + "s replay window");
+            assertEquals((long) Math.ceil(steadyStateOccupancy * CacheFactory.RATE_SIZED_EVICTION_HEADROOM), capacity,
+                    "the capacity must carry head-room, because eviction is not LRU and drops the newest nonce");
+        }
+
+        /**
+         * The whole point of deriving the size: raising the TTL must raise the capacity
+         * by itself, so a future change to the replay window cannot silently outgrow a
+         * hard-coded number.
+         */
+        @Test
+        @DisplayName("a longer nonce TTL yields a proportionally larger cache")
+        void nonceCacheCapacityTracksTheTtl() {
+            long shortTtl = evictionMaximumOf(factory.getCache("nonce-replay-protection", Duration.ofSeconds(390)));
+            long longTtl = evictionMaximumOf(factory.getCache("nonce-replay-protection", Duration.ofSeconds(780)));
+
+            assertEquals(2 * shortTtl, longTtl, "doubling the replay window must double the capacity");
+        }
+
+        @Test
+        @DisplayName("caches that are not rate-sized keep their configured capacity")
+        void nonRateSizedCachesKeepConfiguredSize() {
+            assertEquals(10_000L, evictionMaximumOf(factory.getCache("tool-results", Duration.ofMinutes(5))));
+            assertEquals(1_000L, evictionMaximumOf(factory.getCache("slack-event-dedup", Duration.ofHours(24))),
+                    "an unlisted cache must stay on the 1_000 default however long its TTL is");
         }
 
         @Test
