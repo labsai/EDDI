@@ -142,6 +142,56 @@ class ConversationOutputExtractorTest {
                 "output=[null] should return null, not dump raw metadata");
     }
 
+    // --- Format 1b: Plain "output" value (String or Map) ---
+
+    @Test
+    void extractResponse_outputAsPlainString() {
+        var output = new ConversationOutput();
+        output.put("output", "Direct string response");
+        var snapshot = snapshotWith(output);
+
+        assertEquals("Direct string response", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    @Test
+    void extractResponse_outputAsMapWithTextKey() {
+        var output = new ConversationOutput();
+        output.put("output", Map.of("text", "From output map"));
+        var snapshot = snapshotWith(output);
+
+        assertEquals("From output map", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    @Test
+    void extractResponse_blankOutputString_returnsNull() {
+        var output = new ConversationOutput();
+        output.put("output", "   ");
+        var snapshot = snapshotWith(output);
+
+        assertNull(ConversationOutputExtractor.extractResponse(snapshot),
+                "Blank output string should not be treated as meaningful text");
+    }
+
+    // --- Format 3: "reply" key ---
+
+    @Test
+    void extractResponse_replyAsString() {
+        var output = new ConversationOutput();
+        output.put("reply", "Reply text");
+        var snapshot = snapshotWith(output);
+
+        assertEquals("Reply text", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    @Test
+    void extractResponse_replyAsList() {
+        var output = new ConversationOutput();
+        output.put("reply", List.of("Reply line 1", "Reply line 2"));
+        var snapshot = snapshotWith(output);
+
+        assertEquals("Reply line 1\nReply line 2", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
     // --- Multiple outputs: always uses the LAST one ---
 
     @Test

@@ -20,11 +20,13 @@ import java.util.Map;
  * {@code ConverseWithAgentTool}.
  *
  * <p>
- * Handles two output formats:
+ * Handles multiple output formats:
  * <ol>
  * <li>Nested {@code output} array — items may be plain Strings,
  * {@link OutputItem} POJOs, or Maps with a {@code text} key</li>
+ * <li>Plain {@code output} value — String or Map with {@code text} key</li>
  * <li>Flat keys like {@code output:text:*} — legacy format</li>
+ * <li>{@code reply} key — String or List of Strings</li>
  * </ol>
  * Returns {@code null} when no recognizable text is found (e.g., the output
  * map contains only pipeline metadata like actions, context, or expressions).
@@ -64,8 +66,8 @@ public final class ConversationOutputExtractor {
         var texts = new ArrayList<String>();
 
         // Format 1: Nested "output" array — may contain TextOutputItem POJOs or Maps
-        Object outputArray = lastOutput.get("output");
-        if (outputArray instanceof List<?> list) {
+        Object outputValue = lastOutput.get("output");
+        if (outputValue instanceof List<?> list) {
             for (var item : list) {
                 if (item instanceof String s) {
                     texts.add(s);
@@ -82,6 +84,11 @@ public final class ConversationOutputExtractor {
             if (!texts.isEmpty()) {
                 return String.join("\n", texts);
             }
+        } else if (outputValue instanceof String s && !s.isBlank()) {
+            // Plain string written via addConversationOutputString("output", ...)
+            return s;
+        } else if (outputValue instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+            return s;
         }
 
         // Format 2: Flat keys like "output:text:*"
@@ -105,6 +112,19 @@ public final class ConversationOutputExtractor {
 
         if (!texts.isEmpty()) {
             return String.join("\n", texts);
+        }
+
+        // Format 3: "reply" key — used by some task extensions
+        Object replyValue = lastOutput.get("reply");
+        if (replyValue instanceof String s && !s.isBlank()) {
+            return s;
+        } else if (replyValue instanceof List<?> list) {
+            for (var item : list) {
+                if (item instanceof String s) texts.add(s);
+            }
+            if (!texts.isEmpty()) {
+                return String.join("\n", texts);
+            }
         }
 
         // No recognizable text found in any standard format.
