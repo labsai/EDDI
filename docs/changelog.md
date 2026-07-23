@@ -5,6 +5,41 @@
 
 ---
 
+## 🗄️ Two cache keys that threw away information (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Two Copilot findings on the caching layer, both verified against source before touching anything. Both are the branch's theme one level down: not a control that does nothing, but a **key that silently loses the distinction it was built to preserve**.
+
+### A — `ToolCacheService.buildKey` dereferenced tool arguments that can legitimately be null
+
+`buildKey(scopeTag, toolName, arguments)` called `arguments.length()` with no guard. Copilot claimed `ToolExecutionRequest` can be built without arguments; that is only half the question, so the live path was traced end to end:
+
+- `dev.langchain4j.agent.tool.ToolExecutionRequest` (1.18.0) declares `private final String arguments` with **no default and no validation** — `arguments()` returns null whenever the builder never set it.
+- `OpenAiUtils.toolExecutionRequest` passes the wire value straight through: `.arguments(functionCall.arguments())`, and `FunctionCall.arguments` is a plain Jackson-deserialised field. A provider that omits `function.arguments` for a zero-argument call — routine on OpenAI-compatible endpoints — yields a null. (The newer Responses API path defaults it to `"{}"` via `asText("{}")`; the classic chat-completions path does not.)
+- `AgentOrchestrator` line 1614 forwards `toolRequest.arguments()` into `executeToolWrapped` with **no guard**. The only two coalescing sites on the branch (`normalizeToolCallIds`, `rebuiltRequest`) are on the HITL pause/resume path and never run for a live call.
+
+The NPE was raised inside `executeToolWrapped`'s try block, so it never surfaced as a crash — it came back to the model as `Error executing tool: Cannot invoke "String.length()" because "arguments" is null`, **before the tool ran**. Net effect: a zero-argument tool call failed with caching on (the default) and succeeded with caching off.
+
+**Fix:** `buildKey` coalesces null to `""`. A null and an empty argument string both mean "no arguments" and deliberately share one entry.
+
+### B — the TTL cache key truncated to whole seconds
+
+`CacheFactory.getCache(name, ttl)` keyed instances on `name + ":ttl=" + ttl.toSeconds()`. `toSeconds()` truncates, so every sub-second TTL collapsed onto `":ttl=0"` and any two TTLs sharing a whole-second part collapsed together. Two callers asking one cache name for two TTLs then shared **one** Caffeine instance whose expiry policy was whichever of them built it first; the other TTL was accepted and silently ignored. The same method already derived its capacity from `ttl.toMillis()` in `maximumSizeFor`, so the key was strictly coarser than the sizing it keyed.
+
+Reachability, stated honestly: **no production caller triggers it today.** Each of the four TTL call sites (`NonceCacheService`, `ChannelTargetRouter`, and two in `SlackEventHandler`) requests its cache name exactly once, from a single `@PostConstruct`. This is a latent defect in a shared factory, not a live incident — but it is one config change away (`NonceCacheService`'s TTL is `Duration.ofMillis(maxAgeMs + clockSkewMs + buffer)` over two operator-settable millisecond properties) and the fix is a single token.
+
+**Fix:** the key renders `ttl.toString()`. It is injective over distinct `Duration`s, identical for equal ones — `ofSeconds(60)` and `ofMinutes(1)` still share, as they should — and strictly finer-grained than the `toMillis()` the capacity is derived from, so one key can never span two capacities.
+
+### Tests
+
+- `ToolExecutionServiceTest.NullArgumentsTests` (3 tests) wires the **real** `ToolCacheService` over a real `CacheFactory` — a mocked cache service cannot reach `buildKey` — and drives `executeToolWrapped` with `ToolExecutionRequest.builder().id(…).name(…).build().arguments()`, i.e. the null taken from langchain4j's own type rather than a synthetic one. Asserts the tool runs, the result comes back verbatim, and a second call is served from the cache (proving the write survived too).
+- `CacheFactoryTest`: two sub-second TTLs (1 ms / 999 ms) get distinct instances with distinct expiry; two TTLs sharing a whole-second part (10 001 ms / 10 900 ms) get distinct instances; and equal TTLs expressed differently still share one, so the fix does not leak an instance per caller.
+
+Mutation-checked by reverting each fix: `expected: <2026-07-23T09:00:00Z> but was: <Error executing tool: Cannot invoke "String.length()" because "arguments" is null>`, `expected: <long> but was: <null>`, and `10001ms and 10900ms must not truncate onto one instance ==> expected: <a> but was: <b>`. Restored: `CacheFactoryTest` 19, `CacheImplTest` 51, `ToolCacheServiceTest` 79, `PaginatedResponseStoreTest` 13, `NonceCacheServiceTest` 10, `ToolExecutionServiceTest` 32, `ToolExecutionServiceExtendedTest` 8, `ToolExecutionServiceBranchTest` 2 — 214 tests, 0 failures.
+
+---
+
 ## 🔐 Ledger integrity, replay depth, and a verification that could not fail (2026-07-23)
 
 **Repo:** EDDI (`fix/backlog-defect-remediation`)

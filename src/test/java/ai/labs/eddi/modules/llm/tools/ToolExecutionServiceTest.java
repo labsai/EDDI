@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.engine.caching.CacheFactory;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -14,6 +16,7 @@ import org.mockito.Mock;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -480,6 +483,101 @@ class ToolExecutionServiceTest {
 
             verify(rateLimiter).tryAcquire("testTool", 60);
             verify(costTracker).trackToolCall(ToolInvocation.of("testTool"), "conv-1");
+        }
+    }
+
+    // ==================== null tool arguments ====================
+
+    /**
+     * A tool call may legitimately arrive with {@code null} arguments.
+     * {@code ToolExecutionRequest.arguments()} is an unvalidated field with no
+     * default (see the assertion in
+     * {@link #nullArgumentsAreWhatLangchain4jHandsUs}), and langchain4j's OpenAI
+     * chat-completions mapper passes the wire value straight through, so any
+     * provider that omits {@code function.arguments} for a zero-argument call
+     * produces one. {@code AgentOrchestrator} forwards
+     * {@code toolRequest.arguments()} here unguarded.
+     *
+     * <p>
+     * These tests use the REAL {@link ToolCacheService} rather than the mock the
+     * outer class injects: the defect lived in its private {@code buildKey}, and a
+     * mocked cache service cannot reach it. {@code buildKey} dereferenced the
+     * arguments, so the NPE was raised inside {@code executeToolWrapped}'s try
+     * block and came back to the model as an "Error executing tool" string — BEFORE
+     * the tool ran. The tool call therefore failed with caching on (the default)
+     * and succeeded with caching off.
+     * </p>
+     */
+    @Nested
+    @DisplayName("null tool arguments still reach the tool")
+    class NullArgumentsTests {
+
+        private ToolExecutionService cachingService;
+        private AtomicInteger toolRuns;
+
+        @BeforeEach
+        void wireRealCacheService() throws Exception {
+            ToolCacheService realCacheService = new ToolCacheService();
+            setField(realCacheService, "cacheFactory", new CacheFactory());
+            setField(realCacheService, "meterRegistry", new SimpleMeterRegistry());
+            realCacheService.init();
+            realCacheService.clear();
+
+            cachingService = new ToolExecutionService();
+            setField(cachingService, "cacheService", realCacheService);
+            setField(cachingService, "rateLimiter", rateLimiter);
+            setField(cachingService, "costTracker", costTracker);
+            setField(cachingService, "meterRegistry", new SimpleMeterRegistry());
+            cachingService.init();
+
+            toolRuns = new AtomicInteger();
+        }
+
+        /**
+         * The provenance of the null: langchain4j's own type, not a synthetic value.
+         */
+        @Test
+        @DisplayName("langchain4j yields null arguments for a request built without them")
+        void nullArgumentsAreWhatLangchain4jHandsUs() {
+            var request = ToolExecutionRequest.builder().id("call_1").name("datetime").build();
+
+            assertNull(request.arguments(),
+                    "ToolExecutionRequest.arguments() has no default; AgentOrchestrator forwards it verbatim");
+        }
+
+        @Test
+        @DisplayName("a zero-argument tool call executes instead of erroring out")
+        void nullArgumentsExecuteTheTool() {
+            var request = ToolExecutionRequest.builder().id("call_1").name("datetime").build();
+
+            String result = cachingService.executeToolWrapped(
+                    ToolInvocation.of(request.name()), request.arguments(), SCOPE, "conv-1",
+                    () -> {
+                        toolRuns.incrementAndGet();
+                        return "2026-07-23T09:00:00Z";
+                    },
+                    false, true, false, 60);
+
+            assertEquals("2026-07-23T09:00:00Z", result,
+                    "with caching enabled the cache lookup must not swallow the call");
+            assertEquals(1, toolRuns.get(), "the tool itself must have run exactly once");
+        }
+
+        @Test
+        @DisplayName("the result of a zero-argument call is cached and served back")
+        void nullArgumentsAreCacheable() {
+            var request = ToolExecutionRequest.builder().id("call_1").name("datetime").build();
+
+            String first = cachingService.executeToolWrapped(
+                    ToolInvocation.of(request.name()), request.arguments(), SCOPE, "conv-1",
+                    () -> "run-" + toolRuns.incrementAndGet(), false, true, false, 60);
+            String second = cachingService.executeToolWrapped(
+                    ToolInvocation.of(request.name()), request.arguments(), SCOPE, "conv-1",
+                    () -> "run-" + toolRuns.incrementAndGet(), false, true, false, 60);
+
+            assertEquals("run-1", first);
+            assertEquals("run-1", second, "the second call must be served from the cache, so the write worked too");
+            assertEquals(1, toolRuns.get(), "a cached zero-argument call must not re-run the tool");
         }
     }
 

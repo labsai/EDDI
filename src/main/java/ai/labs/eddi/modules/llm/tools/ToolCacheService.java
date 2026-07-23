@@ -471,9 +471,22 @@ public class ToolCacheService {
      * <p>
      * The scope tag comes first so that entries belonging to different identities
      * can never collide, whatever the tool name and arguments are.
+     * <p>
+     * {@code arguments} may legitimately be {@code null}: langchain4j's
+     * {@code ToolExecutionRequest.arguments()} is an unvalidated field, and the
+     * OpenAI chat-completions mapper passes the wire value straight through
+     * ({@code OpenAiUtils.toolExecutionRequest}), so a provider that omits
+     * {@code function.arguments} for a zero-argument call — common on
+     * OpenAI-compatible endpoints — yields a null here. Dereferencing it threw
+     * inside {@code ToolExecutionService.executeToolWrapped}'s try block, which
+     * turned the NPE into an "Error executing tool" string BEFORE the tool ever
+     * ran: with caching on (the default) the call failed, with caching off it
+     * succeeded. A null and an empty argument string both mean "no arguments" and
+     * deliberately share one entry.
      */
     private static String buildKey(String scopeTag, String toolName, String arguments) {
-        String argumentPart = arguments.length() > MAX_INLINE_ARGUMENT_LENGTH ? sha256(arguments) : arguments;
+        String safeArguments = arguments != null ? arguments : "";
+        String argumentPart = safeArguments.length() > MAX_INLINE_ARGUMENT_LENGTH ? sha256(safeArguments) : safeArguments;
         return scopeTag + SCOPE_SEPARATOR + toolName + ":" + argumentPart;
     }
 

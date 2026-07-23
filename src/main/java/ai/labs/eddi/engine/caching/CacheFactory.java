@@ -119,8 +119,19 @@ public class CacheFactory implements ICacheFactory {
             throw new IllegalArgumentException("TTL must not be null; use getCache(cacheName) for caches without expiry");
         }
         String name = cacheName != null ? cacheName : "local";
-        // Use a distinct key to prevent collision with size-only caches
-        String cacheKey = name + ":ttl=" + ttl.toSeconds();
+        // Use a distinct key to prevent collision with size-only caches.
+        //
+        // The TTL is rendered with Duration.toString() rather than toSeconds():
+        // toSeconds() TRUNCATES, so every sub-second TTL collapsed onto ":ttl=0" and
+        // any two durations sharing a whole-second part collapsed together. Two
+        // callers asking the same cache name for different TTLs then shared ONE
+        // instance whose expiry policy was whichever of them built it first — the
+        // later TTL was accepted and silently ignored. Duration.toString() is
+        // injective over distinct Durations and identical for equal ones (so
+        // ofSeconds(60) and ofMinutes(1) still share, as they should), and it is
+        // strictly finer-grained than the toMillis() maximumSizeFor() below derives
+        // the capacity from, so a key can never span two different capacities.
+        String cacheKey = name + ":ttl=" + ttl.toString();
         // WriteExpiry.of(ttl) rather than expireAfterWrite(ttl): the two are
         // mutually exclusive in Caffeine, and only the expireAfter form leaves the
         // per-entry override available. Entries written without their own lifespan

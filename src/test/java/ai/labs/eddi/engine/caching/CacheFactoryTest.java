@@ -32,6 +32,12 @@ class CacheFactoryTest {
      */
     private static final long PAST_TTL_MILLIS = 150L;
 
+    /**
+     * Past a 1 ms TTL by a wide margin while leaving most of a 999 ms TTL unspent,
+     * so the sub-second cache-key assertions cannot flake in either direction.
+     */
+    private static final long SUB_SECOND_GAP_MILLIS = 30L;
+
     private CacheFactory factory;
 
     @BeforeEach
@@ -222,6 +228,73 @@ class CacheFactoryTest {
             assertEquals(10_000L, evictionMaximumOf(factory.getCache("tool-results", Duration.ofMinutes(5))));
             assertEquals(1_000L, evictionMaximumOf(factory.getCache("slack-event-dedup", Duration.ofHours(24))),
                     "an unlisted cache must stay on the 1_000 default however long its TTL is");
+        }
+
+        /**
+         * The instance key used to render the TTL with {@code Duration.toSeconds()},
+         * which TRUNCATES: every sub-second TTL collapsed onto {@code ":ttl=0"} and any
+         * two TTLs sharing a whole-second part collapsed together. Two callers asking
+         * the same cache name for different TTLs then shared ONE Caffeine instance,
+         * whose expiry policy was whichever of them happened to build it first — the
+         * other TTL was accepted and silently ignored. The distinctness of the
+         * instances is asserted through observable expiry, not through identity, so it
+         * cannot pass on a technicality.
+         */
+        @Test
+        @DisplayName("two sub-second TTLs get distinct caches with distinct expiry")
+        void subSecondTtlsDoNotShareOneCache() throws InterruptedException {
+            // 1ms and 999ms BOTH truncate to ttl=0 seconds, so under the old key they
+            // were one instance — carrying the 1ms policy of whichever built it first.
+            ICache<String, String> shortLived = factory.getCache("subSecondTtl", Duration.ofMillis(1));
+            ICache<String, String> longLived = factory.getCache("subSecondTtl", Duration.ofMillis(999));
+
+            shortLived.put("key", "short");
+            longLived.put("key", "long");
+
+            // Comfortably past the 1ms TTL and comfortably short of the 999ms one.
+            Thread.sleep(SUB_SECOND_GAP_MILLIS);
+
+            assertNull(shortLived.get("key"), "the 1ms TTL must expire its own entry");
+            assertEquals("long", longLived.get("key"),
+                    "the 999ms entry must survive: sharing one instance would have given it the 1ms expiry");
+        }
+
+        /**
+         * The same truncation above one second: 10.001s and 10.9s both rendered as
+         * {@code ttl=10}. This is the form a config-derived TTL actually takes — see
+         * {@code NonceCacheService}, whose TTL is {@code Duration.ofMillis(maxAgeMs +
+         * clockSkewMs + buffer)} over two operator-settable millisecond properties.
+         */
+        @Test
+        @DisplayName("two TTLs sharing a whole-second part get distinct caches")
+        void sameWholeSecondDifferentMillisDoNotShareOneCache() {
+            ICache<String, String> a = factory.getCache("wholeSecondTtl", Duration.ofMillis(10_001));
+            ICache<String, String> b = factory.getCache("wholeSecondTtl", Duration.ofMillis(10_900));
+
+            a.put("key", "a");
+            b.put("key", "b");
+
+            // Both TTLs are far longer than this test takes, so a lost value can only
+            // mean the two Durations resolved to one shared instance.
+            assertEquals("a", a.get("key"), "10001ms and 10900ms must not truncate onto one instance");
+            assertEquals("b", b.get("key"), "10001ms and 10900ms must not truncate onto one instance");
+        }
+
+        /**
+         * The flip side: TTLs that are {@code equal} must still SHARE an instance, or
+         * the fix would leak a fresh Caffeine cache per caller.
+         * {@code Duration.toString()} normalises, so {@code ofSeconds(60)} and
+         * {@code ofMinutes(1)} both render {@code PT1M}.
+         */
+        @Test
+        @DisplayName("equal TTLs expressed differently still share one cache")
+        void equalTtlsShareOneCache() {
+            ICache<String, String> bySeconds = factory.getCache("equalTtl", Duration.ofSeconds(60));
+            ICache<String, String> byMinutes = factory.getCache("equalTtl", Duration.ofMinutes(1));
+
+            bySeconds.put("key", "value");
+
+            assertEquals("value", byMinutes.get("key"), "equal durations must resolve to the same cache instance");
         }
 
         @Test
