@@ -10,6 +10,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -93,6 +94,19 @@ public final class AuditHmac {
      * The canonical form is selected from the stored value's version tag, so
      * entries signed before {@link #V2_PREFIX} existed keep verifying against the
      * v1 canonicalizer and entries signed after it are held to v2 only.
+     * <p>
+     * The digests are compared as raw bytes through
+     * {@link MessageDigest#isEqual(byte[], byte[])} rather than with
+     * {@link String#equals(Object)}, which returns on the first differing character
+     * and so leaks, through timing, how much of a forged HMAC is correct — enough
+     * to reconstruct one digit at a time against a compliance ledger. The version
+     * prefix is <em>not</em> secret (it only selects the canonicalizer), so
+     * inspecting it with {@code startsWith} is fine; it is the digest comparison
+     * that has to be data-independent.
+     * <p>
+     * A stored value that is not valid hex — truncated, mangled, or never a digest
+     * at all — cannot match anything and is rejected rather than throwing. Hex
+     * parsing accepts either case; every digest this class writes is lowercase.
      *
      * @param entry
      *            the audit entry with its hmac field populated
@@ -105,12 +119,36 @@ public final class AuditHmac {
         if (stored == null)
             return false;
 
+        String expectedDigest;
+        String storedDigest;
         if (stored.startsWith(V2_PREFIX)) {
-            return computeHmac(entry, hmacKey).equals(stored);
+            expectedDigest = hmacSha256(buildCanonicalStringV2(entry), hmacKey);
+            storedDigest = stored.substring(V2_PREFIX.length());
+        } else {
+            // Legacy: a bare hex digest over the v1 canonical string.
+            expectedDigest = hmacSha256(buildCanonicalString(entry), hmacKey);
+            storedDigest = stored;
         }
 
-        // Legacy: a bare hex digest over the v1 canonical string.
-        return hmacSha256(buildCanonicalString(entry), hmacKey).equals(stored);
+        byte[] storedBytes = decodeHexOrNull(storedDigest);
+        if (storedBytes == null)
+            return false;
+
+        return MessageDigest.isEqual(decodeHexOrNull(expectedDigest), storedBytes);
+    }
+
+    /**
+     * Decodes a hex digest to its raw bytes, or {@code null} when the text is not
+     * valid hex (odd length, non-hex characters). Only the stored side can realise
+     * that case; the recomputed side is always {@link HexFormat#formatHex(byte[])}
+     * output.
+     */
+    private static byte[] decodeHexOrNull(String hex) {
+        try {
+            return HexFormat.of().parseHex(hex);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**

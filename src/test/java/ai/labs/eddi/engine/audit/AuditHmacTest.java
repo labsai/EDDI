@@ -165,6 +165,81 @@ class AuditHmacTest {
             byte[] wrongKey = AuditHmac.deriveHmacKey("wrong-master-key");
             assertFalse(AuditHmac.verifyHmac(signed, wrongKey));
         }
+
+        /**
+         * Both stored forms go through the same byte comparison, so one assertion pass
+         * over both proves the constant-time comparison did not cost either version its
+         * verification. A v1 row carries a bare hex digest over the v1 canonical
+         * string; a v2 row carries {@code v2:} + a digest over the v2 form.
+         */
+        @Test
+        @DisplayName("a v1 row and a v2 row both verify, and either one tampered is rejected")
+        void bothVersionsVerifyAndBothRejectTampering() {
+            AuditEntry entry = createTestEntry();
+
+            String v1Hmac = legacySignV1(AuditHmac.buildCanonicalString(entry));
+            String v2Hmac = AuditHmac.computeHmac(entry, hmacKey);
+
+            assertFalse(v1Hmac.startsWith("v2:"), "precondition: the v1 row carries no version tag");
+            assertTrue(v2Hmac.startsWith("v2:"), "precondition: the v2 row names its canonical form");
+
+            assertTrue(AuditHmac.verifyHmac(entry.withHmac(v1Hmac), hmacKey), "a pre-v2 ledger row must still verify");
+            assertTrue(AuditHmac.verifyHmac(entry.withHmac(v2Hmac), hmacKey), "a v2 ledger row must verify");
+
+            AuditEntry tampered = entry.withEnvironment("TAMPERED");
+            assertFalse(AuditHmac.verifyHmac(tampered.withHmac(v1Hmac), hmacKey), "a tampered v1 row must be rejected");
+            assertFalse(AuditHmac.verifyHmac(tampered.withHmac(v2Hmac), hmacKey), "a tampered v2 row must be rejected");
+        }
+
+        /**
+         * The comparison now decodes both sides from hex, so a stored value that is not
+         * a digest at all has to be rejected rather than propagate a parse failure out
+         * of a verification sweep over the whole ledger.
+         */
+        @Test
+        @DisplayName("a malformed stored HMAC is rejected without throwing")
+        void malformedStoredHmacIsRejected() {
+            AuditEntry entry = createTestEntry();
+
+            for (String malformed : List.of(
+                    "", // empty
+                    "zz", // non-hex characters
+                    "abc", // odd length
+                    "not-a-digest",
+                    "v2:", // version tag with nothing behind it
+                    "v2:zzzz",
+                    AuditHmac.computeHmac(entry, hmacKey).substring(0, 20))) { // truncated
+                assertFalse(assertDoesNotThrow(() -> AuditHmac.verifyHmac(entry.withHmac(malformed), hmacKey),
+                        "verification must not throw on stored value '" + malformed + "'"),
+                        "a malformed stored HMAC must not verify: '" + malformed + "'");
+            }
+        }
+
+        /**
+         * A v2-tagged value must never be re-checked against the v1 canonicalizer —
+         * that would hand the v1 collision back to an attacker. Signing the v1 form and
+         * storing it under the v2 tag must therefore fail.
+         */
+        @Test
+        @DisplayName("a v1 digest stored under the v2 tag does not verify")
+        void v1DigestUnderV2TagDoesNotVerify() {
+            AuditEntry entry = createTestEntry();
+            String mislabelled = "v2:" + legacySignV1(AuditHmac.buildCanonicalString(entry));
+
+            assertFalse(AuditHmac.verifyHmac(entry.withHmac(mislabelled), hmacKey),
+                    "the version tag selects the canonicalizer and is never retried against the other one");
+        }
+
+        /** Reproduces exactly what the pre-v2 code wrote into the ledger. */
+        private String legacySignV1(String canonical) {
+            try {
+                Mac mac = Mac.getInstance("HmacSHA256");
+                mac.init(new SecretKeySpec(hmacKey, "HmacSHA256"));
+                return HexFormat.of().formatHex(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
+            } catch (GeneralSecurityException e) {
+                throw new IllegalStateException(e);
+            }
+        }
     }
 
     // ==================== Canonical String ====================

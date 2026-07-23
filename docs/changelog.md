@@ -5,6 +5,39 @@
 
 ---
 
+## 🔐 Constant-time audit HMAC comparison, and a retry-cost finding that wasn't (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Cluster `retry-cost-and-hmac`: one CodeRabbit correctness claim and one CodeRabbit security nitpick. Both were traced end to end before touching anything — one is real and fixed, the other is a false positive left unchanged with the evidence recorded here.
+
+### B — `AuditHmac.verifyHmac` compared digests with `String.equals` (real, fixed)
+
+The compliance ledger's HMAC verification did `computeHmac(entry).equals(stored)` (and the v1 branch likewise). `String.equals` returns on the first differing character, so its running time leaks how long a prefix of a forged HMAC is correct — the classic side channel that lets an attacker reconstruct a valid tag one hex digit at a time against an endpoint that reveals verify latency.
+
+**Fix:** decode both the recomputed and the stored digest from hex and compare the raw bytes with `java.security.MessageDigest.isEqual`, which is data-independent. The version selection is unchanged and deliberately kept non-constant-time: the `v2:` prefix only picks the canonicalizer and is not secret (per the frozen-v1 design, a v2-tagged value is *never* retried against v1). A stored value that is not valid hex — truncated, mangled, never a digest — now decodes to null and is rejected rather than throwing out of a whole-ledger verification sweep.
+
+Because a constant-time swap is behaviour-preserving, no unit test can observe the timing difference; the added tests instead guard that the refactor did not break verification. `AuditHmacTest`:
+- `bothVersionsVerifyAndBothRejectTampering` — a bare-hex v1 row and a `v2:` row both verify, and either one tampered is rejected.
+- `malformedStoredHmacIsRejected` — empty / non-hex / odd-length / truncated / `v2:`-only stored values are rejected without throwing.
+- `v1DigestUnderV2TagDoesNotVerify` — a v1 digest mislabelled with the `v2:` tag fails, proving the version tag is never retried against the other canonicalizer.
+
+Mutation-checked two ways. (1) Revert the comparison to `String.equals`: all 29 tests still pass — expected, and the point, since the fix must not change verification behaviour. (2) Point the v1 legacy branch at the v2 canonicalizer: `bothVersionsVerifyAndBothRejectTampering` and the pre-existing `legacyV1EntryStillVerifies` both fail (`TooManyActualInvocations`-free, a plain assertion failure that a pre-v2 ledger row no longer verifies), proving the regression tests guard the version selection the fix preserves. Restored: `AuditHmacTest` 28, and the rest of `engine.audit` (`AuditLedgerServiceTest`, `…BranchTest`, `…ExtendedTest`, `AuditRetentionConfigTest`, `AuditStoreTest`) 61 — all green.
+
+### A — "tool charges are not rolled back when a retry replays" (false positive, unchanged)
+
+CodeRabbit (Major): the tool loop runs inside `AgentExecutionHelper.executeWithRetry(() -> {…})`; the lambda already resets `tokenHolder[0] = null` because a retry replays it and would double-count *tokens*; the same replay re-runs the tool calls, each of which charges an `@ApplicationScoped` per-conversation counter with no per-attempt undo, so an abandoned attempt's spend allegedly stays counted and inflates `toolCostUsd`, the audit cost and `isWithinBudget`.
+
+Traced against source, the premise does not hold:
+
+- **Default config (`enableToolCaching` true): the replay is free.** `ToolExecutionService.executeToolWrapped` returns at the cache-hit branch (step 2) *before* `costTracker.trackToolCall` (step 5). A replayed attempt re-issues the identical `(name, arguments)` call, hits the cache the first attempt populated, and is charged nothing. So the very configuration CodeRabbit assumes produces no double-count at all.
+- **`enableToolCaching` false: the replay genuinely re-executes — and the re-charge is correct.** With no cache, the abandoned attempt's tool really ran (a real search-provider API call, a real HTTP POST), really cost money, and the successful attempt's replay runs it *again*, a second real call. `ToolCostTracker` is the authoritative real-spend ledger behind `maxBudgetPerConversation` and the audit dollar figure; billing two real executions is right, not "inflation". Rolling it back would *under*-count real spend and let an agent evade its budget by inducing retries.
+- The token reset is not analogous. `tokenHolder` is a per-`ExecutionResult` reporting accumulator whose number should match the final coherent attempt; `ToolCostTracker` is a cumulative expenditure ledger. Different jobs, correctly treated differently.
+
+So there is no phantom charge to roll back: every charge corresponds to a tool execution that really happened and really cost money. Production code left untouched. A characterization test pins the property that makes the finding moot — `AgentOrchestratorToolCostTest.retriedLoopChargesReplayedToolCallOnce`: attempt 1 executes and is charged for `searchWeb`, the next model call fails retryably, the whole lambda replays, and with a **real** `ToolCacheService` the replayed identical call is a cache hit — `searchWeb` runs once, the conversation is charged `SEARCH_PRICE` once, and `toolCostUsd` reports exactly that one charge. Mutation-check: swap the real cache for the always-miss stub (the `enableToolCaching: false` model) and the tool runs twice (`verify(times(1))` fails with `TooManyActualInvocations … But was 2 times`), demonstrating that off-cache it is real re-execution, not double-accounting. Restored: `AgentOrchestratorToolCostTest` 10, green.
+
+---
+
 ## 🗄️ Two cache keys that threw away information (2026-07-23)
 
 **Repo:** EDDI (`fix/backlog-defect-remediation`)

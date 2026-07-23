@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -123,6 +124,7 @@ class AgentOrchestratorToolCostTest {
     private IConversationMemory.IWritableConversationStep currentStep;
 
     private ToolCostTracker costTracker;
+    private ToolExecutionService toolExecutionService;
     private AgentOrchestrator orchestrator;
 
     @BeforeEach
@@ -142,7 +144,7 @@ class AgentOrchestratorToolCostTest {
         ToolCacheService cacheService = mock(ToolCacheService.class);
         lenient().when(cacheService.get(anyString(), anyString(), anyString())).thenReturn(null);
 
-        ToolExecutionService toolExecutionService = new ToolExecutionService();
+        toolExecutionService = new ToolExecutionService();
         setField(toolExecutionService, "cacheService", cacheService);
         setField(toolExecutionService, "rateLimiter", rateLimiter);
         setField(toolExecutionService, "costTracker", costTracker);
@@ -420,6 +422,61 @@ class AgentOrchestratorToolCostTest {
         return ChatResponse.builder().aiMessage(response.aiMessage())
                 .metadata(ChatResponseMetadata.builder().tokenUsage(new TokenUsage(in, out, total)).build())
                 .build();
+    }
+
+    /**
+     * The counterpart of {@link #retriedLoopDoesNotDoubleCountTokens} for dollars,
+     * and the reason tool cost is deliberately NOT reset the way the token holder
+     * is: {@link ToolCostTracker} bills what was actually spent, not what was
+     * logically requested.
+     * <p>
+     * A replayed attempt re-issues the identical tool call, and
+     * {@code ToolExecutionService.executeToolWrapped} answers it from the cache the
+     * first attempt populated — returning at the cache-hit branch, <em>before</em>
+     * the {@code costTracker.trackToolCall} step. So the replay costs nothing real
+     * and is charged nothing: the conversation total is ONE call's price even
+     * though the loop dispatched the call twice.
+     * <p>
+     * Wired with a real {@link ToolCacheService} on purpose — the shared setup
+     * stubs the cache to miss forever, which models the
+     * {@code enableToolCaching: false} deployment where the replay genuinely
+     * re-executes the tool, genuinely spends the money again, and is therefore
+     * correctly charged again.
+     */
+    @Test
+    @DisplayName("a retried tool loop charges the replayed identical call once — the cache hit is free")
+    void retriedLoopChargesReplayedToolCallOnce() throws Exception {
+        ToolCacheService realCache = new ToolCacheService();
+        setField(realCache, "cacheFactory", new CacheFactory());
+        setField(realCache, "meterRegistry", new SimpleMeterRegistry());
+        realCache.init();
+        setField(toolExecutionService, "cacheService", realCache);
+
+        var task = webSearchTask();
+        var retry = new RetryConfiguration();
+        retry.setMaxAttempts(2);
+        retry.setBackoffDelayMs(1L);
+        task.setRetry(retry);
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class)))
+                // attempt 1: the tool really runs and is really charged ...
+                .thenReturn(toolBatch())
+                // ... then the NEXT model call fails retryably, after the charge
+                .thenThrow(new RuntimeException("rate limit exceeded"))
+                // attempt 2: the whole lambda replays, re-issuing the identical call
+                .thenReturn(toolBatch())
+                .thenReturn(text("done"));
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        assertEquals("done", result.response());
+        verify(webSearchTool, times(1)).searchWeb("eddi", 3);
+
+        assertEquals(SEARCH_PRICE, costTracker.getConversationCosts(CONVERSATION_ID).getTotalCost(), 1e-9,
+                "the replayed call was served from cache and must not be charged a second time");
+        assertEquals(SEARCH_PRICE, (Double) result.responseMetadata().get("toolCostUsd"), 1e-9,
+                "the reported per-call delta must match the single real charge");
     }
 
     /**
