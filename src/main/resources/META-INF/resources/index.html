@@ -4,17 +4,7 @@
     <meta charset="UTF-8">
     <title>EDDI — Redirecting</title>
     <link rel="icon" type="image/svg+xml" href="/eddi-icon.svg">
-    <script>
-      // Returning users go straight to their preferred workspace;
-      // first-time visitors go to the welcome chooser.
-      var pref = null;
-      try { pref = localStorage.getItem('eddi-landing-preference'); } catch(e) {}
-      if (pref === 'manage' || pref === 'workforce') {
-        window.location.replace('/' + pref);
-      } else {
-        window.location.replace('/welcome');
-      }
-    </script>
+    <script src="/scripts/js/landing-redirect.js"></script>
     <meta http-equiv="refresh" content="1;url=/welcome">
 </head>
 <body>

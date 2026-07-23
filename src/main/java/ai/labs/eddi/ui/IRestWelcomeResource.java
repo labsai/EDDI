@@ -6,7 +6,6 @@ package ai.labs.eddi.ui;
 
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
-import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -14,8 +13,8 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.jboss.resteasy.reactive.Cache;
 
 /**
- * Serves the welcome/landing page SPA shell. Users pick between Manager and
- * Workforce here.
+ * Serves the welcome/landing page SPA shell.
+ * Users pick between Manager and Workforce here.
  */
 @Path("/welcome")
 @Produces(MediaType.TEXT_HTML)
@@ -30,5 +29,5 @@ public interface IRestWelcomeResource {
     @Cache(noCache = true, mustRevalidate = true)
     @Path("{path:.*}")
     @Operation(hidden = true)
-    Response viewHtml(@PathParam("path") String path);
+    Response viewHtml();
 }
