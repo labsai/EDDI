@@ -807,22 +807,18 @@ class GroupConversationServiceTest {
         }
 
         @Test
-        void hasOutputKeyButNoTexts_fallsBackToToString() throws Exception {
+        void hasOutputKeyButNoTexts_returnsEmpty() throws Exception {
             var snapshot = new SimpleConversationMemorySnapshot();
             var output = new ConversationOutput();
-            // Has an "output" key prefix but doesn't yield any text via known formats
-            output.put("outputUnknown", "value"); // Doesn't match the patterns
-            // But we need a key starting with "output" to pass the hasAnyOutput check
+            // Has keys that don't match any extraction format
+            output.put("outputUnknown", "value");
             output.put("output-status", "done");
             snapshot.setConversationOutputs(new LinkedList<>(List.of(output)));
 
-            // ConversationOutputExtractor uses toString() fallback (no
-            // jsonSerialization dependency). Just verify non-null and
-            // contains output key content.
-            String result = invoke(snapshot);
-            assertNotNull(result, "Should fall back to toString()");
-            assertTrue(result.contains("output-status"), "Fallback should include output key");
-            assertTrue(result.contains("done"), "Fallback should include value");
+            // ConversationOutputExtractor returns null (no recognizable text),
+            // GCS wrapper converts null → "" for backward compat.
+            assertEquals("", invoke(snapshot),
+                    "Unrecognized output keys should produce empty string, not a toString() dump");
         }
 
         @Test

@@ -366,21 +366,17 @@ class GroupConversationServiceBranchCoverageTest {
         }
 
         @Test
-        @DisplayName("should handle serialize exception by falling back to toString")
-        void serializeException() throws Exception {
+        @DisplayName("should complete gracefully when output has no extractable text")
+        void noExtractableText() throws Exception {
             var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
                     new GroupMember("a1", "Alice", 1, null));
             cfg.setModeratorAgentId("mod");
             setupStore(cfg);
 
             Map<String, Object> outputMap = new LinkedHashMap<>();
-            outputMap.put("output", 42); // Not a list, forces fallback
+            outputMap.put("output", 42); // Not a list — extractor returns null
             stubAgentWithOutputMap("a1", outputMap);
             stubAgent("mod", "Synthesis");
-
-            // serialize throws
-            when(jsonSerialization.serialize(any()))
-                    .thenThrow(new RuntimeException("serialize failed"));
 
             var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
             assertEquals(GroupConversationState.COMPLETED, result.getState());
