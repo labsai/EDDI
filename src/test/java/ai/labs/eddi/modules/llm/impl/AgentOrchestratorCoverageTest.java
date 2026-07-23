@@ -1229,7 +1229,7 @@ class AgentOrchestratorCoverageTest {
                 .thenReturn(text("finished"));
         when(calculatorTool.calculate("9*9")).thenReturn("81");
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), false);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), false);
 
         assertNotNull(result);
         assertEquals("finished", result.response());
@@ -1257,7 +1257,7 @@ class AgentOrchestratorCoverageTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("no can do"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, decision, Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, decision, true);
 
         assertEquals("no can do", result.response());
         verify(calculatorTool, never()).calculate(anyString());
@@ -1283,7 +1283,7 @@ class AgentOrchestratorCoverageTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("unsure"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("unsure", result.response());
         verify(calculatorTool, never()).calculate(anyString());
@@ -1317,7 +1317,7 @@ class AgentOrchestratorCoverageTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("rebuilt"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("rebuilt", result.response());
         assertTrue(result.trace().stream()
@@ -1340,7 +1340,7 @@ class AgentOrchestratorCoverageTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("merged"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("merged", result.response());
         assertTrue(result.trace().stream().anyMatch(e -> "pre_pause_marker".equals(e.get("type"))),
@@ -1362,7 +1362,7 @@ class AgentOrchestratorCoverageTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("lazy done"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("lazy done", result.response());
         verify(calculatorTool, times(1)).calculate("6*7");

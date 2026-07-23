@@ -143,6 +143,14 @@ class ChatModelRegistryTest {
      * {@code LanguageModelBuildersTest}). Mirroring the expression keeps these
      * tests honest about what an unnormalised value would actually do at build
      * time.
+     * <p>
+     * The {@code Long.parseLong} is deliberately left unguarded and MUST stay that
+     * way: catching {@link NumberFormatException} here would make the helper
+     * tolerate values the real builders reject, so a regression in the registry's
+     * timeout normalisation would silently slip past the {@code C3} tests below
+     * instead of surfacing as the very {@code build()}-time crash those tests guard
+     * against. A static-analysis note asking to wrap this parse in a try/catch is a
+     * false positive for exactly that reason.
      */
     private static void parseTimeoutLikeARealProvider(Map<String, String> parameters) {
         if (!isNullOrEmpty(parameters.get("timeout"))) {

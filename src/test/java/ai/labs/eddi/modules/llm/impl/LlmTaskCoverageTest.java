@@ -728,7 +728,7 @@ class LlmTaskCoverageTest {
     void resume_convertToObjectJson_deserialized() throws Exception {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("{\"x\":1}", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"), Map.of("convertToObject", "true"));
@@ -742,7 +742,7 @@ class LlmTaskCoverageTest {
     void resume_convertToObjectNonJson_noDeserialize() throws Exception {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("plain answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"), Map.of("convertToObject", "true"));
@@ -756,7 +756,7 @@ class LlmTaskCoverageTest {
     void resume_nullResult_stateCleared() throws Exception {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(null);
 
         var t = task("taskA", List.of("action1"), null);
@@ -772,7 +772,7 @@ class LlmTaskCoverageTest {
     void resume_addToOutputFalse_noOutput() throws Exception {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"), Map.of("addToOutput", "false"));
@@ -787,7 +787,7 @@ class LlmTaskCoverageTest {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
         when(memory.getAuditCollector()).thenReturn(mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"), null);
@@ -804,7 +804,7 @@ class LlmTaskCoverageTest {
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
         List<Map<String, Object>> trace = new ArrayList<>();
         trace.add(Map.of("tool", "calc"));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", trace));
 
         var t = task("taskA", List.of("action1"), null);
@@ -828,7 +828,7 @@ class LlmTaskCoverageTest {
         var t = task("taskA", List.of("action1"), null);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(agentOrchestrator, never()).resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        verify(agentOrchestrator, never()).resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any());
         verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 

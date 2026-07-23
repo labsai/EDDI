@@ -969,7 +969,7 @@ public class LlmTask implements ILifecycleTask {
         var jsonPolicy = JsonResponseFormatPolicy.of(Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)), resolvedType,
                 task.getJsonResponseFormat());
 
-        var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision, templateDataObjects,
+        var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision,
                 toolHitlEnabled, jsonPolicy);
 
         String responseContent = result != null ? result.response() : null;

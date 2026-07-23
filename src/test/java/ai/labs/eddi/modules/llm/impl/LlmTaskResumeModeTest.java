@@ -163,14 +163,14 @@ class LlmTaskResumeModeTest {
         var b = batch("taskA", 0);
         var d = decision(HitlVerdict.APPROVED);
         wireBaseMemory(List.of("action1"), b, d);
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"));
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         // The batch is handed to the (Task 9) resume loop exactly once.
-        verify(agentOrchestrator).resumeToolLoop(eq(chatModel), eq(t), eq(memory), eq(b), eq(d), anyMap(), anyBoolean(), any());
+        verify(agentOrchestrator).resumeToolLoop(eq(chatModel), eq(t), eq(memory), eq(b), eq(d), anyBoolean(), any());
         // Raw response is stored in step data (mirrors the normal path).
         verify(currentStep, atLeastOnce()).storeData(any());
     }
@@ -180,7 +180,7 @@ class LlmTaskResumeModeTest {
     void resumeRunsPostResponse() throws Exception {
         var b = batch("taskA", 0);
         wireBaseMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"));
@@ -194,7 +194,7 @@ class LlmTaskResumeModeTest {
     void resumeClearsToolPauseState() throws Exception {
         var b = batch("taskA", 0);
         wireBaseMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"));
@@ -215,7 +215,7 @@ class LlmTaskResumeModeTest {
     void resumeSkipsVectorRag() throws Exception {
         var b = batch("taskA", 0);
         wireBaseMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"));
@@ -229,7 +229,7 @@ class LlmTaskResumeModeTest {
     void resumeSkipsPreRequest() throws Exception {
         var b = batch("taskA", 0);
         wireBaseMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"));
@@ -288,7 +288,7 @@ class LlmTaskResumeModeTest {
         // Batch points at task index 1; task 0 already ran pre-pause.
         var b = batch("taskB", 1);
         wireBaseMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t0 = task("taskA", List.of("action1"));
@@ -297,8 +297,8 @@ class LlmTaskResumeModeTest {
 
         // Only the resumed task (index 1) goes through resumeToolLoop; task 0 is not
         // re-run through it.
-        verify(agentOrchestrator).resumeToolLoop(any(), eq(t1), any(), eq(b), any(), anyMap(), anyBoolean(), any());
-        verify(agentOrchestrator, never()).resumeToolLoop(any(), eq(t0), any(), any(), any(), anyMap(), anyBoolean(), any());
+        verify(agentOrchestrator).resumeToolLoop(any(), eq(t1), any(), eq(b), any(), anyBoolean(), any());
+        verify(agentOrchestrator, never()).resumeToolLoop(any(), eq(t0), any(), any(), any(), anyBoolean(), any());
     }
 
     @Test

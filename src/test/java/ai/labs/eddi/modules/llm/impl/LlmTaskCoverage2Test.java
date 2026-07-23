@@ -769,7 +769,7 @@ class LlmTaskCoverage2Test {
         when(memory.getHitlResumeDecision()).thenReturn(d);
         lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"), null); // no responseObjectName → defaults to id

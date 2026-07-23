@@ -468,24 +468,22 @@ class AgentOrchestrator {
      *            gated calls
      * @param decision
      *            the human decision being applied
-     * @param templateDataObjects
-     *            the template data map (for post-response and fallback rebuild)
      * @return the execution result (final response + tool trace)
      */
     ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
-                                   HitlDecision decision, Map<String, Object> templateDataObjects, boolean toolHitlEnabled)
+                                   HitlDecision decision, boolean toolHitlEnabled)
             throws LifecycleException {
-        return resumeToolLoop(chatModel, task, memory, batch, decision, templateDataObjects, toolHitlEnabled, JsonResponseFormatPolicy.DISABLED);
+        return resumeToolLoop(chatModel, task, memory, batch, decision, toolHitlEnabled, JsonResponseFormatPolicy.DISABLED);
     }
 
     /**
      * As
-     * {@link #resumeToolLoop(ChatModel, LlmConfiguration.Task, IConversationMemory, PendingToolCallBatch, HitlDecision, Map, boolean)},
+     * {@link #resumeToolLoop(ChatModel, LlmConfiguration.Task, IConversationMemory, PendingToolCallBatch, HitlDecision, boolean)},
      * but carrying the JSON response-format policy so the continuation's requests
      * match what the live loop would have sent.
      */
     ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
-                                   HitlDecision decision, Map<String, Object> templateDataObjects, boolean toolHitlEnabled,
+                                   HitlDecision decision, boolean toolHitlEnabled,
                                    JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 

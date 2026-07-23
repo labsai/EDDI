@@ -5,6 +5,26 @@
 
 ---
 
+## 🧹 A dead `resumeToolLoop` parameter, and a CodeQL note on a deliberately unguarded test parse (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Cluster `dead-param-and-test-nit`: one github-code-quality dead-parameter finding and one CodeQL note on a test helper. Both traced to source before touching anything — the first is real and removed, the second is a false positive left unchanged (with one clarifying javadoc line).
+
+### A — `resumeToolLoop`'s `templateDataObjects` parameter was dead (real, removed)
+
+Both `AgentOrchestrator#resumeToolLoop` overloads (the 7-arg delegator and the 8-arg policy-carrying body) declared `Map<String, Object> templateDataObjects`, and the javadoc claimed it fed "post-response and fallback rebuild". Reading both bodies end to end, it is referenced nowhere: the 7-arg overload only threads it into the 8-arg, the 8-arg never touches it, and the fallback path it named (`fallbackRebuildMessages(task, memory, batch)`) does not take it. `LlmTask.executeResume` still uses its *own* local `templateDataObjects` (template render + response-metadata put) — only the pass-through into `resumeToolLoop` was inert. Exactly the branch's theme: a parameter that looks load-bearing and is not.
+
+**Fix:** dropped the parameter from both overloads, the delegating call, the `@param`/`@link` javadoc, the sole production caller (`LlmTask`), and every test call site. Because dropping an argument silently invalidates Mockito matcher lists (an unmatched stub returns null; a `verify(never())` goes vacuous — both stay green, both would be wrong), every stub/verify was re-checked: the real 7-arg calls in `AgentOrchestratorResumeToolLoopTest`/`AgentOrchestratorCoverageTest` shed their `Map.of()`; the 8-matcher `any()` lists and the `anyMap()` verifies in the `LlmTask*` tests each lost exactly the sixth matcher, keeping arity aligned to the new signature. For a behaviour-preserving removal the verification is the compile plus the suites: `test-compile` clean, and 178 tests across the 8 named classes green (`AgentOrchestratorResumeToolLoopTest` 11, `AgentOrchestratorToolPauseTest` 8, `AgentOrchestratorCoverageTest` 59, `LlmTaskResumeModeTest` 9, `LlmTaskCoverageTest` 43, `LlmTaskAgentModeMetadataTest` 7, `LlmTaskCoverage2Test` 29, `LlmTaskAuditLedgerTest` 12). The two `verify(never())` sites stay non-vacuous — in `LlmTaskResumeModeTest` the sibling positive verify binds the same 7-arg overload and passes.
+
+### B — CodeQL "missing catch of NumberFormatException" in a test helper (false positive, one clarifying javadoc line)
+
+`ChatModelRegistryTest.parseTimeoutLikeARealProvider` does `Duration.ofMillis(Long.parseLong(parameters.get("timeout")))` under an un-trimming `isNullOrEmpty` guard, and CodeQL wants a try/catch rethrowing `IllegalArgumentException`. The helper's whole job is to reproduce, verbatim, what the shipped provider builders do — every one of `OpenAI/Azure/Bedrock/Ollama/HuggingFace/Gemini/Anthropic/Mistral/…LanguageModelBuilder` runs `builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))))` with no guard. The C3 `TimeoutNormalisationTests` depend on that fidelity: they prove the registry's `normalizeTimeout` drops blank/non-numeric/zero values before a builder ever sees them. Wrapping the helper's parse in a try/catch would make it tolerate values the real builders reject, so a normalization regression would pass silently instead of surfacing as the `build()`-time crash the tests guard.
+
+Demonstrated: neutralize `normalizeTimeout` (early `return`) and the C3 tests fail with `NumberFormatException` thrown straight from the helper — `"30s"`, `" "`, `"not-a-number"`, `" 5000 "` (2 failures / 4 errors); restore and `ChatModelRegistryTest` is 41 green. So the finding is a false positive and production/test behaviour is untouched. Rather than a bare suppression, the helper's existing javadoc gained one sentence stating the unguarded parse is deliberate and must stay so, naming the try/catch note as a false positive — making the intent unmistakable to the next reader without weakening the test.
+
+---
+
 ## 🔐 Constant-time audit HMAC comparison, and a retry-cost finding that wasn't (2026-07-23)
 
 **Repo:** EDDI (`fix/backlog-defect-remediation`)

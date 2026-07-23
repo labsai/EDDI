@@ -427,7 +427,7 @@ class LlmTaskAuditLedgerTest {
 
         List<Map<String, Object>> trace = new ArrayList<>();
         trace.add(Map.of("type", "tool_call", "tool", "calculator"));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed", trace,
                         Map.of("tokenUsage", Map.of("inputTokens", 7, "outputTokens", 3, "totalTokens", 10),
                                 "toolCostUsd", 0.005)));

@@ -366,7 +366,7 @@ class LlmTaskAgentModeMetadataTest {
         wireStandardMemory();
         when(memory.getHitlPendingToolCalls()).thenReturn(batch);
         when(memory.getHitlResumeDecision()).thenReturn(decision);
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>(),
                         Map.of("tokenUsage", agentTokenUsage())));
 
@@ -392,7 +392,7 @@ class LlmTaskAgentModeMetadataTest {
         wireStandardMemory();
         when(memory.getHitlPendingToolCalls()).thenReturn(batch);
         when(memory.getHitlResumeDecision()).thenReturn(decision);
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(null);
 
         llmTask.execute(memory, new LlmConfiguration(List.of(task("taskA"))));
