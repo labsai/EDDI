@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Manages ChatModel creation, caching, and lookup by type and parameters.
@@ -52,6 +53,27 @@ public class ChatModelRegistry {
     private final Map<ModelCacheKey, ChatModel> modelCache = new ConcurrentHashMap<>(1);
     private final Map<ModelCacheKey, StreamingChatModel> streamingModelCache = new ConcurrentHashMap<>(1);
 
+    /**
+     * Bumped by every cache invalidation — secret rotation, targeted secret
+     * eviction, and global-variable edits. A build snapshots this before it
+     * resolves any global or vault value and re-checks it before publishing, so a
+     * model built from values that a concurrent invalidation has since made stale
+     * is never cached. This is process-wide registry state, not per-conversation
+     * state, so it is safe on this singleton.
+     */
+    private final AtomicLong invalidationGeneration = new AtomicLong();
+
+    /**
+     * Serializes a build's publish decision against a concurrent invalidation. The
+     * publish path holds it for "re-check the generation, then {@code put}"; every
+     * invalidation path holds it for "bump the generation, then
+     * {@code clear}/evict". Without it the re-check would itself be a
+     * check-then-act — an invalidation landing between the check and the
+     * {@code put} would leave a stale model cached — which is exactly the defect
+     * this guards against.
+     */
+    private final Object publishLock = new Object();
+
     @Inject
     ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
@@ -70,11 +92,14 @@ public class ChatModelRegistry {
     void registerSecretInvalidation() {
         secretResolver.registerInvalidationListener(this::invalidateForSecret);
         globalVariableResolver.registerInvalidationListener(() -> {
-            int total = modelCache.size() + streamingModelCache.size();
-            modelCache.clear();
-            streamingModelCache.clear();
-            if (total > 0) {
-                LOGGER.infof("Invalidated all %d model(s) due to global variable change", total);
+            synchronized (publishLock) {
+                invalidationGeneration.incrementAndGet();
+                int total = modelCache.size() + streamingModelCache.size();
+                modelCache.clear();
+                streamingModelCache.clear();
+                if (total > 0) {
+                    LOGGER.infof("Invalidated all %d model(s) due to global variable change", total);
+                }
             }
         });
         LOGGER.info("ChatModelRegistry registered for secret and global variable invalidation events");
@@ -96,6 +121,9 @@ public class ChatModelRegistry {
      * global variable edits), and a clear landing between the two calls made this
      * method return {@code null} to callers that hand the result straight to
      * {@code chat(...)}. A miss simply falls through to construction.
+     * <p>
+     * A freshly built model is published to the cache only if no invalidation raced
+     * the build — see {@link #publishIfCurrent}.
      */
     ChatModel getOrCreate(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
 
@@ -117,13 +145,19 @@ public class ChatModelRegistry {
 
         warnAboutRejectedTimeout(type, processedParams.get(KEY_TIMEOUT), timeoutMs);
 
+        // Snapshot the invalidation generation BEFORE resolving values: it is the
+        // resolved global/secret values that a concurrent rotation or edit makes stale,
+        // so publishIfCurrent refuses to cache this model if the generation moves while
+        // it is being built.
+        long generationAtBuildStart = invalidationGeneration.get();
+
         // Resolve global variable references, then vault secrets (late-binding:
         // after Qute, before builder.build())
         var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
         resolvedParams = secretResolver.resolveSecrets(resolvedParams);
         var rawModel = languageModelApiConnectorBuilders.get(type).get().build(resolvedParams);
         var model = ObservableChatModel.wrapIfNeeded(rawModel, type, timeoutMs, logReq, logResp);
-        modelCache.put(cacheKey, model);
+        publishIfCurrent(modelCache, cacheKey, model, generationAtBuildStart);
 
         return model;
     }
@@ -163,17 +197,53 @@ public class ChatModelRegistry {
         warnAboutRejectedTimeout(type, processedParams.get(KEY_TIMEOUT), filteredParams.get(KEY_TIMEOUT));
 
         try {
+            // Snapshot the invalidation generation before resolving values a concurrent
+            // invalidation could make stale (see publishIfCurrent), as on the sync path.
+            long generationAtBuildStart = invalidationGeneration.get();
+
             // Resolve global variable references, then vault secrets (late-binding:
             // after Qute, before builder.build())
             var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
             resolvedParams = secretResolver.resolveSecrets(resolvedParams);
             var rawModel = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);
             var model = ObservableStreamingChatModel.wrapIfNeeded(rawModel, type, logReq, logResp);
-            streamingModelCache.put(cacheKey, model);
+            publishIfCurrent(streamingModelCache, cacheKey, model, generationAtBuildStart);
             return model;
         } catch (UnsupportedOperationException e) {
             LOGGER.debugf("Streaming not supported for type '%s', falling back to sync", type);
             return null;
+        }
+    }
+
+    /**
+     * Publish a freshly built model to its cache only if no invalidation has
+     * occurred since the build started.
+     * <p>
+     * The model was constructed from global-variable and vault-secret values
+     * resolved after {@code generationAtBuildStart} was snapshotted. If the
+     * generation has moved since, a secret rotation or global-variable edit landed
+     * while the model was being built, so those resolved values — and therefore
+     * this model — may be stale: it must not enter the cache, where later turns
+     * would keep reusing it until the next unrelated invalidation. The current
+     * caller still receives this instance for its own turn (its build began before
+     * the rotation committed — an unavoidable, one-turn window); the next lookup
+     * misses and rebuilds from current values.
+     * <p>
+     * The re-check and the {@code put} run under {@link #publishLock}, which every
+     * invalidation path also holds around its generation bump and clear/evict, so
+     * the two cannot interleave — closing the check-then-act window that a bare
+     * re-check would leave open. The generation is a coarse, registry-wide signal:
+     * an unrelated invalidation may cause a model to be rebuilt needlessly, which
+     * is wasteful but always correct.
+     */
+    private <T> void publishIfCurrent(Map<ModelCacheKey, T> cache, ModelCacheKey cacheKey, T model,
+                                      long generationAtBuildStart) {
+        synchronized (publishLock) {
+            if (invalidationGeneration.get() == generationAtBuildStart) {
+                cache.put(cacheKey, model);
+            } else {
+                LOGGER.debugf("Model built while an invalidation landed — not caching it; the next use rebuilds");
+            }
         }
     }
 
@@ -280,43 +350,53 @@ public class ChatModelRegistry {
      * <p>
      * When {@code reference} is null (DEK/KEK rotation — all secrets affected),
      * clear everything.
+     * <p>
+     * The whole event runs under {@link #publishLock} and first bumps
+     * {@link #invalidationGeneration}, so a build whose secret resolution overlaps
+     * this rotation cannot publish its now-stale model afterwards (see
+     * {@link #publishIfCurrent}). One bump covers both the full-clear and the
+     * targeted {@link #evictMatching} paths.
      *
      * @param reference
      *            the changed secret, or null for full invalidation
      */
     void invalidateForSecret(SecretReference reference) {
-        if (reference == null) {
-            // Full invalidation (DEK/KEK rotation)
-            int total = modelCache.size() + streamingModelCache.size();
-            modelCache.clear();
-            streamingModelCache.clear();
-            if (total > 0) {
-                LOGGER.infof("Invalidated all %d model(s) due to bulk secret rotation", total);
+        synchronized (publishLock) {
+            invalidationGeneration.incrementAndGet();
+
+            if (reference == null) {
+                // Full invalidation (DEK/KEK rotation)
+                int total = modelCache.size() + streamingModelCache.size();
+                modelCache.clear();
+                streamingModelCache.clear();
+                if (total > 0) {
+                    LOGGER.infof("Invalidated all %d model(s) due to bulk secret rotation", total);
+                }
+                return;
             }
-            return;
-        }
 
-        // Build the vault reference forms to search for in cached parameters.
-        // New canonical form: ${vault:tenantId/keyName} — always valid
-        String fullRef = "${vault:" + reference.tenantId() + "/" + reference.keyName() + "}";
-        // Legacy form: ${eddivault:tenantId/keyName} — for backward compat
-        String legacyFullRef = "${eddivault:" + reference.tenantId() + "/" + reference.keyName() + "}";
-        // Short form: ${vault:keyName} — only valid for the default tenant.
-        // The short form always resolves to "default", so a non-default tenant's
-        // secret must NOT match short-form references (that would be a false positive).
-        String shortRef = SecretReference.DEFAULT_TENANT.equals(reference.tenantId())
-                ? "${vault:" + reference.keyName() + "}"
-                : null;
-        String legacyShortRef = SecretReference.DEFAULT_TENANT.equals(reference.tenantId())
-                ? "${eddivault:" + reference.keyName() + "}"
-                : null;
+            // Build the vault reference forms to search for in cached parameters.
+            // New canonical form: ${vault:tenantId/keyName} — always valid
+            String fullRef = "${vault:" + reference.tenantId() + "/" + reference.keyName() + "}";
+            // Legacy form: ${eddivault:tenantId/keyName} — for backward compat
+            String legacyFullRef = "${eddivault:" + reference.tenantId() + "/" + reference.keyName() + "}";
+            // Short form: ${vault:keyName} — only valid for the default tenant.
+            // The short form always resolves to "default", so a non-default tenant's
+            // secret must NOT match short-form references (that would be a false positive).
+            String shortRef = SecretReference.DEFAULT_TENANT.equals(reference.tenantId())
+                    ? "${vault:" + reference.keyName() + "}"
+                    : null;
+            String legacyShortRef = SecretReference.DEFAULT_TENANT.equals(reference.tenantId())
+                    ? "${eddivault:" + reference.keyName() + "}"
+                    : null;
 
-        int evicted = evictMatching(modelCache, fullRef, legacyFullRef, shortRef, legacyShortRef)
-                + evictMatching(streamingModelCache, fullRef, legacyFullRef, shortRef, legacyShortRef);
+            int evicted = evictMatching(modelCache, fullRef, legacyFullRef, shortRef, legacyShortRef)
+                    + evictMatching(streamingModelCache, fullRef, legacyFullRef, shortRef, legacyShortRef);
 
-        if (evicted > 0) {
-            LOGGER.infof("Evicted %d model(s) using secret '%s/%s'",
-                    evicted, sanitize(reference.tenantId()), sanitize(reference.keyName()));
+            if (evicted > 0) {
+                LOGGER.infof("Evicted %d model(s) using secret '%s/%s'",
+                        evicted, sanitize(reference.tenantId()), sanitize(reference.keyName()));
+            }
         }
     }
 

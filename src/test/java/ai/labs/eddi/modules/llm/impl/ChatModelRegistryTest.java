@@ -158,6 +158,20 @@ class ChatModelRegistryTest {
         }
     }
 
+    /**
+     * A registry wired with pass-through secret/global resolvers and
+     * caller-supplied builders. Used by tests that need a builder with custom
+     * behaviour — e.g. one that triggers an invalidation from inside
+     * {@code build()} to race the publish.
+     */
+    private static ChatModelRegistry passThroughRegistry(Map<String, Provider<ILanguageModelBuilder>> builders) {
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        return new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
+    }
+
     @Nested
     @DisplayName("Sync model tests")
     class SyncTests {
@@ -858,6 +872,134 @@ class ChatModelRegistryTest {
             StreamingChatModel streamRebuilt = invalidationRegistry.getOrCreateStreaming("openai", params);
             assertNotSame(syncOriginal, syncRebuilt, "Sync model should be evicted and rebuilt");
             assertNotSame(streamOriginal, streamRebuilt, "Streaming model should be evicted and rebuilt");
+        }
+    }
+
+    /**
+     * A defect distinct from the {@code C1} check-then-act race (which was about a
+     * concurrent {@code clear()} turning a cache <em>hit</em> into a {@code null}).
+     * <p>
+     * A secret rotation ({@link ChatModelRegistry#invalidateForSecret}) or a
+     * global-variable edit (the invalidation listener) can land <em>while a build
+     * is in flight</em> — after {@code getOrCreate}/{@code getOrCreateStreaming}
+     * has resolved the (now about-to-be-stale) global and vault values, but before
+     * it publishes the finished model. The old code then cached that model
+     * unconditionally, so every later turn kept reusing a model built from the
+     * pre-rotation secret until some unrelated invalidation happened to evict it —
+     * i.e. a rotation could silently fail to take effect.
+     * <p>
+     * The fix snapshots an invalidation generation before resolving values and
+     * refuses to publish the model if the generation moved while it was being
+     * built. These tests make the interleaving deterministic by triggering the
+     * invalidation from inside the builder — exactly between the generation
+     * snapshot and the publish. The racing caller still receives its freshly built
+     * instance; what must not happen is that instance being served to the
+     * <em>next</em> caller from the cache.
+     */
+    @Nested
+    @DisplayName("A model built while an invalidation lands is not cached as stale (C5)")
+    class StaleRebuildDuringInvalidationTests {
+
+        @Test
+        @DisplayName("sync: a rotation landing mid-build is discarded, not cached")
+        void getOrCreate_invalidationDuringBuild_isNotCached() throws Exception {
+            var buildCount = new AtomicInteger();
+            var registryRef = new AtomicReference<ChatModelRegistry>();
+
+            Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
+            builders.put("openai", () -> new ILanguageModelBuilder() {
+                @Override
+                public ChatModel build(Map<String, String> parameters) {
+                    // Only the first build races an invalidation: a secret rotation lands
+                    // after the generation was snapshotted but before this model is published.
+                    if (buildCount.incrementAndGet() == 1) {
+                        registryRef.get().invalidateForSecret(null);
+                    }
+                    return new ChatModel() {
+                        @Override
+                        public ChatResponse chat(List<ChatMessage> messages) {
+                            return ChatResponse.builder().aiMessage(aiMessage("ok")).build();
+                        }
+                    };
+                }
+
+                @Override
+                public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+                    return new StreamingChatModel() {
+                        @Override
+                        public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                        }
+                    };
+                }
+            });
+
+            ChatModelRegistry reg = passThroughRegistry(builders);
+            registryRef.set(reg);
+            var params = Map.of("apiKey", "${vault:openai-key}");
+
+            ChatModel racing = reg.getOrCreate("openai", params);
+            assertNotNull(racing, "the racing caller still receives its freshly built model");
+
+            ChatModel afterRace = reg.getOrCreate("openai", params);
+            assertNotSame(racing, afterRace,
+                    "a model built from values a concurrent rotation made stale must NOT be cached — "
+                            + "the next lookup must miss and rebuild");
+
+            ChatModel stable = reg.getOrCreate("openai", params);
+            assertSame(afterRace, stable, "with no further invalidation, the rebuilt model caches normally");
+
+            assertEquals(2, buildCount.get(),
+                    "exactly two builds: the discarded stale one, then the cached one — the third call is a cache hit");
+        }
+
+        @Test
+        @DisplayName("streaming: a rotation landing mid-build is discarded, not cached")
+        void getOrCreateStreaming_invalidationDuringBuild_isNotCached() throws Exception {
+            var buildCount = new AtomicInteger();
+            var registryRef = new AtomicReference<ChatModelRegistry>();
+
+            Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
+            builders.put("openai", () -> new ILanguageModelBuilder() {
+                @Override
+                public ChatModel build(Map<String, String> parameters) {
+                    return new ChatModel() {
+                        @Override
+                        public ChatResponse chat(List<ChatMessage> messages) {
+                            return ChatResponse.builder().aiMessage(aiMessage("ok")).build();
+                        }
+                    };
+                }
+
+                @Override
+                public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+                    // Only the first build races an invalidation, as on the sync path.
+                    if (buildCount.incrementAndGet() == 1) {
+                        registryRef.get().invalidateForSecret(null);
+                    }
+                    return new StreamingChatModel() {
+                        @Override
+                        public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                        }
+                    };
+                }
+            });
+
+            ChatModelRegistry reg = passThroughRegistry(builders);
+            registryRef.set(reg);
+            var params = Map.of("apiKey", "${vault:openai-key}");
+
+            StreamingChatModel racing = reg.getOrCreateStreaming("openai", params);
+            assertNotNull(racing, "the racing caller still receives its freshly built streaming model");
+
+            StreamingChatModel afterRace = reg.getOrCreateStreaming("openai", params);
+            assertNotSame(racing, afterRace,
+                    "a streaming model built from values a concurrent rotation made stale must NOT be cached");
+
+            StreamingChatModel stable = reg.getOrCreateStreaming("openai", params);
+            assertSame(afterRace, stable, "with no further invalidation, the rebuilt streaming model caches normally");
+
+            assertEquals(2, buildCount.get(),
+                    "exactly two builds: the discarded stale one, then the cached one — the third call is a cache hit");
         }
     }
 }

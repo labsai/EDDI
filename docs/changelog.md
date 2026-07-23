@@ -5,6 +5,27 @@
 
 ---
 
+## 🧵 Model registry: a rotation landing mid-build could re-cache a stale model (2026-07-23)
+
+**Repo:** EDDI (`fix/chatmodel-stale-rebuild-race`)
+
+CodeRabbit flagged this on the `fix/backlog-defect-remediation` PR (Major / "Heavy lift") and it was deliberately deferred from that branch. It is **separate** from the `C1` check-then-act race fixed there (commit `96eacacde`, which stopped a concurrent `clear()` turning a cache *hit* into a `null` return).
+
+**The defect.** `getOrCreate`/`getOrCreateStreaming` resolve global-variable and vault-secret values, build a model from them, and then `put` it into the cache — all unsynchronised. A secret rotation (`invalidateForSecret` → `clear()`/`evictMatching`) or a global-variable edit (the invalidation listener → `clear()`) can land **between the resolve and the `put`**. The `clear()` finds nothing (the entry does not exist yet), and the in-flight build then `put`s a model constructed from the **now-stale** secret. Because the entry is present and valid-looking, every later turn keeps reusing that pre-rotation model until some *unrelated* invalidation happens to evict it — i.e. a rotation could silently fail to take effect.
+
+**The fix — an invalidation generation.** A process-wide `AtomicLong invalidationGeneration` is bumped by every invalidation (`invalidateForSecret` for both the bulk-clear and targeted-`evictMatching` paths, and the global-variable listener). A build snapshots the generation *before* it resolves any value, and publishes through `publishIfCurrent`, which caches the model **only if the generation is unchanged**; otherwise it discards it (the racing caller still receives the instance for its own turn — a one-turn window inherent to lock-free building — but the next lookup misses and rebuilds from current values). The re-check and the `put` are held under a new `publishLock` that the invalidation paths also hold around their bump-and-clear, so "re-check then put" and "bump then clear" cannot interleave — without that lock the re-check would itself be a check-then-act with the same hole.
+
+**Design decisions:**
+
+- **Do-not-cache rather than rebuild-and-retry.** CodeRabbit suggested "discard and rebuild (or at least do not cache)". Not caching fully closes the reported bug (persistent staleness) with no unbounded-retry surface under an invalidation storm; the residual one-turn exposure of the racing caller is fundamental to building without holding a lock across the whole (potentially slow) provider build.
+- **The generation is a coarse, registry-wide signal.** An invalidation for an unrelated secret still bumps it, so a concurrent build may be rebuilt needlessly — wasteful but always correct, and far simpler than trying to match the in-flight build against the specific rotated reference. Invalidations are rare.
+- **`publishLock` scope is minimal.** Builds (the expensive part) stay fully concurrent; the lock covers only the cheap re-check+`put` and the clear/evict. Both resolvers fire their listeners outside any lock, so taking `publishLock` in the callbacks introduces no lock-ordering/deadlock risk, and no path holds `publishLock` while calling back into a resolver.
+- **The counter is registry state, not conversation state.** The class stays `@ApplicationScoped` and per-conversation-stateless; the generation and lock are process-global memoization-cache concerns, which is the correct home for them.
+
+**Tests:** `ChatModelRegistryTest` gains a nested `StaleRebuildDuringInvalidationTests` (C5) with a sync and a streaming case. Each installs a builder that fires `invalidateForSecret(null)` from inside `build()`/`buildStreaming()` — deterministically the interleaving "clear lands between build-start and publish" — then asserts the racing model is **not** served to the next caller (it rebuilds) and that caching resumes normally afterwards, with an exact build-count assertion. Mutation-checked twice: against the pre-fix code both tests fail with `expected: not same but was: <same instance>`, and reverting only the generation guard in `publishIfCurrent` (unconditional `put`) fails exactly those two tests and no others.
+
+---
+
 ## 🧪 De-vacuum three tests and fix a doc/fixture drift (2026-07-23)
 
 **Repo:** EDDI (`fix/backlog-defect-remediation`)
