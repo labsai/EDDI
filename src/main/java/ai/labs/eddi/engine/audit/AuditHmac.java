@@ -120,13 +120,43 @@ public final class AuditHmac {
     /**
      * Produce a deterministic string for a map by sorting keys. Uses TreeMap to
      * ensure consistent ordering regardless of Map implementation.
+     * <p>
+     * Nested maps and lists are canonicalized <em>recursively</em> rather than via
+     * {@code toString()}. This is load-bearing for round-tripped entries: the store
+     * deserializes {@code llmDetail}/{@code toolCalls} with a shallow
+     * {@code new LinkedHashMap<>(document)}, so a nested value comes back as an
+     * {@code org.bson.Document} whose {@code toString()} is prefixed with
+     * {@code Document&#123;} — a stored entry would then fail to verify against its
+     * own HMAC. Scalars still fall through to {@code toString()}, so flat maps
+     * (every entry written before nesting existed) produce a byte-identical
+     * canonical string and keep verifying.
      */
-    private static String sortedMapString(Map<String, Object> map) {
+    private static String sortedMapString(Map<?, ?> map) {
         if (map == null)
             return "";
         // Sort keys and produce a deterministic representation
-        return new TreeMap<>(map).entrySet().stream().map(e -> e.getKey() + "=" + Objects.toString(e.getValue(), ""))
+        Map<String, Object> sorted = new TreeMap<>();
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            sorted.put(String.valueOf(entry.getKey()), entry.getValue());
+        }
+        return sorted.entrySet().stream().map(e -> e.getKey() + "=" + canonicalValue(e.getValue()))
                 .collect(Collectors.joining(",", "{", "}"));
+    }
+
+    /**
+     * Canonicalize a single value: maps are sorted recursively, lists keep their
+     * order with each element canonicalized, everything else uses
+     * {@code toString()} (null becomes the empty string, matching the historical
+     * {@code Objects.toString(value, "")} behaviour).
+     */
+    private static String canonicalValue(Object value) {
+        if (value == null)
+            return "";
+        if (value instanceof Map<?, ?> nested)
+            return sortedMapString(nested);
+        if (value instanceof List<?> list)
+            return list.stream().map(AuditHmac::canonicalValue).collect(Collectors.joining(",", "[", "]"));
+        return value.toString();
     }
 
     private static String hmacSha256(String data, byte[] key) {
