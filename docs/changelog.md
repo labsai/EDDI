@@ -5,6 +5,18 @@
 
 ---
 
+## 🔒 Redact secrets from the tool trace before it reaches the SSE stream (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+The D3 fix earlier on this branch made the tool trace reach the `task_complete` SSE frame — the first time tool arguments and results leave the process on a channel with no redaction of its own. Those payloads are LLM- and user-controlled, so they can carry API keys or bearer tokens. Copilot flagged it HIGH on the PR; the tradeoff had been disclosed in the PR description rather than fixed.
+
+Now fixed at the producer. `LifecycleManager.buildTaskSummary` deep-redacts the collected trace through `SecretRedactionFilter` — the same filter the audit ledger already applies via `AuditLedgerService.scrubSecrets` — before putting it on the summary, bringing the live-display path to parity with the audit path. The redaction walks maps and lists recursively and scrubs every string leaf, and it operates on a fresh copy: the trace stored in conversation memory is left intact for the owner-scoped `RestToolHistory` endpoint. Only the summary's `toolTrace` is touched; `buildAuditEntry` reads its own `audit:tool_calls` key (separately scrubbed on submit), so the audit path is unchanged and not double-scrubbed.
+
+Regression test `LifecycleManagerTest.summaryRedactsSecretsInToolTrace` feeds an `sk-…` key and a bearer token through the trace and asserts neither reaches the summary while the non-secret structure (`type`, `tool`) survives. Mutation-checked: bypassing the redaction call fails with the raw key visible in the captured payload.
+
+---
+
 ## 📝 Budget-enforcement docs corrected to match the shipped opt-in default (2026-07-23)
 
 **Repo:** EDDI (`fix/backlog-defect-remediation`)

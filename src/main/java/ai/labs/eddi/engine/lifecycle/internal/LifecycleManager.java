@@ -478,7 +478,12 @@ public class LifecycleManager implements ILifecycleManager {
         if (isLlmTask(task)) {
             List<Object> toolTrace = collectToolTrace(conversationMemory.getCurrentStep());
             if (!toolTrace.isEmpty()) {
-                summary.put("toolTrace", toolTrace);
+                // Redact before it leaves the process. This summary feeds the SSE
+                // task_complete frame, and tool arguments/results are LLM- and
+                // user-controlled, so they can carry secrets (API keys, bearer
+                // tokens). The audit-ledger path already scrubs the same content via
+                // AuditLedgerService; this brings the live-display path to parity.
+                summary.put("toolTrace", redactToolTrace(toolTrace));
             }
             // Cascade confidence (when model cascade is active) — written as a Double by
             // LlmTask's cascade branch. It used to write a String under a different key
@@ -525,6 +530,39 @@ public class LifecycleManager implements ILifecycleManager {
             }
         }
         return aggregated;
+    }
+
+    /**
+     * Deep-redacts a collected tool trace before it is placed on the SSE
+     * {@code task_complete} summary. Each entry is a {@code Map} whose
+     * {@code arguments}/{@code result} strings are LLM- or user-controlled and may
+     * contain secrets. Mirrors {@code AuditLedgerService}'s scrub so the two
+     * outward-facing channels redact the same way. Returns a fresh structure — the
+     * trace stored in conversation memory is left intact for the owner-scoped
+     * {@code RestToolHistory} endpoint.
+     */
+    private static List<Object> redactToolTrace(List<Object> trace) {
+        List<Object> redacted = new ArrayList<>(trace.size());
+        for (Object entry : trace) {
+            redacted.add(redactTraceValue(entry));
+        }
+        return redacted;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object redactTraceValue(Object value) {
+        if (value instanceof String s) {
+            return SecretRedactionFilter.redact(s);
+        } else if (value instanceof Map<?, ?> map) {
+            Map<String, Object> scrubbed = new LinkedHashMap<>(map.size());
+            for (Map.Entry<String, Object> e : ((Map<String, Object>) map).entrySet()) {
+                scrubbed.put(e.getKey(), redactTraceValue(e.getValue()));
+            }
+            return scrubbed;
+        } else if (value instanceof List<?> list) {
+            return list.stream().map(LifecycleManager::redactTraceValue).toList();
+        }
+        return value;
     }
 
     /**

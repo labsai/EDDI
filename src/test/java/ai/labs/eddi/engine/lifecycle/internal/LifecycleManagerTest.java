@@ -1112,6 +1112,34 @@ class LifecycleManagerTest {
         }
 
         @Test
+        @DisplayName("secrets in tool arguments/results are redacted before reaching the SSE summary")
+        void summaryRedactsSecretsInToolTrace() throws Exception {
+            // The summary feeds the task_complete SSE frame, which — unlike the audit
+            // ledger — has no redaction of its own. Tool arguments/results are LLM- and
+            // user-controlled, so a secret in one must not leave the process verbatim.
+            var apiKey = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            var bearer = "Bearer abcdefghijklmnopqrstuvwxyz0123456789";
+            var call = Map.<String, Object>of("type", "tool_call", "tool", "http",
+                    "arguments", "{\"key\":\"" + apiKey + "\"}");
+            var result = Map.<String, Object>of("type", "tool_result", "tool", "http",
+                    "result", "authorized with " + bearer);
+            var summary = runAndCaptureSummary("langchain",
+                    List.<IData<?>>of(new Data<>("langchain:trace:openai:taskA", List.of(call, result))));
+
+            @SuppressWarnings("unchecked")
+            var trace = (List<Map<String, Object>>) summary.get("toolTrace");
+            assertNotNull(trace);
+            var serialized = trace.toString();
+            assertFalse(serialized.contains(apiKey),
+                    "the raw API key must not reach the SSE summary; saw: " + serialized);
+            assertFalse(serialized.contains(bearer),
+                    "the raw bearer token must not reach the SSE summary; saw: " + serialized);
+            // Non-secret structure is preserved so the live display still works.
+            assertEquals("tool_call", trace.get(0).get("type"));
+            assertEquals("http", trace.get(0).get("tool"));
+        }
+
+        @Test
         @DisplayName("non-langchain task: trace lingering in the step is NOT reported")
         void summaryOmitsToolTraceForNonLangchainTask() throws Exception {
             // Step data survives across tasks, so without the task-type gate every task
