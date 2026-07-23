@@ -60,12 +60,10 @@ class CascadingModelExecutor {
     // I/O-bound model calls
     private static final ExecutorService TIMEOUT_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
 
-    // Bound for a live-streamed step's future — must exceed
-    // StreamingLegacyChatExecutor's
-    // own internal latch timeout (120s) so the streaming executor returns its
-    // (possibly
-    // partial) result before this backstop could cancel it mid-stream.
-    private static final long STREAMING_STEP_TIMEOUT_MS = 125_000L;
+    // Margin added on top of StreamingLegacyChatExecutor's own bound when timing a
+    // live-streamed step's future, so the streaming executor always returns its
+    // (possibly partial) result before this backstop could cancel it mid-stream.
+    private static final long STREAMING_STEP_TIMEOUT_MARGIN_MS = 5_000L;
 
     /**
      * Parameter keys that must NOT be run through the template engine
@@ -305,7 +303,7 @@ class CascadingModelExecutor {
                 // pre-step ceiling check already bails out when the budget is fully spent).
                 long stepTimeout;
                 if (streamingModel != null) {
-                    stepTimeout = STREAMING_STEP_TIMEOUT_MS;
+                    stepTimeout = resolveStreamingStepTimeoutMs(task);
                 } else {
                     stepTimeout = step.getTimeoutMs() != null ? step.getTimeoutMs() : 30000L;
                     if (maxTotalDurationMs != null) {
@@ -516,6 +514,21 @@ class CascadingModelExecutor {
             LOGGER.warnf("Failed to build judge model: %s; falling back to heuristic", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Backstop for a live-streamed step's future.
+     * <p>
+     * A live stream must never be cancelled mid-flight, so this bound has to sit
+     * <em>above</em> the bound {@link StreamingLegacyChatExecutor} applies to the
+     * stream itself — otherwise the future is cancelled while the provider keeps
+     * emitting tokens to the SSE client. It is therefore derived from the same
+     * resolution the streaming executor uses (which honours both
+     * {@code streamingTimeoutSeconds} and the {@code timeout} parameter) plus a
+     * margin, rather than assuming the 120s default.
+     */
+    static long resolveStreamingStepTimeoutMs(LlmConfiguration.Task task) {
+        return TimeUnit.SECONDS.toMillis(StreamingLegacyChatExecutor.resolveTimeoutSeconds(task)) + STREAMING_STEP_TIMEOUT_MARGIN_MS;
     }
 
     /**

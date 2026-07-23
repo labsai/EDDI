@@ -42,6 +42,10 @@ A task configured with `timeout: "5000"` silently received an unwrapped, timeout
 
 `StreamingLegacyChatExecutor` retries a timed-out attempt that produced no tokens, but nothing stopped the abandoned attempt's handler: its provider callback thread stayed alive and kept calling `eventSink.onToken(...)` while the retry streamed into the *same* sink. A slow first attempt whose first token landed after the retry began therefore interleaved two answers on the SSE stream, and neither matched the text stored in memory. Each attempt now carries an `abandoned` flag its handler checks before forwarding — set on timeout, on interrupt, and before an error retry. The flag is set *before* the partial text is read, so the text returned to memory is exactly the text the client was sent. The executor still cannot cancel the provider's stream (langchain4j exposes no cancellation on this path); it can and now does make the abandoned stream silent.
 
+### The cascade's live-stream backstop stopped assuming 120s
+
+`CascadingModelExecutor` bounded a live-streamed step's future with a hardcoded `STREAMING_STEP_TIMEOUT_MS = 125_000L`, whose comment states the invariant it exists to hold: it *must* exceed the streaming executor's own bound, because cancelling the awaiting thread does not stop the provider's callback thread — the SSE client would keep receiving tokens for a step the cascade has already moved past. That invariant was already violable (`streamingTimeoutSeconds: 300` broke it), and deriving the bound from `timeout` adds another way in. It is now `resolveStreamingStepTimeoutMs(task)` = the executor's resolved bound + a 5s margin, so the default case is still exactly 125s and a longer configured bound raises the backstop with it.
+
 ### Operator-visible behaviour changes
 
 | Config | Before | After |
@@ -52,12 +56,13 @@ A task configured with `timeout: "5000"` silently received an unwrapped, timeout
 | Streaming task with `timeout` > 120s and no `streamingTimeoutSeconds` | Cut off at the undocumented 120s backstop | Backstop follows the configured `timeout` |
 | Streaming task with only `streamingTimeoutSeconds` | — | Unchanged |
 | Retry after an empty timed-out streaming attempt | Late tokens from the abandoned attempt could interleave with the retry's output | Abandoned attempt is silent |
+| Live-streamed cascade step with a bound above 125s | The cascade cancelled the future while the provider was still emitting | Cascade backstop tracks the executor bound (+5s) |
 
 Cached model instances are keyed more finely now, so a deployment whose tasks differ in these settings holds a few more model objects than before. That is the point — they were sharing an instance only one of them had configured.
 
 ### Tests
 
-`ChatModelRegistryTest` grew an `ObservabilityCacheKeyTests` nest (different `timeout`/`logRequests`/`logResponses` ⇒ different instances, sync and streaming; construction order no longer decides which model a task gets; the settings reach the builder). Its old `getOrCreate_observabilityParamsDontAffectCacheKey` test asserted the defect and was replaced. New `StreamingLegacyChatExecutorTimeoutTest` pins the backstop resolution table including both back-compat shapes, that a short `timeout` cannot truncate a healthy stream end to end, and that a late token from an abandoned attempt never reaches the sink. New `ObservableStreamingChatModelTest` pins decorator transparency. Every behavioural test was mutation-checked by reverting the corresponding production change: 9 of the 29 `ChatModelRegistryTest` cases fail with `filterParams` restored (`expected: <5000> but was: <null>`, `expected: not same but was: <…>`), the backstop cases fail with the derivation neutralised (`expected: <300> but was: <120>`), and the abandoned-stream case fails without the flag (`NeverWantedButInvoked: conversationEventSink.onToken("LATE")`).
+`ChatModelRegistryTest` grew an `ObservabilityCacheKeyTests` nest (different `timeout`/`logRequests`/`logResponses` ⇒ different instances, sync and streaming; construction order no longer decides which model a task gets; the settings reach the builder). Its old `getOrCreate_observabilityParamsDontAffectCacheKey` test asserted the defect and was replaced. New `StreamingLegacyChatExecutorTimeoutTest` pins the backstop resolution table including both back-compat shapes, that a short `timeout` cannot truncate a healthy stream end to end, and that a late token from an abandoned attempt never reaches the sink. New `ObservableStreamingChatModelTest` pins decorator transparency. Every behavioural test was mutation-checked by reverting the corresponding production change: 9 of the 29 `ChatModelRegistryTest` cases fail with `filterParams` restored (`expected: <5000> but was: <null>`, `expected: not same but was: <…>`), the backstop cases fail with the derivation neutralised (`expected: <300> but was: <120>`), and the abandoned-stream case fails without the flag (`NeverWantedButInvoked: conversationEventSink.onToken("LATE")`). The cascade-backstop cases fail with the hardcoded 125s restored (`Cascade backstop (125000ms) must exceed the executor bound (300000ms)`).
 
 ---
 

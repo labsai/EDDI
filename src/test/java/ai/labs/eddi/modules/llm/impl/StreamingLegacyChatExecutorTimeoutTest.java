@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -164,6 +165,46 @@ class StreamingLegacyChatExecutorTimeoutTest {
     }
 
     @Nested
+    @DisplayName("The cascade's live-stream backstop tracks the executor's bound")
+    class CascadeBackstopTests {
+
+        /**
+         * A live-streamed cascade step must never have its future cancelled while the
+         * provider is still emitting: cancelling the awaiting thread does not stop the
+         * callback thread, so the SSE client would keep receiving tokens for a step the
+         * cascade has already moved past. The cascade's bound therefore has to stay
+         * strictly above whatever bound the streaming executor applies — it can no
+         * longer assume the 120s default.
+         */
+        @Test
+        @DisplayName("the cascade bound always exceeds the executor's own bound")
+        void cascadeBackstop_exceedsExecutorBound() {
+            for (LlmConfiguration.Task candidate : List.of(task(null), task("15000"), task("300000"), taskWithStreamingTimeout(300),
+                    taskWithStreamingTimeout(30))) {
+                long executorMs = TimeUnit.SECONDS.toMillis(StreamingLegacyChatExecutor.resolveTimeoutSeconds(candidate));
+                long cascadeMs = CascadingModelExecutor.resolveStreamingStepTimeoutMs(candidate);
+
+                assertTrue(cascadeMs > executorMs,
+                        "Cascade backstop (" + cascadeMs + "ms) must exceed the executor bound (" + executorMs + "ms)");
+            }
+        }
+
+        @Test
+        @DisplayName("the historical 125s bound is preserved for the default case")
+        void cascadeBackstop_defaultUnchanged() {
+            assertEquals(125_000L, CascadingModelExecutor.resolveStreamingStepTimeoutMs(task(null)));
+            assertEquals(125_000L, CascadingModelExecutor.resolveStreamingStepTimeoutMs(task("15000")));
+        }
+
+        @Test
+        @DisplayName("a longer configured bound raises the cascade backstop with it")
+        void cascadeBackstop_followsLongerBound() {
+            assertEquals(305_000L, CascadingModelExecutor.resolveStreamingStepTimeoutMs(task("300000")));
+            assertEquals(305_000L, CascadingModelExecutor.resolveStreamingStepTimeoutMs(taskWithStreamingTimeout(300)));
+        }
+    }
+
+    @Nested
     @DisplayName("Abandoned streams stop writing to the event sink")
     class AbandonedStreamTests {
 
@@ -240,6 +281,12 @@ class StreamingLegacyChatExecutorTimeoutTest {
             parameters.put("timeout", timeoutMs);
         }
         task.setParameters(parameters);
+        return task;
+    }
+
+    private static LlmConfiguration.Task taskWithStreamingTimeout(int seconds) {
+        var task = task(null);
+        task.setStreamingTimeoutSeconds(seconds);
         return task;
     }
 
