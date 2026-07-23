@@ -36,6 +36,20 @@ public final class AuditHmac {
     /** OWASP recommendation for PBKDF2-SHA256 (2023): minimum 600,000 iterations */
     private static final int PBKDF2_ITERATIONS = 600_000;
 
+    /**
+     * Marker prefixed to every HMAC produced by {@link #computeHmac}, identifying
+     * the canonical form it was computed over.
+     * <p>
+     * The stored value carries the version because the two canonicalizers are not
+     * interchangeable: verification must pick the one the entry was signed with. A
+     * stored HMAC <em>without</em> this prefix is a bare v1 hex digest written
+     * before the delimiter escaping existed and is verified with
+     * {@link #buildCanonicalString}. Falling back to v1 for a v2-tagged entry would
+     * hand the collision back to an attacker, so the choice is by prefix and never
+     * by trying both.
+     */
+    static final String V2_PREFIX = "v2:";
+
     private AuditHmac() {
         // Utility class
     }
@@ -61,21 +75,24 @@ public final class AuditHmac {
 
     /**
      * Compute HMAC-SHA256 over all audit entry fields (excluding the hmac field
-     * itself).
+     * itself), using the v2 canonical form.
      *
      * @param entry
      *            the audit entry (hmac field is ignored)
      * @param hmacKey
      *            the 32-byte HMAC key
-     * @return hex-encoded HMAC string
+     * @return version-tagged, hex-encoded HMAC string ({@code v2:<64 hex chars>})
      */
     public static String computeHmac(AuditEntry entry, byte[] hmacKey) {
-        String canonical = buildCanonicalString(entry);
-        return hmacSha256(canonical, hmacKey);
+        return V2_PREFIX + hmacSha256(buildCanonicalStringV2(entry), hmacKey);
     }
 
     /**
      * Verify that an audit entry's HMAC matches the expected value.
+     * <p>
+     * The canonical form is selected from the stored value's version tag, so
+     * entries signed before {@link #V2_PREFIX} existed keep verifying against the
+     * v1 canonicalizer and entries signed after it are held to v2 only.
      *
      * @param entry
      *            the audit entry with its hmac field populated
@@ -84,15 +101,112 @@ public final class AuditHmac {
      * @return true if the HMAC is valid, false if tampered
      */
     public static boolean verifyHmac(AuditEntry entry, byte[] hmacKey) {
-        if (entry.hmac() == null)
+        String stored = entry.hmac();
+        if (stored == null)
             return false;
-        String expected = computeHmac(entry, hmacKey);
-        return expected.equals(entry.hmac());
+
+        if (stored.startsWith(V2_PREFIX)) {
+            return computeHmac(entry, hmacKey).equals(stored);
+        }
+
+        // Legacy: a bare hex digest over the v1 canonical string.
+        return hmacSha256(buildCanonicalString(entry), hmacKey).equals(stored);
+    }
+
+    /**
+     * Build the <strong>v2</strong> canonical string: deterministic <em>and</em>
+     * injective.
+     * <p>
+     * The v1 form below joins keys and values with {@code = , { } [ ] |} without
+     * escaping them, so the map-to-string mapping is not one-to-one — two
+     * structurally different entries can canonicalize to the same bytes and share a
+     * single valid HMAC, which lets a tampered entry verify as intact. That matters
+     * now that {@code toolCalls} carries tool-trace
+     * {@code arguments}/{@code result} strings, which are LLM- and user-controlled.
+     * <p>
+     * v2 closes it two ways: every key and every scalar is escaped so it can no
+     * longer contain an unescaped delimiter, and every value is type-tagged
+     * ({@code s:} scalar, {@code m} map, {@code l} list, {@code n} null) so a
+     * String can never render like a nested map or list.
+     *
+     * @see #V2_PREFIX
+     */
+    static String buildCanonicalStringV2(AuditEntry entry) {
+        StringBuilder sb = new StringBuilder(512);
+        sb.append("v2");
+        sb.append("|id=").append(escape(entry.id()));
+        sb.append("|cid=").append(escape(entry.conversationId()));
+        sb.append("|bid=").append(escape(entry.agentId()));
+        sb.append("|bv=").append(entry.agentVersion());
+        sb.append("|uid=").append(escape(entry.userId()));
+        sb.append("|env=").append(escape(entry.environment()));
+        sb.append("|si=").append(entry.stepIndex());
+        sb.append("|tid=").append(escape(entry.taskId()));
+        sb.append("|tt=").append(escape(entry.taskType()));
+        sb.append("|ti=").append(entry.taskIndex());
+        sb.append("|dur=").append(entry.durationMs());
+        sb.append("|in=").append(canonicalValueV2(entry.input()));
+        sb.append("|out=").append(canonicalValueV2(entry.output()));
+        sb.append("|llm=").append(canonicalValueV2(entry.llmDetail()));
+        sb.append("|tools=").append(canonicalValueV2(entry.toolCalls()));
+        sb.append("|actions=").append(canonicalValueV2(entry.actions()));
+        sb.append("|cost=").append(entry.cost());
+        sb.append("|ts=").append(escape(Objects.toString(entry.timestamp(), "")));
+        return sb.toString();
+    }
+
+    /**
+     * v2 counterpart of {@link #canonicalValue}: same recursion, but each rendering
+     * carries a type tag and every scalar and key is escaped, so distinct
+     * structures cannot produce the same string.
+     */
+    private static String canonicalValueV2(Object value) {
+        if (value == null)
+            return "n";
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sorted = new TreeMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                sorted.put(String.valueOf(e.getKey()), e.getValue());
+            }
+            return sorted.entrySet().stream().map(e -> escape(e.getKey()) + "=" + canonicalValueV2(e.getValue()))
+                    .collect(Collectors.joining(",", "m{", "}"));
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(AuditHmac::canonicalValueV2).collect(Collectors.joining(",", "l[", "]"));
+        }
+        return "s:" + escape(value.toString());
+    }
+
+    /**
+     * Backslash-escape every character the canonical string uses as a delimiter, so
+     * a value can never introduce or terminate a field, a map entry or a list
+     * element. The backslash itself is escaped first, which keeps the
+     * transformation reversible and therefore collision-free.
+     */
+    private static String escape(String value) {
+        if (value == null)
+            return "";
+
+        StringBuilder sb = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '\\', '=', ',', '{', '}', '[', ']', '|' -> sb.append('\\').append(c);
+                default -> sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**
      * Build a deterministic canonical string from all audit entry fields (excluding
      * hmac) for HMAC computation.
+     * <p>
+     * <strong>Frozen — v1.</strong> Every entry written before {@link #V2_PREFIX}
+     * existed carries a bare hex HMAC over exactly these bytes, and
+     * {@link #verifyHmac} still recomputes it for those rows. Changing this method
+     * by a single byte makes every historical ledger row read as tampered. New
+     * entries are signed with {@link #buildCanonicalStringV2}.
      */
     static String buildCanonicalString(AuditEntry entry) {
         StringBuilder sb = new StringBuilder(512);

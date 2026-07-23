@@ -16,7 +16,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,13 +86,15 @@ class AuditHmacTest {
     class ComputeHmacTests {
 
         @Test
-        @DisplayName("produces non-null hex string")
+        @DisplayName("produces a version-tagged hex string")
         void producesHex() {
             String hmac = AuditHmac.computeHmac(createTestEntry(), hmacKey);
             assertNotNull(hmac);
-            assertFalse(hmac.isEmpty());
-            // Hex string should be 64 chars (32 bytes)
-            assertEquals(64, hmac.length());
+            assertTrue(hmac.startsWith("v2:"),
+                    "the stored value must name its canonical form, or verification cannot pick a canonicalizer");
+            // Hex string should be 64 chars (32 bytes) after the version tag
+            assertEquals(64, hmac.substring("v2:".length()).length());
+            assertTrue(hmac.substring("v2:".length()).matches("[0-9a-f]{64}"));
         }
 
         @Test
@@ -353,6 +360,148 @@ class AuditHmacTest {
             BsonDocument bson = encoded.toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry());
             Document decoded = new DocumentCodec().decode(new BsonDocumentReader(bson), DecoderContext.builder().build());
             return new LinkedHashMap<>(decoded);
+        }
+    }
+
+    // ==================== Canonical-form injectivity (D3) ====================
+
+    /**
+     * The v1 canonical string joins keys and values with {@code = , { } [ ]} and
+     * escapes none of them, so the map-to-string mapping is not injective: two
+     * structurally different entries collapse onto the same bytes and therefore
+     * share one valid HMAC. An entry tampered into its twin verifies as intact.
+     * <p>
+     * That is reachable now that {@code toolCalls} carries tool-trace
+     * {@code arguments}/{@code result} strings, which the model and the user write.
+     */
+    @Nested
+    @DisplayName("canonical-form injectivity")
+    class InjectivityTests {
+
+        private AuditEntry entryWithToolCalls(Map<String, Object> toolCalls) {
+            return new AuditEntry(
+                    "entry-1", "conv-1", "agent-1", 1, "user-1", "production",
+                    0, "ai.labs.llm", "langchain", 0, 42L,
+                    Map.of("userInput", "hello"),
+                    Map.of("output", "world"),
+                    null, toolCalls,
+                    List.of("send_message"), 0.005,
+                    Instant.parse("2026-01-01T00:00:00Z"), null, null);
+        }
+
+        /** Two keys, versus one key whose value re-creates the separator. */
+        private final Map<String, Object> twoEntries = Map.of("a", "x", "b", "y");
+        private final Map<String, Object> oneCraftedEntry = Map.of("a", "x,b=y");
+
+        @Test
+        @DisplayName("the v1 form really does collide (this is what v2 exists to fix)")
+        void v1CanonicalStringCollides() {
+            assertEquals(
+                    AuditHmac.buildCanonicalString(entryWithToolCalls(twoEntries)),
+                    AuditHmac.buildCanonicalString(entryWithToolCalls(oneCraftedEntry)),
+                    "if this stops holding the v1 form was changed, which invalidates every stored HMAC");
+        }
+
+        @Test
+        @DisplayName("structurally different maps get different HMACs under v2")
+        void differentStructuresDoNotCollide() {
+            assertNotEquals(
+                    AuditHmac.computeHmac(entryWithToolCalls(twoEntries), hmacKey),
+                    AuditHmac.computeHmac(entryWithToolCalls(oneCraftedEntry), hmacKey));
+        }
+
+        /**
+         * The attack the collision enables: swap the stored {@code toolCalls} for a
+         * structurally different map that canonicalizes identically and the untouched
+         * HMAC still verifies.
+         */
+        @Test
+        @DisplayName("an entry tampered into its v1 twin no longer verifies")
+        void tamperingIntoAColludingTwinIsRejected() {
+            AuditEntry original = entryWithToolCalls(twoEntries);
+            String hmac = AuditHmac.computeHmac(original, hmacKey);
+
+            AuditEntry tampered = entryWithToolCalls(oneCraftedEntry).withHmac(hmac);
+
+            assertFalse(AuditHmac.verifyHmac(tampered, hmacKey),
+                    "a different toolCalls structure must not verify under the original entry's HMAC");
+        }
+
+        /**
+         * A scalar whose text mimics the rendering of a nested list of maps must not
+         * canonicalize like the real thing — that is what the type tags are for.
+         */
+        @Test
+        @DisplayName("a string that looks like a nested structure does not collide with one")
+        void scalarMimickingNestedStructureDoesNotCollide() {
+            Map<String, Object> real = Map.of("calls", List.of(Map.of("tool", "calculator")));
+            Map<String, Object> mimic = Map.of("calls", "[{tool=calculator}]");
+
+            assertEquals(
+                    AuditHmac.buildCanonicalString(entryWithToolCalls(real)),
+                    AuditHmac.buildCanonicalString(entryWithToolCalls(mimic)),
+                    "precondition: the v1 form cannot tell them apart");
+            assertNotEquals(
+                    AuditHmac.computeHmac(entryWithToolCalls(real), hmacKey),
+                    AuditHmac.computeHmac(entryWithToolCalls(mimic), hmacKey));
+        }
+
+        @Test
+        @DisplayName("an action list is not interchangeable with one comma-joined action")
+        void actionListSeparatorIsNotForgeable() {
+            AuditEntry twoActions = withActions(List.of("send_message", "log_it"));
+            AuditEntry oneAction = withActions(List.of("send_message,log_it"));
+
+            assertEquals(AuditHmac.buildCanonicalString(twoActions), AuditHmac.buildCanonicalString(oneAction),
+                    "precondition: String.join collapses both onto 'send_message,log_it'");
+            assertNotEquals(
+                    AuditHmac.computeHmac(twoActions, hmacKey),
+                    AuditHmac.computeHmac(oneAction, hmacKey));
+        }
+
+        private AuditEntry withActions(List<String> actions) {
+            return new AuditEntry(
+                    "entry-1", "conv-1", "agent-1", 1, "user-1", "production",
+                    0, "ai.labs.llm", "langchain", 0, 42L,
+                    Map.of("userInput", "hello"), Map.of("output", "world"),
+                    null, null, actions, 0.005,
+                    Instant.parse("2026-01-01T00:00:00Z"), null, null);
+        }
+
+        /**
+         * The back-compat half of the version tag. Rows written before v2 carry a bare
+         * hex digest over the v1 canonical string; they must keep verifying, or every
+         * historical ledger entry reads as tampered on the first upgraded start-up.
+         */
+        @Test
+        @DisplayName("a stored v1 entry (bare hex, v1 canonical form) still verifies")
+        void legacyV1EntryStillVerifies() {
+            AuditEntry entry = createTestEntry();
+            String legacyHmac = legacySign(AuditHmac.buildCanonicalString(entry));
+
+            assertFalse(legacyHmac.startsWith("v2:"), "a v1 row carries no version tag");
+            assertTrue(AuditHmac.verifyHmac(entry.withHmac(legacyHmac), hmacKey),
+                    "pre-v2 ledger rows must keep verifying against the v1 canonicalizer");
+        }
+
+        @Test
+        @DisplayName("a tampered v1 entry is still rejected")
+        void legacyV1EntryTamperedIsRejected() {
+            AuditEntry entry = createTestEntry();
+            String legacyHmac = legacySign(AuditHmac.buildCanonicalString(entry));
+
+            assertFalse(AuditHmac.verifyHmac(entry.withEnvironment("TAMPERED").withHmac(legacyHmac), hmacKey));
+        }
+
+        /** Reproduces exactly what the pre-v2 code wrote into the ledger. */
+        private String legacySign(String canonical) {
+            try {
+                Mac mac = Mac.getInstance("HmacSHA256");
+                mac.init(new SecretKeySpec(hmacKey, "HmacSHA256"));
+                return HexFormat.of().formatHex(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
+            } catch (GeneralSecurityException e) {
+                throw new IllegalStateException(e);
+            }
         }
     }
 }
