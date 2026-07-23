@@ -130,7 +130,7 @@ function WorkforceBoard() {
     boardId ?? "",
     selectedConvId ?? "",
   );
-  const { streamState, startStream, continueStream, abortStream } = useGroupDiscussionStream();
+  const { streamState, startStream, continueStream, abortStream, resetStream } = useGroupDiscussionStream();
   const queryClient = useQueryClient();
 
   // ─── Auto-select conversation when stream completes ────────────
@@ -213,9 +213,9 @@ function WorkforceBoard() {
   const disabledMessage = useMemo(() => {
     if (isStreaming) return t("groups.inputDisabledInProgress", "Discussion in progress…");
     if (!selectedConvId) return undefined;
-    if (!selectedConversation) return undefined;
+    if (!selectedConversation) return t("common.loading", "Loading…");
     const state = selectedConversation.state;
-    if (state === "CLOSED") return t("Workforce.board.inputDisabledClosed", "This discussion is closed");
+    if (state === "CLOSED") return t("groups.inputDisabledClosed", "This discussion is closed");
     if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
     if (state === "AWAITING_APPROVAL") return t("groups.inputDisabledApproval", "Awaiting approval…");
     if (state === "IN_PROGRESS" || state === "SYNTHESIZING") return t("groups.inputDisabledInProgress", "Discussion in progress…");
@@ -243,9 +243,9 @@ function WorkforceBoard() {
   }, []);
 
   const handleNewDiscussion = useCallback(() => {
-    if (isStreaming) abortStream();
+    resetStream();
     setSelectedConvId(null);
-  }, [isStreaming, abortStream]);
+  }, [resetStream]);
 
   // ─── Lifecycle mutations ──────────────────────────────────────
   const invalidateConversations = useCallback(() => {

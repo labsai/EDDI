@@ -126,7 +126,7 @@ export function GroupDetailPage() {
   } = useGroupConversation(groupId || "", selectedConvId || "");
 
   // SSE streaming hook
-  const { streamState, startStream, continueStream, approveAndStream, abortStream } = useGroupDiscussionStream();
+  const { streamState, startStream, continueStream, approveAndStream, abortStream, resetStream } = useGroupDiscussionStream();
 
   const deleteConvMutation = useDeleteGroupConversation();
   const cancelDiscussionMutation = useCancelGroupDiscussion();
@@ -162,7 +162,7 @@ export function GroupDetailPage() {
   const disabledMessage = useMemo(() => {
     if (streamState.isStreaming) return t("groups.inputDisabledInProgress", "Discussion in progress…");
     if (!selectedConvId) return undefined;
-    if (!selectedConversation) return undefined;
+    if (!selectedConversation) return t("common.loading", "Loading…");
     const state = selectedConversation.state;
     if (state === "CLOSED") return t("groups.inputDisabledClosed", "This discussion is closed");
     if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
@@ -187,10 +187,10 @@ export function GroupDetailPage() {
   }, [groupId, inputMode, selectedConvId, continueStream, startStream, t]);
 
   const handleNewDiscussion = useCallback(() => {
-    if (streamState.isStreaming) abortStream();
+    resetStream();
     pendingDecisionRef.current = null;
     setSelectedConvId(null);
-  }, [streamState.isStreaming, abortStream]);
+  }, [resetStream]);
 
   // Approve/reject a paused group discussion. Resumes over the approve/stream
   // SSE endpoint so the continued discussion renders live in the transcript.
@@ -396,11 +396,19 @@ export function GroupDetailPage() {
       ) : conversationCount > 0 ? (
         <div className="p-1 space-y-0.5">
           {conversations!.map((conv) => (
-            <button
+            <div
               key={conv.id}
+              role="button"
+              tabIndex={0}
               onClick={() => handleSelectConversation(conv.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleSelectConversation(conv.id);
+                }
+              }}
               className={cn(
-                "w-full text-start rounded-lg px-3 py-2 transition-all group/item",
+                "w-full text-start rounded-lg px-3 py-2 transition-all group/item cursor-pointer",
                 streamState.isStreaming && conv.id === streamState.conversationId
                   ? "bg-primary/10 border border-primary/30"
                   : selectedConvId === conv.id && !isStreamActive
@@ -469,7 +477,7 @@ export function GroupDetailPage() {
                   </button>
                 )}
               </div>
-            </button>
+            </div>
           ))}
         </div>
       ) : (

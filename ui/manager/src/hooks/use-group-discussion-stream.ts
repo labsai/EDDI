@@ -225,11 +225,25 @@ export function useGroupDiscussionStream() {
     }));
   }, []);
 
+  /** Abort any in-flight stream AND fully reset to the initial clean state.
+   *  Use this when the user explicitly starts a new discussion (clears stale
+   *  transcript, synthesized answer, etc). */
+  const resetStream = useCallback(() => {
+    abortRef.current?.abort();
+    setStreamState({
+      ...initialState,
+      activeSpeakers: new Set(),
+      tasksInProgress: new Set(),
+      tasksCompleted: new Set(),
+      taskVerifications: new Map(),
+    });
+  }, []);
+
   // Abort any in-flight stream when the consuming component unmounts, so the
   // SSE connection is released and no setState runs after teardown.
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  return { streamState, startStream, continueStream, approveAndStream, abortStream };
+  return { streamState, startStream, continueStream, approveAndStream, abortStream, resetStream };
 }
 
 // ─── Event Handler ──────────────────────────────────────────────
@@ -246,24 +260,27 @@ function handleSSEEvent(
     case "group_start": {
       try {
         const payload: GroupStartPayload = JSON.parse(event.data);
+        const questionEntry: TranscriptEntry = {
+          speakerAgentId: "user",
+          speakerDisplayName: "User",
+          content: payload.question,
+          phaseIndex: -1,
+          phaseName: null,
+          type: "QUESTION" as TranscriptEntryType,
+          timestamp: new Date().toISOString(),
+          errorReason: null,
+          targetAgentId: null,
+        };
         setState((s) => ({
           ...s,
           conversationId: payload.groupConversationId ?? payload.conversationId,
           state: "IN_PROGRESS",
-          // Add the original question as the first transcript entry
-          transcript: [
-            {
-              speakerAgentId: "user",
-              speakerDisplayName: "User",
-              content: payload.question,
-              phaseIndex: -1,
-              phaseName: null,
-              type: "QUESTION" as TranscriptEntryType,
-              timestamp: new Date().toISOString(),
-              errorReason: null,
-              targetAgentId: null,
-            },
-          ],
+          // Continuation (conversationId already set by continueStream) →
+          // append the new question to the existing transcript.
+          // New discussion → replace with just the question.
+          transcript: s.conversationId
+            ? [...s.transcript, questionEntry]
+            : [questionEntry],
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse group_start event:', e);
