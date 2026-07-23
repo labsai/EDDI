@@ -5,6 +5,26 @@
 
 ---
 
+## 📝 README: add HITL section, JSON mode, tool context ceiling (2026-07-23)
+
+**Repo:** EDDI (`feat/v6.2.0-prep`)
+
+The README's Features section was missing Human-in-the-Loop Governance entirely — despite HITL being a Phase 9b completed feature with a 479-line dedicated doc (`docs/hitl.md`). This was the biggest gap found after a systematic comparison of the README against `AGENTS.md` completed features, `docs/changelog.md`, and all documentation files.
+
+**Changes to `README.md`:**
+- **Added `### 🛑 Human-in-the-Loop Governance` section** (8 bullets) between Smart Model Cascading and Enterprise Security — covers turn-level approval, per-tool-call gating, group phase approval, timeout policies, no-progress guard, Slack/MCP approval surfaces, and crash recovery
+- **Added HITL link to Documentation table** — `docs/hitl.md` was not linked
+- **Added JSON Response Mode** to LLM Provider Support — `jsonResponseFormat` policy (`auto`/`on`/`off`) with provider-aware negotiation
+- **Added Tool Context Ceiling** to Memory & Context Management — `maxToolContextTokens` (default 60k) prevents provider context-window errors from tool loops
+- **Added Tool Calling and Multi-Model Cascading cross-reference** under LLM Provider Support
+
+**What was deliberately NOT added** (internal hardening, not README material):
+- Constant-time HMAC, versioned audit HMAC v2, tool-cache scope fail-safe, HTTP logging guard, SSE secret redaction, budget enforcement warnings, stream resilience — these belong in release notes
+- Provider count stays at 12 — verified against `docs/langchain.md` (the authoritative source per §2 rule 7); Vertex AI is a sub-type of Gemini, not a separate provider
+- `docs/template-preview.md` link not added — file doesn't exist yet
+
+---
+
 ## 🧵 Model registry: a rotation landing mid-build could re-cache a stale model (2026-07-23)
 
 **Repo:** EDDI (`fix/chatmodel-stale-rebuild-race`)
