@@ -23,6 +23,10 @@ public class RestWelcomeResource implements IRestWelcomeResource {
 
     @Override
     public Response viewHtml() {
-        return Response.ok(getResourceAsStream("/META-INF/resources/welcome.html")).build();
+        var stream = getResourceAsStream("/META-INF/resources/welcome.html");
+        if (stream == null) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).build();
+        }
+        return Response.ok(stream).build();
     }
 }

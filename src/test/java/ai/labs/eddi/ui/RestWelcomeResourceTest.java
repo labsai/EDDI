@@ -9,10 +9,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link RestWelcomeResource}.
+ * welcome.html is on the test classpath via src/main/resources.
  */
 class RestWelcomeResourceTest {
 
@@ -24,39 +27,31 @@ class RestWelcomeResourceTest {
     }
 
     @Test
-    @DisplayName("viewDefault should delegate to viewHtml")
+    @DisplayName("viewDefault should delegate to viewHtml and return 200")
     void viewDefaultDelegatesToViewHtml() {
-        try {
-            Response response = resource.viewDefault();
-            assertEquals(200, response.getStatus());
-        } catch (Exception e) {
-            // Expected if welcome.html not on test classpath
-            assertNotNull(e);
-        }
+        Response response = resource.viewDefault();
+        assertEquals(200, response.getStatus());
+        assertNotNull(response.getEntity(), "Entity must not be null");
+        assertInstanceOf(InputStream.class, response.getEntity());
     }
 
     @Test
-    @DisplayName("viewHtml should return 200 when welcome.html exists")
-    void viewHtmlReturnsOk() {
-        try {
-            Response response = resource.viewHtml();
-            assertEquals(200, response.getStatus());
-        } catch (Exception e) {
-            // Expected if welcome.html not on test classpath
-            assertNotNull(e);
-        }
+    @DisplayName("viewHtml should return 200 with a readable welcome.html entity")
+    void viewHtmlReturnsOkWithEntity() {
+        Response response = resource.viewHtml();
+        assertEquals(200, response.getStatus());
+        assertNotNull(response.getEntity(), "Entity must not be null");
+        assertInstanceOf(InputStream.class, response.getEntity());
     }
 
     @Test
-    @DisplayName("viewDefault and viewHtml should serve the same SPA shell")
+    @DisplayName("viewDefault and viewHtml should both serve the welcome.html SPA shell")
     void viewDefaultAndViewHtmlServeSameShell() {
-        try {
-            Response r1 = resource.viewDefault();
-            Response r2 = resource.viewHtml();
-            assertEquals(r1.getStatus(), r2.getStatus());
-        } catch (Exception e) {
-            // Expected if welcome.html not on test classpath
-            assertNotNull(e);
-        }
+        Response r1 = resource.viewDefault();
+        Response r2 = resource.viewHtml();
+        assertEquals(r1.getStatus(), r2.getStatus());
+        // Both must return a non-null, readable stream
+        assertNotNull(r1.getEntity(), "viewDefault entity must not be null");
+        assertNotNull(r2.getEntity(), "viewHtml entity must not be null");
     }
 }

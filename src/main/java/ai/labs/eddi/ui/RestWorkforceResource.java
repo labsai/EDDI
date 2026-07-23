@@ -23,6 +23,10 @@ public class RestWorkforceResource implements IRestWorkforceResource {
 
     @Override
     public Response viewHtml() {
-        return Response.ok(getResourceAsStream("/META-INF/resources/workforce.html")).build();
+        var stream = getResourceAsStream("/META-INF/resources/workforce.html");
+        if (stream == null) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).build();
+        }
+        return Response.ok(stream).build();
     }
 }
