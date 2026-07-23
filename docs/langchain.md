@@ -122,11 +122,46 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format | ""                |
 | `addToOutput`              | boolean | Add response to conversation output                   | false             |
 | **Logging**                |         |                                                       |                   |
-| `logRequests`              | boolean | Log API requests                                      | false             |
-| `logResponses`             | boolean | Log API responses                                     | false             |
+| `logRequests`              | boolean | Log API requests (sync and streaming)                 | false             |
+| `logResponses`             | boolean | Log API responses (sync and streaming)                | false             |
 | **API Configuration**      |         |                                                       |                   |
 | `temperature`              | string  | Model temperature (0-1)                               | Provider-specific |
-| `timeout`                  | string  | Request timeout (milliseconds)                        | Provider-specific |
+| `timeout`                  | string  | Request timeout (milliseconds) — see [Timeouts](#timeouts-and-streaming) | Provider-specific |
+
+> **These three settings are part of a model's identity.** Two tasks that differ only in `timeout`, `logRequests` or `logResponses` get two separate cached model instances, so a task always runs with the settings it declares regardless of which task was constructed first.
+
+### Timeouts and Streaming
+
+Two settings bound an LLM call, and they are deliberately distinct:
+
+| Setting                                | Where               | Unit | What it bounds                                                                                                                                       |
+| -------------------------------------- | ------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timeout` (`parameters`)               | model parameter     | ms   | The provider call. On a non-streaming task it bounds the whole request. On a **streaming** task it is the provider HTTP client's request/read timeout — for the JDK client, the time until the provider's first response, so it catches a provider that never answers without truncating one that answers slowly. |
+| `streamingTimeoutSeconds` (task field) | task-level, sibling of `parameters` | s    | The **overall** wall-clock backstop for the whole stream, for providers whose native timeout does not fire (or does not exist). Streaming only.       |
+
+How the backstop is resolved:
+
+1. An explicit positive `streamingTimeoutSeconds` always wins.
+2. Otherwise the backstop is **120s**, raised (never lowered) to cover a longer explicitly configured `timeout`. So `timeout: "300000"` with no `streamingTimeoutSeconds` yields a 300s backstop rather than being cut short at 120s; any `timeout` at or below 120s leaves the 120s default untouched.
+3. Otherwise 120s.
+
+Both stored shapes therefore keep working: a config that sets only `streamingTimeoutSeconds` behaves exactly as before, and a config that sets only `timeout` is now honoured on the streaming path instead of being discarded.
+
+```json
+{
+  "actions": ["send_message"],
+  "id": "longRunning",
+  "type": "openai",
+  "streamingTimeoutSeconds": 300,
+  "parameters": {
+    "apiKey": "your-openai-api-key",
+    "modelName": "gpt-4o",
+    "timeout": "300000"
+  }
+}
+```
+
+> `timeout` is read from the task's stored parameters when deriving the backstop. A Qute-templated value (e.g. `"{vars.llm-timeout}"`) cannot be resolved at that point and simply leaves the 120s default in place — it never produces a shorter bound.
 
 ### Provider-Specific Examples
 
@@ -1205,6 +1240,8 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 
 - **Problem**: Requests timing out
 - **Solution**: Increase the `timeout` parameter value (in milliseconds). Default is often 15000 (15 seconds).
+- **Problem**: A *streaming* turn is cut off after ~120s even though `timeout` is larger
+- **Solution**: This was the behaviour before the `timeout`/`streamingTimeoutSeconds` unification; the backstop now follows a longer `timeout` automatically. Set `streamingTimeoutSeconds` explicitly if you need a bound that differs from the derived one — see [Timeouts and Streaming](#timeouts-and-streaming).
 
 ### Anthropic First Message Error
 

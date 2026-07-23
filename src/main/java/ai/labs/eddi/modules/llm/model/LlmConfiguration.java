@@ -402,8 +402,18 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private ResponseValidation responseValidation;
 
         /**
-         * Timeout in seconds for streaming chat completions. Overrides the default
-         * (120s). Only applies when streaming is active.
+         * Overall wall-clock backstop, in seconds, for a streaming chat completion.
+         * Only applies when streaming is active.
+         * <p>
+         * This is <em>not</em> a duplicate of the {@code timeout} model parameter, and
+         * the two are deliberately kept separate. {@code timeout} (milliseconds) is
+         * handed to the provider's HTTP client and bounds the time to the provider's
+         * first response; this field bounds the entire stream, covering providers whose
+         * native timeout does not fire.
+         * <p>
+         * When unset, the backstop is 120s, raised to cover a longer explicitly
+         * configured {@code timeout} so the backstop never truncates a stream before
+         * the timeout the operator asked for.
          */
         private Integer streamingTimeoutSeconds;
 

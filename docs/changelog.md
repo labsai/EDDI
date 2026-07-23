@@ -5,6 +5,62 @@
 
 ---
 
+## ⏱️ `timeout`, `logRequests` and `logResponses` become part of a model's identity (2026-07-23)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D11**. `docs/langchain.md` documents `timeout`, `logRequests` and `logResponses` as configuration parameters. `ChatModelRegistry.filterParams` removed all three from the map it passed to the provider builders — so **every** provider's `builder.timeout(...)` / `builder.logRequests(...)` / `builder.logResponses(...)` branch, on both the sync and the streaming builder, was unreachable dead code.
+
+The serious half is what that did to the cache. `filterParams` produces both the builder input **and** the `ModelCacheKey`, so stripping those three keys also erased them from the model's identity:
+
+```java
+// before — same cache key for two tasks with different timeouts
+returnMap.remove(KEY_TIMEOUT);
+returnMap.remove(KEY_LOG_REQUESTS);
+returnMap.remove(KEY_LOG_RESPONSES);
+```
+
+A task configured with `timeout: "5000"` silently received an unwrapped, timeout-free model whenever a task with otherwise identical parameters happened to be constructed first — and vice versa. **Which model a task got depended on construction order.** On the sync path `ObservableChatModel.wrapIfNeeded` was applied only to the *first* build, so the wrap was attached to whichever task won the race and then served to every other task. `getOrCreateStreaming` never called `wrapIfNeeded` at all.
+
+### What changed
+
+- **`ChatModelRegistry.filterParams` no longer strips the three keys.** Cache key and builder input are the same map again, which is the invariant that was broken: anything that shapes the constructed model now necessarily shapes its identity. The keys still filtered (`systemMessage`, `prompt`, `logSizeLimit`, `addToOutput`, `convertToObject`, `includeFirstAgentMessage`) are ones no builder reads.
+- **`getOrCreateStreaming` honours the three settings.** `timeout` reaches the streaming builder; `logRequests`/`logResponses` additionally wrap the model in the new `ObservableStreamingChatModel`.
+- **New `ObservableStreamingChatModel`** — logging-only streaming counterpart to `ObservableChatModel`, so the flags behave identically across providers, including those whose streaming builder has no logging switch.
+- **`StreamingLegacyChatExecutor` resolves one backstop from both timeout fields** (`resolveTimeoutSeconds`), and stops an abandoned attempt from writing to the shared event sink.
+- **`docs/langchain.md`** gains a "Timeouts and Streaming" section and drops the implication that `timeout` alone bounds a streaming turn.
+
+### Design decisions
+
+- **No `Future.get` bound on the streaming path.** `ObservableChatModel` bounds a sync call by submitting it to an executor and calling `future.get(timeout)`. That shape is wrong for a stream: an overall wall-clock bound truncates a healthy long answer, and cancelling the awaiting thread does not stop the provider's callback thread. The streaming-appropriate bound already exists — every streaming builder passes `timeout` to its HTTP client, and for the JDK client (`JdkHttpClient` sets it as `HttpRequest.timeout()` on an async `ofInputStream` send) that bounds the time to the provider's **first response**, not the duration of the stream. So it detects a provider that never answers without cutting off one that answers slowly. `ObservableStreamingChatModel` is therefore observability-only.
+- **The two timeout fields stay two fields, with a derived default.** `timeout` (ms, model parameter, provider-level) and `streamingTimeoutSeconds` (s, task-level, EDDI's overall backstop) bound genuinely different things; collapsing them would lose a capability. What was wrong was that they were *unrelated*: a task with `timeout: "300000"` was still cut off by the undocumented 120s backstop. Resolution order is now (1) an explicit positive `streamingTimeoutSeconds` wins, (2) otherwise 120s **raised, never lowered,** to cover a longer configured `timeout`, (3) otherwise 120s. Both stored shapes keep their existing behaviour; only the previously broken combination changes.
+- **`timeout` is read from the task's raw parameters when deriving the backstop.** A Qute-templated value cannot be resolved at that point and leaves the 120s default in place — the pre-existing behaviour, and never a shorter bound. The alternative (threading the processed parameter map through `execute`/`executeCapturing`) buys correctness only for templated timeouts and costs two new overloads.
+- **A decorator must forward to the overload it was called on.** `ObservableStreamingChatModel` overrides both `chat(ChatRequest, handler)` and `chat(ChatRequest, ChatRequestOptions, handler)` and forwards each to the same overload on the delegate. Funnelling both through the three-argument form hits `StreamingChatModel`'s default `doChat` — `throw new RuntimeException("Not implemented")` — for any model that implements the two-argument `chat` directly. Caught by `ObservableStreamingChatModelTest`, which is why it exists.
+- **R5 (`ChatModelListener` observability SPI) deliberately not implemented.** D11 is the bug; R5 is a feature and stays a separate backlog item.
+
+### Abandoned streams no longer write to the shared event sink
+
+`StreamingLegacyChatExecutor` retries a timed-out attempt that produced no tokens, but nothing stopped the abandoned attempt's handler: its provider callback thread stayed alive and kept calling `eventSink.onToken(...)` while the retry streamed into the *same* sink. A slow first attempt whose first token landed after the retry began therefore interleaved two answers on the SSE stream, and neither matched the text stored in memory. Each attempt now carries an `abandoned` flag its handler checks before forwarding — set on timeout, on interrupt, and before an error retry. The flag is set *before* the partial text is read, so the text returned to memory is exactly the text the client was sent. The executor still cannot cancel the provider's stream (langchain4j exposes no cancellation on this path); it can and now does make the abandoned stream silent.
+
+### Operator-visible behaviour changes
+
+| Config | Before | After |
+| --- | --- | --- |
+| `timeout` on any task | Never reached the provider builder; on the sync path only the `ObservableChatModel` wrapper applied, and only if that task built the model first | Reaches the provider builder on both paths, and is part of the model cache key |
+| `logRequests`/`logResponses` on a streaming task | Silently discarded | Honoured — emitted at INFO by `ObservableStreamingChatModel`, and passed to builders that support them |
+| Two tasks differing only in `timeout`/`logRequests`/`logResponses` | Shared one cached model; whichever built first won | Two separate cached model instances |
+| Streaming task with `timeout` > 120s and no `streamingTimeoutSeconds` | Cut off at the undocumented 120s backstop | Backstop follows the configured `timeout` |
+| Streaming task with only `streamingTimeoutSeconds` | — | Unchanged |
+| Retry after an empty timed-out streaming attempt | Late tokens from the abandoned attempt could interleave with the retry's output | Abandoned attempt is silent |
+
+Cached model instances are keyed more finely now, so a deployment whose tasks differ in these settings holds a few more model objects than before. That is the point — they were sharing an instance only one of them had configured.
+
+### Tests
+
+`ChatModelRegistryTest` grew an `ObservabilityCacheKeyTests` nest (different `timeout`/`logRequests`/`logResponses` ⇒ different instances, sync and streaming; construction order no longer decides which model a task gets; the settings reach the builder). Its old `getOrCreate_observabilityParamsDontAffectCacheKey` test asserted the defect and was replaced. New `StreamingLegacyChatExecutorTimeoutTest` pins the backstop resolution table including both back-compat shapes, that a short `timeout` cannot truncate a healthy stream end to end, and that a late token from an abandoned attempt never reaches the sink. New `ObservableStreamingChatModelTest` pins decorator transparency. Every behavioural test was mutation-checked by reverting the corresponding production change: 9 of the 29 `ChatModelRegistryTest` cases fail with `filterParams` restored (`expected: <5000> but was: <null>`, `expected: not same but was: <…>`), the backstop cases fail with the derivation neutralised (`expected: <300> but was: <120>`), and the abandoned-stream case fails without the flag (`NeverWantedButInvoked: conversationEventSink.onToken("LATE")`).
+
+---
+
 ## 🧾 The audit ledger stops recording zeros and nulls (2026-07-23)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static dev.langchain4j.data.message.AiMessage.aiMessage;
 import static org.junit.jupiter.api.Assertions.*;
@@ -36,11 +37,20 @@ import static org.mockito.Mockito.when;
 class ChatModelRegistryTest {
 
     private ChatModelRegistry registry;
+    /**
+     * Registry whose builder returns a UNIQUE instance per build() call — without
+     * that, assertNotSame cannot distinguish a cache hit from a rebuild.
+     */
+    private ChatModelRegistry uniqueRegistry;
     private ChatModel mockSyncModel;
     private StreamingChatModel mockStreamingModel;
+    private final AtomicReference<Map<String, String>> lastBuildParams = new AtomicReference<>();
+    private final AtomicReference<Map<String, String>> lastBuildStreamingParams = new AtomicReference<>();
 
     @BeforeEach
     void setUp() {
+        lastBuildParams.set(null);
+        lastBuildStreamingParams.set(null);
         mockSyncModel = new ChatModel() {
             @Override
             public ChatResponse chat(List<ChatMessage> messages) {
@@ -58,11 +68,13 @@ class ChatModelRegistryTest {
         builders.put("openai", () -> new ILanguageModelBuilder() {
             @Override
             public ChatModel build(Map<String, String> parameters) {
+                lastBuildParams.set(new HashMap<>(parameters));
                 return mockSyncModel;
             }
 
             @Override
             public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+                lastBuildStreamingParams.set(new HashMap<>(parameters));
                 return mockStreamingModel;
             }
         });
@@ -81,6 +93,29 @@ class ChatModelRegistryTest {
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
 
         registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
+
+        Map<String, Provider<ILanguageModelBuilder>> uniqueBuilders = new HashMap<>();
+        uniqueBuilders.put("openai", () -> new ILanguageModelBuilder() {
+            @Override
+            public ChatModel build(Map<String, String> parameters) {
+                return new ChatModel() {
+                    @Override
+                    public ChatResponse chat(List<ChatMessage> messages) {
+                        return ChatResponse.builder().aiMessage(aiMessage("ok")).build();
+                    }
+                };
+            }
+
+            @Override
+            public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+                return new StreamingChatModel() {
+                    @Override
+                    public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    }
+                };
+            }
+        });
+        uniqueRegistry = new ChatModelRegistry(uniqueBuilders, globalVariableResolver, secretResolver);
     }
 
     @Nested
@@ -221,24 +256,165 @@ class ChatModelRegistryTest {
         }
 
         @Test
-        @DisplayName("Observability params are excluded from cache key")
-        void getOrCreate_observabilityParamsDontAffectCacheKey() throws Exception {
-            // First call without observability
-            var params1 = new HashMap<String, String>();
-            params1.put("apiKey", "test");
-            ChatModel first = registry.getOrCreate("openai", params1);
+        @DisplayName("timeout/logRequests/logResponses reach the builder")
+        void getOrCreate_observabilityParamsReachBuilder() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("timeout", "5000");
+            params.put("logRequests", "true");
+            params.put("logResponses", "true");
 
-            // Second call with observability — same model params, different observability
-            var params2 = new HashMap<String, String>();
-            params2.put("apiKey", "test");
-            params2.put("timeout", "5000");
-            params2.put("logRequests", "true");
-            ChatModel second = registry.getOrCreate("openai", params2);
+            registry.getOrCreate("openai", params);
 
-            // both should be cached under the same key (observability params filtered
-            // out)
-            // The first cached model (unwrapped) is returned since it was cached first
-            assertSame(first, second, "Observability params should be excluded from cache key");
+            var seen = lastBuildParams.get();
+            assertNotNull(seen, "builder should have been invoked");
+            assertEquals("5000", seen.get("timeout"), "timeout must reach the provider builder, not be filtered away");
+            assertEquals("true", seen.get("logRequests"), "logRequests must reach the provider builder");
+            assertEquals("true", seen.get("logResponses"), "logResponses must reach the provider builder");
+        }
+    }
+
+    /**
+     * D11 regression: {@code timeout}/{@code logRequests}/{@code logResponses}
+     * shape the constructed model, so they must be part of the model cache key.
+     * While they were stripped from the key, which model a task received depended
+     * on which task happened to be constructed first — a task configured with a
+     * timeout silently got a timeout-free model built for a different task.
+     */
+    @Nested
+    @DisplayName("Observability params are part of the model identity (D11)")
+    class ObservabilityCacheKeyTests {
+
+        @Test
+        @DisplayName("two tasks differing only in timeout get different sync models")
+        void getOrCreate_differentTimeout_differentInstances() throws Exception {
+            var slow = new HashMap<String, String>();
+            slow.put("apiKey", "test");
+            slow.put("timeout", "60000");
+
+            var fast = new HashMap<String, String>();
+            fast.put("apiKey", "test");
+            fast.put("timeout", "1000");
+
+            ChatModel slowModel = uniqueRegistry.getOrCreate("openai", slow);
+            ChatModel fastModel = uniqueRegistry.getOrCreate("openai", fast);
+
+            assertNotSame(slowModel, fastModel, "A different timeout must produce a different model instance");
+            assertSame(slowModel, uniqueRegistry.getOrCreate("openai", slow), "Identical params must still hit the cache");
+        }
+
+        @Test
+        @DisplayName("a task with a timeout is not served an unwrapped model built without one")
+        void getOrCreate_timeoutlessFirst_doesNotPoisonTimeoutTask() throws Exception {
+            var noTimeout = new HashMap<String, String>();
+            noTimeout.put("apiKey", "test");
+
+            var withTimeout = new HashMap<String, String>();
+            withTimeout.put("apiKey", "test");
+            withTimeout.put("timeout", "5000");
+
+            // Construction order is the trigger: the timeout-free task is built first.
+            ChatModel unwrapped = uniqueRegistry.getOrCreate("openai", noTimeout);
+            ChatModel wrapped = uniqueRegistry.getOrCreate("openai", withTimeout);
+
+            assertNotSame(unwrapped, wrapped, "The timeout task must not be served the cached timeout-free model");
+            assertInstanceOf(ObservableChatModel.class, wrapped, "The timeout task must get a model that actually carries the timeout");
+        }
+
+        @Test
+        @DisplayName("two tasks differing only in logRequests get different sync models")
+        void getOrCreate_differentLogRequests_differentInstances() throws Exception {
+            var quiet = new HashMap<String, String>();
+            quiet.put("apiKey", "test");
+            quiet.put("logRequests", "false");
+
+            var loud = new HashMap<String, String>();
+            loud.put("apiKey", "test");
+            loud.put("logRequests", "true");
+
+            assertNotSame(uniqueRegistry.getOrCreate("openai", quiet), uniqueRegistry.getOrCreate("openai", loud),
+                    "A different logRequests must produce a different model instance");
+        }
+
+        @Test
+        @DisplayName("two tasks differing only in logResponses get different sync models")
+        void getOrCreate_differentLogResponses_differentInstances() throws Exception {
+            var quiet = new HashMap<String, String>();
+            quiet.put("apiKey", "test");
+            quiet.put("logResponses", "false");
+
+            var loud = new HashMap<String, String>();
+            loud.put("apiKey", "test");
+            loud.put("logResponses", "true");
+
+            assertNotSame(uniqueRegistry.getOrCreate("openai", quiet), uniqueRegistry.getOrCreate("openai", loud),
+                    "A different logResponses must produce a different model instance");
+        }
+
+        @Test
+        @DisplayName("two streaming tasks differing only in timeout get different models")
+        void getOrCreateStreaming_differentTimeout_differentInstances() throws Exception {
+            var slow = new HashMap<String, String>();
+            slow.put("apiKey", "test");
+            slow.put("timeout", "60000");
+
+            var fast = new HashMap<String, String>();
+            fast.put("apiKey", "test");
+            fast.put("timeout", "1000");
+
+            assertNotSame(uniqueRegistry.getOrCreateStreaming("openai", slow), uniqueRegistry.getOrCreateStreaming("openai", fast),
+                    "A different timeout must produce a different streaming model instance");
+        }
+
+        @Test
+        @DisplayName("two streaming tasks differing only in logResponses get different models")
+        void getOrCreateStreaming_differentLogResponses_differentInstances() throws Exception {
+            var quiet = new HashMap<String, String>();
+            quiet.put("apiKey", "test");
+            quiet.put("logResponses", "false");
+
+            var loud = new HashMap<String, String>();
+            loud.put("apiKey", "test");
+            loud.put("logResponses", "true");
+
+            assertNotSame(uniqueRegistry.getOrCreateStreaming("openai", quiet), uniqueRegistry.getOrCreateStreaming("openai", loud),
+                    "A different logResponses must produce a different streaming model instance");
+        }
+
+        @Test
+        @DisplayName("a streaming task with a timeout gets a model that actually carries it")
+        void getOrCreateStreaming_timeoutReachesBuilder() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("timeout", "7500");
+
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", params);
+
+            assertNotNull(model);
+            var seen = lastBuildStreamingParams.get();
+            assertNotNull(seen, "streaming builder should have been invoked");
+            assertEquals("7500", seen.get("timeout"),
+                    "timeout must reach the streaming builder — it is the provider's streaming request timeout");
+        }
+
+        @Test
+        @DisplayName("a streaming task with logResponses is wrapped for uniform logging")
+        void getOrCreateStreaming_logResponses_wraps() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("logResponses", "true");
+
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", params);
+
+            assertInstanceOf(ObservableStreamingChatModel.class, model,
+                    "logResponses must be honoured on the streaming path, not silently discarded");
+        }
+
+        @Test
+        @DisplayName("a streaming task without logging flags is returned unwrapped")
+        void getOrCreateStreaming_noLogging_notWrapped() throws Exception {
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", Map.of("apiKey", "test"));
+            assertSame(mockStreamingModel, model, "Without logging flags the raw streaming model should be returned");
         }
     }
 

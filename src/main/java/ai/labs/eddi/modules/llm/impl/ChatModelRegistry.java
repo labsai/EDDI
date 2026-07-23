@@ -83,11 +83,16 @@ public class ChatModelRegistry {
     /**
      * Get or create a ChatModel for the given type and processed parameters.
      * Parameters are filtered to remove non-model keys before cache lookup.
+     * <p>
+     * The filtered map is used both as the cache key <em>and</em> as the builder
+     * input, so anything that shapes the constructed model necessarily shapes its
+     * identity. {@code timeout}, {@code logRequests} and {@code logResponses} are
+     * part of that map: they are consumed by the provider builders and by
+     * {@link ObservableChatModel}, so two tasks differing only in those settings
+     * must get two different model instances.
      */
     ChatModel getOrCreate(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
 
-        // Extract observability params BEFORE filtering (they're removed from cache
-        // key)
         var timeoutMs = processedParams.get(KEY_TIMEOUT);
         var logReq = processedParams.get(KEY_LOG_REQUESTS);
         var logResp = processedParams.get(KEY_LOG_RESPONSES);
@@ -117,8 +122,18 @@ public class ChatModelRegistry {
     /**
      * Get or create a StreamingChatModel for the given type and parameters. Returns
      * {@code null} if the builder does not support streaming.
+     * <p>
+     * As on the sync path, {@code timeout}/{@code logRequests}/{@code logResponses}
+     * reach the streaming builder and are part of the cache key. {@code timeout}
+     * becomes the provider's streaming HTTP request/read timeout; the logging flags
+     * additionally wrap the model in {@link ObservableStreamingChatModel} so they
+     * are honoured uniformly, including for providers whose streaming builder has
+     * no logging switch of its own.
      */
     StreamingChatModel getOrCreateStreaming(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
+
+        var logReq = processedParams.get(KEY_LOG_REQUESTS);
+        var logResp = processedParams.get(KEY_LOG_RESPONSES);
 
         var filteredParams = filterParams(processedParams);
         var cacheKey = new ModelCacheKey(type, filteredParams);
@@ -136,7 +151,8 @@ public class ChatModelRegistry {
             // after Qute, before builder.build())
             var resolvedParams = globalVariableResolver.resolveAll(filteredParams);
             resolvedParams = secretResolver.resolveSecrets(resolvedParams);
-            var model = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);
+            var rawModel = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);
+            var model = ObservableStreamingChatModel.wrapIfNeeded(rawModel, type, logReq, logResp);
             streamingModelCache.put(cacheKey, model);
             return model;
         } catch (UnsupportedOperationException e) {
@@ -148,6 +164,14 @@ public class ChatModelRegistry {
     /**
      * Remove all props that are not directly configuring the langchain builders
      * (for better caching).
+     * <p>
+     * Only keys the builders never read may be removed here. {@code timeout},
+     * {@code logRequests} and {@code logResponses} are <em>not</em> among them:
+     * every provider builder reads them, and stripping them both made those builder
+     * branches unreachable and — worse — dropped them from the cache key, so a task
+     * configured with a {@code timeout} silently received a timeout-free model
+     * whenever a task with otherwise identical parameters happened to be built
+     * first. Cache key and builder input must stay the same map.
      */
     private Map<String, String> filterParams(Map<String, String> processedParams) {
         var returnMap = new HashMap<>(processedParams);
@@ -157,10 +181,6 @@ public class ChatModelRegistry {
         returnMap.remove(KEY_LOG_SIZE_LIMIT);
         returnMap.remove(KEY_ADD_TO_OUTPUT);
         returnMap.remove(KEY_CONVERT_TO_OBJECT);
-        // Observability params don't affect model identity — remove from cache key
-        returnMap.remove(KEY_TIMEOUT);
-        returnMap.remove(KEY_LOG_REQUESTS);
-        returnMap.remove(KEY_LOG_RESPONSES);
         return returnMap;
     }
 

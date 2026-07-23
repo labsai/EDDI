@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -32,6 +33,7 @@ import java.util.concurrent.atomic.AtomicReference;
 class StreamingLegacyChatExecutor {
     private static final Logger LOGGER = Logger.getLogger(StreamingLegacyChatExecutor.class);
     private static final long DEFAULT_TIMEOUT_SECONDS = 120;
+    private static final String KEY_TIMEOUT = "timeout";
 
     /**
      * Result of a streaming chat execution, including response text and metadata.
@@ -88,7 +90,8 @@ class StreamingLegacyChatExecutor {
     /**
      * As
      * {@link #executeCapturing(StreamingChatModel, List, ConversationEventSink)},
-     * but honouring the task's {@code streamingTimeoutSeconds}.
+     * but honouring the task's resolved streaming backstop (see
+     * {@link #resolveTimeoutSeconds(LlmConfiguration.Task)}).
      * <p>
      * The task's retry config is deliberately <em>not</em> applied: the cascade
      * owns escalation, and retrying inside a step would multiply spend against the
@@ -133,6 +136,60 @@ class StreamingLegacyChatExecutor {
     }
 
     /**
+     * Resolve the overall wall-clock backstop for one streaming attempt.
+     * <p>
+     * Two settings bound a stream, and they are deliberately kept distinct rather
+     * than merged, because they bound different things:
+     * <ul>
+     * <li>the {@code timeout} model parameter (milliseconds) is handed to the
+     * provider's streaming HTTP client — for the JDK client it bounds the time to
+     * the first response, so it detects a provider that never answers without
+     * truncating one that answers slowly;</li>
+     * <li>{@code streamingTimeoutSeconds} is this overall backstop, covering the
+     * whole stream for providers whose native timeout does not fire (or does not
+     * exist).</li>
+     * </ul>
+     * Precedence, preserving both back-compatible shapes:
+     * <ol>
+     * <li>an explicit positive {@code streamingTimeoutSeconds} always wins —
+     * configs that set only that field behave exactly as before;</li>
+     * <li>otherwise the backstop is the 120s default, raised (never lowered) to
+     * cover an explicitly configured {@code timeout}. A config that sets only
+     * {@code timeout} therefore keeps the 120s default for any value up to 120s,
+     * and no longer has a long deliberate timeout silently cut short at 120s;</li>
+     * <li>otherwise the 120s default.</li>
+     * </ol>
+     * The {@code timeout} value is read from the task's raw parameters. A
+     * Qute-templated value cannot be resolved here and simply leaves the default in
+     * place — the pre-existing behaviour, never a shorter bound.
+     */
+    static long resolveTimeoutSeconds(LlmConfiguration.Task task) {
+        if (task == null) {
+            return DEFAULT_TIMEOUT_SECONDS;
+        }
+        if (task.getStreamingTimeoutSeconds() != null && task.getStreamingTimeoutSeconds() > 0) {
+            return task.getStreamingTimeoutSeconds();
+        }
+        Map<String, String> parameters = task.getParameters();
+        String timeoutMs = parameters != null ? parameters.get(KEY_TIMEOUT) : null;
+        if (timeoutMs == null || timeoutMs.isBlank()) {
+            return DEFAULT_TIMEOUT_SECONDS;
+        }
+        try {
+            long millis = Long.parseLong(timeoutMs.trim());
+            if (millis <= 0) {
+                return DEFAULT_TIMEOUT_SECONDS;
+            }
+            // Round up so a sub-second timeout never collapses the backstop to zero.
+            long seconds = (millis + 999) / 1000;
+            return Math.max(DEFAULT_TIMEOUT_SECONDS, seconds);
+        } catch (NumberFormatException e) {
+            LOGGER.debugf("Ignoring non-numeric 'timeout' parameter '%s' when deriving the streaming backstop", timeoutMs);
+            return DEFAULT_TIMEOUT_SECONDS;
+        }
+    }
+
+    /**
      * Core streaming execution.
      *
      * @param salvagePartialOnError
@@ -149,10 +206,7 @@ class StreamingLegacyChatExecutor {
 
         LOGGER.debug("Executing with streaming (legacy mode)");
 
-        long timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
-        if (task != null && task.getStreamingTimeoutSeconds() != null && task.getStreamingTimeoutSeconds() > 0) {
-            timeoutSeconds = task.getStreamingTimeoutSeconds();
-        }
+        long timeoutSeconds = resolveTimeoutSeconds(task);
 
         RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
 
@@ -170,12 +224,22 @@ class StreamingLegacyChatExecutor {
             var fullResponse = new StringBuilder();
             var errorRef = new AtomicReference<Throwable>();
             var responseRef = new AtomicReference<ChatResponse>();
+            // Abandoning an attempt (timeout, interrupt, or a retried error) does not
+            // stop the provider's callback thread — this executor cannot cancel it. Without
+            // this gate a late token from a timed-out attempt keeps writing to the shared
+            // event sink while the retry streams its own tokens into the same sink, so the
+            // client renders two answers interleaved and neither matches what is stored in
+            // memory. Once an attempt is abandoned its handler goes silent.
+            var abandoned = new AtomicBoolean(false);
 
             var chatRequest = ChatRequest.builder().messages(messages).build();
 
             streamingModel.chat(chatRequest, new StreamingChatResponseHandler() {
                 @Override
                 public void onPartialResponse(String partialResponse) {
+                    if (abandoned.get()) {
+                        return;
+                    }
                     fullResponse.append(partialResponse);
                     try {
                         eventSink.onToken(partialResponse);
@@ -208,6 +272,12 @@ class StreamingLegacyChatExecutor {
                 Thread.currentThread().interrupt();
                 LOGGER.warn("Streaming chat was interrupted");
                 interrupted = true;
+            }
+
+            if (timedOut || interrupted) {
+                // Silence the still-running handler before reading what it produced, so the
+                // text returned to memory is exactly the text the client was sent.
+                abandoned.set(true);
             }
 
             responseText = fullResponse.toString();
@@ -259,6 +329,7 @@ class StreamingLegacyChatExecutor {
                 if (attempt < maxAttempts) {
                     LOGGER.warnf("Streaming error with empty response, retrying (attempt %d/%d): %s",
                             attempt, maxAttempts, errorRef.get().getMessage());
+                    abandoned.set(true);
                     RetryConfiguration.backoff(attempt, retryConfig);
                     continue;
                 }
