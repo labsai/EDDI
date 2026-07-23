@@ -163,7 +163,7 @@ All tool invocations flow through a unified pipeline that provides enterprise-gr
 | `toolRateLimits`           | map     | `{}`      | Per-tool overrides, e.g. `{"websearch": 30}` |
 | `enableToolCaching`        | boolean | `true`    | Cache identical tool calls                   |
 | `defaultToolCacheScope`    | string  | `user`    | Who may reuse a cached result: `user`, `conversation` or `global` |
-| `toolCacheScopes`          | map     | `{}`      | Per-tool overrides, e.g. `{"calculate": "global"}` |
+| `toolCacheScopes`          | map     | `{}`      | Per-tool overrides, keyed on the dispatch name or the slug, e.g. `{"calculate": "global"}` |
 | `enableCostTracking`       | boolean | `true`    | Track tool cost per conversation             |
 | `toolPricing`              | map     | built-ins | Per-call price in USD, e.g. `{"websearch": 0.005}` |
 | `maxBudgetPerConversation` | number  | unlimited | Ceiling on accumulated **tool** cost per conversation |

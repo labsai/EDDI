@@ -168,8 +168,18 @@ public class ToolCacheService {
      * result is {@code null}.
      * </p>
      *
-     * @param toolName
-     *            the tool being invoked
+     * <p>
+     * Both tool names are required: {@code toolCacheScopes} is keyed the same way
+     * as {@code toolRateLimits} and {@code toolPricing} — dispatch name or
+     * configuration slug, dispatch name first. See
+     * {@link ToolCacheScope#resolve(Map, String, String, String)}.
+     * </p>
+     *
+     * @param dispatchName
+     *            the tool name the model invoked
+     * @param canonicalName
+     *            the tool's configuration slug (the dispatch name itself when the
+     *            tool has no slug)
      * @param toolCacheScopes
      *            per-tool scope overrides from the task config, may be null
      * @param defaultToolCacheScope
@@ -180,9 +190,10 @@ public class ToolCacheService {
      *            current conversation id, may be null/blank
      * @return the scope tag, or {@code null} when the cache must be bypassed
      */
-    public static String resolveScopeTag(String toolName, Map<String, String> toolCacheScopes, String defaultToolCacheScope, String userId,
-                                         String conversationId) {
-        return scopeTagFor(ToolCacheScope.resolve(toolCacheScopes, defaultToolCacheScope, toolName), userId, conversationId);
+    public static String resolveScopeTag(String dispatchName, String canonicalName, Map<String, String> toolCacheScopes,
+                                         String defaultToolCacheScope, String userId, String conversationId) {
+        ToolCacheScope scope = ToolCacheScope.resolve(toolCacheScopes, defaultToolCacheScope, dispatchName, canonicalName);
+        return scopeTagFor(scope, userId, conversationId);
     }
 
     /**
@@ -271,15 +282,24 @@ public class ToolCacheService {
     }
 
     /**
-     * Put result in cache with the smart TTL of the invocation's <em>canonical</em>
-     * tool, keyed on its <em>dispatch</em> name.
+     * Put result in cache with the invocation's smart TTL, keyed on its
+     * <em>dispatch</em> name.
      *
      * <p>
-     * The two names must not be conflated here. The TTL is a property of the tool
-     * ({@code websearch} results go stale in 30 minutes), so it is looked up under
-     * the slug — which is the only way a built-in ever matches
-     * {@code TOOL_TTL_SECONDS}, since its dispatch name is a method name. The key,
-     * however, must stay on the dispatch name: {@code searchWeb},
+     * The TTL is resolved from the dispatch name first and only then from the
+     * canonical slug — the same precedence
+     * {@code AgentOrchestrator.resolveRateLimit} uses, and for the same reason: an
+     * entry that describes a single operation is more specific than one describing
+     * the whole tool. Slug-only resolution made the {@code news} bucket
+     * unreachable, because {@code searchNews} canonicalises to {@code websearch}
+     * and matched its 30-minute entry before the 10-minute news entry could ever be
+     * considered. The slug fallback stays, because it is the only way a built-in
+     * whose dispatch name resembles nothing in the table ({@code calculate} →
+     * {@code calculator}) matches at all.
+     * </p>
+     *
+     * <p>
+     * The KEY, however, must stay on the dispatch name: {@code searchWeb},
      * {@code searchNews} and {@code searchWikipedia} all canonicalise to
      * {@code websearch}, and keying on the slug would make them share one entry and
      * serve each other's results for identical arguments.
@@ -290,7 +310,7 @@ public class ToolCacheService {
      *            nothing
      */
     public void put(String scopeTag, ToolInvocation invocation, String arguments, String result) {
-        long ttlSeconds = getSmartTTL(invocation.canonicalName());
+        long ttlSeconds = resolveSmartTTL(invocation.dispatchName(), invocation.canonicalName());
         put(scopeTag, invocation.dispatchName(), arguments, result, ttlSeconds, TimeUnit.SECONDS);
     }
 
@@ -323,21 +343,13 @@ public class ToolCacheService {
     }
 
     /**
-     * Get smart TTL for a tool based on its data freshness requirements
+     * Get smart TTL for a single tool name based on its data freshness
+     * requirements, falling back to {@link #DEFAULT_TTL_SECONDS}.
      */
     private long getSmartTTL(String toolName) {
-        // Check for exact match
-        Long ttl = TOOL_TTL_SECONDS.get(toolName.toLowerCase());
+        Long ttl = lookupTTL(toolName);
         if (ttl != null) {
             return ttl;
-        }
-
-        // Check for partial match (e.g., "WebSearchTool" contains "websearch")
-        String lowerToolName = toolName.toLowerCase();
-        for (Map.Entry<String, Long> entry : TOOL_TTL_SECONDS.entrySet()) {
-            if (lowerToolName.contains(entry.getKey())) {
-                return entry.getValue();
-            }
         }
 
         // Default TTL for unknown tools
@@ -345,6 +357,56 @@ public class ToolCacheService {
             LOGGER.debugf("Using default TTL for unknown tool: %s", sanitize(toolName));
         }
         return DEFAULT_TTL_SECONDS;
+    }
+
+    /**
+     * Get the smart TTL for one invocation: the dispatch name is consulted first,
+     * the canonical slug second. See
+     * {@link #put(String, ToolInvocation, String, String)}.
+     */
+    private long resolveSmartTTL(String dispatchName, String canonicalName) {
+        Long ttl = lookupTTL(dispatchName);
+        if (ttl == null) {
+            ttl = lookupTTL(canonicalName);
+        }
+        if (ttl != null) {
+            return ttl;
+        }
+
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debugf("Using default TTL for unknown tool: %s", sanitize(dispatchName));
+        }
+        return DEFAULT_TTL_SECONDS;
+    }
+
+    /**
+     * Match one tool name against the TTL table, exact first then by substring.
+     *
+     * @return the configured TTL, or {@code null} when nothing matches — the
+     *         distinction the caller needs in order to try a second name before
+     *         settling for the default.
+     */
+    private static Long lookupTTL(String toolName) {
+        if (toolName == null) {
+            return null;
+        }
+
+        String lowerToolName = toolName.toLowerCase();
+
+        // Check for exact match
+        Long ttl = TOOL_TTL_SECONDS.get(lowerToolName);
+        if (ttl != null) {
+            return ttl;
+        }
+
+        // Check for partial match (e.g., "WebSearchTool" contains "websearch")
+        for (Map.Entry<String, Long> entry : TOOL_TTL_SECONDS.entrySet()) {
+            if (lowerToolName.contains(entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -1523,8 +1523,10 @@ class AgentOrchestrator {
 
             // Partition the tool-result cache by identity, so one user's result can never
             // be served back to another. A null tag means no usable identity was
-            // available; ToolExecutionService then bypasses the cache entirely.
-            String cacheScopeTag = ToolCacheService.resolveScopeTag(toolRequest.name(), task.getToolCacheScopes(),
+            // available; ToolExecutionService then bypasses the cache entirely. Both
+            // names go in: toolCacheScopes shares its key vocabulary with toolRateLimits
+            // and toolPricing, so a slug-keyed narrowing override has to bind here too.
+            String cacheScopeTag = ToolCacheService.resolveScopeTag(toolRequest.name(), canonicalName, task.getToolCacheScopes(),
                     task.getDefaultToolCacheScope(), memory != null ? memory.getUserId() : null, conversationId);
 
             var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);

@@ -954,7 +954,7 @@ difference between a rule that binds and one that is silently ignored:
 | `builtInToolsWhitelist`      | slug only                                            |
 | `toolRateLimits`             | slug **or** dispatch name — dispatch name wins       |
 | `toolPricing`                | slug **or** dispatch name — dispatch name wins       |
-| `toolCacheScopes`            | dispatch name (resolved per call)                    |
+| `toolCacheScopes`            | slug **or** dispatch name — dispatch name wins       |
 | `toolApprovals`              | dispatch name, optionally `source:name`-qualified    |
 | cache TTL, default price     | slug (resolved automatically)                        |
 | `eddi.tool.*` metric `tool` tag | dispatch name                                     |
@@ -991,7 +991,8 @@ Negative `toolPricing` values are clamped to 0.0.
 
 Cached tool results are partitioned by identity. The cache key is
 `scopeTag|toolName:arguments`, and the scope tag is resolved per tool call as
-`toolCacheScopes[<tool>]` → `defaultToolCacheScope` → `user`:
+`toolCacheScopes[<dispatch name>]` → `toolCacheScopes[<slug>]` →
+`defaultToolCacheScope` → `user`:
 
 | Scope          | Tag                                    | A cached result is reused…                     |
 | -------------- | -------------------------------------- | ---------------------------------------------- |
@@ -1008,10 +1009,19 @@ narrower conversation partition. When neither identity is available the cache is
 bypassed entirely for that call — nothing is read and nothing is stored, and the
 `eddi.tool.cache.bypassed` counter is incremented.
 
+An unrecognized token never fails the agent load, and it never widens a tool's
+audience either. A `toolCacheScopes` entry whose value does not parse
+(`"usr"`, `""`, `null`) resolves to `user` — **not** to `defaultToolCacheScope`,
+which could be `global` — and is logged at WARN naming the tool and the bad
+token. An unrecognized `defaultToolCacheScope` likewise resolves to `user`.
+
 Per-tool TTLs are enforced per entry: a cached result is removed once its own
 TTL has elapsed since it was written, independently of the other entries in the
-cache. `GET /llm/tools/cache/ttl/{toolName}` reports the TTL that will be
-applied. Size eviction (10 000 entries) is the secondary bound.
+cache. The TTL is resolved from the dispatch name first and the slug second, so
+`searchNews` gets the 10-minute `news` TTL while its `searchWeb` sibling
+inherits `websearch`'s 30 minutes. `GET /llm/tools/cache/ttl/{toolName}` reports
+the TTL that will be applied. Size eviction (10 000 entries) is the secondary
+bound.
 
 ### Configuration Example
 

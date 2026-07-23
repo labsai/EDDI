@@ -5,6 +5,45 @@
 
 ---
 
+## 🔐 Tool-cache scope resolution honours its own invariant (2026-07-23)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Three defects in the per-tool cache-scope surface this branch introduced with D5/D2. Two of them could put a tool on a **cross-user** partition — the exact leak D5 existed to close.
+
+**B1 — a typo in a per-tool scope widened the tool instead of narrowing it.** `ToolCacheScope`'s javadoc (and the D5 changelog entry) promise that "a typo must never silently widen a tool's audience". The code did the opposite: `fromConfig` returns `null` for an unrecognized token, and `resolve`'s `if (scope == null)` branch could not tell "this tool has no entry" from "this tool has an entry I could not parse", so it fell through to the **task-level default**. With `defaultToolCacheScope: "global"` plus `toolCacheScopes: {"getUserProfile": "usr"}` — a typo for `"user"` in an override written to *narrow* that one tool — the tool resolved to `GLOBAL` and got the shared `"g"` tag: one partition for every authenticated user. Alice's result served to Bob.
+
+**B2 — `toolCacheScopes` was the only per-tool map that did not speak the slug.** D2 established the canonical slug as the configuration vocabulary: `toolRateLimits` and `toolPricing` both accept the dispatch name *or* the slug. `toolCacheScopes` was looked up by dispatch name alone, so `{"websearch": "user"}` — written in the same object as the `toolRateLimits: {"websearch": 30}` next to it, in the same vocabulary as `builtInToolsWhitelist` — was silently ignored and the tool stayed on whatever the task default was, possibly `global`. Every built-in was affected; none declares `@Tool(name = ...)`.
+
+**B3 — the dedicated `news` TTL became unreachable.** `getSmartTTL` received only the canonical slug after D2, so `searchNews` canonicalised to `websearch` and exact-matched its 1800s entry before the substring loop could reach `Map.entry("news", 600L)`. No slug contains "news", so that entry was dead for every built-in and news results were cached 3× longer than the table declares. Inert until D5b made per-entry TTLs actually take effect.
+
+**What changed:**
+
+| Component | Change |
+|---|---|
+| **`ToolCacheScope`** | `resolve` takes both names and gains `resolvePerTool`, which returns `null` **only** when the map has no entry for a name. A present-but-unparseable entry returns `DEFAULT` (`USER`) and logs a WARN naming the tool and the bad token. An unrecognized `defaultToolCacheScope` also WARNs |
+| **`ToolCacheService`** | `resolveScopeTag(dispatchName, canonicalName, …)`; `getSmartTTL` split into a `lookupTTL` that can say "no match" plus `resolveSmartTTL(dispatch, canonical)` which tries the dispatch name first |
+| **`AgentOrchestrator`** | Passes the already-computed `canonicalName` into `resolveScopeTag` — the three per-tool maps on a Task now agree on key vocabulary |
+| **`docs/langchain.md`, `docs/security.md`, `docs/agent-father-langchain-tools-guide.md`** | Scope keys documented as slug-or-dispatch-name; fail-safe parsing and dispatch-first TTL documented |
+
+**Design decisions:**
+
+- **Fail safe, don't fail the load.** Leniency was never the bug — the *direction* of the fallback was. Unknown tokens still never abort an agent load; they now land on `USER`, and the WARN makes the typo discoverable instead of merely inert.
+- **A bad dispatch-name entry does not fall through to the slug entry either.** `{"searchNews": "usr", "websearch": "global"}` resolves `searchNews` to `USER`. Any fall-through from a broken narrowing override risks landing somewhere wider, which is the whole defect.
+- **Dispatch name before slug, everywhere.** Same precedence as `resolveRateLimit`: an entry naming one operation is more specific than one naming the whole tool. That precedence is also what makes the `news` TTL reachable again, without deleting a table entry that is genuinely correct for news.
+- **The cache KEY stays on the dispatch name.** Unchanged, and load-bearing: `searchWeb`/`searchNews`/`searchWikipedia` share the `websearch` slug and must not share an entry.
+- **`resolveScopeTag`'s old 5-arg form was replaced, not overloaded.** A lingering dispatch-name-only overload would let future code reintroduce B2 silently.
+
+**Operator-visible behaviour changes:**
+
+- A `toolCacheScopes` value that does not parse now yields `user` scope instead of inheriting `defaultToolCacheScope`. Deployments relying on a typo'd key to reach a `global` default lose that (unintended) cross-user reuse — a cache-hit-rate change, never a correctness one.
+- Slug-keyed `toolCacheScopes` entries now bind. An entry like `{"websearch": "global"}` that was previously inert becomes live — audit `toolCacheScopes` for slug keys that were written as documentation rather than intent.
+- `searchNews` results are now cached for 10 minutes instead of 30.
+
+**Tests:** `ToolCacheServiceTest` (79) and `AgentOrchestratorCoverageTest` (57) green. New nested suites `UnparseablePerToolEntryTests` and `DualNameScopeKeyTests`, plus TTL cases in `CanonicalPutTests` and a ticker-driven `newsTtlIsLoadBearing` against a real expiring cache. All mutation-checked: reverting each production change fails 6, 4 and 2 tests respectively.
+
+---
+
 ## 🧾 The audit ledger stops triple-billing the turn, and starts seeing the tool spend (2026-07-23)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

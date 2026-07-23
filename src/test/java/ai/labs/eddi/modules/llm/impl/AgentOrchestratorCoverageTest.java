@@ -494,6 +494,42 @@ class AgentOrchestratorCoverageTest {
                 "an explicit per-tool GLOBAL opt-in is the only way back to a shared partition");
     }
 
+    /**
+     * {@code toolCacheScopes} must accept the same keys as the
+     * {@code toolRateLimits} and {@code toolPricing} maps sitting next to it on the
+     * task — the whitelist slug as well as the dispatch name. Keying the lookup on
+     * the dispatch name alone silently ignored every slug-keyed entry, so an
+     * override written to pin a tool's partition left it on the task default.
+     */
+    @Test
+    void toolCall_slugKeyedCacheScope_bindsForABuiltIn() throws Exception {
+        when(memory.getUserId()).thenReturn("alice");
+        var task = calcOnlyTask();
+        task.setToolCacheScopes(Map.of("calculator", "global"));
+
+        assertEquals("g", capturedCacheScopeTag(task),
+                "'calculator' is the slug that builtInToolsWhitelist, toolRateLimits and toolPricing all use; "
+                        + "the orchestrator must hand the canonical name to resolveScopeTag so it binds here too");
+    }
+
+    /**
+     * The fail-safe half of the same config surface: a typo in a per-tool entry
+     * must not promote that tool onto the task's wider default partition.
+     */
+    @Test
+    void toolCall_typoedCacheScope_doesNotInheritTheGlobalDefault() throws Exception {
+        when(memory.getUserId()).thenReturn("alice");
+        var task = calcOnlyTask();
+        task.setToolCacheScopes(Map.of("calculate", "usr"));
+        task.setDefaultToolCacheScope("global");
+
+        String tag = capturedCacheScopeTag(task);
+
+        assertNotEquals("g", tag, "'usr' is a typo for 'user' in an override meant to NARROW this tool; "
+                + "inheriting the task's 'global' default puts every authenticated user on one partition");
+        assertTrue(tag.startsWith("u:"), "expected a per-user partition, got: " + tag);
+    }
+
     @Test
     void toolCall_noIdentityAtAll_passesNullCacheTagSoCacheIsBypassed() throws Exception {
         when(memory.getUserId()).thenReturn(null);

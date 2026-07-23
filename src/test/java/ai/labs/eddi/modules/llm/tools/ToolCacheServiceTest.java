@@ -18,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -155,14 +156,15 @@ class ToolCacheServiceTest {
     // ==================== Canonical name vs cache key ====================
 
     /**
-     * The TTL table is keyed on configuration slugs, but tools are dispatched under
-     * {@code @Tool} method names. Resolving the TTL under the slug while keeping
-     * the KEY on the dispatch name is the only combination that is correct: a
+     * The TTL table is keyed mostly on configuration slugs, but tools are
+     * dispatched under {@code @Tool} method names — and one entry ({@code news})
+     * only ever matches a dispatch name. The TTL is therefore resolved dispatch
+     * name first, slug second, while the KEY stays on the dispatch name alone: a
      * slug-keyed cache would make {@code searchWeb}, {@code searchNews} and
      * {@code searchWikipedia} share one entry and serve each other's results.
      */
     @Nested
-    @DisplayName("canonical name drives TTL, dispatch name drives the key")
+    @DisplayName("both names drive the TTL, only the dispatch name drives the key")
     class CanonicalPutTests {
 
         @SuppressWarnings("unchecked")
@@ -209,6 +211,44 @@ class ToolCacheServiceTest {
             service.put(null, new ToolInvocation("calculate", "calculator", null), "2+2", "4");
 
             verify(cache, never()).put(any(), any(), anyLong(), any());
+        }
+
+        /**
+         * Resolving the TTL from the slug ALONE made the dedicated {@code news} bucket
+         * unreachable for every built-in: {@code searchNews} canonicalises to
+         * {@code websearch} and exact-matched its 1800s entry before the substring loop
+         * could ever reach {@code news}, so news results were cached three times longer
+         * than the table declares. Dispatch name first, slug second.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("searchNews gets the 600s news TTL, not websearch's 1800s")
+        void newsTtlIsReachable() {
+            service.put(SCOPE_A, new ToolInvocation("searchNews", "websearch", null), "{\"q\":\"eddi\"}", "news hits");
+
+            verify(cache).put(eq(SCOPE_A + "|searchNews:{\"q\":\"eddi\"}"), any(), eq(600L), eq(TimeUnit.SECONDS));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("siblings that match nothing themselves still fall back to the slug's TTL")
+        void siblingsWithoutTheirOwnEntryUseTheSlugTtl() {
+            service.put(SCOPE_A, new ToolInvocation("searchWeb", "websearch", null), "{\"q\":\"eddi\"}", "web hits");
+            service.put(SCOPE_A, new ToolInvocation("searchWikipedia", "websearch", null), "{\"q\":\"eddi\"}", "wiki hits");
+
+            verify(cache).put(eq(SCOPE_A + "|searchWeb:{\"q\":\"eddi\"}"), any(), eq(1800L), eq(TimeUnit.SECONDS));
+            verify(cache).put(eq(SCOPE_A + "|searchWikipedia:{\"q\":\"eddi\"}"), any(), eq(1800L), eq(TimeUnit.SECONDS));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a dispatch name that matches nothing at all still reaches the default")
+        void unknownOnBothNamesUsesTheDefault() {
+            service.put(SCOPE_A, new ToolInvocation("listTimezones", "datetime", null), "{}", "…");
+            service.put(SCOPE_A, new ToolInvocation("do_a_thing", "do_a_thing", null), "{}", "…");
+
+            verify(cache).put(eq(SCOPE_A + "|listTimezones:{}"), any(), eq(60L), eq(TimeUnit.SECONDS));
+            verify(cache).put(eq(SCOPE_A + "|do_a_thing:{}"), any(), eq(300L), eq(TimeUnit.SECONDS));
         }
     }
 
@@ -314,40 +354,41 @@ class ToolCacheServiceTest {
         @Test
         @DisplayName("no config at all resolves to USER")
         void defaultsToUser() {
-            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(null, null, "calculate"));
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(null, null, "calculate", "calculator"));
         }
 
         @Test
         @DisplayName("task-level default applies to tools without an override")
         void taskDefaultApplies() {
-            assertEquals(ToolCacheScope.CONVERSATION, ToolCacheScope.resolve(Map.of(), "conversation", "calculate"));
+            assertEquals(ToolCacheScope.CONVERSATION, ToolCacheScope.resolve(Map.of(), "conversation", "calculate", "calculator"));
         }
 
         @Test
         @DisplayName("per-tool entry wins over the task-level default")
         void perToolWinsOverDefault() {
             assertEquals(ToolCacheScope.GLOBAL,
-                    ToolCacheScope.resolve(Map.of("calculate", "global"), "conversation", "calculate"));
+                    ToolCacheScope.resolve(Map.of("calculate", "global"), "conversation", "calculate", "calculator"));
         }
 
         @Test
         @DisplayName("a per-tool entry for a DIFFERENT tool does not leak across")
         void perToolIsPerTool() {
             assertEquals(ToolCacheScope.USER,
-                    ToolCacheScope.resolve(Map.of("calculate", "global"), null, "getCurrentWeather"));
+                    ToolCacheScope.resolve(Map.of("calculate", "global"), null, "getCurrentWeather", "weather"));
         }
 
         @Test
         @DisplayName("tokens are case-insensitive and trimmed")
         void tokensAreLenient() {
-            assertEquals(ToolCacheScope.GLOBAL, ToolCacheScope.resolve(Map.of("calculate", "  GLOBAL "), null, "calculate"));
+            assertEquals(ToolCacheScope.GLOBAL,
+                    ToolCacheScope.resolve(Map.of("calculate", "  GLOBAL "), null, "calculate", "calculator"));
         }
 
         @Test
         @DisplayName("an unrecognized token falls back to USER, never to a wider scope")
         void unknownTokenFailsClosed() {
-            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(Map.of("calculate", "globl"), null, "calculate"));
-            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(null, "everyone", "calculate"));
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(Map.of("calculate", "globl"), null, "calculate", "calculator"));
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(null, "everyone", "calculate", "calculator"));
             assertNull(ToolCacheScope.fromConfig("nonsense"));
             assertNull(ToolCacheScope.fromConfig(null));
         }
@@ -355,7 +396,7 @@ class ToolCacheServiceTest {
         @Test
         @DisplayName("USER scope tag is 'u:' + the first 32 hex chars of the userId digest")
         void userScopeTagShape() throws Exception {
-            String tag = ToolCacheService.resolveScopeTag("calculate", null, null, "alice", "conv-1");
+            String tag = ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, "alice", "conv-1");
 
             assertEquals("u:" + sha256Hex("alice").substring(0, 32), tag);
             assertFalse(tag.contains("alice"), "the raw userId must not appear in the cache key");
@@ -364,8 +405,8 @@ class ToolCacheServiceTest {
         @Test
         @DisplayName("two different userIds resolve to two different USER tags")
         void differentUserIdsDifferentTags() {
-            String alice = ToolCacheService.resolveScopeTag("calculate", null, null, "alice", "conv-1");
-            String bob = ToolCacheService.resolveScopeTag("calculate", null, null, "bob", "conv-1");
+            String alice = ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, "alice", "conv-1");
+            String bob = ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, "bob", "conv-1");
 
             assertNotEquals(alice, bob);
         }
@@ -373,7 +414,8 @@ class ToolCacheServiceTest {
         @Test
         @DisplayName("CONVERSATION scope tag is 'c:' + conversationId, ignoring the userId")
         void conversationScopeTag() {
-            String tag = ToolCacheService.resolveScopeTag("calculate", Map.of("calculate", "conversation"), null, "alice", "conv-1");
+            String tag = ToolCacheService.resolveScopeTag("calculate", "calculator", Map.of("calculate", "conversation"), null, "alice",
+                    "conv-1");
 
             assertEquals("c:conv-1", tag);
         }
@@ -381,23 +423,141 @@ class ToolCacheServiceTest {
         @Test
         @DisplayName("GLOBAL scope tag is 'g' even without any identity")
         void globalScopeTag() {
-            assertEquals("g", ToolCacheService.resolveScopeTag("calculate", Map.of("calculate", "global"), null, null, null));
+            assertEquals("g",
+                    ToolCacheService.resolveScopeTag("calculate", "calculator", Map.of("calculate", "global"), null, null, null));
         }
 
         @Test
         @DisplayName("USER scope with a blank userId degrades to the conversation partition, not a shared one")
         void userScopeWithoutUserIdDegradesToConversation() {
-            assertEquals("c:conv-1", ToolCacheService.resolveScopeTag("calculate", null, null, null, "conv-1"));
-            assertEquals("c:conv-1", ToolCacheService.resolveScopeTag("calculate", null, null, "   ", "conv-1"));
+            assertEquals("c:conv-1", ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, null, "conv-1"));
+            assertEquals("c:conv-1", ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, "   ", "conv-1"));
         }
 
         @Test
         @DisplayName("no usable identity at all resolves to null (cache must be bypassed)")
         void noIdentityResolvesToNull() {
-            assertNull(ToolCacheService.resolveScopeTag("calculate", null, null, null, null));
-            assertNull(ToolCacheService.resolveScopeTag("calculate", null, null, "  ", "  "));
-            assertNull(ToolCacheService.resolveScopeTag("calculate", Map.of("calculate", "conversation"), null, "alice", null),
+            assertNull(ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, null, null));
+            assertNull(ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, "  ", "  "));
+            assertNull(ToolCacheService.resolveScopeTag("calculate", "calculator", Map.of("calculate", "conversation"), null, "alice", null),
                     "CONVERSATION scope without a conversationId has nothing to partition on");
+        }
+    }
+
+    // ==================== Scope resolution fails SAFE ====================
+
+    /**
+     * A per-tool entry is written to pin ONE tool. When its token does not parse,
+     * the entry used to evaporate and the tool inherited
+     * {@code defaultToolCacheScope} — so {@code {"getUserProfile": "usr"}} under
+     * {@code defaultToolCacheScope: "global"}, a typo in an override written to
+     * NARROW one tool, promoted that tool onto the single shared {@code "g"}
+     * partition instead. The class javadoc promised the opposite ("a typo must
+     * never silently widen a tool's audience"); these tests hold the code to it.
+     */
+    @Nested
+    @DisplayName("An unparseable per-tool entry fails safe, never to the task default")
+    class UnparseablePerToolEntryTests {
+
+        @Test
+        @DisplayName("a typo'd per-tool token resolves to USER, not to the wider task default")
+        void typoDoesNotInheritGlobalDefault() {
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(Map.of("calculate", "usr"), "global", "calculate", "calculator"),
+                    "'usr' is a typo for 'user' in an override that NARROWS one tool; inheriting the task's "
+                            + "'global' default would put every authenticated user on one cache partition");
+        }
+
+        @Test
+        @DisplayName("the resulting scope tag is per-user, not the shared 'g'")
+        void typoDoesNotProduceTheSharedTag() {
+            String tag = ToolCacheService.resolveScopeTag("calculate", "calculator", Map.of("calculate", "usr"), "global", "alice",
+                    "conv-1");
+
+            assertNotEquals("g", tag, "a shared tag here is Alice's tool result being served to Bob");
+            assertTrue(tag.startsWith("u:"), "expected a per-user partition, got: " + tag);
+        }
+
+        @Test
+        @DisplayName("a blank per-tool token also fails safe")
+        void blankTokenFailsSafe() {
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(Map.of("calculate", "   "), "global", "calculate", "calculator"));
+        }
+
+        @Test
+        @DisplayName("an explicit null per-tool value also fails safe")
+        void nullTokenFailsSafe() {
+            Map<String, String> scopes = new HashMap<>();
+            scopes.put("calculate", null);
+
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(scopes, "global", "calculate", "calculator"));
+        }
+
+        @Test
+        @DisplayName("a typo'd entry for ANOTHER tool leaves this tool on the task default")
+        void unrelatedTypoDoesNotNarrowEveryTool() {
+            assertEquals(ToolCacheScope.GLOBAL,
+                    ToolCacheScope.resolve(Map.of("calculate", "usr"), "global", "getCurrentWeather", "weather"),
+                    "failing safe applies to the tool the bad entry names, not to the whole task");
+        }
+
+        @Test
+        @DisplayName("an unrecognized TASK default still falls through to USER")
+        void unparseableTaskDefaultFallsBackToUser() {
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(Map.of(), "globl", "calculate", "calculator"));
+        }
+    }
+
+    // ==================== Scope keys accept the slug too ====================
+
+    /**
+     * {@code toolRateLimits} and {@code toolPricing} accept the configuration slug
+     * (dispatch name first, then slug). {@code toolCacheScopes} sits between them
+     * in the same task and must speak the same vocabulary: a {@code {"websearch":
+     * "user"}} written next to {@code {"websearch": 30}} used to be silently
+     * ignored, leaving the tool on the task default — possibly {@code global}.
+     */
+    @Nested
+    @DisplayName("toolCacheScopes accepts the dispatch name OR the canonical slug")
+    class DualNameScopeKeyTests {
+
+        @Test
+        @DisplayName("a slug-keyed override binds for a built-in dispatched under a method name")
+        void slugKeyedOverrideBinds() {
+            assertEquals(ToolCacheScope.CONVERSATION,
+                    ToolCacheScope.resolve(Map.of("websearch", "conversation"), "global", "searchWeb", "websearch"),
+                    "'websearch' is the whitelist slug and the key used by toolRateLimits/toolPricing; "
+                            + "ignoring it here leaves searchWeb on the task's 'global' default");
+        }
+
+        @Test
+        @DisplayName("a slug-keyed narrowing override also changes the resolved tag")
+        void slugKeyedOverrideChangesTheTag() {
+            String tag = ToolCacheService.resolveScopeTag("searchWeb", "websearch", Map.of("websearch", "conversation"), "global", "alice",
+                    "conv-1");
+
+            assertEquals("c:conv-1", tag);
+        }
+
+        @Test
+        @DisplayName("the dispatch name still wins over the slug")
+        void dispatchNameWinsOverSlug() {
+            assertEquals(ToolCacheScope.CONVERSATION,
+                    ToolCacheScope.resolve(Map.of("searchNews", "conversation", "websearch", "global"), null, "searchNews", "websearch"),
+                    "an entry pinning one operation is more specific than one covering the whole tool");
+        }
+
+        @Test
+        @DisplayName("a typo'd DISPATCH entry does not fall through to a wider slug entry")
+        void typoedDispatchEntryDoesNotFallThroughToSlug() {
+            assertEquals(ToolCacheScope.USER,
+                    ToolCacheScope.resolve(Map.of("searchNews", "usr", "websearch", "global"), null, "searchNews", "websearch"));
+        }
+
+        @Test
+        @DisplayName("a slug-keyed opt-in to GLOBAL still works (the vocabulary cuts both ways)")
+        void slugKeyedGlobalOptInBinds() {
+            assertEquals("g", ToolCacheService.resolveScopeTag("calculate", "calculator", Map.of("calculator", "global"), null, "alice",
+                    "conv-1"));
         }
     }
 
@@ -631,6 +791,21 @@ class ToolCacheServiceTest {
             var stats = realCacheService.getStats();
             assertEquals(1, stats.hits);
             assertEquals(1, stats.misses);
+        }
+
+        @Test
+        @DisplayName("a searchNews entry really is gone at 601s while its searchWeb sibling survives")
+        void newsTtlIsLoadBearing() {
+            realCacheService.put(SCOPE_A, new ToolInvocation("searchNews", "websearch", null), "eddi", "news hits");
+            realCacheService.put(SCOPE_A, new ToolInvocation("searchWeb", "websearch", null), "eddi", "web hits");
+
+            ticker.advanceSeconds(601);
+
+            assertNull(realCacheService.get(SCOPE_A, "searchNews", "eddi"),
+                    "news is 600s in TOOL_TTL_SECONDS — resolving the TTL from the 'websearch' slug alone "
+                            + "would keep this entry alive for 30 minutes");
+            assertEquals("web hits", realCacheService.get(SCOPE_A, "searchWeb", "eddi"),
+                    "searchWeb matches nothing itself and correctly inherits websearch's 1800s");
         }
 
         @Test
