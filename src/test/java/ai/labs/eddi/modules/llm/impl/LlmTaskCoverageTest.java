@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
@@ -200,12 +201,12 @@ class LlmTaskCoverageTest {
     }
 
     private void agentReturns(String response) throws Exception {
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult(response, new ArrayList<>()));
     }
 
     private void agentReturnsNull() throws Exception {
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(null);
     }
 
@@ -264,7 +265,7 @@ class LlmTaskCoverageTest {
         var t = task("taskA", List.of("action1"), null);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -276,7 +277,7 @@ class LlmTaskCoverageTest {
         var t = task("taskA", List.of("*"), null);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -317,7 +318,7 @@ class LlmTaskCoverageTest {
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         var captor = ArgumentCaptor.forClass(ToolApprovalsConfig.class);
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), captor.capture(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), captor.capture(), anyInt(), anyInt(), any());
         assertSame(override, captor.getValue());
     }
 
@@ -335,8 +336,66 @@ class LlmTaskCoverageTest {
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         var captor = ArgumentCaptor.forClass(ToolApprovalsConfig.class);
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), captor.capture(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), captor.capture(), anyInt(), anyInt(), any());
         assertSame(agentDefault, captor.getValue());
+    }
+
+    // ============================================================
+    // D7 — convertToObject must reach agent mode as a request-level JSON policy
+    // ============================================================
+
+    /**
+     * The wiring regression. {@code jsonMode} used to be computed in
+     * {@code executeTask} and handed only to {@link LegacyChatExecutor}, so a
+     * tool-enabled agent got prompt-only JSON no matter what
+     * {@code convertToObject} said.
+     */
+    @Test
+    @DisplayName("convertToObject=true on an approved provider threads an applying JSON policy into agent mode")
+    void jsonPolicy_threadedIntoAgentMode() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        agentReturns("{\"a\":1}");
+
+        var t = task("taskA", List.of("action1"), Map.of("convertToObject", "true"));
+        t.setType("mistral");
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        var captor = ArgumentCaptor.forClass(JsonResponseFormatPolicy.class);
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), captor.capture());
+        assertNotNull(captor.getValue(), "the orchestrator must receive a policy, not null");
+        assertTrue(captor.getValue().applies(true), "a tool-carrying mistral request must take the JSON format");
+    }
+
+    @Test
+    @DisplayName("convertToObject absent → the agent-mode policy never applies")
+    void jsonPolicy_notRequested() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        agentReturns("done");
+
+        var t = task("taskA", List.of("action1"), null);
+        t.setType("mistral");
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        var captor = ArgumentCaptor.forClass(JsonResponseFormatPolicy.class);
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), captor.capture());
+        assertFalse(captor.getValue().applies(true));
+        assertFalse(captor.getValue().applies(false));
+    }
+
+    @Test
+    @DisplayName("the task's jsonResponseFormat override reaches the agent-mode policy")
+    void jsonPolicy_taskOverrideThreaded() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        agentReturns("done");
+
+        var t = task("taskA", List.of("action1"), Map.of("convertToObject", "true"));
+        t.setType("mistral");
+        t.setJsonResponseFormat("off");
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        var captor = ArgumentCaptor.forClass(JsonResponseFormatPolicy.class);
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), captor.capture());
+        assertFalse(captor.getValue().applies(true), "jsonResponseFormat=off must suppress the format");
     }
 
     @Test
@@ -353,7 +412,7 @@ class LlmTaskCoverageTest {
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         var captor = ArgumentCaptor.forClass(ToolApprovalsConfig.class);
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), captor.capture(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), captor.capture(), anyInt(), anyInt(), any());
         assertNull(captor.getValue());
         // Agent default must never be consulted when the kill-switch is off.
         verify(memory, never()).getAgentToolApprovalsConfig();
@@ -458,7 +517,7 @@ class LlmTaskCoverageTest {
 
         // Standard branch executes the orchestrator directly (not the cascade
         // executor).
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -475,7 +534,7 @@ class LlmTaskCoverageTest {
 
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -499,7 +558,7 @@ class LlmTaskCoverageTest {
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         // skipCascade path uses the orchestrator directly (cascade executor bypassed).
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -669,7 +728,7 @@ class LlmTaskCoverageTest {
     void resume_convertToObjectJson_deserialized() throws Exception {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("{\"x\":1}", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"), Map.of("convertToObject", "true"));
@@ -683,7 +742,7 @@ class LlmTaskCoverageTest {
     void resume_convertToObjectNonJson_noDeserialize() throws Exception {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("plain answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"), Map.of("convertToObject", "true"));
@@ -697,7 +756,7 @@ class LlmTaskCoverageTest {
     void resume_nullResult_stateCleared() throws Exception {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(null);
 
         var t = task("taskA", List.of("action1"), null);
@@ -713,7 +772,7 @@ class LlmTaskCoverageTest {
     void resume_addToOutputFalse_noOutput() throws Exception {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"), Map.of("addToOutput", "false"));
@@ -728,7 +787,7 @@ class LlmTaskCoverageTest {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
         when(memory.getAuditCollector()).thenReturn(mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"), null);
@@ -745,13 +804,16 @@ class LlmTaskCoverageTest {
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
         List<Map<String, Object>> trace = new ArrayList<>();
         trace.add(Map.of("tool", "calc"));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", trace));
 
         var t = task("taskA", List.of("action1"), null);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(dataFactory).createData(startsWith("langchain:trace:"), eq(trace));
+        // Exact key, not startsWith: LifecycleManager's SSE reader and RestToolHistory
+        // both key off this precise shape (prefix + modelType + ':' + configTaskId).
+        // A startsWith matcher cannot catch a regression in the suffix.
+        verify(dataFactory).createData(eq("langchain:trace:openai:taskA"), eq(trace));
     }
 
     @Test
@@ -766,8 +828,8 @@ class LlmTaskCoverageTest {
         var t = task("taskA", List.of("action1"), null);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(agentOrchestrator, never()).resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean());
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator, never()).resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     // ============================================================
@@ -821,7 +883,7 @@ class LlmTaskCoverageTest {
     @DisplayName("agent LifecycleException propagates as LifecycleException")
     void agentLifecycleException_propagates() throws Exception {
         wireStandardMemory(List.of("action1"));
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenThrow(new LifecycleException("boom"));
 
         var t = task("taskA", List.of("action1"), null);

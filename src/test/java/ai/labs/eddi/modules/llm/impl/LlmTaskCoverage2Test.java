@@ -184,12 +184,12 @@ class LlmTaskCoverage2Test {
     }
 
     private void agentReturns(String response) throws Exception {
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult(response, new ArrayList<>()));
     }
 
     private void agentReturnsNull() throws Exception {
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(null);
     }
 
@@ -211,7 +211,7 @@ class LlmTaskCoverage2Test {
         // System message with the appended "## Relevant Context" reaches the
         // orchestrator.
         var sysCaptor = ArgumentCaptor.forClass(String.class);
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), sysCaptor.capture(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), sysCaptor.capture(), any(), any(), any(), any(), anyInt(), anyInt(), any());
         assertTrue(sysCaptor.getValue().contains("some retrieved knowledge"));
     }
 
@@ -227,9 +227,16 @@ class LlmTaskCoverage2Test {
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         // The catch block keeps the turn alive.
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
+    /**
+     * The branch under test is {@code if (userInput != null)}. The matcher for the
+     * user input MUST be {@code nullable(String.class)}: the only invocation a
+     * missing guard could produce is {@code retrieveContext(memory, task, null)},
+     * and {@code anyString()} does not match null — with it this verification
+     * matches zero invocations whether the guard exists or not.
+     */
     @Test
     @DisplayName("null user input (no 'input' data) → vector RAG skipped entirely")
     void nullUserInput_ragSkipped() throws Exception {
@@ -241,7 +248,7 @@ class LlmTaskCoverage2Test {
         var t = task("taskA", List.of("action1"), null);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(ragContextProvider, never()).retrieveContext(any(), any(), anyString());
+        verify(ragContextProvider, never()).retrieveContext(any(), any(), nullable(String.class));
     }
 
     @Test
@@ -256,7 +263,7 @@ class LlmTaskCoverage2Test {
         // Must not throw — the httpCall RAG block is guarded by try/catch.
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     // ============================================================
@@ -311,7 +318,7 @@ class LlmTaskCoverage2Test {
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         var sysCaptor = ArgumentCaptor.forClass(String.class);
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), sysCaptor.capture(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), sysCaptor.capture(), any(), any(), any(), any(), anyInt(), anyInt(), any());
         assertTrue(sysCaptor.getValue().contains("RESPONSE FORMAT (MANDATORY)"));
         assertTrue(sysCaptor.getValue().contains("{\"type\":\"object\"}"),
                 "the explicit schema must be embedded in the reinforced system message");
@@ -327,7 +334,7 @@ class LlmTaskCoverage2Test {
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         var sysCaptor = ArgumentCaptor.forClass(String.class);
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), sysCaptor.capture(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), sysCaptor.capture(), any(), any(), any(), any(), anyInt(), anyInt(), any());
         assertTrue(sysCaptor.getValue().contains("starting with '{'"),
                 "the generic (no-schema) reinforcement variant must be used");
     }
@@ -419,7 +426,7 @@ class LlmTaskCoverage2Test {
         t.setMaxContextTokens(4096);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     // ============================================================
@@ -522,7 +529,7 @@ class LlmTaskCoverage2Test {
     }
 
     @Test
-    @DisplayName("cascade + auditCollector → cascade_model + cascade_confidence audit keys stored")
+    @DisplayName("cascade + auditCollector → cascade model and a Double confidence under the key LifecycleManager reads")
     void cascadeEnabled_auditMetadataStored() throws Exception {
         wireStandardMemory(List.of("action1"));
         when(chatModel.chat(anyList())).thenReturn(chatResponse("cascade answer"));
@@ -541,8 +548,12 @@ class LlmTaskCoverage2Test {
 
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(dataFactory).createData(eq("audit:cascade_model"), any());
-        verify(dataFactory).createData(eq("audit:cascade_confidence"), any());
+        verify(dataFactory).createData(eq(MemoryKeys.AUDIT_CASCADE_MODEL), any());
+        // Must be the key LifecycleManager reads, and a Double — its IData<Double> slot
+        // used to receive nothing at all while a String went to a key nobody read.
+        verify(dataFactory).createData(eq(MemoryKeys.AUDIT_CONFIDENCE), argThat(v -> v instanceof Double));
+        verify(dataFactory, never()).createData(eq("audit:cascade_confidence"), any());
+        verify(dataFactory, never()).createData(eq("audit:cascade_cost"), any());
     }
 
     @Test
@@ -551,7 +562,7 @@ class LlmTaskCoverage2Test {
         wireStandardMemory(List.of("action1"));
         // Agent mode cascade calls the orchestrator (8-arg overload) inside the cascade
         // step.
-        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent cascade answer", new ArrayList<>()));
 
         var cascade = new ModelCascadeConfig();
@@ -578,7 +589,7 @@ class LlmTaskCoverage2Test {
     void cascadeEnabled_agentMode_threadsTranscriptCap() throws Exception {
         llmTask.toolTranscriptMaxBytes = 54321;
         wireStandardMemory(List.of("action1"));
-        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent cascade answer", new ArrayList<>()));
 
         var cascade = new ModelCascadeConfig();
@@ -598,7 +609,7 @@ class LlmTaskCoverage2Test {
 
         var capCaptor = ArgumentCaptor.forClass(Integer.class);
         verify(agentOrchestrator).executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(),
-                capCaptor.capture());
+                capCaptor.capture(), any());
         assertEquals(54321, capCaptor.getValue());
     }
 
@@ -692,11 +703,11 @@ class LlmTaskCoverage2Test {
 
     // ============================================================
     // Cascade token-usage surfacing — non-empty tokenUsage reaches
-    // responseMetadata (responseMetadataObjectName) AND audit:cascade_token_usage
+    // responseMetadata (responseMetadataObjectName) AND the audit ledger
     // ============================================================
 
     @Test
-    @DisplayName("cascade legacy step with non-empty tokenUsage → surfaced in responseMetadata + audit:cascade_token_usage stored")
+    @DisplayName("cascade legacy step with non-empty tokenUsage → surfaced in responseMetadata + audit:token_usage stored")
     void cascadeEnabled_tokenUsageSurfaced() throws Exception {
         wireStandardMemory(List.of("action1"));
         // The step's ChatResponse carries real token usage → LegacyChatExecutor emits a
@@ -725,9 +736,12 @@ class LlmTaskCoverage2Test {
         var meta = (Map<String, Object>) templateData.get("meta");
         assertNotNull(meta, "response metadata should be stored under the configured object name");
         assertTrue(meta.containsKey("tokenUsage"), "non-empty cascade tokenUsage must be surfaced in responseMetadata");
-        // (b) audit token-usage key stored (mirrors audit:cascade_model /
-        // cascade_cost).
-        verify(dataFactory).createData(eq("audit:cascade_token_usage"), any());
+        // (b) the real counts land under the key LifecycleManager reads into
+        // llmDetail.tokenUsage — "audit:cascade_token_usage" had no reader anywhere.
+        verify(dataFactory).createData(eq(MemoryKeys.AUDIT_TOKEN_USAGE), argThat(v -> v instanceof Map<?, ?> m
+                && Long.valueOf(120L).equals(m.get("inputTokens"))
+                && Long.valueOf(30L).equals(m.get("outputTokens"))));
+        verify(dataFactory, never()).createData(eq("audit:cascade_token_usage"), any());
     }
 
     // ============================================================
@@ -755,7 +769,7 @@ class LlmTaskCoverage2Test {
         when(memory.getHitlResumeDecision()).thenReturn(d);
         lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
         var t = task("taskA", List.of("action1"), null); // no responseObjectName → defaults to id
@@ -790,7 +804,7 @@ class LlmTaskCoverage2Test {
         AgentOrchestrator o = mock(AgentOrchestrator.class);
         try {
             lenient().doReturn(null).when(o)
-                    .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt());
+                    .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

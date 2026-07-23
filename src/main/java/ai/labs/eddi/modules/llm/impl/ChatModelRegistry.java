@@ -83,29 +83,43 @@ public class ChatModelRegistry {
     /**
      * Get or create a ChatModel for the given type and processed parameters.
      * Parameters are filtered to remove non-model keys before cache lookup.
+     * <p>
+     * The filtered map is the cache key, so anything that shapes the constructed
+     * model necessarily shapes its identity. {@code timeout}, {@code logRequests}
+     * and {@code logResponses} are part of that map: {@code timeout} is consumed by
+     * the provider builders and all three are consumed by
+     * {@link ObservableChatModel}, so two tasks differing only in those settings
+     * must get two different model instances.
+     * <p>
+     * The lookup is a single {@code get} rather than {@code containsKey} followed
+     * by {@code get}: the cache is cleared from other threads (secret rotation,
+     * global variable edits), and a clear landing between the two calls made this
+     * method return {@code null} to callers that hand the result straight to
+     * {@code chat(...)}. A miss simply falls through to construction.
      */
     ChatModel getOrCreate(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
 
-        // Extract observability params BEFORE filtering (they're removed from cache
-        // key)
-        var timeoutMs = processedParams.get(KEY_TIMEOUT);
+        var filteredParams = filterParams(processedParams);
+        var timeoutMs = filteredParams.get(KEY_TIMEOUT);
         var logReq = processedParams.get(KEY_LOG_REQUESTS);
         var logResp = processedParams.get(KEY_LOG_RESPONSES);
 
-        var filteredParams = filterParams(processedParams);
         var cacheKey = new ModelCacheKey(type, filteredParams);
 
-        if (modelCache.containsKey(cacheKey)) {
-            return modelCache.get(cacheKey);
+        ChatModel cached = modelCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
         }
 
         if (!languageModelApiConnectorBuilders.containsKey(type)) {
             throw new UnsupportedLlmTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
+        warnAboutRejectedTimeout(type, processedParams.get(KEY_TIMEOUT), timeoutMs);
+
         // Resolve global variable references, then vault secrets (late-binding:
         // after Qute, before builder.build())
-        var resolvedParams = globalVariableResolver.resolveAll(filteredParams);
+        var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
         resolvedParams = secretResolver.resolveSecrets(resolvedParams);
         var rawModel = languageModelApiConnectorBuilders.get(type).get().build(resolvedParams);
         var model = ObservableChatModel.wrapIfNeeded(rawModel, type, timeoutMs, logReq, logResp);
@@ -117,26 +131,44 @@ public class ChatModelRegistry {
     /**
      * Get or create a StreamingChatModel for the given type and parameters. Returns
      * {@code null} if the builder does not support streaming.
+     * <p>
+     * As on the sync path, {@code timeout}/{@code logRequests}/{@code logResponses}
+     * are part of the cache key. {@code timeout} reaches the streaming builder and
+     * becomes the provider's streaming HTTP request/read timeout; the logging flags
+     * wrap the model in {@link ObservableStreamingChatModel} so they are honoured
+     * uniformly, including for providers whose streaming builder has no logging
+     * switch of its own.
+     * <p>
+     * The lookup is a single {@code get} for the same reason as on the sync path —
+     * a concurrent cache clear must never turn a hit into a {@code null} return,
+     * which callers would mistake for "streaming unsupported".
      */
     StreamingChatModel getOrCreateStreaming(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
+
+        var logReq = processedParams.get(KEY_LOG_REQUESTS);
+        var logResp = processedParams.get(KEY_LOG_RESPONSES);
 
         var filteredParams = filterParams(processedParams);
         var cacheKey = new ModelCacheKey(type, filteredParams);
 
-        if (streamingModelCache.containsKey(cacheKey)) {
-            return streamingModelCache.get(cacheKey);
+        StreamingChatModel cached = streamingModelCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
         }
 
         if (!languageModelApiConnectorBuilders.containsKey(type)) {
             throw new UnsupportedLlmTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
+        warnAboutRejectedTimeout(type, processedParams.get(KEY_TIMEOUT), filteredParams.get(KEY_TIMEOUT));
+
         try {
             // Resolve global variable references, then vault secrets (late-binding:
             // after Qute, before builder.build())
-            var resolvedParams = globalVariableResolver.resolveAll(filteredParams);
+            var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
             resolvedParams = secretResolver.resolveSecrets(resolvedParams);
-            var model = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);
+            var rawModel = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);
+            var model = ObservableStreamingChatModel.wrapIfNeeded(rawModel, type, logReq, logResp);
             streamingModelCache.put(cacheKey, model);
             return model;
         } catch (UnsupportedOperationException e) {
@@ -146,8 +178,16 @@ public class ChatModelRegistry {
     }
 
     /**
-     * Remove all props that are not directly configuring the langchain builders
-     * (for better caching).
+     * Build the cache key / model-identity map: remove all props that do not shape
+     * the constructed model, and normalise {@code timeout}.
+     * <p>
+     * Only keys that shape nothing may be removed here. {@code timeout},
+     * {@code logRequests} and {@code logResponses} are <em>not</em> among them:
+     * {@code timeout} is read by every provider builder and all three are read by
+     * {@link ObservableChatModel}/{@link ObservableStreamingChatModel}. Stripping
+     * them dropped them from the cache key, so a task configured with a
+     * {@code timeout} silently received a timeout-free model whenever a task with
+     * otherwise identical parameters happened to be built first.
      */
     private Map<String, String> filterParams(Map<String, String> processedParams) {
         var returnMap = new HashMap<>(processedParams);
@@ -157,11 +197,76 @@ public class ChatModelRegistry {
         returnMap.remove(KEY_LOG_SIZE_LIMIT);
         returnMap.remove(KEY_ADD_TO_OUTPUT);
         returnMap.remove(KEY_CONVERT_TO_OBJECT);
-        // Observability params don't affect model identity — remove from cache key
-        returnMap.remove(KEY_TIMEOUT);
-        returnMap.remove(KEY_LOG_REQUESTS);
-        returnMap.remove(KEY_LOG_RESPONSES);
+        normalizeTimeout(returnMap);
         return returnMap;
+    }
+
+    /**
+     * Normalise a stored {@code timeout} at the single boundary that feeds both the
+     * cache key and the provider builders.
+     * <p>
+     * The builders parse the value with an unguarded {@code Long.parseLong}, so a
+     * stored {@code " "}, {@code "30s"} or {@code "0"} would abort {@code build()}
+     * on every turn of that agent. Those values were previously tolerated (their
+     * only consumer, {@link ObservableChatModel#wrapIfNeeded}, guards blank,
+     * swallows {@link NumberFormatException} and drops non-positive durations), and
+     * stored configs get no migration — so the same tolerance is applied here:
+     * trim, and drop the key entirely when it is blank, non-numeric or
+     * non-positive.
+     * <p>
+     * Normalising before the key is built also means {@code "5000"} and
+     * {@code " 5000 "} are one cached model rather than two.
+     */
+    private static void normalizeTimeout(Map<String, String> params) {
+        String raw = params.get(KEY_TIMEOUT);
+        if (raw == null) {
+            return;
+        }
+        String trimmed = raw.trim();
+        if (!trimmed.isEmpty()) {
+            try {
+                long millis = Long.parseLong(trimmed);
+                if (millis > 0) {
+                    params.put(KEY_TIMEOUT, Long.toString(millis));
+                    return;
+                }
+            } catch (NumberFormatException ignored) {
+                // falls through to removal below
+            }
+        }
+        params.remove(KEY_TIMEOUT);
+    }
+
+    /**
+     * Warn once per constructed model when a stored {@code timeout} was rejected by
+     * {@link #normalizeTimeout}. Deliberately emitted on the build path only — a
+     * warning on every cache hit would repeat on every turn. The registry has no
+     * task identity, so the model type is the most specific context available.
+     */
+    private static void warnAboutRejectedTimeout(String type, String rawTimeout, String normalizedTimeout) {
+        if (rawTimeout != null && normalizedTimeout == null) {
+            LOGGER.warnf("Ignoring unusable 'timeout' parameter '%s' for model type '%s' — expected a positive number of "
+                    + "milliseconds; the model is built without a provider timeout", sanitize(rawTimeout), sanitize(type));
+        }
+    }
+
+    /**
+     * The parameter map actually handed to a provider builder.
+     * <p>
+     * {@code logRequests}/{@code logResponses} are removed: the provider builders
+     * turn them into langchain4j's {@code LoggingHttpClient}, which writes the
+     * entire request and response body to the application log at INFO with no
+     * truncation — full prompts, full conversation history, full model output.
+     * EDDI's own {@link ObservableChatModel}/{@link ObservableStreamingChatModel}
+     * already honour both flags and deliberately truncate to 200/500 chars, so they
+     * stay the single logging path. The flags remain part of the cache key above,
+     * because they still change which model instance a task gets.
+     */
+    private static Map<String, String> builderParams(Map<String, String> filteredParams) {
+        var builderMap = new HashMap<>(filteredParams);
+        builderMap.remove(KEY_LOG_REQUESTS);
+        builderMap.remove(KEY_LOG_RESPONSES);
+        return builderMap;
     }
 
     /**

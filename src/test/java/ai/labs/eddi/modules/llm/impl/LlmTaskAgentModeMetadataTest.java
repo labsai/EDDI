@@ -216,7 +216,7 @@ class LlmTaskAgentModeMetadataTest {
     @DisplayName("agent mode surfaces the orchestrator's responseMetadata, including tokenUsage")
     void agentMode_surfacesResponseMetadataWithTokenUsage() throws Exception {
         wireStandardMemory();
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", new ArrayList<>(),
                         Map.of("tokenUsage", agentTokenUsage())));
 
@@ -239,7 +239,7 @@ class LlmTaskAgentModeMetadataTest {
         // Two-arg convenience constructor → Map.of(), the shape every pre-existing
         // stub used and the reason the dropped-metadata bug stayed invisible.
         var emptyMetaResult = new AgentOrchestrator.ExecutionResult("agent answer", new ArrayList<>());
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(emptyMetaResult);
 
         llmTask.execute(memory, new LlmConfiguration(List.of(task("taskA"))));
@@ -272,7 +272,7 @@ class LlmTaskAgentModeMetadataTest {
     @DisplayName("skipCascade agent branch surfaces responseMetadata too (distinct call site from the standard branch)")
     void skipCascadeAgentMode_surfacesResponseMetadata() throws Exception {
         wireStandardMemory();
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", new ArrayList<>(),
                         Map.of("tokenUsage", agentTokenUsage())));
 
@@ -310,7 +310,7 @@ class LlmTaskAgentModeMetadataTest {
         // sites pass a fresh list — but the record permits it and AgentOrchestratorTest
         // already constructs `new ExecutionResult(null, null)` as a legal shape.
         // Unguarded, the `!toolTrace.isEmpty()` check downstream throws.
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", null,
                         Map.of("tokenUsage", agentTokenUsage())));
 
@@ -329,7 +329,7 @@ class LlmTaskAgentModeMetadataTest {
     @DisplayName("agent mode returns null → legacy chat executor runs and its metadata is surfaced")
     void agentReturnsNull_fallsBackToLegacyChatExecutor() throws Exception {
         wireStandardMemory();
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(null);
         when(chatModel.chat(anyList())).thenReturn(ChatResponse.builder()
                 .aiMessage(aiMessage("legacy answer"))
@@ -339,7 +339,7 @@ class LlmTaskAgentModeMetadataTest {
         llmTask.execute(memory, new LlmConfiguration(List.of(task("taskA"))));
 
         // The orchestrator was consulted first, then declined.
-        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
         // The real LegacyChatExecutor ran against the model (it is constructed
         // internally, so this is asserted behaviourally rather than by verify()).
         verify(chatModel).chat(anyList());
@@ -366,7 +366,7 @@ class LlmTaskAgentModeMetadataTest {
         wireStandardMemory();
         when(memory.getHitlPendingToolCalls()).thenReturn(batch);
         when(memory.getHitlResumeDecision()).thenReturn(decision);
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>(),
                         Map.of("tokenUsage", agentTokenUsage())));
 
@@ -377,7 +377,7 @@ class LlmTaskAgentModeMetadataTest {
                 "the continuation's tokenUsage must be surfaced on the resume path too");
         assertSame(stored, templateData.get(METADATA_KEY));
         // The live path must not run — this turn resumed a frozen tool loop.
-        verify(agentOrchestrator, never()).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(agentOrchestrator, never()).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -392,7 +392,7 @@ class LlmTaskAgentModeMetadataTest {
         wireStandardMemory();
         when(memory.getHitlPendingToolCalls()).thenReturn(batch);
         when(memory.getHitlResumeDecision()).thenReturn(decision);
-        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(null);
 
         llmTask.execute(memory, new LlmConfiguration(List.of(task("taskA"))));

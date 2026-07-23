@@ -22,7 +22,9 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
@@ -51,6 +53,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
 
 /**
@@ -129,7 +132,7 @@ class AgentOrchestratorResumeToolLoopTest {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
                 null, null, null, null, null,
-                journalStore, historyBuilder);
+                journalStore, historyBuilder, new TokenCounterFactory());
 
         when(memory.getConversationId()).thenReturn("conv-1");
         when(memory.getAgentId()).thenReturn(null);
@@ -139,10 +142,10 @@ class AgentOrchestratorResumeToolLoopTest {
                 .thenAnswer(inv -> inv.getArgument(1));
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
-        when(toolExecutionService.executeToolWrapped(anyString(), anyString(), any(), any(Supplier.class),
+        when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(), any(Supplier.class),
                 anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
                 .thenAnswer(inv -> {
-                    Supplier<String> sup = inv.getArgument(3);
+                    Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
                 });
     }
@@ -257,7 +260,7 @@ class AgentOrchestratorResumeToolLoopTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("The answers are 42 and 4."));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertNotNull(result);
         assertEquals("The answers are 42 and 4.", result.response());
@@ -268,6 +271,43 @@ class AgentOrchestratorResumeToolLoopTest {
         verify(journalStore).markExecuted("conv-1", "epoch-1", "c1", "42");
         verify(journalStore).markExecuted("conv-1", "epoch-1", "c2", "4");
         verify(chatModel, times(1)).chat(any(ChatRequest.class));
+    }
+
+    /**
+     * The HITL resume path rebuilds its own {@code ToolSetup} and threads its own
+     * copy of the canonical-name map. If it is missed, prices and cache TTLs are
+     * resolved on the live path but not after a human approval — "budget enforced
+     * on live turns, ignored after approval" — which is exactly the kind of split
+     * that only shows up in production.
+     */
+    @Test
+    @DisplayName("resume: an approved call carries the canonical slug, same as the live path")
+    void resumeCarriesCanonicalToolName() throws Exception {
+        var task = twoToolTask();
+        task.setDefaultRateLimit(100);
+        task.setToolRateLimits(Map.of("calculator", 9));
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), eq("reviewer-1")))
+                .thenReturn(true);
+        when(calculatorTool.calculate("6*7")).thenReturn("42");
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("42"));
+
+        orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        ArgumentCaptor<ToolInvocation> invocation = ArgumentCaptor.forClass(ToolInvocation.class);
+        ArgumentCaptor<Integer> rateLimit = ArgumentCaptor.forClass(Integer.class);
+        verify(toolExecutionService).executeToolWrapped(invocation.capture(), anyString(), nullable(String.class), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), rateLimit.capture());
+
+        assertEquals("calculate", invocation.getValue().dispatchName());
+        assertEquals("calculator", invocation.getValue().canonicalName(),
+                "the resume path must resolve the slug too, or pricing and TTLs differ after a human approval");
+        assertEquals(9, rateLimit.getValue(),
+                "a slug-keyed toolRateLimits entry must bind on the resume path as well");
     }
 
     @Test
@@ -281,7 +321,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("I could not perform that action."));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, rejectAll("policy forbids this"), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, rejectAll("policy forbids this"), true);
 
         assertEquals("I could not perform that action.", result.response());
         verify(calculatorTool, never()).calculate(anyString());
@@ -328,7 +368,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("done"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, decision, Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, decision, true);
 
         assertEquals("done", result.response());
         // c1 executed with amended args only (JSON unwrapped to the {expression} value)
@@ -362,7 +402,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("replayed 42"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("replayed 42", result.response());
         verify(calculatorTool, never()).calculate(anyString());
@@ -390,7 +430,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("uncertain"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("uncertain", result.response());
         verify(calculatorTool, never()).calculate(anyString());
@@ -432,7 +472,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("fallback done"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("fallback done", result.response());
         verify(calculatorTool, times(1)).calculate("6*7");
@@ -470,7 +510,7 @@ class AgentOrchestratorResumeToolLoopTest {
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(newGated));
 
         var ex = assertThrows(ToolApprovalRequiredException.class,
-                () -> orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true));
+                () -> orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true));
 
         var newBatch = ex.getBatch();
         assertNotNull(newBatch);
@@ -496,13 +536,55 @@ class AgentOrchestratorResumeToolLoopTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("should not be reached"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertNotNull(result);
         // The continuation loop makes NO further model call (budget exhausted).
         verify(chatModel, never()).chat(any(ChatRequest.class));
         // Approved call still executed during verdict application.
         verify(calculatorTool, times(1)).calculate("6*7");
+    }
+
+    /**
+     * The tool-cost baseline used to be snapshotted AFTER the verdict loop, which
+     * had already executed (and charged) every human-approved gated call — so the
+     * delta reported as {@code toolCostUsd}, and with it the audit ledger's dollar
+     * figure, excluded exactly the calls a human explicitly approved.
+     */
+    @Test
+    @DisplayName("resume: an approved gated call's cost is included in toolCostUsd")
+    void approvedGatedCallCostIsReported() throws Exception {
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), eq("reviewer-1")))
+                .thenReturn(true);
+        when(calculatorTool.calculate("6*7")).thenReturn("42");
+
+        // Conversation-scoped tracker, charged from inside executeToolWrapped exactly
+        // like the real pipeline does. It already carries spend from BEFORE the pause,
+        // which the resumed turn must NOT re-report.
+        var metrics = new ToolCostTracker.ConversationCostMetrics("conv-1");
+        metrics.addToolCost("earlierTool", 0.005);
+        var costTracker = mock(ToolCostTracker.class);
+        when(costTracker.getConversationCosts("conv-1")).thenReturn(metrics);
+        when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
+        when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(), any(Supplier.class),
+                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                .thenAnswer(inv -> {
+                    metrics.addToolCost("calculate", 0.002);
+                    Supplier<String> sup = inv.getArgument(4);
+                    return sup.get();
+                });
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("42"));
+
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        assertEquals(0.002, (Double) result.responseMetadata().get("toolCostUsd"), 1e-9,
+                "the approved gated call ran during verdict application — its cost must reach the ledger");
     }
 
     @Test
@@ -518,7 +600,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("handled"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("handled", result.response());
         verify(calculatorTool, never()).calculate(anyString());

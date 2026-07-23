@@ -32,7 +32,7 @@ The dashboard appears automatically as the Grafana home page. Anonymous viewer a
 | **KPI Strip** | _(always visible)_ | Uptime, Agents Deployed, Active Conversations, Messages/sec, Tool Success %, Cache Hit %, Error Rate, Cost/hr |
 | **Row 1** | Platform Overview & HTTP Traffic | Request rate by status (2xx/4xx/5xx), latency P50/P95/P99, CPU usage, top 10 slowest endpoints |
 | **Row 2** | Conversations | Start/end/processing rate, processing duration percentiles, active gauge, undo/redo, start vs load latency |
-| **Row 3** | Tool Execution Engine | Success vs failure rate, per-tool execution duration, parallel execution stats, cached/rate-limited breakdown |
+| **Row 3** | Tool Execution Engine | Success vs failure rate, per-tool execution duration, cached/rate-limited breakdown, per-tool call counts |
 | **Row 4** | Tool Cache Performance | Hit rate %, hits vs misses, cache size, get/put duration |
 | **Row 5** | Rate Limiting & Cost | Allowed vs denied, denied by tool, total cost, budget exceeded events, cost accumulation, cost by tool |
 | **Row 6** | Multi-Agent Group Discussions | Started vs failed, failure rate gauge, discussion duration |
@@ -75,11 +75,6 @@ eddi_tool_execution_failure_total           # Failed executions
 eddi_tool_execution_cached_total            # Cache-served executions
 eddi_tool_execution_ratelimited_total       # Rate-limited executions
 eddi_tool_execution_duration_seconds        # Execution duration (timer)
-eddi_tool_execution_parallel_total          # Parallel batches started
-eddi_tool_execution_parallel_count_total    # Number of parallel tools
-eddi_tool_execution_parallel_duration_seconds  # Parallel execution time (timer)
-eddi_tool_execution_parallel_timeout_total  # Parallel timeouts
-eddi_tool_execution_parallel_error_total    # Parallel errors
 ```
 
 All execution metrics support a `tool` label for per-tool breakdown:
@@ -96,7 +91,15 @@ eddi_tool_cache_puts_total                  # Cache puts (per tool)
 eddi_tool_cache_get_duration_seconds        # Get latency (timer)
 eddi_tool_cache_put_duration_seconds        # Put latency (timer)
 eddi_tool_cache_size                        # Current entries (gauge)
+eddi_tool_cache_bypassed_total              # Calls that skipped the cache (per tool)
 ```
+
+> `eddi_tool_cache_bypassed_total` counts tool calls where caching was enabled
+> but no identity could be derived to scope the entry to, so the cache was
+> skipped on both the read and the write side. A sustained non-zero rate means
+> tool calls are running without a user id **or** a conversation id and are
+> paying full tool cost every time — investigate the caller rather than widening
+> the cache scope.
 
 ### Rate Limiting Metrics
 

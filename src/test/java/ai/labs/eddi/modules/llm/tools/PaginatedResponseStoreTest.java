@@ -6,6 +6,8 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.caching.TestCaches;
+import ai.labs.eddi.engine.caching.TestCaches.FakeTicker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -166,21 +168,72 @@ class PaginatedResponseStoreTest {
     }
 
     /**
-     * Creates a store backed by a simple in-memory HashMap for integration-style
-     * tests.
+     * The 15-minute TTL this store has always documented was, until D5b, thrown
+     * away by {@code CacheImpl}: pages lived until the cache filled up. These tests
+     * run against a real ticker-driven cache and wind the clock past the boundary.
      */
-    @SuppressWarnings("unchecked")
+    @Nested
+    @DisplayName("Page expiry")
+    class ExpiryTests {
+
+        @Test
+        @DisplayName("Pages are gone once the 15-minute TTL has elapsed")
+        void pagesExpireAfterTtl() {
+            var ticker = new FakeTicker();
+            var realStore = createStoreWithRealCache(ticker);
+            String responseId = realStore.store("testTool", "A".repeat(250), 100);
+
+            ticker.advanceSeconds(901);
+
+            assertNull(realStore.getPage(responseId, 1), "a 15-minute-old responseId must no longer resolve");
+            assertEquals(0, realStore.getPageCount(responseId));
+        }
+
+        @Test
+        @DisplayName("Pages survive a whole tool-calling loop — still resolvable just before the TTL")
+        void pagesSurviveUntilTtl() {
+            var ticker = new FakeTicker();
+            var realStore = createStoreWithRealCache(ticker);
+            String responseId = realStore.store("testTool", "A".repeat(250), 100);
+
+            ticker.advanceSeconds(899);
+
+            PaginatedResponseStore.PageResult page = realStore.getPage(responseId, 2);
+            assertNotNull(page);
+            assertTrue(page.isSuccess());
+        }
+
+        @Test
+        @DisplayName("Each stored response expires on its own clock, not the first one's")
+        void expiryIsPerResponse() {
+            var ticker = new FakeTicker();
+            var realStore = createStoreWithRealCache(ticker);
+
+            String first = realStore.store("testTool", "A".repeat(250), 100);
+            ticker.advanceSeconds(600);
+            String second = realStore.store("testTool", "B".repeat(250), 100);
+
+            ticker.advanceSeconds(301); // 901s for the first, 301s for the second
+
+            assertNull(realStore.getPage(first, 1));
+            assertNotNull(realStore.getPage(second, 1));
+        }
+    }
+
+    /**
+     * Creates a store backed by the same cache shape production uses — a real
+     * {@code CacheImpl} over Caffeine — but ticked by the caller so expiry can be
+     * asserted deterministically.
+     */
     private PaginatedResponseStore createStoreWithRealCache() {
-        var realCache = new java.util.concurrent.ConcurrentHashMap<String, Object>();
-        ICache<String, Object> mapCache = mock(ICache.class);
-        doAnswer(inv -> {
-            realCache.put(inv.getArgument(0), inv.getArgument(1));
-            return null;
-        }).when(mapCache).put(anyString(), any(), anyLong(), any(TimeUnit.class));
-        when(mapCache.get(anyString())).thenAnswer(inv -> realCache.get(inv.getArgument(0)));
+        return createStoreWithRealCache(new FakeTicker());
+    }
+
+    private PaginatedResponseStore createStoreWithRealCache(FakeTicker ticker) {
+        ICache<String, Object> realCache = TestCaches.expiring("paginated-tool-responses", ticker);
 
         ICacheFactory factory = mock(ICacheFactory.class);
-        doReturn(mapCache).when(factory).getCache("paginated-tool-responses");
+        doReturn(realCache).when(factory).getCache("paginated-tool-responses");
 
         PaginatedResponseStore s = new PaginatedResponseStore();
         try {

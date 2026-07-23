@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -38,22 +39,32 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatcher;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.lang.reflect.Method;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
 
 /**
@@ -136,7 +147,7 @@ class AgentOrchestratorCoverageTest {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
                 null, null, null, null, null,
-                journalStore, historyBuilder);
+                journalStore, historyBuilder, new TokenCounterFactory());
 
         lenient().when(memory.getConversationId()).thenReturn("conv-1");
         lenient().when(memory.getAgentId()).thenReturn(null);
@@ -146,10 +157,12 @@ class AgentOrchestratorCoverageTest {
                 .thenAnswer(inv -> inv.getArgument(1));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         lenient().when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
-        lenient().when(toolExecutionService.executeToolWrapped(anyString(), anyString(), any(), any(Supplier.class),
-                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+        lenient()
+                .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
+                        any(Supplier.class),
+                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
                 .thenAnswer(inv -> {
-                    Supplier<String> sup = inv.getArgument(3);
+                    Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
                 });
     }
@@ -335,10 +348,18 @@ class AgentOrchestratorCoverageTest {
         assertTrue(notFound, "missing executor must yield a 'not found' tool_result");
     }
 
+    /**
+     * Gate wiring only: the refusal here comes from a stubbed
+     * {@code isWithinBudget}, not from accumulated cost. That the budget can be
+     * reached by real spend at all is proved by
+     * {@code AgentOrchestratorToolCostTest}, which drives the same loop against a
+     * REAL {@link ai.labs.eddi.modules.llm.tools.ToolCostTracker}.
+     */
     @Test
     void toolCall_perConversationBudgetExceeded_returnsBudgetError() throws Exception {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
+        task.setEnforceBudget(true);
         var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
         when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
         when(costTracker.isWithinBudget(eq("conv-1"), eq(1.0))).thenReturn(false);
@@ -402,17 +423,136 @@ class AgentOrchestratorCoverageTest {
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
 
         assertEquals("four", result.response());
-        // executeToolWrapped invoked with all-false flags.
-        verify(toolExecutionService).executeToolWrapped(eq("calculate"), anyString(), any(),
+        // executeToolWrapped invoked with all-false flags, and carrying BOTH names:
+        // the dispatched method name plus the whitelist slug it is configured under.
+        verify(toolExecutionService).executeToolWrapped(argThat(calculateInvocation()), anyString(), nullable(String.class), any(),
                 any(Supplier.class), eq(false), eq(false), eq(false), anyInt());
     }
 
-    @Test
-    void toolCall_perToolRateLimitOverride_usesConfiguredLimit() throws Exception {
-        var task = calcOnlyTask();
-        task.setDefaultRateLimit(50);
-        task.setToolRateLimits(Map.of("calculate", 7));
+    /**
+     * Matches the invocation for CalculatorTool#calculate. Asserting both names is
+     * the point: {@code calculate} is what langchain4j dispatches,
+     * {@code calculator} is what {@code builtInToolsWhitelist}/{@code toolPricing}
+     * use, and the whole defect was that only the former ever reached the executor.
+     */
+    private static ArgumentMatcher<ToolInvocation> calculateInvocation() {
+        return inv -> inv != null && "calculate".equals(inv.dispatchName()) && "calculator".equals(inv.canonicalName());
+    }
 
+    // ─── D5: cache scope tag handed to ToolExecutionService ───
+
+    /**
+     * Runs one tool call and returns the {@code cacheScopeTag} the orchestrator
+     * passed to {@link ToolExecutionService#executeToolWrapped}.
+     */
+    private String capturedCacheScopeTag(LlmConfiguration.Task task) throws Exception {
+        ChatModel chatModel = mock(ChatModel.class);
+        var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"2+2\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(calcReq))
+                .thenReturn(text("four"));
+        when(calculatorTool.calculate("2+2")).thenReturn("4");
+
+        orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        // nullable(): anyString() would not match a null tag, so a regression that
+        // stopped passing one would make this verification match zero invocations.
+        ArgumentCaptor<String> scopeTag = ArgumentCaptor.forClass(String.class);
+        verify(toolExecutionService).executeToolWrapped(argThat(calculateInvocation()), anyString(), scopeTag.capture(), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt());
+        return scopeTag.getValue();
+    }
+
+    @Test
+    void toolCall_defaultScope_passesPerUserCacheTag() throws Exception {
+        when(memory.getUserId()).thenReturn("alice");
+
+        String tag = capturedCacheScopeTag(calcOnlyTask());
+
+        assertNotNull(tag, "a user-scoped tool call must carry a cache scope tag");
+        assertTrue(tag.startsWith("u:"), "default scope is USER, expected a 'u:' tag but got: " + tag);
+        assertFalse(tag.contains("alice"), "the raw userId must not travel into the cache key");
+        assertNotEquals(tag, capturedCacheScopeTagForOtherUser(), "two users must not share a cache partition");
+    }
+
+    /** Same call as above for a different userId, on a fresh orchestrator state. */
+    private String capturedCacheScopeTagForOtherUser() throws Exception {
+        reset(toolExecutionService, calculatorTool);
+        lenient()
+                .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
+                        any(Supplier.class),
+                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                .thenAnswer(inv -> {
+                    Supplier<String> sup = inv.getArgument(4);
+                    return sup.get();
+                });
+        when(memory.getUserId()).thenReturn("bob");
+        return capturedCacheScopeTag(calcOnlyTask());
+    }
+
+    @Test
+    void toolCall_globalScopeOptIn_passesSharedCacheTag() throws Exception {
+        when(memory.getUserId()).thenReturn("alice");
+        var task = calcOnlyTask();
+        task.setToolCacheScopes(Map.of("calculate", "global"));
+
+        assertEquals("g", capturedCacheScopeTag(task),
+                "an explicit per-tool GLOBAL opt-in is the only way back to a shared partition");
+    }
+
+    /**
+     * {@code toolCacheScopes} must accept the same keys as the
+     * {@code toolRateLimits} and {@code toolPricing} maps sitting next to it on the
+     * task — the whitelist slug as well as the dispatch name. Keying the lookup on
+     * the dispatch name alone silently ignored every slug-keyed entry, so an
+     * override written to pin a tool's partition left it on the task default.
+     */
+    @Test
+    void toolCall_slugKeyedCacheScope_bindsForABuiltIn() throws Exception {
+        when(memory.getUserId()).thenReturn("alice");
+        var task = calcOnlyTask();
+        task.setToolCacheScopes(Map.of("calculator", "global"));
+
+        assertEquals("g", capturedCacheScopeTag(task),
+                "'calculator' is the slug that builtInToolsWhitelist, toolRateLimits and toolPricing all use; "
+                        + "the orchestrator must hand the canonical name to resolveScopeTag so it binds here too");
+    }
+
+    /**
+     * The fail-safe half of the same config surface: a typo in a per-tool entry
+     * must not promote that tool onto the task's wider default partition.
+     */
+    @Test
+    void toolCall_typoedCacheScope_doesNotInheritTheGlobalDefault() throws Exception {
+        when(memory.getUserId()).thenReturn("alice");
+        var task = calcOnlyTask();
+        task.setToolCacheScopes(Map.of("calculate", "usr"));
+        task.setDefaultToolCacheScope("global");
+
+        String tag = capturedCacheScopeTag(task);
+
+        assertNotEquals("g", tag, "'usr' is a typo for 'user' in an override meant to NARROW this tool; "
+                + "inheriting the task's 'global' default puts every authenticated user on one partition");
+        assertTrue(tag.startsWith("u:"), "expected a per-user partition, got: " + tag);
+    }
+
+    @Test
+    void toolCall_noIdentityAtAll_passesNullCacheTagSoCacheIsBypassed() throws Exception {
+        when(memory.getUserId()).thenReturn(null);
+        when(memory.getConversationId()).thenReturn(null);
+
+        assertNull(capturedCacheScopeTag(calcOnlyTask()),
+                "with neither a userId nor a conversationId there is nothing to partition on; "
+                        + "the tag must stay null so ToolExecutionService skips the cache entirely");
+    }
+
+    // ─── D2: canonical (slug) tool naming at the executor boundary ───
+
+    /**
+     * Runs one {@code calculate} call for the given task and returns the rate limit
+     * the orchestrator handed to {@link ToolExecutionService#executeToolWrapped}.
+     */
+    private int capturedRateLimit(LlmConfiguration.Task task) throws Exception {
         ChatModel chatModel = mock(ChatModel.class);
         var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"3+3\"}").build();
         when(chatModel.chat(any(ChatRequest.class)))
@@ -421,11 +561,227 @@ class AgentOrchestratorCoverageTest {
         when(calculatorTool.calculate("3+3")).thenReturn("6");
 
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
-
         assertEquals("six", result.response());
-        // per-tool override (7) wins over defaultRateLimit (50).
-        verify(toolExecutionService).executeToolWrapped(eq("calculate"), anyString(), any(),
-                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), eq(7));
+
+        ArgumentCaptor<Integer> rateLimit = ArgumentCaptor.forClass(Integer.class);
+        verify(toolExecutionService).executeToolWrapped(argThat(calculateInvocation()), anyString(), nullable(String.class), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), rateLimit.capture());
+        return rateLimit.getValue();
+    }
+
+    @Test
+    void toolCall_perToolRateLimitOverride_usesConfiguredLimit() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultRateLimit(50);
+        task.setToolRateLimits(Map.of("calculate", 7));
+
+        // per-tool override on the DISPATCH name (7) wins over defaultRateLimit (50).
+        assertEquals(7, capturedRateLimit(task));
+    }
+
+    /**
+     * The documented form. Every docs page tells operators to key
+     * {@code toolRateLimits} on the same slugs as {@code builtInToolsWhitelist} —
+     * but the lookup only ever saw the dispatched {@code @Tool} method name, which
+     * for a built-in is never equal to its slug. Every slug-keyed limit was
+     * therefore silently discarded in favour of the default.
+     */
+    @Test
+    void toolCall_rateLimitKeyedOnCanonicalSlug_binds() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultRateLimit(100);
+        task.setToolRateLimits(Map.of("calculator", 7));
+
+        assertEquals(7, capturedRateLimit(task),
+                "a toolRateLimits entry keyed on the documented 'calculator' slug must reach the executor; "
+                        + "falling back to the default means slug-keyed limits are inert");
+    }
+
+    @Test
+    void toolCall_dispatchNameRateLimitWinsOverSlug() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultRateLimit(100);
+        task.setToolRateLimits(Map.of("calculator", 7, "calculate", 3));
+
+        assertEquals(3, capturedRateLimit(task),
+                "the more specific dispatch-name key must win over the tool-wide slug key");
+    }
+
+    @Test
+    void toolCall_noRateLimitEntry_fallsBackToDefault() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultRateLimit(42);
+        task.setToolRateLimits(Map.of("websearch", 7));
+
+        assertEquals(42, capturedRateLimit(task));
+    }
+
+    @Test
+    void toolCall_toolPricingOverride_reachesTheExecutor() throws Exception {
+        var task = calcOnlyTask();
+        task.setToolPricing(Map.of("calculator", 0.05));
+
+        ChatModel chatModel = mock(ChatModel.class);
+        var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"3+3\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(calcReq))
+                .thenReturn(text("six"));
+        when(calculatorTool.calculate("3+3")).thenReturn("6");
+
+        orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        ArgumentCaptor<ToolInvocation> invocation = ArgumentCaptor.forClass(ToolInvocation.class);
+        verify(toolExecutionService).executeToolWrapped(invocation.capture(), anyString(), nullable(String.class), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt());
+        assertEquals(0.05, invocation.getValue().priceOverride(),
+                "a toolPricing entry keyed on the canonical slug must travel with the invocation");
+    }
+
+    @Test
+    void buildToolSetup_mapsDispatchNamesToCanonicalSlugs() {
+        var setup = orchestrator.buildToolSetup(twoToolTask(), memory);
+
+        assertEquals("calculator", setup.toolCanonicalNames().get("calculate"),
+                "the whole defect was that 'calculate' never resolved to the 'calculator' slug");
+        assertEquals("calculator", setup.toolCanonicalNames().get("convertUnits"));
+        assertEquals("datetime", setup.toolCanonicalNames().get("getCurrentDateTime"));
+        assertEquals("datetime", setup.toolCanonicalNames().get("listTimezones"));
+        // Mockito mocks are subclasses, not CDI proxies, but the guarantee is the same:
+        // the map is built from the UNWRAPPED bean class, never from tool.getClass().
+        assertFalse(setup.toolCanonicalNames().containsValue("CalculatorTool"),
+                "a class simple name must never leak into the canonical-name map");
+    }
+
+    // ─── D2/D4: enforceBudget is an opt-IN ───
+
+    /**
+     * Enforcement is off unless asked for. A stored ceiling must not be consulted
+     * at all when the flag is absent, otherwise a future refactor could reintroduce
+     * enforcement through a side effect and start refusing calls on upgrade.
+     */
+    @Test
+    void toolCall_budgetExplicitlyNotEnforced_neverConsultsTheBudget() throws Exception {
+        var task = calcOnlyTask();
+        task.setMaxBudgetPerConversation(1.0);
+        task.setEnforceBudget(false);
+        var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
+        lenient().when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
+        lenient().when(costTracker.isWithinBudget(anyString(), anyDouble())).thenReturn(false);
+
+        ChatModel chatModel = mock(ChatModel.class);
+        var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"1+1\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(calcReq))
+                .thenReturn(text("two"));
+        when(calculatorTool.calculate("1+1")).thenReturn("2");
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        assertEquals("two", result.response());
+        verify(calculatorTool).calculate("1+1");
+        // nullable(): the conversationId argument is legally null on some paths and
+        // anyString() would not match it, making this verification vacuously true.
+        verify(costTracker, never()).isWithinBudget(nullable(String.class), anyDouble());
+        assertTrue(result.trace().stream()
+                .noneMatch(e -> String.valueOf(e.get("error")).contains("Budget exceeded")),
+                "no budget error may be produced when enforceBudget is explicitly false");
+    }
+
+    /**
+     * D4: a stored config carrying only {@code maxBudgetPerConversation} — no
+     * {@code enforceBudget} — records cost but refuses nothing.
+     * <p>
+     * This is the deliberate opt-in default. Built-in tools priced at $0.00 until
+     * this release, so enforcing by default would make those ceilings bind for the
+     * first time and start refusing calls mid-conversation on upgrade. The cost of
+     * that choice is that an operator whose ceiling <em>was</em> working (http /
+     * MCP / A2A / dynamic tools dispatch under their configured name, so they were
+     * priced and refused before) loses it — which is why
+     * {@code warnAboutUnenforcedBudgets} names every such task in a WARN instead of
+     * letting it pass silently. The pairing of this test with
+     * {@link #toolCall_unenforcedCeilingIsWarnedAbout()} is the contract.
+     */
+    @Test
+    void toolCall_budgetSetWithoutEnforceFlag_isNotEnforced() throws Exception {
+        var task = calcOnlyTask();
+        task.setMaxBudgetPerConversation(1.0);
+        // deliberately no setEnforceBudget(...)
+        var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
+        lenient().when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
+        lenient().when(costTracker.isWithinBudget(nullable(String.class), anyDouble())).thenReturn(false);
+
+        ChatModel chatModel = mock(ChatModel.class);
+        var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"1+1\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(calcReq))
+                .thenReturn(text("two"));
+        when(calculatorTool.calculate("1+1")).thenReturn("2");
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        assertEquals("two", result.response());
+        verify(calculatorTool).calculate("1+1");
+        // nullable(): conversationId is legally null on some paths and anyString()
+        // would not match it, which would make this verification vacuously true.
+        verify(costTracker, never()).isWithinBudget(nullable(String.class), anyDouble());
+        assertTrue(result.trace().stream()
+                .noneMatch(e -> String.valueOf(e.get("error")).contains("Budget exceeded")),
+                "an unflagged ceiling must not refuse the call — enforcement is opt-in");
+    }
+
+    /**
+     * The other half of the opt-in contract: a ceiling that records but never
+     * refuses is exactly the "config that silently does nothing" this release set
+     * out to remove, so it must be reported. Asserting on the log keeps the warning
+     * load-bearing — without this, dropping the WARN would be invisible.
+     */
+    @Test
+    void toolCall_unenforcedCeilingIsWarnedAbout() throws Exception {
+        var task = calcOnlyTask();
+        task.setId("budgeted-task");
+        task.setMaxBudgetPerConversation(1.0);
+
+        var records = new CopyOnWriteArrayList<String>();
+        var handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                records.add(MessageFormat.format(String.valueOf(record.getMessage()), record.getParameters()));
+            }
+
+            @Override
+            public void flush() {
+                // nothing buffered
+            }
+
+            @Override
+            public void close() {
+                // nothing to release
+            }
+        };
+        // src/test/resources/logging.properties sets ai.labs.eddi.level=OFF to keep
+        // test output quiet, so the level has to be raised for the duration or the
+        // record never reaches a handler at all.
+        var julLogger = Logger.getLogger(AgentOrchestrator.class.getName());
+        Level previousLevel = julLogger.getLevel();
+        julLogger.setLevel(Level.WARNING);
+        julLogger.addHandler(handler);
+        try {
+            ChatModel chatModel = mock(ChatModel.class);
+            var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate")
+                    .arguments("{\"expression\":\"1+1\"}").build();
+            when(chatModel.chat(any(ChatRequest.class)))
+                    .thenReturn(toolBatch(calcReq))
+                    .thenReturn(text("two"));
+            when(calculatorTool.calculate("1+1")).thenReturn("2");
+
+            orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previousLevel);
+        }
+
+        assertTrue(records.stream().anyMatch(m -> m.contains("budgeted-task") && m.contains("enforceBudget")),
+                "an unenforced ceiling must be named in a WARN, not pass silently; saw: " + records);
     }
 
     @Test
@@ -484,7 +840,7 @@ class AgentOrchestratorCoverageTest {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 null,
                 null, null, null, null, null,
-                journalStore, historyBuilder);
+                journalStore, historyBuilder, new TokenCounterFactory());
 
         var task = calcOnlyTask();
         ChatModel chatModel = mock(ChatModel.class);
@@ -512,7 +868,7 @@ class AgentOrchestratorCoverageTest {
                 userMemoryStore, toolResponseTruncator, null,
                 memorySnapshotService,
                 null, null, null, null, null,
-                journalStore, historyBuilder);
+                journalStore, historyBuilder, new TokenCounterFactory());
 
         var task = calcOnlyTask();
         ChatModel chatModel = mock(ChatModel.class);
@@ -533,7 +889,7 @@ class AgentOrchestratorCoverageTest {
     // ═══════════════════════════════════════════════════════════════════
 
     private AgentOrchestrator.ToolSetup setupWith(List<ToolSpecification> all, List<ToolSpecification> builtIn) {
-        return new AgentOrchestrator.ToolSetup(all, Map.of(), Map.of(), builtIn);
+        return new AgentOrchestrator.ToolSetup(all, Map.of(), Map.of(), builtIn, Map.of());
     }
 
     private ToolSpecification spec(String name) {
@@ -873,7 +1229,7 @@ class AgentOrchestratorCoverageTest {
                 .thenReturn(text("finished"));
         when(calculatorTool.calculate("9*9")).thenReturn("81");
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), false);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), false);
 
         assertNotNull(result);
         assertEquals("finished", result.response());
@@ -901,7 +1257,7 @@ class AgentOrchestratorCoverageTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("no can do"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, decision, Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, decision, true);
 
         assertEquals("no can do", result.response());
         verify(calculatorTool, never()).calculate(anyString());
@@ -927,7 +1283,7 @@ class AgentOrchestratorCoverageTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("unsure"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("unsure", result.response());
         verify(calculatorTool, never()).calculate(anyString());
@@ -961,7 +1317,7 @@ class AgentOrchestratorCoverageTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("rebuilt"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("rebuilt", result.response());
         assertTrue(result.trace().stream()
@@ -984,7 +1340,7 @@ class AgentOrchestratorCoverageTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("merged"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("merged", result.response());
         assertTrue(result.trace().stream().anyMatch(e -> "pre_pause_marker".equals(e.get("type"))),
@@ -1006,7 +1362,7 @@ class AgentOrchestratorCoverageTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("lazy done"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
 
         assertEquals("lazy done", result.response());
         verify(calculatorTool, times(1)).calculate("6*7");

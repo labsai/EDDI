@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
@@ -48,6 +49,7 @@ import java.util.*;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -441,11 +443,14 @@ public class LlmTask implements ILifecycleTask {
         // output.
         boolean addToOutputExplicitlyFalse = "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT));
 
-        // When convertToObject is true, use native JSON response format on the API
-        // level
-        // (supported by OpenAI, Gemini, Mistral). Falls back gracefully for providers
-        // that don't support it.
+        // When convertToObject is true, request a native JSON response format at the
+        // API level. The format is set per REQUEST (never baked into the cached model)
+        // and only for providers whose binding accepts it — including the tools-aware
+        // distinction that keeps Gemini from being sent JSON mode and function calling
+        // together. Every execution mode below gets the same policy, so a tool-enabled
+        // or streaming agent is no longer silently downgraded to prompt-only JSON.
         boolean jsonMode = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        var jsonPolicy = JsonResponseFormatPolicy.of(jsonMode, resolvedType, task.getJsonResponseFormat());
 
         // Execute: try agent mode first, fall back to legacy
         String responseContent;
@@ -501,6 +506,13 @@ public class LlmTask implements ILifecycleTask {
                 }
             }
             responseMetadata.put("cascadeCostUsd", cascadeResult.runCostUsd());
+            // Tool spend of the run. This branch builds a FRESH metadata map instead of
+            // adopting the agent's, so without this the entire tool cost of an agent-mode
+            // cascade (the DEFAULT — enableInAgentMode defaults to true) never reaches
+            // accumulateAuditEvidence's cascadeCostUsd + toolCostUsd sum, and the ledger
+            // reports token cost only. The non-cascade branches below assign the agent's
+            // whole map and always carried it.
+            responseMetadata.put("toolCostUsd", cascadeResult.runToolCostUsd());
             responseMetadata.put("cascadeModel", cascadeAuditModel);
             responseMetadata.put("cascadeStep", cascadeResult.stepUsed());
             responseMetadata.put("cascadeConfidence", cascadeResult.confidence());
@@ -520,22 +532,21 @@ public class LlmTask implements ILifecycleTask {
             }
 
             // Store cascade metadata in audit — real model name + provider + step + cost
-            // (#5)
+            // (#5). Confidence goes under AUDIT_CONFIDENCE as a Double: the former
+            // "audit:cascade_confidence" String had no reader anywhere, while the
+            // IData<Double> slot LifecycleManager reads had no writer. Cost and token
+            // usage are accumulated below from responseMetadata, together with every
+            // other execution path, so they are not written twice here.
             if (memory.getAuditCollector() != null) {
                 String cascadeModelDesc = cascadeAuditModel + " (step " + cascadeResult.stepUsed() + ")";
-                currentStep.storeData(dataFactory.createData("audit:cascade_model", cascadeModelDesc));
-                currentStep.storeData(dataFactory.createData("audit:cascade_confidence", String.valueOf(cascadeResult.confidence())));
-                currentStep.storeData(dataFactory.createData("audit:cascade_cost",
-                        String.format(java.util.Locale.ROOT, "%.6f", cascadeResult.runCostUsd())));
-                if (cascadeResult.tokenUsage() != null && !cascadeResult.tokenUsage().isEmpty()) {
-                    currentStep.storeData(dataFactory.createData("audit:cascade_token_usage", cascadeResult.tokenUsage()));
-                }
+                currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_CASCADE_MODEL, cascadeModelDesc));
+                currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_CONFIDENCE, cascadeResult.confidence()));
             }
 
         } else if (skipCascade) {
             // Agent mode with cascade disabled — use normal agent flow
             var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
+                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
             if (agentResult != null) {
                 responseContent = agentResult.response();
                 // Null-guarded to match executeResume. No production path returns a null
@@ -554,7 +565,7 @@ public class LlmTask implements ILifecycleTask {
                     eventSink.onToken(responseContent);
                 }
             } else {
-                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
                 responseContent = chatResult.response();
                 responseMetadata = chatResult.responseMetadata();
                 // Forward the buffered response to the stream so an SSE client is not left
@@ -567,7 +578,7 @@ public class LlmTask implements ILifecycleTask {
         } else {
             // === Standard (non-cascade) execution path ===
             var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
+                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
 
             if (agentResult != null) {
                 // Agent mode — tools execute synchronously, stream final response if sink
@@ -588,13 +599,13 @@ public class LlmTask implements ILifecycleTask {
                 // Legacy mode with streaming — try to get a streaming model
                 var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
                 if (streamingModel != null) {
-                    var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task);
+                    var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task, jsonPolicy);
                     responseContent = streamingResult.response();
                     responseMetadata.putAll(streamingResult.metadata());
                 } else {
                     // Streaming not supported by this builder — fall back to sync, emit as single
                     // chunk
-                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
+                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                     if (!addToOutputExplicitlyFalse) {
@@ -603,7 +614,7 @@ public class LlmTask implements ILifecycleTask {
                 }
             } else {
                 // Standard non-streaming legacy mode
-                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
                 responseContent = chatResult.response();
                 responseMetadata = chatResult.responseMetadata();
             }
@@ -646,12 +657,12 @@ public class LlmTask implements ILifecycleTask {
 
         // Write audit:* memory keys for the audit ledger (only if auditing is enabled)
         if (memory.getAuditCollector() != null) {
-            var compiledPrompt = dataFactory.createData("audit:compiled_prompt",
+            var compiledPrompt = dataFactory.createData(MemoryKeys.AUDIT_COMPILED_PROMPT,
                     systemMessage + "\n---\n" + (processedParams.get(KEY_PROMPT) != null ? processedParams.get(KEY_PROMPT) : ""));
             currentStep.storeData(compiledPrompt);
 
             if (responseContent != null) {
-                var modelResponse = dataFactory.createData("audit:model_response", responseContent);
+                var modelResponse = dataFactory.createData(MemoryKeys.AUDIT_MODEL_RESPONSE, responseContent);
                 currentStep.storeData(modelResponse);
             }
 
@@ -659,13 +670,15 @@ public class LlmTask implements ILifecycleTask {
             // task-level default — an auditor must be able to reconstruct which model
             // produced the answer (#5).
             String modelName = cascadeAuditModel != null ? cascadeAuditModel : processedParams.getOrDefault("model", task.getType());
-            var modelNameData = dataFactory.createData("audit:model_name", modelName);
+            var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
+
+            accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task.getId());
         }
 
         // Store tool trace if available
         if (!toolTrace.isEmpty()) {
-            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(), toolTrace);
+            var traceData = dataFactory.createData(LANGCHAIN_TRACE_PREFIX + task.getType() + ":" + task.getId(), toolTrace);
             currentStep.storeData(traceData);
         }
 
@@ -708,6 +721,94 @@ public class LlmTask implements ILifecycleTask {
                 // Non-fatal — conversation continues, summary will catch up next turn
             }
         }
+    }
+
+    /**
+     * Folds one LLM call's usage evidence into the step-level audit totals.
+     * <p>
+     * A single turn can drive several LLM calls — one per matching config sub-task,
+     * plus every escalated cascade step and tool-loop iteration inside each. The
+     * ledger has to report the turn's total, but {@code getLatestData} is
+     * last-write-wins, so each contributor read-modify-writes rather than
+     * overwriting. Cost is the sum of the two dollar signals that actually exist:
+     * configured cascade LLM pricing and tracked tool cost. There is no token price
+     * table for non-cascade tasks, so those contribute tool cost only.
+     */
+    private void accumulateAuditEvidence(IWritableConversationStep currentStep, Map<String, Object> responseMetadata,
+                                         List<Map<String, Object>> toolTrace, String llmTaskId) {
+        if (responseMetadata != null) {
+            if (responseMetadata.get("tokenUsage") instanceof Map<?, ?> tokenUsage) {
+                accumulateTokenUsage(currentStep, tokenUsage);
+            }
+            accumulateCost(currentStep, asDouble(responseMetadata.get("cascadeCostUsd")) + asDouble(responseMetadata.get("toolCostUsd")));
+        }
+        accumulateToolCalls(currentStep, toolTrace, llmTaskId);
+    }
+
+    private void accumulateTokenUsage(IWritableConversationStep currentStep, Map<?, ?> delta) {
+        if (delta.isEmpty()) {
+            return;
+        }
+        Map<String, Object> total = new LinkedHashMap<>();
+        IData<Map<String, Object>> existing = currentStep.getLatestData(MemoryKeys.AUDIT_TOKEN_USAGE);
+        if (existing != null && existing.getResult() != null) {
+            total.putAll(existing.getResult());
+        }
+        for (String field : AgentOrchestrator.TOKEN_USAGE_FIELDS) {
+            // Only touch a count the provider actually reported (or that a previous call
+            // already contributed) — otherwise a provider that omits totalTokens would
+            // materialize a bogus 0 next to real input/output numbers.
+            if (delta.containsKey(field) || total.containsKey(field)) {
+                total.put(field, asLong(total.get(field)) + asLong(delta.get(field)));
+            }
+        }
+        currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_TOKEN_USAGE, total));
+    }
+
+    private void accumulateToolCalls(IWritableConversationStep currentStep, List<Map<String, Object>> toolTrace, String llmTaskId) {
+        if (toolTrace == null || toolTrace.isEmpty()) {
+            return;
+        }
+        List<Object> calls = new ArrayList<>();
+        IData<Map<String, Object>> existing = currentStep.getLatestData(MemoryKeys.AUDIT_TOOL_CALLS);
+        if (existing != null && existing.getResult() != null && existing.getResult().get("calls") instanceof List<?> prior) {
+            calls.addAll(prior);
+        }
+        for (Map<String, Object> entry : toolTrace) {
+            if (entry == null) {
+                continue;
+            }
+            var augmented = new LinkedHashMap<String, Object>(entry);
+            if (llmTaskId != null) {
+                // Which config sub-task issued the call — otherwise a merged list from
+                // several sub-tasks is unattributable.
+                augmented.put("llmTaskId", llmTaskId);
+            }
+            calls.add(augmented);
+        }
+        Map<String, Object> toolCalls = new LinkedHashMap<>();
+        toolCalls.put("calls", calls);
+        currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_TOOL_CALLS, toolCalls));
+    }
+
+    private void accumulateCost(IWritableConversationStep currentStep, double delta) {
+        if (delta <= 0.0) {
+            return;
+        }
+        double total = delta;
+        IData<Double> existing = currentStep.getLatestData(MemoryKeys.AUDIT_COST);
+        if (existing != null && existing.getResult() != null) {
+            total += existing.getResult();
+        }
+        currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_COST, total));
+    }
+
+    private static long asLong(Object value) {
+        return value instanceof Number n ? n.longValue() : 0L;
+    }
+
+    private static double asDouble(Object value) {
+        return value instanceof Number n ? n.doubleValue() : 0.0;
     }
 
     /**
@@ -863,8 +964,13 @@ public class LlmTask implements ILifecycleTask {
         // === Hand off to the resume loop (Task 9) ===
         // Pass the cluster-wide kill-switch so the continuation's gate resolution
         // matches the live path (executeTask) — a disabled gate stays inert on resume.
-        var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision, templateDataObjects,
-                toolHitlEnabled);
+        // Same JSON policy the live loop would have applied — a resumed continuation
+        // must not silently lose the API-level JSON the paused turn was running with.
+        var jsonPolicy = JsonResponseFormatPolicy.of(Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)), resolvedType,
+                task.getJsonResponseFormat());
+
+        var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision,
+                toolHitlEnabled, jsonPolicy);
 
         String responseContent = result != null ? result.response() : null;
         List<Map<String, Object>> toolTrace = result != null && result.trace() != null ? result.trace() : new ArrayList<>();
@@ -907,18 +1013,31 @@ public class LlmTask implements ILifecycleTask {
 
         // Audit keys (mirror executeTask)
         if (memory.getAuditCollector() != null) {
+            // LifecycleManager gates the whole llmDetail block on the compiled prompt.
+            // Omitting it here dropped model response, model name, token usage and cost
+            // from the audit entry of every HITL-resumed turn — precisely the turns a
+            // human intervened in, and therefore the ones most worth auditing.
+            var compiledPrompt = dataFactory.createData(MemoryKeys.AUDIT_COMPILED_PROMPT,
+                    processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "") + "\n---\n" + processedParams.getOrDefault(KEY_PROMPT, ""));
+            currentStep.storeData(compiledPrompt);
+
             if (responseContent != null) {
-                var modelResponse = dataFactory.createData("audit:model_response", responseContent);
+                var modelResponse = dataFactory.createData(MemoryKeys.AUDIT_MODEL_RESPONSE, responseContent);
                 currentStep.storeData(modelResponse);
             }
             String modelName = processedParams.getOrDefault("model", task.getType());
-            var modelNameData = dataFactory.createData("audit:model_name", modelName);
+            var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
+
+            // Known gap: the continuation's tokenUsage covers only the post-resume model
+            // calls (see the comment above) — the pre-pause segment is not recoverable
+            // here, so a paused turn's ledger entry under-reports by that segment.
+            accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task.getId());
         }
 
         // Tool trace (mirror executeTask)
         if (!toolTrace.isEmpty()) {
-            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(), toolTrace);
+            var traceData = dataFactory.createData(LANGCHAIN_TRACE_PREFIX + task.getType() + ":" + task.getId(), toolTrace);
             currentStep.storeData(traceData);
         }
 
@@ -1064,8 +1183,12 @@ public class LlmTask implements ILifecycleTask {
      * Resolve the model name from provider-specific parameter keys. Different
      * providers use different keys: OpenAI uses "modelName", Ollama uses "model",
      * Bedrock/HuggingFace use "modelId", Azure uses "deploymentName".
+     * <p>
+     * Package-private rather than private so {@code AgentOrchestrator} can resolve
+     * the same model name when it picks a token estimator for the in-turn
+     * tool-context budget — one resolution table, not two that can drift.
      */
-    private static String resolveModelName(Map<String, String> processedParams) {
+    static String resolveModelName(Map<String, String> processedParams) {
         String name = processedParams.get("modelName");
         if (name != null)
             return name;

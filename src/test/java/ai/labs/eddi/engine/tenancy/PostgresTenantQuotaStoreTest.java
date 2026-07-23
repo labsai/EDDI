@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import javax.sql.DataSource;
 import java.sql.*;
@@ -59,6 +60,20 @@ class PostgresTenantQuotaStoreTest {
         lenient().when(dataSourceInstance.get()).thenReturn(dataSource);
 
         sut = new PostgresTenantQuotaStore(dataSourceInstance);
+    }
+
+    /**
+     * Returns the single prepared statement containing {@code marker}, with runs of
+     * whitespace collapsed so assertions do not depend on SQL indentation.
+     */
+    private static String capturedStatement(Connection conn, String marker) throws SQLException {
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(conn, atLeastOnce()).prepareStatement(sqlCaptor.capture());
+        return sqlCaptor.getAllValues().stream()
+                .map(sql -> sql.replaceAll("\\s+", " ").trim())
+                .filter(sql -> sql.contains(marker))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no prepared statement contained: " + marker));
     }
 
     // ─── Schema initialization ────────────────────────────────────────────────
@@ -342,34 +357,36 @@ class PostgresTenantQuotaStoreTest {
         @Test
         @DisplayName("should return denied when limit is reached")
         void limitReached() throws Exception {
-            // First query: no rows (not in window or already at limit)
-            ResultSet rs1 = mock(ResultSet.class);
-            when(rs1.next()).thenReturn(false);
-
-            // Second query: upsert returns count above limit
-            ResultSet rs2 = mock(ResultSet.class);
-            when(rs2.next()).thenReturn(true);
-            when(rs2.getInt(1)).thenReturn(11);
-
-            PreparedStatement ps1 = mock(PreparedStatement.class);
-            when(ps1.executeQuery()).thenReturn(rs1);
-
-            PreparedStatement ps2 = mock(PreparedStatement.class);
-            when(ps2.executeQuery()).thenReturn(rs2);
-
-            Connection schemaConn = mock(Connection.class);
-            when(schemaConn.createStatement()).thenReturn(statement);
-
-            Connection opConn = mock(Connection.class);
-            when(opConn.prepareStatement(anyString())).thenReturn(ps1, ps2);
-
-            when(dataSource.getConnection()).thenReturn(schemaConn, opConn);
+            // At the limit with a current window BOTH conditional increments miss:
+            // `conversations_today < limit` is false, and the materialise-or-roll
+            // statement is a no-op because the window has not expired.
+            when(resultSet.next()).thenReturn(false);
 
             QuotaCheckResult result = sut.tryIncrementConversations(TENANT_ID, 10);
 
             assertFalse(result.allowed());
             assertNotNull(result.reason());
             assertTrue(result.reason().contains("10"));
+        }
+
+        @Test
+        @DisplayName("the materialise-or-roll statement must be guarded by an expired day window")
+        void rollStatementGuardedByExpiredWindow() throws Exception {
+            // Structural guard. The at-limit *behaviour* cannot be observed through a
+            // mocked JDBC layer — whether the DO UPDATE fires is decided by Postgres,
+            // not by this code — so the behavioural proof lives in
+            // TenantQuotaStoreParityTest. What IS observable here is the clause that
+            // makes the difference: without it a row whose window is still current is
+            // rewritten and reported as an acquisition, and the daily cap never binds.
+            when(resultSet.next()).thenReturn(false);
+
+            sut.tryIncrementConversations(TENANT_ID, 10);
+
+            String upsert = capturedStatement(connection, "ON CONFLICT (tenant_id) DO UPDATE");
+            assertTrue(upsert.contains("WHERE tenant_usage.day_start <"),
+                    "materialise-or-roll must skip a current window, was: " + upsert);
+            assertTrue(upsert.contains("conversations_today = 0"),
+                    "the roll must reset to zero and let the increment statement do the counting, was: " + upsert);
         }
 
         @Test
@@ -414,31 +431,28 @@ class PostgresTenantQuotaStoreTest {
         @Test
         @DisplayName("should return denied when rate limit reached")
         void limitReached() throws Exception {
-            ResultSet rs1 = mock(ResultSet.class);
-            when(rs1.next()).thenReturn(false);
-
-            ResultSet rs2 = mock(ResultSet.class);
-            when(rs2.next()).thenReturn(true);
-            when(rs2.getInt(1)).thenReturn(61);
-
-            PreparedStatement ps1 = mock(PreparedStatement.class);
-            when(ps1.executeQuery()).thenReturn(rs1);
-
-            PreparedStatement ps2 = mock(PreparedStatement.class);
-            when(ps2.executeQuery()).thenReturn(rs2);
-
-            Connection schemaConn = mock(Connection.class);
-            when(schemaConn.createStatement()).thenReturn(statement);
-
-            Connection opConn = mock(Connection.class);
-            when(opConn.prepareStatement(anyString())).thenReturn(ps1, ps2);
-
-            when(dataSource.getConnection()).thenReturn(schemaConn, opConn);
+            // See TryIncrementConversations.limitReached — at the limit with a current
+            // window both conditional increments miss and the roll is a no-op.
+            when(resultSet.next()).thenReturn(false);
 
             QuotaCheckResult result = sut.tryIncrementApiCalls(TENANT_ID, 60);
 
             assertFalse(result.allowed());
             assertTrue(result.reason().contains("60/min"));
+        }
+
+        @Test
+        @DisplayName("the materialise-or-roll statement must be guarded by an expired minute window")
+        void rollStatementGuardedByExpiredWindow() throws Exception {
+            when(resultSet.next()).thenReturn(false);
+
+            sut.tryIncrementApiCalls(TENANT_ID, 60);
+
+            String upsert = capturedStatement(connection, "ON CONFLICT (tenant_id) DO UPDATE");
+            assertTrue(upsert.contains("WHERE tenant_usage.minute_start <"),
+                    "materialise-or-roll must skip a current window, was: " + upsert);
+            assertTrue(upsert.contains("api_calls_this_minute = 0"),
+                    "the roll must reset to zero and let the increment statement do the counting, was: " + upsert);
         }
 
         @Test

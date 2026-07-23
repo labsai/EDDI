@@ -5,12 +5,12 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ResponseFormat;
-import dev.langchain4j.model.chat.request.ResponseFormatType;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import org.jboss.logging.Logger;
 
@@ -24,9 +24,9 @@ import java.util.Map;
  * This handles the "legacy mode" path where the task has no tools configured
  * and just sends the message list directly to the LLM.
  * <p>
- * When a responseSchema parameter is provided and the provider supports it,
- * uses {@link ChatRequest} with {@link ResponseFormat#JSON} to enforce
- * structured output at the API level (more reliable than prompt-only
+ * When the {@link JsonResponseFormatPolicy} allows it for the resolved
+ * provider, the {@link ChatRequest} is built with {@link ResponseFormat#JSON}
+ * to enforce structured output at the API level (more reliable than prompt-only
  * enforcement).
  */
 class LegacyChatExecutor {
@@ -48,13 +48,17 @@ class LegacyChatExecutor {
      * messages-based API (no structured output enforcement).
      */
     ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task) throws LifecycleException {
-        return execute(chatModel, messages, task, false);
+        return execute(chatModel, messages, task, JsonResponseFormatPolicy.DISABLED);
     }
 
     /**
-     * Execute a chat completion, optionally using JSON response format. When
-     * jsonMode is true, the ChatRequest is built with ResponseFormatType.JSON to
-     * enforce structured output at the API level.
+     * Execute a chat completion, optionally using JSON response format. The format
+     * is only set when {@code jsonPolicy} allows it for the resolved provider — a
+     * provider that rejects a schemaless JSON format (anthropic, bedrock) is never
+     * sent one, so it costs no wasted round trip and no 400.
+     * <p>
+     * This path never carries tool specifications, so the policy is resolved with
+     * {@code toolsInRequest=false}.
      *
      * @param chatModel
      *            the model to chat with
@@ -62,20 +66,25 @@ class LegacyChatExecutor {
      *            the full message list (system + history + user)
      * @param task
      *            task configuration (for retry settings)
-     * @param jsonMode
-     *            if true, set response format to JSON
+     * @param jsonPolicy
+     *            decides whether this request carries {@code ResponseFormat.JSON};
+     *            {@code null} is treated as
+     *            {@link JsonResponseFormatPolicy#DISABLED}
      * @return result containing response text and metadata
      */
-    ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task, boolean jsonMode) throws LifecycleException {
+    ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy)
+            throws LifecycleException {
 
-        LOGGER.debug("Executing without tools (legacy mode)" + (jsonMode ? " with JSON response format" : ""));
+        ResponseFormat responseFormat = jsonPolicy != null ? jsonPolicy.resolve(false) : null;
+
+        LOGGER.debug("Executing without tools (legacy mode)" + (responseFormat != null ? " with JSON response format" : ""));
 
         ChatResponse messageResponse;
-        if (jsonMode) {
+        if (responseFormat != null) {
             try {
                 messageResponse = AgentExecutionHelper.executeWithRetry(() -> {
                     var requestBuilder = ChatRequest.builder().messages(messages);
-                    requestBuilder.responseFormat(ResponseFormat.builder().type(ResponseFormatType.JSON).build());
+                    requestBuilder.responseFormat(responseFormat);
                     return chatModel.chat(requestBuilder.build());
                 }, task, "Chat model execution (JSON mode)");
             } catch (LifecycleException e) {
@@ -108,8 +117,10 @@ class LegacyChatExecutor {
                 }
             }
             if (metadata.tokenUsage() != null) {
-                responseMetadata.put("tokenUsage", Map.of("inputTokens", metadata.tokenUsage().inputTokenCount(), "outputTokens",
-                        metadata.tokenUsage().outputTokenCount(), "totalTokens", metadata.tokenUsage().totalTokenCount()));
+                // Not Map.of: the three counts are boxed Integers and providers legitimately
+                // report only some of them (Bedrock and Ollama commonly omit the total), so
+                // Map.of would throw NPE and take the whole turn down over telemetry.
+                responseMetadata.put("tokenUsage", AgentOrchestrator.tokenUsageMap(metadata.tokenUsage()));
             }
         }
 

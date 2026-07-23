@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
@@ -31,6 +32,8 @@ import static org.mockito.Mockito.*;
  * onComplete, onError) to cover the $1 inner class.
  */
 class RestAgentEngineStreamingExtendedTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private IConversationService conversationService;
     private RestAgentEngineStreaming streaming;
@@ -114,18 +117,32 @@ class RestAgentEngineStreamingExtendedTest {
         }
 
         @Test
-        @DisplayName("onTaskComplete includes toolTrace in event")
+        @DisplayName("onTaskComplete emits toolTrace as a JSON array of trace entries")
         void onTaskCompleteIncludesToolTrace() throws Exception {
             invokeSayStreaming();
             var handler = captureHandler();
 
             handler.onTaskComplete(new TaskId("task-1"), "LlmTask", 200L,
-                    Map.of("toolTrace", List.of(Map.of("tool", "weather", "duration", 100))));
+                    Map.of("toolTrace", List.of(
+                            Map.of("type", "tool_call", "tool", "weather", "arguments", "{\"city\":\"Vienna\"}"),
+                            Map.of("type", "tool_result", "tool", "weather", "result", "18C, clear"))));
 
             var dataCaptor = ArgumentCaptor.forClass(String.class);
             verify(eventBuilder).data(eq(String.class), dataCaptor.capture());
-            String data = dataCaptor.getValue();
-            assertTrue(data.contains("toolTrace"));
+
+            // Parse the frame instead of substring-matching: a raw `contains("toolTrace")`
+            // also passes on malformed JSON or a stringified payload.
+            var node = MAPPER.readTree(dataCaptor.getValue());
+            assertEquals("eddi://task-1", node.get("taskId").asText());
+            var trace = node.get("toolTrace");
+            assertNotNull(trace, "task_complete frame must carry a toolTrace field");
+            assertTrue(trace.isArray(), "toolTrace must be a JSON array, not a string");
+            assertEquals(2, trace.size());
+            assertEquals("tool_call", trace.get(0).get("type").asText());
+            assertEquals("weather", trace.get(0).get("tool").asText());
+            assertEquals("{\"city\":\"Vienna\"}", trace.get(0).get("arguments").asText());
+            assertEquals("tool_result", trace.get(1).get("type").asText());
+            assertEquals("18C, clear", trace.get(1).get("result").asText());
         }
 
         @Test

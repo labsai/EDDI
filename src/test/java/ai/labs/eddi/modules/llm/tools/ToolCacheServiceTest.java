@@ -6,13 +6,22 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.caching.TestCaches;
+import ai.labs.eddi.engine.caching.TestCaches.FakeTicker;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HashMap;
+import java.util.HexFormat;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -20,10 +29,16 @@ import static org.mockito.Mockito.*;
 
 /**
  * Tests for {@link ToolCacheService} — Caffeine-backed tool result cache with
- * smart TTL.
+ * smart TTL and per-identity key scoping.
  */
 @DisplayName("ToolCacheService")
 class ToolCacheServiceTest {
+
+    /** A representative resolved USER scope tag. */
+    private static final String SCOPE_A = "u:0123456789abcdef0123456789abcdef";
+
+    /** A different resolved USER scope tag — MUST NOT share keys with SCOPE_A. */
+    private static final String SCOPE_B = "u:fedcba9876543210fedcba9876543210";
 
     private ToolCacheService service;
     private ICache cache; // raw type to avoid CachedResult (private inner class) generics issues
@@ -113,27 +128,127 @@ class ToolCacheServiceTest {
         void get_cacheMiss_returnsNull() {
             when(cache.get(anyString())).thenReturn(null);
 
-            String result = service.get("calculator", "2+2");
+            String result = service.get(SCOPE_A, "calculator", "2+2");
 
             assertNull(result);
         }
 
         @SuppressWarnings("unchecked")
         @Test
-        @DisplayName("put stores result in cache")
+        @DisplayName("put stores result under the scoped key with the smart TTL")
         void put_storesInCache() {
-            service.put("calculator", "2+2", "4");
+            service.put(SCOPE_A, "calculator", "2+2", "4");
 
-            verify(cache).put(eq("calculator:2+2"), any(), anyLong(), any());
+            // calculator's smart TTL is 7 days; the key carries the scope tag
+            verify(cache).put(eq(SCOPE_A + "|calculator:2+2"), any(), eq(604800L), eq(TimeUnit.SECONDS));
         }
 
         @SuppressWarnings("unchecked")
         @Test
         @DisplayName("put with custom TTL uses provided values")
         void put_customTTL() {
-            service.put("myTool", "args", "result", 120, java.util.concurrent.TimeUnit.SECONDS);
+            service.put(SCOPE_A, "myTool", "args", "result", 120, TimeUnit.SECONDS);
 
-            verify(cache).put(eq("myTool:args"), any(), eq(120L), any());
+            verify(cache).put(eq(SCOPE_A + "|myTool:args"), any(), eq(120L), eq(TimeUnit.SECONDS));
+        }
+    }
+
+    // ==================== Canonical name vs cache key ====================
+
+    /**
+     * The TTL table is keyed mostly on configuration slugs, but tools are
+     * dispatched under {@code @Tool} method names — and one entry ({@code news})
+     * only ever matches a dispatch name. The TTL is therefore resolved dispatch
+     * name first, slug second, while the KEY stays on the dispatch name alone: a
+     * slug-keyed cache would make {@code searchWeb}, {@code searchNews} and
+     * {@code searchWikipedia} share one entry and serve each other's results.
+     */
+    @Nested
+    @DisplayName("both names drive the TTL, only the dispatch name drives the key")
+    class CanonicalPutTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("TTL comes from the canonical slug")
+        void ttlFromCanonicalName() {
+            service.put(SCOPE_A, new ToolInvocation("calculate", "calculator", null), "2+2", "4");
+
+            // 604800s is calculator's configured TTL; 300L here would mean the dispatch
+            // name fell through to the default and the TTL table is still unreachable.
+            verify(cache).put(eq(SCOPE_A + "|calculate:2+2"), any(), eq(604800L), eq(TimeUnit.SECONDS));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("sibling methods of one tool never share a cache key")
+        void siblingMethodsDoNotCollide() {
+            service.put(SCOPE_A, new ToolInvocation("searchWeb", "websearch", null), "{\"q\":\"eddi\"}", "web hits");
+            service.put(SCOPE_A, new ToolInvocation("searchNews", "websearch", null), "{\"q\":\"eddi\"}", "news hits");
+
+            ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
+            verify(cache, times(2)).put(keys.capture(), any(), anyLong(), any());
+
+            assertEquals(2, keys.getAllValues().stream().distinct().count(),
+                    "keying on the canonical slug would collapse these two searches onto one entry "
+                            + "and serve news results to a web-search call");
+            assertTrue(keys.getAllValues().contains(SCOPE_A + "|searchWeb:{\"q\":\"eddi\"}"));
+            assertTrue(keys.getAllValues().contains(SCOPE_A + "|searchNews:{\"q\":\"eddi\"}"));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a tool with no slug falls back to its own name for the TTL")
+        void unmappedToolFallsBackToItsOwnName() {
+            service.put(SCOPE_A, ToolInvocation.of("my_http_tool"), "args", "result");
+
+            verify(cache).put(eq(SCOPE_A + "|my_http_tool:args"), any(), eq(300L), eq(TimeUnit.SECONDS));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a null scope tag still stores nothing")
+        void nullScopeStillBypasses() {
+            service.put(null, new ToolInvocation("calculate", "calculator", null), "2+2", "4");
+
+            verify(cache, never()).put(any(), any(), anyLong(), any());
+        }
+
+        /**
+         * Resolving the TTL from the slug ALONE made the dedicated {@code news} bucket
+         * unreachable for every built-in: {@code searchNews} canonicalises to
+         * {@code websearch} and exact-matched its 1800s entry before the substring loop
+         * could ever reach {@code news}, so news results were cached three times longer
+         * than the table declares. Dispatch name first, slug second.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("searchNews gets the 600s news TTL, not websearch's 1800s")
+        void newsTtlIsReachable() {
+            service.put(SCOPE_A, new ToolInvocation("searchNews", "websearch", null), "{\"q\":\"eddi\"}", "news hits");
+
+            verify(cache).put(eq(SCOPE_A + "|searchNews:{\"q\":\"eddi\"}"), any(), eq(600L), eq(TimeUnit.SECONDS));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("siblings that match nothing themselves still fall back to the slug's TTL")
+        void siblingsWithoutTheirOwnEntryUseTheSlugTtl() {
+            service.put(SCOPE_A, new ToolInvocation("searchWeb", "websearch", null), "{\"q\":\"eddi\"}", "web hits");
+            service.put(SCOPE_A, new ToolInvocation("searchWikipedia", "websearch", null), "{\"q\":\"eddi\"}", "wiki hits");
+
+            verify(cache).put(eq(SCOPE_A + "|searchWeb:{\"q\":\"eddi\"}"), any(), eq(1800L), eq(TimeUnit.SECONDS));
+            verify(cache).put(eq(SCOPE_A + "|searchWikipedia:{\"q\":\"eddi\"}"), any(), eq(1800L), eq(TimeUnit.SECONDS));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a dispatch name that matches nothing at all still reaches the default")
+        void unknownOnBothNamesUsesTheDefault() {
+            service.put(SCOPE_A, new ToolInvocation("listTimezones", "datetime", null), "{}", "…");
+            service.put(SCOPE_A, new ToolInvocation("do_a_thing", "do_a_thing", null), "{}", "…");
+
+            verify(cache).put(eq(SCOPE_A + "|listTimezones:{}"), any(), eq(60L), eq(TimeUnit.SECONDS));
+            verify(cache).put(eq(SCOPE_A + "|do_a_thing:{}"), any(), eq(300L), eq(TimeUnit.SECONDS));
         }
     }
 
@@ -143,26 +258,356 @@ class ToolCacheServiceTest {
     @DisplayName("Cache Key Building")
     class CacheKeyTests {
 
+        /**
+         * The D5 regression test. Before scoping, the key was
+         * {@code toolName + ":" + arguments} — identical for every caller — so one
+         * authenticated user's tool result was served verbatim to the next user that
+         * asked the same question. Two different identities must now land on two
+         * different keys.
+         */
         @SuppressWarnings("unchecked")
         @Test
-        @DisplayName("short arguments use readable key format")
-        void shortArgs_readableKey() {
-            service.put("calculator", "2+2", "4");
+        @DisplayName("two different users produce two DISTINCT keys for the same tool and arguments")
+        void differentUsers_produceDifferentKeys() {
+            service.put(SCOPE_A, "getAccountBalance", "{\"account\":\"main\"}", "alice-balance");
+            service.put(SCOPE_B, "getAccountBalance", "{\"account\":\"main\"}", "bob-balance");
 
-            verify(cache).put(eq("calculator:2+2"), any(), anyLong(), any());
+            ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
+            verify(cache, times(2)).put(keys.capture(), any(), anyLong(), any());
+
+            String aliceKey = keys.getAllValues().get(0);
+            String bobKey = keys.getAllValues().get(1);
+
+            assertNotEquals(aliceKey, bobKey,
+                    "same tool + same arguments from two different users must NOT share a cache key — "
+                            + "a shared key is how one user's tool result gets served to another");
+            assertTrue(aliceKey.startsWith(SCOPE_A + "|"), "expected the scope tag as the first key segment, got: " + aliceKey);
+            assertTrue(bobKey.startsWith(SCOPE_B + "|"), "expected the scope tag as the first key segment, got: " + bobKey);
         }
 
         @SuppressWarnings("unchecked")
         @Test
-        @DisplayName("long arguments (>2048 chars) use SHA-256 hash key")
-        void longArgs_sha256Key() {
-            String longArgs = "x".repeat(3000);
-            service.put("calculator", longArgs, "result");
+        @DisplayName("the SAME identity does reuse one key (scoping must not disable caching)")
+        void sameUser_sharesOneKey() {
+            service.put(SCOPE_A, "getAccountBalance", "{\"account\":\"main\"}", "first");
+            service.put(SCOPE_A, "getAccountBalance", "{\"account\":\"main\"}", "second");
 
-            verify(cache).put(argThat(key -> {
-                String k = (String) key;
-                return k.startsWith("calculator:") && k.length() < 200;
-            }), any(), anyLong(), any());
+            ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
+            verify(cache, times(2)).put(keys.capture(), any(), anyLong(), any());
+
+            assertEquals(keys.getAllValues().get(0), keys.getAllValues().get(1));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("short arguments are inlined verbatim: scopeTag|toolName:arguments")
+        void shortArgs_readableKey() {
+            String args = "{\"expression\":\"2+2\"}";
+
+            service.put(SCOPE_A, "calculate", args, "4");
+
+            ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+            verify(cache).put(key.capture(), any(), anyLong(), any());
+
+            // Full key asserted, not just a prefix: the arguments are present verbatim
+            // (not digested) and the scope tag is separated by a single '|'.
+            assertEquals(SCOPE_A + "|calculate:" + args, key.getValue());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("long arguments (>2048 chars) are replaced by the FULL SHA-256 hex of those arguments")
+        void longArgs_sha256Key() throws Exception {
+            String longArgs = "x".repeat(3000);
+
+            service.put(SCOPE_A, "calculate", longArgs, "result");
+
+            ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+            verify(cache).put(key.capture(), any(), anyLong(), any());
+
+            // Independent oracle: anything other than the complete digest (a truncation,
+            // a different hash, a prefix of the arguments) fails this equality.
+            assertEquals(SCOPE_A + "|calculate:" + sha256Hex(longArgs), key.getValue());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("two different over-threshold argument strings still produce different keys")
+        void longArgs_distinctArgumentsStayDistinct() {
+            service.put(SCOPE_A, "calculate", "x".repeat(3000) + "A", "a");
+            service.put(SCOPE_A, "calculate", "x".repeat(3000) + "B", "b");
+
+            ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
+            verify(cache, times(2)).put(keys.capture(), any(), anyLong(), any());
+
+            assertNotEquals(keys.getAllValues().get(0), keys.getAllValues().get(1),
+                    "hashing must not collapse distinct long arguments onto one key");
+        }
+    }
+
+    // ==================== Scope resolution ====================
+
+    @Nested
+    @DisplayName("Scope resolution")
+    class ScopeResolutionTests {
+
+        @Test
+        @DisplayName("no config at all resolves to USER")
+        void defaultsToUser() {
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(null, null, "calculate", "calculator"));
+        }
+
+        @Test
+        @DisplayName("task-level default applies to tools without an override")
+        void taskDefaultApplies() {
+            assertEquals(ToolCacheScope.CONVERSATION, ToolCacheScope.resolve(Map.of(), "conversation", "calculate", "calculator"));
+        }
+
+        @Test
+        @DisplayName("per-tool entry wins over the task-level default")
+        void perToolWinsOverDefault() {
+            assertEquals(ToolCacheScope.GLOBAL,
+                    ToolCacheScope.resolve(Map.of("calculate", "global"), "conversation", "calculate", "calculator"));
+        }
+
+        @Test
+        @DisplayName("a per-tool entry for a DIFFERENT tool does not leak across")
+        void perToolIsPerTool() {
+            assertEquals(ToolCacheScope.USER,
+                    ToolCacheScope.resolve(Map.of("calculate", "global"), null, "getCurrentWeather", "weather"));
+        }
+
+        @Test
+        @DisplayName("tokens are case-insensitive and trimmed")
+        void tokensAreLenient() {
+            assertEquals(ToolCacheScope.GLOBAL,
+                    ToolCacheScope.resolve(Map.of("calculate", "  GLOBAL "), null, "calculate", "calculator"));
+        }
+
+        @Test
+        @DisplayName("an unrecognized token falls back to USER, never to a wider scope")
+        void unknownTokenFailsClosed() {
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(Map.of("calculate", "globl"), null, "calculate", "calculator"));
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(null, "everyone", "calculate", "calculator"));
+            assertNull(ToolCacheScope.fromConfig("nonsense"));
+            assertNull(ToolCacheScope.fromConfig(null));
+        }
+
+        @Test
+        @DisplayName("USER scope tag is 'u:' + the first 32 hex chars of the userId digest")
+        void userScopeTagShape() throws Exception {
+            String tag = ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, "alice", "conv-1");
+
+            assertEquals("u:" + sha256Hex("alice").substring(0, 32), tag);
+            assertFalse(tag.contains("alice"), "the raw userId must not appear in the cache key");
+        }
+
+        @Test
+        @DisplayName("two different userIds resolve to two different USER tags")
+        void differentUserIdsDifferentTags() {
+            String alice = ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, "alice", "conv-1");
+            String bob = ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, "bob", "conv-1");
+
+            assertNotEquals(alice, bob);
+        }
+
+        @Test
+        @DisplayName("CONVERSATION scope tag is 'c:' + conversationId, ignoring the userId")
+        void conversationScopeTag() {
+            String tag = ToolCacheService.resolveScopeTag("calculate", "calculator", Map.of("calculate", "conversation"), null, "alice",
+                    "conv-1");
+
+            assertEquals("c:conv-1", tag);
+        }
+
+        @Test
+        @DisplayName("GLOBAL scope tag is 'g' even without any identity")
+        void globalScopeTag() {
+            assertEquals("g",
+                    ToolCacheService.resolveScopeTag("calculate", "calculator", Map.of("calculate", "global"), null, null, null));
+        }
+
+        @Test
+        @DisplayName("USER scope with a blank userId degrades to the conversation partition, not a shared one")
+        void userScopeWithoutUserIdDegradesToConversation() {
+            assertEquals("c:conv-1", ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, null, "conv-1"));
+            assertEquals("c:conv-1", ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, "   ", "conv-1"));
+        }
+
+        @Test
+        @DisplayName("no usable identity at all resolves to null (cache must be bypassed)")
+        void noIdentityResolvesToNull() {
+            assertNull(ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, null, null));
+            assertNull(ToolCacheService.resolveScopeTag("calculate", "calculator", null, null, "  ", "  "));
+            assertNull(ToolCacheService.resolveScopeTag("calculate", "calculator", Map.of("calculate", "conversation"), null, "alice", null),
+                    "CONVERSATION scope without a conversationId has nothing to partition on");
+        }
+    }
+
+    // ==================== Scope resolution fails SAFE ====================
+
+    /**
+     * A per-tool entry is written to pin ONE tool. When its token does not parse,
+     * the entry used to evaporate and the tool inherited
+     * {@code defaultToolCacheScope} — so {@code {"getUserProfile": "usr"}} under
+     * {@code defaultToolCacheScope: "global"}, a typo in an override written to
+     * NARROW one tool, promoted that tool onto the single shared {@code "g"}
+     * partition instead. The class javadoc promised the opposite ("a typo must
+     * never silently widen a tool's audience"); these tests hold the code to it.
+     */
+    @Nested
+    @DisplayName("An unparseable per-tool entry fails safe, never to the task default")
+    class UnparseablePerToolEntryTests {
+
+        @Test
+        @DisplayName("a typo'd per-tool token resolves to USER, not to the wider task default")
+        void typoDoesNotInheritGlobalDefault() {
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(Map.of("calculate", "usr"), "global", "calculate", "calculator"),
+                    "'usr' is a typo for 'user' in an override that NARROWS one tool; inheriting the task's "
+                            + "'global' default would put every authenticated user on one cache partition");
+        }
+
+        @Test
+        @DisplayName("the resulting scope tag is per-user, not the shared 'g'")
+        void typoDoesNotProduceTheSharedTag() {
+            String tag = ToolCacheService.resolveScopeTag("calculate", "calculator", Map.of("calculate", "usr"), "global", "alice",
+                    "conv-1");
+
+            assertNotEquals("g", tag, "a shared tag here is Alice's tool result being served to Bob");
+            assertTrue(tag.startsWith("u:"), "expected a per-user partition, got: " + tag);
+        }
+
+        @Test
+        @DisplayName("a blank per-tool token also fails safe")
+        void blankTokenFailsSafe() {
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(Map.of("calculate", "   "), "global", "calculate", "calculator"));
+        }
+
+        @Test
+        @DisplayName("an explicit null per-tool value also fails safe")
+        void nullTokenFailsSafe() {
+            Map<String, String> scopes = new HashMap<>();
+            scopes.put("calculate", null);
+
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(scopes, "global", "calculate", "calculator"));
+        }
+
+        @Test
+        @DisplayName("a typo'd entry for ANOTHER tool leaves this tool on the task default")
+        void unrelatedTypoDoesNotNarrowEveryTool() {
+            assertEquals(ToolCacheScope.GLOBAL,
+                    ToolCacheScope.resolve(Map.of("calculate", "usr"), "global", "getCurrentWeather", "weather"),
+                    "failing safe applies to the tool the bad entry names, not to the whole task");
+        }
+
+        @Test
+        @DisplayName("an unrecognized TASK default still falls through to USER")
+        void unparseableTaskDefaultFallsBackToUser() {
+            assertEquals(ToolCacheScope.USER, ToolCacheScope.resolve(Map.of(), "globl", "calculate", "calculator"));
+        }
+    }
+
+    // ==================== Scope keys accept the slug too ====================
+
+    /**
+     * {@code toolRateLimits} and {@code toolPricing} accept the configuration slug
+     * (dispatch name first, then slug). {@code toolCacheScopes} sits between them
+     * in the same task and must speak the same vocabulary: a {@code {"websearch":
+     * "user"}} written next to {@code {"websearch": 30}} used to be silently
+     * ignored, leaving the tool on the task default — possibly {@code global}.
+     */
+    @Nested
+    @DisplayName("toolCacheScopes accepts the dispatch name OR the canonical slug")
+    class DualNameScopeKeyTests {
+
+        @Test
+        @DisplayName("a slug-keyed override binds for a built-in dispatched under a method name")
+        void slugKeyedOverrideBinds() {
+            assertEquals(ToolCacheScope.CONVERSATION,
+                    ToolCacheScope.resolve(Map.of("websearch", "conversation"), "global", "searchWeb", "websearch"),
+                    "'websearch' is the whitelist slug and the key used by toolRateLimits/toolPricing; "
+                            + "ignoring it here leaves searchWeb on the task's 'global' default");
+        }
+
+        @Test
+        @DisplayName("a slug-keyed narrowing override also changes the resolved tag")
+        void slugKeyedOverrideChangesTheTag() {
+            String tag = ToolCacheService.resolveScopeTag("searchWeb", "websearch", Map.of("websearch", "conversation"), "global", "alice",
+                    "conv-1");
+
+            assertEquals("c:conv-1", tag);
+        }
+
+        @Test
+        @DisplayName("the dispatch name still wins over the slug")
+        void dispatchNameWinsOverSlug() {
+            assertEquals(ToolCacheScope.CONVERSATION,
+                    ToolCacheScope.resolve(Map.of("searchNews", "conversation", "websearch", "global"), null, "searchNews", "websearch"),
+                    "an entry pinning one operation is more specific than one covering the whole tool");
+        }
+
+        @Test
+        @DisplayName("a typo'd DISPATCH entry does not fall through to a wider slug entry")
+        void typoedDispatchEntryDoesNotFallThroughToSlug() {
+            assertEquals(ToolCacheScope.USER,
+                    ToolCacheScope.resolve(Map.of("searchNews", "usr", "websearch", "global"), null, "searchNews", "websearch"));
+        }
+
+        @Test
+        @DisplayName("a slug-keyed opt-in to GLOBAL still works (the vocabulary cuts both ways)")
+        void slugKeyedGlobalOptInBinds() {
+            assertEquals("g", ToolCacheService.resolveScopeTag("calculate", "calculator", Map.of("calculator", "global"), null, "alice",
+                    "conv-1"));
+        }
+    }
+
+    // ==================== Null-scope bypass ====================
+
+    @Nested
+    @DisplayName("Null scope tag bypasses the cache entirely")
+    class NullScopeBypassTests {
+
+        @Test
+        @DisplayName("get with a null scope tag never reads the cache and returns null")
+        void get_nullScope_noLookup() {
+            assertNull(service.get(null, "calculate", "2+2"));
+
+            verify(cache, never()).get(any());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("put with a null scope tag stores nothing")
+        void put_nullScope_noStore() {
+            service.put(null, "calculate", "2+2", "4");
+
+            verify(cache, never()).put(any(), any(), anyLong(), any());
+            verify(cache, never()).put(any(), any());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("put with an explicit TTL and a null scope tag stores nothing")
+        void putWithTtl_nullScope_noStore() {
+            service.put(null, "calculate", "2+2", "4", 60, TimeUnit.SECONDS);
+
+            verify(cache, never()).put(any(), any(), anyLong(), any());
+        }
+
+        @Test
+        @DisplayName("invalidate with a null scope tag removes nothing")
+        void invalidate_nullScope_noRemove() {
+            service.invalidate(null, "calculate", "2+2");
+
+            verify(cache, never()).remove(any());
+        }
+
+        @Test
+        @DisplayName("a bypassed get is not counted as a cache miss")
+        void bypassIsNotAMiss() {
+            service.get(null, "calculate", "2+2");
+
+            assertEquals(0, service.getStats().misses);
         }
     }
 
@@ -187,7 +632,7 @@ class ToolCacheServiceTest {
         void cacheMissTracked() {
             when(cache.get(anyString())).thenReturn(null);
 
-            service.get("tool1", "args");
+            service.get(SCOPE_A, "tool1", "args");
 
             var stats = service.getStats();
             assertEquals(1, stats.misses);
@@ -203,7 +648,7 @@ class ToolCacheServiceTest {
         @DisplayName("CacheStats toString includes per-tool stats")
         void cacheStatsToString() {
             when(cache.get(anyString())).thenReturn(null);
-            service.get("myTool", "args");
+            service.get(SCOPE_A, "myTool", "args");
 
             var stats = service.getStats();
             String str = stats.toString();
@@ -220,18 +665,26 @@ class ToolCacheServiceTest {
     class InvalidateTests {
 
         @Test
-        @DisplayName("invalidate removes specific key from cache")
+        @DisplayName("invalidate removes the scoped key from cache")
         void invalidate_removesKey() {
-            service.invalidate("calculator", "2+2");
+            service.invalidate(SCOPE_A, "calculator", "2+2");
 
-            verify(cache).remove("calculator:2+2");
+            verify(cache).remove(SCOPE_A + "|calculator:2+2");
+        }
+
+        @Test
+        @DisplayName("invalidate for one user does not remove another user's entry")
+        void invalidate_isScoped() {
+            service.invalidate(SCOPE_A, "calculator", "2+2");
+
+            verify(cache, never()).remove(SCOPE_B + "|calculator:2+2");
         }
 
         @Test
         @DisplayName("clear resets cache and stats")
         void clear_resetsAll() {
             when(cache.get(anyString())).thenReturn(null);
-            service.get("tool", "args");
+            service.get(SCOPE_A, "tool", "args");
 
             service.clear();
 
@@ -242,12 +695,145 @@ class ToolCacheServiceTest {
         }
     }
 
+    // ==================== Smart TTL is load-bearing ====================
+
+    /**
+     * The tests above run against a mocked {@link ICache} because they are about
+     * the <em>key</em> — its shape, its partitioning, and when the cache is
+     * bypassed. A mock can say nothing about expiry, and for a long time nothing
+     * else did either: {@code CacheImpl} discarded every lifespan it was handed
+     * (D5b), so {@code TOOL_TTL_SECONDS} was a lookup table whose values reached
+     * Caffeine and were thrown away. {@code getConfiguredTTL} assertions passed
+     * throughout.
+     * <p>
+     * These tests therefore wire a second service to a <strong>real</strong>
+     * {@code CacheImpl} over a ticker-driven Caffeine cache — the same shape
+     * {@code CacheFactory.getCache("tool-results")} hands out in production — and
+     * assert that two tools with two different table entries actually die at two
+     * different times.
+     */
+    @Nested
+    @DisplayName("Smart TTL is load-bearing")
+    class SmartTtlEnforcementTests {
+
+        /** 60s in the table. */
+        private static final String SHORT_TTL_TOOL = "datetime";
+
+        /** 604800s (7 days) in the table. */
+        private static final String LONG_TTL_TOOL = "calculator";
+
+        private FakeTicker ticker;
+        private ToolCacheService realCacheService;
+
+        @BeforeEach
+        void setUp() throws Exception {
+            ticker = new FakeTicker();
+            ICache<String, Object> realCache = TestCaches.expiring("tool-results", ticker);
+
+            ICacheFactory realCacheFactory = mock(ICacheFactory.class);
+            doReturn(realCache).when(realCacheFactory).getCache("tool-results");
+
+            realCacheService = new ToolCacheService();
+            setField(realCacheService, "cacheFactory", realCacheFactory);
+            setField(realCacheService, "meterRegistry", new SimpleMeterRegistry());
+            realCacheService.init();
+        }
+
+        @Test
+        @DisplayName("a 60s-TTL tool result is gone at 61s while a 7-day one is not")
+        void shortTtlExpiresLongTtlSurvives() {
+            realCacheService.put(SCOPE_A, SHORT_TTL_TOOL, "now", "12:00");
+            realCacheService.put(SCOPE_A, LONG_TTL_TOOL, "2+2", "4");
+
+            assertEquals("12:00", realCacheService.get(SCOPE_A, SHORT_TTL_TOOL, "now"));
+            assertEquals("4", realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"));
+
+            ticker.advanceSeconds(61);
+
+            assertNull(realCacheService.get(SCOPE_A, SHORT_TTL_TOOL, "now"),
+                    "datetime is 60s in TOOL_TTL_SECONDS — a stale clock reading must not be served at 61s");
+            assertEquals("4", realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"),
+                    "calculator is 7 days — the short TTL must not take it down too");
+        }
+
+        @Test
+        @DisplayName("the 7-day tool result does expire, one second past its own TTL")
+        void longTtlExpiresEventually() {
+            realCacheService.put(SCOPE_A, LONG_TTL_TOOL, "2+2", "4");
+
+            ticker.advanceSeconds(604_799);
+            assertEquals("4", realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"), "still inside the 7-day window");
+
+            ticker.advanceSeconds(2);
+            assertNull(realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"));
+        }
+
+        @Test
+        @DisplayName("an explicit TTL passed to put wins over the table")
+        void explicitTtlIsHonoured() {
+            realCacheService.put(SCOPE_A, LONG_TTL_TOOL, "2+2", "4", 30, TimeUnit.SECONDS);
+
+            ticker.advanceSeconds(31);
+
+            assertNull(realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"),
+                    "the caller asked for 30s; the 7-day table entry must not override it");
+        }
+
+        @Test
+        @DisplayName("an expired entry counts as a miss, not a hit")
+        void expiredEntryCountsAsMiss() {
+            realCacheService.put(SCOPE_A, SHORT_TTL_TOOL, "now", "12:00");
+            realCacheService.get(SCOPE_A, SHORT_TTL_TOOL, "now"); // hit
+
+            ticker.advanceSeconds(61);
+            realCacheService.get(SCOPE_A, SHORT_TTL_TOOL, "now"); // must be a miss
+
+            var stats = realCacheService.getStats();
+            assertEquals(1, stats.hits);
+            assertEquals(1, stats.misses);
+        }
+
+        @Test
+        @DisplayName("a searchNews entry really is gone at 601s while its searchWeb sibling survives")
+        void newsTtlIsLoadBearing() {
+            realCacheService.put(SCOPE_A, new ToolInvocation("searchNews", "websearch", null), "eddi", "news hits");
+            realCacheService.put(SCOPE_A, new ToolInvocation("searchWeb", "websearch", null), "eddi", "web hits");
+
+            ticker.advanceSeconds(601);
+
+            assertNull(realCacheService.get(SCOPE_A, "searchNews", "eddi"),
+                    "news is 600s in TOOL_TTL_SECONDS — resolving the TTL from the 'websearch' slug alone "
+                            + "would keep this entry alive for 30 minutes");
+            assertEquals("web hits", realCacheService.get(SCOPE_A, "searchWeb", "eddi"),
+                    "searchWeb matches nothing itself and correctly inherits websearch's 1800s");
+        }
+
+        @Test
+        @DisplayName("expiry does not leak across scope partitions")
+        void expiryIsPerEntryNotPerPartition() {
+            realCacheService.put(SCOPE_A, LONG_TTL_TOOL, "2+2", "alice-4");
+            ticker.advanceSeconds(300);
+            realCacheService.put(SCOPE_B, SHORT_TTL_TOOL, "now", "bob-12:00");
+
+            ticker.advanceSeconds(61);
+
+            assertEquals("alice-4", realCacheService.get(SCOPE_A, LONG_TTL_TOOL, "2+2"));
+            assertNull(realCacheService.get(SCOPE_B, SHORT_TTL_TOOL, "now"));
+        }
+    }
+
     // ==================== Helpers ====================
 
     private static void setField(Object target, String fieldName, Object value) throws Exception {
         Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    /** Independent SHA-256 hex oracle for the key-building assertions. */
+    private static String sha256Hex(String input) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return HexFormat.of().formatHex(digest.digest(input.getBytes(StandardCharsets.UTF_8)));
     }
 
     // ==================== Additional Smart TTL ====================
@@ -292,32 +878,54 @@ class ToolCacheServiceTest {
         @DisplayName("get returns result on cache hit (via captured put)")
         void get_cacheHit_returnsResult() {
             // Use ArgumentCaptor to capture what put stores, then return it for get
-            org.mockito.ArgumentCaptor<Object> valueCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            ArgumentCaptor<Object> valueCaptor = ArgumentCaptor.forClass(Object.class);
 
-            service.put("calculator", "2+2", "4");
+            service.put(SCOPE_A, "calculator", "2+2", "4");
 
-            verify(cache).put(eq("calculator:2+2"), valueCaptor.capture(), anyLong(), any());
+            verify(cache).put(eq(SCOPE_A + "|calculator:2+2"), valueCaptor.capture(), anyLong(), any());
             Object storedValue = valueCaptor.getValue();
 
             // Now mock cache.get to return the captured value
-            when(cache.get("calculator:2+2")).thenReturn(storedValue);
+            when(cache.get(SCOPE_A + "|calculator:2+2")).thenReturn(storedValue);
 
-            String result = service.get("calculator", "2+2");
+            String result = service.get(SCOPE_A, "calculator", "2+2");
 
             assertEquals("4", result);
+        }
+
+        /**
+         * The read-side half of
+         * {@link CacheKeyTests#differentUsers_produceDifferentKeys}: an entry written
+         * under one identity must not be readable under another. The mocked cache
+         * answers only the exact key that was written.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("an entry written by one user is NOT returned to another user")
+        void get_otherUser_missesEntry() {
+            ArgumentCaptor<Object> valueCaptor = ArgumentCaptor.forClass(Object.class);
+
+            service.put(SCOPE_A, "getAccountBalance", "{}", "alice-balance");
+            verify(cache).put(eq(SCOPE_A + "|getAccountBalance:{}"), valueCaptor.capture(), anyLong(), any());
+
+            when(cache.get(SCOPE_A + "|getAccountBalance:{}")).thenReturn(valueCaptor.getValue());
+
+            assertEquals("alice-balance", service.get(SCOPE_A, "getAccountBalance", "{}"));
+            assertNull(service.get(SCOPE_B, "getAccountBalance", "{}"),
+                    "the second user must miss, not inherit the first user's cached result");
         }
 
         @SuppressWarnings("unchecked")
         @Test
         @DisplayName("cache hit increments hit counter")
         void cacheHit_incrementsCounter() {
-            org.mockito.ArgumentCaptor<Object> valueCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            ArgumentCaptor<Object> valueCaptor = ArgumentCaptor.forClass(Object.class);
 
-            service.put("calc", "1+1", "2");
-            verify(cache).put(eq("calc:1+1"), valueCaptor.capture(), anyLong(), any());
+            service.put(SCOPE_A, "calc", "1+1", "2");
+            verify(cache).put(eq(SCOPE_A + "|calc:1+1"), valueCaptor.capture(), anyLong(), any());
 
-            when(cache.get("calc:1+1")).thenReturn(valueCaptor.getValue());
-            service.get("calc", "1+1");
+            when(cache.get(SCOPE_A + "|calc:1+1")).thenReturn(valueCaptor.getValue());
+            service.get(SCOPE_A, "calc", "1+1");
 
             var stats = service.getStats();
             assertEquals(1, stats.hits);
@@ -336,16 +944,16 @@ class ToolCacheServiceTest {
         void hitRateCalculation() {
             // First, a miss
             when(cache.get(anyString())).thenReturn(null);
-            service.get("tool1", "args1");
+            service.get(SCOPE_A, "tool1", "args1");
 
             // Capture a put value
-            org.mockito.ArgumentCaptor<Object> valueCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
-            service.put("tool1", "args2", "result");
-            verify(cache).put(eq("tool1:args2"), valueCaptor.capture(), anyLong(), any());
+            ArgumentCaptor<Object> valueCaptor = ArgumentCaptor.forClass(Object.class);
+            service.put(SCOPE_A, "tool1", "args2", "result");
+            verify(cache).put(eq(SCOPE_A + "|tool1:args2"), valueCaptor.capture(), anyLong(), any());
 
             // Then a hit
-            when(cache.get("tool1:args2")).thenReturn(valueCaptor.getValue());
-            service.get("tool1", "args2");
+            when(cache.get(SCOPE_A + "|tool1:args2")).thenReturn(valueCaptor.getValue());
+            service.get(SCOPE_A, "tool1", "args2");
 
             var stats = service.getStats();
             assertEquals(1, stats.hits);
@@ -357,7 +965,7 @@ class ToolCacheServiceTest {
         @DisplayName("getToolStats returns non-null after access")
         void getToolStatsAfterAccess() {
             when(cache.get(anyString())).thenReturn(null);
-            service.get("myCustomTool", "args");
+            service.get(SCOPE_A, "myCustomTool", "args");
 
             assertNotNull(service.getToolStats("myCustomTool"));
         }
@@ -365,7 +973,7 @@ class ToolCacheServiceTest {
         @Test
         @DisplayName("CacheStats toString without per-tool stats omits Per-Tool section")
         void cacheStatsToString_noPerToolStats() {
-            var stats = new ToolCacheService.CacheStats(0, 0, 0, 0.0, java.util.Map.of());
+            var stats = new ToolCacheService.CacheStats(0, 0, 0, 0.0, Map.of());
             String str = stats.toString();
 
             assertTrue(str.contains("Cache Stats"));
@@ -384,23 +992,57 @@ class ToolCacheServiceTest {
         @DisplayName("exactly 2048 chars uses readable key (not hashed)")
         void exactThreshold_readable() {
             String exactArgs = "x".repeat(2048);
-            service.put("tool", exactArgs, "result");
+            service.put(SCOPE_A, "tool", exactArgs, "result");
 
-            // 2048 chars exactly → should NOT be hashed → key is "tool:" + args
-            verify(cache).put(eq("tool:" + exactArgs), any(), anyLong(), any());
+            // 2048 chars exactly → should NOT be hashed
+            verify(cache).put(eq(SCOPE_A + "|tool:" + exactArgs), any(), anyLong(), any());
         }
 
         @SuppressWarnings("unchecked")
         @Test
         @DisplayName("2049 chars uses SHA-256 hash key")
-        void overThreshold_hashed() {
+        void overThreshold_hashed() throws Exception {
             String longArgs = "x".repeat(2049);
-            service.put("tool", longArgs, "result");
+            service.put(SCOPE_A, "tool", longArgs, "result");
 
-            verify(cache).put(argThat(key -> {
-                String k = (String) key;
-                return k.startsWith("tool:") && k.length() < 200;
-            }), any(), anyLong(), any());
+            verify(cache).put(eq(SCOPE_A + "|tool:" + sha256Hex(longArgs)), any(), anyLong(), any());
+        }
+    }
+
+    // ==================== Old global-key API stays deleted ====================
+
+    /**
+     * Tripwire for D5. The pre-scoping {@code get(toolName, arguments)} /
+     * {@code put(toolName, arguments, result)} / {@code invalidate(toolName,
+     * arguments)} signatures were <em>deleted</em> rather than kept as overloads on
+     * purpose: an overload lets a future caller silently reintroduce the global,
+     * unpartitioned key and with it the cross-user leak.
+     */
+    @Nested
+    @DisplayName("unscoped cache API stays deleted")
+    class UnscopedApiRemovedTests {
+
+        @Test
+        @DisplayName("no two-argument get(toolName, arguments) survives")
+        void noUnscopedGet() {
+            assertThrows(NoSuchMethodException.class,
+                    () -> ToolCacheService.class.getMethod("get", String.class, String.class),
+                    "get(toolName, arguments) must not exist — it would build a key every user shares");
+        }
+
+        @Test
+        @DisplayName("no three-argument put(toolName, arguments, result) survives")
+        void noUnscopedPut() {
+            assertThrows(NoSuchMethodException.class,
+                    () -> ToolCacheService.class.getMethod("put", String.class, String.class, String.class),
+                    "put(toolName, arguments, result) must not exist — it would store under a globally shared key");
+        }
+
+        @Test
+        @DisplayName("no two-argument invalidate(toolName, arguments) survives")
+        void noUnscopedInvalidate() {
+            assertThrows(NoSuchMethodException.class,
+                    () -> ToolCacheService.class.getMethod("invalidate", String.class, String.class));
         }
     }
 }

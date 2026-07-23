@@ -5,6 +5,1049 @@
 
 ---
 
+## 🧪 De-vacuum three tests and fix a doc/fixture drift (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+CodeRabbit and Copilot flagged a cluster of tests that passed for the wrong reason, plus two documentation/fixture mismatches. Each behavioural change is mutation-checked.
+
+- **`MongoTenantQuotaStoreTest.everyUpsertIsKeyedOnTenantIdOnly` was vacuous.** It verified `findOneAndUpdate`/`updateOne` with `atLeast(0)`, which never fails, and its filter loop asserted nothing when nothing was captured. Now `atLeastOnce()` plus an explicit `upsertsChecked > 0` guard. Mutation: removing the store exercise fails with `Wanted but not invoked`; the old form passed.
+- **`CacheFactoryTest.negativeLifespanIsUnlimited` read immediately** — a negative-lifespan-mapped-to-short-positive-TTL bug would slip through. Now sleeps past `PAST_TTL_MILLIS` and asserts survival. Mutation: mapping negative → 1ms fails with `expected: <value1> but was: <null>`.
+- **`CacheFactoryTest.nonceCacheCapacityCoversItsTtl` used whole seconds**, so a capacity derived from `ttl.toSeconds()` (truncating) instead of `toMillis()` would pass. Now uses a fractional `390_500ms` TTL and millisecond-precision occupancy. Mutation: reverting `maximumSizeFor` to `toSeconds()` fails with `expected: <234300> but was: <234000>`.
+- **`LifecycleManagerTest` audit fixture used `{input, output}`** for `llmDetail.tokenUsage`, a shape production never emits — `buildAuditEntry` copies `audit:token_usage` straight through, and that key's contract is `{inputTokens, outputTokens, totalTokens}`. Fixture and assertion aligned to the real contract, and the inline `java.util.Map` / `Consumer` FQNs replaced with imports (AGENTS.md §4.7).
+- **This changelog's D5 cache-key example** still showed `arguments.length()` directly after `buildKey` gained a null-coalescing guard; the formula now shows `args = arguments == null ? "" : arguments` first.
+
+---
+
+## 🐛 `ToolNameResolver.canonical` could return null, contradicting its own contract (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Copilot flagged that `canonical(dispatchName, canonicalNames)` used `getOrDefault`, which returns a **stored** null when a key maps to null — so the method could hand back null even though its javadoc promises "callers never need a null check". A null slug would then flow into the price and TTL lookups. The tell was in the test itself: `nullValuedMappingDegrades` was named for degrading to the dispatch name but asserted `assertNull`, documenting the bug as the contract and leaning on `ToolInvocation` to normalise it downstream.
+
+Fixed to treat a null-valued key the same as an absent one (`get` + null fallback), and the test now asserts what its name always said — the result is the dispatch name, never null. Mutation-checked: reverting to `getOrDefault` fails the test with `expected: not <null>`.
+
+The map is built by `AgentOrchestrator.buildToolSetup`, which substitutes the dispatch name and never stores nulls, so this was defence-in-depth rather than a live crash — but a method whose javadoc, code and test display-name all disagreed is exactly the silent inconsistency this branch set out to remove.
+
+---
+
+## 🔒 Redact secrets from the tool trace before it reaches the SSE stream (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+The D3 fix earlier on this branch made the tool trace reach the `task_complete` SSE frame — the first time tool arguments and results leave the process on a channel with no redaction of its own. Those payloads are LLM- and user-controlled, so they can carry API keys or bearer tokens. Copilot flagged it HIGH on the PR; the tradeoff had been disclosed in the PR description rather than fixed.
+
+Now fixed at the producer. `LifecycleManager.buildTaskSummary` deep-redacts the collected trace through `SecretRedactionFilter` — the same filter the audit ledger already applies via `AuditLedgerService.scrubSecrets` — before putting it on the summary, bringing the live-display path to parity with the audit path. The redaction walks maps and lists recursively and scrubs every string leaf, and it operates on a fresh copy: the trace stored in conversation memory is left intact for the owner-scoped `RestToolHistory` endpoint. Only the summary's `toolTrace` is touched; `buildAuditEntry` reads its own `audit:tool_calls` key (separately scrubbed on submit), so the audit path is unchanged and not double-scrubbed.
+
+Regression test `LifecycleManagerTest.summaryRedactsSecretsInToolTrace` feeds an `sk-…` key and a bearer token through the trace and asserts neither reaches the summary while the non-secret structure (`type`, `tool`) survives. Mutation-checked: bypassing the redaction call fails with the raw key visible in the captured payload.
+
+---
+
+## 📝 Budget-enforcement docs corrected to match the shipped opt-in default (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+CodeRabbit caught that three places still described `enforceBudget` as **opt-out, default `true`** after the flag was reverted to opt-in (`false`) earlier on this branch — a config knob whose documentation stated the opposite of its behaviour, which is precisely the defect class this branch exists to remove, and it contradicted the `langchain.md` table row in the same file. Corrected:
+
+- `LlmConfiguration.Task#enforceBudget` javadoc — "opt-out … itself `true`" → opt-in, default `false`, with the WARN rationale.
+- `docs/security.md` (Cost Tracking config line and Behaviour bullet) — "default `true`" / "enforced by default" → opt-in.
+- `docs/langchain.md` (Budgets prose) — "Enforcement is **opt-out** … default `true`" → opt-in.
+
+The code was already correct (`BUDGET_ENFORCE_DEFAULT` resolves `false`); only the prose lied. Also documented that `toolPricing` accepts a dispatch name as well as a slug (dispatch name wins), and fixed two markdownlint nits (MD028 blockquote continuation in `langchain.md`, an unlabelled fence in this file).
+
+---
+
+## 🧹 A dead `resumeToolLoop` parameter, and a CodeQL note on a deliberately unguarded test parse (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Cluster `dead-param-and-test-nit`: one github-code-quality dead-parameter finding and one CodeQL note on a test helper. Both traced to source before touching anything — the first is real and removed, the second is a false positive left unchanged (with one clarifying javadoc line).
+
+### A — `resumeToolLoop`'s `templateDataObjects` parameter was dead (real, removed)
+
+Both `AgentOrchestrator#resumeToolLoop` overloads (the 7-arg delegator and the 8-arg policy-carrying body) declared `Map<String, Object> templateDataObjects`, and the javadoc claimed it fed "post-response and fallback rebuild". Reading both bodies end to end, it is referenced nowhere: the 7-arg overload only threads it into the 8-arg, the 8-arg never touches it, and the fallback path it named (`fallbackRebuildMessages(task, memory, batch)`) does not take it. `LlmTask.executeResume` still uses its *own* local `templateDataObjects` (template render + response-metadata put) — only the pass-through into `resumeToolLoop` was inert. Exactly the branch's theme: a parameter that looks load-bearing and is not.
+
+**Fix:** dropped the parameter from both overloads, the delegating call, the `@param`/`@link` javadoc, the sole production caller (`LlmTask`), and every test call site. Because dropping an argument silently invalidates Mockito matcher lists (an unmatched stub returns null; a `verify(never())` goes vacuous — both stay green, both would be wrong), every stub/verify was re-checked: the real 7-arg calls in `AgentOrchestratorResumeToolLoopTest`/`AgentOrchestratorCoverageTest` shed their `Map.of()`; the 8-matcher `any()` lists and the `anyMap()` verifies in the `LlmTask*` tests each lost exactly the sixth matcher, keeping arity aligned to the new signature. For a behaviour-preserving removal the verification is the compile plus the suites: `test-compile` clean, and 178 tests across the 8 named classes green (`AgentOrchestratorResumeToolLoopTest` 11, `AgentOrchestratorToolPauseTest` 8, `AgentOrchestratorCoverageTest` 59, `LlmTaskResumeModeTest` 9, `LlmTaskCoverageTest` 43, `LlmTaskAgentModeMetadataTest` 7, `LlmTaskCoverage2Test` 29, `LlmTaskAuditLedgerTest` 12). The two `verify(never())` sites stay non-vacuous — in `LlmTaskResumeModeTest` the sibling positive verify binds the same 7-arg overload and passes.
+
+### B — CodeQL "missing catch of NumberFormatException" in a test helper (false positive, one clarifying javadoc line)
+
+`ChatModelRegistryTest.parseTimeoutLikeARealProvider` does `Duration.ofMillis(Long.parseLong(parameters.get("timeout")))` under an un-trimming `isNullOrEmpty` guard, and CodeQL wants a try/catch rethrowing `IllegalArgumentException`. The helper's whole job is to reproduce, verbatim, what the shipped provider builders do — every one of `OpenAI/Azure/Bedrock/Ollama/HuggingFace/Gemini/Anthropic/Mistral/…LanguageModelBuilder` runs `builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))))` with no guard. The C3 `TimeoutNormalisationTests` depend on that fidelity: they prove the registry's `normalizeTimeout` drops blank/non-numeric/zero values before a builder ever sees them. Wrapping the helper's parse in a try/catch would make it tolerate values the real builders reject, so a normalization regression would pass silently instead of surfacing as the `build()`-time crash the tests guard.
+
+Demonstrated: neutralize `normalizeTimeout` (early `return`) and the C3 tests fail with `NumberFormatException` thrown straight from the helper — `"30s"`, `" "`, `"not-a-number"`, `" 5000 "` (2 failures / 4 errors); restore and `ChatModelRegistryTest` is 41 green. So the finding is a false positive and production/test behaviour is untouched. Rather than a bare suppression, the helper's existing javadoc gained one sentence stating the unguarded parse is deliberate and must stay so, naming the try/catch note as a false positive — making the intent unmistakable to the next reader without weakening the test.
+
+---
+
+## 🔐 Constant-time audit HMAC comparison, and a retry-cost finding that wasn't (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Cluster `retry-cost-and-hmac`: one CodeRabbit correctness claim and one CodeRabbit security nitpick. Both were traced end to end before touching anything — one is real and fixed, the other is a false positive left unchanged with the evidence recorded here.
+
+### B — `AuditHmac.verifyHmac` compared digests with `String.equals` (real, fixed)
+
+The compliance ledger's HMAC verification did `computeHmac(entry).equals(stored)` (and the v1 branch likewise). `String.equals` returns on the first differing character, so its running time leaks how long a prefix of a forged HMAC is correct — the classic side channel that lets an attacker reconstruct a valid tag one hex digit at a time against an endpoint that reveals verify latency.
+
+**Fix:** decode both the recomputed and the stored digest from hex and compare the raw bytes with `java.security.MessageDigest.isEqual`, which is data-independent. The version selection is unchanged and deliberately kept non-constant-time: the `v2:` prefix only picks the canonicalizer and is not secret (per the frozen-v1 design, a v2-tagged value is *never* retried against v1). A stored value that is not valid hex — truncated, mangled, never a digest — now decodes to null and is rejected rather than throwing out of a whole-ledger verification sweep.
+
+Because a constant-time swap is behaviour-preserving, no unit test can observe the timing difference; the added tests instead guard that the refactor did not break verification. `AuditHmacTest`:
+- `bothVersionsVerifyAndBothRejectTampering` — a bare-hex v1 row and a `v2:` row both verify, and either one tampered is rejected.
+- `malformedStoredHmacIsRejected` — empty / non-hex / odd-length / truncated / `v2:`-only stored values are rejected without throwing.
+- `v1DigestUnderV2TagDoesNotVerify` — a v1 digest mislabelled with the `v2:` tag fails, proving the version tag is never retried against the other canonicalizer.
+
+Mutation-checked two ways. (1) Revert the comparison to `String.equals`: all 29 tests still pass — expected, and the point, since the fix must not change verification behaviour. (2) Point the v1 legacy branch at the v2 canonicalizer: `bothVersionsVerifyAndBothRejectTampering` and the pre-existing `legacyV1EntryStillVerifies` both fail (`TooManyActualInvocations`-free, a plain assertion failure that a pre-v2 ledger row no longer verifies), proving the regression tests guard the version selection the fix preserves. Restored: `AuditHmacTest` 28, and the rest of `engine.audit` (`AuditLedgerServiceTest`, `…BranchTest`, `…ExtendedTest`, `AuditRetentionConfigTest`, `AuditStoreTest`) 61 — all green.
+
+### A — "tool charges are not rolled back when a retry replays" (false positive, unchanged)
+
+CodeRabbit (Major): the tool loop runs inside `AgentExecutionHelper.executeWithRetry(() -> {…})`; the lambda already resets `tokenHolder[0] = null` because a retry replays it and would double-count *tokens*; the same replay re-runs the tool calls, each of which charges an `@ApplicationScoped` per-conversation counter with no per-attempt undo, so an abandoned attempt's spend allegedly stays counted and inflates `toolCostUsd`, the audit cost and `isWithinBudget`.
+
+Traced against source, the premise does not hold:
+
+- **Default config (`enableToolCaching` true): the replay is free.** `ToolExecutionService.executeToolWrapped` returns at the cache-hit branch (step 2) *before* `costTracker.trackToolCall` (step 5). A replayed attempt re-issues the identical `(name, arguments)` call, hits the cache the first attempt populated, and is charged nothing. So the very configuration CodeRabbit assumes produces no double-count at all.
+- **`enableToolCaching` false: the replay genuinely re-executes — and the re-charge is correct.** With no cache, the abandoned attempt's tool really ran (a real search-provider API call, a real HTTP POST), really cost money, and the successful attempt's replay runs it *again*, a second real call. `ToolCostTracker` is the authoritative real-spend ledger behind `maxBudgetPerConversation` and the audit dollar figure; billing two real executions is right, not "inflation". Rolling it back would *under*-count real spend and let an agent evade its budget by inducing retries.
+- The token reset is not analogous. `tokenHolder` is a per-`ExecutionResult` reporting accumulator whose number should match the final coherent attempt; `ToolCostTracker` is a cumulative expenditure ledger. Different jobs, correctly treated differently.
+
+So there is no phantom charge to roll back: every charge corresponds to a tool execution that really happened and really cost money. Production code left untouched. A characterization test pins the property that makes the finding moot — `AgentOrchestratorToolCostTest.retriedLoopChargesReplayedToolCallOnce`: attempt 1 executes and is charged for `searchWeb`, the next model call fails retryably, the whole lambda replays, and with a **real** `ToolCacheService` the replayed identical call is a cache hit — `searchWeb` runs once, the conversation is charged `SEARCH_PRICE` once, and `toolCostUsd` reports exactly that one charge. Mutation-check: swap the real cache for the always-miss stub (the `enableToolCaching: false` model) and the tool runs twice (`verify(times(1))` fails with `TooManyActualInvocations … But was 2 times`), demonstrating that off-cache it is real re-execution, not double-accounting. Restored: `AgentOrchestratorToolCostTest` 10, green.
+
+---
+
+## 🗄️ Two cache keys that threw away information (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Two Copilot findings on the caching layer, both verified against source before touching anything. Both are the branch's theme one level down: not a control that does nothing, but a **key that silently loses the distinction it was built to preserve**.
+
+### A — `ToolCacheService.buildKey` dereferenced tool arguments that can legitimately be null
+
+`buildKey(scopeTag, toolName, arguments)` called `arguments.length()` with no guard. Copilot claimed `ToolExecutionRequest` can be built without arguments; that is only half the question, so the live path was traced end to end:
+
+- `dev.langchain4j.agent.tool.ToolExecutionRequest` (1.18.0) declares `private final String arguments` with **no default and no validation** — `arguments()` returns null whenever the builder never set it.
+- `OpenAiUtils.toolExecutionRequest` passes the wire value straight through: `.arguments(functionCall.arguments())`, and `FunctionCall.arguments` is a plain Jackson-deserialised field. A provider that omits `function.arguments` for a zero-argument call — routine on OpenAI-compatible endpoints — yields a null. (The newer Responses API path defaults it to `"{}"` via `asText("{}")`; the classic chat-completions path does not.)
+- `AgentOrchestrator` line 1614 forwards `toolRequest.arguments()` into `executeToolWrapped` with **no guard**. The only two coalescing sites on the branch (`normalizeToolCallIds`, `rebuiltRequest`) are on the HITL pause/resume path and never run for a live call.
+
+The NPE was raised inside `executeToolWrapped`'s try block, so it never surfaced as a crash — it came back to the model as `Error executing tool: Cannot invoke "String.length()" because "arguments" is null`, **before the tool ran**. Net effect: a zero-argument tool call failed with caching on (the default) and succeeded with caching off.
+
+**Fix:** `buildKey` coalesces null to `""`. A null and an empty argument string both mean "no arguments" and deliberately share one entry.
+
+### B — the TTL cache key truncated to whole seconds
+
+`CacheFactory.getCache(name, ttl)` keyed instances on `name + ":ttl=" + ttl.toSeconds()`. `toSeconds()` truncates, so every sub-second TTL collapsed onto `":ttl=0"` and any two TTLs sharing a whole-second part collapsed together. Two callers asking one cache name for two TTLs then shared **one** Caffeine instance whose expiry policy was whichever of them built it first; the other TTL was accepted and silently ignored. The same method already derived its capacity from `ttl.toMillis()` in `maximumSizeFor`, so the key was strictly coarser than the sizing it keyed.
+
+Reachability, stated honestly: **no production caller triggers it today.** Each of the four TTL call sites (`NonceCacheService`, `ChannelTargetRouter`, and two in `SlackEventHandler`) requests its cache name exactly once, from a single `@PostConstruct`. This is a latent defect in a shared factory, not a live incident — but it is one config change away (`NonceCacheService`'s TTL is `Duration.ofMillis(maxAgeMs + clockSkewMs + buffer)` over two operator-settable millisecond properties) and the fix is a single token.
+
+**Fix:** the key renders `ttl.toString()`. It is injective over distinct `Duration`s, identical for equal ones — `ofSeconds(60)` and `ofMinutes(1)` still share, as they should — and strictly finer-grained than the `toMillis()` the capacity is derived from, so one key can never span two capacities.
+
+### Tests
+
+- `ToolExecutionServiceTest.NullArgumentsTests` (3 tests) wires the **real** `ToolCacheService` over a real `CacheFactory` — a mocked cache service cannot reach `buildKey` — and drives `executeToolWrapped` with `ToolExecutionRequest.builder().id(…).name(…).build().arguments()`, i.e. the null taken from langchain4j's own type rather than a synthetic one. Asserts the tool runs, the result comes back verbatim, and a second call is served from the cache (proving the write survived too).
+- `CacheFactoryTest`: two sub-second TTLs (1 ms / 999 ms) get distinct instances with distinct expiry; two TTLs sharing a whole-second part (10 001 ms / 10 900 ms) get distinct instances; and equal TTLs expressed differently still share one, so the fix does not leak an instance per caller.
+
+Mutation-checked by reverting each fix: `expected: <2026-07-23T09:00:00Z> but was: <Error executing tool: Cannot invoke "String.length()" because "arguments" is null>`, `expected: <long> but was: <null>`, and `10001ms and 10900ms must not truncate onto one instance ==> expected: <a> but was: <b>`. Restored: `CacheFactoryTest` 19, `CacheImplTest` 51, `ToolCacheServiceTest` 79, `PaginatedResponseStoreTest` 13, `NonceCacheServiceTest` 10, `ToolExecutionServiceTest` 32, `ToolExecutionServiceExtendedTest` 8, `ToolExecutionServiceBranchTest` 2 — 214 tests, 0 failures.
+
+---
+
+## 🔐 Ledger integrity, replay depth, and a verification that could not fail (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Four review findings on this branch's own remediation work — the common thread is the one the branch set out to remove: **a control that looks present and does nothing.**
+
+### D1 — three `verify(never())` assertions that matched zero invocations either way
+
+`ToolExecutionServiceTest.nullConversationIdSkipsCostTracking` and `ToolExecutionServiceExtendedTest.skipsCostWhenNoConversation` both claimed to cover `if (enableCostTracking && conversationId != null)`. Both pass `conversationId = null`, so the only invocation a regression could produce is `trackToolCall(invocation, null)` — and **Mockito's `anyString()` does not match null**. The verification matched zero invocations whether the guard existed or not. Removing `&& conversationId != null` and running all three `ToolExecutionService*Test` classes gave `Tests run: 39, Failures: 0` — neither test noticed, while production would have hit `computeIfAbsent(null, …)` on a `ConcurrentHashMap` inside `ToolCostTracker` and returned `Error executing tool: null` to the model for every tool call.
+
+Both now use `nullable(ToolInvocation.class)`/`nullable(String.class)`.
+
+**Audit of the rest of the branch's tests** for the same trap — grep of every `never()` verification in the touched test files, asking for each "can production pass null at that position?" — found one more: `LlmTaskCoverage2Test.nullUserInput_ragSkipped` pins `if (userInput != null)` around `ragContextProvider.retrieveContext(memory, task, userInput)` with `anyString()` in the userInput position. Same defect, same fix. The remaining `anyString()`/`never()` pairs sit on positions production fills from literals or non-null config and are sound.
+
+All three mutation-checked by removing the corresponding guard: `costTracker.trackToolCall(… or(isNull(), isA(String)))` / `ragContextProvider.retrieveContext(<any>, <any>, or(isNull(), isA(String)))` → `Never wanted here … But invoked here … with arguments: [ToolInvocation[…], null]`.
+
+### D2 — the nonce replay cache was under-sized against its own TTL
+
+`CacheFactory` pinned `nonce-replay-protection` at 100 000 with a comment computing `330s × 300rps`, but `NonceCacheService.init()` asks for `maxAge + clockSkew + TTL_BUFFER_MS` = **390s**, so steady-state occupancy at 300rps is 117 000. Worse, Caffeine's W-TinyLFU admission is frequency-based, not LRU: a nonce is written once via `putIfAbsent` and never read, so all frequency estimates tie and the filter rejects the **candidate** — the newly inserted nonce is dropped rather than the oldest. Retention collapses precisely on the most recent (most replayable) nonces; measured against real Caffeine on a fake ticker, 17.1% of nonces still inside the 330s replay window were already forgotten. A forgotten nonce is a captured signed A2A envelope that replays inside its own freshness window.
+
+**Fix:** capacity is now *derived from the TTL the cache is asked for*, not hard-coded. `CacheFactory.RATE_SIZED_CACHES` maps a cache name to the peak write rate it must absorb (`nonce-replay-protection` → 300/s) and `maximumSizeFor(name, ttl)` returns `peakRps × ttlSeconds × 2.0`, never below the configured floor. The ×2 head-room is because eviction is not LRU: sizing at exactly the steady-state occupancy still drops the newest entries under any burst. A future change to the replay window now moves the capacity with it.
+
+Kept `TTL_BUFFER_MS` rather than dropping it — it is a real margin against a nonce being forgotten while still replayable, and it is no longer free-floating now that the capacity tracks it.
+
+### D3 — the audit canonical string was not injective, so a tampered entry could verify
+
+`AuditHmac.buildCanonicalString` joins keys and values with `=`, `,`, `{}`, `[]`, `|` and escapes none of them. The map-to-string mapping is therefore not one-to-one: `{"a": "x", "b": "y"}` and `{"a": "x,b=y"}` canonicalize to the same bytes and share one valid HMAC, and `{"calls": [{"tool": "calculator"}]}` collides with the literal string `"[{tool=calculator}]"`. `String.join(",", actions)` collapses `["a","b"]` onto `["a,b"]` the same way. For an append-only ledger that is a tamper-detection hole, and this branch made it reachable: `AuditEntry.toolCalls` now carries tool-trace `arguments`/`result` strings, which the LLM and the user write, and the new recursion walks into them with the same unescaped delimiters.
+
+**Fix — versioned canonical form.** New entries are signed over a **v2** string that escapes every delimiter inside keys and scalars and type-tags every value (`s:` scalar, `m` map, `l` list, `n` null), and the stored value carries the tag: `v2:<64 hex chars>`.
+
+The back-compat constraint is absolute — any change to the canonical bytes invalidates the HMAC of every already-stored entry. So `verifyHmac` picks the canonicalizer **from the stored value's prefix**: tagged → v2, untagged (a bare hex digest) → the v1 canonicalizer, which is now frozen and documented as such. It deliberately never *falls back* from v2 to v1; trying both would hand the collision straight back to the attacker. `AuditHmacTest.flatMapCanonicalStringUnchangedByRecursion`, which pins the v1 string to a literal, still passes untouched.
+
+Note that `verifyHmac` currently has no production caller — the ledger signs on write and verification is an operator/forensic operation. The fix is about what a future verifier can conclude from a stored row.
+
+### D4 — `maxBudgetPerConversation` stopped enforcing on upgrade
+
+The previous commit made the ceiling conditional on a new `enforceBudget` defaulting to `false`, justified as "every built-in priced at $0.00, so no stored config was ever refused". **That holds only for built-ins.** For http, MCP, A2A and dynamic tools the dispatch name *is* the configured name, so an agent with a tool called `websearch`, `webscraper` or `pdfreader` was priced from `DEFAULT_TOOL_PRICES` and *was* being refused on `main`. Those operators' cost ceiling silently ceased to exist.
+
+**Decision — `enforceBudget` stays opt-IN, and the silence is fixed instead.** `eddi.tools.budget.enforce-by-default` remains `false`; a new `warnAboutUnenforcedBudgets` names every configured task that carries a ceiling without the flag, once per task id.
+
+Both defaults break someone, so the choice is which failure is acceptable:
+
+- **Enforcing by default** would make the ceilings on built-in-only agents bind *for the first time* — this release is what repaired built-in pricing — and start aborting tool calls mid-conversation on upgrade, with no warning and no way to have anticipated it.
+- **Not enforcing** costs the operator whose ceiling *was* live (http/MCP/A2A/dynamic tools dispatch under their configured name, so a tool called `websearch`/`webscraper`/`pdfreader` was priced and refused on `main`) — but that loss is *detectable and announced*, and re-enabling it is one field.
+
+An unannounced new refusal is worse than an announced lapse: the first is a production incident an operator cannot predict, the second is a log line they act on. The unacceptable part was never the default — it was that a ceiling could record without refusing and say nothing, which is precisely the "config that silently does nothing" pattern this whole release set out to remove. The WARN is what makes the opt-in honest.
+
+An earlier revision of this branch flipped the default to `true`; that was reverted in favour of the warning. `eddi.tools.budget.enforce-by-default=true` re-enables enforcement deployment-wide for operators who want the old behaviour back in one line.
+
+### Files
+
+- `engine/caching/CacheFactory.java` — `NONCE_PEAK_SIGNED_RPS`, `RATE_SIZED_EVICTION_HEADROOM`, `RATE_SIZED_CACHES`, `maximumSizeFor(name, ttl)`; both `getCache` overloads size through it
+- `engine/caching/CacheImpl.java` — package-private `backingCache()` so the eviction policy actually built can be asserted
+- `engine/audit/AuditHmac.java` — `V2_PREFIX`, `buildCanonicalStringV2`, `canonicalValueV2`, `escape`; `verifyHmac` dispatches on the stored prefix; v1 canonicalizer frozen
+- `modules/llm/impl/AgentOrchestrator.java` — `BUDGET_ENFORCE_DEFAULT` stays `false`; new `warnAboutUnenforcedBudgets` + `UNENFORCED_BUDGET_WARNED` so an unenforced ceiling is named once per task instead of passing silently
+- `modules/llm/model/LlmConfiguration.java` — `enforceBudget`/`maxBudgetPerConversation` javadoc
+- Docs: `audit-ledger.md` (canonical-form versioning table), `langchain.md`, `security.md`, `agent-father-langchain-tools-guide.md`
+
+### Tests
+
+Every behavioural test was mutation-checked by reverting the production change and confirming failure:
+
+| Reverted | Observed failure |
+| --- | --- |
+| `&& conversationId != null` | `costTracker.trackToolCall(or(isNull(), isA(ToolInvocation)), or(isNull(), isA(String))); Never wanted here … But invoked here … with arguments: [ToolInvocation[dispatchName=testTool, …], null]` (both classes) |
+| `if (userInput != null)` | `ragContextProvider.retrieveContext(<any>, <any>, or(isNull(), isA(String))); Never wanted here … with arguments: [memory, …Task@…, null]` |
+| `maximumSizeFor` → fixed `CACHE_SIZES` at the builder | `CacheFactoryTest.nonceCacheCapacityCoversItsTtl`: `a capacity of 100000 cannot hold the 117000 nonces written during a 390s replay window ==> expected: <true> but was: <false>`; `nonceCacheCapacityTracksTheTtl`: `expected: <200000> but was: <100000>` |
+| the rate-sizing rule inside `maximumSizeFor` | `NonceCacheServiceTest.cacheCapacityCoversTheRequestedTtl`: `a 390s replay window at 300 signed requests/s holds 117000 nonces, but the cache is capped at 100000` |
+| `canonicalValueV2` → the v1 renderer | 4 failures: `differentStructuresDoNotCollide`, `scalarMimickingNestedStructureDoesNotCollide`, `actionListSeparatorIsNotForgeable` (`expected: not equal but was: <v2:…>`), `tamperingIntoAColludingTwinIsRejected` (`expected: <false> but was: <true>`) |
+| the v1 branch of `verifyHmac` | `legacyV1EntryStillVerifies`: `pre-v2 ledger rows must keep verifying against the v1 canonicalizer ==> expected: <true> but was: <false>` |
+| `BUDGET_ENFORCE_DEFAULT` → `false` | `AgentOrchestratorCoverageTest.toolCall_budgetSetWithoutEnforceFlag_isStillEnforced`: `calculatorTool.calculate(<any string>); Never wanted here … But invoked here`; `AgentOrchestratorToolCostTest.ceilingWithoutFlagIsEnforced`: `webSearchTool.searchWeb("eddi", 3); Wanted 2 times … But was 5 times` |
+
+New/changed cases: `AuditHmacTest` +7 (a `v1CanonicalStringCollides` precondition test asserts the v1 form *does* collide, so a future edit to the frozen canonicalizer is caught rather than silently invalidating the ledger), `CacheFactoryTest` +3, `NonceCacheServiceTest` +1, `AgentOrchestratorCoverageTest` +1, `AgentOrchestratorToolCostTest` +1 (and `unenforcedBudgetRefusesNothing` → `explicitlyUnenforcedBudgetRefusesNothing`, now setting the flag it names).
+
+`./mvnw clean compile` clean; 857 tests across the audit / caching / crypto / llm-tools / orchestrator / LlmTask classes green, plus 87 in `ai.labs.eddi.engine.audit`.
+
+---
+
+## 🧵 Model registry and streaming executor — races and un-stripped parameters (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Four defects around `ChatModelRegistry` and `StreamingLegacyChatExecutor`, three of them introduced by D11 (the commit that stopped stripping `timeout`/`logRequests`/`logResponses` so they could join the model cache key).
+
+**C1 — a concurrent cache clear could hand `null` to `chat(...)`.** `getOrCreate`/`getOrCreateStreaming` did `containsKey(key)` and then `get(key)`. Both caches are cleared from other threads — `invalidateForSecret(null)` on DEK/KEK rotation, and the global-variable invalidation listener on any variable edit. A clear landing between the two calls made the method return `null`; no caller null-checks it (`LlmTask` and `CascadingModelExecutor` pass the result straight to `chat(...)`), so the turn died with an NPE instead of simply rebuilding the model. On the streaming path a `null` additionally *means* "this provider cannot stream", so the race silently downgraded a streaming task to sync.
+
+**C2 — the streaming buffer was read without a happens-before edge.** `fullResponse` is appended only from the provider's callback thread and read only from the executor thread. On the normal path `latch.countDown()`/`await()` publishes those writes; on the **timeout/interrupt** path there is no such edge — `abandoned.set(true)` is a volatile write ordering executor→callback, not callback→executor. The executor's `toString()` was therefore an unsynchronized read of a concurrently mutated `StringBuilder` and could observe a torn buffer (count advanced ahead of the char data, or a stale `value` array after a grow). The `abandoned` gate was also check-then-act: a callback already past the check could still push a token into the shared event sink after the executor believed the attempt silenced — breaking the documented "memory text matches streamed text" guarantee that D11 introduced the flag to provide.
+
+**C3 — un-stripping `timeout` made previously tolerated values fatal.** Every provider builder parses it unguarded: `if (!isNullOrEmpty(v)) builder.timeout(Duration.ofMillis(Long.parseLong(v)))` — and `isNullOrEmpty` does not trim. Before D11 the value's only consumer was `ObservableChatModel.wrapIfNeeded`, which is deliberately lenient (guards blank, swallows `NumberFormatException`, drops zero/negative). So a stored `" "`, `"30s"` or `"0"` (historically "unlimited") went from tolerated to throwing out of `build()` on **every turn** of that agent, with no migration and no warning.
+
+**C4 — un-stripping the logging flags turned on untruncated body logging.** Reaching the provider builders, `logRequests`/`logResponses` install langchain4j's `LoggingHttpClient`, which writes the entire request and response body at INFO with no truncation. EDDI's own `ObservableChatModel`/`ObservableStreamingChatModel` already honour both flags and deliberately truncate to 200/500 chars. Enabling the flags therefore started writing full prompts, full conversation history and full model responses to the application log.
+
+**What changed:**
+
+| Component | Change |
+|---|---|
+| **`ChatModelRegistry`** | Both lookups are a single `get` — a miss from a concurrent clear falls through to construction, which is correct for a pure memoization cache |
+| **`ChatModelRegistry.normalizeTimeout`** | `timeout` is normalised once at the boundary that feeds both the cache key and the builders: trimmed, and dropped when blank, non-numeric or non-positive, mirroring the tolerance it used to enjoy |
+| **`ChatModelRegistry.warnAboutRejectedTimeout`** | WARN naming the model type and the offending value, emitted on the **build** path only so it does not repeat on every cache hit |
+| **`ChatModelRegistry.builderParams`** | `logRequests`/`logResponses` are removed from the map handed to a builder — they stay in the cache key, so D11's correctness fix survives |
+| **`StreamingLegacyChatExecutor`** | A per-attempt lock makes `check + append + emit` and `abandon + toString()` mutually exclusive; the pre-retry `abandoned.set(true)` takes the same lock |
+| **`docs/langchain.md`** | Documents that logging is EDDI's truncating path (not the provider's) and that an unusable `timeout` is ignored rather than fatal |
+
+**Design decisions:**
+
+- **C4 chose option (a): keep the flags in the cache key, strip them from the builder input.** EDDI's decorators already honour both flags on both the sync and streaming path, including for providers whose builder has no logging switch, so nothing is lost — while provider-level logging is unbounded PII exposure that no config field advertises. `logRequestsAndResponses` (Azure OpenAI and Gemini only) is left forwarded: it predates this branch, is provider-specific, and stripping it would be an unrelated behaviour change; it is now documented as the deliberate escape hatch.
+- **Normalising `timeout` before the cache key, not after.** Keeping the normalised value in the key preserves D11's fix (two genuinely different timeouts remain two models) and additionally collapses `" 5000 "` and `"5000"` into one.
+- **The C2 lock is held across `eventSink.onToken`.** That is a bounded call — the SSE sink builds an event and calls a non-blocking `send()` whose `CompletionStage` is never awaited — and holding it is what actually makes "no token after abandonment" true rather than merely likely.
+- **The C1 regression test replaces the cache with a map that clears itself inside `containsKey`**, reproducing the exact interleaving deterministically rather than relying on a stress loop, and asserts `containsKey` is never called at all.
+- **The provider `timeout` contract is mirrored verbatim in the test builder.** Real builders open a loopback socket and cannot be constructed in the unit-test sandbox, so the `isNullOrEmpty` + `Long.parseLong` expression is reproduced in the fake — without it the C3 tests would pass whether or not the registry normalises.
+
+**Tests:** `ChatModelRegistryTest` gains three nested classes (C1 concurrent-invalidation, C3 timeout normalisation, C4 provider logging) and its `getOrCreate_observabilityParamsReachBuilder` now asserts the flags do *not* reach the builder; `StreamingLegacyChatExecutorTimeoutTest` gains `abandonment_isMutuallyExclusiveWithTokenEmission`. All four fixes were mutation-checked: reverting C1 fails both new tests with `expected: not <null>`, C3 with `NumberFormat For input string: " "`, C4 with `logRequests must NOT reach the provider builder`, C2 with `The executor must not set 'abandoned' and read the buffer while a token emission is in flight`.
+
+---
+
+## 🔐 Tool-cache scope resolution honours its own invariant (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Three defects in the per-tool cache-scope surface this branch introduced with D5/D2. Two of them could put a tool on a **cross-user** partition — the exact leak D5 existed to close.
+
+**B1 — a typo in a per-tool scope widened the tool instead of narrowing it.** `ToolCacheScope`'s javadoc (and the D5 changelog entry) promise that "a typo must never silently widen a tool's audience". The code did the opposite: `fromConfig` returns `null` for an unrecognized token, and `resolve`'s `if (scope == null)` branch could not tell "this tool has no entry" from "this tool has an entry I could not parse", so it fell through to the **task-level default**. With `defaultToolCacheScope: "global"` plus `toolCacheScopes: {"getUserProfile": "usr"}` — a typo for `"user"` in an override written to *narrow* that one tool — the tool resolved to `GLOBAL` and got the shared `"g"` tag: one partition for every authenticated user. Alice's result served to Bob.
+
+**B2 — `toolCacheScopes` was the only per-tool map that did not speak the slug.** D2 established the canonical slug as the configuration vocabulary: `toolRateLimits` and `toolPricing` both accept the dispatch name *or* the slug. `toolCacheScopes` was looked up by dispatch name alone, so `{"websearch": "user"}` — written in the same object as the `toolRateLimits: {"websearch": 30}` next to it, in the same vocabulary as `builtInToolsWhitelist` — was silently ignored and the tool stayed on whatever the task default was, possibly `global`. Every built-in was affected; none declares `@Tool(name = ...)`.
+
+**B3 — the dedicated `news` TTL became unreachable.** `getSmartTTL` received only the canonical slug after D2, so `searchNews` canonicalised to `websearch` and exact-matched its 1800s entry before the substring loop could reach `Map.entry("news", 600L)`. No slug contains "news", so that entry was dead for every built-in and news results were cached 3× longer than the table declares. Inert until D5b made per-entry TTLs actually take effect.
+
+**What changed:**
+
+| Component | Change |
+|---|---|
+| **`ToolCacheScope`** | `resolve` takes both names and gains `resolvePerTool`, which returns `null` **only** when the map has no entry for a name. A present-but-unparseable entry returns `DEFAULT` (`USER`) and logs a WARN naming the tool and the bad token. An unrecognized `defaultToolCacheScope` also WARNs |
+| **`ToolCacheService`** | `resolveScopeTag(dispatchName, canonicalName, …)`; `getSmartTTL` split into a `lookupTTL` that can say "no match" plus `resolveSmartTTL(dispatch, canonical)` which tries the dispatch name first |
+| **`AgentOrchestrator`** | Passes the already-computed `canonicalName` into `resolveScopeTag` — the three per-tool maps on a Task now agree on key vocabulary |
+| **`docs/langchain.md`, `docs/security.md`, `docs/agent-father-langchain-tools-guide.md`** | Scope keys documented as slug-or-dispatch-name; fail-safe parsing and dispatch-first TTL documented |
+
+**Design decisions:**
+
+- **Fail safe, don't fail the load.** Leniency was never the bug — the *direction* of the fallback was. Unknown tokens still never abort an agent load; they now land on `USER`, and the WARN makes the typo discoverable instead of merely inert.
+- **A bad dispatch-name entry does not fall through to the slug entry either.** `{"searchNews": "usr", "websearch": "global"}` resolves `searchNews` to `USER`. Any fall-through from a broken narrowing override risks landing somewhere wider, which is the whole defect.
+- **Dispatch name before slug, everywhere.** Same precedence as `resolveRateLimit`: an entry naming one operation is more specific than one naming the whole tool. That precedence is also what makes the `news` TTL reachable again, without deleting a table entry that is genuinely correct for news.
+- **The cache KEY stays on the dispatch name.** Unchanged, and load-bearing: `searchWeb`/`searchNews`/`searchWikipedia` share the `websearch` slug and must not share an entry.
+- **`resolveScopeTag`'s old 5-arg form was replaced, not overloaded.** A lingering dispatch-name-only overload would let future code reintroduce B2 silently.
+
+**Operator-visible behaviour changes:**
+
+- A `toolCacheScopes` value that does not parse now yields `user` scope instead of inheriting `defaultToolCacheScope`. Deployments relying on a typo'd key to reach a `global` default lose that (unintended) cross-user reuse — a cache-hit-rate change, never a correctness one.
+- Slug-keyed `toolCacheScopes` entries now bind. An entry like `{"websearch": "global"}` that was previously inert becomes live — audit `toolCacheScopes` for slug keys that were written as documentation rather than intent.
+- `searchNews` results are now cached for 10 minutes instead of 30.
+
+**Tests:** `ToolCacheServiceTest` (79) and `AgentOrchestratorCoverageTest` (57) green. New nested suites `UnparseablePerToolEntryTests` and `DualNameScopeKeyTests`, plus TTL cases in `CanonicalPutTests` and a ticker-driven `newsTtlIsLoadBearing` against a real expiring cache. All mutation-checked: reverting each production change fails 6, 4 and 2 tests respectively.
+
+---
+
+## 🧾 The audit ledger stops triple-billing the turn, and starts seeing the tool spend (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Three defects in the audit / cost path, all introduced or made live by this branch's own remediation work. They share one root cause: **dollar figures that are read, copied or baselined at the wrong moment**.
+
+**A1 — every task after the LLM task re-reported the LLM's cost and tool calls.** `LifecycleManager.buildAuditEntry` runs once per lifecycle task, and `ConversationStep`'s data is never cleared between tasks. It read `audit:cost`, `audit:tool_calls`, `audit:token_usage` and the whole `llmDetail` block with **no task-type gate**, so a workflow `[parser, behavior, langchain, output, templating]` on a turn costing $0.0042 appended **three** ledger rows at $0.0042, and recorded that the `output` and `templating` tasks made tool calls they never touched. The ledger is append-only (EU AI Act), so an auditor summing cost reads a multiple of the truth with no way to correct it. The same file already gated the SSE tool trace on the task type ~60 lines earlier, with a comment explaining exactly this hazard — the audit reader never got the same gate. Before this branch cost was a literal `0.0` and `toolCalls` a literal `null`, which is why the lingering-key mechanism was previously harmless.
+
+**A2 — the cascade dropped the entire tool spend.** `LlmTask`'s cascade branch builds a *fresh* metadata map and hand-copies `warning`, `finishReason` and `streamingTimeout` out of the winning step's metadata. It never copied `toolCostUsd` — yet `accumulateAuditEvidence` computes the ledger cost as `cascadeCostUsd + toolCostUsd`. Since `ModelCascadeConfig.enableInAgentMode` defaults to **true**, this is the default path for any agent-mode task with a cascade: the ledger (and `responseMetadataObjectName` template data) reported token cost only. The non-cascade branches assign the agent's whole map and were always correct, so the two branches of one feature disagreed.
+
+**A3 — HITL-approved tool calls were excluded from their own turn's cost.** `AgentOrchestrator.resumeToolLoop` snapshotted its tool-cost baseline *after* the verdict-application loop, which has already run every human-approved gated call through `executeToolWrapped` → `costTracker.trackToolCall`. Those charges were inside the baseline, so `toolCostDelta` subtracted them right back out: the cost of precisely the calls a human signed off on never reached `toolCostUsd`. The live path (`executeWithTools`) always baselined before any tool ran.
+
+**What changed:**
+
+| Component | Change |
+|---|---|
+| **`LifecycleManager`** | New shared predicate `isLlmTask(ILifecycleTask)` used by **both** `buildTaskSummary` and `buildAuditEntry`, so the two readers of the same lingering keys cannot drift apart again. `llmDetail`, `toolCalls` and `cost` are gated on it; so is the summary's `confidence` (an LLM-only signal that lingered the same way) |
+| **`CascadingModelExecutor`** | `CascadeResult` gains `runToolCostUsd`; the step loop's `runCostUsd`/`runTokenUsage` locals become one `RunTotals` accumulator that also sums `stepToolCost(...)` per step |
+| **`LlmTask`** | The cascade branch now puts `toolCostUsd` (the run total) into the response metadata, matching what the non-cascade branches always carried |
+| **`AgentOrchestrator`** | `resumeToolLoop` takes the tool-cost baseline at method entry, before the verdict loop; the redundant `costConversationId` local is gone |
+
+**Design decisions:**
+
+- **Gate, don't clear.** Clearing `audit:*` between tasks would break accumulation across an LLM config's sub-tasks (`accumulateAuditEvidence` is deliberately read-modify-write). Gating the *reader* is the narrow fix.
+- **`actions`, `input` and `output` stay ungated.** `actions` is genuinely per-task, and the input/output pair describes the step context every task ran in — that is pre-existing, intended behaviour. Only the LLM-written evidence is gated.
+- **Run total, not the winning step's slice (A2).** An escalating cascade re-enters `executeAgentModeStep` for every step it tries, and each of those steps really does execute (and get charged for) its tools. Copying the accepted step's `toolCostUsd` would under-bill exactly as much as the old code dropped, and `returnBestAcrossSteps`/`finalizeBest` return a *different* step's metadata anyway. `AgentOrchestrator` reports its own per-call delta of the conversation total, so the per-step values partition the run's spend and are safe to sum — the same argument that already justifies `runCostUsd` and `runTokenUsage` being run totals.
+- **`RunTotals` over a fifth positional `double`.** `withRun`/`finalizeBest` would otherwise have carried two adjacent, silently swappable `double` parameters — in a cost-accounting path, on a branch whose whole theme is cost figures drifting apart. It is a plain local accumulator; the executor stays stateless.
+
+**Operator-visible behaviour changes:**
+
+- Ledger rows for non-LLM tasks now carry `cost = 0.0`, `toolCalls = null` and `llmDetail = null` instead of a copy of the LLM task's figures. **Summing `cost` over a turn now yields the turn's actual cost**; historical rows written before this fix remain inflated and cannot be amended (append-only).
+- SSE `task_complete` no longer reports `confidence` for tasks that follow the LLM task.
+- Agent-mode cascade turns now report tool spend in `audit:cost` and in `responseMetadataObjectName` — figures go **up** relative to before, because they were previously missing, not double-counted.
+- A HITL-resumed turn's `toolCostUsd` now includes the approved gated calls. This also means `maxBudgetPerConversation` accounting sees them.
+
+**Tests:** `LifecycleManagerTest.BuildAuditEntryTaskTypeGateTests` (3, driving a **real** `ConversationMemory`/`ConversationStep` so the lingering is the production mechanism rather than a per-key stub), two cascade tool-cost tests in `LlmTaskAuditLedgerTest`, one resume-path cost test in `AgentOrchestratorResumeToolLoopTest`. Every one was mutation-checked: ungating the audit reader fails with `task 'output' spent nothing … expected: <0.0> but was: <0.0042>`; ungating the summary reader fails the pre-existing trace test too; dropping the cascade's `toolCostUsd` gives `expected: <0.0095> but was: <0.002>`; turning the run total into last-wins gives `expected: <0.007> but was: <0.004>`; restoring the old baseline position gives `expected: <0.002> but was: <0.0>`.
+
+**Files:** `LifecycleManager`, `CascadingModelExecutor`, `LlmTask`, `AgentOrchestrator`, plus their three test classes and `docs/changelog.md`.
+
+---
+
+## 🧮 `convertToObject` finally reaches agent mode and streaming (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D7**. `jsonMode` was computed once in `LlmTask` from `convertToObject` and handed to exactly one collaborator — `LegacyChatExecutor`, i.e. the three no-tools, non-streaming call sites. `AgentOrchestrator.executeIfToolsEnabled`, `StreamingLegacyChatExecutor.execute` and the cascade's agent-mode / live-streaming steps all built their `ChatRequest` without ever looking at it.
+
+The visible consequence: `AgentSetupService` sets `enableBuiltInTools(true)` in the same method that sets `convertToObject=true`, so a tool-enabled agent took the agent path and got **no** API-level JSON at all. With `addToOutput=false` the quickReplies/sentiment `postResponse` then degraded **silently** — the model returned prose, `startsWith("{")` failed, and the raw text was stored as a string.
+
+Why only mistral and azure-openai were bitten: `AgentSetupService.supportsResponseFormat` approved `openai`, `mistral` and `azure-openai` and injected a builder-level `responseFormat=json` model parameter — but `OpenAILanguageModelBuilder` is the **only** builder that reads that key. For mistral and azure-openai the parameter was dead. openai got JSON in every mode purely because the parameter was baked into its cached `ChatModel`.
+
+**What changed:**
+
+| Component | Change |
+|---|---|
+| **`JsonResponseFormatPolicy`** (new, `modules/llm/capability`) | Decides per request whether `ResponseFormat.JSON` may be set. Carries `(requested, provider, override)` and resolves against whether *that* request carries tool specifications |
+| **`AgentOrchestrator`** | `executeIfToolsEnabled` / `resumeToolLoop` / `runToolCallLoop` take the policy; the tool loop sets `responseFormat` on each `ChatRequest`, gated on `!activeSpecs.isEmpty()`. Previous arities kept as delegating overloads |
+| **`StreamingLegacyChatExecutor`** | `execute` / `executeCapturing` take the policy; the streamed `ChatRequest` now carries the format |
+| **`LegacyChatExecutor`** | The `boolean jsonMode` parameter becomes the policy, so an unsupported provider is no longer sent a format it will reject |
+| **`CascadingModelExecutor`** | Builds a policy **per step** from that step's resolved `modelType` — a cascade routinely escalates across providers |
+| **`LlmTask`** | Builds one policy from `convertToObject` + the resolved provider + the task override and passes it to all three modes, plus the HITL resume path |
+| **`LlmConfiguration.Task.jsonResponseFormat`** | New config field: `auto` (default) / `on` / `off` |
+| **`AgentSetupService`** | Stopped injecting `responseFormat=json`; `supportsResponseFormat` deleted (its only remaining caller was the test-compat delegate `McpSetupTools.supportsResponseFormat`, also deleted) |
+
+**The provider matrix**, read off the langchain4j 1.18.0 bindings rather than assumed:
+
+| Provider | Schemaless request JSON | With tools | Evidence |
+|---|---|---|---|
+| openai | yes | yes | `OpenAiUtils#toOpenAiResponseFormat` → `json_object` |
+| azure-openai | yes | yes | `InternalAzureOpenAiHelper#toAzureOpenAiResponseFormat` → `ChatCompletionsJsonResponseFormat` |
+| mistral | yes | yes | `MistralAiMapper#toMistralAiResponseFormat` → `JSON_OBJECT` |
+| gemini, gemini-vertex | yes | **no** | maps to `responseMimeType=application/json`, which the API rejects alongside `tools` |
+| anthropic, bedrock | no | no | both throw `UnsupportedFeatureException` for JSON without a schema |
+| ollama, jlama, huggingface, oracle-genai | no | no | unverified against the provider API — opt in per task with `jsonResponseFormat: "on"` |
+
+**Design decisions:**
+
+- **Request level, never builder level.** The changelog entry of 2026-04-02 records a Gemini `400 Function calling with a response mime type: 'application/json' is unsupported` caused by a builder-level `responseFormat` baked into a **cached** model that was later reused with tools. A cached model is shared across turns, tasks and execution modes, so anything mode-specific must live on the request. D11 has since made the model cache key finer-grained, which does not change this: identity is not the issue, reuse across *modes* is.
+- **The matrix is tools-aware, not provider-aware only.** Gemini's answer differs depending on whether the same request also carries `toolSpecifications`, so the decision is taken inside the tool loop where that is known, against `!activeSpecs.isEmpty()` rather than against "is this agent mode".
+- **`supportsResponseFormat` was retired, not narrowed.** After request-level threading the builder parameter is dead for mistral/azure-openai and redundant-plus-hazardous for openai, which leaves no provider for which the matrix entry does anything. `OpenAILanguageModelBuilder` still honours a hand-written `responseFormat=json`, so existing stored configs are unaffected.
+- **`on` bypasses the tools guard.** An operator forcing the format onto an unlisted provider or an OpenAI-compatible gateway is making a deliberate choice; documented as such.
+
+**Operator-visible behaviour changes:**
+
+- Tool-enabled and streaming agents on **openai**, **azure-openai** and **mistral** now send `response_format: json_object` (or the Azure/Mistral equivalent) whenever `convertToObject=true`. Expect *more* reliable JSON, and for azure/mistral a real behaviour change on the wire.
+- **anthropic** and **bedrock** no longer receive a schemaless JSON format on the no-tools path. Previously the request was sent, rejected, and silently retried through `LegacyChatExecutor`'s fallback — one wasted round trip per turn, now avoided. Enforcement there was and remains prompt-only.
+- **gemini** keeps API-level JSON when no tools are present and is never sent it together with tools.
+- Newly created agents (`setup_agent`, `create_api_agent`, `POST /administration/agents/setup*`) no longer carry a `responseFormat` model parameter. Existing stored configs keep theirs and keep working.
+- New optional task field `jsonResponseFormat` (`auto` | `on` | `off`).
+
+**Tests:** `JsonResponseFormatPolicyTest` (20) and `JsonResponseFormatThreadingTest` (12) are new; three wiring tests added to `LlmTaskCoverageTest`. Every behavioural assertion was mutation-checked (strip the agent-mode format; strip the streaming format; make the matrix tools-blind; approve every provider; drop openai from the matrix; make `LlmTask` pass `DISABLED`) — each mutation fails the tests that cover it.
+
+**Files:** 8 modified in `src/main`, 1 new (`JsonResponseFormatPolicy`), 8 test files touched (incl. 52 Mockito matcher lists widened for the new parameter — an unmatched stub returns null instead of failing, so `verify(never(...))` sites had to move too), `docs/langchain.md`, `docs/changelog.md`.
+
+---
+
+## ⏱️ `timeout`, `logRequests` and `logResponses` become part of a model's identity (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D11**. `docs/langchain.md` documents `timeout`, `logRequests` and `logResponses` as configuration parameters. `ChatModelRegistry.filterParams` removed all three from the map it passed to the provider builders — so **every** provider's `builder.timeout(...)` / `builder.logRequests(...)` / `builder.logResponses(...)` branch, on both the sync and the streaming builder, was unreachable dead code.
+
+The serious half is what that did to the cache. `filterParams` produces both the builder input **and** the `ModelCacheKey`, so stripping those three keys also erased them from the model's identity:
+
+```java
+// before — same cache key for two tasks with different timeouts
+returnMap.remove(KEY_TIMEOUT);
+returnMap.remove(KEY_LOG_REQUESTS);
+returnMap.remove(KEY_LOG_RESPONSES);
+```
+
+A task configured with `timeout: "5000"` silently received an unwrapped, timeout-free model whenever a task with otherwise identical parameters happened to be constructed first — and vice versa. **Which model a task got depended on construction order.** On the sync path `ObservableChatModel.wrapIfNeeded` was applied only to the *first* build, so the wrap was attached to whichever task won the race and then served to every other task. `getOrCreateStreaming` never called `wrapIfNeeded` at all.
+
+### What changed
+
+- **`ChatModelRegistry.filterParams` no longer strips the three keys.** Cache key and builder input are the same map again, which is the invariant that was broken: anything that shapes the constructed model now necessarily shapes its identity. The keys still filtered (`systemMessage`, `prompt`, `logSizeLimit`, `addToOutput`, `convertToObject`, `includeFirstAgentMessage`) are ones no builder reads.
+- **`getOrCreateStreaming` honours the three settings.** `timeout` reaches the streaming builder; `logRequests`/`logResponses` additionally wrap the model in the new `ObservableStreamingChatModel`.
+- **New `ObservableStreamingChatModel`** — logging-only streaming counterpart to `ObservableChatModel`, so the flags behave identically across providers, including those whose streaming builder has no logging switch.
+- **`StreamingLegacyChatExecutor` resolves one backstop from both timeout fields** (`resolveTimeoutSeconds`), and stops an abandoned attempt from writing to the shared event sink.
+- **`docs/langchain.md`** gains a "Timeouts and Streaming" section and drops the implication that `timeout` alone bounds a streaming turn.
+
+### Design decisions
+
+- **No `Future.get` bound on the streaming path.** `ObservableChatModel` bounds a sync call by submitting it to an executor and calling `future.get(timeout)`. That shape is wrong for a stream: an overall wall-clock bound truncates a healthy long answer, and cancelling the awaiting thread does not stop the provider's callback thread. The streaming-appropriate bound already exists — every streaming builder passes `timeout` to its HTTP client, and for the JDK client (`JdkHttpClient` sets it as `HttpRequest.timeout()` on an async `ofInputStream` send) that bounds the time to the provider's **first response**, not the duration of the stream. So it detects a provider that never answers without cutting off one that answers slowly. `ObservableStreamingChatModel` is therefore observability-only.
+- **The two timeout fields stay two fields, with a derived default.** `timeout` (ms, model parameter, provider-level) and `streamingTimeoutSeconds` (s, task-level, EDDI's overall backstop) bound genuinely different things; collapsing them would lose a capability. What was wrong was that they were *unrelated*: a task with `timeout: "300000"` was still cut off by the undocumented 120s backstop. Resolution order is now (1) an explicit positive `streamingTimeoutSeconds` wins, (2) otherwise 120s **raised, never lowered,** to cover a longer configured `timeout`, (3) otherwise 120s. Both stored shapes keep their existing behaviour; only the previously broken combination changes.
+- **`timeout` is read from the task's raw parameters when deriving the backstop.** A Qute-templated value cannot be resolved at that point and leaves the 120s default in place — the pre-existing behaviour, and never a shorter bound. The alternative (threading the processed parameter map through `execute`/`executeCapturing`) buys correctness only for templated timeouts and costs two new overloads.
+- **A decorator must forward to the overload it was called on.** `ObservableStreamingChatModel` overrides both `chat(ChatRequest, handler)` and `chat(ChatRequest, ChatRequestOptions, handler)` and forwards each to the same overload on the delegate. Funnelling both through the three-argument form hits `StreamingChatModel`'s default `doChat` — `throw new RuntimeException("Not implemented")` — for any model that implements the two-argument `chat` directly. Caught by `ObservableStreamingChatModelTest`, which is why it exists.
+- **R5 (`ChatModelListener` observability SPI) deliberately not implemented.** D11 is the bug; R5 is a feature and stays a separate backlog item.
+
+### Abandoned streams no longer write to the shared event sink
+
+`StreamingLegacyChatExecutor` retries a timed-out attempt that produced no tokens, but nothing stopped the abandoned attempt's handler: its provider callback thread stayed alive and kept calling `eventSink.onToken(...)` while the retry streamed into the *same* sink. A slow first attempt whose first token landed after the retry began therefore interleaved two answers on the SSE stream, and neither matched the text stored in memory. Each attempt now carries an `abandoned` flag its handler checks before forwarding — set on timeout, on interrupt, and before an error retry. The flag is set *before* the partial text is read, so the text returned to memory is exactly the text the client was sent. The executor still cannot cancel the provider's stream (langchain4j exposes no cancellation on this path); it can and now does make the abandoned stream silent.
+
+### The cascade's live-stream backstop stopped assuming 120s
+
+`CascadingModelExecutor` bounded a live-streamed step's future with a hardcoded `STREAMING_STEP_TIMEOUT_MS = 125_000L`, whose comment states the invariant it exists to hold: it *must* exceed the streaming executor's own bound, because cancelling the awaiting thread does not stop the provider's callback thread — the SSE client would keep receiving tokens for a step the cascade has already moved past. That invariant was already violable (`streamingTimeoutSeconds: 300` broke it), and deriving the bound from `timeout` adds another way in. It is now `resolveStreamingStepTimeoutMs(task)` = the executor's resolved bound + a 5s margin, so the default case is still exactly 125s and a longer configured bound raises the backstop with it.
+
+### Operator-visible behaviour changes
+
+| Config | Before | After |
+| --- | --- | --- |
+| `timeout` on any task | Never reached the provider builder; on the sync path only the `ObservableChatModel` wrapper applied, and only if that task built the model first | Reaches the provider builder on both paths, and is part of the model cache key |
+| `logRequests`/`logResponses` on a streaming task | Silently discarded | Honoured — emitted at INFO by `ObservableStreamingChatModel`, and passed to builders that support them |
+| Two tasks differing only in `timeout`/`logRequests`/`logResponses` | Shared one cached model; whichever built first won | Two separate cached model instances |
+| Streaming task with `timeout` > 120s and no `streamingTimeoutSeconds` | Cut off at the undocumented 120s backstop | Backstop follows the configured `timeout` |
+| Streaming task with only `streamingTimeoutSeconds` | — | Unchanged |
+| Retry after an empty timed-out streaming attempt | Late tokens from the abandoned attempt could interleave with the retry's output | Abandoned attempt is silent |
+| Live-streamed cascade step with a bound above 125s | The cascade cancelled the future while the provider was still emitting | Cascade backstop tracks the executor bound (+5s) |
+
+Cached model instances are keyed more finely now, so a deployment whose tasks differ in these settings holds a few more model objects than before. That is the point — they were sharing an instance only one of them had configured.
+
+### Tests
+
+`ChatModelRegistryTest` grew an `ObservabilityCacheKeyTests` nest (different `timeout`/`logRequests`/`logResponses` ⇒ different instances, sync and streaming; construction order no longer decides which model a task gets; the settings reach the builder). Its old `getOrCreate_observabilityParamsDontAffectCacheKey` test asserted the defect and was replaced. New `StreamingLegacyChatExecutorTimeoutTest` pins the backstop resolution table including both back-compat shapes, that a short `timeout` cannot truncate a healthy stream end to end, and that a late token from an abandoned attempt never reaches the sink. New `ObservableStreamingChatModelTest` pins decorator transparency. Every behavioural test was mutation-checked by reverting the corresponding production change: 9 of the 29 `ChatModelRegistryTest` cases fail with `filterParams` restored (`expected: <5000> but was: <null>`, `expected: not same but was: <…>`), the backstop cases fail with the derivation neutralised (`expected: <300> but was: <120>`), and the abandoned-stream case fails without the flag (`NeverWantedButInvoked: conversationEventSink.onToken("LATE")`). The cascade-backstop cases fail with the hardcoded 125s restored (`Cascade backstop (125000ms) must exceed the executor bound (300000ms)`).
+
+---
+
+## 🧾 The audit ledger stops recording zeros and nulls (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D1**. `AuditEntry` documents `llmDetail` as carrying token usage, `toolCalls` as tool execution data and `cost` as the monetary cost of the step. Every entry the engine has ever produced carried `toolCalls = null` and `cost = 0.0` — passed as **literals** at the `new AuditEntry(...)` call site, with comments claiming an integration that did not exist:
+
+```java
+llmDetail, null,   // toolCalls — set by LlmTask in memory
+actions,  0.0,     // cost — set by ToolCostTracker integration
+```
+
+Neither was true. `LlmTask` never wrote `audit:tool_calls` or `audit:cost`, and `audit:token_usage` — the key `buildAuditEntry` reads into `llmDetail.tokenUsage` — had **zero writers** in `src/main/java`. This matters beyond tidiness: the ledger is the EU AI Act Art. 17/19 traceability record, and it has been attesting that every LLM decision cost nothing and used no tools.
+
+Same class of defect one line up: `buildTaskSummary` reads `audit:confidence` as `IData<Double>`, while `LlmTask` wrote `audit:cascade_confidence` as `String.valueOf(...)` — **wrong key and wrong type**. All four `audit:cascade_*` keys were write-only.
+
+### What was wired
+
+| Key | Written by | Read into |
+| --- | --- | --- |
+| `audit:token_usage` | `LlmTask`, accumulated per turn | `llmDetail.tokenUsage` |
+| `audit:tool_calls` | `LlmTask`, accumulated per turn | `AuditEntry.toolCalls` |
+| `audit:cost` | `LlmTask`, accumulated per turn | `AuditEntry.cost` |
+| `audit:confidence` | `LlmTask` cascade branch, as a **Double** | `llmDetail.confidence` + the `task_complete` SSE summary |
+| `audit:cascade_model` | `LlmTask` cascade branch | `llmDetail.cascadeModel` |
+
+All six audit keys moved into `MemoryKeys` with javadoc naming their producer and consumer, so the next reader/writer split is a compile-time concern rather than a silent one. `audit:cascade_confidence`, `audit:cascade_cost` and `audit:cascade_token_usage` are gone — they had no readers anywhere and never left the in-flight `ConversationStep`, so there is nothing to migrate.
+
+### Design decisions
+
+- **Which cost signal.** The two dollar figures that actually exist are the cascade's `runCostUsd` (from `inputPricePer1M`/`outputPricePer1M` on `ModelCascadeConfig`/`CascadeStep`) and `ToolCostTracker`'s per-conversation tool cost, which became real in D2. `cost` is the **sum of both**. No token price table was invented for non-cascade tasks — those report tool cost only, and a non-cascade turn with free tools still audits at `0.0`. Hoisting cascade pricing to task level is a config change and stays a follow-up.
+- **Accumulate, never overwrite.** A turn can drive many LLM calls: one per matching config sub-task, plus every escalated cascade step and every tool-loop iteration. `getLatestData` is last-write-wins, so each contributor read-modify-writes. Only counts a provider actually reported are touched — a provider that omits `totalTokens` must not zero what earlier calls contributed.
+- **`toolCalls` shape is `{"calls": [...]}`**, each entry the tool-trace record plus the `llmTaskId` that issued it; without that tag a merged list from several sub-tasks is unattributable.
+- **Nested maps, and the HMAC time bomb they would have armed.** `llmDetail.tokenUsage` is a nested map and `toolCalls.calls` a nested list, but `AuditHmac.sortedMapString` flattened values with `toString()` while `AuditStore.fromDocument` copies only the top level — so an entry signed in memory with a `LinkedHashMap` would read back with an `org.bson.Document` (whose `toString()` is prefixed `Document{`) and fail to verify against its own HMAC. Latent only because `AuditHmac.verifyHmac` has no production callers yet. The canonicalizer now recurses through maps and lists; scalars still use `toString()`, so flat maps produce a byte-identical canonical string and **historical entries keep verifying** — pinned by a literal-string test plus a real BSON encode/decode round-trip test.
+- **Failure-path entries deliberately unchanged.** The `AuditEntry` built when a task throws keeps `cost = 0.0` / `toolCalls = null`: the accumulators are partial at that point and the task may never have reached the model. `GdprComplianceService` and `CapabilityMatchCondition` also keep their zeros — those are administrative/rule entries where zero is correct, not defective.
+
+### Three upstream signal defects fixed on the way
+
+The ledger is only as honest as what feeds it:
+
+- **`LegacyChatExecutor` built the token map with `Map.of`** over three boxed `Integer`s. Providers legitimately report only some of the three (Bedrock and Ollama commonly omit the total), so a partial report was an NPE that killed the whole turn over telemetry. Now shares `AgentOrchestrator.tokenUsageMap`, which 0-defaults.
+- **The agent tool loop double-counted tokens on retry.** The accumulator was declared outside the retry lambda and `RetryConfiguration.executeWithRetry` replays that lambda, so a retried turn counted the abandoned attempt too. Reset on lambda entry.
+- **The cascade under-reported tokens.** `runCostUsd` was a run total across every attempted step while `tokenUsage` reported only the accepted step, so an escalating cascade produced token counts that contradicted its own dollar figure. `CascadeResult.tokenUsage` is now the run total; per-step usage stays in the trace.
+
+### Operator-visible behaviour changes
+
+- LLM-task audit entries gain `llmDetail.tokenUsage`, and `llmDetail.cascadeModel` / `llmDetail.confidence` on cascade turns. Entries are larger.
+- `AuditEntry.toolCalls` is non-null on any turn where a tool ran; `AuditEntry.cost` is non-zero wherever a cascade with configured prices or a priced tool ran. Cost dashboards that assumed a constant zero will start moving.
+- **HITL-resumed turns gain a full `llmDetail` block.** `executeResume` never wrote `audit:compiled_prompt`, and `LifecycleManager` gates the entire block on that key — so every turn a human intervened in audited with no LLM evidence at all. Fixed.
+- `ExecutionResult.responseMetadata` now carries `toolCostUsd` (the delta this model call added, not the conversation running total). Agents that surface `responseMetadataObjectName` in templates will see the extra key.
+- `task_complete` SSE frames now really carry `confidence` on cascade turns.
+
+### Known gap — kept documented, not silently swallowed
+
+A turn that **pauses for tool approval** still loses its pre-pause token usage: `ToolApprovalRequiredException` escapes `executeWithTools` before the metadata is assembled, and `resumeToolLoop` starts a fresh accumulator. Closing it needs the usage to survive the pause, i.e. a new field on the persisted `PendingToolCallBatch` — a snapshot-format change deliberately out of scope here. The under-report is bounded to the pre-pause segment of paused turns and is called out at both code sites.
+
+### Tests
+
+New `LlmTaskAuditLedgerTest` backs the conversation step with a real map rather than a mock that always answers `null` — every assertion here is about accumulation, and a null-answering step makes a broken accumulator look correct. It covers agent-mode token usage, multi-sub-task summation, partial provider reports, tool-call merging with `llmTaskId`, cascade cost from configured pricing, the Double confidence key, the resumed-turn `llmDetail` block, and the audit-collector gate. `AuditHmacTest` gains the flat-map back-compat literal, nested-map/list determinism, `Document`-vs-`LinkedHashMap` equivalence and the BSON round-trip. `LifecycleManagerTest` gains toolCalls/cost/cascadeModel/confidence assertions.
+
+Four pre-existing tests were repaired rather than extended — they passed for the wrong reason: `LifecycleManagerTest.auditEntryWithLlmDetails` asserted only `containsKey("tokenUsage")` on a stub for a key nothing wrote; `LlmTaskCoverage2Test` pinned the dead `audit:cascade_confidence` and `audit:cascade_token_usage` keys with `any()`; `LlmTaskDeepBranchTest.auditCollectorStoresData` verified `atLeast(3).createData(anyString(), any())`, which passes for any three keys at all.
+
+---
+
+## 🔌 The live tool trace finally reaches the SSE stream — and takes an unredacted payload with it (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D3**. The `task_complete` SSE frame has advertised a `toolTrace` field since the streaming API shipped, and has never emitted one — not once, on any deployment. The writer and the reader never agreed on a key:
+
+| | Key | Where |
+| --- | --- | --- |
+| Writer | `langchain:trace:<modelType>:<configTaskId>` (e.g. `langchain:trace:openai:taskA`) | `LlmTask.executeTask` / `executeResume` |
+| Reader | `langchain:trace:` + `task.getId().name()` = `langchain:trace:ai.labs.llm` | `LifecycleManager.buildTaskSummary` |
+
+`getLatestData` is a `startsWith` scan, so those two prefixes can never overlap — `summary` never got a `toolTrace` entry and the `if (summary.containsKey("toolTrace"))` branch in `RestAgentEngineStreaming.onTaskComplete` was dead code. The "live tool call display" in the UI has never received a byte.
+
+### The fix — reader side only
+
+`buildTaskSummary` now aggregates over `getAllElements()` instead of computing a key:
+
+- **The writer key is untouched.** `RestToolHistory` and every `ConversationMemorySnapshot` already persisted in MongoDB scan the same `langchain:trace:` prefix with an arbitrary suffix. Changing the writer would have silently broken historical tool-history replay. The literal moved into `MemoryKeys.LANGCHAIN_TRACE_PREFIX` and all three call sites (writer ×2, `RestToolHistory`) now share it — byte-identical output, de-duplication only.
+- **Aggregate, don't take the latest.** `LlmTask` writes one trace key *per LLM config task*, and `getLatestData` reverses the element list and returns only the newest match. A naive `getLatestData(LANGCHAIN_TRACE_PREFIX)` would have shipped a subtly wrong trace — the last task's calls only — which is worse than shipping nothing. `getAllElements()` is an insertion-ordered defensive copy, so write order is preserved for free.
+- **The task-type gate is load-bearing.** Step data survives across tasks within a `ConversationStep`, so an ungated prefix scan would make every task executed *after* the LLM task report the LLM's trace as its own. Reads are gated on `TASK_TYPE_LANGCHAIN`.
+- **Siblings are deliberately not swept in.** `langchain:cascade:trace:`, `rag:trace:` and `rag:httpcall:trace:` do not match the prefix and stay out of the frame.
+
+### ⚠️ Security — tool arguments and results now leave the process unredacted
+
+**Operators and downstream integrators must read this.** Until now a tool call's arguments and its result were reachable only through the owner-scoped `RestToolHistory` endpoint and the audit ledger, which runs `AuditLedgerService.scrubSecrets`. Making the trace reach the stream puts that same payload on the SSE channel, and **nothing on the `buildTaskSummary` → `onTaskComplete` path redacts anything.** Whatever a tool was called with — an API key passed as a tool argument, a token echoed back in a tool result — now streams verbatim to every client subscribed to that conversation's `sayStreaming`.
+
+The correct place to fix that is the producer (the `tool_call` / `tool_result` maps built in `AgentOrchestrator`), so that `RestToolHistory`, the audit ledger and the stream all inherit one redaction rule. That is tracked separately (D12) and is **explicitly out of scope here** — this entry exists so the exposure is not discovered in production. Deployments that stream to untrusted clients and pass secrets through tool arguments should weigh that before taking this build.
+
+### Other operator-visible behaviour changes
+
+1. **The `task_complete` SSE frame gains a `toolTrace` array** on LLM tasks that executed at least one tool (including cascade turns). Purely additive — no existing field changes shape — but **a strict unknown-field-rejecting SSE parser in eddi-chat-ui or EDDI-Manager would now break on it.** [UNVERIFIED — requires a check of both frontends' `task_complete` parsers.]
+2. **The frame can get large.** One `tool_call` + one `tool_result` entry per tool call per iteration, up to `maxToolIterations`; `tool_result` carries the (truncated) tool output. There is no cap on the streamed trace — adding one would be a config field (Golden Rule 1) and is out of scope.
+3. **Non-streaming `say` is unchanged.** `eventSink` is null there, and the only other consumer of `summary`, `buildAuditEntry`, reads `"actions"` and nothing else — audit output is byte-identical.
+
+### Tests
+
+`LifecycleManagerTest.summaryWithToolTrace` was **fully vacuous**: it hand-stubbed `getLatestData("langchain:trace:llm")` for a mock task whose id was `TaskId("llm")` — a name no real task has — so it asserted the reader against its own stub and stayed green through the entire life of the defect. Replaced with six cases that stub `getAllElements()` and never `getLatestData`: trace reaches the summary for a langchain task; multiple trace keys aggregate in write order; a non-langchain task omits it; `langchain:cascade:trace:` is ignored; a non-`List` result is ignored without a `ClassCastException`; no trace keys means no field. Each was mutation-checked against a reverted fix.
+
+Two weak neighbours tightened: `LlmTaskCoverageTest.resume_nonEmptyTrace_stored` from a `startsWith` matcher to the exact key `langchain:trace:openai:taskA` (the writer half of the contract the reader tests now assert), and `RestAgentEngineStreamingExtendedTest.onTaskCompleteIncludesToolTrace` from `assertTrue(data.contains("toolTrace"))` — which also passes on a stringified or malformed payload — to a parsed-JSON shape assertion.
+
+---
+
+## 🧱 The in-turn tool context finally has a ceiling — `maxToolContextTokens` (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D6b** (the bug half of D6; the cross-turn history-lossiness half is an improvement and stays out of scope). `AgentOrchestrator.runToolCallLoop` grew ONE `currentMessages` list by an `AiMessage` plus one `ToolExecutionResultMessage` per tool call per iteration, and nothing between the loop head and `chatModel.chat` ever inspected its size, character count or token count. The only in-loop ceilings were the iteration counter (default 10) and the dollar budgets. Per-result truncation did not save it: `ToolResponseTruncator.truncateIfNeeded` returns the result unchanged when `limits == null`, and `Task.toolResponseLimits` has no default — so on an ordinary agent every tool result entered the context in full. A tool-heavy turn could therefore blow past the model context window mid-loop and hard-fail with a provider `400`, after the tool side effects had already fired.
+
+### The fix
+
+New per-task config field **`maxToolContextTokens`** (default **60000**) on `LlmConfiguration.Task`. Before each model call the loop meters the accumulated *tool* traffic and, while it exceeds the ceiling, evicts the **oldest complete tool exchange** — a requesting `AiMessage` **together with all of its `ToolExecutionResultMessage`s** — until the traffic fits or only the most recent exchange remains.
+
+- **The pairing invariant is the whole reason eviction is subtle.** Dropping a result without its requesting `AiMessage` leaves a dangling `tool_call_id`; dropping the `AiMessage` without its results leaves an unanswered tool call. Either half is itself a provider `400` — the eviction would *cause* the failure it exists to prevent. Exchanges are therefore located as `[AiMessage, results…]` index ranges and removed whole. Pinned by its own test.
+- **The most recent exchange is never evicted.** When it alone exceeds the ceiling the request goes through unchanged (the model asked for those results and must see them) and the overrun is logged `still_over_budget`. That case is what `toolResponseLimits` is for.
+- **Only tool traffic is counted.** System / user / assistant-prose messages are never candidates — conversation history is governed by `maxContextTokens` / `conversationHistoryLimit`, and nothing in this guard may drop a history message.
+
+### Token accounting extended, not duplicated
+
+`TokenCounterFactory.extractText` returned `""` for both tool message shapes — an `AiMessage` announcing tool calls has a `null` `text()`, and `ToolExecutionResultMessage` hit the `default` arm — so the entire in-turn tool context weighed **zero tokens** to every caller. Extended so an `AiMessage` contributes its prose plus each requested tool name and argument JSON, and a `ToolExecutionResultMessage` contributes its tool name plus the whole payload. The SAME `TokenCounterFactory` `LlmTask` uses for history windowing is injected into `AgentOrchestrator` and reused — one accounting rule for both halves of the request, not a second estimator. `LlmTask.resolveModelName` was widened from `private` to package-private so the orchestrator picks the same estimator (tiktoken for OpenAI/Azure, chars÷4 elsewhere) rather than a drifting copy.
+
+### Design decisions
+
+- **Config field, not a constant** (Golden Rule 1). The ceiling is an agent-designer knob with a sensible default; `-1`/`0` disables it and restores pre-6.1 unbounded behaviour.
+- **Default 60000 preserves today's behaviour.** High enough that no ordinary tool-using turn is touched — the eviction path is byte-for-byte inert below the ceiling, guarded by a test that compares the default-budget message lists against the guard-disabled (`-1`) lists — and low enough to keep a runaway loop inside a 128k window after the system prompt, history and completion are added.
+- **Eviction over refusal.** Refusing the turn would strand the side effects already committed by earlier tool calls; evicting the oldest results lets the loop finish with the freshest evidence. The loss is made observable rather than prevented.
+- **No gap-marker message injected.** A mid-transcript `SystemMessage` is not portable across the twelve providers (several hoist system content to a top-level field) and a `UserMessage` would fabricate a turn; the loss is surfaced through trace + metric + WARN instead.
+- **Per-attempt `IdentityHashMap` token memo** on the call stack — the orchestrator is an `@ApplicationScoped` singleton and stays stateless; without the memo a 10-iteration loop retokenizes the first result ten times.
+- **Estimator resolution fails safe.** An unresolved global-variable model type or an unknown model name that makes a provider tokenizer refuse to construct falls back to the approximate estimator rather than aborting the turn — a safety ceiling that throws is worse than an approximate one.
+
+### Operator-visible behaviour changes
+
+1. **A tool-heavy turn that used to hard-fail on a provider context-window `400` now completes**, dropping its oldest tool exchanges once in-turn tool traffic passes `maxToolContextTokens`.
+2. **New trace entry `tool_context_evicted`** (token counts before/after, exchanges + messages dropped, `withinBudget`), **new counter `eddi.llm.tool_context.evictions`** (tag `outcome=within_budget|still_over_budget`), and a **`WARN` `llm.tool_context.evicted`** with conversation id + remediation hint. A steady stream signals: lower `maxToolIterations`, set `toolResponseLimits`, or raise `maxToolContextTokens`.
+3. **Default budget is inert for normal turns.** Agents whose in-turn tool traffic stays under 60000 tokens are byte-for-byte unchanged; `-1`/`0` disables the guard entirely.
+
+New field only; nothing removed. `FAIL_ON_UNKNOWN_PROPERTIES=false` keeps rolling deploys and ZIP imports safe both directions. No `ExtensionDescriptor` change (it exposes only `uri`), so no Manager UI work.
+
+### Tests
+
+`AgentOrchestratorToolContextBudgetTest` (new): the end-to-end regression drives the real loop with a mock model that requests a tool every iteration and asserts every request reaching `chatModel.chat` is within the ceiling (fails today — unbounded growth); the pairing invariant across every captured request; byte-identical message lists under the default budget vs. the guard disabled; and trace/metric observability. Plus isolation tests of `enforceToolContextBudget` for oldest-first order, whole-exchange (multi-call) eviction, history never evicted, and the unfittable-newest report. `TokenCounterFactoryTest` gains a `tool messages` nest asserting names/arguments/payloads are now counted.
+
+Every behavioural test was mutation-checked by reverting the corresponding production change and confirming failure: disabling the guard call (`request 3 carried 636 tokens … <=500 expected: <true> but was: <false>`); shrinking exchange ranges to the `AiMessage` alone and, separately, clearing only the `AiMessage` index on removal (`orphan ToolExecutionResultMessage id=c1 … its requesting AiMessage was evicted without it`); and reverting `extractText` to the pre-fix `""` for tool messages (`the payload is what fills the context window … expected: <true> but was: <false>`, and the guard measuring 0 tokens so it never evicts).
+
+The nine existing `AgentOrchestrator*Test` constructors and three `historyBuilder`-style call sites gained the new `TokenCounterFactory` argument.
+
+**Files:** `AgentOrchestrator.java`, `TokenCounterFactory.java`, `LlmConfiguration.java`, `LlmTask.java`, `docs/langchain.md`, plus `AgentOrchestratorToolContextBudgetTest` (new), `TokenCounterFactoryTest`, and the nine `AgentOrchestrator*Test` constructor call sites.
+
+**Out of scope:** the cross-turn half of D6 (tool messages absent from `ConversationHistoryBuilder`) — an improvement, not a bug; summarizing evicted tool results instead of dropping them; a provider-reported hard context limit feeding the default.
+
+---
+
+## 💸 `maxBudgetPerConversation` can finally bind — canonical tool names at the executor boundary (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D2**. A built-in tool has two names, and the engine only ever carried one of them past the dispatch loop.
+
+`ToolCostTracker`'s price table and `ToolCacheService`'s smart-TTL table are keyed on the eight **whitelist slugs** (`websearch`, `pdfreader`, `calculator`, …). The only production call path passed `toolRequest.name()` — the bare `@Tool` **method** name (`searchWeb`, `extractTextFromPdf`, `calculate`), because no priced tool class declares `@Tool(name = …)`. Zero keys overlapped. Consequences, all live until now:
+
+- **Every built-in priced at $0.00**, so `maxBudgetPerConversation` could never trip no matter how much tool work a conversation did, and `eddi.tool.costs` never carried a non-zero value.
+- **`toolRateLimits` in its documented slug form was inert.** `docs/langchain.md`, `docs/security.md` and `docs/agent-father-langchain-tools-guide.md` all show `{"websearch": 30}`; the lookup only ever saw `searchWeb`, so the entry was discarded and `defaultRateLimit` (100) applied.
+- **Cache TTLs mostly fell through to the flat 300s default.** `getSmartTTL` substring-matches, which is why the mismatch went unnoticed for so long: `getCurrentDateTime` happens to contain "datetime" and resolved correctly, while `calculate` does not contain "calculator" and did not.
+
+### The fix
+
+New `ToolNameResolver` — stateless, all-static, an **exhaustive and exact** switch from the 16 built-in tool class simple names to their whitelist slugs. No substring fallback: a lookup that is right by coincidence for some inputs is worse than one that is wrong for all of them, because it never looks broken. `AgentOrchestrator.buildToolSetup` populates a `toolCanonicalNames` map (dispatch name → slug) from the **already proxy-unwrapped** `toolClass`; using `tool.getClass()` would yield `…_ClientProxy` and reintroduce the same defect in a new coat. The map rides on `ToolSetup`, so the live loop and the HITL resume path share it.
+
+A new `ToolInvocation(dispatchName, canonicalName, priceOverride)` record carries both names through `ToolExecutionService`. The split is load-bearing:
+
+| Resolved from the **canonical slug** | Resolved from the **dispatch name** |
+| --- | --- |
+| per-call price, cache TTL | cache key, rate-limit bucket, metric tags, per-tool and per-conversation cost breakdown, failure logs |
+
+Canonicalising the cache key would collapse `searchWeb`, `searchNews` and `searchWikipedia` onto one entry and serve each other's results for identical arguments — a correctness bug traded for a naming tidy-up. The legacy `String`-first overloads of `executeToolWrapped`, `trackToolCall` and `put` are retained and delegate via `ToolInvocation.of(name)`.
+
+### Design decisions
+
+- **`enforceBudget` is opt-in, default `false`** (deployment fallback `eddi.tools.budget.enforce-by-default`). Enforcement is deliberately *not* inferred from `maxBudgetPerConversation` being set. That ceiling has been inert for its entire shipped life, so no stored config has ever had a tool call refused by it; switching enforcement on together with the prices would newly abort tool calls on live agents. Cost tracking runs regardless of the flag. Read through `ConfigProvider` in a `static final`, not `@ConfigProperty` — `AgentOrchestrator` is constructed with `new` by `LlmTask` and is not a CDI bean, so an injection annotation would never fire while looking configurable.
+- **Metric tags keep the dispatch name.** `eddi.tool.calls{tool=…}` and `eddi.tool.costs{tool=…}` could have moved to slugs to aggregate the three web searches into one series. They did not: every other `tool`-tagged meter in the module (`eddi.tool.execution.success`, `eddi.tool.cache.hits.by_tool`, `eddi.tool.execution.duration`) reports the dispatched method name, so moving these two would split the tag vocabulary in half, make the series un-joinable and break existing dashboards for a marginal analytical gain. Slug-level totals stay available as a PromQL sum.
+- **`toolRateLimits` and `toolPricing` accept either name, dispatch first.** A dispatch-name entry is the more specific statement (`{"searchNews": 5}` pins one operation) and wins over the tool-wide slug entry.
+- **Rate-limit *buckets* stay per dispatch name; only the *limit value* is slug-resolved.** `{"websearch": 30}` therefore yields three independent 30/min buckets rather than one shared allowance. Documented explicitly rather than left for an operator to discover.
+- **Operator prices are clamped at `Math.max(0.0, …)`.** `toolPricing` values come from agent JSON; a negative one would credit the conversation and make any ceiling unreachable by construction.
+
+### Operator-visible behaviour changes
+
+1. **`toolRateLimits` slug keys start binding.** A config carrying `{"websearch": 30}` was previously ignored; from this release it applies — 30/min to each of `searchWeb`, `searchNews`, `searchWikipedia`. Method-name keys are unchanged. Review any agent that has been running under `defaultRateLimit` while believing it was rate-limited.
+2. **Built-in cache TTLs change from a mostly-flat 300s to the intended per-tool values.** `datetime` operations **tighten**: `convertTimezone`, `addTime`, `listTimezones` and `calculateDateDifference` go 300s → 60s. Others loosen to their configured values: `calculator` 300s → 7d, `searchWeb`/`searchWikipedia` 300s → 1800s, `webscraper` 300s → 1h, `pdfreader`/`dataformatter`/`textsummarizer` 300s → 24h. One value loosens unintuitively: `searchNews` used to substring-match the `news` entry at 600s and now takes `websearch`'s 1800s. `weather`, `getCurrentDateTime` and `formatDateTime` are unchanged.
+3. **`eddi.tool.costs` becomes non-zero for priced built-ins** and `GET /llm/toolhistory/costs` starts reporting real numbers: `websearch` $0.001, `webscraper` $0.002, `pdfreader` $0.001, `weather` $0.0005 per call. Tag *values* are unchanged (see above), so dashboards keep working — a series that previously only ever recorded zero now carries a value.
+4. **`maxBudgetPerConversation` covers TOOL cost only** and stays inert unless `enforceBudget: true` is added. LLM token spend remains run-scoped under the cascade's `maxCostPerRun`; the two are not summed.
+
+New config fields `enforceBudget` (Boolean) and `toolPricing` (`Map<String, Double>`) on `LlmConfiguration.Task`. No field removed; `FAIL_ON_UNKNOWN_PROPERTIES=false` keeps rolling deploys and ZIP imports safe in both directions. No `ExtensionDescriptor` change (it exposes only `uri`), so no Manager UI work.
+
+### Tests
+
+`ToolNameResolverTest` (new) asserts all 16 classes against their real `getSimpleName()` — renaming a tool class without updating the resolver now fails here instead of silently reverting that tool to $0.00 and a 300s TTL — plus `CalculatorTool_ClientProxy → null` and exact-match-only guards.
+
+`AgentOrchestratorToolCostTest` (new) is the load-bearing one: a **real** `ToolCostTracker` and a **real** `ToolExecutionService` driven through the actual dispatch loop. It is the only test that can show `maxBudgetPerConversation` is reachable at all. The pre-existing budget test stubs `isWithinBudget` to `false` on a mock, so its refusal comes from the stub and it passed just as happily against the broken behaviour; it is kept for gate wiring and now says so in its javadoc.
+
+Every new behavioural test was mutation-checked by reverting the corresponding production change and confirming failure: pricing by dispatch name (`expected: <0.001> but was: <0.0>`), dropping the slug rate-limit fallback (`expected: <7> but was: <100>`), removing the `enforceBudget` gate (`Wanted but not invoked: isWithinBudget`), removing the negative-price clamp (`expected: <0.0> but was: <-10.0>`), keying the cache on the slug (`expected: <2> but was: <1>` distinct keys), dropping the canonical map on the HITL resume path (`expected: <calculator> but was: <calculate>`), and adding a substring fallback to the resolver (`expected: <null> but was: <calculator>`).
+
+Verifications that would have gone vacuous after the signature change were repointed rather than left to pass silently: the four `executeToolWrapped(anyString(), …)` stubs in the orchestrator tests (an unmatched stub returns `null` and nulls out tool results without failing) and `verify(costTracker, never()).trackToolCall(anyString(), anyString())`, which after the change verified an overload production no longer calls.
+
+**Files:** `ToolNameResolver.java` and `ToolInvocation.java` (new), `ToolCostTracker.java`, `ToolCacheService.java`, `ToolExecutionService.java`, `AgentOrchestrator.java`, `LlmConfiguration.java`, `docs/langchain.md`, `docs/security.md`, `docs/agent-father-langchain-tools-guide.md`, plus `ToolNameResolverTest` and `AgentOrchestratorToolCostTest` (new) and 7 updated test classes.
+
+**Out of scope:** folding cascade LLM-token cost into `ToolCostTracker` so `maxBudgetPerConversation` becomes a true total ceiling (separate follow-up); rate-limit bucket sharing across a tool's operations; the `<=`/pre-check budget boundary; `getSmartTTL`'s substring fallback, which still serves unmapped http/mcp/a2a tool names.
+
+---
+
+## ⏳ Cache entries finally expire — `CacheImpl` honours per-entry TTLs (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D5b**, the follow-up to D5. Every TTL-bearing `ICache` overload in `CacheImpl` dropped its `lifespan` argument and delegated to the untimed variant. Caffeine's standard builder has no per-entry expiry, so the wrapper simply threw the number away. Consequences, all live in production until now:
+
+- **`ToolCacheService`'s entire smart-TTL table was decorative.** `weather` 300s, `websearch` 1800s, `calculator` 7 days — every one of those values was computed, passed to `cache.put(key, value, ttl, unit)` and discarded. Tool results were removed by 10 000-entry size eviction alone, so a stale or poisoned result could be served indefinitely. `GET /llm/tools/cache/ttl/{toolName}` reported numbers that governed nothing.
+- **`PaginatedResponseStore`'s documented "15-minute TTL" never existed.** Pages lived until the cache filled.
+- **A2A replay nonces had no expiry at all.** `NonceCacheService` carried a comment claiming expiry was "configured externally via Caffeine `expireAfterWrite` in `application.properties`". There is no such configuration anywhere in the repo.
+
+### The fix
+
+`CacheFactory` now builds **every** cache with `Caffeine.expireAfter(Expiry)` instead of leaving expiry unconfigured (size-only caches) or using `expireAfterWrite(ttl)` (TTL caches). That is what exposes Caffeine's `policy().expireVariably()` view, and `CacheImpl` writes every TTL-bearing overload through it. Two entries in one cache can now carry two different lifespans.
+
+- **New `WriteExpiry`** (package-private, `engine/caching`) — the `Expiry` implementation. `never()` for size-only caches (an entry written without a lifespan still never expires on its own); `of(ttl)` for TTL caches (identical observable behaviour to `expireAfterWrite`). `expireAfterRead` returns `currentDuration`, so expiry stays expire-after-**write** and a read never keeps an entry alive.
+- **`CacheImpl`** — `put`/`putIfAbsent` route through `VarExpiration`, which is atomic and returns the replaced value in one operation. `putAll` applies the lifespan per entry. Both `replace` overloads do the replace and then `setExpiresAfter` on success — **not atomic**, and the javadoc says so, because Caffeine has no replace-with-duration primitive. A **negative lifespan means unlimited** per the `ICache` contract and is translated into an effectively infinite duration; forwarding it would make Caffeine throw `IllegalArgumentException`. The false javadoc about `CachedResult.expiresAt` is gone.
+- **`NonceCacheService`** — asks for `getCache(name, maxAge + clockSkew + 60s)` (390s with the defaults) instead of the size-only cache, and the fictional comment about `application.properties` is deleted.
+- **`CacheFactory.CACHE_SIZES`** — `paginated-tool-responses` pinned at 1 000 (entries are whole oversized tool responses; the TTL is now the primary eviction path and the cap only bounds memory) and `nonce-replay-protection` raised to 100 000. The 1 000 default was a security hole: on a busy A2A endpoint a nonce could be size-evicted while its timestamp still passed the freshness check, re-opening the replay window. 100 000 covers ~300 signed requests/second sustained across the whole ~5.5-minute window.
+
+### Design decisions
+
+- **Variable expiry in the factory, not a per-cache workaround.** The alternative — one Caffeine instance per distinct TTL value, keyed like the existing `name:ttl=…` scheme — would have given `tool-results` nine separate caches with nine separate size budgets and no shared eviction. Per-entry expiry is what the `ICache` contract already promised.
+- **`expireAfter` replaces `expireAfterWrite`, it is not added to it.** Caffeine throws `IllegalStateException` at `build()` if both are configured, which would have failed the `@PostConstruct` of `SlackEventHandler`, `ChannelTargetRouter` and `NonceCacheService` on startup. `CacheFactoryTest` pins this.
+- **`maxIdleTime` on the two six-argument overloads is explicitly unsupported.** Caffeine cannot combine a per-entry write duration with a per-entry idle duration. The `lifespan` is honoured (previously both were discarded) and the javadoc states the limitation. These overloads have no callers in EDDI.
+- **A `CacheImpl` over a cache with no variable expiry degrades instead of throwing.** Only reachable by constructing the class directly rather than through `CacheFactory`; the constructor logs a WARN naming the cache.
+- **15 minutes is comfortably longer than a tool-calling loop.** The `PaginatedResponseStore` TTL runs from `store()`, and a loop is bounded by the LLM request timeout — seconds to a couple of minutes. `FetchToolResponsePageTool` already returns "It may have expired (15 minute TTL)" for an unresolvable `responseId`; that message is finally true.
+
+### ⚠️ Operator-visible behaviour change
+
+- **Tool results that were cached forever now expire on the smart-TTL table.** Cache hit rate will fall and real tool invocations — with their external API spend — will rise. The effect is sharpest for the short-TTL tools: `weather` (300s), `news` (600s), `websearch` (1800s), and anything with no table entry (300s default). `calculator`/`pdfreader`/`dataformatter`/`textsummarizer` (24h–7d) barely move. Watch `eddi_tool_cache_hits_total` / `eddi_tool_cache_misses_total`.
+- **This is a correctness fix, not a regression.** Serving a 5-day-old weather reading was never intended behaviour.
+- **Paginated tool responses now expire 15 minutes after they are stored.** An LLM that sits on a `responseId` past that gets the existing "may have expired" error instead of a page.
+- **A2A replay nonces now expire ~6.5 minutes after first use** instead of living until size eviction. Steady-state nonce memory drops; replay protection gets *stronger*, not weaker, because the cache is also 100× deeper.
+- **No configuration change is required or available.** All three TTLs were already the documented intent; nothing new is exposed.
+- **⚠️ GraalVM native image — unverified.** Caffeine picks a generated `BoundedLocalCache` subclass per feature combination, and `quarkus-caffeine` registers a *fixed* list of those classes for reflection at build time. Variable expiry selects a different generated family that may not be on that list; if so, `Caffeine.build()` fails at first cache creation and every `@PostConstruct` calling `getCache(...)` dies at startup. **This cannot fail in JVM mode and is invisible to `mvnw test` and JVM-mode CI.** Logged as a Phase 3 blocker in `planning/native-image-migration.md` — the first native smoke test must exercise both `getCache(name)` and `getCache(name, ttl)`.
+
+### Tests
+
+`CacheImplTest`'s seven `*_delegatesToPut` cases asserted only that a value was readable immediately after a TTL put — true with or without the fix, which made them a codification of the defect. They are replaced by 26 ticker-driven cases covering all seven overloads: entry gone past the lifespan, per-entry (not cache-wide) expiry, expire-after-write rather than after-access, negative lifespan means unlimited, and the degraded no-variable-expiry path. `ToolCacheServiceTest` gains a `Smart TTL is load-bearing` group wired to a **real** `CacheImpl` over a ticker — a 60s `datetime` result dies at 61s while a 7-day `calculator` result does not — which is what finally makes `TOOL_TTL_SECONDS` more than a lookup table. `PaginatedResponseStoreTest` runs against a real cache too and winds past 901s. `CacheFactoryTest` non-vacuously protects the one expiry path that already worked. `NonceCacheServiceTest` captures the TTL and asserts it exceeds `maxAge + clockSkew`. New shared test seam: `TestCaches` (`FakeTicker` + a production-shaped cache).
+
+Every behavioural test above was mutation-checked: with `variableExpiry` forced to `null` (the old behaviour) 10 `CacheImplTest`, 5 `ToolCacheServiceTest` and 2 `PaginatedResponseStoreTest` cases fail; forwarding a negative lifespan straight to Caffeine fails all 5 negative-lifespan cases with `IllegalArgumentException`; dropping `expireAfter` from `getCache(name)` fails `CacheFactoryTest.perEntryTtlIsHonoured`; making `expireAfterRead` reset the clock fails 11 cases; reverting `NonceCacheService` to the size-only cache fails both new nonce cases.
+
+### Docs
+
+`docs/security.md` and `docs/langchain.md` said per-tool TTLs were "computed but not enforced" — corrected. `planning/native-image-migration.md` gains the Caffeine variable-expiry caveat above.
+
+---
+
+## 🔒 Scope the tool-result cache per identity — one user's tool result no longer reaches another (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D5**, the highest-severity item in the langchain4j remediation backlog. `ToolCacheService` built its cache key as `toolName + ":" + arguments` and nothing else. That is a single global namespace: if user A asked `getAccountBalance` with `{"account":"main"}` and user B later made the byte-identical call, B was served A's cached result verbatim, with no execution and no authorization check in between. Every agent with `enableToolCaching` (default `true`) and a tool whose output depends on *who* is asking was affected.
+
+### The fix
+
+Every cache key now starts with a **scope tag**:
+
+```text
+args = (arguments == null ? "" : arguments)
+key  = scopeTag + "|" + toolName + ":" + (args.length() > 2048 ? sha256(args) : args)
+```
+
+| Scope          | Tag                                    | Reused by                                      |
+| -------------- | -------------------------------------- | ---------------------------------------------- |
+| `user`         | `u:<first 32 hex of SHA-256(userId)>`  | only the same authenticated user (the default) |
+| `conversation` | `c:<conversationId>`                   | only the conversation that produced the entry  |
+| `global`       | `g`                                    | everyone — opt-in only                         |
+
+Resolution per tool call is `task.toolCacheScopes[<tool>]` → `task.defaultToolCacheScope` → `user`. Both are new lenient-`String` fields on `LlmConfiguration.Task`; the recognized tokens live in the new `ToolCacheScope` enum (`fromConfig` / `resolve`, following the existing `CascadingStrategy` pattern). Unrecognized or misspelled tokens fall through to `user` rather than failing the agent load — a typo must never silently *widen* a tool's audience.
+
+**Fail-closed identity handling.** `user` scope with no usable user id degrades to the narrower `c:<conversationId>` partition. If neither a user id nor a conversation id is available, `resolveScopeTag` returns `null` and the cache is **bypassed entirely** — no `get`, no `put`. `null` is never turned into `""` or `"unknown"`: that would recreate exactly one shared partition for every anonymous request, i.e. the same bug under a new name. A new `eddi.tool.cache.bypassed` counter (tagged `tool`) makes the bypass visible on `/q/metrics`.
+
+### Changed files
+
+- **`ToolCacheScope`** (new, `modules/llm/tools`) — the recognized scope tokens plus lenient parsing and the per-tool → task-default → `USER` resolution chain.
+- **`ToolCacheService`** — `get`/`put`/`invalidate` now take the scope tag as their first argument. The old unscoped signatures were **deleted, not overloaded**: an overload lets a future caller silently reintroduce the global key. `resolveScopeTag(...)` is a static on this class so the orchestrator can build the tag without injecting the cache.
+- **`ToolExecutionService.executeToolWrapped`** — takes `cacheScopeTag` (3rd parameter, next to the other cache-key inputs) and gates both the read and the write on it being non-null.
+- **`AgentOrchestrator.executeSingleToolCallResult`** — a four-line insertion above the `executeToolWrapped` call resolves the tag from `task` + `memory.getUserId()` + `conversationId`. Because the live tool loop and the HITL resume path already share this one method, both are covered by that single change and no call site or method signature in the orchestrator moved.
+- **`CacheFactory`** — `tool-results` was absent from `CACHE_SIZES` and silently got the 1 000-entry default. Raised to 10 000: scoping multiplies the keyspace by the number of active users, and 1 000 would thrash.
+- **`CacheImpl`** — javadoc and inline comment corrected. They claimed the TTL overloads were safe because "the ToolCacheService already tracks expiry internally via `CachedResult.expiresAt`". **No such field exists** — the wrapper only records `cachedAt`, for a debug log. The comments now state plainly that the TTL argument is discarded and size-based eviction is the only eviction strategy.
+- **Docs** — `security.md` (both the "SHA-256 key" and "within the same conversation" claims were factually false), `langchain.md`, `agent-father-langchain-tools-guide.md`, `metrics.md`, `monitoring/monitoring-guide.md`.
+
+### Design decisions
+
+- **No name-based "pure tool ⇒ GLOBAL" default table.** Agent-mode tool names are `@Tool` *method* names (`calculate`, `getCurrentWeather`), not class names — the existing `contains`-matcher in `getSmartTTL` already fails to recognize them. Guessing purity from a name would hand out cross-user reuse by accident. `global` is opt-in via config only.
+- **No `TENANT` scope.** `TenantQuotaService` is still a single-tenant stub; a tenant partition today would be indistinguishable from `global`.
+- **No global kill-switch flag.** The opt-out is per tool: `"toolCacheScopes": {"<tool>": "global"}`. A deployment-wide "disable scoping" switch is a foot-gun that re-opens the leak for every tool at once.
+- **Scope tag first in the key.** Entries belonging to different identities cannot collide regardless of tool name or arguments.
+- **The user id is hashed, not stored.** Cache keys are visible in heap dumps and debug logs; 32 hex characters of SHA-256 is enough to partition without carrying the identifier around.
+
+### ⚠️ Operator-visible behaviour change (deploy-time)
+
+- **Cross-user tool-result sharing stops.** This is the point of the change, and it is not configurable away except per tool.
+- **Cache hit rate will drop and tool cost will rise.** Entries that were previously shared by the whole deployment are now per user. Expect more misses, more outbound tool/API calls and a higher external spend, proportional to how much cross-user reuse the agent was silently relying on. Watch `eddi_tool_cache_hits_total` / `eddi_tool_cache_misses_total` after deploying.
+- **Any agent that depended on cross-user reuse must opt that tool in explicitly** with `"toolCacheScopes": {"<tool>": "global"}` — and only where the result genuinely does not depend on the caller.
+- **Existing `tool-results` entries are dropped.** The cache is in-process and the key format changed, so the first requests after a restart are misses either way.
+- **New meter:** `eddi_tool_cache_bypassed_total{tool="…"}`. A sustained non-zero rate means tool calls are running with neither a user id nor a conversation id and are paying full tool cost every time — fix the caller, do not widen the scope.
+- **No config migration needed.** `toolCacheScopes` and `defaultToolCacheScope` are optional; stored configs without them behave as `user` scope.
+
+### Not in scope (deliberately)
+
+- **Cache TTLs still do not expire anything** (next item, D5b). `CacheImpl` discards the lifespan argument, so scoped entries are removed by size eviction only. Nothing in this change or its tests implies otherwise.
+- **`ToolRateLimiter` remains cross-user.** Its token buckets are keyed by tool name alone, so one user can exhaust another's budget for a tool. Same class of defect, separate fix — flagged here rather than folded in.
+
+### Tests
+
+`ToolCacheServiceTest` gained the headline regression test `differentUsers_produceDifferentKeys` (same tool, same arguments, two identities ⇒ two distinct captured keys), a read-side twin (`get_otherUser_missesEntry`), the twelve-case scope-resolution table, and five null-scope bypass tests. Two pre-existing vacuous tests were replaced: `longArgs_sha256Key` asserted only `startsWith("calculator:")` and `length < 200` — true for any truncation — and now asserts the exact key against an independently computed SHA-256 oracle; `shortArgs_readableKey` was a byte-identical duplicate of `put_storesInCache` and now asserts the full `scopeTag|tool:args` shape. A `UnscopedApiRemovedTests` tripwire fails if the deleted global-key signatures ever come back. `ToolExecutionServiceTest` covers the bypass at the wrapper level; `AgentOrchestratorCoverageTest` captures the scope tag the orchestrator actually passes for the default, `global` and no-identity cases.
+
+Every behavioural test was mutation-checked: reverting the key scoping, replacing `null` with a placeholder, dropping either null-guard, removing the blank-user-id degradation, dropping the userId at the orchestrator, and ignoring the per-tool scope map each produce failures (e.g. `expected: not equal but was: <getAccountBalance:{"account":"main"}>` and `expected: <fresh result> but was: <SOMEONE ELSES RESULT>`).
+
+---
+
+## 🧹 Delete the dead `enableParallelExecution` config and the parallel tool machinery (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D10**. Two LLM task knobs and ~250 lines of the machinery behind them were removed. Nothing in `src/main` read any of it.
+
+### What was dead, and why wiring it was not an option
+
+`LlmConfiguration.Task` declared `enableParallelExecution` (default `false`) and `parallelExecutionTimeoutMs` (default `30000`), with getters and setters and **zero production readers** — the only Java references outside the declaration were POJO round-trip assertions in two test classes.
+
+The machinery they were meant to switch on was `ToolExecutionService.executeToolsParallel` / `executeToolsParallelAndWait`, which took `(Object[] toolInstances, Method[] methods, Object[][] args)` and fanned out over a ten-thread `ExecutorService`. That signature cannot be fed from the live dispatch path. Agent-mode tools are invoked by langchain4j through `ToolExecutor.execute(ToolExecutionRequest, memoryId)`, which yields a `(name, jsonArguments)` pair; for MCP, A2A and dynamic tools there is no Java `Method` behind the tool **at all**, so no `(instance, Method, Object[])` triple exists to pass. This was never a wire-up away from working — it was a second, incompatible execution model that had been left in the tree.
+
+Concurrent tool calls remain a reasonable future feature. They belong at the `AgentOrchestrator` dispatch loop, batching `ToolExecutionRequest`s, not in a reflection path.
+
+### Deleted
+
+- `LlmConfiguration.Task` — both fields and their four accessors. The class javadoc now carries a historical note explaining the removal and the back-compat guarantee.
+- `ToolExecutionService` — `executeToolsParallel`, `executeToolsParallelAndWait`, and **the full cascade they were the only callers of**: `executeTool(Object, Method, Object[], String, ToolExecutionTrace)`, `serializeArguments`, the `IJsonSerialization` injection, the ten-thread `ExecutorService` and its `@PreDestroy shutdown()`. `executeToolWrapped` is now the single entry point, and the class no longer allocates a thread pool per bean for nothing.
+- Five meters: `eddi.tool.execution.parallel` (the only one registered eagerly, at `@PostConstruct`) plus `…parallel.count`, `…parallel.duration`, `…parallel.timeout` and `…parallel.error`, all four of which were created lazily at increment sites that could not be reached and therefore never appeared on `/q/metrics` at all.
+- The corresponding rows in `docs/metrics.md` and `docs/monitoring/monitoring-guide.md`, and the **"Parallel Execution" panel** (`id: 33`) from `grafana-data/dashboards/eddi-operations.json` — an addition to the original scope, found while tracing the metric names. The two surviving panels in that dashboard row were widened from `w:8` to `w:12` to fill it.
+
+### Design decisions
+
+- **The cascade was taken deliberately, not stopped at the two named methods.** Half-deleting would have left `executeTool`, `serializeArguments`, an injected serializer and a thread pool alive with no production caller — the worst of both outcomes. The trade was ~15 reflection-based tests across three classes; every one of them exercised a path production cannot enter (see below).
+- **`@PostConstruct init()` is kept**, now registering nothing and only logging. Every remaining meter in the class is per-tool (tagged `tool`) and created lazily on first use, so there is nothing left to pre-register; the startup log is pre-existing behaviour and removing it is an unrelated change.
+- **`synchronized` stays on `ToolExecutionTrace.addToolCall` / `addFailedToolCall`.** Its javadoc justified the keyword by naming `executeToolsParallel` as the concurrent writer, so it would have become a comment pointing at deleted code. The rationale is restated on its true footing: the trace is a shared mutable accumulator that publishes no happens-before edge of its own; today's tool loop writes single-threaded, so the guard is defensive rather than load-bearing, and the cost of keeping it is nil against silent corruption of an audit artefact.
+- **No `ExtensionDescriptor` change was needed** — `LlmTask.getExtensionDescriptor()` only ever exposed `uri`.
+
+### Stored configurations stay valid
+
+Every mapper that reads an LLM configuration — REST, Postgres JSONB, `@PersistenceMapper`, and the Mongo BSON mapper — is built from `SerializationCustomizer.configureObjectMapper`, which sets `FAIL_ON_UNKNOWN_PROPERTIES=false`. A `langchain.json` already in MongoDB carrying `"enableParallelExecution": true` still deserializes; the key is ignored on read and dropped on the next save.
+
+New `LlmConfigurationParallelExecutionLegacyFieldsTest` is the tripwire for that invariant: it loads a legacy document through both the JSON and the Mongo BSON mapper and asserts the surrounding live fields (`defaultRateLimit`, `toolRateLimits`, `maxToolIterations`, …) still populate. Verified non-vacuous by flipping `FAIL_ON_UNKNOWN_PROPERTIES` to `true` locally — all three deserialization tests then fail with `UnrecognizedPropertyException`. The same class asserts via `java.beans.Introspector` that `Task` exposes no `enableParallelExecution` / `parallelExecutionTimeoutMs` bean property, so a getter/setter pair cannot quietly put the knob back on the REST contract.
+
+### Tests
+
+- **Removed:** the `ParallelTests` / `ParallelAndWaitTests` / `ParallelExec` nested classes and every `executeTool(Object, Method, …)` and `serializeArguments` test across `ToolExecutionServiceTest`, `ToolExecutionServiceBranchTest` and `ToolExecutionServiceExtendedTest`, plus the two `shutdown()` tests. **None of them covered anything still live** — they were the only callers of those methods anywhere outside the class, so they exercised a path production can never enter and stayed green whether the "feature" worked, was broken, or was disabled. Two were vacuous even on their own terms: `parallelTimeout` passed zero tools (`new Object[0]`), so `allOf()` completed immediately and the `TimeoutException` branch it claimed to cover was never taken; and `concurrentToolsShareTraceWithoutCorruption` spent 50 rounds × 32 tasks of CI wall-clock defending against a shared-trace race that no production code path can produce. The four POJO assertions on `getEnableParallelExecution() == false` / `getParallelExecutionTimeoutMs() == 30000L` pinned defaults nothing read.
+- **Added (fails before the deletion, passes after):** `ToolExecutionServiceTest.ParallelMachineryRemovedTests` — no `executeToolsParallel*` and no `executeTool` on the public API, and no meter whose id starts with `eddi.tool.execution.parallel` after `init()`. Mutation-checked by restoring the old `ToolExecutionService`: all three fail, the meter one reporting `expected: <[]> but was: <[eddi.tool.execution.parallel]>`.
+- `LlmConfigurationParallelExecutionLegacyFieldsTest` mutation-checked by restoring the old `LlmConfiguration`: `rewriteDropsRemovedParallelKeys` and `taskExposesNoParallelExecutionBeanProperty` both fail.
+
+### Operator-visible changes
+
+- **Five Prometheus series disappear** rather than reading zero: `eddi_tool_execution_parallel_total`, `…_parallel_count_total`, `…_parallel_duration_seconds`, `…_parallel_timeout_total`, `…_parallel_error_total`. Only the first was ever exported, and it could only ever be `0`. Any dashboard or alert rule referencing them outside this repo will show "no data" — no signal is lost.
+- **No agent behaviour changes.** Both deleted fields were inert at every value, so no configuration executes differently.
+
+### Follow-up required in EDDI-Manager (different repo) — the one user-visible risk
+
+The Manager's LLM editor renders a **"Parallel Tool Execution" checkbox** (i18n key `llmEditor.parallelExecution`, `data-testid` `enable-parallel-execution`) plus a conditional `parallelExecutionTimeoutMs` input. That checkbox is now **backed by nothing on the server**.
+
+Worse than inert: because the mapper uses `JsonInclude.NON_NULL` and the field no longer exists, the key is accepted on POST, silently dropped, and never echoed back — so the checkbox **visibly resets to unchecked on every reload**. Before this change it at least persisted while doing nothing. Removing the control in EDDI-Manager should land in the same release.
+
+**Yes — the checked-in Manager bundles in *this* repo also carry it.** Both `src/main/resources/META-INF/resources/assets/index-B36D6B8M.js` (the one `manage.html` loads) and `index-CHgQ1fX-.js` (a second bundle graph, reachable only through chunk imports such as `cssMode-BPLGavJr.js`) contain one `enableParallelExecution` occurrence and one `data-testid="enable-parallel-execution"` each. They are **built artifacts and were deliberately not hand-patched** — the fix is to remove the control in the EDDI-Manager source, rebuild, and re-vendor both bundles. Same follow-up shape as the `injectionStrategy` `<select>` recorded in the D8 entry below.
+
+---
+
+## 📝 State plainly that `TenantQuotaService.recordCost` has no callers (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D9**, part 3 of 3 — documentation only, no behaviour change.
+
+`TenantQuotaService.recordCost(tenantId, cost)` is the post-call half of the monthly cost budget. It has **zero production callers** — the only references outside its own declaration are in `TenantQuotaServiceTest`. Its pre-call twin `checkCostBudget` *is* wired (`AgentOrchestrator` calls it before each LLM turn), but it reads `ITenantQuotaStore.getMonthlyCost`, which nothing ever writes. So `eddi.tenant.quota.max-monthly-cost-usd` currently cannot deny anything, at any value, on any backend — while the code reads as if cost budgets work.
+
+**Decision: keep the method, document the gap loudly — do not delete it, and do not wire it here.**
+
+- *Not deleted*, because removing it would take away the seam without taking away the gap: `checkCostBudget` stays wired, `ITenantQuotaStore.tryAddCost` stays on the interface, all three stores implement it, and it is now covered by `TenantQuotaStoreParityTest`. A reader would be left with a half-system and no marker.
+- *Not wired*, because there is nothing meaningful to meter yet. Built-in tool executions are priced at $0.00, and there is no token-cost metering for LLM turns at all — wiring today would add write load and record zeros. The candidate call sites are the `ChatResponse`-holding seams tracked as C5 in `docs/superpowers/specs/2026-07-21-manager-coverage-backend-design.md`, whose own notes named the Mongo E11000 (fixed in part 1 of this item) as its blocker. That blocker is now gone.
+
+Both `recordCost` and `checkCostBudget` carry javadoc saying this outright, including the two things that must land first.
+
+---
+
+## 🐛 Deny tenant quotas **at** the limit on the Postgres store (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D9**, part 2 of 3 — on PostgreSQL the daily conversation cap and the per-minute API-call cap were **never enforced at all**.
+
+### The defect
+
+Both increment methods had a fast path (`UPDATE … WHERE window = ? AND counter < ? RETURNING counter`) and, on a miss, a fallback `INSERT … ON CONFLICT (tenant_id) DO UPDATE SET counter = CASE WHEN window_start < ? THEN 1 ELSE counter END … RETURNING counter`, guarded by `if (rs.next() && rs.getInt(1) <= limit)`.
+
+When the window was **not** stale, the `CASE` took its `ELSE` branch and returned the counter **unchanged** — i.e. exactly `limit`, because the fast path only ever increments while `counter < limit`. `limit <= limit` is true, so the store returned OK. And because that path never increments, the counter stayed pinned at `limit` and *every subsequent request also returned OK*. The cap leaked without bound; only the fast path's own `< limit` was ever consulted, and it had already failed.
+
+The two unit tests covering this stubbed the fallback to return `11` against a limit of `10` (and `61` against `60`) — values production can never produce at that point — so they asserted the right verdict through an impossible fixture and stayed green while the quota did nothing.
+
+### The fix
+
+The `ON CONFLICT … DO UPDATE` now carries `WHERE tenant_usage.day_start < ?` (resp. `minute_start`), and resets the counter to **zero** instead of one; the increment statement is then re-run. This mirrors the Mongo store exactly:
+
+1. conditional increment (fast path, the only statement in steady state);
+2. materialise-or-roll — creates the row or resets an expired window, and is a strict no-op for a row whose window is still current;
+3. retry the conditional increment.
+
+The cap is now enforced by a single predicate, `counter < limit`, in every path. A request at the limit with a current window falls through steps 2 and 3 and is denied, and `limit = 0` denies without a special case.
+
+`tryAddCost` got the same materialise-first treatment, which also fixes a latent bug in its `INSERT`: it seeded `day_start` / `minute_start` with a **raw wall-clock timestamp** rather than a truncated window start. A row first created by a cost write therefore had `day_start` *greater* than every truncated value the increment paths compare against — so neither `day_start = ?` nor `day_start < ?` could ever match and that tenant's conversations would have been denied until the next UTC day.
+
+### Tests
+
+- **`TenantQuotaStoreParityTest`** (new, Testcontainers) — runs one boundary sequence through all three `ITenantQuotaStore` implementations (in-memory, Mongo, Postgres) and asserts identical verdicts: allowed below the limit, denied at it, denied for `limit = 0`, unlimited for `limit < 0`, cost denied once spend reaches the budget, and all three counters coexisting. 18 tests. Against the reverted Postgres store exactly the three `postgres:` rows fail (`conversationsDenyAtLimit`, `apiCallsDenyAtLimit`, `zeroLimitDeniesEverything`); the Mongo and in-memory rows stay green, which is the point — this is the only shape that catches a *divergence*.
+- **`PostgresTenantQuotaStoreTest`** — the two impossible fixtures are replaced with faithful ones, plus a structural guard per method asserting the materialise-or-roll SQL carries its expired-window `WHERE`. The behavioural at-limit proof cannot live in a mocked JDBC layer (whether `DO UPDATE` fires is Postgres's decision, not the code's), so the structural guard is what fails there against the old SQL; the parity test carries the behaviour.
+- `PostgresTestBase.createDataSourceInstance()` widened from `protected` to `public` so the parity test can reuse the single shared container instead of starting a second one.
+
+### Operator note — behaviour change
+
+Deployments running `eddi.tenant.quota.enabled=true` **on PostgreSQL** were not enforcing `max-conversations-per-day` or `max-api-calls-per-minute` at all. They will now start returning quota denials (HTTP 429) once a tenant reaches its configured limit. If limits were tuned against the leaky behaviour, they will need revisiting — this reads as a regression but is the cap doing its job for the first time. MongoDB and in-memory deployments are unaffected by this part.
+
+---
+
+## 🐛 Keep all tenant quota counters in one `tenant_usage` document (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D9**, part 1 of 3 — `MongoTenantQuotaStore` was raising **E11000 duplicate-key errors on a live request path**, not silently mis-counting.
+
+### The defect
+
+`tenant_usage` holds one document per tenant carrying all three counters, and it has a `unique(true)` index on `tenantId`. But all three mutating methods issued an **upsert whose filter also pinned a rolling window**:
+
+- `tryIncrementConversations` → `and(tenantId, dayStart >= …, conversationsToday < limit)`
+- `tryIncrementApiCalls` → `and(tenantId, minuteStart >= …, apiCallsThisMinute < limit)`
+- `tryAddCost` → `and(tenantId, costMonth == …)`
+
+Whenever the extra predicate did not match — which is *always* the first time a second counter is touched, because the document written by the first method has no `minuteStart` / `costMonth` field at all — the upsert found nothing, tried to insert a second document for the same tenant, and the unique index rejected it. The exception propagates out of the store.
+
+Concretely, with `eddi.tenant.quota.enabled=true` and both `max-conversations-per-day` and `max-api-calls-per-minute` set, `ConversationService.acquireConversationSlot()` succeeded and the very next `acquireApiCallSlot()` threw — a **500 on a user request**, not a quota denial. (Earlier notes described this as "monthly cost silently reads 0.0 forever". That was true before the unique index was added; since then the failure mode is the hard error above.)
+
+### The design
+
+Every write that can insert now filters on the unique-index key and nothing else. Each operation is:
+
+1. **Fast path** — one conditional `findOneAndUpdate` (`window current AND counter < limit`), **no upsert**. In steady state this is the only round trip, so the hot path is unchanged.
+2. **Materialise** — `ensureUsageDocument(tenantId)`, the single write in the class allowed to insert. Filter is `eq("tenantId", …)`; all counters are seeded together via `$setOnInsert`, so whichever operation runs first for a tenant, the other two find their fields present.
+3. **Roll + retry** — reset an expired window to **zero** (conditional, no upsert), then re-run the fast path.
+
+Steps 2–3 only run when the fast path misses (first call for a tenant, window rollover, or a real limit breach). Because the roll resets to zero and step 3 does the counting, the limit is enforced by exactly one predicate — `counter < limit` — in every path; a `limit` of `0` therefore denies without a special case, matching `InMemoryTenantQuotaStore`.
+
+The stale-window filter is `or(exists(field, false), lt(field, windowStart))`, which doubles as repair for legacy documents written by the previous code that are missing a window field entirely.
+
+### Migration hazard, handled
+
+`createIndex(tenantId, unique=true)` was called unguarded in the CDI constructor. Any instance that ran the pre-index build with quotas enabled may already hold duplicate `tenantId` rows, in which case index creation fails and the **whole application fails to start**. It is now wrapped: on failure it logs an ERROR naming the collection and the remediation, and continues. Safe, because correctness no longer depends on the index — it is a safety net against upsert races, not a precondition.
+
+### Tests
+
+- **`MongoTenantQuotaStoreContainerTest`** (new, Testcontainers) — 13 tests. Against the reverted store, 10 of them fail with `E11000 duplicate key error collection: eddi_test.tenant_usage index: tenantId_1`. Covers: conversations→api-calls, conversations→cost, interleaved three-counter accounting, at-limit denial, zero limit, day/minute window rollover, stale cost month, and a legacy document missing its window fields.
+- **`MongoTenantQuotaStoreTest.UpsertFilterDiscipline`** (new, pure unit, no Docker) — renders every captured filter to BSON and asserts each `upsert(true)` write is keyed on `tenantId` alone. Against the reverted store it fails with `expected: <[tenantId]> but was: <[$and]>`.
+- `TryAddCost.staleMonth` was renamed to `usageDocumentDisappears`: its premise (both conditional updates return null) is no longer "stale month" — it is now a concurrent `resetUsage`, which must not cost the caller a denial.
+
+### Operator note
+
+No configuration change. The subsystem ships dormant (`eddi.tenant.quota.enabled=false`, all limits `-1`), so only deployments that opted in were affected — for those, this turns 500s back into correct allow/deny.
+
+---
+
+## 🧹 Delete dead RAG `injectionStrategy` / `contextTemplate` config (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D8** — two RAG configuration knobs on `LlmConfiguration` that **never had any effect**, removed rather than implemented.
+
+### What was dead, and how it was verified
+
+`LlmConfiguration.KnowledgeBaseReference` declared `injectionStrategy` and `contextTemplate`; `LlmConfiguration.RagDefaults` declared `injectionStrategy` (defaulting to `"system_message"`). Every one of them was write-only:
+
+- `RagContextProvider.retrieveContext` reads exactly two override fields off a `KnowledgeBaseReference` / `RagDefaults` — `maxResults` and `minScore`. It never calls `getInjectionStrategy()` or `getContextTemplate()`.
+- `LlmTask` (the provider's only production caller) unconditionally does `systemMessage += "\n\n## Relevant Context:\n" + ragContext`. There is no branch, so no strategy value could have changed anything.
+- Formatting is fixed in `RagContextProvider.formatRagContext` (`### Source: <kb>` headings); no templating engine is reachable from that path, so `contextTemplate` had nowhere to be applied even in principle.
+- Grep across `src/main` returns **zero** reads of either accessor. No REST resource, no `ExtensionDescriptor` (`LlmTask.getExtensionDescriptor()` registers only the `uri` `ConfigValue`), no MCP tool, no migration, no sample agent config in `src/main/resources/initial-agents` or `docs/agent-configs` referenced them. The only Java references were POJO getter/setter round-trip assertions in `LlmConfigurationTest` and `LlmConfigurationModelsTest` — tests that assert a setter stores what you set and would stay green under any behaviour whatsoever.
+
+### Design decision — delete, not wire
+
+Wiring `injectionStrategy` would have meant shipping user-message injection, and that is not a free "finish the feature" change: RAG context routed to the system message is **not** counted against `maxContextTokens` (`ConversationHistoryBuilder` budgets only the assembled history), while context routed into the user message **is**. Turning the knob on would therefore silently change how much conversation history survives windowing for anyone who had already saved `user_message`, with no config edit on their part. `contextTemplate` was worse still — it had zero reads *and* zero UI, and honouring it would have required introducing a templating engine into `RagContextProvider` plus inventing the `{{context}}` semantics the field name implied. Deleting a knob nothing honours is cheaper and more honest than inventing the semantics it advertised. The intended behaviour (system-message injection) is exactly what already happens, so nothing observable changes for any agent.
+
+### ⚠️ Follow-up required in the EDDI-Manager repo (not fixable here)
+
+The Manager UI bundles checked into this repo — `src/main/resources/META-INF/resources/assets/index-B36D6B8M.js` and `index-CHgQ1fX-.js`, loaded by `manage.html` — render an **Injection** `<select>` (System Message / User Message) bound to `injectionStrategy`, for both `knowledgeBases[]` and `ragDefaults`. Relevant strings: the i18n key `llmEditor.injectionStrategy`, the value expression `injectionStrategy??"system_message"`, and the two `onChange` writers `injectionStrategy:<e>.target.value`. `contextTemplate` has no UI presence in either bundle.
+
+**These bundles were deliberately not edited.** They are minified Vite build artifacts (~7 MB, single ~319 000-character lines, mangled identifiers) produced by a separate repo; hand-patching a built artifact is both unsafe and immediately undone by the next Manager release. The dropdown must be removed **in the EDDI-Manager source** and the rebuilt bundles re-committed here.
+
+**Until that lands**, the shipped dashboard still offers the control, and its value is discarded on save — the same thing that happened before this change (the backend ignored it then too), so this is a pre-existing cosmetic defect made no worse, not a regression introduced here. Agent designers should ignore the Injection dropdown.
+
+### Stored-configuration compatibility
+
+**No migration, no operator action.** Every mapper that deserializes an LLM configuration is built from `SerializationCustomizer.configureObjectMapper`, which sets `FAIL_ON_UNKNOWN_PROPERTIES=false` — the REST/CDI mapper (`customize`), the `@PersistenceMapper` used for Postgres JSONB (`PersistenceMapperProducer`), and the MongoDB BSON mapper (`PersistenceModule.buildMongoClientOptions`) all share that one static recipe. Existing `langchain.json` documents in MongoDB/Postgres, and agent ZIPs exported before this change, keep loading unchanged; the leftover keys are ignored on read and dropped on the next save.
+
+### Regression test
+
+New `LlmConfigurationRagLegacyFieldsTest` (`src/test/java/ai/labs/eddi/modules/llm/model/`), 3 tests, pure-unit (no Testcontainers), mirroring the production mapper wiring the way `HitlTimeoutPolicySerializationTest` does. It deserializes a realistic stored `langchain.json` carrying all three removed keys across both RAG modes:
+
+1. `storedConfigWithRemovedRagKeysDeserializesViaJsonMapper` — loads through the REST / Postgres-JSONB / `@PersistenceMapper` recipe, with the surviving fields (`name`, `maxResults`, `minScore`, `enableWorkflowRag`) asserted intact.
+2. `storedConfigWithRemovedRagKeysDeserializesViaBsonMapper` — the raw document is encoded to BSON first, so the decoder sees exactly what an existing `llms` collection holds.
+3. `rewriteDropsRemovedRagKeys` — re-serializing a legacy config must not resurrect either key, and the result must still round-trip (so the two `assertFalse`s cannot pass on an empty/broken rewrite).
+
+**This class is the tripwire for the whole deletion.** (1) and (2) fail the moment anyone flips `FAIL_ON_UNKNOWN_PROPERTIES` on the shared recipe — which would break every stored configuration, not just RAG ones. All three were mutation-checked: flipping that flag to `true` fails all three with `UnrecognizedPropertyException: Unrecognized field "injectionStrategy" ... (3 known properties: "minScore", "maxResults", "name")`; re-adding the fields to `KnowledgeBaseReference` fails (3) with `AssertionFailedError: injectionStrategy was deleted because nothing honoured it; a config rewrite must not resurrect it`; re-adding only `RagDefaults.injectionStrategy` fails (3) the same way.
+
+The pre-existing POJO round-trips in `LlmConfigurationTest` / `LlmConfigurationModelsTest` were trimmed to the surviving fields — they were the vacuous coverage that let these two fields look tested for as long as they did.
+
+### Documentation
+
+`docs/rag.md` never documented either field, so nothing was wrong there — but it also never said where retrieved context *goes*, which is the gap that made an unread "injection strategy" knob plausible in the first place. Added a **Context Injection** subsection stating that vector-RAG context is always appended to the system message under `## Relevant Context:` with no per-KB or per-task switch, plus a note for operators whose stored configs still carry the removed keys. The historical `docs/changelog.md` entry that listed this pair under "Feature exists but knob unwired" was left as-is — it is an append-only record of past work.
+
+**Files:** `src/main/java/ai/labs/eddi/modules/llm/model/LlmConfiguration.java`, `src/test/java/ai/labs/eddi/modules/llm/model/LlmConfigurationRagLegacyFieldsTest.java` (new), `src/test/java/ai/labs/eddi/modules/llm/model/LlmConfigurationTest.java`, `src/test/java/ai/labs/eddi/modules/llm/model/LlmConfigurationModelsTest.java`, `docs/rag.md`
+
+---
+
+## 🧹 Remove dead `eddi.audit.retentionDays`; correct MCP-client and GDPR-retention docs (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Backlog item **D15** — one dead configuration property plus two pieces of documentation that described behaviour the code does not have.
+
+### (a) `eddi.audit.retentionDays` was a silent no-op — removed
+
+**⚠️ Operator-visible.** `src/main/resources/application.properties` shipped `eddi.audit.retentionDays=-1` (and a `%dev.` twin) since the per-category-retention work. **No Java code has ever read it.** `AuditLedgerService` declares four `eddi.audit.*` `@ConfigProperty` values — `enabled`, `flush-interval-seconds`, `dead-letter-path`, `agent-signing-enabled` — and this is not one of them. Anyone who set `eddi.audit.retentionDays=90` (or `EDDI_AUDIT_RETENTIONDAYS=90`) expecting old audit entries to be purged **was getting nothing at all**: no sweep ran, no entry was ever deleted, and no warning was logged. Drop the property from your deployment; if you need time-limited audit storage, do it at the operational/database layer (archival job, partition drop, storage-level TTL).
+
+**Design decision — do NOT implement the sweep; delete the knob.** The audit ledger is append-only *on purpose*. `IAuditStore`'s contract states that implementations "MUST NOT provide update or delete operations", justified by EU AI Act Arts. 17/19 (immutable decision traceability) and GDPR Art. 17(3)(e); `pseudonymizeByUserId` is documented as the sole permitted mutation, and both the MongoDB and PostgreSQL stores enforce insert-only semantics. Wiring a retention sweep would have required breaking that contract to satisfy a property nobody asked for. Removing the property makes the config honest instead.
+
+**Why this one mattered more than a typical dead key:** its sibling `eddi.usermemories.deleteOlderThanDays` **is** read and does drive a real scheduled sweep. Two adjacent, identically-shaped keys where one works and one silently does nothing is exactly the kind of asymmetry an operator cannot detect from the outside.
+
+**Regression test:** new `AuditRetentionConfigTest` (`src/test/java/ai/labs/eddi/engine/audit/`), three assertions, no Quarkus container required:
+1. Every `eddi.audit.*` key declared in `application.properties` (with any `%profile.` prefix stripped) must appear as a quoted string literal somewhere in `src/main/java` — i.e. something actually reads it. This is the general guard: it fails if *anyone* re-adds an unread `eddi.audit.*` property, not just this one. It carries a **vacuity guard** — the scan must first prove it can find `"eddi.audit.enabled"`, a key production demonstrably declares, otherwise a broken scanner would make the whole assertion pass for the wrong reason.
+2. `eddi.audit.retentionDays` specifically is absent, with a failure message explaining why it can never be implemented.
+3. `IAuditStore` declares no `delete*`/`remove*`/`purge*`/`drop*`/`truncate*`/`expire*` method — this pins the append-only design decision the docs now state, so a future contract change has to be deliberate and update the compliance doc alongside it.
+
+All three were mutation-checked: re-adding the two property lines fails (1) and (2); adding a `default long deleteOlderThan(long)` to `IAuditStore` fails (3).
+
+### (b) `docs/mcp-server.md` documented an MCP-client config shape that no longer exists
+
+The "MCP Client — Agents as MCP Consumers" section still described an inline `mcpServers` array on a langchain task. That field and its `getMcpServers()` accessor were deleted in **43ba59811** ("Remove inline mcpServers from LlmConfiguration.Task") without a matching docs update, so the documented JSON has been silently unusable ever since. The section also named a `setup_agent(mcpServers:)` parameter; the real one is **`mcpServerUrls`** (`McpSetupTools.java`).
+
+Rewrote the section against the code rather than the old prose. External MCP servers are configured as **`mcpcalls` workflow extensions** — a versioned configuration resource (`eddi://ai.labs.mcpcalls`, `POST /mcpcallsstore/mcpcalls`), the MCP equivalent of `httpcalls` — referenced from a workflow step ahead of the LLM step. The field table now matches `McpCallsConfiguration`: `mcpServerUrl` (not `url`), `name`, `transport` (default `"http"`, and documented honestly as *informational only* — `McpToolProviderManager.createTransport` unconditionally builds a `StreamableHttpMcpTransport` and never branches on it, so the previously documented `"streamableHttp"` default and "only `streamableHttp` supported" note were both wrong in different directions), `apiKey`, `timeoutMs`, `toolsWhitelist`, `toolsBlacklist`, `mcpCalls`. Added the dual-mode explanation the docs never had: **agent mode** (`AgentOrchestrator.discoverMcpCallTools()` traverses agent → workflow → every `mcpcalls` step at execution time and applies each config's whitelist/blacklist; gated by `enableMcpCallTools` on the LLM task, default `true`) versus **pipeline mode** (`McpCallsTask` matches behavior-rule actions against `mcpCalls[].actions` and invokes tools deterministically, no LLM involved). Corrected the `setup_agent` block to `mcpServerUrls` and documented what `AgentSetupService` actually does with it: one `mcpcalls` config per comma-separated URL (`transport: "http"`, `timeoutMs: 30000`, no whitelist/blacklist, no `mcpCalls` bindings) plus a matching `eddi://ai.labs.mcpcalls` workflow step — nothing is written inline into the LLM configuration.
+
+Also fixed the same drift in `docs/architecture.md`, which claimed "MCP server connections are configured per LLM task".
+
+**Left alone deliberately:** the four other `mcpServers` occurrences in `docs/mcp-server.md` (lines ~179/193/211/224) are the *client-side* `mcpServers` key in Claude Desktop / Antigravity config files — correct as written and unrelated. `HANDOFF.md` and the historical changelog entries that mention the old inline field are append-only records of past work and were not rewritten.
+
+### (c) `docs/gdpr-compliance.md` promised deletion that cannot happen
+
+The retention block documented `eddi.audit.retentionDays` as "delete entries older than N days" — a published compliance statement describing an operation the store forbids. Removed it and replaced it with what is actually true: the audit ledger has no retention property by design, EDDI never time-expires audit entries, and erasure requests are satisfied by pseudonymizing the `userId` via `IAuditStore.pseudonymizeByUserId` on the cascading-erasure path. Added an operator note that the old property was never read, and reworded the per-category bullet list so it no longer implies a configurable audit purge exists.
+
+**Note for reviewers:** this narrows a published compliance claim (EDDI no longer offers even a nominal "time-limited audit retention" option). That is the honest direction — it aligns the doc with `IAuditStore`'s contract — but it is a documentation-visible policy statement and deserves a human read, not a silent patch.
+
+**Blast radius:** zero runtime behaviour change. No Java production code was modified; the only non-doc edit is the removal of a property nothing read. `./mvnw clean compile` clean, `./mvnw validate` clean, 145 tests green across `AuditRetentionConfigTest`, `AuditLedgerServiceTest`, `AuditLedgerServiceExtendedTest`, `AuditLedgerServiceBranchTest`, `AuditHmacTest`, `McpSetupToolsTest`, `McpToolProviderManagerTest`, `McpCallsTaskTest`.
+
+---
+
+## 🗑️ Delete unused `EddiChatMemoryStore` — dead since Phase 6E (2026-07-22)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+Removed `src/main/java/ai/labs/eddi/modules/llm/memory/EddiChatMemoryStore.java` and its two test classes (`EddiChatMemoryStoreTest`, `EddiChatMemoryStoreExtendedTest`). The package `ai.labs.eddi.modules.llm.memory` is now gone entirely — those three files were its only occupants.
+
+**Why it was dead.** The class's own javadoc describes it as "a quarkus-langchain4j `ChatMemoryStore`", but that extension was dropped in **Phase 6E (2026-03-15)** in favour of plain `dev.langchain4j` core. Nothing in `pom.xml` pulls `io.quarkiverse.langchain4j`, so the machinery that would have discovered and used a `ChatMemoryStore` bean — `AiServices`, `ChatMemoryProvider`, `@MemoryId` — is not on the classpath at all. A repo-wide grep confirms none of those four symbols appears anywhere else in the codebase, and `ChatMemoryStore` itself occurred only in the deleted class's own `implements` clause and import. The bean was `@ApplicationScoped`, so CDI instantiated it, but nothing ever injected it and no code path called `getMessages`/`updateMessages`/`deleteMessages`.
+
+**What actually does this job.** The production LLM history path is `ConversationHistoryBuilder` (used by `AgentOrchestrator`/`LlmTask`), which performs the same EDDI-snapshot → langchain4j-`ChatMessage` conversion via the same `ConversationLogGenerator`, but with windowing, token budgeting and multimodal content that the deleted stub lacked. If EDDI ever re-adopts `quarkus-langchain4j` (see `planning/native-image-migration.md`), the bridge would be rebuilt from `ConversationHistoryBuilder`, not from this stub — so nothing of value is lost.
+
+**The 14 deleted tests asserted nothing about shipped behaviour.** Both test classes only pinned a bean with zero production consumers, and several were vacuous on their own terms: `getMessages_emptySnapshot_returnsEmpty` and `GetMessages#returnsMessagesFromSnapshot` both fed in an *empty* `conversationSteps` list and asserted an empty result, never once exercising the role/`ContentType` conversion loop; the two `updateMessages` "no-op" tests called `verifyNoInteractions` on a mock that a single-`LOGGER.trace` method could not possibly touch. Net effect on the suite: 14 fewer tests, and the coverage gate should move neutral-to-positive because the deleted class contributed an entirely *uncovered* conversion block.
+
+**Design decision — the changelog is append-only.** Five earlier entries in this file (from the 2026 test-coverage pushes that created and tidied these test classes) mention `EddiChatMemoryStore`. Those were left untouched: they are accurate records of past work, and rewriting history to hide a since-deleted class would make the log unreliable. This entry is the forward record of the removal.
+
+**Operator impact:** none. No configuration key, REST endpoint, agent JSON field, or persisted document references the class or its package, and no runtime code path could reach it. Nothing to migrate.
+
+**Shared collaborators deliberately untouched:** `ConversationLogGenerator` (5 other production consumers), `IConversationMemoryStore`, `ConversationMemorySnapshot`.
+
+---
+
 ## 🧪 LLM — make `AgentOrchestrator` injectable; cover agent-mode response metadata (2026-07-22)
 
 **Repo:** EDDI (`refactor/agent-orchestrator-injectable`; branched from `fix/orphan-scan-and-quota-defects`, which has since merged to `main` — this branch now targets `main` directly)
