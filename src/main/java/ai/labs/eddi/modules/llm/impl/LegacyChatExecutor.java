@@ -108,8 +108,10 @@ class LegacyChatExecutor {
                 }
             }
             if (metadata.tokenUsage() != null) {
-                responseMetadata.put("tokenUsage", Map.of("inputTokens", metadata.tokenUsage().inputTokenCount(), "outputTokens",
-                        metadata.tokenUsage().outputTokenCount(), "totalTokens", metadata.tokenUsage().totalTokenCount()));
+                // Not Map.of: the three counts are boxed Integers and providers legitimately
+                // report only some of them (Bedrock and Ollama commonly omit the total), so
+                // Map.of would throw NPE and take the whole turn down over telemetry.
+                responseMetadata.put("tokenUsage", AgentOrchestrator.tokenUsageMap(metadata.tokenUsage()));
             }
         }
 

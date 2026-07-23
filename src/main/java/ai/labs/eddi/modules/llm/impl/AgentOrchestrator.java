@@ -43,6 +43,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
@@ -502,6 +503,8 @@ class AgentOrchestrator {
         // is capped at the constant default here — a defensible, rare-path fallback
         // rather than widening resumeToolLoop's signature for the primary knob, which
         // governs the initial pause.
+        String costConversationId = memory.getConversationId();
+        double toolCostBefore = conversationToolCost(costConversationId);
         TokenUsage[] tokenHolder = new TokenUsage[1];
         String response = runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, DEFAULT_TRANSCRIPT_MAX_BYTES, tokenHolder);
@@ -517,6 +520,7 @@ class AgentOrchestrator {
         if (tokenHolder[0] != null) {
             responseMetadata.put("tokenUsage", tokenUsageMap(tokenHolder[0]));
         }
+        responseMetadata.put("toolCostUsd", toolCostDelta(costConversationId, toolCostBefore));
         return new ExecutionResult(response, mergedTrace, responseMetadata);
     }
 
@@ -879,6 +883,8 @@ class AgentOrchestrator {
         List<Map<String, Object>> trace = new ArrayList<>();
 
         // Live path: iteration loop starts at 0, no pre-cleared call ids.
+        String conversationId = memory != null ? memory.getConversationId() : null;
+        double toolCostBefore = conversationToolCost(conversationId);
         TokenUsage[] tokenHolder = new TokenUsage[1];
         String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes, tokenHolder);
@@ -887,7 +893,35 @@ class AgentOrchestrator {
         if (tokenHolder[0] != null) {
             responseMetadata.put("tokenUsage", tokenUsageMap(tokenHolder[0]));
         }
+        responseMetadata.put("toolCostUsd", toolCostDelta(conversationId, toolCostBefore));
         return new ExecutionResult(response, trace, responseMetadata);
+    }
+
+    /**
+     * Accumulated tool cost for a conversation, or {@code 0.0} when nothing has
+     * been tracked for it yet — {@link ToolCostTracker#getConversationCosts}
+     * returns null for an untracked conversation.
+     */
+    private double conversationToolCost(String conversationId) {
+        if (conversationId == null || toolExecutionService == null) {
+            return 0.0;
+        }
+        ToolCostTracker tracker = toolExecutionService.getCostTracker();
+        if (tracker == null) {
+            return 0.0;
+        }
+        ToolCostTracker.ConversationCostMetrics metrics = tracker.getConversationCosts(conversationId);
+        return metrics != null ? metrics.getTotalCost() : 0.0;
+    }
+
+    /**
+     * Dollar cost the tools of THIS model call added, as the difference between two
+     * snapshots of the conversation total. Clamped at zero because
+     * {@link ToolCostTracker#resetConversation} can fire between the snapshots and
+     * would otherwise yield a negative "cost".
+     */
+    private double toolCostDelta(String conversationId, double costBefore) {
+        return Math.max(0.0, conversationToolCost(conversationId) - costBefore);
     }
 
     /**
@@ -938,6 +972,10 @@ class AgentOrchestrator {
         TokenCountEstimator toolContextEstimator = toolContextBudget > 0 ? resolveToolContextEstimator(task) : null;
 
         return AgentExecutionHelper.executeWithRetry(() -> {
+            // A retry REPLAYS this whole lambda, so anything the previous attempt
+            // accumulated must be discarded — otherwise a turn that retried once
+            // reports (and bills) roughly double the tokens it actually used.
+            tokenHolder[0] = null;
             List<ChatMessage> currentMessages = new ArrayList<>(initialMessages);
             // Per-message token memo, local to this attempt: messages are immutable and
             // re-counted on every iteration, so without it a 10-iteration loop tokenizes

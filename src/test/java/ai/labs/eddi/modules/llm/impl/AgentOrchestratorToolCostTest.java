@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -27,6 +28,8 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.output.TokenUsage;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -297,6 +300,94 @@ class AgentOrchestratorToolCostTest {
         orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
 
         assertEquals(0.05, costTracker.getConversationCosts(CONVERSATION_ID).getTotalCost(), 1e-9);
+    }
+
+    /**
+     * The audit ledger's dollar figure is assembled from this metadata key. It has
+     * to be the cost THIS model call added, not the conversation running total —
+     * otherwise a turn with several LLM tasks bills the earlier tasks' tools again
+     * on every later one.
+     */
+    @Test
+    @DisplayName("responseMetadata carries the tool-cost delta of this call, not the conversation total")
+    void responseMetadataCarriesToolCostDelta() throws Exception {
+        ChatModel firstCall = mock(ChatModel.class);
+        when(firstCall.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch())
+                .thenReturn(toolBatch())
+                .thenReturn(text("done"));
+
+        var first = orchestrator.executeIfToolsEnabled(firstCall, "sys", List.of(UserMessage.from("hi")),
+                webSearchTask(), memory);
+        assertEquals(2 * SEARCH_PRICE, (Double) first.responseMetadata().get("toolCostUsd"), 1e-9);
+
+        // Second call on the SAME conversation: the tracker total is now 3 searches,
+        // but this call only added one.
+        ChatModel secondCall = mock(ChatModel.class);
+        when(secondCall.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch())
+                .thenReturn(text("done"));
+
+        var second = orchestrator.executeIfToolsEnabled(secondCall, "sys", List.of(UserMessage.from("hi")),
+                webSearchTask(), memory);
+        assertEquals(3 * SEARCH_PRICE, costTracker.getConversationCosts(CONVERSATION_ID).getTotalCost(), 1e-9);
+        assertEquals(SEARCH_PRICE, (Double) second.responseMetadata().get("toolCostUsd"), 1e-9);
+    }
+
+    @Test
+    @DisplayName("toolCostUsd is 0.0 when the conversation was never cost-tracked")
+    void toolCostDeltaIsZeroWhenNothingTracked() throws Exception {
+        // Tools are offered but the model never calls one, so ToolCostTracker has no
+        // entry for this conversation and getConversationCosts returns null.
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("done"));
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")),
+                webSearchTask(), memory);
+
+        assertNotNull(result);
+        assertEquals(0.0, (Double) result.responseMetadata().get("toolCostUsd"), 1e-9);
+    }
+
+    /**
+     * {@code RetryConfiguration.executeWithRetry} replays the whole tool-call loop
+     * lambda, and the token accumulator lives outside it. Without an explicit reset
+     * the discarded attempt's tokens stay on the total, so a retried turn reports
+     * (and, once prices are configured, bills) roughly double what it used.
+     */
+    @Test
+    @DisplayName("a retried tool loop reports one attempt's tokens, not both")
+    void retriedLoopDoesNotDoubleCountTokens() throws Exception {
+        var task = webSearchTask();
+        var retry = new RetryConfiguration();
+        retry.setMaxAttempts(2);
+        retry.setBackoffDelayMs(1L);
+        task.setRetry(retry);
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class)))
+                // attempt 1: one accounted model call, then a retryable failure
+                .thenReturn(usage(toolBatch(), 10, 20, 30))
+                .thenThrow(new RuntimeException("rate limit exceeded"))
+                // attempt 2: replayed from scratch
+                .thenReturn(usage(toolBatch(), 10, 20, 30))
+                .thenReturn(usage(text("done"), 1, 2, 3));
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        assertEquals("done", result.response());
+        @SuppressWarnings("unchecked")
+        var tokenUsage = (Map<String, Object>) result.responseMetadata().get("tokenUsage");
+        assertNotNull(tokenUsage);
+        assertEquals(11, tokenUsage.get("inputTokens"), "the abandoned attempt's 10 input tokens must not be counted");
+        assertEquals(22, tokenUsage.get("outputTokens"));
+        assertEquals(33, tokenUsage.get("totalTokens"));
+    }
+
+    private static ChatResponse usage(ChatResponse response, int in, int out, int total) {
+        return ChatResponse.builder().aiMessage(response.aiMessage())
+                .metadata(ChatResponseMetadata.builder().tokenUsage(new TokenUsage(in, out, total)).build())
+                .build();
     }
 
     /**
