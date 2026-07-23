@@ -208,10 +208,12 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
                   : t("Workforce.board.askYourBoard", "Ask your task force..."))
           }
           aria-label={
-            placeholder ??
-            (mode === "continue"
-              ? t("Workforce.board.continuePlaceholder", "Continue this discussion…")
-              : t("Workforce.board.askYourBoard", "Ask your task force..."))
+            disabled && disabledMessage
+              ? disabledMessage
+              : placeholder ??
+                (mode === "continue"
+                  ? t("Workforce.board.continuePlaceholder", "Continue this discussion…")
+                  : t("Workforce.board.askYourBoard", "Ask your task force..."))
           }
           disabled={disabled}
           rows={1}

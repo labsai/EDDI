@@ -206,7 +206,18 @@ export function useGroupDiscussionStream() {
         error: null,
         errorKind: null,
         startedAt: s.startedAt ?? new Date().toISOString(),
+        // Keep transcript (appended by group_start handler), but reset
+        // per-round derived fields so stale data doesn't leak into the UI.
+        synthesizedAnswer: null,
+        currentPhase: null,
+        taskPlan: null,
+        taskVerifications: new Map(),
+        tasksInProgress: new Set(),
+        tasksCompleted: new Set(),
         activeSpeakers: new Set(),
+        hitlPause: null,
+        hitlResume: null,
+        cancelInfo: null,
       }));
 
       await consumeStream(

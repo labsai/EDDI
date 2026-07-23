@@ -111,8 +111,12 @@ function WorkforceBoard() {
   const [showMembers, setShowMembers] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showConfig, setShowConfig] = useState(() => {
-    const saved = localStorage.getItem("workforce-board-config-panel");
-    return saved !== null ? saved === "true" : true;
+    try {
+      const saved = localStorage.getItem("workforce-board-config-panel");
+      return saved !== null ? saved === "true" : true;
+    } catch {
+      return true;
+    }
   });
   const membersRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
@@ -120,7 +124,9 @@ function WorkforceBoard() {
 
   // Persist panel state to localStorage
   useEffect(() => {
-    localStorage.setItem("workforce-board-config-panel", String(showConfig));
+    try {
+      localStorage.setItem("workforce-board-config-panel", String(showConfig));
+    } catch { /* storage unavailable — silently degrade */ }
   }, [showConfig]);
 
   // ─── Data ──────────────────────────────────────────────────────

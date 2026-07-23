@@ -30,14 +30,20 @@ import { cn } from "@/lib/utils";
 export function WorkforceChat() {
   const { t } = useTranslation();
   const [showDetails, setShowDetails] = useState(() => {
-    const saved = localStorage.getItem("workforce-chat-details-panel");
-    return saved !== null ? saved === "true" : true;
+    try {
+      const saved = localStorage.getItem("workforce-chat-details-panel");
+      return saved !== null ? saved === "true" : true;
+    } catch {
+      return true;
+    }
   });
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
 
   // Persist panel state to localStorage
   useEffect(() => {
-    localStorage.setItem("workforce-chat-details-panel", String(showDetails));
+    try {
+      localStorage.setItem("workforce-chat-details-panel", String(showDetails));
+    } catch { /* storage unavailable — silently degrade */ }
   }, [showDetails]);
 
   // Read selected agent from the ChatPanel's shared store
