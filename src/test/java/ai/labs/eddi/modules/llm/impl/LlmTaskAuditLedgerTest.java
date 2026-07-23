@@ -150,25 +150,16 @@ class LlmTaskAuditLedgerTest {
         lenient().when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
         lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
 
+        // PR #604 made AgentOrchestrator an injected collaborator, so it is passed
+        // straight to the constructor — the reflective field write this test used
+        // before is no longer needed.
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
-                mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class),
-                mock(PdfReaderTool.class), mock(WeatherTool.class), mock(FetchToolResponsePageTool.class),
-                mock(IApiCallExecutor.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
-                mock(RagContextProvider.class), mock(IUserMemoryStore.class),
-                new TokenCounterFactory(), mock(ConversationSummarizer.class),
-                promptSnippetService, globalVariableResolver, counterweightService,
-                identityMaskingService, mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null, null, null, null, null, null, new SimpleMeterRegistry(),
-                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
-
-        Field orchestratorField = LlmTask.class.getDeclaredField("agentOrchestrator");
-        orchestratorField.setAccessible(true);
-        orchestratorField.set(llmTask, agentOrchestrator);
+                mock(IApiCallExecutor.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                mock(RagContextProvider.class), new TokenCounterFactory(),
+                mock(ConversationSummarizer.class), promptSnippetService, globalVariableResolver,
+                counterweightService, identityMaskingService,
+                agentOrchestrator, new ConversationHistoryBuilder(), new SimpleMeterRegistry());
 
         wireMemory();
     }

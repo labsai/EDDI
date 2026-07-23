@@ -5,7 +5,6 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -18,7 +17,6 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -27,6 +25,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -96,35 +95,24 @@ class LlmTaskExtendedBranchTest {
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
         var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
-        var toolResponseTruncator = new ToolResponseTruncator(
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), chatModelRegistry);
 
         mockSnippetService = mock(PromptSnippetService.class);
         when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(mockSnippetService,
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
         counterweightService.initMetrics();
         var identityMaskingService = new IdentityMaskingService(
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
         identityMaskingService.initMetrics();
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
-                mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class),
-                mock(PdfReaderTool.class), mock(WeatherTool.class), mock(FetchToolResponsePageTool.class),
-                mock(IApiCallExecutor.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
-                mock(RagContextProvider.class), mock(IUserMemoryStore.class),
-                new TokenCounterFactory(), mock(ConversationSummarizer.class),
+                mock(IApiCallExecutor.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                mock(RagContextProvider.class), new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 mockSnippetService, globalVariableResolver, counterweightService,
-                identityMaskingService, toolResponseTruncator,
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null,
-                null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
-                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
+                identityMaskingService, mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
+                new SimpleMeterRegistry());
     }
 
     private IConversationMemory setupMemory(List<String> actions) {
@@ -473,13 +461,11 @@ class LlmTaskExtendedBranchTest {
             when(gvr.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
             when(gvr.getTemplateData()).thenReturn(Map.of());
             var chatModelRegistry = new ChatModelRegistry(jsonBuilders, gvr, secretResolver);
-            var trt = new ToolResponseTruncator(
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), chatModelRegistry);
             var cws = new CounterweightService(mock(PromptSnippetService.class),
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                    new SimpleMeterRegistry());
             cws.initMetrics();
             var ims = new IdentityMaskingService(
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                    new SimpleMeterRegistry());
             ims.initMetrics();
 
             var snippetService = mock(PromptSnippetService.class);
@@ -487,19 +473,11 @@ class LlmTaskExtendedBranchTest {
 
             var ioTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                     templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                    mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
-                    mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class),
-                    mock(PdfReaderTool.class), mock(WeatherTool.class), mock(FetchToolResponsePageTool.class),
-                    mock(IApiCallExecutor.class), mock(ToolExecutionService.class),
-                    mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                    mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
-                    mock(RagContextProvider.class), mock(IUserMemoryStore.class),
-                    new TokenCounterFactory(), mock(ConversationSummarizer.class),
-                    snippetService, gvr, cws, ims, trt,
-                    mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                    null, null,
-                    null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
-                    mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class));
+                    mock(IApiCallExecutor.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                    mock(RagContextProvider.class), new TokenCounterFactory(), mock(ConversationSummarizer.class),
+                    snippetService, gvr, cws,
+                    ims, mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
+                    new SimpleMeterRegistry());
 
             var memory = setupMemory(List.of("action1"));
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());

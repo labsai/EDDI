@@ -67,6 +67,8 @@ import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.Metrics;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
@@ -96,7 +98,16 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * ToolExecutionService</li>
  * <li>Produce an execution trace for debugging</li>
  * </ul>
+ * <p>
+ * A stateless singleton, per the pipeline-component contract: every field is
+ * {@code final} except the two write-once attachment services, which are
+ * deployment-scoped collaborators rather than per-conversation state. All
+ * conversational state travels through the {@code IConversationMemory}
+ * argument. Constructing it directly (as the unit tests do) stays supported —
+ * the annotations below only add the managed instance that {@code LlmTask}
+ * injects.
  */
+@ApplicationScoped
 class AgentOrchestrator {
     private static final Logger LOGGER = Logger.getLogger(AgentOrchestrator.class);
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
@@ -149,9 +160,11 @@ class AgentOrchestrator {
      * deployment-wide with {@code eddi.tools.budget.enforce-by-default=true}.
      * <p>
      * Read through {@link ConfigProvider} rather than {@code @ConfigProperty}
-     * because AgentOrchestrator is not a CDI bean — {@code LlmTask} constructs it
-     * with {@code new}, so an injection annotation here would never fire and the
-     * field would stay at its initializer while looking configurable.
+     * because the value is {@code static final}: CDI injects into instance fields,
+     * so an injection annotation here would never fire and the constant would sit
+     * at its initializer while looking configurable. (This class became an
+     * {@code @ApplicationScoped} bean in PR #604 — that makes
+     * {@code @ConfigProperty} viable for *instance* state, but not for this one.)
      */
     private static final boolean BUDGET_ENFORCE_DEFAULT = resolveBudgetEnforceDefault();
 
@@ -238,16 +251,27 @@ class AgentOrchestrator {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
 
-    // Set once after construction by LlmTask (@PostConstruct), past the
-    // constructor's final-field freeze; `volatile` publishes this write-once
-    // field to the per-turn reader threads (see setAttachmentServices).
-    private volatile IAttachmentStore attachmentStore;
-    private volatile AttachmentTextExtractor attachmentTextExtractor;
+    // Injected by the container after construction, past the constructor's
+    // final-field freeze; `volatile` publishes these write-once fields to the
+    // per-turn reader threads. Null under direct construction (unit tests), in
+    // which case the readAttachment tool is simply never added.
+    //
+    // Field- rather than constructor-injected only to keep the constructor's
+    // signature — and therefore the eight AgentOrchestrator*Test classes that
+    // call it directly — untouched.
+    @Inject
+    volatile IAttachmentStore attachmentStore;
+
+    @Inject
+    volatile AttachmentTextExtractor attachmentTextExtractor;
 
     /**
-     * Provide the attachment services used to build the {@code readAttachment}
-     * tool. Called by {@code LlmTask} after CDI injection completes; when unset
-     * (e.g. in isolated unit tests) the tool is simply never added.
+     * Test seam for supplying the attachment services to a directly-constructed
+     * orchestrator (CDI populates the fields above in production). Previously this
+     * was the sole wiring path, pushed in by {@code LlmTask}'s
+     * {@code @PostConstruct} — which left any other future injector of this bean
+     * holding an orchestrator with no attachment services, since {@code LlmTask} is
+     * itself lazily created.
      */
     void setAttachmentServices(IAttachmentStore attachmentStore, AttachmentTextExtractor attachmentTextExtractor) {
         this.attachmentStore = attachmentStore;
@@ -266,6 +290,7 @@ class AgentOrchestrator {
      */
     private final TokenCounterFactory tokenCounterFactory;
 
+    @Inject
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             FetchToolResponsePageTool fetchToolResponsePageTool,

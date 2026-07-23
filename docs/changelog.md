@@ -907,6 +907,74 @@ Removed `src/main/java/ai/labs/eddi/modules/llm/memory/EddiChatMemoryStore.java`
 
 ---
 
+## 🧪 LLM — make `AgentOrchestrator` injectable; cover agent-mode response metadata (2026-07-22)
+
+**Repo:** EDDI (`refactor/agent-orchestrator-injectable`; branched from `fix/orphan-scan-and-quota-defects`, which has since merged to `main` — this branch now targets `main` directly)
+
+Follow-up to the token-usage fix below, which shipped without unit coverage.
+
+### Correction to the entry below
+
+Its "Verification limits" paragraph states that `LlmTask` constructs its orchestrator internally, so `executeIfToolsEnabled` cannot be stubbed and "every existing `LlmTask` test therefore exercises the legacy branch". **That is wrong.** `LlmTaskCoverage2Test` and `LlmTaskResumeModeTest` already substituted a mocked `AgentOrchestrator` — via `LlmTask.class.getDeclaredField("agentOrchestrator")` + `setAccessible(true)` — and roughly 20 tests drove the agent branches through it, including the legacy-fallback case.
+
+The branches were covered. What was never exercised was the **metadata dimension**: every stub built its result with the two-argument `ExecutionResult` convenience constructor, which hardcodes `Map.of()`. Against an always-empty map, a task that ignores `responseMetadata()` is indistinguishable from one that honours it. Branch coverage hid a data-flow gap — the more useful lesson than "the seam was missing".
+
+### What changed
+
+- `AgentOrchestrator` → `@ApplicationScoped` with an `@Inject` constructor. **Signature unchanged**, so the 8 `AgentOrchestrator*Test` classes that construct it directly are untouched.
+- `ConversationHistoryBuilder` → `@ApplicationScoped`; it is an orchestrator constructor parameter and had to become resolvable. Stateless (only a static logger).
+- `LlmTask.agentOrchestrator` is a `private final` constructor-injected collaborator. Tests pass a mock as an argument.
+- **`LlmTask`'s constructor went from 41 parameters to 20.** 22 of them existed only to feed `new AgentOrchestrator(...)`, plus `attachmentStore`; all 23 left with the orchestrator, and `AgentOrchestrator` + `ConversationHistoryBuilder` came in. All 10 call sites across 9 test files were rewritten, along with the mocks, imports and locals the removal orphaned.
+- **Attachment services are now injected into `AgentOrchestrator` directly** (`@Inject` fields), and `LlmTask.wireAttachmentServices()` is gone. `setAttachmentServices` survives only as a test seam for directly-constructed orchestrators.
+- All three reflection hacks deleted (`LlmTaskCoverage2Test`, `LlmTaskCoverageTest`, `LlmTaskResumeModeTest` — the third was missed on the first pass and found by grepping the whole test tree rather than the two files already in hand).
+
+### Statelessness check (AGENTS.md §4.1 rule 2)
+
+Every `AgentOrchestrator` field is `final` except the two `volatile` attachment services, which are write-once deployment-scoped collaborators, not per-conversation state; `ToolApprovalGate` and `ChatTranscriptCodec` are stateless helpers. All conversational state travels through the `IConversationMemory` argument. Safe as a shared singleton — which it already effectively was, being owned by the singleton `LlmTask`.
+
+### Tests
+
+New `LlmTaskAgentModeMetadataTest` (7 tests) covering the standard agent branch, the `skipCascade` agent branch, the legacy fallback when the orchestrator declines, the HITL resume continuation (non-null and null), and a null tool trace.
+
+Validated by mutation rather than by observing green: reverting `15b7a08a7` and re-running turns **five of the seven** red. The two that survive (`agentMode_emptyMetadata_publishesEmptyMap`, `agentReturnsNull_fallsBackToLegacyChatExecutor`) pass with and without the fix by design — they pin behaviour the fix did not alter, and are regression guards, not discriminators. Each says so at its own assertion, so the distinction is visible in the file a future reader actually opens, not only here.
+
+> **Correction, and a lesson about arithmetic-by-inspection.** This paragraph twice carried a wrong count, and a Copilot review on PR #604 caught the inconsistency (`four` + `the other two` ≠ seven). Both the number *and* the suggested repair were wrong, in opposite directions: the review proposed listing `resumeMode_nullResult_publishesEmptyMetadata` as a third guard, but that test **does** discriminate — pre-fix, `executeResume` published no metadata at all, so its `verify` fails outright. Re-measuring gave five, not four. The stale figure came from updating the totals by hand across two changes that moved the score in opposite directions: the defensive copy demoted `agentMode_emptyMetadata_publishesEmptyMap` from discriminator to guard (identity assertion → `assertNotSame`), and the later null-trace test added a discriminator back. Mutation scores are cheap to measure and expensive to infer — re-run them.
+
+### Review pass — what it changed
+
+Two independent reviewers (one general, one adversarial and instructed to refute) read the diff, the full orchestrator, and `15b7a08a7`. Neither found a Critical issue; both independently refuted the sharpest hypothesis (that an immutable `Map.of()` could reach a mutation site — production always returns a mutable `HashMap`, and every post-assignment site is read-only). What the pass did produce:
+
+- **A missing third call site.** The fix has three separately-revertable assignments — the `skipCascade` branch, the standard branch, and `executeResume` — and the original five tests reached only the last two. Deleting the `skipCascade` line left all five green. Test six closes it; surgically reverting that one line now fails exactly that one test.
+- **A false claim in this entry**, retracted in place above.
+- **A near-vacuous test.** `agentMode_emptyMetadata_publishesEmptyMap` asserted only emptiness, which the bug satisfies as readily as the fix.
+- **A lazy-init hazard introduced by the refactor itself.** With the orchestrator injectable but its attachments still pushed in by `LlmTask`'s `@PostConstruct`, any *other* future injector of `AgentOrchestrator` would get one with null attachment services, because `@ApplicationScoped LlmTask` is created lazily and might never have run. Fixed by injecting the services into the orchestrator directly. This had been part of the agreed design and was simply not implemented on the first pass.
+- **Defensive copy** at all three sites: `responseMetadata` is now `new HashMap<>(...)` rather than an alias of the orchestrator's map. Dormant today, but the published map lands in conversation memory and the `{{llmMeta}}` namespace, and the two-argument `ExecutionResult` constructor yields an immutable map — so a later metadata write would have thrown on the agent path only, in production only.
+- **Fixture fidelity:** tasks now set `enableBuiltInTools`, so `isAgentMode()` is true. Previously the fixtures stubbed a non-null agent result onto a config for which the real orchestrator always returns `null`.
+
+### Fourth review round — CodeRabbit + Copilot on PR #604
+
+- **Assert the published metadata is *writable*, not merely a distinct instance (applied).** `agentMode_emptyMetadata_publishesEmptyMap` asserted `assertNotSame` — which `Map.copyOf(...)` would also satisfy, while still throwing the instant downstream code adds a metadata key. That is exactly the failure the defensive copy exists to prevent, so the assertion was checking the wrong property. Now probes an actual `put`.
+- **Inline FQNs replaced (applied).** 25 occurrences of `new io.micrometer.core.instrument.simple.SimpleMeterRegistry()` across 9 `LlmTask*Test` classes, swapped for a top-level import per AGENTS.md §4.7. Pre-existing, but carried forward by this branch when the constructor call sites were rewritten, so they belong to it now.
+- **`@Inject` fields left package-private (declined, with evidence).** The suggestion was to privatise `AgentOrchestrator`'s two injected attachment fields. Declined on three counts: `src/main` contains **43 package-private `@Inject` fields and zero private ones**, so this would be the sole exception; `GroupConversationService.attachmentStore` is the identical shape, package-private and written directly by `GroupConversationServiceTest`; and Quarkus recommends package-private precisely to keep ArC from injecting reflectively, which matters for the native-image work on the roadmap. The stated risk — accidental in-package mutation — is also not removed by the change, since the package-private `setAttachmentServices` setter next to the fields exists so the eight `AgentOrchestrator*Test` classes can write them.
+
+### Third review round — Copilot on PR #604
+
+- **Null `trace()` guard, applied.** `executeTask` assigned `agentResult.trace()` straight into `toolTrace` while `executeResume` null-guarded it, so `!toolTrace.isEmpty()` could throw. Both agent branches now guard. Flagged by all three reviewers, and previously deferred here as "pre-existing" — a thin defence given this change edits those exact lines. Mutation-verified: removing the guard yields `NullPointerException: Cannot invoke "java.util.List.isEmpty()" because "toolTrace" is null` and fails exactly the new `agentMode_nullTrace_doesNotThrow`. Worth stating precisely, since the review overstated it: **no production path returns a null trace** — both `ExecutionResult` construction sites pass a fresh list — so this is hardening and consistency, not a live bug fix.
+- **`PersistenceMapperProducer` (rated High), not applied — the finding is incorrect.** It claims the producer omits a production `WRITE_DATES_AS_TIMESTAMPS` setting. That feature defaults to `true` in Jackson, and a hand-built `new ObjectMapper()` is untouched by `quarkus.jackson.*` either way, so the suggested `configure(..., true)` is a no-op. Verified by pointing `SerializationCustomizerInstantFormatTest` at the real producer: all 7 pass, including "Instant stays NUMERIC".
+  **But there is a real defect underneath it, in the test rather than production.** That test's helper is documented as *"Exactly what PersistenceMapperProducer builds"* and is not — it adds a `configure(WRITE_DATES_AS_TIMESTAMPS, true)` the producer never makes, so it reconstructs the mapper instead of exercising it and cannot catch producer drift. That is precisely the drift `dc117cddc` had to revert once. Fix belongs on the branch that owns the file (#603): make the helper `return new PersistenceMapperProducer().persistenceMapper();` — confirmed green.
+
+### Verification limits
+
+CDI wiring **is validated locally**, by `./mvnw package -DskipTests`. Augmentation completes and ArC emits `AgentOrchestrator_Bean` + `AgentOrchestrator_ClientProxy` and `ConversationHistoryBuilder_Bean` + `ConversationHistoryBuilder_ClientProxy` into `target/quarkus-app/quarkus/generated-bytecode.jar`. That answers the only genuinely uncertain part of this change: these are the repo's first package-private `@ApplicationScoped` beans, and ArC proxies them without complaint. An unsatisfied injection point anywhere in the orchestrator's 29-dependency constructor would have failed the build outright, so resolution of the whole graph is confirmed too.
+
+> **Worth remembering, because it cost three wrong claims in this entry's drafts:** build-time augmentation binds no sockets and needs no MongoDB. The local limitation recorded elsewhere in this file is about **tests that bind a loopback socket** (`*IT.java`, HTTP-server tests) — it does not extend to `quarkus:build`. `./mvnw package -DskipTests` is the right local gate for any CDI change and takes ~13s of augmentation.
+
+`@ApplicationScoped` was chosen over `@Singleton` to match repo convention (AGENTS.md §4.1 rule 4) and because a normal scope's client proxy is the safer way to introduce a 29-dependency bean into a dense graph — lazy resolution tolerates ordering that a pseudo-scope resolves eagerly.
+
+> **Correction (same-day review):** an earlier revision of this entry justified the choice by claiming the chain `LlmTask → AgentOrchestrator → IConversationService → IAgentFactory → lifecycle tasks` is cyclic and that a pseudo-scope could break it. That reasoning does not hold and should not be relied on: `ILifecycleTask` is only ever consumed through `Instance<ILifecycleTask>` / `Provider<ILifecycleTask>` (`LlmModule`, `WorkflowStoreClientLibrary`, `ApiCallsModule`), which is lazy and already breaks any cycle at that edge, and `AgentFactory` injects only `IAgentStoreClientLibrary` + `IDeploymentListener`. The conclusion stands; the stated reason was wrong.
+
+---
+
 ## 🔍 More PR review follow-ups (2026-07-22)
 
 **Repo:** EDDI (`fix/orphan-scan-and-quota-defects`)
