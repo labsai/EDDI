@@ -5,6 +5,48 @@
 
 ---
 
+## 🔌 The live tool trace finally reaches the SSE stream — and takes an unredacted payload with it (2026-07-23)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D3**. The `task_complete` SSE frame has advertised a `toolTrace` field since the streaming API shipped, and has never emitted one — not once, on any deployment. The writer and the reader never agreed on a key:
+
+| | Key | Where |
+| --- | --- | --- |
+| Writer | `langchain:trace:<modelType>:<configTaskId>` (e.g. `langchain:trace:openai:taskA`) | `LlmTask.executeTask` / `executeResume` |
+| Reader | `langchain:trace:` + `task.getId().name()` = `langchain:trace:ai.labs.llm` | `LifecycleManager.buildTaskSummary` |
+
+`getLatestData` is a `startsWith` scan, so those two prefixes can never overlap — `summary` never got a `toolTrace` entry and the `if (summary.containsKey("toolTrace"))` branch in `RestAgentEngineStreaming.onTaskComplete` was dead code. The "live tool call display" in the UI has never received a byte.
+
+### The fix — reader side only
+
+`buildTaskSummary` now aggregates over `getAllElements()` instead of computing a key:
+
+- **The writer key is untouched.** `RestToolHistory` and every `ConversationMemorySnapshot` already persisted in MongoDB scan the same `langchain:trace:` prefix with an arbitrary suffix. Changing the writer would have silently broken historical tool-history replay. The literal moved into `MemoryKeys.LANGCHAIN_TRACE_PREFIX` and all three call sites (writer ×2, `RestToolHistory`) now share it — byte-identical output, de-duplication only.
+- **Aggregate, don't take the latest.** `LlmTask` writes one trace key *per LLM config task*, and `getLatestData` reverses the element list and returns only the newest match. A naive `getLatestData(LANGCHAIN_TRACE_PREFIX)` would have shipped a subtly wrong trace — the last task's calls only — which is worse than shipping nothing. `getAllElements()` is an insertion-ordered defensive copy, so write order is preserved for free.
+- **The task-type gate is load-bearing.** Step data survives across tasks within a `ConversationStep`, so an ungated prefix scan would make every task executed *after* the LLM task report the LLM's trace as its own. Reads are gated on `TASK_TYPE_LANGCHAIN`.
+- **Siblings are deliberately not swept in.** `langchain:cascade:trace:`, `rag:trace:` and `rag:httpcall:trace:` do not match the prefix and stay out of the frame.
+
+### ⚠️ Security — tool arguments and results now leave the process unredacted
+
+**Operators and downstream integrators must read this.** Until now a tool call's arguments and its result were reachable only through the owner-scoped `RestToolHistory` endpoint and the audit ledger, which runs `AuditLedgerService.scrubSecrets`. Making the trace reach the stream puts that same payload on the SSE channel, and **nothing on the `buildTaskSummary` → `onTaskComplete` path redacts anything.** Whatever a tool was called with — an API key passed as a tool argument, a token echoed back in a tool result — now streams verbatim to every client subscribed to that conversation's `sayStreaming`.
+
+The correct place to fix that is the producer (the `tool_call` / `tool_result` maps built in `AgentOrchestrator`), so that `RestToolHistory`, the audit ledger and the stream all inherit one redaction rule. That is tracked separately (D12) and is **explicitly out of scope here** — this entry exists so the exposure is not discovered in production. Deployments that stream to untrusted clients and pass secrets through tool arguments should weigh that before taking this build.
+
+### Other operator-visible behaviour changes
+
+1. **The `task_complete` SSE frame gains a `toolTrace` array** on LLM tasks that executed at least one tool (including cascade turns). Purely additive — no existing field changes shape — but **a strict unknown-field-rejecting SSE parser in eddi-chat-ui or EDDI-Manager would now break on it.** [UNVERIFIED — requires a check of both frontends' `task_complete` parsers.]
+2. **The frame can get large.** One `tool_call` + one `tool_result` entry per tool call per iteration, up to `maxToolIterations`; `tool_result` carries the (truncated) tool output. There is no cap on the streamed trace — adding one would be a config field (Golden Rule 1) and is out of scope.
+3. **Non-streaming `say` is unchanged.** `eventSink` is null there, and the only other consumer of `summary`, `buildAuditEntry`, reads `"actions"` and nothing else — audit output is byte-identical.
+
+### Tests
+
+`LifecycleManagerTest.summaryWithToolTrace` was **fully vacuous**: it hand-stubbed `getLatestData("langchain:trace:llm")` for a mock task whose id was `TaskId("llm")` — a name no real task has — so it asserted the reader against its own stub and stayed green through the entire life of the defect. Replaced with six cases that stub `getAllElements()` and never `getLatestData`: trace reaches the summary for a langchain task; multiple trace keys aggregate in write order; a non-langchain task omits it; `langchain:cascade:trace:` is ignored; a non-`List` result is ignored without a `ClassCastException`; no trace keys means no field. Each was mutation-checked against a reverted fix.
+
+Two weak neighbours tightened: `LlmTaskCoverageTest.resume_nonEmptyTrace_stored` from a `startsWith` matcher to the exact key `langchain:trace:openai:taskA` (the writer half of the contract the reader tests now assert), and `RestAgentEngineStreamingExtendedTest.onTaskCompleteIncludesToolTrace` from `assertTrue(data.contains("toolTrace"))` — which also passes on a stringified or malformed payload — to a parsed-JSON shape assertion.
+
+---
+
 ## 🧱 The in-turn tool context finally has a ceiling — `maxToolContextTokens` (2026-07-22)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

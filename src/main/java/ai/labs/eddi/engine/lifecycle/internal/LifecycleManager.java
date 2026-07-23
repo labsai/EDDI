@@ -35,6 +35,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
+import static ai.labs.eddi.engine.memory.MemoryKeys.TASK_TYPE_LANGCHAIN;
 import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -458,10 +460,18 @@ public class LifecycleManager implements ILifecycleManager {
         if (actionData != null && actionData.getResult() != null) {
             summary.put("actions", actionData.getResult());
         }
-        // Tool execution trace (for LLM tasks) — enables live tool call display in UI
-        IData<?> traceData = conversationMemory.getCurrentStep().getLatestData("langchain:trace:" + task.getId().name());
-        if (traceData != null && traceData.getResult() != null) {
-            summary.put("toolTrace", traceData.getResult());
+        // Tool execution trace (LLM tasks only) — enables live tool call display in UI.
+        // One LlmTask execution iterates the LLM config's tasks and writes one
+        // "langchain:trace:<modelType>:<configTaskId>" key PER config task, so the
+        // trace has to be aggregated. getLatestData() cannot be used: it reverses the
+        // element list and returns only the LAST prefix match. The task-type gate is
+        // load-bearing — step data survives across tasks, so an ungated prefix scan
+        // would report the LLM's trace on every task that runs after it in this step.
+        if (TASK_TYPE_LANGCHAIN.equals(task.getType())) {
+            List<Object> toolTrace = collectToolTrace(conversationMemory.getCurrentStep());
+            if (!toolTrace.isEmpty()) {
+                summary.put("toolTrace", toolTrace);
+            }
         }
         // Cascade confidence (when model cascade is active)
         IData<Double> confidenceData = conversationMemory.getCurrentStep().getLatestData("audit:confidence");
@@ -469,6 +479,26 @@ public class LifecycleManager implements ILifecycleManager {
             summary.put("confidence", confidenceData.getResult());
         }
         return summary;
+    }
+
+    /**
+     * Aggregates every {@code langchain:trace:*} entry of the current step, in
+     * write order. {@link IConversationMemory.IConversationStep#getAllElements()}
+     * returns an insertion-ordered defensive copy, so no reordering is needed.
+     * <p>
+     * The caller must gate on the task type — this method deliberately does not, so
+     * it stays a pure read over the step.
+     */
+    private List<Object> collectToolTrace(IConversationMemory.IConversationStep currentStep) {
+        List<Object> aggregated = new ArrayList<>();
+        for (IData<?> element : currentStep.getAllElements()) {
+            if (element != null && element.getKey() != null
+                    && element.getKey().startsWith(LANGCHAIN_TRACE_PREFIX)
+                    && element.getResult() instanceof List<?> entries) {
+                aggregated.addAll(entries);
+            }
+        }
+        return aggregated;
     }
 
     /**

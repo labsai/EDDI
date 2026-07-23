@@ -11,8 +11,10 @@ import java.util.List;
  * workflow.
  * <p>
  * Tasks should import these constants instead of declaring local string
- * constants. Keys that are task-internal (e.g., "langchain:trace") can remain
- * as local {@code MemoryKey<T>} constants within the task itself.
+ * constants. Keys with a dynamic suffix (e.g.
+ * "langchain:trace:&lt;type&gt;:&lt;id&gt;") are registered here as plain
+ * {@code String} prefixes rather than {@code MemoryKey<T>} constants, because
+ * the full key is only known at runtime.
  *
  * @see MemoryKey
  * @see IConversationMemory.IConversationStep
@@ -67,6 +69,35 @@ public final class MemoryKeys {
 
     /** Prompt sent to the LLM. Written by LlmTask. */
     public static final MemoryKey<String> PROMPT = MemoryKey.of("prompt");
+
+    /**
+     * Prefix for LLM tool-execution trace keys. The full key shape is
+     * {@code langchain:trace:<modelType>:<configTaskId>} — LlmTask writes one such
+     * key <em>per LLM config task</em> it executes, so consumers must aggregate
+     * over all matching keys rather than taking the latest one.
+     * <p>
+     * Written by LlmTask (executeTask / executeResume); read by LifecycleManager
+     * (the {@code task_complete} SSE summary) and by RestToolHistory (replay of
+     * persisted conversation snapshots). The literal value is part of the persisted
+     * snapshot format and must not be changed.
+     * <p>
+     * Deliberately does <em>not</em> match the sibling keys
+     * {@code langchain:cascade:trace:}, {@code rag:trace:} and
+     * {@code rag:httpcall:trace:}.
+     *
+     * @since 6.1.0
+     */
+    public static final String LANGCHAIN_TRACE_PREFIX = "langchain:trace:";
+
+    /**
+     * Lifecycle task type reported by LlmTask. Used to gate reads of
+     * {@link #LANGCHAIN_TRACE_PREFIX} keys, which linger in the conversation step
+     * and would otherwise be attributed to every task that runs after the LLM task
+     * in the same step.
+     *
+     * @since 6.1.0
+     */
+    public static final String TASK_TYPE_LANGCHAIN = "langchain";
 
     // ---- Output ----
 

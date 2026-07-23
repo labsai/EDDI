@@ -22,11 +22,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static org.junit.jupiter.api.Assertions.*;
@@ -1043,12 +1045,19 @@ class LifecycleManagerTest {
                     argThat(summary -> summary.containsKey("actions")));
         }
 
-        @Test
-        @DisplayName("task summary includes toolTrace when present")
-        void summaryWithToolTrace() throws Exception {
+        /**
+         * Runs one lifecycle turn for a single task of the given type over the given
+         * step elements, and returns the summary map handed to {@code onTaskComplete}.
+         * <p>
+         * Deliberately stubs only {@code getAllElements()} — never
+         * {@code getLatestData(...)}. The predecessor of these tests hand-stubbed the
+         * exact key the reader computed, which made it assert the reader against its
+         * own stub instead of against the key LlmTask actually writes.
+         */
+        private Map<String, Object> runAndCaptureSummary(String taskType, List<IData<?>> stepElements) throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn(new TaskId("llm"));
-            when(task.getType()).thenReturn("langchain");
+            when(task.getId()).thenReturn(new TaskId("ai.labs.llm"));
+            when(task.getType()).thenReturn(taskType);
 
             lifecycleManager.addLifecycleTask(task);
 
@@ -1057,21 +1066,88 @@ class LifecycleManagerTest {
             when(memory.getCurrentStep()).thenReturn(currentStep);
             when(memory.getConversationId()).thenReturn("conv1");
             when(memory.getAgentId()).thenReturn("agent1");
+            when(currentStep.getAllElements()).thenReturn(stepElements);
 
             var eventSink = mock(ConversationEventSink.class);
             when(memory.getEventSink()).thenReturn(eventSink);
-
-            // Set up tool trace data
-            var traceData = mock(IData.class);
-            when(traceData.getResult()).thenReturn("trace-data");
-            when(currentStep.getLatestData("langchain:trace:llm")).thenReturn(traceData);
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
             lifecycleManager.executeLifecycle(memory, null);
 
-            verify(eventSink).onTaskComplete(eq(new TaskId("llm")), eq("langchain"), anyLong(),
-                    argThat(summary -> summary.containsKey("toolTrace")));
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> summaryCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(eventSink).onTaskComplete(eq(new TaskId("ai.labs.llm")), eq(taskType), anyLong(),
+                    summaryCaptor.capture());
+            return summaryCaptor.getValue();
+        }
+
+        @Test
+        @DisplayName("langchain task: trace key written by LlmTask reaches the summary")
+        void summaryIncludesToolTraceForLangchainTask() throws Exception {
+            // Exactly the key LlmTask writes for a task with type=openai, id=taskA —
+            // see LlmTaskCoverageTest.resume_nonEmptyTrace_stored (writer half).
+            var call = Map.<String, Object>of("type", "tool_call", "tool", "weather");
+            var result = Map.<String, Object>of("type", "tool_result", "tool", "weather");
+            var summary = runAndCaptureSummary("langchain",
+                    List.<IData<?>>of(new Data<>("langchain:trace:openai:taskA", List.of(call, result))));
+
+            assertEquals(List.of(call, result), summary.get("toolTrace"));
+        }
+
+        @Test
+        @DisplayName("langchain task: multiple trace keys are aggregated in write order")
+        void summaryAggregatesMultipleToolTraceKeys() throws Exception {
+            // LlmTask writes ONE trace key per LLM config task, so a reader that takes
+            // only the latest match (getLatestData) silently drops all but the last.
+            var first = Map.<String, Object>of("type", "tool_call", "tool", "weather");
+            var second = Map.<String, Object>of("type", "tool_call", "tool", "calculator");
+            var summary = runAndCaptureSummary("langchain", List.<IData<?>>of(
+                    new Data<>("langchain:trace:openai:taskA", List.of(first)),
+                    new Data<>("langchain:trace:anthropic:taskB", List.of(second))));
+
+            assertEquals(List.of(first, second), summary.get("toolTrace"));
+        }
+
+        @Test
+        @DisplayName("non-langchain task: trace lingering in the step is NOT reported")
+        void summaryOmitsToolTraceForNonLangchainTask() throws Exception {
+            // Step data survives across tasks, so without the task-type gate every task
+            // running after the LLM task would report the LLM's trace as its own.
+            var summary = runAndCaptureSummary("behavior_rules", List.<IData<?>>of(
+                    new Data<>("langchain:trace:openai:taskA",
+                            List.of(Map.<String, Object>of("type", "tool_call", "tool", "weather")))));
+
+            assertFalse(summary.containsKey("toolTrace"));
+        }
+
+        @Test
+        @DisplayName("langchain task: no trace keys → no toolTrace field")
+        void summaryOmitsToolTraceWhenNoTraceKeys() throws Exception {
+            var summary = runAndCaptureSummary("langchain", List.<IData<?>>of(
+                    new Data<>("input", "hello"),
+                    new Data<>("actions", List.of("greet"))));
+
+            assertFalse(summary.containsKey("toolTrace"));
+        }
+
+        @Test
+        @DisplayName("langchain task: langchain:cascade:trace: is not swept into toolTrace")
+        void summaryIgnoresCascadeTraceKey() throws Exception {
+            var summary = runAndCaptureSummary("langchain", List.<IData<?>>of(
+                    new Data<>("langchain:cascade:trace:taskA",
+                            List.of(Map.<String, Object>of("step", 0, "model", "gpt-4o-mini")))));
+
+            assertFalse(summary.containsKey("toolTrace"));
+        }
+
+        @Test
+        @DisplayName("langchain task: non-List trace result is ignored, not cast")
+        void summaryIgnoresNonListTraceResult() throws Exception {
+            var summary = assertDoesNotThrow(() -> runAndCaptureSummary("langchain",
+                    List.<IData<?>>of(new Data<>("langchain:trace:openai:taskA", "not-a-list"))));
+
+            assertFalse(summary.containsKey("toolTrace"));
         }
 
         @Test

@@ -767,7 +767,10 @@ class LlmTaskCoverageTest {
         var t = task("taskA", List.of("action1"), null);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(dataFactory).createData(startsWith("langchain:trace:"), eq(trace));
+        // Exact key, not startsWith: LifecycleManager's SSE reader and RestToolHistory
+        // both key off this precise shape (prefix + modelType + ':' + configTaskId).
+        // A startsWith matcher cannot catch a regression in the suffix.
+        verify(dataFactory).createData(eq("langchain:trace:openai:taskA"), eq(trace));
     }
 
     @Test

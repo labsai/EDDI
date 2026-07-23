@@ -58,6 +58,7 @@ import java.util.*;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -690,7 +691,7 @@ public class LlmTask implements ILifecycleTask {
 
         // Store tool trace if available
         if (!toolTrace.isEmpty()) {
-            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(), toolTrace);
+            var traceData = dataFactory.createData(LANGCHAIN_TRACE_PREFIX + task.getType() + ":" + task.getId(), toolTrace);
             currentStep.storeData(traceData);
         }
 
@@ -943,7 +944,7 @@ public class LlmTask implements ILifecycleTask {
 
         // Tool trace (mirror executeTask)
         if (!toolTrace.isEmpty()) {
-            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(), toolTrace);
+            var traceData = dataFactory.createData(LANGCHAIN_TRACE_PREFIX + task.getType() + ":" + task.getId(), toolTrace);
             currentStep.storeData(traceData);
         }
 
