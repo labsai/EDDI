@@ -385,11 +385,13 @@ class GroupConversationServiceBranchCoverageTest {
             var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
             assertEquals(GroupConversationState.COMPLETED, result.getState());
             // The a1 transcript entry must have empty content, not raw metadata
-            result.getTranscript().stream()
+            var a1Entries = result.getTranscript().stream()
                     .filter(e -> "a1".equals(e.speakerAgentId()))
-                    .forEach(e -> assertTrue(
-                            e.content() == null || e.content().isEmpty(),
-                            "Transcript should not contain raw metadata dump, got: " + e.content()));
+                    .toList();
+            assertFalse(a1Entries.isEmpty(), "Expected a transcript entry for agent a1");
+            a1Entries.forEach(e -> assertTrue(
+                    e.content() == null || e.content().isEmpty(),
+                    "Transcript should not contain raw metadata dump, got: " + e.content()));
         }
 
         @Test
