@@ -17,6 +17,7 @@ import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { useTheme } from "@/components/layout/theme-provider";
 import { STYLE_INFO, type DiscussionStyle } from "@/lib/api/groups";
 import { getInitials } from "@/lib/utils";
+import { ModeSwitcher } from "@/components/shared/mode-switcher";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -109,6 +110,11 @@ export function WorkforceSidebar({
             )}
           </Button>
         )}
+      </div>
+
+      {/* Mode switcher (Manager ↔ Workforce) */}
+      <div className="shrink-0 border-b border-border p-1.5">
+        <ModeSwitcher collapsed={collapsed} />
       </div>
 
       {/* ── New Workforce Button ───────────────────────────────── */}

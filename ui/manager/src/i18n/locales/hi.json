@@ -65,7 +65,10 @@
     "sectionExternal": "बाहरी",
     "activeConversations": "सक्रिय बातचीत",
     "openapi": "OpenAPI",
-    "docs": "दस्तावेज़"
+    "docs": "दस्तावेज़",
+    "modeManager": "प्रबंधक",
+    "modeWorkforce": "कार्यबल",
+    "switchMode": "कार्यक्षेत्र बदलें"
   },
   "theme": {
     "light": "लाइट",

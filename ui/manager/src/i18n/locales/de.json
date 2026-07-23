@@ -65,7 +65,10 @@
     "sectionExternal": "Extern",
     "activeConversations": "Aktive Gespräche",
     "openapi": "OpenAPI",
-    "docs": "Dokumentation"
+    "docs": "Dokumentation",
+    "modeManager": "Manager",
+    "modeWorkforce": "Workforce",
+    "switchMode": "Arbeitsbereich wechseln"
   },
   "theme": {
     "light": "Hell",

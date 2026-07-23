@@ -65,7 +65,10 @@
     "sectionExternal": "ภายนอก",
     "activeConversations": "บทสนทนาที่ใช้งานอยู่",
     "openapi": "OpenAPI",
-    "docs": "เอกสาร"
+    "docs": "เอกสาร",
+    "modeManager": "ผู้จัดการ",
+    "modeWorkforce": "ทีมงาน",
+    "switchMode": "สลับพื้นที่ทำงาน"
   },
   "theme": {
     "light": "สว่าง",

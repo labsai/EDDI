@@ -65,7 +65,10 @@
     "sectionExternal": "خارجي",
     "activeConversations": "المحادثات النشطة",
     "openapi": "OpenAPI",
-    "docs": "التوثيق"
+    "docs": "التوثيق",
+    "modeManager": "المدير",
+    "modeWorkforce": "فريق العمل",
+    "switchMode": "تبديل مساحة العمل"
   },
   "theme": {
     "light": "فاتح",

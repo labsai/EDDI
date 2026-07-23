@@ -65,7 +65,10 @@
     "sectionExternal": "외부",
     "activeConversations": "활성 대화",
     "openapi": "OpenAPI",
-    "docs": "문서"
+    "docs": "문서",
+    "modeManager": "매니저",
+    "modeWorkforce": "워크포스",
+    "switchMode": "작업 공간 전환"
   },
   "theme": {
     "light": "라이트",

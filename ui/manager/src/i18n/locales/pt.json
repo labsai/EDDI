@@ -65,7 +65,10 @@
     "sectionExternal": "Externo",
     "activeConversations": "Conversas ativas",
     "openapi": "OpenAPI",
-    "docs": "Documentação"
+    "docs": "Documentação",
+    "modeManager": "Gerenciador",
+    "modeWorkforce": "Equipe",
+    "switchMode": "Alternar espaço"
   },
   "theme": {
     "light": "Claro",

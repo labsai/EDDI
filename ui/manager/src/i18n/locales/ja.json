@@ -65,7 +65,10 @@
     "sectionExternal": "外部",
     "activeConversations": "アクティブな会話",
     "openapi": "OpenAPI",
-    "docs": "ドキュメント"
+    "docs": "ドキュメント",
+    "modeManager": "マネージャー",
+    "modeWorkforce": "ワークフォース",
+    "switchMode": "ワークスペースを切替"
   },
   "theme": {
     "light": "ライト",

@@ -65,7 +65,10 @@
     "sectionExternal": "外部",
     "activeConversations": "活跃对话",
     "openapi": "OpenAPI",
-    "docs": "文档"
+    "docs": "文档",
+    "modeManager": "管理器",
+    "modeWorkforce": "团队",
+    "switchMode": "切换工作区"
   },
   "theme": {
     "light": "浅色",
