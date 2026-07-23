@@ -167,6 +167,7 @@ if ($answer -match '^[Yy]') {
         git add "src/main/resources/META-INF/resources/manage.html"
         git add "src/main/resources/META-INF/resources/welcome.html" 2>$null
         git add "src/main/resources/META-INF/resources/workforce.html" 2>$null
+        git add "src/main/resources/META-INF/resources/index.html" 2>$null
         
         # Stage the specific old files that were deleted
         foreach ($removed in $removedFiles) {
