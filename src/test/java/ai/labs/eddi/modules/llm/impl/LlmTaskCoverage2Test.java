@@ -246,6 +246,13 @@ class LlmTaskCoverage2Test {
         verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
+    /**
+     * The branch under test is {@code if (userInput != null)}. The matcher for the
+     * user input MUST be {@code nullable(String.class)}: the only invocation a
+     * missing guard could produce is {@code retrieveContext(memory, task, null)},
+     * and {@code anyString()} does not match null — with it this verification
+     * matches zero invocations whether the guard exists or not.
+     */
     @Test
     @DisplayName("null user input (no 'input' data) → vector RAG skipped entirely")
     void nullUserInput_ragSkipped() throws Exception {
@@ -257,7 +264,7 @@ class LlmTaskCoverage2Test {
         var t = task("taskA", List.of("action1"), null);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(ragContextProvider, never()).retrieveContext(any(), any(), anyString());
+        verify(ragContextProvider, never()).retrieveContext(any(), any(), nullable(String.class));
     }
 
     @Test

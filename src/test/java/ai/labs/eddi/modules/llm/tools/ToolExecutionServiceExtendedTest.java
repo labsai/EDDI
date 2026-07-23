@@ -109,6 +109,13 @@ class ToolExecutionServiceExtendedTest {
             verify(rateLimiter, never()).tryAcquire(anyString(), anyInt());
         }
 
+        /**
+         * See {@code ToolExecutionServiceTest#nullConversationIdSkipsCostTracking} —
+         * {@code nullable(String.class)} is load-bearing here. {@code anyString()}
+         * cannot match the null conversationId that a missing
+         * {@code conversationId != null} guard would pass, so it would verify zero
+         * invocations either way and never notice the guard disappearing.
+         */
         @Test
         @DisplayName("should skip cost when conversationId is null")
         void skipsCostWhenNoConversation() {
@@ -116,7 +123,7 @@ class ToolExecutionServiceExtendedTest {
                     () -> "result", false, false, true, 0);
 
             assertEquals("result", result);
-            verify(costTracker, never()).trackToolCall(any(ToolInvocation.class), anyString());
+            verify(costTracker, never()).trackToolCall(nullable(ToolInvocation.class), nullable(String.class));
         }
 
         @Test

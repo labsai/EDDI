@@ -154,21 +154,33 @@ class ToolExecutionServiceTest {
                     () -> "result",
                     true, true, false, 60);
 
-            verify(costTracker, never()).trackToolCall(any(ToolInvocation.class), anyString());
+            verify(costTracker, never()).trackToolCall(nullable(ToolInvocation.class), nullable(String.class));
         }
 
+        /**
+         * Pins the {@code conversationId != null} half of the cost-tracking guard.
+         * <p>
+         * The matcher MUST be {@code nullable(String.class)}: the only invocation this
+         * test could ever observe is {@code trackToolCall(invocation, null)}, and
+         * {@code anyString()} does not match null — with it the verification matches
+         * zero invocations whether the guard exists or not, and drops the guard
+         * silently. Without the guard {@code ToolCostTracker} would
+         * {@code computeIfAbsent(null, …)} on a {@code ConcurrentHashMap} and every
+         * tool call would come back to the model as "Error executing tool: null".
+         */
         @Test
         @DisplayName("should skip cost tracking when conversationId is null")
         void nullConversationIdSkipsCostTracking() {
             when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "testTool", "args")).thenReturn(null);
 
-            service.executeToolWrapped(
+            var result = service.executeToolWrapped(
                     "testTool", "args", SCOPE, null,
                     () -> "result",
                     true, true, true, 60);
 
-            verify(costTracker, never()).trackToolCall(any(ToolInvocation.class), anyString());
+            assertEquals("result", result, "an unattributable call must still return the tool's own result");
+            verify(costTracker, never()).trackToolCall(nullable(ToolInvocation.class), nullable(String.class));
         }
 
         @Test
