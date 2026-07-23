@@ -5,6 +5,43 @@
 
 ---
 
+## 🧵 Model registry and streaming executor — races and un-stripped parameters (2026-07-23)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Four defects around `ChatModelRegistry` and `StreamingLegacyChatExecutor`, three of them introduced by D11 (the commit that stopped stripping `timeout`/`logRequests`/`logResponses` so they could join the model cache key).
+
+**C1 — a concurrent cache clear could hand `null` to `chat(...)`.** `getOrCreate`/`getOrCreateStreaming` did `containsKey(key)` and then `get(key)`. Both caches are cleared from other threads — `invalidateForSecret(null)` on DEK/KEK rotation, and the global-variable invalidation listener on any variable edit. A clear landing between the two calls made the method return `null`; no caller null-checks it (`LlmTask` and `CascadingModelExecutor` pass the result straight to `chat(...)`), so the turn died with an NPE instead of simply rebuilding the model. On the streaming path a `null` additionally *means* "this provider cannot stream", so the race silently downgraded a streaming task to sync.
+
+**C2 — the streaming buffer was read without a happens-before edge.** `fullResponse` is appended only from the provider's callback thread and read only from the executor thread. On the normal path `latch.countDown()`/`await()` publishes those writes; on the **timeout/interrupt** path there is no such edge — `abandoned.set(true)` is a volatile write ordering executor→callback, not callback→executor. The executor's `toString()` was therefore an unsynchronized read of a concurrently mutated `StringBuilder` and could observe a torn buffer (count advanced ahead of the char data, or a stale `value` array after a grow). The `abandoned` gate was also check-then-act: a callback already past the check could still push a token into the shared event sink after the executor believed the attempt silenced — breaking the documented "memory text matches streamed text" guarantee that D11 introduced the flag to provide.
+
+**C3 — un-stripping `timeout` made previously tolerated values fatal.** Every provider builder parses it unguarded: `if (!isNullOrEmpty(v)) builder.timeout(Duration.ofMillis(Long.parseLong(v)))` — and `isNullOrEmpty` does not trim. Before D11 the value's only consumer was `ObservableChatModel.wrapIfNeeded`, which is deliberately lenient (guards blank, swallows `NumberFormatException`, drops zero/negative). So a stored `" "`, `"30s"` or `"0"` (historically "unlimited") went from tolerated to throwing out of `build()` on **every turn** of that agent, with no migration and no warning.
+
+**C4 — un-stripping the logging flags turned on untruncated body logging.** Reaching the provider builders, `logRequests`/`logResponses` install langchain4j's `LoggingHttpClient`, which writes the entire request and response body at INFO with no truncation. EDDI's own `ObservableChatModel`/`ObservableStreamingChatModel` already honour both flags and deliberately truncate to 200/500 chars. Enabling the flags therefore started writing full prompts, full conversation history and full model responses to the application log.
+
+**What changed:**
+
+| Component | Change |
+|---|---|
+| **`ChatModelRegistry`** | Both lookups are a single `get` — a miss from a concurrent clear falls through to construction, which is correct for a pure memoization cache |
+| **`ChatModelRegistry.normalizeTimeout`** | `timeout` is normalised once at the boundary that feeds both the cache key and the builders: trimmed, and dropped when blank, non-numeric or non-positive, mirroring the tolerance it used to enjoy |
+| **`ChatModelRegistry.warnAboutRejectedTimeout`** | WARN naming the model type and the offending value, emitted on the **build** path only so it does not repeat on every cache hit |
+| **`ChatModelRegistry.builderParams`** | `logRequests`/`logResponses` are removed from the map handed to a builder — they stay in the cache key, so D11's correctness fix survives |
+| **`StreamingLegacyChatExecutor`** | A per-attempt lock makes `check + append + emit` and `abandon + toString()` mutually exclusive; the pre-retry `abandoned.set(true)` takes the same lock |
+| **`docs/langchain.md`** | Documents that logging is EDDI's truncating path (not the provider's) and that an unusable `timeout` is ignored rather than fatal |
+
+**Design decisions:**
+
+- **C4 chose option (a): keep the flags in the cache key, strip them from the builder input.** EDDI's decorators already honour both flags on both the sync and streaming path, including for providers whose builder has no logging switch, so nothing is lost — while provider-level logging is unbounded PII exposure that no config field advertises. `logRequestsAndResponses` (Azure OpenAI and Gemini only) is left forwarded: it predates this branch, is provider-specific, and stripping it would be an unrelated behaviour change; it is now documented as the deliberate escape hatch.
+- **Normalising `timeout` before the cache key, not after.** Keeping the normalised value in the key preserves D11's fix (two genuinely different timeouts remain two models) and additionally collapses `" 5000 "` and `"5000"` into one.
+- **The C2 lock is held across `eventSink.onToken`.** That is a bounded call — the SSE sink builds an event and calls a non-blocking `send()` whose `CompletionStage` is never awaited — and holding it is what actually makes "no token after abandonment" true rather than merely likely.
+- **The C1 regression test replaces the cache with a map that clears itself inside `containsKey`**, reproducing the exact interleaving deterministically rather than relying on a stress loop, and asserts `containsKey` is never called at all.
+- **The provider `timeout` contract is mirrored verbatim in the test builder.** Real builders open a loopback socket and cannot be constructed in the unit-test sandbox, so the `isNullOrEmpty` + `Long.parseLong` expression is reproduced in the fake — without it the C3 tests would pass whether or not the registry normalises.
+
+**Tests:** `ChatModelRegistryTest` gains three nested classes (C1 concurrent-invalidation, C3 timeout normalisation, C4 provider logging) and its `getOrCreate_observabilityParamsReachBuilder` now asserts the flags do *not* reach the builder; `StreamingLegacyChatExecutorTimeoutTest` gains `abandonment_isMutuallyExclusiveWithTokenEmission`. All four fixes were mutation-checked: reverting C1 fails both new tests with `expected: not <null>`, C3 with `NumberFormat For input string: " "`, C4 with `logRequests must NOT reach the provider builder`, C2 with `The executor must not set 'abandoned' and read the buffer while a token emission is in flight`.
+
+---
+
 ## 🔐 Tool-cache scope resolution honours its own invariant (2026-07-23)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

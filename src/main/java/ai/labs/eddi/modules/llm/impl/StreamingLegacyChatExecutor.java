@@ -262,6 +262,18 @@ class StreamingLegacyChatExecutor {
             // client renders two answers interleaved and neither matches what is stored in
             // memory. Once an attempt is abandoned its handler goes silent.
             var abandoned = new AtomicBoolean(false);
+            // Appending, emitting and abandoning must be mutually exclusive.
+            // fullResponse is written only by the provider's callback thread and read
+            // only here; on the normal path latch.countDown()/await() publishes those
+            // writes, but the timeout/interrupt path has no such edge — abandoned is a
+            // volatile write ordering executor -> callback, not callback -> executor.
+            // Reading the StringBuilder unsynchronized while it is being mutated can
+            // observe a torn buffer (count advanced before the char data is visible, or
+            // a stale value array after a grow). The same lock also closes the
+            // check-then-act on `abandoned`: a callback already past the check could
+            // otherwise still push a token into the shared event sink after this thread
+            // believed the attempt silenced.
+            final Object streamLock = new Object();
 
             var requestBuilder = ChatRequest.builder().messages(messages);
             if (responseFormat != null) {
@@ -272,14 +284,16 @@ class StreamingLegacyChatExecutor {
             streamingModel.chat(chatRequest, new StreamingChatResponseHandler() {
                 @Override
                 public void onPartialResponse(String partialResponse) {
-                    if (abandoned.get()) {
-                        return;
-                    }
-                    fullResponse.append(partialResponse);
-                    try {
-                        eventSink.onToken(partialResponse);
-                    } catch (Exception e) {
-                        LOGGER.warnf("Error sending token event: %s", e.getMessage());
+                    synchronized (streamLock) {
+                        if (abandoned.get()) {
+                            return;
+                        }
+                        fullResponse.append(partialResponse);
+                        try {
+                            eventSink.onToken(partialResponse);
+                        } catch (Exception e) {
+                            LOGGER.warnf("Error sending token event: %s", e.getMessage());
+                        }
                     }
                 }
 
@@ -309,13 +323,16 @@ class StreamingLegacyChatExecutor {
                 interrupted = true;
             }
 
-            if (timedOut || interrupted) {
-                // Silence the still-running handler before reading what it produced, so the
-                // text returned to memory is exactly the text the client was sent.
-                abandoned.set(true);
+            synchronized (streamLock) {
+                if (timedOut || interrupted) {
+                    // Silence the still-running handler before reading what it produced, so the
+                    // text returned to memory is exactly the text the client was sent. Under the
+                    // lock an in-flight emission completes first and is therefore included —
+                    // never half-included.
+                    abandoned.set(true);
+                }
+                responseText = fullResponse.toString();
             }
-
-            responseText = fullResponse.toString();
             metadata.putAll(buildMetadata(responseRef.get()));
 
             // An interrupt is a cancellation request — the cascade cancelling a step, or
@@ -364,7 +381,9 @@ class StreamingLegacyChatExecutor {
                 if (attempt < maxAttempts) {
                     LOGGER.warnf("Streaming error with empty response, retrying (attempt %d/%d): %s",
                             attempt, maxAttempts, errorRef.get().getMessage());
-                    abandoned.set(true);
+                    synchronized (streamLock) {
+                        abandoned.set(true);
+                    }
                     RetryConfiguration.backoff(attempt, retryConfig);
                     continue;
                 }

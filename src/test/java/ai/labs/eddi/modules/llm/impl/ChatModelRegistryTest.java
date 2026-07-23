@@ -20,11 +20,16 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static dev.langchain4j.data.message.AiMessage.aiMessage;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -68,12 +73,14 @@ class ChatModelRegistryTest {
         builders.put("openai", () -> new ILanguageModelBuilder() {
             @Override
             public ChatModel build(Map<String, String> parameters) {
+                parseTimeoutLikeARealProvider(parameters);
                 lastBuildParams.set(new HashMap<>(parameters));
                 return mockSyncModel;
             }
 
             @Override
             public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+                parseTimeoutLikeARealProvider(parameters);
                 lastBuildStreamingParams.set(new HashMap<>(parameters));
                 return mockStreamingModel;
             }
@@ -98,6 +105,7 @@ class ChatModelRegistryTest {
         uniqueBuilders.put("openai", () -> new ILanguageModelBuilder() {
             @Override
             public ChatModel build(Map<String, String> parameters) {
+                parseTimeoutLikeARealProvider(parameters);
                 return new ChatModel() {
                     @Override
                     public ChatResponse chat(List<ChatMessage> messages) {
@@ -108,6 +116,7 @@ class ChatModelRegistryTest {
 
             @Override
             public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+                parseTimeoutLikeARealProvider(parameters);
                 return new StreamingChatModel() {
                     @Override
                     public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
@@ -116,6 +125,29 @@ class ChatModelRegistryTest {
             }
         });
         uniqueRegistry = new ChatModelRegistry(uniqueBuilders, globalVariableResolver, secretResolver);
+    }
+
+    /**
+     * Reproduces, verbatim, what every shipped provider builder does with
+     * {@code timeout} — an {@code isNullOrEmpty} guard (which does <em>not</em>
+     * trim) followed by an unguarded parse:
+     *
+     * <pre>
+     * if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
+     *     builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
+     * }
+     * </pre>
+     *
+     * The real builders cannot be used here: constructing one opens a loopback
+     * socket, which is unavailable in the unit-test sandbox (see
+     * {@code LanguageModelBuildersTest}). Mirroring the expression keeps these
+     * tests honest about what an unnormalised value would actually do at build
+     * time.
+     */
+    private static void parseTimeoutLikeARealProvider(Map<String, String> parameters) {
+        if (!isNullOrEmpty(parameters.get("timeout"))) {
+            Duration.ofMillis(Long.parseLong(parameters.get("timeout")));
+        }
     }
 
     @Nested
@@ -256,7 +288,7 @@ class ChatModelRegistryTest {
         }
 
         @Test
-        @DisplayName("timeout/logRequests/logResponses reach the builder")
+        @DisplayName("timeout reaches the builder; the logging flags deliberately do not")
         void getOrCreate_observabilityParamsReachBuilder() throws Exception {
             var params = new HashMap<String, String>();
             params.put("apiKey", "test");
@@ -269,8 +301,264 @@ class ChatModelRegistryTest {
             var seen = lastBuildParams.get();
             assertNotNull(seen, "builder should have been invoked");
             assertEquals("5000", seen.get("timeout"), "timeout must reach the provider builder, not be filtered away");
-            assertEquals("true", seen.get("logRequests"), "logRequests must reach the provider builder");
-            assertEquals("true", seen.get("logResponses"), "logResponses must reach the provider builder");
+            assertFalse(seen.containsKey("logRequests"),
+                    "logRequests must NOT reach the provider builder — it installs langchain4j's untruncated body logger");
+            assertFalse(seen.containsKey("logResponses"),
+                    "logResponses must NOT reach the provider builder — it installs langchain4j's untruncated body logger");
+        }
+    }
+
+    /**
+     * C4: {@code logRequests}/{@code logResponses} still shape model identity, but
+     * they no longer reach the provider builders. langchain4j's
+     * {@code LoggingHttpClient} writes whole request and response bodies to the
+     * application log at INFO with no truncation, i.e. full prompts, full
+     * conversation history and full model output. EDDI's own
+     * {@link ObservableChatModel}/{@link ObservableStreamingChatModel} honour both
+     * flags and truncate to 200/500 chars, so they remain the single logging path.
+     */
+    @Nested
+    @DisplayName("Logging flags never reach the provider builders (C4)")
+    class ProviderLoggingTests {
+
+        @Test
+        @DisplayName("logging flags are stripped from the sync builder input but still wrap the model")
+        void getOrCreate_loggingFlagsStrippedFromBuilder() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("logRequests", "true");
+            params.put("logResponses", "true");
+
+            ChatModel model = registry.getOrCreate("openai", params);
+
+            var seen = lastBuildParams.get();
+            assertNotNull(seen);
+            assertFalse(seen.containsKey("logRequests"), "logRequests must not be handed to the provider builder");
+            assertFalse(seen.containsKey("logResponses"), "logResponses must not be handed to the provider builder");
+            assertInstanceOf(ObservableChatModel.class, model, "The flags must still be honoured by EDDI's truncating decorator");
+        }
+
+        @Test
+        @DisplayName("logging flags are stripped from the streaming builder input but still wrap the model")
+        void getOrCreateStreaming_loggingFlagsStrippedFromBuilder() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("logRequests", "true");
+            params.put("logResponses", "true");
+
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", params);
+
+            var seen = lastBuildStreamingParams.get();
+            assertNotNull(seen);
+            assertFalse(seen.containsKey("logRequests"), "logRequests must not be handed to the streaming provider builder");
+            assertFalse(seen.containsKey("logResponses"), "logResponses must not be handed to the streaming provider builder");
+            assertInstanceOf(ObservableStreamingChatModel.class, model, "The flags must still be honoured by EDDI's truncating decorator");
+        }
+
+        @Test
+        @DisplayName("stripping them from the builder input does not remove them from the cache key")
+        void loggingFlags_stillPartOfCacheKey() throws Exception {
+            var quiet = new HashMap<String, String>();
+            quiet.put("apiKey", "test");
+            quiet.put("logRequests", "false");
+            quiet.put("logResponses", "false");
+
+            var loud = new HashMap<String, String>();
+            loud.put("apiKey", "test");
+            loud.put("logRequests", "true");
+            loud.put("logResponses", "true");
+
+            assertNotSame(uniqueRegistry.getOrCreate("openai", quiet), uniqueRegistry.getOrCreate("openai", loud),
+                    "D11's cache-key correctness must survive: the flags still change which model instance a task gets");
+            assertNotSame(uniqueRegistry.getOrCreateStreaming("openai", quiet), uniqueRegistry.getOrCreateStreaming("openai", loud),
+                    "Same on the streaming path");
+        }
+    }
+
+    /**
+     * C3: {@code timeout} now flows into the provider builders, each of which
+     * parses it with an unguarded {@code Long.parseLong}. Values that the previous
+     * sole consumer ({@link ObservableChatModel#wrapIfNeeded}) tolerated — blank,
+     * non-numeric, zero — would abort {@code build()} on every turn of an agent
+     * whose stored config carries one. Normalising at the registry boundary keeps
+     * those configs working without a migration.
+     */
+    @Nested
+    @DisplayName("Stored timeout values are normalised before they reach a builder (C3)")
+    class TimeoutNormalisationTests {
+
+        @Test
+        @DisplayName("a blank timeout still builds a model instead of throwing")
+        void getOrCreate_blankTimeout_stillBuilds() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("timeout", " ");
+
+            ChatModel model = registry.getOrCreate("openai", params);
+
+            assertSame(mockSyncModel, model, "A blank timeout was previously tolerated and must not start failing turns");
+            assertFalse(lastBuildParams.get().containsKey("timeout"), "An unusable timeout must be dropped, not forwarded");
+        }
+
+        @Test
+        @DisplayName("a non-numeric timeout such as \"30s\" still builds a model")
+        void getOrCreate_nonNumericTimeout_stillBuilds() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("timeout", "30s");
+
+            ChatModel model = registry.getOrCreate("openai", params);
+
+            assertSame(mockSyncModel, model, "A non-numeric timeout was previously tolerated and must not start failing turns");
+            assertFalse(lastBuildParams.get().containsKey("timeout"));
+        }
+
+        @Test
+        @DisplayName("a zero timeout (\"unlimited\") still builds a model and adds no bound")
+        void getOrCreate_zeroTimeout_stillBuilds() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("timeout", "0");
+
+            ChatModel model = registry.getOrCreate("openai", params);
+
+            assertSame(mockSyncModel, model, "Zero meant 'no timeout' and must keep meaning that");
+            assertFalse(lastBuildParams.get().containsKey("timeout"));
+        }
+
+        @Test
+        @DisplayName("a blank timeout still builds a streaming model")
+        void getOrCreateStreaming_blankTimeout_stillBuilds() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("timeout", "");
+
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", params);
+
+            assertSame(mockStreamingModel, model);
+            assertFalse(lastBuildStreamingParams.get().containsKey("timeout"));
+        }
+
+        @Test
+        @DisplayName("a valid timeout still reaches the builder and still differentiates the cache key")
+        void getOrCreate_validTimeout_survivesNormalisation() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("timeout", "5000");
+
+            ChatModel model = registry.getOrCreate("openai", params);
+
+            assertEquals("5000", lastBuildParams.get().get("timeout"), "A usable timeout must still configure the provider");
+            assertInstanceOf(ObservableChatModel.class, model, "and must still be honoured by the decorator");
+
+            var other = new HashMap<String, String>();
+            other.put("apiKey", "test");
+            other.put("timeout", "9000");
+            assertNotSame(uniqueRegistry.getOrCreate("openai", params), uniqueRegistry.getOrCreate("openai", other),
+                    "Normalisation must not collapse two genuinely different timeouts into one cached model");
+        }
+
+        @Test
+        @DisplayName("whitespace around a valid timeout collapses to a single cached model")
+        void getOrCreate_paddedTimeout_isTheSameModel() throws Exception {
+            var padded = new HashMap<String, String>();
+            padded.put("apiKey", "test");
+            padded.put("timeout", " 5000 ");
+
+            var plain = new HashMap<String, String>();
+            plain.put("apiKey", "test");
+            plain.put("timeout", "5000");
+
+            assertSame(uniqueRegistry.getOrCreate("openai", padded), uniqueRegistry.getOrCreate("openai", plain),
+                    "' 5000 ' and '5000' are the same timeout and must share one model instance");
+
+            registry.getOrCreate("openai", padded);
+            assertEquals("5000", lastBuildParams.get().get("timeout"), "The builder must receive the trimmed value it can parse");
+        }
+
+        @Test
+        @DisplayName("an unusable timeout and no timeout at all are the same cached model")
+        void getOrCreate_unusableTimeout_sharesTheTimeoutFreeModel() throws Exception {
+            var unusable = new HashMap<String, String>();
+            unusable.put("apiKey", "test");
+            unusable.put("timeout", "not-a-number");
+
+            var none = new HashMap<String, String>();
+            none.put("apiKey", "test");
+
+            assertSame(uniqueRegistry.getOrCreate("openai", unusable), uniqueRegistry.getOrCreate("openai", none),
+                    "A dropped timeout must produce exactly the timeout-free model, not a second identical one");
+        }
+    }
+
+    /**
+     * C1: the caches are cleared from other threads — {@code invalidateForSecret}
+     * on DEK/KEK rotation and the global-variable listener on any variable edit. A
+     * {@code containsKey} check followed by a {@code get} could therefore return
+     * {@code null}, which callers hand straight to {@code chat(...)}. The lookup
+     * must be a single {@code get}.
+     */
+    @Nested
+    @DisplayName("A concurrent cache clear never yields a null model (C1)")
+    class ConcurrentInvalidationTests {
+
+        @Test
+        @DisplayName("a clear landing between check and act rebuilds instead of returning null (sync)")
+        void getOrCreate_clearRacingTheLookup_neverReturnsNull() throws Exception {
+            var racingCache = new ClearOnContainsKeyMap<Object, Object>();
+            installCache(uniqueRegistry, "modelCache", racingCache);
+
+            var params = Map.of("apiKey", "test");
+            assertNotNull(uniqueRegistry.getOrCreate("openai", params), "first call must construct a model");
+
+            ChatModel second = uniqueRegistry.getOrCreate("openai", params);
+
+            assertNotNull(second, "A cache clear racing the lookup must fall through to construction, never hand null to the caller");
+            assertEquals(0, racingCache.containsKeyCalls.get(),
+                    "The lookup must be a single get(); containsKey() followed by get() is the check-then-act that returns null");
+        }
+
+        @Test
+        @DisplayName("a clear landing between check and act rebuilds instead of returning null (streaming)")
+        void getOrCreateStreaming_clearRacingTheLookup_neverReturnsNull() throws Exception {
+            var racingCache = new ClearOnContainsKeyMap<Object, Object>();
+            installCache(uniqueRegistry, "streamingModelCache", racingCache);
+
+            var params = Map.of("apiKey", "test");
+            assertNotNull(uniqueRegistry.getOrCreateStreaming("openai", params), "first call must construct a model");
+
+            StreamingChatModel second = uniqueRegistry.getOrCreateStreaming("openai", params);
+
+            assertNotNull(second, "A null here is indistinguishable from 'this provider cannot stream'");
+            assertEquals(0, racingCache.containsKeyCalls.get(), "The streaming lookup must be a single get() too");
+        }
+
+        private void installCache(ChatModelRegistry target, String fieldName, Map<?, ?> replacement) throws Exception {
+            Field field = ChatModelRegistry.class.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            field.set(target, replacement);
+        }
+    }
+
+    /**
+     * Cache map that makes the invalidation race deterministic: every
+     * {@code containsKey} answers truthfully and then clears the map, i.e. exactly
+     * the interleaving where {@code invalidateForSecret(null)} or the
+     * global-variable listener lands between the check and the following
+     * {@code get}. A single-{@code get} lookup never calls {@code containsKey} at
+     * all, so the clear never happens.
+     */
+    private static final class ClearOnContainsKeyMap<K, V> extends ConcurrentHashMap<K, V> {
+        private static final long serialVersionUID = 1L;
+
+        private final transient AtomicInteger containsKeyCalls = new AtomicInteger();
+
+        @Override
+        public boolean containsKey(Object key) {
+            containsKeyCalls.incrementAndGet();
+            boolean present = super.containsKey(key);
+            super.clear();
+            return present;
         }
     }
 

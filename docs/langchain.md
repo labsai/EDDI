@@ -130,6 +130,10 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 
 > **These three settings are part of a model's identity.** Two tasks that differ only in `timeout`, `logRequests` or `logResponses` get two separate cached model instances, so a task always runs with the settings it declares regardless of which task was constructed first.
 
+> **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
+
+> **An unusable `timeout` is ignored, not fatal.** The value is normalised once before it reaches a provider builder: it is trimmed, and dropped entirely when it is blank, non-numeric (`"30s"`) or non-positive (`"0"`, historically "no timeout"), with a WARN naming the model type. Provider builders parse the value with an unguarded `Long.parseLong`, so without this a stored config carrying one of those values would fail on every turn. `" 5000 "` and `"5000"` are the same timeout and share one cached model.
+
 ### Timeouts and Streaming
 
 Two settings bound an LLM call, and they are deliberately distinct:

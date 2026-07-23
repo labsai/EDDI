@@ -22,13 +22,18 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -267,6 +272,75 @@ class StreamingLegacyChatExecutorTimeoutTest {
             assertEquals("good", result.response());
             verify(eventSink, never()).onToken("LATE");
             verify(eventSink, times(1)).onToken("good");
+        }
+
+        /**
+         * C2: the abandoned flag was a check-then-act and the accumulating
+         * StringBuilder was read without synchronization.
+         * <p>
+         * A callback that had already passed the {@code abandoned} check could still
+         * append and emit while the executor was setting the flag and calling
+         * {@code toString()} — an unsynchronized read of a concurrently mutated
+         * StringBuilder (torn count/value after a grow), and a token pushed into the
+         * shared sink after the executor believed the attempt silenced.
+         * <p>
+         * The observable contract of the fix: abandoning waits for an in-flight
+         * emission, so the text handed to memory is exactly the text the client was
+         * sent. Here the sink blocks mid-emission and the backstop fires underneath it;
+         * the executor must not return until the emission completes.
+         */
+        @Test
+        @DisplayName("abandoning a timed-out attempt waits for an in-flight token emission")
+        void abandonment_isMutuallyExclusiveWithTokenEmission() throws Exception {
+            var emitStarted = new CountDownLatch(1);
+            var releaseEmit = new CountDownLatch(1);
+            var emitted = new CopyOnWriteArrayList<String>();
+
+            ConversationEventSink blockingSink = mock(ConversationEventSink.class);
+            doAnswer(invocation -> {
+                emitted.add(invocation.getArgument(0));
+                emitStarted.countDown();
+                if (!releaseEmit.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("emission was never released");
+                }
+                return null;
+            }).when(blockingSink).onToken(any(String.class));
+
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    // Emit from the provider's own thread and never complete, so the
+                    // executor's backstop fires while the emission is still in flight.
+                    var emitter = new Thread(() -> handler.onPartialResponse("A"));
+                    emitter.setDaemon(true);
+                    emitter.start();
+                }
+            };
+
+            var task = task(null);
+            task.setStreamingTimeoutSeconds(1);
+
+            var pool = Executors.newSingleThreadExecutor();
+            try {
+                var running = pool.submit(() -> executor.execute(model, messages(), blockingSink, task));
+
+                assertTrue(emitStarted.await(5, TimeUnit.SECONDS), "the provider should have started emitting");
+                // Well past the 1s backstop: the executor has timed out and wants to
+                // abandon, but must block until the emission it is racing has finished.
+                Thread.sleep(2500);
+                assertFalse(running.isDone(),
+                        "The executor must not set `abandoned` and read the buffer while a token emission is in flight");
+
+                releaseEmit.countDown();
+                var result = running.get(10, TimeUnit.SECONDS);
+
+                assertEquals(List.of("A"), emitted, "exactly one token reached the sink");
+                assertEquals(String.join("", emitted), result.response(),
+                        "the text stored in memory must be exactly the text streamed to the client");
+                assertEquals(Boolean.TRUE, result.metadata().get("streamingTimeout"), "the attempt did time out");
+            } finally {
+                pool.shutdownNow();
+            }
         }
     }
 
