@@ -10,8 +10,8 @@ import jakarta.ws.rs.core.Response;
 import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 
 /**
- * Serves welcome.html for all /welcome/** paths.
- * React Router handles client-side routing from there.
+ * Serves welcome.html for all /welcome/** paths. React Router handles
+ * client-side routing from there.
  */
 @ApplicationScoped
 public class RestWelcomeResource implements IRestWelcomeResource {

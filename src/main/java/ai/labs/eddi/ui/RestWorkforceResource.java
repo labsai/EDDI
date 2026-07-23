@@ -10,8 +10,8 @@ import jakarta.ws.rs.core.Response;
 import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 
 /**
- * Serves workforce.html for all /workforce/** paths.
- * React Router handles client-side routing from there.
+ * Serves workforce.html for all /workforce/** paths. React Router handles
+ * client-side routing from there.
  */
 @ApplicationScoped
 public class RestWorkforceResource implements IRestWorkforceResource {

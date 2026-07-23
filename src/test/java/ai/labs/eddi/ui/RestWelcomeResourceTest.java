@@ -14,8 +14,8 @@ import java.io.InputStream;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for {@link RestWelcomeResource}.
- * welcome.html is on the test classpath via src/main/resources.
+ * Unit tests for {@link RestWelcomeResource}. welcome.html is on the test
+ * classpath via src/main/resources.
  */
 class RestWelcomeResourceTest {
 
