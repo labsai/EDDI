@@ -5,6 +5,69 @@
 
 ---
 
+## 🧾 The audit ledger stops recording zeros and nulls (2026-07-23)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Backlog item **D1**. `AuditEntry` documents `llmDetail` as carrying token usage, `toolCalls` as tool execution data and `cost` as the monetary cost of the step. Every entry the engine has ever produced carried `toolCalls = null` and `cost = 0.0` — passed as **literals** at the `new AuditEntry(...)` call site, with comments claiming an integration that did not exist:
+
+```java
+llmDetail, null,   // toolCalls — set by LlmTask in memory
+actions,  0.0,     // cost — set by ToolCostTracker integration
+```
+
+Neither was true. `LlmTask` never wrote `audit:tool_calls` or `audit:cost`, and `audit:token_usage` — the key `buildAuditEntry` reads into `llmDetail.tokenUsage` — had **zero writers** in `src/main/java`. This matters beyond tidiness: the ledger is the EU AI Act Art. 17/19 traceability record, and it has been attesting that every LLM decision cost nothing and used no tools.
+
+Same class of defect one line up: `buildTaskSummary` reads `audit:confidence` as `IData<Double>`, while `LlmTask` wrote `audit:cascade_confidence` as `String.valueOf(...)` — **wrong key and wrong type**. All four `audit:cascade_*` keys were write-only.
+
+### What was wired
+
+| Key | Written by | Read into |
+| --- | --- | --- |
+| `audit:token_usage` | `LlmTask`, accumulated per turn | `llmDetail.tokenUsage` |
+| `audit:tool_calls` | `LlmTask`, accumulated per turn | `AuditEntry.toolCalls` |
+| `audit:cost` | `LlmTask`, accumulated per turn | `AuditEntry.cost` |
+| `audit:confidence` | `LlmTask` cascade branch, as a **Double** | `llmDetail.confidence` + the `task_complete` SSE summary |
+| `audit:cascade_model` | `LlmTask` cascade branch | `llmDetail.cascadeModel` |
+
+All six audit keys moved into `MemoryKeys` with javadoc naming their producer and consumer, so the next reader/writer split is a compile-time concern rather than a silent one. `audit:cascade_confidence`, `audit:cascade_cost` and `audit:cascade_token_usage` are gone — they had no readers anywhere and never left the in-flight `ConversationStep`, so there is nothing to migrate.
+
+### Design decisions
+
+- **Which cost signal.** The two dollar figures that actually exist are the cascade's `runCostUsd` (from `inputPricePer1M`/`outputPricePer1M` on `ModelCascadeConfig`/`CascadeStep`) and `ToolCostTracker`'s per-conversation tool cost, which became real in D2. `cost` is the **sum of both**. No token price table was invented for non-cascade tasks — those report tool cost only, and a non-cascade turn with free tools still audits at `0.0`. Hoisting cascade pricing to task level is a config change and stays a follow-up.
+- **Accumulate, never overwrite.** A turn can drive many LLM calls: one per matching config sub-task, plus every escalated cascade step and every tool-loop iteration. `getLatestData` is last-write-wins, so each contributor read-modify-writes. Only counts a provider actually reported are touched — a provider that omits `totalTokens` must not zero what earlier calls contributed.
+- **`toolCalls` shape is `{"calls": [...]}`**, each entry the tool-trace record plus the `llmTaskId` that issued it; without that tag a merged list from several sub-tasks is unattributable.
+- **Nested maps, and the HMAC time bomb they would have armed.** `llmDetail.tokenUsage` is a nested map and `toolCalls.calls` a nested list, but `AuditHmac.sortedMapString` flattened values with `toString()` while `AuditStore.fromDocument` copies only the top level — so an entry signed in memory with a `LinkedHashMap` would read back with an `org.bson.Document` (whose `toString()` is prefixed `Document{`) and fail to verify against its own HMAC. Latent only because `AuditHmac.verifyHmac` has no production callers yet. The canonicalizer now recurses through maps and lists; scalars still use `toString()`, so flat maps produce a byte-identical canonical string and **historical entries keep verifying** — pinned by a literal-string test plus a real BSON encode/decode round-trip test.
+- **Failure-path entries deliberately unchanged.** The `AuditEntry` built when a task throws keeps `cost = 0.0` / `toolCalls = null`: the accumulators are partial at that point and the task may never have reached the model. `GdprComplianceService` and `CapabilityMatchCondition` also keep their zeros — those are administrative/rule entries where zero is correct, not defective.
+
+### Three upstream signal defects fixed on the way
+
+The ledger is only as honest as what feeds it:
+
+- **`LegacyChatExecutor` built the token map with `Map.of`** over three boxed `Integer`s. Providers legitimately report only some of the three (Bedrock and Ollama commonly omit the total), so a partial report was an NPE that killed the whole turn over telemetry. Now shares `AgentOrchestrator.tokenUsageMap`, which 0-defaults.
+- **The agent tool loop double-counted tokens on retry.** The accumulator was declared outside the retry lambda and `RetryConfiguration.executeWithRetry` replays that lambda, so a retried turn counted the abandoned attempt too. Reset on lambda entry.
+- **The cascade under-reported tokens.** `runCostUsd` was a run total across every attempted step while `tokenUsage` reported only the accepted step, so an escalating cascade produced token counts that contradicted its own dollar figure. `CascadeResult.tokenUsage` is now the run total; per-step usage stays in the trace.
+
+### Operator-visible behaviour changes
+
+- LLM-task audit entries gain `llmDetail.tokenUsage`, and `llmDetail.cascadeModel` / `llmDetail.confidence` on cascade turns. Entries are larger.
+- `AuditEntry.toolCalls` is non-null on any turn where a tool ran; `AuditEntry.cost` is non-zero wherever a cascade with configured prices or a priced tool ran. Cost dashboards that assumed a constant zero will start moving.
+- **HITL-resumed turns gain a full `llmDetail` block.** `executeResume` never wrote `audit:compiled_prompt`, and `LifecycleManager` gates the entire block on that key — so every turn a human intervened in audited with no LLM evidence at all. Fixed.
+- `ExecutionResult.responseMetadata` now carries `toolCostUsd` (the delta this model call added, not the conversation running total). Agents that surface `responseMetadataObjectName` in templates will see the extra key.
+- `task_complete` SSE frames now really carry `confidence` on cascade turns.
+
+### Known gap — kept documented, not silently swallowed
+
+A turn that **pauses for tool approval** still loses its pre-pause token usage: `ToolApprovalRequiredException` escapes `executeWithTools` before the metadata is assembled, and `resumeToolLoop` starts a fresh accumulator. Closing it needs the usage to survive the pause, i.e. a new field on the persisted `PendingToolCallBatch` — a snapshot-format change deliberately out of scope here. The under-report is bounded to the pre-pause segment of paused turns and is called out at both code sites.
+
+### Tests
+
+New `LlmTaskAuditLedgerTest` backs the conversation step with a real map rather than a mock that always answers `null` — every assertion here is about accumulation, and a null-answering step makes a broken accumulator look correct. It covers agent-mode token usage, multi-sub-task summation, partial provider reports, tool-call merging with `llmTaskId`, cascade cost from configured pricing, the Double confidence key, the resumed-turn `llmDetail` block, and the audit-collector gate. `AuditHmacTest` gains the flat-map back-compat literal, nested-map/list determinism, `Document`-vs-`LinkedHashMap` equivalence and the BSON round-trip. `LifecycleManagerTest` gains toolCalls/cost/cascadeModel/confidence assertions.
+
+Four pre-existing tests were repaired rather than extended — they passed for the wrong reason: `LifecycleManagerTest.auditEntryWithLlmDetails` asserted only `containsKey("tokenUsage")` on a stub for a key nothing wrote; `LlmTaskCoverage2Test` pinned the dead `audit:cascade_confidence` and `audit:cascade_token_usage` keys with `any()`; `LlmTaskDeepBranchTest.auditCollectorStoresData` verified `atLeast(3).createData(anyString(), any())`, which passes for any three keys at all.
+
+---
+
 ## 🔌 The live tool trace finally reaches the SSE stream — and takes an unredacted payload with it (2026-07-23)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

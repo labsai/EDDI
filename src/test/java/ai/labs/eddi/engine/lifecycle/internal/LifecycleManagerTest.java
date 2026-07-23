@@ -1273,9 +1273,152 @@ class LifecycleManagerTest {
                 assertTrue(entry.llmDetail().containsKey("compiledPrompt"));
                 assertTrue(entry.llmDetail().containsKey("modelResponse"));
                 assertTrue(entry.llmDetail().containsKey("modelName"));
-                assertTrue(entry.llmDetail().containsKey("tokenUsage"));
+                // containsKey alone passed while the entry carried null: assert the value.
+                assertEquals(java.util.Map.of("input", 10, "output", 20), entry.llmDetail().get("tokenUsage"));
                 return true;
             }));
+        }
+
+        @Test
+        @DisplayName("audit entry omits tokenUsage when no LLM call reported any")
+        void auditEntryOmitsTokenUsageWhenAbsent() throws Exception {
+            var auditCollector = auditRun(currentStep -> {
+                IData<String> promptData = mock(IData.class);
+                when(promptData.getResult()).thenReturn("You are a helpful assistant");
+                doReturn(promptData).when(currentStep).getLatestData("audit:compiled_prompt");
+                // Key present but empty-resulted — the loose "data != null" guard would
+                // put a null tokenUsage into llmDetail and ship it to the ledger.
+                IData<java.util.Map<String, Object>> tokenData = mock(IData.class);
+                when(tokenData.getResult()).thenReturn(null);
+                doReturn(tokenData).when(currentStep).getLatestData("audit:token_usage");
+            });
+
+            verify(auditCollector).collect(argThat(entry -> {
+                assertNotNull(entry.llmDetail());
+                assertFalse(entry.llmDetail().containsKey("tokenUsage"));
+                return true;
+            }));
+        }
+
+        @Test
+        @DisplayName("audit entry carries cascadeModel and a Double confidence in llmDetail")
+        void auditEntryLlmDetailCarriesConfidenceAndCascadeModel() throws Exception {
+            var auditCollector = auditRun(currentStep -> {
+                IData<String> promptData = mock(IData.class);
+                when(promptData.getResult()).thenReturn("prompt");
+                doReturn(promptData).when(currentStep).getLatestData("audit:compiled_prompt");
+
+                IData<String> cascadeModelData = mock(IData.class);
+                when(cascadeModelData.getResult()).thenReturn("openai/gpt-4o (step 1)");
+                doReturn(cascadeModelData).when(currentStep).getLatestData("audit:cascade_model");
+
+                IData<Double> confidenceData = mock(IData.class);
+                when(confidenceData.getResult()).thenReturn(0.87);
+                doReturn(confidenceData).when(currentStep).getLatestData("audit:confidence");
+            });
+
+            verify(auditCollector).collect(argThat(entry -> {
+                assertEquals("openai/gpt-4o (step 1)", entry.llmDetail().get("cascadeModel"));
+                assertEquals(0.87, entry.llmDetail().get("confidence"));
+                return true;
+            }));
+        }
+
+        /**
+         * {@code toolCalls} was passed as a literal {@code null} to every audit entry
+         * the engine ever produced, with a comment claiming LlmTask set it in memory.
+         */
+        @Test
+        @DisplayName("audit entry populates toolCalls from memory")
+        void auditEntryPopulatesToolCallsFromMemory() throws Exception {
+            var calls = List.of(java.util.Map.<String, Object>of("tool", "calculator", "llmTaskId", "taskA"));
+            var auditCollector = auditRun(currentStep -> {
+                IData<java.util.Map<String, Object>> toolCallData = mock(IData.class);
+                when(toolCallData.getResult()).thenReturn(java.util.Map.of("calls", calls));
+                doReturn(toolCallData).when(currentStep).getLatestData("audit:tool_calls");
+            });
+
+            verify(auditCollector).collect(argThat(entry -> {
+                assertNotNull(entry.toolCalls(), "toolCalls must no longer be hard-coded null");
+                assertEquals(calls, entry.toolCalls().get("calls"));
+                return true;
+            }));
+        }
+
+        @Test
+        @DisplayName("audit entry leaves toolCalls null when the key is absent or empty")
+        void auditEntryToolCallsNullWhenAbsentOrEmpty() throws Exception {
+            var absent = auditRun(currentStep -> {
+            });
+            verify(absent).collect(argThat(entry -> {
+                assertNull(entry.toolCalls());
+                return true;
+            }));
+
+            var empty = auditRun(currentStep -> {
+                IData<java.util.Map<String, Object>> toolCallData = mock(IData.class);
+                when(toolCallData.getResult()).thenReturn(java.util.Map.of());
+                doReturn(toolCallData).when(currentStep).getLatestData("audit:tool_calls");
+            });
+            verify(empty).collect(argThat(entry -> {
+                assertNull(entry.toolCalls());
+                return true;
+            }));
+        }
+
+        /**
+         * {@code cost} was a literal {@code 0.0} with a comment claiming a
+         * ToolCostTracker integration that never existed.
+         */
+        @Test
+        @DisplayName("audit entry populates cost from memory, and defaults to 0.0 when absent")
+        void auditEntryPopulatesCostFromMemory() throws Exception {
+            var priced = auditRun(currentStep -> {
+                IData<Double> costData = mock(IData.class);
+                when(costData.getResult()).thenReturn(0.0042);
+                doReturn(costData).when(currentStep).getLatestData("audit:cost");
+            });
+            verify(priced).collect(argThat(entry -> {
+                assertEquals(0.0042, entry.cost(), 1e-9, "cost must no longer be hard-coded 0.0");
+                return true;
+            }));
+
+            var free = auditRun(currentStep -> {
+            });
+            verify(free).collect(argThat(entry -> {
+                assertEquals(0.0, entry.cost(), 1e-9);
+                return true;
+            }));
+        }
+
+        /**
+         * Runs one lifecycle turn with an audit collector attached, letting the caller
+         * stub whatever {@code audit:*} data the case needs on the current step.
+         */
+        private IAuditEntryCollector auditRun(java.util.function.Consumer<IConversationMemory.IWritableConversationStep> stubStep)
+                throws Exception {
+            var manager = new LifecycleManager(componentCache, workflowId);
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
+            when(task.getType()).thenReturn("langchain");
+            manager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(memory.getAgentVersion()).thenReturn(1);
+            when(memory.size()).thenReturn(1);
+
+            stubStep.accept(currentStep);
+
+            var auditCollector = mock(IAuditEntryCollector.class);
+            when(memory.getAuditCollector()).thenReturn(auditCollector);
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            manager.executeLifecycle(memory, null);
+            return auditCollector;
         }
     }
 

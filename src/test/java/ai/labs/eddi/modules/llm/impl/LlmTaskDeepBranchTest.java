@@ -328,8 +328,10 @@ class LlmTaskDeepBranchTest {
             var task = createTask(Map.of("apiKey", "key"));
             llmTask.execute(memory, new LlmConfiguration(List.of(task)));
 
-            // Should create audit:compiled_prompt, audit:model_response, audit:model_name
-            verify(dataFactory, atLeast(3)).createData(anyString(), any());
+            // atLeast(3) on anyString() passed for any three keys at all — name them.
+            verify(dataFactory).createData(eq(MemoryKeys.AUDIT_COMPILED_PROMPT), any());
+            verify(dataFactory).createData(eq(MemoryKeys.AUDIT_MODEL_RESPONSE), eq(LLM_RESPONSE));
+            verify(dataFactory).createData(eq(MemoryKeys.AUDIT_MODEL_NAME), any());
         }
 
         @Test

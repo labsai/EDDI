@@ -538,7 +538,7 @@ class LlmTaskCoverage2Test {
     }
 
     @Test
-    @DisplayName("cascade + auditCollector → cascade_model + cascade_confidence audit keys stored")
+    @DisplayName("cascade + auditCollector → cascade model and a Double confidence under the key LifecycleManager reads")
     void cascadeEnabled_auditMetadataStored() throws Exception {
         wireStandardMemory(List.of("action1"));
         when(chatModel.chat(anyList())).thenReturn(chatResponse("cascade answer"));
@@ -557,8 +557,12 @@ class LlmTaskCoverage2Test {
 
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(dataFactory).createData(eq("audit:cascade_model"), any());
-        verify(dataFactory).createData(eq("audit:cascade_confidence"), any());
+        verify(dataFactory).createData(eq(MemoryKeys.AUDIT_CASCADE_MODEL), any());
+        // Must be the key LifecycleManager reads, and a Double — its IData<Double> slot
+        // used to receive nothing at all while a String went to a key nobody read.
+        verify(dataFactory).createData(eq(MemoryKeys.AUDIT_CONFIDENCE), argThat(v -> v instanceof Double));
+        verify(dataFactory, never()).createData(eq("audit:cascade_confidence"), any());
+        verify(dataFactory, never()).createData(eq("audit:cascade_cost"), any());
     }
 
     @Test
@@ -708,11 +712,11 @@ class LlmTaskCoverage2Test {
 
     // ============================================================
     // Cascade token-usage surfacing — non-empty tokenUsage reaches
-    // responseMetadata (responseMetadataObjectName) AND audit:cascade_token_usage
+    // responseMetadata (responseMetadataObjectName) AND the audit ledger
     // ============================================================
 
     @Test
-    @DisplayName("cascade legacy step with non-empty tokenUsage → surfaced in responseMetadata + audit:cascade_token_usage stored")
+    @DisplayName("cascade legacy step with non-empty tokenUsage → surfaced in responseMetadata + audit:token_usage stored")
     void cascadeEnabled_tokenUsageSurfaced() throws Exception {
         wireStandardMemory(List.of("action1"));
         // The step's ChatResponse carries real token usage → LegacyChatExecutor emits a
@@ -741,9 +745,12 @@ class LlmTaskCoverage2Test {
         var meta = (Map<String, Object>) templateData.get("meta");
         assertNotNull(meta, "response metadata should be stored under the configured object name");
         assertTrue(meta.containsKey("tokenUsage"), "non-empty cascade tokenUsage must be surfaced in responseMetadata");
-        // (b) audit token-usage key stored (mirrors audit:cascade_model /
-        // cascade_cost).
-        verify(dataFactory).createData(eq("audit:cascade_token_usage"), any());
+        // (b) the real counts land under the key LifecycleManager reads into
+        // llmDetail.tokenUsage — "audit:cascade_token_usage" had no reader anywhere.
+        verify(dataFactory).createData(eq(MemoryKeys.AUDIT_TOKEN_USAGE), argThat(v -> v instanceof Map<?, ?> m
+                && Long.valueOf(120L).equals(m.get("inputTokens"))
+                && Long.valueOf(30L).equals(m.get("outputTokens"))));
+        verify(dataFactory, never()).createData(eq("audit:cascade_token_usage"), any());
     }
 
     // ============================================================

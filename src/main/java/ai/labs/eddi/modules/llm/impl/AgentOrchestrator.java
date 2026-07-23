@@ -1336,6 +1336,12 @@ class AgentOrchestrator {
     }
 
     /**
+     * The three token-usage count keys of the map {@link #tokenUsageMap} produces,
+     * in reporting order. Shared by every consumer that merges usage maps.
+     */
+    static final List<String> TOKEN_USAGE_FIELDS = List.of("inputTokens", "outputTokens", "totalTokens");
+
+    /**
      * Convert a TokenUsage into a template/audit-friendly map with non-null counts.
      */
     static Map<String, Object> tokenUsageMap(TokenUsage usage) {

@@ -73,9 +73,6 @@ class CascadingModelExecutor {
      */
     private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
 
-    /** The three token-usage counts, in the order they are reported. */
-    static final List<String> TOKEN_USAGE_FIELDS = List.of("inputTokens", "outputTokens", "totalTokens");
-
     private final ChatModelRegistry registry;
     private final GlobalVariableResolver globalVariableResolver;
     private final ITemplatingEngine templatingEngine;
@@ -786,7 +783,7 @@ class CascadingModelExecutor {
         if (stepTokenUsage == null || stepTokenUsage.isEmpty()) {
             return;
         }
-        for (String field : TOKEN_USAGE_FIELDS) {
+        for (String field : AgentOrchestrator.TOKEN_USAGE_FIELDS) {
             if (stepTokenUsage.containsKey(field) || runTokenUsage.containsKey(field)) {
                 runTokenUsage.put(field, asLong(runTokenUsage.get(field)) + asLong(stepTokenUsage.get(field)));
             }
