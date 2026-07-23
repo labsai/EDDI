@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>6.1.2</version>
+    <version>6.2.0</version>
     <properties>
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <maven.compiler.source>25</maven.compiler.source>
@@ -20,10 +20,10 @@
         <langchain4j-beta.version>1.18.0-beta28</langchain4j-beta.version>
         <langchain4j.version>1.18.0</langchain4j.version>
         <langchain4j-libs.version>1.18.0</langchain4j-libs.version>
-        <jandex-maven-plugin.version>3.5.3</jandex-maven-plugin.version>
+        <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
-        <surefire-plugin.version>3.5.5</surefire-plugin.version>
-        <failsafe-plugin.version>3.5.5</failsafe-plugin.version>
+        <surefire-plugin.version>3.5.6</surefire-plugin.version>
+        <failsafe-plugin.version>3.5.6</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.4.0</war-plugin.version>
         <quarkus-mcp-server.version>1.13.1</quarkus-mcp-server.version>
@@ -56,12 +56,13 @@
                 <artifactId>reactor-netty-http</artifactId>
                 <version>1.2.8</version>
             </dependency>
-            <!-- Override postgresql to fix CVE-2026-42198 (client-side DoS via SCRAM iteration count).
-                 Vulnerable: 42.2.0–42.7.10. Pulled by langchain4j-pgvector (42.7.7) and Quarkus BOM. -->
+            <!-- Override postgresql to fix CVE-2026-42198 (SCRAM iteration count DoS, ≤42.7.10)
+                 and CVE-2026-54291 (auth downgrade, ≤42.7.11).
+                 Pulled by langchain4j-pgvector (42.7.7) and Quarkus BOM. -->
             <dependency>
                 <groupId>org.postgresql</groupId>
                 <artifactId>postgresql</artifactId>
-                <version>42.7.11</version>
+                <version>42.7.13</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -266,7 +267,7 @@
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
-            <version>3.0.7</version>
+            <version>3.0.8</version>
         </dependency>
         <dependency>
             <groupId>org.jsoup</groupId>
@@ -285,7 +286,7 @@
         <dependency>
             <groupId>io.swagger.core.v3</groupId>
             <artifactId>swagger-annotations</artifactId>
-            <version>2.2.50</version>
+            <version>2.2.52</version>
         </dependency>
         <dependency>
             <groupId>de.undercouch</groupId>
@@ -425,7 +426,7 @@
         <dependency>
             <groupId>io.nats</groupId>
             <artifactId>jnats</artifactId>
-            <version>2.25.3</version>
+            <version>2.26.0</version>
         </dependency>
         <!-- PostgreSQL JDBC driver + Agroal connection pool (Phase 6.31) -->
         <dependency>
@@ -446,7 +447,7 @@
         <dependency>
             <groupId>io.swagger.parser.v3</groupId>
             <artifactId>swagger-parser</artifactId>
-            <version>2.1.44</version>
+            <version>2.1.45</version>
         </dependency>
 
     </dependencies>
@@ -615,7 +616,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.14</version>
+                <version>0.8.15</version>
                 <!-- Plugin-level excludes: applied to report AND check goals.
                      Excludes CDI bootstrap wiring, external integration adapters,
                      REST client libraries, and import/export services that require

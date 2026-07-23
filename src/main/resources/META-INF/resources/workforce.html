@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/eddi-icon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="EDDI Workforce — AI teams that solve complex challenges together" />
+    <title>EDDI Workforce</title>
+    <script src="/manage/__auth_config__.js"></script>
+    <script type="module" crossorigin src="/assets/index-B36D6B8M.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BGguYnRl.css">
+    <style>
+      /* Inline loading indicator — visible until React mounts and replaces #root content */
+      .app-loader {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        background: #111113;
+        color: #a1a1aa;
+        font-family: system-ui, sans-serif;
+        gap: 1.5rem;
+      }
+      .app-loader img {
+        width: 120px;
+        opacity: 0.9;
+      }
+      .app-loader-spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid #27272a;
+        border-top-color: #d4a843;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      .app-loader-text {
+        font-size: 0.875rem;
+        letter-spacing: 0.05em;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-background text-foreground antialiased">
+    <div id="root">
+      <div class="app-loader">
+        <img src="/img/logo_eddi.png" alt="EDDI" />
+        <div class="app-loader-spinner"></div>
+        <div class="app-loader-text">Loading EDDI Workforce…</div>
+      </div>
+    </div>
+  </body>
+</html>

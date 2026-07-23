@@ -1,6 +1,6 @@
 # Developer Quickstart Guide
 
-**Version: 6.0.0**
+**Version: 6.2.0**
 
 This guide helps developers quickly understand EDDI's architecture and start building agents.
 

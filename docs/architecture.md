@@ -1,6 +1,6 @@
 # EDDI Architecture
 
-**Version: 6.1.2**
+**Version: 6.2.0**
 
 This document provides a comprehensive overview of EDDI's architecture, design principles, and internal workflow.
 
