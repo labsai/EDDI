@@ -9,14 +9,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link RestWelcomeResource}.
- *
- * In the plain JUnit (non-Quarkus) test context, RuntimeUtilities.getResourceAsStream
- * cannot resolve META-INF/resources/ files, so the null-guard returns 500.
- * These tests verify both the null-guard path and the delegation logic.
+ * welcome.html is on the test classpath via src/main/resources.
  */
 class RestWelcomeResourceTest {
 
@@ -28,31 +27,30 @@ class RestWelcomeResourceTest {
     }
 
     @Test
-    @DisplayName("viewDefault should delegate to viewHtml (same status code)")
+    @DisplayName("viewDefault should delegate to viewHtml and return 200")
     void viewDefaultDelegatesToViewHtml() {
-        Response fromDefault = resource.viewDefault();
-        Response fromViewHtml = resource.viewHtml();
-        assertEquals(fromViewHtml.getStatus(), fromDefault.getStatus(),
-                "viewDefault must delegate to viewHtml");
+        Response response = resource.viewDefault();
+        assertEquals(200, response.getStatus());
+        assertNotNull(response.getEntity(), "Entity must not be null");
+        assertInstanceOf(InputStream.class, response.getEntity());
     }
 
     @Test
-    @DisplayName("viewHtml returns 500 when welcome.html is not on classpath")
-    void viewHtmlReturns500WhenHtmlMissing() {
-        // In plain JUnit context, getResourceAsStream cannot resolve the file
+    @DisplayName("viewHtml should return 200 with a readable welcome.html entity")
+    void viewHtmlReturnsOkWithEntity() {
         Response response = resource.viewHtml();
-        assertEquals(500, response.getStatus(),
-                "Should return 500 when welcome.html is not resolvable");
-        assertNull(response.getEntity(),
-                "500 response should have no entity");
+        assertEquals(200, response.getStatus());
+        assertNotNull(response.getEntity(), "Entity must not be null");
+        assertInstanceOf(InputStream.class, response.getEntity());
     }
 
     @Test
-    @DisplayName("viewDefault returns same result as viewHtml (delegation)")
-    void viewDefaultAndViewHtmlReturnConsistentResults() {
+    @DisplayName("viewDefault and viewHtml should both serve the welcome.html SPA shell")
+    void viewDefaultAndViewHtmlServeSameShell() {
         Response r1 = resource.viewDefault();
         Response r2 = resource.viewHtml();
         assertEquals(r1.getStatus(), r2.getStatus());
-        assertEquals(r1.getEntity(), r2.getEntity());
+        assertNotNull(r1.getEntity(), "viewDefault entity must not be null");
+        assertNotNull(r2.getEntity(), "viewHtml entity must not be null");
     }
 }
