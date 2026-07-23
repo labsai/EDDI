@@ -167,7 +167,7 @@ All tool invocations flow through a unified pipeline that provides enterprise-gr
 | `enableCostTracking`       | boolean | `true`    | Track tool cost per conversation             |
 | `toolPricing`              | map     | built-ins | Per-call price in USD, e.g. `{"websearch": 0.005}` |
 | `maxBudgetPerConversation` | number  | unlimited | Ceiling on accumulated **tool** cost per conversation |
-| `enforceBudget`            | boolean | `true`    | Set `false` to make the ceiling report-only  |
+| `enforceBudget`            | boolean | `false`   | Set `true` to actually refuse calls past the ceiling |
 
 ### Example: Restrict web search rate and set a budget
 
@@ -184,9 +184,14 @@ All tool invocations flow through a unified pipeline that provides enterprise-gr
 }
 ```
 
-> A configured `maxBudgetPerConversation` is enforced by default. Add
-> `enforceBudget: false` to make it report-only. It covers **tool** cost only;
-> LLM token spend is capped separately by the model cascade's `maxCostPerRun`.
+> A configured `maxBudgetPerConversation` is **report-only until you add
+> `enforceBudget: true`.** Built-in tools priced at $0.00 before v6.1, so these
+> ceilings have never refused a call; enforcing them automatically would start
+> aborting tool calls on upgrade. If you relied on a ceiling that *was* binding
+> (an http/MCP/A2A tool named `websearch`, `webscraper` or `pdfreader` was priced
+> by name and refused), add the flag — the startup log names every task in that
+> position. It covers **tool** cost only; LLM token spend is capped separately by
+> the model cascade's `maxCostPerRun`.
 
 ### Which name does a setting expect?
 

@@ -477,8 +477,8 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 | `conversationHistoryLimit` | int      | Max conversation turns in context                | 10                     |
 | `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
 | **Cost & Performance**     |          |                                                  |                        |
-| `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` is off | (unlimited) |
-| `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. Set `false` for a report-only ceiling | true (`eddi.tools.budget.enforce-by-default`) |
+| `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Records cost; only refuses calls when `enforceBudget` is on | (unlimited) |
+| `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-in** — a ceiling without it is report-only, and is named in a startup WARN | false (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD, keyed on the built-in slug (`{"websearch": 0.005}`) | (built-in defaults) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls           | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global` | (all `user`)   |

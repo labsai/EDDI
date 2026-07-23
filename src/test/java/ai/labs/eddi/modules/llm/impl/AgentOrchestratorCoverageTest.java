@@ -44,11 +44,17 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.lang.reflect.Method;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -646,13 +652,12 @@ class AgentOrchestratorCoverageTest {
                 "a class simple name must never leak into the canonical-name map");
     }
 
-    // ─── D2/D4: enforceBudget is an opt-OUT ───
+    // ─── D2/D4: enforceBudget is an opt-IN ───
 
     /**
-     * {@code enforceBudget: false} is the escape hatch for an operator who wants a
-     * ceiling reported but never binding. It must not merely tolerate an
-     * over-budget conversation — the budget must not be consulted at all, otherwise
-     * a future refactor could reintroduce enforcement through a side effect.
+     * Enforcement is off unless asked for. A stored ceiling must not be consulted
+     * at all when the flag is absent, otherwise a future refactor could reintroduce
+     * enforcement through a side effect and start refusing calls on upgrade.
      */
     @Test
     void toolCall_budgetExplicitlyNotEnforced_neverConsultsTheBudget() throws Exception {
@@ -683,36 +688,100 @@ class AgentOrchestratorCoverageTest {
     }
 
     /**
-     * D4: a stored config that carries only {@code maxBudgetPerConversation} — no
-     * {@code enforceBudget} at all — must still be refused past the ceiling. That
-     * is what {@code main} did, and for http/MCP/A2A/dynamic tools (whose dispatch
-     * name IS the configured name) it was doing it for real. Making enforcement
-     * opt-in silently deleted those operators' cost ceiling on upgrade.
+     * D4: a stored config carrying only {@code maxBudgetPerConversation} — no
+     * {@code enforceBudget} — records cost but refuses nothing.
+     * <p>
+     * This is the deliberate opt-in default. Built-in tools priced at $0.00 until
+     * this release, so enforcing by default would make those ceilings bind for the
+     * first time and start refusing calls mid-conversation on upgrade. The cost of
+     * that choice is that an operator whose ceiling <em>was</em> working (http /
+     * MCP / A2A / dynamic tools dispatch under their configured name, so they were
+     * priced and refused before) loses it — which is why
+     * {@code warnAboutUnenforcedBudgets} names every such task in a WARN instead of
+     * letting it pass silently. The pairing of this test with
+     * {@link #toolCall_unenforcedCeilingIsWarnedAbout()} is the contract.
      */
     @Test
-    void toolCall_budgetSetWithoutEnforceFlag_isStillEnforced() throws Exception {
+    void toolCall_budgetSetWithoutEnforceFlag_isNotEnforced() throws Exception {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
         // deliberately no setEnforceBudget(...)
         var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
-        when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
-        when(costTracker.isWithinBudget(eq("conv-1"), eq(1.0))).thenReturn(false);
+        lenient().when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
+        lenient().when(costTracker.isWithinBudget(nullable(String.class), anyDouble())).thenReturn(false);
 
         ChatModel chatModel = mock(ChatModel.class);
         var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"1+1\"}").build();
         when(chatModel.chat(any(ChatRequest.class)))
                 .thenReturn(toolBatch(calcReq))
-                .thenReturn(text("stopped"));
+                .thenReturn(text("two"));
+        when(calculatorTool.calculate("1+1")).thenReturn("2");
 
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
 
-        assertEquals("stopped", result.response());
-        verify(calculatorTool, never()).calculate(anyString());
-        verify(costTracker).isWithinBudget("conv-1", 1.0);
+        assertEquals("two", result.response());
+        verify(calculatorTool).calculate("1+1");
+        // nullable(): conversationId is legally null on some paths and anyString()
+        // would not match it, which would make this verification vacuously true.
+        verify(costTracker, never()).isWithinBudget(nullable(String.class), anyDouble());
         assertTrue(result.trace().stream()
-                .anyMatch(e -> "tool_error".equals(e.get("type"))
-                        && String.valueOf(e.get("error")).contains("Budget exceeded")),
-                "a ceiling with no enforceBudget flag must still refuse the call");
+                .noneMatch(e -> String.valueOf(e.get("error")).contains("Budget exceeded")),
+                "an unflagged ceiling must not refuse the call — enforcement is opt-in");
+    }
+
+    /**
+     * The other half of the opt-in contract: a ceiling that records but never
+     * refuses is exactly the "config that silently does nothing" this release set
+     * out to remove, so it must be reported. Asserting on the log keeps the warning
+     * load-bearing — without this, dropping the WARN would be invisible.
+     */
+    @Test
+    void toolCall_unenforcedCeilingIsWarnedAbout() throws Exception {
+        var task = calcOnlyTask();
+        task.setId("budgeted-task");
+        task.setMaxBudgetPerConversation(1.0);
+
+        var records = new CopyOnWriteArrayList<String>();
+        var handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                records.add(MessageFormat.format(String.valueOf(record.getMessage()), record.getParameters()));
+            }
+
+            @Override
+            public void flush() {
+                // nothing buffered
+            }
+
+            @Override
+            public void close() {
+                // nothing to release
+            }
+        };
+        // src/test/resources/logging.properties sets ai.labs.eddi.level=OFF to keep
+        // test output quiet, so the level has to be raised for the duration or the
+        // record never reaches a handler at all.
+        var julLogger = Logger.getLogger(AgentOrchestrator.class.getName());
+        Level previousLevel = julLogger.getLevel();
+        julLogger.setLevel(Level.WARNING);
+        julLogger.addHandler(handler);
+        try {
+            ChatModel chatModel = mock(ChatModel.class);
+            var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate")
+                    .arguments("{\"expression\":\"1+1\"}").build();
+            when(chatModel.chat(any(ChatRequest.class)))
+                    .thenReturn(toolBatch(calcReq))
+                    .thenReturn(text("two"));
+            when(calculatorTool.calculate("1+1")).thenReturn("2");
+
+            orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previousLevel);
+        }
+
+        assertTrue(records.stream().anyMatch(m -> m.contains("budgeted-task") && m.contains("enforceBudget")),
+                "an unenforced ceiling must be named in a WARN, not pass silently; saw: " + records);
     }
 
     @Test

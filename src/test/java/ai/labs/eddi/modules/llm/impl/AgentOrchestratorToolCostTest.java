@@ -258,14 +258,20 @@ class AgentOrchestratorToolCostTest {
     }
 
     /**
-     * D4: the same ceiling with no {@code enforceBudget} at all still binds. A
-     * stored config carrying only {@code maxBudgetPerConversation} is what
-     * {@code main} enforced, and treating the flag's absence as "off" deleted that
-     * ceiling for every agent whose tools dispatch under a priced name.
+     * D4: the same ceiling with no {@code enforceBudget} refuses nothing, against
+     * real accumulated cost.
+     * <p>
+     * Enforcement is opt-in because built-in tools priced at $0.00 until this
+     * release — the sibling test above proves the ceiling genuinely binds once the
+     * flag is set, so what this pins is that an upgrade does not start refusing
+     * calls on its own. The operator whose ceiling <em>was</em> live (tools
+     * dispatching under a priced name) is told so by the WARN, not by a surprise
+     * refusal; see
+     * {@code AgentOrchestratorCoverageTest.toolCall_unenforcedCeilingIsWarnedAbout}.
      */
     @Test
-    @DisplayName("a ceiling with no enforceBudget flag is enforced on real accumulated cost")
-    void ceilingWithoutFlagIsEnforced() throws Exception {
+    @DisplayName("a ceiling with no enforceBudget flag refuses nothing")
+    void ceilingWithoutFlagIsNotEnforced() throws Exception {
         var task = webSearchTask();
         task.setMaxBudgetPerConversation(0.0015);
         task.setMaxToolIterations(5);
@@ -277,17 +283,15 @@ class AgentOrchestratorToolCostTest {
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
 
         assertNotNull(result);
-        verify(webSearchTool, times(2)).searchWeb("eddi", 3);
+        verify(webSearchTool, times(5)).searchWeb("eddi", 3);
         assertTrue(result.trace().stream()
-                .anyMatch(e -> "tool_error".equals(e.get("type"))
-                        && String.valueOf(e.get("error")).contains("Budget exceeded")),
-                "an operator who configured a ceiling and nothing else must still get it enforced");
+                .noneMatch(e -> String.valueOf(e.get("error")).contains("Budget exceeded")),
+                "an unflagged ceiling must refuse nothing — enforcement is opt-in");
     }
 
     /**
      * Same ceiling, same spend, {@code enforceBudget: false} — every call runs.
-     * This is the explicit opt-out for an operator who wants the number reported
-     * but never binding.
+     * Explicitly opting out must behave identically to leaving the flag unset.
      */
     @Test
     @DisplayName("enforceBudget:false makes the same ceiling refuse nothing")

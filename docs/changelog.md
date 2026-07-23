@@ -7,7 +7,7 @@
 
 ## 🔐 Ledger integrity, replay depth, and a verification that could not fail (2026-07-23)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Four review findings on this branch's own remediation work — the common thread is the one the branch set out to remove: **a control that looks present and does nothing.**
 
@@ -43,19 +43,23 @@ Note that `verifyHmac` currently has no production caller — the ledger signs o
 
 The previous commit made the ceiling conditional on a new `enforceBudget` defaulting to `false`, justified as "every built-in priced at $0.00, so no stored config was ever refused". **That holds only for built-ins.** For http, MCP, A2A and dynamic tools the dispatch name *is* the configured name, so an agent with a tool called `websearch`, `webscraper` or `pdfreader` was priced from `DEFAULT_TOOL_PRICES` and *was* being refused on `main`. Those operators' cost ceiling silently ceased to exist.
 
-**Decision — `enforceBudget` is an opt-OUT.** `eddi.tools.budget.enforce-by-default` now defaults to `true`, so a stored `maxBudgetPerConversation` keeps doing exactly what it did before the flag existed. Rationale:
+**Decision — `enforceBudget` stays opt-IN, and the silence is fixed instead.** `eddi.tools.budget.enforce-by-default` remains `false`; a new `warnAboutUnenforcedBudgets` names every configured task that carries a ceiling without the flag, once per task id.
 
-- Relative to the last release the enforcing behaviour is the *status quo*; the flag's `false` default is what changed it. Restoring it is the back-compat-preserving choice, not the disruptive one.
-- Setting a dollar ceiling is already an explicit statement of intent. A safety control that quietly evaporates on upgrade is a worse failure than one that binds.
-- The gate only fires when a ceiling is configured, so this is unobservable for agents that set none.
-- The original concern (a long-inert ceiling suddenly aborting a live built-in-only agent) keeps two explicit escape hatches: `"enforceBudget": false` per task, and `eddi.tools.budget.enforce-by-default=false` per deployment. The property stays load-bearing in both directions rather than becoming dead config — which is why this was done by flipping its default rather than by inferring enforcement from `maxBudgetPerConversation != null` and leaving the property unreachable.
+Both defaults break someone, so the choice is which failure is acceptable:
+
+- **Enforcing by default** would make the ceilings on built-in-only agents bind *for the first time* — this release is what repaired built-in pricing — and start aborting tool calls mid-conversation on upgrade, with no warning and no way to have anticipated it.
+- **Not enforcing** costs the operator whose ceiling *was* live (http/MCP/A2A/dynamic tools dispatch under their configured name, so a tool called `websearch`/`webscraper`/`pdfreader` was priced and refused on `main`) — but that loss is *detectable and announced*, and re-enabling it is one field.
+
+An unannounced new refusal is worse than an announced lapse: the first is a production incident an operator cannot predict, the second is a log line they act on. The unacceptable part was never the default — it was that a ceiling could record without refusing and say nothing, which is precisely the "config that silently does nothing" pattern this whole release set out to remove. The WARN is what makes the opt-in honest.
+
+An earlier revision of this branch flipped the default to `true`; that was reverted in favour of the warning. `eddi.tools.budget.enforce-by-default=true` re-enables enforcement deployment-wide for operators who want the old behaviour back in one line.
 
 ### Files
 
 - `engine/caching/CacheFactory.java` — `NONCE_PEAK_SIGNED_RPS`, `RATE_SIZED_EVICTION_HEADROOM`, `RATE_SIZED_CACHES`, `maximumSizeFor(name, ttl)`; both `getCache` overloads size through it
 - `engine/caching/CacheImpl.java` — package-private `backingCache()` so the eviction policy actually built can be asserted
 - `engine/audit/AuditHmac.java` — `V2_PREFIX`, `buildCanonicalStringV2`, `canonicalValueV2`, `escape`; `verifyHmac` dispatches on the stored prefix; v1 canonicalizer frozen
-- `modules/llm/impl/AgentOrchestrator.java` — `BUDGET_ENFORCE_DEFAULT` now `true`
+- `modules/llm/impl/AgentOrchestrator.java` — `BUDGET_ENFORCE_DEFAULT` stays `false`; new `warnAboutUnenforcedBudgets` + `UNENFORCED_BUDGET_WARNED` so an unenforced ceiling is named once per task instead of passing silently
 - `modules/llm/model/LlmConfiguration.java` — `enforceBudget`/`maxBudgetPerConversation` javadoc
 - Docs: `audit-ledger.md` (canonical-form versioning table), `langchain.md`, `security.md`, `agent-father-langchain-tools-guide.md`
 
@@ -81,7 +85,7 @@ New/changed cases: `AuditHmacTest` +7 (a `v1CanonicalStringCollides` preconditio
 
 ## 🧵 Model registry and streaming executor — races and un-stripped parameters (2026-07-23)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Four defects around `ChatModelRegistry` and `StreamingLegacyChatExecutor`, three of them introduced by D11 (the commit that stopped stripping `timeout`/`logRequests`/`logResponses` so they could join the model cache key).
 
@@ -118,7 +122,7 @@ Four defects around `ChatModelRegistry` and `StreamingLegacyChatExecutor`, three
 
 ## 🔐 Tool-cache scope resolution honours its own invariant (2026-07-23)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Three defects in the per-tool cache-scope surface this branch introduced with D5/D2. Two of them could put a tool on a **cross-user** partition — the exact leak D5 existed to close.
 
@@ -157,7 +161,7 @@ Three defects in the per-tool cache-scope surface this branch introduced with D5
 
 ## 🧾 The audit ledger stops triple-billing the turn, and starts seeing the tool spend (2026-07-23)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Three defects in the audit / cost path, all introduced or made live by this branch's own remediation work. They share one root cause: **dollar figures that are read, copied or baselined at the wrong moment**.
 
@@ -198,7 +202,7 @@ Three defects in the audit / cost path, all introduced or made live by this bran
 
 ## 🧮 `convertToObject` finally reaches agent mode and streaming (2026-07-23)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D7**. `jsonMode` was computed once in `LlmTask` from `convertToObject` and handed to exactly one collaborator — `LegacyChatExecutor`, i.e. the three no-tools, non-streaming call sites. `AgentOrchestrator.executeIfToolsEnabled`, `StreamingLegacyChatExecutor.execute` and the cascade's agent-mode / live-streaming steps all built their `ChatRequest` without ever looking at it.
 
@@ -253,7 +257,7 @@ Why only mistral and azure-openai were bitten: `AgentSetupService.supportsRespon
 
 ## ⏱️ `timeout`, `logRequests` and `logResponses` become part of a model's identity (2026-07-23)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D11**. `docs/langchain.md` documents `timeout`, `logRequests` and `logResponses` as configuration parameters. `ChatModelRegistry.filterParams` removed all three from the map it passed to the provider builders — so **every** provider's `builder.timeout(...)` / `builder.logRequests(...)` / `builder.logResponses(...)` branch, on both the sync and the streaming builder, was unreachable dead code.
 
@@ -314,7 +318,7 @@ Cached model instances are keyed more finely now, so a deployment whose tasks di
 
 ## 🧾 The audit ledger stops recording zeros and nulls (2026-07-23)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D1**. `AuditEntry` documents `llmDetail` as carrying token usage, `toolCalls` as tool execution data and `cost` as the monetary cost of the step. Every entry the engine has ever produced carried `toolCalls = null` and `cost = 0.0` — passed as **literals** at the `new AuditEntry(...)` call site, with comments claiming an integration that did not exist:
 
@@ -377,7 +381,7 @@ Four pre-existing tests were repaired rather than extended — they passed for t
 
 ## 🔌 The live tool trace finally reaches the SSE stream — and takes an unredacted payload with it (2026-07-23)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D3**. The `task_complete` SSE frame has advertised a `toolTrace` field since the streaming API shipped, and has never emitted one — not once, on any deployment. The writer and the reader never agreed on a key:
 
@@ -419,7 +423,7 @@ Two weak neighbours tightened: `LlmTaskCoverageTest.resume_nonEmptyTrace_stored`
 
 ## 🧱 The in-turn tool context finally has a ceiling — `maxToolContextTokens` (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D6b** (the bug half of D6; the cross-turn history-lossiness half is an improvement and stays out of scope). `AgentOrchestrator.runToolCallLoop` grew ONE `currentMessages` list by an `AiMessage` plus one `ToolExecutionResultMessage` per tool call per iteration, and nothing between the loop head and `chatModel.chat` ever inspected its size, character count or token count. The only in-loop ceilings were the iteration counter (default 10) and the dollar budgets. Per-result truncation did not save it: `ToolResponseTruncator.truncateIfNeeded` returns the result unchanged when `limits == null`, and `Task.toolResponseLimits` has no default — so on an ordinary agent every tool result entered the context in full. A tool-heavy turn could therefore blow past the model context window mid-loop and hard-fail with a provider `400`, after the tool side effects had already fired.
 
@@ -468,7 +472,7 @@ The nine existing `AgentOrchestrator*Test` constructors and three `historyBuilde
 
 ## 💸 `maxBudgetPerConversation` can finally bind — canonical tool names at the executor boundary (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D2**. A built-in tool has two names, and the engine only ever carried one of them past the dispatch loop.
 
@@ -525,7 +529,7 @@ Verifications that would have gone vacuous after the signature change were repoi
 
 ## ⏳ Cache entries finally expire — `CacheImpl` honours per-entry TTLs (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D5b**, the follow-up to D5. Every TTL-bearing `ICache` overload in `CacheImpl` dropped its `lifespan` argument and delegated to the untimed variant. Caffeine's standard builder has no per-entry expiry, so the wrapper simply threw the number away. Consequences, all live in production until now:
 
@@ -573,7 +577,7 @@ Every behavioural test above was mutation-checked: with `variableExpiry` forced 
 
 ## 🔒 Scope the tool-result cache per identity — one user's tool result no longer reaches another (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D5**, the highest-severity item in the langchain4j remediation backlog. `ToolCacheService` built its cache key as `toolName + ":" + arguments` and nothing else. That is a single global namespace: if user A asked `getAccountBalance` with `{"account":"main"}` and user B later made the byte-identical call, B was served A's cached result verbatim, with no execution and no authorization check in between. Every agent with `enableToolCaching` (default `true`) and a tool whose output depends on *who* is asking was affected.
 
@@ -637,7 +641,7 @@ Every behavioural test was mutation-checked: reverting the key scoping, replacin
 
 ## 🧹 Delete the dead `enableParallelExecution` config and the parallel tool machinery (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D10**. Two LLM task knobs and ~250 lines of the machinery behind them were removed. Nothing in `src/main` read any of it.
 
@@ -692,7 +696,7 @@ Worse than inert: because the mapper uses `JsonInclude.NON_NULL` and the field n
 
 ## 📝 State plainly that `TenantQuotaService.recordCost` has no callers (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D9**, part 3 of 3 — documentation only, no behaviour change.
 
@@ -709,7 +713,7 @@ Both `recordCost` and `checkCostBudget` carry javadoc saying this outright, incl
 
 ## 🐛 Deny tenant quotas **at** the limit on the Postgres store (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D9**, part 2 of 3 — on PostgreSQL the daily conversation cap and the per-minute API-call cap were **never enforced at all**.
 
@@ -747,7 +751,7 @@ Deployments running `eddi.tenant.quota.enabled=true` **on PostgreSQL** were not 
 
 ## 🐛 Keep all tenant quota counters in one `tenant_usage` document (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D9**, part 1 of 3 — `MongoTenantQuotaStore` was raising **E11000 duplicate-key errors on a live request path**, not silently mis-counting.
 
@@ -793,7 +797,7 @@ No configuration change. The subsystem ships dormant (`eddi.tenant.quota.enabled
 
 ## 🧹 Delete dead RAG `injectionStrategy` / `contextTemplate` config (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D8** — two RAG configuration knobs on `LlmConfiguration` that **never had any effect**, removed rather than implemented.
 
@@ -844,7 +848,7 @@ The pre-existing POJO round-trips in `LlmConfigurationTest` / `LlmConfigurationM
 
 ## 🧹 Remove dead `eddi.audit.retentionDays`; correct MCP-client and GDPR-retention docs (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Backlog item **D15** — one dead configuration property plus two pieces of documentation that described behaviour the code does not have.
 
@@ -885,7 +889,7 @@ The retention block documented `eddi.audit.retentionDays` as "delete entries old
 
 ## 🗑️ Delete unused `EddiChatMemoryStore` — dead since Phase 6E (2026-07-22)
 
-**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
 
 Removed `src/main/java/ai/labs/eddi/modules/llm/memory/EddiChatMemoryStore.java` and its two test classes (`EddiChatMemoryStoreTest`, `EddiChatMemoryStoreExtendedTest`). The package `ai.labs.eddi.modules.llm.memory` is now gone entirely — those three files were its only occupants.
 

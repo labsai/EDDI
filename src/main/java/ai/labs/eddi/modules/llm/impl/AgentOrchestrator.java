@@ -80,6 +80,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -126,21 +127,26 @@ class AgentOrchestrator {
 
     /**
      * Deployment-wide fallback for {@code LlmConfiguration.Task#getEnforceBudget()}
-     * ({@code eddi.tools.budget.enforce-by-default}, default {@code true}).
+     * ({@code eddi.tools.budget.enforce-by-default}, default {@code false}).
      * <p>
-     * The default is {@code true} so that a stored {@code maxBudgetPerConversation}
-     * keeps doing what it did before {@code enforceBudget} existed. The gate only
-     * fires when a ceiling is configured at all, so this flag is unobservable for
-     * agents that set none. Defaulting it to {@code false} instead — as this field
-     * originally did — silently voided every ceiling that <em>was</em> being
-     * enforced: the "no built-in was ever priced above $0.00" reasoning holds only
-     * for built-ins, and http/MCP/A2A/dynamic tools dispatch under their configured
-     * name, so an agent with a tool called {@code websearch}, {@code webscraper} or
-     * {@code pdfreader} was priced and refused on the previous release.
+     * Enforcement is <em>opt-in</em>. Until this release every built-in tool priced
+     * at $0.00 (the cost table was keyed on config slugs while the live path passed
+     * {@code @Tool} method names), so a {@code maxBudgetPerConversation} on a
+     * built-in-only agent has never once refused a call. Now that pricing works,
+     * defaulting the gate to on would make those ceilings bind for the first time
+     * and start refusing tool calls mid-conversation on upgrade.
      * <p>
-     * Opting out is explicit and still available in both directions: per task with
-     * {@code "enforceBudget": false}, or deployment-wide with
-     * {@code eddi.tools.budget.enforce-by-default=false}.
+     * That is <em>not</em> the whole story, and the other half is why
+     * {@link #warnAboutUnenforcedBudgets} exists: http/MCP/A2A/dynamic tools
+     * dispatch under their configured name, so an agent with a tool called
+     * {@code websearch}, {@code webscraper} or {@code pdfreader} WAS priced and WAS
+     * refused on the previous release. For those agents an opt-in default silently
+     * removes a cost cap that was working. Silence is the unacceptable part, not
+     * the default — so every stored task carrying a ceiling without an explicit
+     * {@code enforceBudget} is named in a startup WARN.
+     * <p>
+     * Turn enforcement on per task with {@code "enforceBudget": true}, or
+     * deployment-wide with {@code eddi.tools.budget.enforce-by-default=true}.
      * <p>
      * Read through {@link ConfigProvider} rather than {@code @ConfigProperty}
      * because AgentOrchestrator is not a CDI bean — {@code LlmTask} constructs it
@@ -153,14 +159,47 @@ class AgentOrchestrator {
         try {
             return ConfigProvider.getConfig()
                     .getOptionalValue("eddi.tools.budget.enforce-by-default", Boolean.class)
-                    .orElse(true);
+                    .orElse(false);
         } catch (Exception e) {
             // No MicroProfile config available (plain unit test JVM): fall back to the
-            // documented default rather than to "unenforced", so a missing config never
-            // turns a configured ceiling off.
-            return true;
+            // documented default so a test JVM and a deployment agree.
+            return false;
         }
     }
+
+    /**
+     * Warns, once per configured task, that a {@code maxBudgetPerConversation}
+     * ceiling is present but not enforced.
+     * <p>
+     * The cost of an opt-in default (see {@link #BUDGET_ENFORCE_DEFAULT}) is that
+     * an operator who genuinely had a working ceiling — one on http/MCP/A2A/dynamic
+     * tools, which were priced by their configured name before this release — loses
+     * it without noticing. This makes that loss loud instead of silent: a ceiling
+     * that records but never refuses is exactly the "config that silently does
+     * nothing" this release set out to remove.
+     *
+     * @param task
+     *            the configured LLM task about to run
+     */
+    private static void warnAboutUnenforcedBudgets(LlmConfiguration.Task task) {
+        if (task.getMaxBudgetPerConversation() == null || task.getEnforceBudget() != null || BUDGET_ENFORCE_DEFAULT) {
+            return;
+        }
+        if (UNENFORCED_BUDGET_WARNED.add(String.valueOf(task.getId()))) {
+            LOGGER.warnf("LLM task '%s' sets maxBudgetPerConversation=%s but enforceBudget is unset, "
+                    + "so the ceiling records cost without ever refusing a tool call. Tool pricing was "
+                    + "repaired in this release; set \"enforceBudget\": true on the task (or "
+                    + "eddi.tools.budget.enforce-by-default=true) to enforce it.",
+                    sanitize(String.valueOf(task.getId())), task.getMaxBudgetPerConversation());
+        }
+    }
+
+    /**
+     * Task ids already named by {@link #warnAboutUnenforcedBudgets}, so a per-turn
+     * check does not emit a per-turn log line. Bounded by the number of configured
+     * tasks, not by traffic.
+     */
+    private static final Set<String> UNENFORCED_BUDGET_WARNED = ConcurrentHashMap.newKeySet();
 
     // Stateless helpers — safe to instantiate directly (no CDI needed).
     private final ToolApprovalGate toolApprovalGate = new ToolApprovalGate();
@@ -1487,12 +1526,13 @@ class AgentOrchestrator {
 
         // Check per-conversation TOOL budget before executing tool.
         //
-        // A configured maxBudgetPerConversation is enforced unless the operator says
-        // otherwise: enforceBudget on the task wins, and BUDGET_ENFORCE_DEFAULT (true
-        // unless eddi.tools.budget.enforce-by-default says so) decides when the task
-        // is silent. Defaulting to "unenforced" would void the ceilings that http,
-        // MCP, A2A and dynamic tools were already being refused by. Cost tracking
-        // itself is unaffected by the flag.
+        // Enforcement is opt-in: enforceBudget on the task wins, otherwise
+        // BUDGET_ENFORCE_DEFAULT (false unless eddi.tools.budget.enforce-by-default
+        // says so). Built-in tools priced at $0.00 until this release, so enforcing
+        // by default would make those ceilings bind for the first time on upgrade.
+        // A ceiling left unenforced is named once in a startup-style WARN rather
+        // than passing silently. Cost tracking itself is unaffected by the flag.
+        warnAboutUnenforcedBudgets(task);
         boolean enforceBudget = task.getEnforceBudget() != null ? task.getEnforceBudget() : BUDGET_ENFORCE_DEFAULT;
         if (enforceBudget && maxBudget != null && conversationId != null
                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
