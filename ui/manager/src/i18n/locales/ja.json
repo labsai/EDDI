@@ -2123,6 +2123,7 @@
     "followupPlaceholder": "このメンバーにフォローアップの質問をする…",
     "inputDisabledApproval": "承認待ち…",
     "inputDisabledClosed": "この議論は終了しました",
+    "inputDisabledCompleted": "ディスカッション完了",
     "inputDisabledEnded": "この議論は完了しました",
     "inputDisabledInProgress": "議論が進行中…",
     "membersCount": "{{count}} メンバー",

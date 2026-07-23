@@ -50,7 +50,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
 
   function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault();
-    if (question.trim() && !isLoading) {
+    if (question.trim() && !isLoading && !disabled) {
       onSubmit(question.trim());
       setQuestion("");
       setDialogOpen(false);
@@ -90,7 +90,10 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
           <button
             type="button"
             onClick={() => setDialogOpen(true)}
-            className="absolute end-2 inset-y-0 my-auto h-fit rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
+            disabled={disabled || isLoading}
+            aria-label={t("groups.expandInput", "Expand input")}
+            aria-expanded={dialogOpen}
+            className="absolute end-2 inset-y-0 my-auto h-fit rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title={t("groups.expandInput", "Expand input")}
           >
             <Expand className="h-3.5 w-3.5" />
@@ -142,7 +145,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
             }
             className="w-full resize-y rounded-lg border border-input bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow min-h-[200px]"
             rows={8}
-            disabled={isLoading}
+            disabled={isLoading || disabled}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
@@ -167,7 +170,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
             </Button>
             <Button
               onClick={() => handleSubmit()}
-              disabled={!question.trim() || isLoading}
+              disabled={!question.trim() || isLoading || disabled}
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin me-1" />

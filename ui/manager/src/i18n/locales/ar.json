@@ -2123,6 +2123,7 @@
     "followupPlaceholder": "اطرح على هذا العضو سؤال متابعة…",
     "inputDisabledApproval": "في انتظار الموافقة…",
     "inputDisabledClosed": "هذه المناقشة مغلقة",
+    "inputDisabledCompleted": "النقاش مكتمل",
     "inputDisabledEnded": "انتهت هذه المناقشة",
     "inputDisabledInProgress": "المناقشة قيد التقدم…",
     "membersCount": "{{count}} أعضاء",

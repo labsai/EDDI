@@ -17,7 +17,7 @@ import {
 } from "@/lib/api/groups";
 
 const GROUPS_KEY = ["groups"] as const;
-const GROUP_CONVERSATIONS_KEY = ["groupConversations"] as const;
+export const GROUP_CONVERSATIONS_KEY = ["groupConversations"] as const;
 
 // ─── Group Config Hooks ──────────────────────────────────────────
 

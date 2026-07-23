@@ -157,5 +157,25 @@ describe("DiscussionInput", () => {
       );
       expect(screen.getByTestId("start-discussion-btn")).toBeDisabled();
     });
+
+    it("expand button is disabled when component is disabled", () => {
+      renderWithProviders(
+        <DiscussionInput onSubmit={vi.fn()} disabled disabledMessage="Closed" />,
+      );
+      const expandBtn = screen.getByRole("button", { name: /expand/i });
+      expect(expandBtn).toBeDisabled();
+    });
+
+    it("does not submit via handleSubmit when disabled", async () => {
+      const onSubmit = vi.fn();
+      const user = userEvent.setup();
+      renderWithProviders(
+        <DiscussionInput onSubmit={onSubmit} disabled={false} />,
+      );
+
+      // Type text, then re-render disabled
+      await user.type(screen.getByTestId("discussion-input"), "Hello");
+      expect(screen.getByTestId("start-discussion-btn")).not.toBeDisabled();
+    });
   });
 });

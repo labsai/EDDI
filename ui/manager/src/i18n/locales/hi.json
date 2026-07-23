@@ -2123,6 +2123,7 @@
     "followupPlaceholder": "इस सदस्य से एक फ़ॉलो-अप प्रश्न पूछें…",
     "inputDisabledApproval": "स्वीकृति की प्रतीक्षा है…",
     "inputDisabledClosed": "यह चर्चा बंद है",
+    "inputDisabledCompleted": "चर्चा पूर्ण",
     "inputDisabledEnded": "यह चर्चा समाप्त हो चुकी है",
     "inputDisabledInProgress": "चर्चा प्रगति पर है…",
     "membersCount": "{{count}} सदस्य",

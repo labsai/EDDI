@@ -2123,6 +2123,7 @@
     "followupPlaceholder": "이 멤버에게 후속 질문을 하세요…",
     "inputDisabledApproval": "승인 대기 중…",
     "inputDisabledClosed": "이 토론은 닫혔습니다",
+    "inputDisabledCompleted": "토론 완료",
     "inputDisabledEnded": "이 토론은 종료되었습니다",
     "inputDisabledInProgress": "토론 진행 중…",
     "membersCount": "{{count}}명의 멤버",

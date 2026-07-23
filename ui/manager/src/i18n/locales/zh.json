@@ -2123,6 +2123,7 @@
     "followupPlaceholder": "向该成员提出跟进问题…",
     "inputDisabledApproval": "等待批准中…",
     "inputDisabledClosed": "此讨论已关闭",
+    "inputDisabledCompleted": "讨论已完成",
     "inputDisabledEnded": "此讨论已结束",
     "inputDisabledInProgress": "讨论正在进行中…",
     "membersCount": "{{count}} 位成员",

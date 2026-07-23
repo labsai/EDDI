@@ -168,6 +168,7 @@ export function GroupDetailPage() {
     if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
     if (state === "AWAITING_APPROVAL") return t("groups.inputDisabledApproval", "Awaiting approval…");
     if (state === "IN_PROGRESS" || state === "SYNTHESIZING") return t("groups.inputDisabledInProgress", "Discussion in progress…");
+    if (state === "COMPLETED") return t("groups.inputDisabledCompleted", "Discussion completed");
     return undefined;
   }, [streamState.isStreaming, selectedConvId, selectedConversation, t]);
 
@@ -176,13 +177,13 @@ export function GroupDetailPage() {
     if (inputMode === "continue" && selectedConvId) {
       // SSE streaming continuation
       continueStream(groupId, selectedConvId, question);
-      toast.success(t("groups.continueStreamStarted", "Continuation started — streaming live"));
+      toast.info(t("groups.continueStreamStarted", "Continuation started — streaming live"));
     } else {
       // New discussion
       pendingDecisionRef.current = null;
       setSelectedConvId(null);
       startStream(groupId, question);
-      toast.success(t("groups.discussionStarted", "Discussion started — streaming live"));
+      toast.info(t("groups.discussionStarted", "Discussion started — streaming live"));
     }
   }, [groupId, inputMode, selectedConvId, continueStream, startStream, t]);
 
@@ -402,7 +403,7 @@ export function GroupDetailPage() {
               tabIndex={0}
               onClick={() => handleSelectConversation(conv.id)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
+                if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
                   e.preventDefault();
                   handleSelectConversation(conv.id);
                 }

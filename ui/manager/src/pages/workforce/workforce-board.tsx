@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { usePersistedBoolean } from "@/hooks/use-persisted-boolean";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronLeft, PanelRightOpen, PanelRightClose, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useGroup, useGroupConversations, useGroupConversation } from "@/hooks/use-groups";
+import { useGroup, useGroupConversations, useGroupConversation, GROUP_CONVERSATIONS_KEY } from "@/hooks/use-groups";
 import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { BoardTranscript } from "@/components/workforce/board-transcript";
 import { BoardInput } from "@/components/workforce/board-input";
@@ -110,24 +111,10 @@ function WorkforceBoard() {
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [showConfig, setShowConfig] = useState(() => {
-    try {
-      const saved = localStorage.getItem("workforce-board-config-panel");
-      return saved !== null ? saved === "true" : true;
-    } catch {
-      return true;
-    }
-  });
+  const [showConfig, setShowConfig] = usePersistedBoolean("workforce-board-config-panel", true);
   const membersRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const panelTriggerRef = useRef<HTMLElement | null>(null);
-
-  // Persist panel state to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem("workforce-board-config-panel", String(showConfig));
-    } catch { /* storage unavailable — silently degrade */ }
-  }, [showConfig]);
 
   // ─── Data ──────────────────────────────────────────────────────
   const { data: groupConfig, isLoading: configLoading } = useGroup(boardId ?? "", version);
@@ -143,8 +130,12 @@ function WorkforceBoard() {
   useEffect(() => {
     if (streamState.state === "COMPLETED" && streamState.conversationId) {
       setSelectedConvId(streamState.conversationId);
+      // Invalidate to refresh availableActions after a continuation round
+      if (boardId) {
+        queryClient.invalidateQueries({ queryKey: [...GROUP_CONVERSATIONS_KEY, boardId] });
+      }
     }
-  }, [streamState.state, streamState.conversationId]);
+  }, [streamState.state, streamState.conversationId, boardId, queryClient]);
 
   // Close slide-over panels on Escape + restore focus
   useEffect(() => {
@@ -225,6 +216,7 @@ function WorkforceBoard() {
     if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
     if (state === "AWAITING_APPROVAL") return t("groups.inputDisabledApproval", "Awaiting approval…");
     if (state === "IN_PROGRESS" || state === "SYNTHESIZING") return t("groups.inputDisabledInProgress", "Discussion in progress…");
+    if (state === "COMPLETED") return t("groups.inputDisabledCompleted", "Discussion completed");
     return undefined;
   }, [isStreaming, selectedConvId, selectedConversation, t]);
 
@@ -256,7 +248,7 @@ function WorkforceBoard() {
   // ─── Lifecycle mutations ──────────────────────────────────────
   const invalidateConversations = useCallback(() => {
     if (boardId) {
-      queryClient.invalidateQueries({ queryKey: ["groupConversations", boardId] });
+      queryClient.invalidateQueries({ queryKey: [...GROUP_CONVERSATIONS_KEY, boardId] });
     }
   }, [boardId, queryClient]);
 

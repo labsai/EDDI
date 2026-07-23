@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { usePersistedBoolean } from "@/hooks/use-persisted-boolean";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -29,22 +30,8 @@ import { cn } from "@/lib/utils";
  */
 export function WorkforceChat() {
   const { t } = useTranslation();
-  const [showDetails, setShowDetails] = useState(() => {
-    try {
-      const saved = localStorage.getItem("workforce-chat-details-panel");
-      return saved !== null ? saved === "true" : true;
-    } catch {
-      return true;
-    }
-  });
+  const [showDetails, setShowDetails] = usePersistedBoolean("workforce-chat-details-panel", true);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
-
-  // Persist panel state to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem("workforce-chat-details-panel", String(showDetails));
-    } catch { /* storage unavailable — silently degrade */ }
-  }, [showDetails]);
 
   // Read selected agent from the ChatPanel's shared store
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);

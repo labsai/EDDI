@@ -2123,6 +2123,7 @@
     "followupPlaceholder": "ถามคำถามติดตามกับสมาชิกคนนี้…",
     "inputDisabledApproval": "รอการอนุมัติ…",
     "inputDisabledClosed": "การอภิปรายนี้ปิดแล้ว",
+    "inputDisabledCompleted": "การสนทนาเสร็จสิ้น",
     "inputDisabledEnded": "การอภิปรายนี้สิ้นสุดแล้ว",
     "inputDisabledInProgress": "กำลังดำเนินการอภิปราย…",
     "membersCount": "{{count}} สมาชิก",

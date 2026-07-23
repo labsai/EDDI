@@ -2123,6 +2123,7 @@
     "followupPlaceholder": "Posez une question de relance à ce membre…",
     "inputDisabledApproval": "En attente d'approbation…",
     "inputDisabledClosed": "Cette discussion est fermée",
+    "inputDisabledCompleted": "Discussion terminée",
     "inputDisabledEnded": "Cette discussion est terminée",
     "inputDisabledInProgress": "Discussion en cours…",
     "membersCount": "{{count}} membres",
