@@ -414,6 +414,15 @@ class AgentOrchestrator {
         String pauseEpoch = batch.getPauseEpoch();
         List<Map<String, Object>> trace = new ArrayList<>();
 
+        // Tool-cost baseline, snapshotted BEFORE the verdict loop below — that loop
+        // runs every human-approved gated call through executeToolWrapped, which
+        // charges the conversation's cost tracker. A baseline taken after it would
+        // already contain those charges, so the delta reported as toolCostUsd (and
+        // hence the audit ledger's dollar figure) would exclude exactly the calls a
+        // human explicitly approved. The live path (executeWithTools) snapshots
+        // before any tool runs; this is the same contract.
+        double toolCostBefore = conversationToolCost(conversationId);
+
         // ── Step 2: rebuild tooling via the shared setup (SAME as the live path) ──
         ToolSetup setup = buildToolSetup(task, memory);
         boolean isLazy = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY;
@@ -535,8 +544,6 @@ class AgentOrchestrator {
         // is capped at the constant default here — a defensible, rare-path fallback
         // rather than widening resumeToolLoop's signature for the primary knob, which
         // governs the initial pause.
-        String costConversationId = memory.getConversationId();
-        double toolCostBefore = conversationToolCost(costConversationId);
         TokenUsage[] tokenHolder = new TokenUsage[1];
         String response = runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, DEFAULT_TRANSCRIPT_MAX_BYTES, tokenHolder,
@@ -553,7 +560,7 @@ class AgentOrchestrator {
         if (tokenHolder[0] != null) {
             responseMetadata.put("tokenUsage", tokenUsageMap(tokenHolder[0]));
         }
-        responseMetadata.put("toolCostUsd", toolCostDelta(costConversationId, toolCostBefore));
+        responseMetadata.put("toolCostUsd", toolCostDelta(conversationId, toolCostBefore));
         return new ExecutionResult(response, mergedTrace, responseMetadata);
     }
 

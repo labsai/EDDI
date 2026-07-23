@@ -5,6 +5,47 @@
 
 ---
 
+## 🧾 The audit ledger stops triple-billing the turn, and starts seeing the tool spend (2026-07-23)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Three defects in the audit / cost path, all introduced or made live by this branch's own remediation work. They share one root cause: **dollar figures that are read, copied or baselined at the wrong moment**.
+
+**A1 — every task after the LLM task re-reported the LLM's cost and tool calls.** `LifecycleManager.buildAuditEntry` runs once per lifecycle task, and `ConversationStep`'s data is never cleared between tasks. It read `audit:cost`, `audit:tool_calls`, `audit:token_usage` and the whole `llmDetail` block with **no task-type gate**, so a workflow `[parser, behavior, langchain, output, templating]` on a turn costing $0.0042 appended **three** ledger rows at $0.0042, and recorded that the `output` and `templating` tasks made tool calls they never touched. The ledger is append-only (EU AI Act), so an auditor summing cost reads a multiple of the truth with no way to correct it. The same file already gated the SSE tool trace on the task type ~60 lines earlier, with a comment explaining exactly this hazard — the audit reader never got the same gate. Before this branch cost was a literal `0.0` and `toolCalls` a literal `null`, which is why the lingering-key mechanism was previously harmless.
+
+**A2 — the cascade dropped the entire tool spend.** `LlmTask`'s cascade branch builds a *fresh* metadata map and hand-copies `warning`, `finishReason` and `streamingTimeout` out of the winning step's metadata. It never copied `toolCostUsd` — yet `accumulateAuditEvidence` computes the ledger cost as `cascadeCostUsd + toolCostUsd`. Since `ModelCascadeConfig.enableInAgentMode` defaults to **true**, this is the default path for any agent-mode task with a cascade: the ledger (and `responseMetadataObjectName` template data) reported token cost only. The non-cascade branches assign the agent's whole map and were always correct, so the two branches of one feature disagreed.
+
+**A3 — HITL-approved tool calls were excluded from their own turn's cost.** `AgentOrchestrator.resumeToolLoop` snapshotted its tool-cost baseline *after* the verdict-application loop, which has already run every human-approved gated call through `executeToolWrapped` → `costTracker.trackToolCall`. Those charges were inside the baseline, so `toolCostDelta` subtracted them right back out: the cost of precisely the calls a human signed off on never reached `toolCostUsd`. The live path (`executeWithTools`) always baselined before any tool ran.
+
+**What changed:**
+
+| Component | Change |
+|---|---|
+| **`LifecycleManager`** | New shared predicate `isLlmTask(ILifecycleTask)` used by **both** `buildTaskSummary` and `buildAuditEntry`, so the two readers of the same lingering keys cannot drift apart again. `llmDetail`, `toolCalls` and `cost` are gated on it; so is the summary's `confidence` (an LLM-only signal that lingered the same way) |
+| **`CascadingModelExecutor`** | `CascadeResult` gains `runToolCostUsd`; the step loop's `runCostUsd`/`runTokenUsage` locals become one `RunTotals` accumulator that also sums `stepToolCost(...)` per step |
+| **`LlmTask`** | The cascade branch now puts `toolCostUsd` (the run total) into the response metadata, matching what the non-cascade branches always carried |
+| **`AgentOrchestrator`** | `resumeToolLoop` takes the tool-cost baseline at method entry, before the verdict loop; the redundant `costConversationId` local is gone |
+
+**Design decisions:**
+
+- **Gate, don't clear.** Clearing `audit:*` between tasks would break accumulation across an LLM config's sub-tasks (`accumulateAuditEvidence` is deliberately read-modify-write). Gating the *reader* is the narrow fix.
+- **`actions`, `input` and `output` stay ungated.** `actions` is genuinely per-task, and the input/output pair describes the step context every task ran in — that is pre-existing, intended behaviour. Only the LLM-written evidence is gated.
+- **Run total, not the winning step's slice (A2).** An escalating cascade re-enters `executeAgentModeStep` for every step it tries, and each of those steps really does execute (and get charged for) its tools. Copying the accepted step's `toolCostUsd` would under-bill exactly as much as the old code dropped, and `returnBestAcrossSteps`/`finalizeBest` return a *different* step's metadata anyway. `AgentOrchestrator` reports its own per-call delta of the conversation total, so the per-step values partition the run's spend and are safe to sum — the same argument that already justifies `runCostUsd` and `runTokenUsage` being run totals.
+- **`RunTotals` over a fifth positional `double`.** `withRun`/`finalizeBest` would otherwise have carried two adjacent, silently swappable `double` parameters — in a cost-accounting path, on a branch whose whole theme is cost figures drifting apart. It is a plain local accumulator; the executor stays stateless.
+
+**Operator-visible behaviour changes:**
+
+- Ledger rows for non-LLM tasks now carry `cost = 0.0`, `toolCalls = null` and `llmDetail = null` instead of a copy of the LLM task's figures. **Summing `cost` over a turn now yields the turn's actual cost**; historical rows written before this fix remain inflated and cannot be amended (append-only).
+- SSE `task_complete` no longer reports `confidence` for tasks that follow the LLM task.
+- Agent-mode cascade turns now report tool spend in `audit:cost` and in `responseMetadataObjectName` — figures go **up** relative to before, because they were previously missing, not double-counted.
+- A HITL-resumed turn's `toolCostUsd` now includes the approved gated calls. This also means `maxBudgetPerConversation` accounting sees them.
+
+**Tests:** `LifecycleManagerTest.BuildAuditEntryTaskTypeGateTests` (3, driving a **real** `ConversationMemory`/`ConversationStep` so the lingering is the production mechanism rather than a per-key stub), two cascade tool-cost tests in `LlmTaskAuditLedgerTest`, one resume-path cost test in `AgentOrchestratorResumeToolLoopTest`. Every one was mutation-checked: ungating the audit reader fails with `task 'output' spent nothing … expected: <0.0> but was: <0.0042>`; ungating the summary reader fails the pre-existing trace test too; dropping the cascade's `toolCostUsd` gives `expected: <0.0095> but was: <0.002>`; turning the run total into last-wins gives `expected: <0.007> but was: <0.004>`; restoring the old baseline position gives `expected: <0.002> but was: <0.0>`.
+
+**Files:** `LifecycleManager`, `CascadingModelExecutor`, `LlmTask`, `AgentOrchestrator`, plus their three test classes and `docs/changelog.md`.
+
+---
+
 ## 🧮 `convertToObject` finally reaches agent mode and streaming (2026-07-23)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

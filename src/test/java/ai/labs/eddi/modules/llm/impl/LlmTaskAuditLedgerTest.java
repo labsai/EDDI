@@ -356,6 +356,69 @@ class LlmTaskAuditLedgerTest {
         assertEquals(1000L, tokenUsage.get("inputTokens"));
     }
 
+    /**
+     * The cascade branch builds a FRESH response-metadata map and hand-copies
+     * selected keys out of the winning step's metadata. It copied the validation
+     * signals but not {@code toolCostUsd}, so on the agent-mode cascade path — the
+     * DEFAULT, since {@code enableInAgentMode} defaults to true — the entire tool
+     * spend of the turn never reached the ledger.
+     */
+    @Test
+    @DisplayName("an agent-mode cascade adds the tool spend to the audit cost, not just the token cost")
+    void cascadeAgentModeCarriesToolCost() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        cascade.setInputPricePer1M(1.0);
+        cascade.setOutputPricePer1M(2.0);
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step));
+
+        agentReturns("cascade answer", new ArrayList<>(),
+                Map.of("tokenUsage", Map.of("inputTokens", 1000, "outputTokens", 500, "totalTokens", 1500),
+                        "toolCostUsd", 0.0075));
+
+        var t = task("taskA");
+        t.setEnableBuiltInTools(true); // → isAgentMode()
+        t.setModelCascade(cascade);
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        // 1000/1M * $1.00 + 500/1M * $2.00 = $0.002 of token cost, plus $0.0075 of
+        // tracked tool spend the cascade branch used to drop on the floor.
+        assertEquals(0.0095, auditCost(), 1e-9, "the cascade's tool spend must reach the ledger");
+    }
+
+    @Test
+    @DisplayName("an escalating cascade sums the tool spend of every step it tried")
+    void cascadeSumsToolCostAcrossEscalatedSteps() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("heuristic");
+        var cheap = new CascadeStep();
+        cheap.setType("openai");
+        cheap.setTimeoutMs(5000L);
+        // Unreachable threshold → step 0 runs its tools and then escalates.
+        cheap.setConfidenceThreshold(1.1);
+        var strong = new CascadeStep();
+        strong.setType("openai");
+        strong.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(cheap, strong));
+
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult("weak", new ArrayList<>(), Map.of("toolCostUsd", 0.003)))
+                .thenReturn(new AgentOrchestrator.ExecutionResult("strong answer", new ArrayList<>(), Map.of("toolCostUsd", 0.004)));
+
+        var t = task("taskA");
+        t.setEnableBuiltInTools(true);
+        t.setModelCascade(cascade);
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        assertEquals(0.007, auditCost(), 1e-9,
+                "the escalated step's tools really ran and were charged — reporting only the winning step under-bills the ledger");
+    }
+
     // ==================== HITL resume ====================
 
     @Test

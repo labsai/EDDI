@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -542,6 +543,48 @@ class AgentOrchestratorResumeToolLoopTest {
         verify(chatModel, never()).chat(any(ChatRequest.class));
         // Approved call still executed during verdict application.
         verify(calculatorTool, times(1)).calculate("6*7");
+    }
+
+    /**
+     * The tool-cost baseline used to be snapshotted AFTER the verdict loop, which
+     * had already executed (and charged) every human-approved gated call — so the
+     * delta reported as {@code toolCostUsd}, and with it the audit ledger's dollar
+     * figure, excluded exactly the calls a human explicitly approved.
+     */
+    @Test
+    @DisplayName("resume: an approved gated call's cost is included in toolCostUsd")
+    void approvedGatedCallCostIsReported() throws Exception {
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), eq("reviewer-1")))
+                .thenReturn(true);
+        when(calculatorTool.calculate("6*7")).thenReturn("42");
+
+        // Conversation-scoped tracker, charged from inside executeToolWrapped exactly
+        // like the real pipeline does. It already carries spend from BEFORE the pause,
+        // which the resumed turn must NOT re-report.
+        var metrics = new ToolCostTracker.ConversationCostMetrics("conv-1");
+        metrics.addToolCost("earlierTool", 0.005);
+        var costTracker = mock(ToolCostTracker.class);
+        when(costTracker.getConversationCosts("conv-1")).thenReturn(metrics);
+        when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
+        when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(), any(Supplier.class),
+                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                .thenAnswer(inv -> {
+                    metrics.addToolCost("calculate", 0.002);
+                    Supplier<String> sup = inv.getArgument(4);
+                    return sup.get();
+                });
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("42"));
+
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
+
+        assertEquals(0.002, (Double) result.responseMetadata().get("toolCostUsd"), 1e-9,
+                "the approved gated call ran during verdict application — its cost must reach the ledger");
     }
 
     @Test

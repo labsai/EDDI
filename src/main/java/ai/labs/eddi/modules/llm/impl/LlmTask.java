@@ -539,6 +539,13 @@ public class LlmTask implements ILifecycleTask {
                 }
             }
             responseMetadata.put("cascadeCostUsd", cascadeResult.runCostUsd());
+            // Tool spend of the run. This branch builds a FRESH metadata map instead of
+            // adopting the agent's, so without this the entire tool cost of an agent-mode
+            // cascade (the DEFAULT — enableInAgentMode defaults to true) never reaches
+            // accumulateAuditEvidence's cascadeCostUsd + toolCostUsd sum, and the ledger
+            // reports token cost only. The non-cascade branches below assign the agent's
+            // whole map and always carried it.
+            responseMetadata.put("toolCostUsd", cascadeResult.runToolCostUsd());
             responseMetadata.put("cascadeModel", cascadeAuditModel);
             responseMetadata.put("cascadeStep", cascadeResult.stepUsed());
             responseMetadata.put("cascadeConfidence", cascadeResult.confidence());

@@ -475,20 +475,36 @@ public class LifecycleManager implements ILifecycleManager {
         // element list and returns only the LAST prefix match. The task-type gate is
         // load-bearing — step data survives across tasks, so an ungated prefix scan
         // would report the LLM's trace on every task that runs after it in this step.
-        if (TASK_TYPE_LANGCHAIN.equals(task.getType())) {
+        if (isLlmTask(task)) {
             List<Object> toolTrace = collectToolTrace(conversationMemory.getCurrentStep());
             if (!toolTrace.isEmpty()) {
                 summary.put("toolTrace", toolTrace);
             }
-        }
-        // Cascade confidence (when model cascade is active) — written as a Double by
-        // LlmTask's cascade branch. It used to write a String under a different key
-        // ("audit:cascade_confidence"), so this slot was never populated at all.
-        IData<Double> confidenceData = conversationMemory.getCurrentStep().getLatestData(AUDIT_CONFIDENCE);
-        if (confidenceData != null && confidenceData.getResult() != null) {
-            summary.put("confidence", confidenceData.getResult());
+            // Cascade confidence (when model cascade is active) — written as a Double by
+            // LlmTask's cascade branch. It used to write a String under a different key
+            // ("audit:cascade_confidence"), so this slot was never populated at all.
+            // Same gate as the trace above: it is an LLM-only signal that lingers in the
+            // step, so an ungated read reports it for every later task too.
+            IData<Double> confidenceData = conversationMemory.getCurrentStep().getLatestData(AUDIT_CONFIDENCE);
+            if (confidenceData != null && confidenceData.getResult() != null) {
+                summary.put("confidence", confidenceData.getResult());
+            }
         }
         return summary;
+    }
+
+    /**
+     * Whether this task is the LLM task, i.e. the only writer of the
+     * {@code audit:*} and {@code langchain:trace:*} step keys.
+     * <p>
+     * Both {@link #buildTaskSummary} and {@link #buildAuditEntry} read those keys,
+     * and {@code ConversationStep}'s data is never cleared between tasks — so an
+     * ungated read attributes the LLM's evidence to every task that runs after it
+     * in the same step. Kept as one shared predicate so the two readers cannot
+     * drift apart again.
+     */
+    private boolean isLlmTask(ILifecycleTask task) {
+        return TASK_TYPE_LANGCHAIN.equals(task.getType());
     }
 
     /**
@@ -533,10 +549,19 @@ public class LifecycleManager implements ILifecycleManager {
             output.put("output", outputData.getResult());
         }
 
-        // Collect LLM details (if present). All of these are written by LlmTask
-        // (executeTask and executeResume) and only when an audit collector is attached.
+        // Everything below is written by LlmTask (executeTask and executeResume) and
+        // only when an audit collector is attached. It is gated on the task type for
+        // the same reason buildTaskSummary gates the tool trace: the step's data
+        // survives across tasks, so an ungated read makes every task running after the
+        // LLM task in this step append a ledger row carrying the LLM's prompt, tokens,
+        // tool calls and — worst of all — its dollar cost. The ledger is append-only,
+        // so an auditor summing cost over the turn would read a multiple of the truth
+        // with no way to correct it after the fact.
+        boolean llmTask = isLlmTask(task);
+
+        // Collect LLM details (if present).
         Map<String, Object> llmDetail = null;
-        IData<String> promptData = currentStep.getLatestData(AUDIT_COMPILED_PROMPT);
+        IData<String> promptData = llmTask ? currentStep.getLatestData(AUDIT_COMPILED_PROMPT) : null;
         if (promptData != null && promptData.getResult() != null) {
             llmDetail = new LinkedHashMap<>();
             llmDetail.put("compiledPrompt", promptData.getResult());
@@ -562,7 +587,7 @@ public class LifecycleManager implements ILifecycleManager {
 
         // Tool execution evidence, accumulated by LlmTask across the whole turn.
         Map<String, Object> toolCalls = null;
-        IData<Map<String, Object>> toolCallData = currentStep.getLatestData(AUDIT_TOOL_CALLS);
+        IData<Map<String, Object>> toolCallData = llmTask ? currentStep.getLatestData(AUDIT_TOOL_CALLS) : null;
         if (toolCallData != null && toolCallData.getResult() != null && !toolCallData.getResult().isEmpty()) {
             toolCalls = toolCallData.getResult();
         }
@@ -570,7 +595,7 @@ public class LifecycleManager implements ILifecycleManager {
         // Dollar cost of this task: configured cascade LLM pricing plus tracked tool
         // cost. Absent means nothing priced ran, which is a genuine 0.0.
         double cost = 0.0;
-        IData<Double> costData = currentStep.getLatestData(AUDIT_COST);
+        IData<Double> costData = llmTask ? currentStep.getLatestData(AUDIT_COST) : null;
         if (costData != null && costData.getResult() != null) {
             cost = costData.getResult();
         }

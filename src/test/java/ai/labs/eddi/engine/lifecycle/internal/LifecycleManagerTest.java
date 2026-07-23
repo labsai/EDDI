@@ -10,10 +10,12 @@ import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -1419,6 +1421,118 @@ class LifecycleManagerTest {
 
             manager.executeLifecycle(memory, null);
             return auditCollector;
+        }
+    }
+
+    /**
+     * The {@code audit:*} keys live on the step, and a step's data is never cleared
+     * between tasks — so every reader of those keys has to be gated on the LLM task
+     * type. Without the gate the ledger (which is append-only, EU AI Act) records
+     * the LLM's dollar cost and tool calls once more for EVERY task that runs after
+     * it in the same step.
+     * <p>
+     * These tests deliberately drive a REAL {@link ConversationMemory} / step and
+     * let the first task write the keys from inside {@code execute}, so the
+     * lingering is the production mechanism rather than a per-key stub.
+     */
+    @Nested
+    @DisplayName("buildAuditEntry — LLM task-type gate")
+    class BuildAuditEntryTaskTypeGateTests {
+
+        private static final double TURN_COST = 0.0042;
+
+        private ILifecycleTask llmTask() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("ai.labs.llm"));
+            when(task.getType()).thenReturn("langchain");
+            doAnswer(invocation -> {
+                var memory = (IConversationMemory) invocation.getArgument(0);
+                var step = memory.getCurrentStep();
+                step.storeData(new Data<>("audit:compiled_prompt", "system\n---\nprompt"));
+                step.storeData(new Data<>("audit:token_usage", Map.<String, Object>of("totalTokens", 120L)));
+                step.storeData(new Data<>("audit:cascade_model", "openai/gpt-4o (step 0)"));
+                step.storeData(new Data<>("audit:confidence", 0.87));
+                step.storeData(new Data<>("audit:tool_calls",
+                        Map.<String, Object>of("calls", List.of(Map.of("tool", "weather", "llmTaskId", "taskA")))));
+                step.storeData(new Data<>("audit:cost", TURN_COST));
+                return null;
+            }).when(task).execute(any(), any());
+            return task;
+        }
+
+        private ILifecycleTask plainTask(String id, String type) {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId(id));
+            when(task.getType()).thenReturn(type);
+            return task;
+        }
+
+        private List<AuditEntry> runPipeline(ILifecycleTask... tasks) throws Exception {
+            for (ILifecycleTask task : tasks) {
+                lifecycleManager.addLifecycleTask(task);
+            }
+            var memory = new ConversationMemory("conv1", "agent1", 1, "user1");
+            var auditCollector = mock(IAuditEntryCollector.class);
+            memory.setAuditCollector(auditCollector);
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            lifecycleManager.executeLifecycle(memory, null);
+
+            ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(auditCollector, times(tasks.length)).collect(captor.capture());
+            return captor.getAllValues();
+        }
+
+        @Test
+        @DisplayName("tasks following the LLM task do NOT re-report its cost, tool calls or llmDetail")
+        void laterTasksDoNotInheritLlmAuditEvidence() throws Exception {
+            var entries = runPipeline(llmTask(), plainTask("ai.labs.output", "output"),
+                    plainTask("ai.labs.templating", "templating"));
+
+            var llmEntry = entries.get(0);
+            assertEquals(TURN_COST, llmEntry.cost(), 1e-9, "the LLM task must still carry the real cost");
+            assertNotNull(llmEntry.toolCalls());
+            assertNotNull(llmEntry.llmDetail());
+
+            for (AuditEntry later : entries.subList(1, entries.size())) {
+                assertEquals(0.0, later.cost(), 1e-9,
+                        "task '" + later.taskType() + "' spent nothing — summing the ledger must not multiply the turn's cost");
+                assertNull(later.toolCalls(),
+                        "task '" + later.taskType() + "' made no tool calls");
+                assertNull(later.llmDetail(),
+                        "task '" + later.taskType() + "' invoked no model");
+            }
+        }
+
+        @Test
+        @DisplayName("a non-LLM task running BEFORE the LLM task is unaffected")
+        void tasksBeforeTheLlmTaskStayEmpty() throws Exception {
+            var entries = runPipeline(plainTask("ai.labs.parser", "input"), llmTask());
+
+            assertEquals(0.0, entries.get(0).cost(), 1e-9);
+            assertNull(entries.get(0).toolCalls());
+            assertEquals(TURN_COST, entries.get(1).cost(), 1e-9);
+        }
+
+        @Test
+        @DisplayName("summary confidence is not re-reported for tasks after the LLM task")
+        void confidenceIsNotInheritedBySubsequentTasks() throws Exception {
+            var llm = llmTask();
+            var output = plainTask("ai.labs.output", "output");
+            lifecycleManager.addLifecycleTask(llm);
+            lifecycleManager.addLifecycleTask(output);
+
+            var memory = new ConversationMemory("conv1", "agent1", 1, "user1");
+            var eventSink = mock(ConversationEventSink.class);
+            memory.setEventSink(eventSink);
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            lifecycleManager.executeLifecycle(memory, null);
+
+            verify(eventSink).onTaskComplete(eq(new TaskId("ai.labs.llm")), eq("langchain"), anyLong(),
+                    argThat(summary -> Double.valueOf(0.87).equals(summary.get("confidence"))));
+            verify(eventSink).onTaskComplete(eq(new TaskId("ai.labs.output")), eq("output"), anyLong(),
+                    argThat(summary -> !summary.containsKey("confidence")));
         }
     }
 
