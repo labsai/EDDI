@@ -80,8 +80,8 @@ export function App() {
       </Route>
 
       {/* Legacy /Workforce (capital W) redirect → /workforce */}
-      <Route path="/Workforce/*" element={<WorkforceRedirect />} />
-      <Route path="/Workforce" element={<Navigate to="/workforce" replace />} />
+      <Route path="/Workforce/*" caseSensitive element={<WorkforceRedirect />} />
+      <Route path="/Workforce" caseSensitive element={<Navigate to="/workforce" replace />} />
 
       <Route element={<AppLayout />}>
         <Route path="/manage" element={<DashboardPage />} />
