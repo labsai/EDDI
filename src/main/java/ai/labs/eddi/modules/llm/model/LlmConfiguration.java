@@ -260,15 +260,19 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /**
          * Enforce {@link #maxBudgetPerConversation}. Defaults to the deployment-wide
-         * {@code eddi.tools.budget.enforce-by-default} property, itself {@code true}.
+         * {@code eddi.tools.budget.enforce-by-default} property, itself {@code false}.
          * <p>
-         * This is an opt-<em>out</em>, because setting a ceiling is already a statement
-         * of intent and because the ceiling <em>was</em> binding before this field
-         * existed: http, MCP, A2A and dynamic tools dispatch under their configured
-         * name, so a tool named {@code websearch}/{@code webscraper}/{@code pdfreader}
-         * has always been priced and refused. Only built-ins were exempt (they priced
-         * at $0.00 until the canonical-slug fix). Set {@code false} to keep a ceiling
-         * report-only. Cost tracking runs regardless of this flag.
+         * This is an opt-<em>in</em>: without it a ceiling records cost but refuses
+         * nothing. Built-in tools priced at $0.00 until the canonical-slug fix in this
+         * release, so enforcing by default would make those ceilings bind for the first
+         * time and start aborting tool calls mid-conversation on upgrade.
+         * <p>
+         * The cost of that choice is real and is why the engine warns: http, MCP, A2A
+         * and dynamic tools dispatch under their configured name, so a tool named
+         * {@code websearch}/{@code webscraper}/{@code pdfreader} <em>was</em> priced
+         * and refused before this field existed. Every task carrying a ceiling without
+         * this flag is named once in a WARN rather than passing silently. Cost tracking
+         * runs regardless of the flag.
          */
         private Boolean enforceBudget;
 

@@ -5,6 +5,20 @@
 
 ---
 
+## 📝 Budget-enforcement docs corrected to match the shipped opt-in default (2026-07-23)
+
+**Repo:** EDDI (`fix/backlog-defect-remediation`)
+
+CodeRabbit caught that three places still described `enforceBudget` as **opt-out, default `true`** after the flag was reverted to opt-in (`false`) earlier on this branch — a config knob whose documentation stated the opposite of its behaviour, which is precisely the defect class this branch exists to remove, and it contradicted the `langchain.md` table row in the same file. Corrected:
+
+- `LlmConfiguration.Task#enforceBudget` javadoc — "opt-out … itself `true`" → opt-in, default `false`, with the WARN rationale.
+- `docs/security.md` (Cost Tracking config line and Behaviour bullet) — "default `true`" / "enforced by default" → opt-in.
+- `docs/langchain.md` (Budgets prose) — "Enforcement is **opt-out** … default `true`" → opt-in.
+
+The code was already correct (`BUDGET_ENFORCE_DEFAULT` resolves `false`); only the prose lied. Also documented that `toolPricing` accepts a dispatch name as well as a slug (dispatch name wins), and fixed two markdownlint nits (MD028 blockquote continuation in `langchain.md`, an unlabelled fence in this file).
+
+---
+
 ## 🧹 A dead `resumeToolLoop` parameter, and a CodeQL note on a deliberately unguarded test parse (2026-07-23)
 
 **Repo:** EDDI (`fix/backlog-defect-remediation`)
@@ -673,7 +687,7 @@ Backlog item **D5**, the highest-severity item in the langchain4j remediation ba
 
 Every cache key now starts with a **scope tag**:
 
-```
+```text
 key = scopeTag + "|" + toolName + ":" + (arguments.length() > 2048 ? sha256(arguments) : arguments)
 ```
 
