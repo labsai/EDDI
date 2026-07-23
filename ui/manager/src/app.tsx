@@ -48,7 +48,7 @@ import { WorkforceHistory } from "@/pages/workforce/workforce-history";
 import { WorkforceAnalytics } from "@/pages/workforce/workforce-analytics";
 import { WorkforceChat } from "@/pages/workforce/workforce-chat";
 
-/** Redirect /workforce/* → /workforce/* preserving sub-paths */
+/** Redirect /Workforce/* (capital W) → /workforce/* preserving sub-paths */
 function WorkforceRedirect() {
   const { "*": rest } = useParams();
   const sub = rest ? `/${rest}` : "";
@@ -61,7 +61,8 @@ export function App() {
     <ErrorBoundary resetKey={location.key}>
     <Routes>
       {/* Landing — workspace chooser */}
-      <Route path="/" element={<LandingPage />} />
+      <Route path="/welcome" element={<LandingPage />} />
+      <Route path="/" element={<Navigate to="/welcome" replace />} />
 
       {/* Studio — full-screen breakout, no sidebar/topbar chrome */}
       <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />
@@ -78,9 +79,9 @@ export function App() {
         <Route path=":boardId/history" element={<WorkforceHistory />} />
       </Route>
 
-      {/* Legacy /Workforce redirect → /workforce */}
-      <Route path="/workforce/*" element={<WorkforceRedirect />} />
-      <Route path="/Workforce" element={<Navigate to="/workforce" replace />} />
+      {/* Legacy /Workforce (capital W) redirect → /workforce */}
+      <Route path="/Workforce/*" caseSensitive element={<WorkforceRedirect />} />
+      <Route path="/Workforce" caseSensitive element={<Navigate to="/workforce" replace />} />
 
       <Route element={<AppLayout />}>
         <Route path="/manage" element={<DashboardPage />} />
@@ -127,8 +128,8 @@ export function App() {
         />
       </Route>
 
-      {/* Catch-all → landing */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      {/* Catch-all → welcome */}
+      <Route path="*" element={<Navigate to="/welcome" replace />} />
     </Routes>
     <CommandPalette />
     </ErrorBoundary>

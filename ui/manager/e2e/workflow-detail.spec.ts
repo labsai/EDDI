@@ -3,8 +3,8 @@ import { waitForApp, expectHeading } from "./e2e-helpers";
 
 test.describe("Workflow Detail Page", () => {
   test.beforeEach(async ({ page }) => {
-    // MSW has wf1 at version 2
-    await page.goto("/manage/workflows/wf1?version=2");
+    // MSW has wf1 at version 2 — route is /manage/workflowview/:id
+    await page.goto("/manage/workflowview/wf1?version=2");
     await waitForApp(page);
   });
 
@@ -15,7 +15,7 @@ test.describe("Workflow Detail Page", () => {
   });
 
   test("shows main content area", async ({ page }) => {
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 10000 });
   });
 });
 

@@ -6,8 +6,8 @@
     1. Runs `npm run build` to produce the production bundle
     2. Cleans up old hashed assets from previous builds.
     3. Copies the entire new assets folder into EDDI's assets/ directory.
-    4. Updates manage.html with the new hashed filenames
-    Note: index.html is a simple redirect to /manage and does not need updating.
+    4. Updates manage.html, welcome.html, and workforce.html with the new hashed filenames
+    Note: index.html is a smart redirect page and does not reference asset bundles.
 
 .PARAMETER EddiPath
     Path to the EDDI repository root. Default: ..\EDDI
@@ -118,6 +118,27 @@ $html = $html -replace 'src="/(scripts/js|assets)/index-[^"]+\.js"', "src=`"/ass
 $html = $html -replace 'href="/(scripts/css|assets)/index-[^"]+\.css"', "href=`"/assets/$($newCss.Name)`""
 Set-Content $ManageHtml -Value $html -NoNewline
 Write-Host "  Updated manage.html" -ForegroundColor Green
+
+# Update welcome.html references (same bundles, different shell)
+$WelcomeHtml = Join-Path $ResourceDir "welcome.html"
+if (Test-Path $WelcomeHtml) {
+    $wHtml = Get-Content $WelcomeHtml -Raw
+    $wHtml = $wHtml -replace 'src="/(scripts/js|assets)/index-[^"]+\.js"', "src=`"/assets/$($newJs.Name)`""
+    $wHtml = $wHtml -replace 'href="/(scripts/css|assets)/index-[^"]+\.css"', "href=`"/assets/$($newCss.Name)`""
+    Set-Content $WelcomeHtml -Value $wHtml -NoNewline
+    Write-Host "  Updated welcome.html" -ForegroundColor Green
+}
+
+# Update workforce.html references (same bundles, different shell)
+$WorkforceHtml = Join-Path $ResourceDir "workforce.html"
+if (Test-Path $WorkforceHtml) {
+    $wfHtml = Get-Content $WorkforceHtml -Raw
+    $wfHtml = $wfHtml -replace 'src="/(scripts/js|assets)/index-[^"]+\.js"', "src=`"/assets/$($newJs.Name)`""
+    $wfHtml = $wfHtml -replace 'href="/(scripts/css|assets)/index-[^"]+\.css"', "href=`"/assets/$($newCss.Name)`""
+    Set-Content $WorkforceHtml -Value $wfHtml -NoNewline
+    Write-Host "  Updated workforce.html" -ForegroundColor Green
+}
+
 Write-Host "`n[DONE] EDDI Manager deployed successfully!" -ForegroundColor Green
 Write-Host "  JS:  /assets/$($newJs.Name)"
 Write-Host "  CSS: /assets/$($newCss.Name)`n"
@@ -144,6 +165,9 @@ if ($answer -match '^[Yy]') {
         }
         
         git add "src/main/resources/META-INF/resources/manage.html"
+        git add "src/main/resources/META-INF/resources/welcome.html" 2>$null
+        git add "src/main/resources/META-INF/resources/workforce.html" 2>$null
+        git add "src/main/resources/META-INF/resources/index.html" 2>$null
         
         # Stage the specific old files that were deleted
         foreach ($removed in $removedFiles) {
