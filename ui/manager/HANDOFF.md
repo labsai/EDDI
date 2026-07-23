@@ -120,10 +120,11 @@
 - Boardroom files: `src/pages/boardroom/`, `src/components/boardroom/`, `src/styles/advisory.css`
 
 ### Test Counts
-- 249 test files passing (EDDI-Manager)
-- 3613 Tests passing (`npm run test`)
+- 271 test files passing (EDDI-Manager)
+- 3937 Tests passing (`npm run test`)
 - 76.59% statement coverage
 - 112 Backend tenancy tests passing (`mvn test`)
 
 ### Last Commit Focus
-- Frontend: `feat: add Protocol, HITL, Dynamic Agents, and Task config to workforce settings` on `test/debug-workforce-coverage` (`feeb5aef`)
+- Frontend: `fix: address PR review feedback — bugs, coverage, code quality` on `feat/group-chat-followup-ux` (`44084657`)
+- Includes: mode switcher, live logging optimisation, disabled bypass fix, keyboard a11y fix, usePersistedBoolean DRY, GROUP_CONVERSATIONS_KEY export, i18n updates
