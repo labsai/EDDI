@@ -5,6 +5,80 @@
 
 ---
 
+## 🔐 Ledger integrity, replay depth, and a verification that could not fail (2026-07-23)
+
+**Repo:** EDDI (`fix/langchain4j-backlog-defects`)
+
+Four review findings on this branch's own remediation work — the common thread is the one the branch set out to remove: **a control that looks present and does nothing.**
+
+### D1 — three `verify(never())` assertions that matched zero invocations either way
+
+`ToolExecutionServiceTest.nullConversationIdSkipsCostTracking` and `ToolExecutionServiceExtendedTest.skipsCostWhenNoConversation` both claimed to cover `if (enableCostTracking && conversationId != null)`. Both pass `conversationId = null`, so the only invocation a regression could produce is `trackToolCall(invocation, null)` — and **Mockito's `anyString()` does not match null**. The verification matched zero invocations whether the guard existed or not. Removing `&& conversationId != null` and running all three `ToolExecutionService*Test` classes gave `Tests run: 39, Failures: 0` — neither test noticed, while production would have hit `computeIfAbsent(null, …)` on a `ConcurrentHashMap` inside `ToolCostTracker` and returned `Error executing tool: null` to the model for every tool call.
+
+Both now use `nullable(ToolInvocation.class)`/`nullable(String.class)`.
+
+**Audit of the rest of the branch's tests** for the same trap — grep of every `never()` verification in the touched test files, asking for each "can production pass null at that position?" — found one more: `LlmTaskCoverage2Test.nullUserInput_ragSkipped` pins `if (userInput != null)` around `ragContextProvider.retrieveContext(memory, task, userInput)` with `anyString()` in the userInput position. Same defect, same fix. The remaining `anyString()`/`never()` pairs sit on positions production fills from literals or non-null config and are sound.
+
+All three mutation-checked by removing the corresponding guard: `costTracker.trackToolCall(… or(isNull(), isA(String)))` / `ragContextProvider.retrieveContext(<any>, <any>, or(isNull(), isA(String)))` → `Never wanted here … But invoked here … with arguments: [ToolInvocation[…], null]`.
+
+### D2 — the nonce replay cache was under-sized against its own TTL
+
+`CacheFactory` pinned `nonce-replay-protection` at 100 000 with a comment computing `330s × 300rps`, but `NonceCacheService.init()` asks for `maxAge + clockSkew + TTL_BUFFER_MS` = **390s**, so steady-state occupancy at 300rps is 117 000. Worse, Caffeine's W-TinyLFU admission is frequency-based, not LRU: a nonce is written once via `putIfAbsent` and never read, so all frequency estimates tie and the filter rejects the **candidate** — the newly inserted nonce is dropped rather than the oldest. Retention collapses precisely on the most recent (most replayable) nonces; measured against real Caffeine on a fake ticker, 17.1% of nonces still inside the 330s replay window were already forgotten. A forgotten nonce is a captured signed A2A envelope that replays inside its own freshness window.
+
+**Fix:** capacity is now *derived from the TTL the cache is asked for*, not hard-coded. `CacheFactory.RATE_SIZED_CACHES` maps a cache name to the peak write rate it must absorb (`nonce-replay-protection` → 300/s) and `maximumSizeFor(name, ttl)` returns `peakRps × ttlSeconds × 2.0`, never below the configured floor. The ×2 head-room is because eviction is not LRU: sizing at exactly the steady-state occupancy still drops the newest entries under any burst. A future change to the replay window now moves the capacity with it.
+
+Kept `TTL_BUFFER_MS` rather than dropping it — it is a real margin against a nonce being forgotten while still replayable, and it is no longer free-floating now that the capacity tracks it.
+
+### D3 — the audit canonical string was not injective, so a tampered entry could verify
+
+`AuditHmac.buildCanonicalString` joins keys and values with `=`, `,`, `{}`, `[]`, `|` and escapes none of them. The map-to-string mapping is therefore not one-to-one: `{"a": "x", "b": "y"}` and `{"a": "x,b=y"}` canonicalize to the same bytes and share one valid HMAC, and `{"calls": [{"tool": "calculator"}]}` collides with the literal string `"[{tool=calculator}]"`. `String.join(",", actions)` collapses `["a","b"]` onto `["a,b"]` the same way. For an append-only ledger that is a tamper-detection hole, and this branch made it reachable: `AuditEntry.toolCalls` now carries tool-trace `arguments`/`result` strings, which the LLM and the user write, and the new recursion walks into them with the same unescaped delimiters.
+
+**Fix — versioned canonical form.** New entries are signed over a **v2** string that escapes every delimiter inside keys and scalars and type-tags every value (`s:` scalar, `m` map, `l` list, `n` null), and the stored value carries the tag: `v2:<64 hex chars>`.
+
+The back-compat constraint is absolute — any change to the canonical bytes invalidates the HMAC of every already-stored entry. So `verifyHmac` picks the canonicalizer **from the stored value's prefix**: tagged → v2, untagged (a bare hex digest) → the v1 canonicalizer, which is now frozen and documented as such. It deliberately never *falls back* from v2 to v1; trying both would hand the collision straight back to the attacker. `AuditHmacTest.flatMapCanonicalStringUnchangedByRecursion`, which pins the v1 string to a literal, still passes untouched.
+
+Note that `verifyHmac` currently has no production caller — the ledger signs on write and verification is an operator/forensic operation. The fix is about what a future verifier can conclude from a stored row.
+
+### D4 — `maxBudgetPerConversation` stopped enforcing on upgrade
+
+The previous commit made the ceiling conditional on a new `enforceBudget` defaulting to `false`, justified as "every built-in priced at $0.00, so no stored config was ever refused". **That holds only for built-ins.** For http, MCP, A2A and dynamic tools the dispatch name *is* the configured name, so an agent with a tool called `websearch`, `webscraper` or `pdfreader` was priced from `DEFAULT_TOOL_PRICES` and *was* being refused on `main`. Those operators' cost ceiling silently ceased to exist.
+
+**Decision — `enforceBudget` is an opt-OUT.** `eddi.tools.budget.enforce-by-default` now defaults to `true`, so a stored `maxBudgetPerConversation` keeps doing exactly what it did before the flag existed. Rationale:
+
+- Relative to the last release the enforcing behaviour is the *status quo*; the flag's `false` default is what changed it. Restoring it is the back-compat-preserving choice, not the disruptive one.
+- Setting a dollar ceiling is already an explicit statement of intent. A safety control that quietly evaporates on upgrade is a worse failure than one that binds.
+- The gate only fires when a ceiling is configured, so this is unobservable for agents that set none.
+- The original concern (a long-inert ceiling suddenly aborting a live built-in-only agent) keeps two explicit escape hatches: `"enforceBudget": false` per task, and `eddi.tools.budget.enforce-by-default=false` per deployment. The property stays load-bearing in both directions rather than becoming dead config — which is why this was done by flipping its default rather than by inferring enforcement from `maxBudgetPerConversation != null` and leaving the property unreachable.
+
+### Files
+
+- `engine/caching/CacheFactory.java` — `NONCE_PEAK_SIGNED_RPS`, `RATE_SIZED_EVICTION_HEADROOM`, `RATE_SIZED_CACHES`, `maximumSizeFor(name, ttl)`; both `getCache` overloads size through it
+- `engine/caching/CacheImpl.java` — package-private `backingCache()` so the eviction policy actually built can be asserted
+- `engine/audit/AuditHmac.java` — `V2_PREFIX`, `buildCanonicalStringV2`, `canonicalValueV2`, `escape`; `verifyHmac` dispatches on the stored prefix; v1 canonicalizer frozen
+- `modules/llm/impl/AgentOrchestrator.java` — `BUDGET_ENFORCE_DEFAULT` now `true`
+- `modules/llm/model/LlmConfiguration.java` — `enforceBudget`/`maxBudgetPerConversation` javadoc
+- Docs: `audit-ledger.md` (canonical-form versioning table), `langchain.md`, `security.md`, `agent-father-langchain-tools-guide.md`
+
+### Tests
+
+Every behavioural test was mutation-checked by reverting the production change and confirming failure:
+
+| Reverted | Observed failure |
+| --- | --- |
+| `&& conversationId != null` | `costTracker.trackToolCall(or(isNull(), isA(ToolInvocation)), or(isNull(), isA(String))); Never wanted here … But invoked here … with arguments: [ToolInvocation[dispatchName=testTool, …], null]` (both classes) |
+| `if (userInput != null)` | `ragContextProvider.retrieveContext(<any>, <any>, or(isNull(), isA(String))); Never wanted here … with arguments: [memory, …Task@…, null]` |
+| `maximumSizeFor` → fixed `CACHE_SIZES` at the builder | `CacheFactoryTest.nonceCacheCapacityCoversItsTtl`: `a capacity of 100000 cannot hold the 117000 nonces written during a 390s replay window ==> expected: <true> but was: <false>`; `nonceCacheCapacityTracksTheTtl`: `expected: <200000> but was: <100000>` |
+| the rate-sizing rule inside `maximumSizeFor` | `NonceCacheServiceTest.cacheCapacityCoversTheRequestedTtl`: `a 390s replay window at 300 signed requests/s holds 117000 nonces, but the cache is capped at 100000` |
+| `canonicalValueV2` → the v1 renderer | 4 failures: `differentStructuresDoNotCollide`, `scalarMimickingNestedStructureDoesNotCollide`, `actionListSeparatorIsNotForgeable` (`expected: not equal but was: <v2:…>`), `tamperingIntoAColludingTwinIsRejected` (`expected: <false> but was: <true>`) |
+| the v1 branch of `verifyHmac` | `legacyV1EntryStillVerifies`: `pre-v2 ledger rows must keep verifying against the v1 canonicalizer ==> expected: <true> but was: <false>` |
+| `BUDGET_ENFORCE_DEFAULT` → `false` | `AgentOrchestratorCoverageTest.toolCall_budgetSetWithoutEnforceFlag_isStillEnforced`: `calculatorTool.calculate(<any string>); Never wanted here … But invoked here`; `AgentOrchestratorToolCostTest.ceilingWithoutFlagIsEnforced`: `webSearchTool.searchWeb("eddi", 3); Wanted 2 times … But was 5 times` |
+
+New/changed cases: `AuditHmacTest` +7 (a `v1CanonicalStringCollides` precondition test asserts the v1 form *does* collide, so a future edit to the frozen canonicalizer is caught rather than silently invalidating the ledger), `CacheFactoryTest` +3, `NonceCacheServiceTest` +1, `AgentOrchestratorCoverageTest` +1, `AgentOrchestratorToolCostTest` +1 (and `unenforcedBudgetRefusesNothing` → `explicitlyUnenforcedBudgetRefusesNothing`, now setting the flag it names).
+
+`./mvnw clean compile` clean; 857 tests across the audit / caching / crypto / llm-tools / orchestrator / LlmTask classes green, plus 87 in `ai.labs.eddi.engine.audit`.
+
+---
+
 ## 🧵 Model registry and streaming executor — races and un-stripped parameters (2026-07-23)
 
 **Repo:** EDDI (`fix/langchain4j-backlog-defects`)

@@ -230,10 +230,10 @@ class AgentOrchestratorToolCostTest {
     }
 
     /**
-     * With real prices flowing, the ceiling finally does something — but only once
-     * an operator opts in. {@code isWithinBudget} uses {@code <=} and is checked
-     * BEFORE the call, so the crossing call is allowed and the next one is refused:
-     * $0.0015 admits two $0.001 searches and blocks the third.
+     * With real prices flowing, the ceiling finally does something.
+     * {@code isWithinBudget} uses {@code <=} and is checked BEFORE the call, so the
+     * crossing call is allowed and the next one is refused: $0.0015 admits two
+     * $0.001 searches and blocks the third.
      */
     @Test
     @DisplayName("enforceBudget stops tool calls once the accumulated real cost passes the ceiling")
@@ -258,15 +258,43 @@ class AgentOrchestratorToolCostTest {
     }
 
     /**
-     * Same ceiling, same spend, no {@code enforceBudget} — every call runs. This is
-     * what protects agents whose stored config has carried an inert
-     * {@code maxBudgetPerConversation} since before prices resolved.
+     * D4: the same ceiling with no {@code enforceBudget} at all still binds. A
+     * stored config carrying only {@code maxBudgetPerConversation} is what
+     * {@code main} enforced, and treating the flag's absence as "off" deleted that
+     * ceiling for every agent whose tools dispatch under a priced name.
      */
     @Test
-    @DisplayName("without enforceBudget the same ceiling refuses nothing")
-    void unenforcedBudgetRefusesNothing() throws Exception {
+    @DisplayName("a ceiling with no enforceBudget flag is enforced on real accumulated cost")
+    void ceilingWithoutFlagIsEnforced() throws Exception {
         var task = webSearchTask();
         task.setMaxBudgetPerConversation(0.0015);
+        task.setMaxToolIterations(5);
+        // deliberately no setEnforceBudget(...)
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch());
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        assertNotNull(result);
+        verify(webSearchTool, times(2)).searchWeb("eddi", 3);
+        assertTrue(result.trace().stream()
+                .anyMatch(e -> "tool_error".equals(e.get("type"))
+                        && String.valueOf(e.get("error")).contains("Budget exceeded")),
+                "an operator who configured a ceiling and nothing else must still get it enforced");
+    }
+
+    /**
+     * Same ceiling, same spend, {@code enforceBudget: false} — every call runs.
+     * This is the explicit opt-out for an operator who wants the number reported
+     * but never binding.
+     */
+    @Test
+    @DisplayName("enforceBudget:false makes the same ceiling refuse nothing")
+    void explicitlyUnenforcedBudgetRefusesNothing() throws Exception {
+        var task = webSearchTask();
+        task.setMaxBudgetPerConversation(0.0015);
+        task.setEnforceBudget(false);
         task.setMaxToolIterations(5);
 
         ChatModel chatModel = mock(ChatModel.class);
@@ -278,7 +306,7 @@ class AgentOrchestratorToolCostTest {
         verify(webSearchTool, times(5)).searchWeb("eddi", 3);
         assertTrue(result.trace().stream()
                 .noneMatch(e -> String.valueOf(e.get("error")).contains("Budget exceeded")),
-                "an unenforced ceiling must never refuse a call, however far the real cost exceeds it");
+                "an explicitly unenforced ceiling must never refuse a call, however far the real cost exceeds it");
     }
 
     /**

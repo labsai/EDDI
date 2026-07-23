@@ -253,20 +253,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /**
          * Maximum TOOL budget per conversation, in dollars. Covers per-call tool prices
          * only — LLM token spend is governed separately and per run by the model
-         * cascade's {@code maxCostPerRun}. Inert unless {@link #enforceBudget} is on.
+         * cascade's {@code maxCostPerRun}. Enforced unless {@link #enforceBudget} (or
+         * the deployment-wide fallback) turns enforcement off.
          */
         private Double maxBudgetPerConversation;
 
         /**
          * Enforce {@link #maxBudgetPerConversation}. Defaults to the deployment-wide
-         * {@code eddi.tools.budget.enforce-by-default} property, itself {@code false}.
+         * {@code eddi.tools.budget.enforce-by-default} property, itself {@code true}.
          * <p>
-         * Opt-in on purpose. The ceiling has been inert since it shipped because every
-         * built-in priced at $0.00, so no stored config has ever had its tool calls
-         * refused by it. Now that prices resolve, switching enforcement on by default —
-         * or inferring it from {@code maxBudgetPerConversation} being present — would
-         * start aborting tool calls on live agents whose operators set a number that
-         * never did anything. Cost tracking runs regardless of this flag.
+         * This is an opt-<em>out</em>, because setting a ceiling is already a statement
+         * of intent and because the ceiling <em>was</em> binding before this field
+         * existed: http, MCP, A2A and dynamic tools dispatch under their configured
+         * name, so a tool named {@code websearch}/{@code webscraper}/{@code pdfreader}
+         * has always been priced and refused. Only built-ins were exempt (they priced
+         * at $0.00 until the canonical-slug fix). Set {@code false} to keep a ceiling
+         * report-only. Cost tracking runs regardless of this flag.
          */
         private Boolean enforceBudget;
 

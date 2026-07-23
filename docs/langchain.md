@@ -477,8 +477,8 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 | `conversationHistoryLimit` | int      | Max conversation turns in context                | 10                     |
 | `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
 | **Cost & Performance**     |          |                                                  |                        |
-| `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Only enforced when `enforceBudget` is on | (unlimited) |
-| `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed | false (`eddi.tools.budget.enforce-by-default`) |
+| `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` is off | (unlimited) |
+| `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. Set `false` for a report-only ceiling | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD, keyed on the built-in slug (`{"websearch": 0.005}`) | (built-in defaults) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls           | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global` | (all `user`)   |
@@ -975,11 +975,15 @@ prices of the tools a conversation invokes. LLM token spend is a separate,
 run-scoped concern governed by the model cascade's `maxCostPerRun`; the two are
 not added together.
 
-Enforcement is **opt-in**: set `enforceBudget: true`. Without it the cost is
-still tracked and reported (`GET /llm/toolhistory/costs`, `eddi.tool.costs`) but
-no tool call is ever refused. Cost tracking is unaffected by the flag. The
+Enforcement is **opt-out**: a configured ceiling refuses calls past it. Setting
+a number is already a statement of intent, and the ceiling was binding for http,
+MCP, A2A and dynamic tools before `enforceBudget` existed (those dispatch under
+their configured name, so a tool called `websearch` was always priced). Set
+`enforceBudget: false` to keep the ceiling report-only — the cost is still
+tracked and reported (`GET /llm/toolhistory/costs`, `eddi.tool.costs`), no call
+is refused. Cost tracking is unaffected by the flag either way. The
 deployment-wide default comes from `eddi.tools.budget.enforce-by-default`
-(default `false`).
+(default `true`).
 
 The check runs *before* each call and uses `<=`, so the call that crosses the
 ceiling still completes and the next one is refused with

@@ -126,12 +126,26 @@ class AgentOrchestrator {
 
     /**
      * Deployment-wide fallback for {@code LlmConfiguration.Task#getEnforceBudget()}
-     * ({@code eddi.tools.budget.enforce-by-default}, default {@code false}).
+     * ({@code eddi.tools.budget.enforce-by-default}, default {@code true}).
+     * <p>
+     * The default is {@code true} so that a stored {@code maxBudgetPerConversation}
+     * keeps doing what it did before {@code enforceBudget} existed. The gate only
+     * fires when a ceiling is configured at all, so this flag is unobservable for
+     * agents that set none. Defaulting it to {@code false} instead — as this field
+     * originally did — silently voided every ceiling that <em>was</em> being
+     * enforced: the "no built-in was ever priced above $0.00" reasoning holds only
+     * for built-ins, and http/MCP/A2A/dynamic tools dispatch under their configured
+     * name, so an agent with a tool called {@code websearch}, {@code webscraper} or
+     * {@code pdfreader} was priced and refused on the previous release.
+     * <p>
+     * Opting out is explicit and still available in both directions: per task with
+     * {@code "enforceBudget": false}, or deployment-wide with
+     * {@code eddi.tools.budget.enforce-by-default=false}.
      * <p>
      * Read through {@link ConfigProvider} rather than {@code @ConfigProperty}
      * because AgentOrchestrator is not a CDI bean — {@code LlmTask} constructs it
      * with {@code new}, so an injection annotation here would never fire and the
-     * field would stay {@code false} while looking configurable.
+     * field would stay at its initializer while looking configurable.
      */
     private static final boolean BUDGET_ENFORCE_DEFAULT = resolveBudgetEnforceDefault();
 
@@ -139,11 +153,12 @@ class AgentOrchestrator {
         try {
             return ConfigProvider.getConfig()
                     .getOptionalValue("eddi.tools.budget.enforce-by-default", Boolean.class)
-                    .orElse(false);
+                    .orElse(true);
         } catch (Exception e) {
-            // No MicroProfile config available (plain unit test JVM): fail open, which is
-            // also the documented default.
-            return false;
+            // No MicroProfile config available (plain unit test JVM): fall back to the
+            // documented default rather than to "unenforced", so a missing config never
+            // turns a configured ceiling off.
+            return true;
         }
     }
 
@@ -1472,11 +1487,12 @@ class AgentOrchestrator {
 
         // Check per-conversation TOOL budget before executing tool.
         //
-        // Opt-in: until enforceBudget is set, maxBudgetPerConversation is recorded but
-        // never refuses a call. The ceiling could not bind before this release (every
-        // built-in priced at $0.00), so enforcing it by default would newly abort tool
-        // calls on agents whose stored config has carried the number harmlessly for
-        // versions. Cost tracking itself is unaffected by the flag.
+        // A configured maxBudgetPerConversation is enforced unless the operator says
+        // otherwise: enforceBudget on the task wins, and BUDGET_ENFORCE_DEFAULT (true
+        // unless eddi.tools.budget.enforce-by-default says so) decides when the task
+        // is silent. Defaulting to "unenforced" would void the ceilings that http,
+        // MCP, A2A and dynamic tools were already being refused by. Cost tracking
+        // itself is unaffected by the flag.
         boolean enforceBudget = task.getEnforceBudget() != null ? task.getEnforceBudget() : BUDGET_ENFORCE_DEFAULT;
         if (enforceBudget && maxBudget != null && conversationId != null
                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {

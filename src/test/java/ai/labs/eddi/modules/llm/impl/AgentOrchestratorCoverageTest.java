@@ -646,20 +646,19 @@ class AgentOrchestratorCoverageTest {
                 "a class simple name must never leak into the canonical-name map");
     }
 
-    // ─── D2: enforceBudget is opt-in ───
+    // ─── D2/D4: enforceBudget is an opt-OUT ───
 
     /**
-     * {@code maxBudgetPerConversation} has never been able to refuse a call (every
-     * built-in priced at $0.00), so switching enforcement on for stored configs
-     * that merely carry the number would newly break live agents. It must stay
-     * inert until {@code enforceBudget} is set — and the budget check must not even
-     * be consulted, otherwise a future refactor could reintroduce enforcement
-     * through a side effect.
+     * {@code enforceBudget: false} is the escape hatch for an operator who wants a
+     * ceiling reported but never binding. It must not merely tolerate an
+     * over-budget conversation — the budget must not be consulted at all, otherwise
+     * a future refactor could reintroduce enforcement through a side effect.
      */
     @Test
-    void toolCall_budgetSetButNotEnforced_neverConsultsTheBudget() throws Exception {
+    void toolCall_budgetExplicitlyNotEnforced_neverConsultsTheBudget() throws Exception {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
+        task.setEnforceBudget(false);
         var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
         lenient().when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
         lenient().when(costTracker.isWithinBudget(anyString(), anyDouble())).thenReturn(false);
@@ -680,7 +679,40 @@ class AgentOrchestratorCoverageTest {
         verify(costTracker, never()).isWithinBudget(nullable(String.class), anyDouble());
         assertTrue(result.trace().stream()
                 .noneMatch(e -> String.valueOf(e.get("error")).contains("Budget exceeded")),
-                "no budget error may be produced while enforceBudget is unset");
+                "no budget error may be produced when enforceBudget is explicitly false");
+    }
+
+    /**
+     * D4: a stored config that carries only {@code maxBudgetPerConversation} — no
+     * {@code enforceBudget} at all — must still be refused past the ceiling. That
+     * is what {@code main} did, and for http/MCP/A2A/dynamic tools (whose dispatch
+     * name IS the configured name) it was doing it for real. Making enforcement
+     * opt-in silently deleted those operators' cost ceiling on upgrade.
+     */
+    @Test
+    void toolCall_budgetSetWithoutEnforceFlag_isStillEnforced() throws Exception {
+        var task = calcOnlyTask();
+        task.setMaxBudgetPerConversation(1.0);
+        // deliberately no setEnforceBudget(...)
+        var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
+        when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
+        when(costTracker.isWithinBudget(eq("conv-1"), eq(1.0))).thenReturn(false);
+
+        ChatModel chatModel = mock(ChatModel.class);
+        var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"1+1\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(calcReq))
+                .thenReturn(text("stopped"));
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        assertEquals("stopped", result.response());
+        verify(calculatorTool, never()).calculate(anyString());
+        verify(costTracker).isWithinBudget("conv-1", 1.0);
+        assertTrue(result.trace().stream()
+                .anyMatch(e -> "tool_error".equals(e.get("type"))
+                        && String.valueOf(e.get("error")).contains("Budget exceeded")),
+                "a ceiling with no enforceBudget flag must still refuse the call");
     }
 
     @Test
