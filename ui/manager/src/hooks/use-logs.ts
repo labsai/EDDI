@@ -130,6 +130,7 @@ export function useLogStream(filters: LogFilters = {}) {
   useEffect(() => {
     if (!filtered) return;
     setFilteredEntries([]); // reset on filter change
+    setFilteredConnected(false); // reset connection state before reconnecting
     connect();
     return () => {
       eventSourceRef.current?.close();

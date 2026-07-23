@@ -10,8 +10,6 @@ const LANDING_PREF_KEY = "eddi-landing-preference";
 
 interface ModeOption {
   key: string;
-  labelKey: string;
-  fallback: string;
   icon: typeof Settings2;
   path: string;
   prefValue: string;
@@ -20,16 +18,12 @@ interface ModeOption {
 const MODES: ModeOption[] = [
   {
     key: "manager",
-    labelKey: "nav.modeManager",
-    fallback: "Manager",
     icon: Settings2,
     path: "/manage",
     prefValue: "manager",
   },
   {
     key: "workforce",
-    labelKey: "nav.modeWorkforce",
-    fallback: "Workforce",
     icon: Users,
     path: "/workforce",
     prefValue: "workforce",
@@ -49,6 +43,13 @@ export function ModeSwitcher({ collapsed = false }: ModeSwitcherProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Helper for mode labels using literal t() calls per coding guidelines
+  function getModeLabel(key: string): string {
+    return key === "manager"
+      ? t("nav.modeManager", "Manager")
+      : t("nav.modeWorkforce", "Workforce");
+  }
 
   // Determine active mode from URL
   const activeKey = location.pathname.startsWith("/workforce")
@@ -155,7 +156,7 @@ export function ModeSwitcher({ collapsed = false }: ModeSwitcherProps) {
         {!collapsed && (
           <>
             <span className="flex-1 truncate text-start text-sm font-medium">
-              {t(activeMode.labelKey, activeMode.fallback)}
+              {getModeLabel(activeKey)}
             </span>
             <ChevronDown
               className={cn(
@@ -201,7 +202,7 @@ export function ModeSwitcher({ collapsed = false }: ModeSwitcherProps) {
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                 <span className="flex-1 truncate">
-                  {t(mode.labelKey, mode.fallback)}
+                  {getModeLabel(mode.key)}
                 </span>
                 {isActive && (
                   <Check className="h-3.5 w-3.5 shrink-0 text-sidebar-accent" aria-hidden="true" />

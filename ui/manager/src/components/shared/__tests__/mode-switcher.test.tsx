@@ -60,4 +60,61 @@ describe("ModeSwitcher", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
+
+  it("navigates to /workforce and persists preference when selecting Workforce", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ModeSwitcher collapsed={false} />);
+
+    // Open dropdown
+    await user.click(screen.getByRole("button", { name: /switch workspace/i }));
+
+    // Click on Workforce option
+    const workforceOption = screen.getByTestId("mode-option-workforce");
+    await user.click(workforceOption);
+
+    // Should navigate to /workforce
+    expect(mockNavigate).toHaveBeenCalledWith("/workforce");
+    // Should persist preference
+    expect(localStorage.getItem("eddi-landing-preference")).toBe("workforce");
+    // Dropdown should close
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("does not navigate when selecting the already-active mode", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ModeSwitcher collapsed={false} />);
+
+    await user.click(screen.getByRole("button", { name: /switch workspace/i }));
+
+    // Click on Manager (already active since pathname is /manage/agents)
+    const managerOption = screen.getByTestId("mode-option-manager");
+    await user.click(managerOption);
+
+    // Should NOT navigate since we're already on manager
+    expect(mockNavigate).not.toHaveBeenCalled();
+    // Dropdown should close
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("shows checkmark on the active mode option", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ModeSwitcher collapsed={false} />);
+
+    await user.click(screen.getByRole("button", { name: /switch workspace/i }));
+
+    // Manager (active) should have a checkmark icon
+    const managerOption = screen.getByTestId("mode-option-manager");
+    expect(managerOption.querySelector("svg.lucide-check")).not.toBeNull();
+
+    // Workforce (inactive) should NOT have a checkmark
+    const workforceOption = screen.getByTestId("mode-option-workforce");
+    expect(workforceOption.querySelector("svg.lucide-check")).toBeNull();
+  });
+
+  it("has correct aria attributes on trigger", () => {
+    renderWithProviders(<ModeSwitcher collapsed={false} />);
+    const trigger = screen.getByRole("button", { name: /switch workspace/i });
+    expect(trigger).toHaveAttribute("aria-haspopup", "true");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
 });

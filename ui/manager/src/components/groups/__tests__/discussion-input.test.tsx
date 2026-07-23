@@ -166,16 +166,14 @@ describe("DiscussionInput", () => {
       expect(expandBtn).toBeDisabled();
     });
 
-    it("does not submit via handleSubmit when disabled", async () => {
+    it("blocks submission when disabled even if text is present", () => {
       const onSubmit = vi.fn();
-      const user = userEvent.setup();
       renderWithProviders(
-        <DiscussionInput onSubmit={onSubmit} disabled={false} />,
+        <DiscussionInput onSubmit={onSubmit} disabled disabledMessage="Closed" />,
       );
-
-      // Type text, then re-render disabled
-      await user.type(screen.getByTestId("discussion-input"), "Hello");
-      expect(screen.getByTestId("start-discussion-btn")).not.toBeDisabled();
+      expect(screen.getByTestId("discussion-input")).toBeDisabled();
+      expect(screen.getByTestId("start-discussion-btn")).toBeDisabled();
+      expect(onSubmit).not.toHaveBeenCalled();
     });
   });
 });
