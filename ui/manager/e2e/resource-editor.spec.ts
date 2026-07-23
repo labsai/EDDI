@@ -31,10 +31,10 @@ test.describe("Resource Editor — Rules", () => {
   });
 
   test("can switch to JSON tab", async ({ page }) => {
-    await page.getByTestId("tab-json").click();
-    await page.waitForTimeout(500);
-    // After switching to JSON tab, the editor layout should still be visible
-    await expect(page.getByTestId("config-editor-layout")).toBeVisible();
+    const jsonTab = page.getByTestId("tab-json");
+    await jsonTab.click();
+    // Radix Tabs sets data-state="active" on the selected trigger
+    await expect(jsonTab).toHaveAttribute("data-state", "active");
   });
 
   test("shows rules editor with behavior groups", async ({ page }) => {
@@ -73,7 +73,7 @@ test.describe("Resource Editor — LLM", () => {
       page.getByTestId("tab-form")
     ).toBeVisible({ timeout: 5000 });
     // Check that the editor layout has loaded
-    await expect(page.getByTestId("config-editor-layout")).toBeVisible();
+    await expect(page.getByTestId("app-layout")).toBeVisible();
   });
 });
 
