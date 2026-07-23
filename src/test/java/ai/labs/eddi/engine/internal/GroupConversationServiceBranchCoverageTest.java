@@ -373,13 +373,23 @@ class GroupConversationServiceBranchCoverageTest {
             cfg.setModeratorAgentId("mod");
             setupStore(cfg);
 
+            // Exact production scenario: output list contains a null item
+            var nullList = new LinkedList<>(List.of((Object) "placeholder"));
+            nullList.set(0, null); // output=[null]
             Map<String, Object> outputMap = new LinkedHashMap<>();
-            outputMap.put("output", 42); // Not a list — extractor returns null
+            outputMap.put("output", nullList);
+            outputMap.put("actions", List.of("send_message", "unknown"));
             stubAgentWithOutputMap("a1", outputMap);
             stubAgent("mod", "Synthesis");
 
             var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
             assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // The a1 transcript entry must have empty content, not raw metadata
+            result.getTranscript().stream()
+                    .filter(e -> "a1".equals(e.speakerAgentId()))
+                    .forEach(e -> assertTrue(
+                            e.content() == null || e.content().isEmpty(),
+                            "Transcript should not contain raw metadata dump, got: " + e.content()));
         }
 
         @Test

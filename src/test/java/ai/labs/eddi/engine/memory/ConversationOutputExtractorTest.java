@@ -131,7 +131,7 @@ class ConversationOutputExtractorTest {
         // This is the exact scenario from production: the pipeline produces
         // output=[null] when the langchain step has no output extension to
         // copy the LLM response into conversationOutputs.
-        var nullList = new java.util.ArrayList<>();
+        var nullList = new LinkedList<>();
         nullList.add(null);
         var output = new ConversationOutput();
         output.put("output", nullList);
