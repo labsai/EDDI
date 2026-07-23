@@ -48,7 +48,7 @@ import { WorkforceHistory } from "@/pages/workforce/workforce-history";
 import { WorkforceAnalytics } from "@/pages/workforce/workforce-analytics";
 import { WorkforceChat } from "@/pages/workforce/workforce-chat";
 
-/** Redirect /workforce/* → /workforce/* preserving sub-paths */
+/** Redirect /Workforce/* (capital W) → /workforce/* preserving sub-paths */
 function WorkforceRedirect() {
   const { "*": rest } = useParams();
   const sub = rest ? `/${rest}` : "";
@@ -79,8 +79,8 @@ export function App() {
         <Route path=":boardId/history" element={<WorkforceHistory />} />
       </Route>
 
-      {/* Legacy /Workforce redirect → /workforce */}
-      <Route path="/workforce/*" element={<WorkforceRedirect />} />
+      {/* Legacy /Workforce (capital W) redirect → /workforce */}
+      <Route path="/Workforce/*" element={<WorkforceRedirect />} />
       <Route path="/Workforce" element={<Navigate to="/workforce" replace />} />
 
       <Route element={<AppLayout />}>
