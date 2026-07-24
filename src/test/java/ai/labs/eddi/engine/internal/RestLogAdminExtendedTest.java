@@ -189,6 +189,106 @@ class RestLogAdminExtendedTest {
         }
     }
 
+    // ─── Heartbeat tests ────────────────────────────────────
+
+    @Nested
+    @DisplayName("Heartbeat")
+    class Heartbeat {
+
+        @Test
+        @DisplayName("should send heartbeat comment event when idle")
+        void shouldSendHeartbeatWhenIdle() {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
+            when(eventSink.isClosed()).thenReturn(false);
+            when(eventSink.send(any())).thenReturn(CompletableFuture.completedFuture(null));
+            
+            var heartbeatEvent = mock(OutboundSseEvent.class);
+            when(sse.newEventBuilder().comment("heartbeat").build()).thenReturn(heartbeatEvent);
+            
+            when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
+            when(boundedLogStore.addListener(any())).thenReturn("listener-hb");
+
+            long t0 = System.currentTimeMillis();
+            try (var mockedSystem = mockStatic(System.class, CALLS_REAL_METHODS)) {
+                // Initialize to t0
+                mockedSystem.when(System::currentTimeMillis).thenReturn(t0);
+                
+                restLogAdmin.streamLogs(null, null, null, eventSink, sse);
+                
+                // Advance time by 20 seconds
+                mockedSystem.when(System::currentTimeMillis).thenReturn(t0 + 20_000L);
+                
+                // Verify that within ~3 seconds (to allow Thread.sleep(2000) to wake up), heartbeat is sent
+                verify(eventSink, timeout(3000).atLeastOnce()).send(heartbeatEvent);
+                
+                when(eventSink.isClosed()).thenReturn(true);
+            }
+        }
+
+        @Test
+        @DisplayName("should not send heartbeat when recent events sent")
+        void shouldNotSendHeartbeatWhenRecentEventsSent() throws InterruptedException {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
+            when(eventSink.isClosed()).thenReturn(false);
+            when(eventSink.send(any())).thenReturn(CompletableFuture.completedFuture(null));
+            
+            var heartbeatEvent = mock(OutboundSseEvent.class);
+            when(sse.newEventBuilder().comment("heartbeat").build()).thenReturn(heartbeatEvent);
+            
+            var logEvent = mock(OutboundSseEvent.class);
+            when(sse.newEventBuilder().name("log").data(any()).build()).thenReturn(logEvent);
+
+            when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
+            
+            var captor = ArgumentCaptor.forClass(Consumer.class);
+            when(boundedLogStore.addListener(captor.capture())).thenReturn("listener-hb");
+
+            long t0 = System.currentTimeMillis();
+            try (var mockedSystem = mockStatic(System.class, CALLS_REAL_METHODS)) {
+                mockedSystem.when(System::currentTimeMillis).thenReturn(t0);
+                
+                restLogAdmin.streamLogs(null, null, null, eventSink, sse);
+                
+                @SuppressWarnings("unchecked")
+                Consumer<LogEntry> listener = captor.getValue();
+                
+                // Advance time by 10s, then send a log event (which updates lastEventTime)
+                mockedSystem.when(System::currentTimeMillis).thenReturn(t0 + 10_000L);
+                listener.accept(logEntry("agent-1", "conv-1", "INFO"));
+                
+                // Advance time by another 10s. Total is 20s from start, but only 10s from last event.
+                mockedSystem.when(System::currentTimeMillis).thenReturn(t0 + 20_000L);
+                
+                // Give the cleanup thread a moment to run
+                Thread.sleep(2500);
+                
+                verify(eventSink, never()).send(heartbeatEvent);
+                when(eventSink.isClosed()).thenReturn(true);
+            }
+        }
+
+        @Test
+        @DisplayName("should stop heartbeat when sink closed")
+        void shouldStopHeartbeatWhenSinkClosed() throws InterruptedException {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
+            when(eventSink.isClosed()).thenReturn(true);
+            
+            var heartbeatEvent = mock(OutboundSseEvent.class);
+            when(sse.newEventBuilder().comment("heartbeat").build()).thenReturn(heartbeatEvent);
+            
+            when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
+            when(boundedLogStore.addListener(any())).thenReturn("listener-hb");
+
+            restLogAdmin.streamLogs(null, null, null, eventSink, sse);
+            
+            Thread.sleep(2500);
+            verify(eventSink, never()).send(any());
+        }
+    }
+
     private LogEntry logEntry(String agentId, String conversationId, String level) {
         return new LogEntry(System.currentTimeMillis(), level, "test.Logger", "message",
                 null, agentId, null, conversationId, null, null);
