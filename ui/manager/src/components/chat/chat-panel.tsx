@@ -375,7 +375,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   return (
     <div className={cn(
       "flex h-full min-w-0 overflow-hidden bg-background",
-      embedded ? "flex-col" : "rounded-xl border border-border shadow-sm"
+      !embedded && "rounded-xl border border-border shadow-sm"
     )}>
       {/* History panel — hidden in embedded mode (no room for nested side panels) */}
       {!embedded && (
