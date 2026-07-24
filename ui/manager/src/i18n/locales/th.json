@@ -339,7 +339,7 @@
     "saveError": "บันทึก Agent ล้มเหลว",
     "deployToEnv": "Deploy ไปยัง {{env}}",
     "undeployFromEnv": "ถอนจาก {{env}}",
-    "openStudio": "เปิดใน Manager",
+    "openStudio": "เปิดใน Studio",
     "maxKeyLength": "ความยาวคีย์สูงสุด",
     "maxValueLength": "ความยาวค่าสูงสุด",
     "maxWritesPerTurn": "เขียนสูงสุด/รอบ",

@@ -366,7 +366,7 @@
     "saveError": "Failed to save agent",
     "deployToEnv": "Deploy to {{env}}",
     "undeployFromEnv": "Undeploy from {{env}}",
-    "openStudio": "Open in Manager",
+    "openStudio": "Open in Studio",
     "maxKeyLength": "Max Key Length",
     "maxValueLength": "Max Value Length",
     "maxWritesPerTurn": "Max Writes/Turn",

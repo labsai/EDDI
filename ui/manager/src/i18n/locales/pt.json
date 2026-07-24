@@ -339,7 +339,7 @@
     "saveError": "Falha ao salvar o agent",
     "deployToEnv": "Implantar em {{env}}",
     "undeployFromEnv": "Remover de {{env}}",
-    "openStudio": "Abrir no Manager",
+    "openStudio": "Abrir no Studio",
     "maxKeyLength": "Comprimento máx. da chave",
     "maxValueLength": "Comprimento máx. do valor",
     "maxWritesPerTurn": "Escritas máx./turno",

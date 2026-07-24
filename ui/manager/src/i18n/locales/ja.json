@@ -339,7 +339,7 @@
     "saveError": "Agent の保存に失敗しました",
     "deployToEnv": "{{env}}にデプロイ",
     "undeployFromEnv": "{{env}}から削除",
-    "openStudio": "マネージャーで開く",
+    "openStudio": "スタジオで開く",
     "maxKeyLength": "キー最大長",
     "maxValueLength": "値の最大長",
     "maxWritesPerTurn": "ターンあたりの最大書き込み数",

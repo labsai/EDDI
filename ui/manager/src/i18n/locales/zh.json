@@ -339,7 +339,7 @@
     "saveError": "Agent 保存失败",
     "deployToEnv": "部署到{{env}}",
     "undeployFromEnv": "从{{env}}移除",
-    "openStudio": "在管理器中打开",
+    "openStudio": "在工作室中打开",
     "maxKeyLength": "最大键长度",
     "maxValueLength": "最大值长度",
     "maxWritesPerTurn": "每轮最大写入次数",

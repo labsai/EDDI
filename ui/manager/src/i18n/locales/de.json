@@ -339,7 +339,7 @@
     "saveError": "Agent konnte nicht gespeichert werden",
     "deployToEnv": "In {{env}} bereitstellen",
     "undeployFromEnv": "Aus {{env}} entfernen",
-    "openStudio": "Im Manager öffnen",
+    "openStudio": "Im Studio öffnen",
     "maxKeyLength": "Max. Schlüssellänge",
     "maxValueLength": "Max. Wertlänge",
     "maxWritesPerTurn": "Max. Schreibvorgänge/Runde",

@@ -339,7 +339,7 @@
     "saveError": "فشل حفظ Agent",
     "deployToEnv": "نشر في {{env}}",
     "undeployFromEnv": "إزالة من {{env}}",
-    "openStudio": "فتح في المدير",
+    "openStudio": "فتح في الاستوديو",
     "maxKeyLength": "أقصى طول للمفتاح",
     "maxValueLength": "أقصى طول للقيمة",
     "maxWritesPerTurn": "أقصى عمليات كتابة/دورة",

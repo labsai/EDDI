@@ -339,7 +339,7 @@
     "saveError": "Agent सहेजने में विफल",
     "deployToEnv": "{{env}} में Deploy करें",
     "undeployFromEnv": "{{env}} से हटाएं",
-    "openStudio": "मैनेजर में खोलें",
+    "openStudio": "स्टूडियो में खोलें",
     "maxKeyLength": "अधिकतम कुंजी लंबाई",
     "maxValueLength": "अधिकतम मान लंबाई",
     "maxWritesPerTurn": "प्रति बारी अधिकतम लेखन",
