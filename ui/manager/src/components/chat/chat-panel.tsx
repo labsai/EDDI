@@ -70,7 +70,7 @@ interface PendingAttachment {
   error?: string;
 }
 
-export function ChatPanel() {
+export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
@@ -373,31 +373,41 @@ export function ChatPanel() {
   }, [rerunConversation, t]);
 
   return (
-    <div className="flex h-full min-w-0 overflow-hidden rounded-xl border border-border bg-background shadow-sm">
-      {/* History panel */}
-      <ChatHistory
-        open={historyOpen}
-        onNewConversation={handleNewConversation}
-      />
+    <div className={cn(
+      "flex h-full min-w-0 overflow-hidden bg-background",
+      embedded ? "flex-col" : "rounded-xl border border-border shadow-sm"
+    )}>
+      {/* History panel — hidden in embedded mode (no room for nested side panels) */}
+      {!embedded && (
+        <ChatHistory
+          open={historyOpen}
+          onNewConversation={handleNewConversation}
+        />
+      )}
 
       {/* Main chat area */}
       <div className="flex flex-1 flex-col min-w-0 min-h-0">
         {/* Top bar */}
-        <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-          {/* History toggle */}
-          <button
-            onClick={() => setHistoryOpen((p) => !p)}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-              historyOpen
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-            title={t("chat.history")}
-            data-testid="history-toggle"
-          >
-            <History className="h-4 w-4" />
-          </button>
+        <div className={cn(
+          "flex items-center border-b border-border",
+          embedded ? "gap-1 px-2 py-1.5" : "gap-2 px-4 py-2.5"
+        )}>
+          {/* History toggle — hidden in embedded mode */}
+          {!embedded && (
+            <button
+              onClick={() => setHistoryOpen((p) => !p)}
+              className={cn(
+                "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                historyOpen
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+              title={t("chat.history")}
+              data-testid="history-toggle"
+            >
+              <History className="h-4 w-4" />
+            </button>
+          )}
 
           {/* Agent selector */}
           <div ref={agentSelectorRef} className="relative flex-1">
@@ -461,23 +471,25 @@ export function ChatPanel() {
             )}
           </div>
 
-          {/* Streaming toggle */}
-          <StreamingToggle />
+          {/* Streaming toggle — hidden in embedded mode to save space */}
+          {!embedded && <StreamingToggle />}
 
-          {/* Activity toggle */}
-          <button
-            onClick={toggleShowActivity}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-              showActivity
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
-            title={showActivity ? t("chat.hideActivity", "Hide Activity") : t("chat.showActivity", "Show Activity")}
-            data-testid="activity-toggle"
-          >
-            <Activity className="h-4 w-4" />
-          </button>
+          {/* Activity toggle — hidden in embedded mode */}
+          {!embedded && (
+            <button
+              onClick={toggleShowActivity}
+              className={cn(
+                "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                showActivity
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+              title={showActivity ? t("chat.hideActivity", "Hide Activity") : t("chat.showActivity", "Show Activity")}
+              data-testid="activity-toggle"
+            >
+              <Activity className="h-4 w-4" />
+            </button>
+          )}
 
           {/* Top bar actions */}
           {conversationId && (
@@ -535,7 +547,7 @@ export function ChatPanel() {
             </div>
           </div>
         )}
-        {conversationId && (
+        {conversationId && !embedded && (
           <button
             onClick={() => setContextOpen((p) => !p)}
             className={cn(
@@ -573,7 +585,7 @@ export function ChatPanel() {
               </div>
             </div>
           ) : (
-            <div className="py-4">
+            <div className={embedded ? "py-2" : "py-4"}>
               {messages.map((msg) => (
                 <ChatMessage key={msg.id} message={msg} />
               ))}

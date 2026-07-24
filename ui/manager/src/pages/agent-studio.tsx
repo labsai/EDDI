@@ -218,7 +218,7 @@ export function AgentStudioPage() {
             )}
             {mobileTab === "chat" && (
               <div className="flex-1 overflow-hidden flex flex-col">
-                <ChatPanel />
+                <ChatPanel embedded />
               </div>
             )}
           </div>
@@ -227,7 +227,7 @@ export function AgentStudioPage() {
         {/* Right: Chat + Debug */}
         {rightPanelOpen && (
           <div className="w-96 shrink-0 border-s border-border overflow-hidden hidden md:flex md:flex-col min-h-0 min-w-0">
-            <ChatPanel />
+            <ChatPanel embedded />
           </div>
         )}
       </div>
