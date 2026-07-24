@@ -27,13 +27,16 @@ export function formatMarkdownText(text: string): string {
   // 1. Fix ATX headings missing space (e.g. "#Header" -> "# Header", "###Title" -> "### Title")
   formatted = formatted.replace(/^(#{1,6})([^\s#])/gm, "$1 $2");
 
-  // 2. Fix bold/italic syntax glued to preceding letter/digit (e.g. "word**bold**" -> "word **bold**")
+  // 2. Fix spaces inside bold markers (e.g. "**Moderator **" -> "**Moderator**", "** Financial Analysis **" -> "**Financial Analysis**")
+  formatted = formatted.replace(/\*\*\s*([^*]+?)\s*\*\*/g, "**$1**");
+
+  // 3. Fix bold/italic syntax glued to preceding letter/digit (e.g. "word**bold**" -> "word **bold**")
   formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ])(\*{2}|_{2})([^\s*_])/g, "$1 $2");
 
-  // 3. Fix missing spaces after punctuation before capitalized words (e.g. "mich,Sie" -> "mich, Sie", "End.Next" -> "End. Next")
+  // 4. Fix missing spaces after punctuation before capitalized words (e.g. "mich,Sie" -> "mich, Sie", "End.Next" -> "End. Next")
   formatted = formatted.replace(/([,.:;!?])([A-ZÄÖÜ])/g, "$1 $2");
 
-  // 4. Ensure headings have a blank line before them if preceded by text on a single newline
+  // 5. Ensure headings have a blank line before them if preceded by text on a single newline
   formatted = formatted.replace(/([^\n])\n(#{1,6}\s)/g, "$1\n\n$2");
 
   return formatted;
@@ -139,7 +142,7 @@ export function parseEmojiVerification(content: string): StructuredItem[] | null
   };
 
   // Match: ✅ **Subject**: Status  or  ❌ Subject: Status
-  const emojiLineRe = /^([✅❌])\s+\*{0,2}([^*:]+?)\*{0,2}\s*:\s*(.+)/;
+  const emojiLineRe = /^([✅❌])\s+\*{0,2}([^*\n:]+?)\*{0,2}\s*:\s*(.+)/;
 
   for (const line of lines) {
     const match = emojiLineRe.exec(line);

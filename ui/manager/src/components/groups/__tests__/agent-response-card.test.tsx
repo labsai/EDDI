@@ -113,9 +113,9 @@ describe("AgentResponseCard", () => {
     );
 
     expect(screen.getByText("Financial Analysis")).toBeInTheDocument();
-    expect(screen.getByText("All requirements met.")).toBeInTheDocument();
+    expect(screen.getByText(/All requirements met/)).toBeInTheDocument();
     expect(screen.getByText("Risk Assessment")).toBeInTheDocument();
-    expect(screen.getByText("No risk data provided.")).toBeInTheDocument();
+    expect(screen.getByText(/No risk data provided/)).toBeInTheDocument();
 
     expect(container.querySelector("svg.text-emerald-500")).toBeInTheDocument();
     expect(container.querySelector("svg.text-destructive")).toBeInTheDocument();

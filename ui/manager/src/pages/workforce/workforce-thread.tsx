@@ -22,7 +22,12 @@ import {
   Loader2,
   CheckCircle2,
   ArrowDown,
+  Copy,
+  Check,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { parseTranscriptContent, formatMarkdownText } from "@/components/groups/group-utils";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { useGroup } from "@/hooks/use-groups";
 import {
@@ -168,7 +173,49 @@ function parseConversationSteps(
   return messages;
 }
 
-// ─── Typing Indicator ────────────────────────────────────────────
+function formatShortTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function CopyMessageButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [content]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 transition-opacity duration-150",
+        copied
+          ? "text-emerald-500 font-medium"
+          : "text-muted-foreground/60 hover:text-foreground hover:bg-muted/50",
+      )}
+      title="Copy message"
+      aria-label="Copy message"
+    >
+      {copied ? (
+        <>
+          <Check className="h-3 w-3" />
+          <span>Copied</span>
+        </>
+      ) : (
+        <>
+          <Copy className="h-3 w-3" />
+          <span>Copy</span>
+        </>
+      )}
+    </button>
+  );
+}
 
 function TypingDots() {
   return (
@@ -896,7 +943,7 @@ function WorkforceThread() {
             <div
               key={`${msg.role}-${msg.timestamp}-${idx}`}
               className={cn(
-                "flex",
+                "group/msg flex",
                 msg.role === "user" ? "justify-end" : "justify-start",
               )}
             >
@@ -910,75 +957,101 @@ function WorkforceThread() {
                 </div>
               )}
 
-              <div
-                className={cn(
-                  "max-w-lg rounded-2xl ps-4 pe-4 py-2.5 text-sm",
-                  msg.role === "user"
-                    ? "rounded-ee-md bg-primary text-primary-foreground"
-                    : cn(
-                        "rounded-es-md border",
-                        "bg-card dark:bg-card",
-                        "border-border",
-                        "text-foreground",
-                      ),
-                )}
-              >
-                {msg.role === "agent" && (
-                  <p className="mb-1 text-xs font-medium text-muted-foreground">
-                    {memberName}
-                  </p>
-                )}
+              <div className="flex flex-col min-w-0 max-w-lg">
+                <div
+                  className={cn(
+                    "rounded-2xl ps-4 pe-4 py-2.5 text-sm",
+                    msg.role === "user"
+                      ? "rounded-ee-md bg-primary text-primary-foreground"
+                      : cn(
+                          "rounded-es-md border",
+                          "bg-card dark:bg-card",
+                          "border-border",
+                          "text-foreground",
+                        ),
+                  )}
+                >
+                  {msg.role === "agent" && (
+                    <p className="mb-1 text-xs font-medium text-muted-foreground">
+                      {memberName}
+                    </p>
+                  )}
 
-                {/* Attachment rendering on messages */}
-                {msg.attachments && msg.attachments.length > 0 && (
-                  <div className="mb-1.5 space-y-1.5">
-                    {msg.attachments.map((att) => (
-                      <div key={att.storageRef}>
-                        {/* Image preview */}
-                        {isImageMime(att.mimeType) && att.previewUrl ? (
-                          <img
-                            src={att.previewUrl}
-                            alt={att.fileName}
-                            className="max-h-40 max-w-[220px] rounded-lg object-cover"
-                          />
-                        ) : (
-                          /* Non-image file chip */
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1.5 rounded-full ps-2.5 pe-2.5 py-1 text-xs",
-                              msg.role === "user"
-                                ? "bg-white/20 text-primary-foreground"
-                                : "bg-muted text-muted-foreground",
-                            )}
-                          >
-                            <FileText className="h-3 w-3" />
-                            <span className="max-w-32 truncate">{att.fileName}</span>
-                            {att.sizeBytes != null && (
-                              <span className="opacity-60">{formatBytes(att.sizeBytes)}</span>
-                            )}
-                          </span>
-                        )}
-                        {/* Warning when file not forwarded to model */}
-                        {att.forwardableInline === false && (
-                          <span
-                            data-testid="attachment-not-forwarded"
-                            className={cn(
-                              "mt-0.5 inline-flex items-center gap-1 rounded-full ps-2 pe-2 py-0.5 text-[10px]",
-                              msg.role === "user"
-                                ? "bg-amber-500/20 text-amber-100"
-                                : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-                            )}
-                          >
-                            <AlertTriangle className="h-2.5 w-2.5" />
-                            {t("Workforce.thread.notForwarded", "File stored but too large to send to model")}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                  {/* Attachment rendering on messages */}
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="mb-1.5 space-y-1.5">
+                      {msg.attachments.map((att) => (
+                        <div key={att.storageRef}>
+                          {/* Image preview */}
+                          {isImageMime(att.mimeType) && att.previewUrl ? (
+                            <img
+                              src={att.previewUrl}
+                              alt=""
+                              className="max-h-40 max-w-[220px] rounded-lg object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLElement).style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            /* Non-image file chip */
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1.5 rounded-full ps-2.5 pe-2.5 py-1 text-xs",
+                                msg.role === "user"
+                                  ? "bg-white/20 text-primary-foreground"
+                                  : "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              <FileText className="h-3 w-3" />
+                              <span className="max-w-32 truncate">{att.fileName}</span>
+                              {att.sizeBytes != null && (
+                                <span className="opacity-60">{formatBytes(att.sizeBytes)}</span>
+                              )}
+                            </span>
+                          )}
+                          {/* Warning when file not forwarded to model */}
+                          {att.forwardableInline === false && (
+                            <span
+                              data-testid="attachment-not-forwarded"
+                              className={cn(
+                                "mt-0.5 inline-flex items-center gap-1 rounded-full ps-2 pe-2 py-0.5 text-[10px]",
+                                msg.role === "user"
+                                  ? "bg-amber-500/20 text-amber-100"
+                                  : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+                              )}
+                            >
+                              <AlertTriangle className="h-2.5 w-2.5" />
+                              {t("Workforce.thread.notForwarded", "File stored but too large to send to model")}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {msg.role === "agent" ? (
+                    <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {formatMarkdownText(parseTranscriptContent(msg.content))}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  )}
+                </div>
+
+                {/* Timestamp & copy button row — fixed h-5 prevents hover layout shift */}
+                <div
+                  className={cn(
+                    "mt-0.5 flex h-5 items-center gap-1.5 px-1 text-[10px] text-muted-foreground/60 select-none",
+                    msg.role === "user" ? "justify-end" : "justify-start",
+                  )}
+                >
+                  <span>{formatShortTime(msg.timestamp)}</span>
+                  {msg.content && (
+                    <CopyMessageButton content={parseTranscriptContent(msg.content)} />
+                  )}
+                </div>
               </div>
             </div>
           ))}

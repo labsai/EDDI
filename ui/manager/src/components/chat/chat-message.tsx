@@ -105,7 +105,7 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* Timestamp + hover actions row */}
         <div className={cn(
-          "flex items-center gap-1.5 px-1",
+          "flex h-5 items-center gap-1.5 px-1",
           isUser ? "flex-row-reverse" : "flex-row"
         )}>
           {/* Timestamp */}
@@ -117,8 +117,10 @@ export const ChatMessage = memo(function ChatMessage({
           </span>
 
           {/* Hover actions — only for agent messages with content */}
-          {!isUser && message.content && hovered && (
-            <CopyMessageButton content={message.content} />
+          {!isUser && message.content && (
+            <div className={cn("transition-opacity duration-150", hovered ? "opacity-100" : "opacity-0 pointer-events-none")}>
+              <CopyMessageButton content={message.content} />
+            </div>
           )}
         </div>
       </div>

@@ -421,7 +421,7 @@ export function ChatPanel() {
 
             {/* Dropdown */}
             {agentSelectorOpen && (
-              <div className="absolute inset-s-0 top-full z-50 mt-1 w-full rounded-lg border border-border bg-popover p-1 shadow-lg">
+              <div className="absolute inset-s-0 top-full z-50 mt-1 w-full max-h-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg">
                 {agentsLoading ? (
                   <div className="flex items-center justify-center py-3">
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -436,16 +436,16 @@ export function ChatPanel() {
                       key={agent.id}
                       onClick={() => handleSelectAgent(agent.id, agent.name)}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted",
+                        "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted min-w-0",
                         agent.id === selectedAgentId &&
                           "bg-primary/10 text-primary font-medium"
                       )}
                     >
                       <Bot className="h-4 w-4 shrink-0" />
-                      <div className="flex-1 text-start">
+                      <div className="flex-1 min-w-0 text-start">
                         <p className="truncate font-medium">{agent.name}</p>
                         {agent.description && (
-                          <p className="truncate text-xs text-muted-foreground">
+                          <p className="line-clamp-2 text-xs text-muted-foreground/80 leading-snug">
                             {agent.description}
                           </p>
                         )}

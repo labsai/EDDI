@@ -8,7 +8,7 @@ import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
 import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
-import { parseTranscriptContent, parseEmojiVerification, truncateContent, safeFormatDate } from "./group-utils";
+import { parseTranscriptContent, formatMarkdownText, parseEmojiVerification, truncateContent, safeFormatDate } from "./group-utils";
 import type { StructuredItem } from "./group-utils";
 
 /** Style-aware badge colors for different discussion roles */
@@ -135,14 +135,15 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
     || defaultBadgeVariant(entry.type);
 
   const rawParsed = entry.content ? parseTranscriptContent(entry.content) : null;
-  // Guard: treat whitespace-only content as empty (prevents rendering empty bubbles)
-  const parsedContent = rawParsed?.trim() ? rawParsed : null;
+  // Guard: treat whitespace-only content as empty and auto-format markdown syntax
+  const parsedContent = rawParsed?.trim() ? formatMarkdownText(rawParsed) : null;
   // Try parsing as structured JSON array — check both raw and unwrapped content (no type gate)
   let structuredItems = tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent);
 
   // For VERIFICATION entries, also try emoji-based text parsing (✅/❌ format from backend)
-  if (!structuredItems && isVerification && parsedContent) {
-    structuredItems = parseEmojiVerification(parsedContent);
+  if (!structuredItems && isVerification) {
+    structuredItems = (entry.content ? parseEmojiVerification(entry.content) : null)
+      ?? (parsedContent ? parseEmojiVerification(parsedContent) : null);
   }
 
   // For PLAN entries with pre-configured tasks: convert TaskDefinition[] → StructuredItem[]

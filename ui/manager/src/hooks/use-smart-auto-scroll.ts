@@ -27,7 +27,11 @@ export function useSmartAutoScroll<T extends HTMLElement = HTMLDivElement>({
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
+    if (typeof el.scrollTo === "function") {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
     isNearBottomRef.current = true;
     setShowScrollFab(false);
     setHasNewContent(false);
@@ -54,7 +58,11 @@ export function useSmartAutoScroll<T extends HTMLElement = HTMLDivElement>({
     if (!el) return;
     if (isNearBottomRef.current) {
       const behavior = isInitialMountRef.current ? "auto" : "smooth";
-      el.scrollTo({ top: el.scrollHeight, behavior });
+      if (typeof el.scrollTo === "function") {
+        el.scrollTo({ top: el.scrollHeight, behavior });
+      } else {
+        el.scrollTop = el.scrollHeight;
+      }
       if (isInitialMountRef.current) {
         isInitialMountRef.current = false;
       }
