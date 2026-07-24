@@ -86,6 +86,14 @@ public class GroupConversationService implements IGroupConversationService {
     private static final Logger LOGGER = Logger.getLogger(GroupConversationService.class);
     private static final Environment DEFAULT_ENV = Environment.production;
 
+    /**
+     * Default per-agent-turn timeout (seconds) when not configured via
+     * {@code protocol.agentTimeoutSeconds}. 180s covers thinking models (e.g.
+     * claude-sonnet-5) and synthesis phases comfortably. Was 60s, which caused
+     * timeouts on synthesis with extended thinking.
+     */
+    private static final int DEFAULT_AGENT_TIMEOUT_SECONDS = 180;
+
     private final IAgentGroupStore groupStore;
     private final IGroupConversationStore conversationStore;
     private final IConversationService conversationService;
@@ -1728,7 +1736,7 @@ public class GroupConversationService implements IGroupConversationService {
         // not transcript context.
 
         List<GroupDiscussionException> errors = Collections.synchronizedList(new ArrayList<>());
-        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
+        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
         int maxWaves = 100; // safety cap to prevent infinite loops
 
         // Wave loop: re-query executable tasks after each wave completes.
@@ -2347,7 +2355,7 @@ public class GroupConversationService implements IGroupConversationService {
             }
         }, executorService)).toList();
 
-        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
+        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
         for (int i = 0; i < futures.size(); i++) {
             try {
                 TranscriptEntry entry = futures.get(i).get(timeout, TimeUnit.SECONDS);
@@ -2506,7 +2514,7 @@ public class GroupConversationService implements IGroupConversationService {
         // Call through ConversationService with retry
         int retries = 0;
         int maxRetries = protocol.maxRetries() > 0 ? protocol.maxRetries() : 2;
-        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
+        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
 
         while (true) {
             try {
