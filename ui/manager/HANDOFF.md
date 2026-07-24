@@ -120,11 +120,10 @@
 - Boardroom files: `src/pages/boardroom/`, `src/components/boardroom/`, `src/styles/advisory.css`
 
 ### Test Counts
-- 271 test files passing (EDDI-Manager)
-- 3937 Tests passing (`npm run test`)
-- 76.59% statement coverage
+- 277 test files passing (EDDI-Manager)
+- 3982 Tests passing (`npm run test`)
 - 112 Backend tenancy tests passing (`mvn test`)
 
 ### Last Commit Focus
-- Frontend: `fix: address PR review feedback — bugs, coverage, code quality` on `feat/group-chat-followup-ux` (`44084657`)
-- Includes: mode switcher, live logging optimisation, disabled bypass fix, keyboard a11y fix, usePersistedBoolean DRY, GROUP_CONVERSATIONS_KEY export, i18n updates
+- Frontend: `fix: defensive rendering for group conversation transcript entries` on `fix/group-chat-defensive-rendering` (`549b61a3`)
+- Includes: empty content guard, emoji verification parser, consistent ReactMarkdown, content truncation, conversation-viewer markdown, i18n (11 locales), 20 new tests
