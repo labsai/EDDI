@@ -49,7 +49,7 @@ public class ContextMatcher implements IRuleCondition {
     private final IExpressionProvider expressionProvider;
     private final IJsonSerialization jsonSerialization;
 
-    private static final Logger log = Logger.getLogger(ContextMatcher.class);
+    private static final Logger LOGGER = Logger.getLogger(ContextMatcher.class);
 
     public ContextMatcher(IExpressionProvider expressionProvider, IJsonSerialization jsonSerialization) {
         this.expressionProvider = expressionProvider;
@@ -126,7 +126,7 @@ public class ContextMatcher implements IRuleCondition {
                                 }
                             }
                         } catch (IOException e) {
-                            log.error(e.getLocalizedMessage(), e);
+                            LOGGER.error(e.getLocalizedMessage(), e);
                             success = false;
                         }
                         break;
