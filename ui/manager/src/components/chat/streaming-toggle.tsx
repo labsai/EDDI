@@ -17,8 +17,8 @@ export function StreamingToggle() {
           ? "text-muted-foreground hover:text-foreground"
           : "text-muted-foreground/50 hover:text-muted-foreground"
       )}
-      title={t("chat.streaming")}
-      aria-label={t("chat.streaming")}
+      title={t("chat.streaming", "Streaming")}
+      aria-label={t("chat.streaming", "Streaming")}
       aria-pressed={streamingEnabled}
       data-testid="streaming-toggle"
     >
@@ -27,7 +27,7 @@ export function StreamingToggle() {
       ) : (
         <ZapOff className="h-3 w-3" />
       )}
-      {t("chat.streaming")}
+      {t("chat.streaming", "Streaming")}
     </button>
   );
 }

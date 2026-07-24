@@ -157,7 +157,7 @@ export function extractOutputParts(conversationOutput?: ConversationOutput): str
         if (typeof item === "string" && item.trim()) texts.push(item);
         else if (item?.text && typeof item.text === "string" && item.text.trim()) texts.push(item.text);
       }
-    } else if (val && typeof val === "object" && (val as Record<string, unknown>).text) {
+    } else if (val && typeof val === "object" && typeof (val as Record<string, unknown>).text === "string") {
       const t = (val as Record<string, unknown>).text as string;
       if (t.trim()) texts.push(t);
     }

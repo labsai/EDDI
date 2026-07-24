@@ -631,11 +631,8 @@ function HistoryTab() {
       <div className="mt-2 text-end text-xs text-muted-foreground">
         {logs &&
           (filteredLogs.length !== logs.length
-            ? t("logs.filteredCount", { shown: filteredLogs.length, total: logs.length, defaultValue: `${filteredLogs.length} of ${logs.length} entries` })
-            : t("logs.entryCount", {
-                count: logs.length,
-                defaultValue: `${logs.length} entries`,
-              }))}
+            ? t("logs.filteredCount", "{{shown}} of {{total}} entries", { shown: filteredLogs.length, total: logs.length })
+            : t("logs.entryCount", "{{count}} entries", { count: logs.length }))}
       </div>
     </div>
   );

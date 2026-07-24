@@ -107,6 +107,20 @@ export class BearerEventSource {
           if (msg) this.dispatch(msg);
         }
       }
+
+      // Flush remaining buffer — normalize any held-back trailing \r
+      if (buffer.length > 0) {
+        buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        const blocks = buffer.split("\n\n");
+        for (const block of blocks) {
+          const trimmed = block.trim();
+          if (trimmed) {
+            const msg = this.parseBlock(trimmed);
+            if (msg) this.dispatch(msg);
+          }
+        }
+      }
+
       this.clearInactivityTimer();
       // Clean EOF — reconnect to keep streaming
       if (!this._closed) this.scheduleReconnect();
