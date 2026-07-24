@@ -163,11 +163,11 @@ export function ChatPanel() {
       setSelectedAgent(agentId, agentName);
       setAgentSelectorOpen(false);
       startConversation.mutate({ agentId });
-      // Focus the chat input so user can start typing immediately
-      requestAnimationFrame(() => {
+      // Focus the chat input after the dropdown closes and UI settles
+      setTimeout(() => {
         const input = document.querySelector<HTMLTextAreaElement>('[data-testid="chat-input"]');
         input?.focus();
-      });
+      }, 150);
     },
     [setSelectedAgent, startConversation]
   );
