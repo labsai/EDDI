@@ -33,8 +33,8 @@ test.describe("Resource Editor — Rules", () => {
   test("can switch to JSON tab", async ({ page }) => {
     const jsonTab = page.getByTestId("tab-json");
     await jsonTab.click();
-    // Radix Tabs sets data-state="active" on the selected trigger
-    await expect(jsonTab).toHaveAttribute("data-state", "active");
+    // Custom tab buttons use aria-selected (not Radix data-state)
+    await expect(jsonTab).toHaveAttribute("aria-selected", "true");
   });
 
   test("shows rules editor with behavior groups", async ({ page }) => {
