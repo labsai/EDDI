@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
@@ -56,6 +57,7 @@ public class GdprComplianceService {
     private final AuditLedgerService auditLedgerService;
     private final Instance<IAttachmentStore> attachmentStorageInstance;
     private final IHitlToolJournalStore hitlToolJournalStore;
+    private final IConversationDescriptorStore conversationDescriptorStore;
 
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
@@ -65,7 +67,8 @@ public class GdprComplianceService {
             IAuditStore auditStore,
             AuditLedgerService auditLedgerService,
             Instance<IAttachmentStore> attachmentStorageInstance,
-            IHitlToolJournalStore hitlToolJournalStore) {
+            IHitlToolJournalStore hitlToolJournalStore,
+            IConversationDescriptorStore conversationDescriptorStore) {
         this.userMemoryStore = userMemoryStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.userConversationStore = userConversationStore;
@@ -74,6 +77,7 @@ public class GdprComplianceService {
         this.auditLedgerService = auditLedgerService;
         this.attachmentStorageInstance = attachmentStorageInstance;
         this.hitlToolJournalStore = hitlToolJournalStore;
+        this.conversationDescriptorStore = conversationDescriptorStore;
     }
 
     /**
@@ -85,16 +89,17 @@ public class GdprComplianceService {
      * <li>Delete all binary attachments for user conversations</li>
      * <li>Delete all HITL tool execution journal entries for user
      * conversations</li>
+     * <li>Delete all conversation descriptors</li>
      * <li>Delete all conversation memory snapshots</li>
      * <li>Delete all managed conversation mappings</li>
      * <li>Pseudonymize database log entries</li>
      * <li>Pseudonymize audit ledger entries</li>
      * </ol>
      * <p>
-     * The journal deletion (step 3) runs <em>before</em> the conversation snapshots
-     * are deleted (step 4) because it resolves the conversation ids from
-     * {@link IConversationMemoryStore#getConversationIdsByUserId(String)}, which is
-     * only meaningful while those conversations still exist.
+     * Conversation IDs are resolved once before step 2 and reused across steps 2–4.
+     * The journal and descriptor deletions (steps 3–4) run <em>before</em> the
+     * conversation snapshots are deleted (step 5) because they reference
+     * conversation IDs that the bulk delete removes.
      *
      * @param userId
      *            the user to erase
@@ -118,10 +123,21 @@ public class GdprComplianceService {
 
         // 2. Delete attachments for all user conversations
         long attachmentsDeleted = 0;
+
+        // Resolve conversation IDs once — needed by steps 2, 3, 4a, and 4b.
+        // Must happen BEFORE the bulk snapshot delete (step 4b) which removes
+        // the documents that getConversationIdsByUserId queries.
+        List<String> conversationIds = List.of();
+        try {
+            conversationIds = conversationMemoryStore.getConversationIdsByUserId(userId);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to resolve conversation ids for user [%s]",
+                    pseudonym);
+        }
+
         try {
             if (attachmentStorageInstance.isResolvable()) {
                 var attachmentStorage = attachmentStorageInstance.get();
-                var conversationIds = conversationMemoryStore.getConversationIdsByUserId(userId);
                 for (String convId : conversationIds) {
                     attachmentsDeleted += attachmentStorage.deleteByConversation(convId);
                 }
@@ -135,11 +151,10 @@ public class GdprComplianceService {
         }
 
         // 3. Delete HITL tool execution journal entries for user conversations.
-        // Must run BEFORE the conversations themselves are deleted (step 4), since
-        // the conversation ids are resolved by userId from the memory store.
+        // Must run BEFORE the conversations themselves are deleted (step 4b), since
+        // the journal entries reference conversation ids.
         long journalEntriesDeleted = 0;
         try {
-            var conversationIds = conversationMemoryStore.getConversationIdsByUserId(userId);
             for (String convId : conversationIds) {
                 journalEntriesDeleted += hitlToolJournalStore.deleteByConversationId(convId);
             }
@@ -152,7 +167,24 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
-        // 4. Delete conversation memory snapshots
+        // 4a. Delete conversation descriptors (must run BEFORE or alongside
+        // the snapshot delete so the ids are still available)
+        long descriptorsDeleted = 0;
+        try {
+            for (String convId : conversationIds) {
+                conversationDescriptorStore.deleteAllDescriptor(convId);
+                descriptorsDeleted++;
+            }
+            if (descriptorsDeleted > 0) {
+                LOGGER.infof("[GDPR] Deleted %d conversation descriptors [%s]",
+                        descriptorsDeleted, pseudonym);
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to delete conversation descriptors [%s]",
+                    pseudonym);
+        }
+
+        // 4b. Delete conversation memory snapshots
         long conversationsDeleted = 0;
         try {
             conversationsDeleted = conversationMemoryStore

@@ -5,6 +5,29 @@
 
 ---
 
+## 🐛 fix(memory): orphaned ConversationDescriptors on conversation deletion (2026-07-24)
+
+**Repo:** EDDI (`feat/v6.2.0-prep`)
+
+ConversationDescriptors (created at conversation start by `ConversationSetup`) were never cleaned up when a conversation was permanently deleted, causing "Memory snapshot not found — Descriptor is orphaned" warnings on every conversation listing.
+
+**Root cause:** `ConversationDescriptorStore.deleteAllDescriptor()` existed but was never called in any deletion path. Three separate hard-delete paths all deleted the memory snapshot but left the descriptor behind.
+
+**Fixes (all in production code):**
+- **RestConversationStore.deleteConversationLog** — added `conversationDescriptorStore.deleteAllDescriptor()` after permanent snapshot deletion
+- **RestConversationStore.permanentlyDeleteEndedConversationLogs** — added descriptor cleanup in both the happy path (old enough to delete) and the catch path (orphaned snapshot without DocumentDescriptor)
+- **GdprComplianceService.deleteUserData** — added `IConversationDescriptorStore` dependency, hoisted conversation ID resolution before step 2 (eliminating a duplicate DB query), added step 4a to delete descriptors per-conversation before the bulk snapshot delete
+
+**Files:**
+- `RestConversationStore.java` — 3 `deleteAllDescriptor` calls added
+- `GdprComplianceService.java` — new dependency, hoisted ID resolution, new step 4a, updated Javadoc
+- `RestConversationStoreTest.java` — 9 verify assertions added (positive + negative)
+- `GdprComplianceServiceTest.java` — mock added, constructors updated, `inOrder` verification for deletion ordering
+
+**Design decision:** soft-delete (`deletePermanently=false`) does NOT touch the descriptor — the `DocumentDescriptorFilter` JAX-RS interceptor still handles soft-deletion via its existing mechanism. Only hard-deletes clean up the ConversationDescriptor.
+
+---
+
 ## 🐛 fix(llm,group): empty task results, maxTokens defaults, verification display (2026-07-24)
 
 **Repo:** EDDI (`feat/v6.2.0-prep`)
