@@ -13,6 +13,7 @@ type EventHandler = (event: MessageEvent) => void;
 export class BearerEventSource {
   private abortController: AbortController | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners: Map<string, EventHandler[]> = new Map();
   private _closed = false;
 
@@ -38,8 +39,29 @@ export class BearerEventSource {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    if (this.inactivityTimer !== null) {
+      clearTimeout(this.inactivityTimer);
+      this.inactivityTimer = null;
+    }
     this.abortController?.abort();
     this.abortController = null;
+  }
+
+  private clearInactivityTimer(): void {
+    if (this.inactivityTimer !== null) {
+      clearTimeout(this.inactivityTimer);
+      this.inactivityTimer = null;
+    }
+  }
+
+  private resetInactivityTimer(): void {
+    this.clearInactivityTimer();
+    if (this._closed) return;
+    this.inactivityTimer = setTimeout(() => {
+      if (this.abortController) {
+        this.abortController.abort();
+      }
+    }, 45000);
   }
 
   private async connect(): Promise<void> {
@@ -62,10 +84,17 @@ export class BearerEventSource {
       const decoder = new TextDecoder();
       let buffer = "";
 
+      this.resetInactivityTimer();
+
       while (!this._closed) {
         const { done, value } = await reader.read();
+        this.resetInactivityTimer();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        
+        let chunk = decoder.decode(value, { stream: true });
+        chunk = chunk.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        buffer += chunk;
+        
         // SSE blocks are separated by double newlines
         const blocks = buffer.split("\n\n");
         buffer = blocks.pop() ?? "";
@@ -74,11 +103,12 @@ export class BearerEventSource {
           if (msg) this.dispatch(msg);
         }
       }
+      this.clearInactivityTimer();
       // Clean EOF — reconnect to keep streaming
       if (!this._closed) this.scheduleReconnect();
-    } catch (err) {
+    } catch {
+      this.clearInactivityTimer();
       if (this._closed) return; // intentional abort
-      if (err instanceof DOMException && err.name === "AbortError") return;
       this.scheduleReconnect();
     }
   }
@@ -93,7 +123,9 @@ export class BearerEventSource {
     if (!block) return null;
     let eventType = "message";
     const dataParts: string[] = [];
-    for (const line of block.split("\n")) {
+    for (let line of block.split("\n")) {
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      
       if (line.startsWith("event:")) {
         eventType = line.slice(6).trim();
       } else if (line.startsWith("data:")) {

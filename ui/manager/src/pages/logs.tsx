@@ -193,7 +193,7 @@ function LiveTab() {
     [agentFilter, levelFilter]
   );
 
-  const { entries, sseConnected, paused, setPaused, clearEntries } =
+  const { entries, sseConnected, seeded, paused, setPaused, clearEntries } =
     useLogStream(filters);
   const { data: instanceInfo } = useInstanceId();
   const [textSearch, setTextSearch] = useState("");
@@ -370,15 +370,22 @@ function LiveTab() {
         }}
       >
         {entries.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
-            {sseConnected ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-8" data-testid="live-empty">
+            {!seeded ? (
               <>
-                <Radio className="h-10 w-10 text-muted-foreground/40 animate-pulse" />
+                <Loader2 className="h-10 w-10 text-muted-foreground/40 animate-spin" />
                 <p className="text-sm font-medium text-muted-foreground">
-                  {t("logs.waitingForLogs", "Waiting for logs...")}
+                  {t("logs.loadingRecentLogs", "Loading recent logs…")}
+                </p>
+              </>
+            ) : sseConnected ? (
+              <>
+                <Radio className="h-10 w-10 text-muted-foreground/40" />
+                <p className="text-sm font-medium text-muted-foreground">
+                  {t("logs.noRecentLogs", "No recent log activity.")}
                 </p>
                 <p className="text-xs text-muted-foreground/60">
-                  {t("logs.waitingHint", "Logs will appear here as they stream in from the backend.")}
+                  {t("logs.noRecentLogsHint", "New logs will appear here as they stream in from the backend.")}
                 </p>
               </>
             ) : (
