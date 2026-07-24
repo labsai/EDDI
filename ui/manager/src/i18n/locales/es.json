@@ -339,7 +339,7 @@
     "saveError": "Error al guardar el agent",
     "deployToEnv": "Desplegar en {{env}}",
     "undeployFromEnv": "Retirar de {{env}}",
-    "openStudio": "Abrir en el Estudio",
+    "openStudio": "Abrir en el Manager",
     "maxKeyLength": "Longitud máx. de clave",
     "maxValueLength": "Longitud máx. de valor",
     "maxWritesPerTurn": "Escrituras máx./turno",
@@ -2981,7 +2981,7 @@
       "hideDetails": "Ocultar detalles",
       "editAgent": "Editar agente",
       "auditLogs": "Registros de auditoría",
-    "openStudio": "Abrir en el Estudio",
+    "openStudio": "Abrir en el Manager",
       "triggers": "Ver activadores"
     },
     "agentEditor": {

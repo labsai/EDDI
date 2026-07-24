@@ -339,7 +339,7 @@
     "saveError": "فشل حفظ Agent",
     "deployToEnv": "نشر في {{env}}",
     "undeployFromEnv": "إزالة من {{env}}",
-    "openStudio": "فتح في الاستوديو",
+    "openStudio": "فتح في المدير",
     "maxKeyLength": "أقصى طول للمفتاح",
     "maxValueLength": "أقصى طول للقيمة",
     "maxWritesPerTurn": "أقصى عمليات كتابة/دورة",
@@ -3020,7 +3020,7 @@
       "hideDetails": "إخفاء التفاصيل",
       "editAgent": "تعديل الوكيل",
       "auditLogs": "سجلات المراجعة",
-    "openStudio": "فتح في الاستوديو",
+    "openStudio": "فتح في المدير",
       "triggers": "عرض المشغلات",
       "starterSelected": "تمت إفادة الإدخال بالموجه"
     },

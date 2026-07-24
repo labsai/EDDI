@@ -480,14 +480,14 @@ export function AgentDetailsPanel({
                   {agentData.workflows.length}
                 </span>
               </div>
-              <Link to={`/manage/studio/${realAgentId || agentId}`}>
+              <Link to={`/manage/agentview/${realAgentId || agentId}`}>
                 <Button
                   variant="outline"
                   size="sm"
                   className="w-full text-xs h-8 justify-start"
                 >
                   <ArrowUpRight className="h-3.5 w-3.5 me-1 text-blue-500" />
-                  {t("Workforce.chat.openStudio", "Open in Studio")}
+                  {t("Workforce.chat.openStudio", "Open in Manager")}
                 </Button>
               </Link>
             </div>

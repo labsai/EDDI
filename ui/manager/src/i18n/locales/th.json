@@ -339,7 +339,7 @@
     "saveError": "บันทึก Agent ล้มเหลว",
     "deployToEnv": "Deploy ไปยัง {{env}}",
     "undeployFromEnv": "ถอนจาก {{env}}",
-    "openStudio": "เปิดในสตูดิโอ",
+    "openStudio": "เปิดใน Manager",
     "maxKeyLength": "ความยาวคีย์สูงสุด",
     "maxValueLength": "ความยาวค่าสูงสุด",
     "maxWritesPerTurn": "เขียนสูงสุด/รอบ",
@@ -3020,7 +3020,7 @@
       "hideDetails": "ซ่อนแผงรายละเอียด",
       "editAgent": "แก้ไขเอเจนต์",
       "auditLogs": "บันทึกการตรวจสอบ",
-    "openStudio": "เปิดใน Studio",
+    "openStudio": "เปิดใน Manager",
       "triggers": "ดูตัวทริกเกอร์",
       "starterSelected": "เพิ่มพรอมต์ลงในกล่องข้อความแล้ว"
     },

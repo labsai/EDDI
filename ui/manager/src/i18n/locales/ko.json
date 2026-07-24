@@ -339,7 +339,7 @@
     "saveError": "Agent 저장 실패",
     "deployToEnv": "{{env}}에 배포",
     "undeployFromEnv": "{{env}}에서 제거",
-    "openStudio": "스튜디오에서 열기",
+    "openStudio": "매니저에서 열기",
     "maxKeyLength": "최대 키 길이",
     "maxValueLength": "최대 값 길이",
     "maxWritesPerTurn": "턴당 최대 쓰기 횟수",
@@ -3020,7 +3020,7 @@
       "hideDetails": "상세 패널 숨기기",
       "editAgent": "에이전트 편집",
       "auditLogs": "감사 로그",
-    "openStudio": "스튜디오에서 열기",
+    "openStudio": "매니저에서 열기",
       "triggers": "트리거 보기",
       "starterSelected": "프롬프트가 입력창에 추가되었습니다"
     },

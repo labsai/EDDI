@@ -339,7 +339,7 @@
     "saveError": "Falha ao salvar o agent",
     "deployToEnv": "Implantar em {{env}}",
     "undeployFromEnv": "Remover de {{env}}",
-    "openStudio": "Abrir no Estúdio",
+    "openStudio": "Abrir no Manager",
     "maxKeyLength": "Comprimento máx. da chave",
     "maxValueLength": "Comprimento máx. do valor",
     "maxWritesPerTurn": "Escritas máx./turno",
@@ -3020,7 +3020,7 @@
       "hideDetails": "Ocultar painel de detalhes",
       "editAgent": "Editar Agente",
       "auditLogs": "Registos de Auditoria",
-    "openStudio": "Abrir no Studio",
+    "openStudio": "Abrir no Manager",
       "triggers": "Ver Gatilhos",
       "starterSelected": "Prompt adicionado à caixa de chat"
     },

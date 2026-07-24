@@ -339,7 +339,7 @@
     "saveError": "Échec de l'enregistrement de l'agent",
     "deployToEnv": "Déployer en {{env}}",
     "undeployFromEnv": "Retirer de {{env}}",
-    "openStudio": "Ouvrir dans le Studio",
+    "openStudio": "Ouvrir dans le Manager",
     "maxKeyLength": "Longueur max. de clé",
     "maxValueLength": "Longueur max. de valeur",
     "maxWritesPerTurn": "Écritures max./tour",
@@ -3020,7 +3020,7 @@
       "hideDetails": "Masquer les détails",
       "editAgent": "Modifier l agent",
       "auditLogs": "Journaux d audit",
-    "openStudio": "Ouvrir dans le Studio",
+    "openStudio": "Ouvrir dans le Manager",
       "triggers": "Voir les déclencheurs",
       "starterSelected": "Prompt ajouté à la zone de texte"
     },

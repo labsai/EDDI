@@ -339,7 +339,7 @@
     "saveError": "Agent konnte nicht gespeichert werden",
     "deployToEnv": "In {{env}} bereitstellen",
     "undeployFromEnv": "Aus {{env}} entfernen",
-    "openStudio": "Im Studio öffnen",
+    "openStudio": "Im Manager öffnen",
     "maxKeyLength": "Max. Schlüssellänge",
     "maxValueLength": "Max. Wertlänge",
     "maxWritesPerTurn": "Max. Schreibvorgänge/Runde",
@@ -3020,7 +3020,7 @@
       "hideDetails": "Details ausblenden",
       "editAgent": "Agent bearbeiten",
       "auditLogs": "Audit-Protokolle",
-    "openStudio": "Im Studio öffnen",
+    "openStudio": "Im Manager öffnen",
       "triggers": "Trigger anzeigen",
       "starterSelected": "Prompt zum Chateingabefeld hinzugefügt"
     },

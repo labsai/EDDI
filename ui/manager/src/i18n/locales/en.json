@@ -366,7 +366,7 @@
     "saveError": "Failed to save agent",
     "deployToEnv": "Deploy to {{env}}",
     "undeployFromEnv": "Undeploy from {{env}}",
-    "openStudio": "Open in Studio",
+    "openStudio": "Open in Manager",
     "maxKeyLength": "Max Key Length",
     "maxValueLength": "Max Value Length",
     "maxWritesPerTurn": "Max Writes/Turn",
@@ -3047,7 +3047,7 @@
       "hideDetails": "Hide details panel",
       "editAgent": "Edit Agent",
       "auditLogs": "Audit Logs",
-    "openStudio": "Open in Studio",
+    "openStudio": "Open in Manager",
       "triggers": "View Triggers",
       "starterSelected": "Prompt added to chat input"
     },

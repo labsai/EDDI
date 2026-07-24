@@ -339,7 +339,7 @@
     "saveError": "Agent の保存に失敗しました",
     "deployToEnv": "{{env}}にデプロイ",
     "undeployFromEnv": "{{env}}から削除",
-    "openStudio": "スタジオで開く",
+    "openStudio": "マネージャーで開く",
     "maxKeyLength": "キー最大長",
     "maxValueLength": "値の最大長",
     "maxWritesPerTurn": "ターンあたりの最大書き込み数",
@@ -3020,7 +3020,7 @@
       "hideDetails": "詳細パネルを非表示",
       "editAgent": "エージェントを編集",
       "auditLogs": "監査ログ",
-    "openStudio": "スタジオで開く",
+    "openStudio": "マネージャーで開く",
       "triggers": "トリガーを表示",
       "starterSelected": "プロンプトを入力欄に追加しました"
     },
