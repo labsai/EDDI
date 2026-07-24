@@ -21,6 +21,7 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 
 /**
  * REST implementation for log administration — provides real-time SSE streaming
@@ -39,6 +40,9 @@ public class RestLogAdmin implements IRestLogAdmin {
     private final BoundedLogStore boundedLogStore;
     private final IDatabaseLogs databaseLogs;
     private final InstanceIdProducer instanceIdProducer;
+
+    // Package-private for testing — allows injecting a controllable time source
+    LongSupplier clock = System::currentTimeMillis;
 
     @Inject
     public RestLogAdmin(BoundedLogStore boundedLogStore, IDatabaseLogs databaseLogs, InstanceIdProducer instanceIdProducer) {
@@ -61,7 +65,7 @@ public class RestLogAdmin implements IRestLogAdmin {
     @Override
     public void streamLogs(String agentId, String conversationId, String level, SseEventSink eventSink, Sse sse) {
 
-        AtomicLong lastEventTime = new AtomicLong(System.currentTimeMillis());
+        AtomicLong lastEventTime = new AtomicLong(clock.getAsLong());
 
         // Send initial batch from ring buffer
         List<LogEntry> initial = boundedLogStore.getEntries(agentId, conversationId, level, 50);
@@ -88,11 +92,11 @@ public class RestLogAdmin implements IRestLogAdmin {
         // Clean up when client disconnects or after max lifetime
         Thread.ofVirtual().name("sse-log-cleanup-" + listenerId).start(() -> {
             long maxLifetimeMs = TimeUnit.HOURS.toMillis(24);
-            long start = System.currentTimeMillis();
+            long start = clock.getAsLong();
             try {
-                while (!eventSink.isClosed() && (System.currentTimeMillis() - start) < maxLifetimeMs) {
+                while (!eventSink.isClosed() && (clock.getAsLong() - start) < maxLifetimeMs) {
                     Thread.sleep(2000);
-                    if ((System.currentTimeMillis() - lastEventTime.get()) > HEARTBEAT_INTERVAL_MS) {
+                    if ((clock.getAsLong() - lastEventTime.get()) > HEARTBEAT_INTERVAL_MS) {
                         try {
                             OutboundSseEvent heartbeat = sse.newEventBuilder()
                                     .comment("heartbeat")
@@ -101,7 +105,7 @@ public class RestLogAdmin implements IRestLogAdmin {
                                 log.debugv("Failed to send heartbeat: {0}", t.getMessage());
                                 return null;
                             });
-                            lastEventTime.set(System.currentTimeMillis());
+                            lastEventTime.set(clock.getAsLong());
                         } catch (Exception e) {
                             // Client likely disconnected — will be caught by isClosed() check
                             break;
@@ -134,7 +138,7 @@ public class RestLogAdmin implements IRestLogAdmin {
 
     private void sendEvent(SseEventSink eventSink, Sse sse, LogEntry entry, AtomicLong lastEventTime) {
         try {
-            OutboundSseEvent event = sse.newEventBuilder().name("log").data(LogEntry.class, entry, MediaType.APPLICATION_JSON_TYPE).build();
+            OutboundSseEvent event = sse.newEventBuilder().name("log").mediaType(MediaType.APPLICATION_JSON_TYPE).data(LogEntry.class, entry).build();
             eventSink.send(event).exceptionally(t -> {
                 log.debugv("Failed to send SSE log event: {0}", t.getMessage());
                 return null;

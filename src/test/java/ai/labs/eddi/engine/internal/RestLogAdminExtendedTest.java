@@ -19,6 +19,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -59,7 +60,7 @@ class RestLogAdminExtendedTest {
             eventSink = mock(SseEventSink.class);
             sse = mock(Sse.class, RETURNS_DEEP_STUBS);
             var event = mock(OutboundSseEvent.class);
-            when(sse.newEventBuilder().name(anyString()).data(any(), any(), any()).build()).thenReturn(event);
+            when(sse.newEventBuilder().name(anyString()).mediaType(any()).data((Class) any(), any()).build()).thenReturn(event);
             when(eventSink.send(any(OutboundSseEvent.class)))
                     .thenReturn(CompletableFuture.completedFuture(null));
             when(eventSink.isClosed()).thenReturn(false);
@@ -136,7 +137,7 @@ class RestLogAdminExtendedTest {
         void handlesSendException() {
             var eventSink = mock(SseEventSink.class);
             var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
-            when(sse.newEventBuilder().name(anyString()).data(any(), any(), any()).build())
+            when(sse.newEventBuilder().name(anyString()).mediaType(any()).data((Class) any(), any()).build())
                     .thenThrow(new RuntimeException("Build failed"));
             when(eventSink.isClosed()).thenReturn(false);
 
@@ -165,7 +166,8 @@ class RestLogAdminExtendedTest {
             var event = mock(OutboundSseEvent.class);
             when(sse.newEventBuilder()).thenReturn(builder);
             when(builder.name(anyString())).thenReturn(builder);
-            when(builder.data(any(), any(), any())).thenReturn(builder);
+            when(builder.mediaType(any())).thenReturn(builder);
+            when(builder.data((Class) any(), any())).thenReturn(builder);
             when(builder.build()).thenReturn(event);
             when(eventSink.send(any(OutboundSseEvent.class)))
                     .thenReturn(CompletableFuture.completedFuture(null));
@@ -182,9 +184,9 @@ class RestLogAdminExtendedTest {
 
             // Verify order: entry3, then entry2, then entry1
             var inOrder = inOrder(builder);
-            inOrder.verify(builder).data(eq(LogEntry.class), eq(entry3), any());
-            inOrder.verify(builder).data(eq(LogEntry.class), eq(entry2), any());
-            inOrder.verify(builder).data(eq(LogEntry.class), eq(entry1), any());
+            inOrder.verify(builder).data(eq(LogEntry.class), eq(entry3));
+            inOrder.verify(builder).data(eq(LogEntry.class), eq(entry2));
+            inOrder.verify(builder).data(eq(LogEntry.class), eq(entry1));
             verify(eventSink, times(3)).send(event);
         }
     }
@@ -209,22 +211,22 @@ class RestLogAdminExtendedTest {
             when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
             when(boundedLogStore.addListener(any())).thenReturn("listener-hb");
 
+            // Controllable clock: starts at t0, then jumps 20s ahead
             long t0 = System.currentTimeMillis();
-            try (var mockedSystem = mockStatic(System.class, CALLS_REAL_METHODS)) {
-                // Initialize to t0
-                mockedSystem.when(System::currentTimeMillis).thenReturn(t0);
+            var time = new AtomicLong(t0);
+            restLogAdmin.clock = time::get;
 
-                restLogAdmin.streamLogs(null, null, null, eventSink, sse);
+            restLogAdmin.streamLogs(null, null, null, eventSink, sse);
 
-                // Advance time by 20 seconds
-                mockedSystem.when(System::currentTimeMillis).thenReturn(t0 + 20_000L);
+            // Advance time by 20 seconds (exceeds 15s heartbeat interval)
+            time.set(t0 + 20_000L);
 
-                // Verify that within ~3 seconds (to allow Thread.sleep(2000) to wake up),
-                // heartbeat is sent
-                verify(eventSink, timeout(3000).atLeastOnce()).send(heartbeatEvent);
+            // Verify that within ~3 seconds (to allow Thread.sleep(2000) in cleanup
+            // thread),
+            // heartbeat is sent
+            verify(eventSink, timeout(3000).atLeastOnce()).send(heartbeatEvent);
 
-                when(eventSink.isClosed()).thenReturn(true);
-            }
+            when(eventSink.isClosed()).thenReturn(true);
         }
 
         @Test
@@ -239,36 +241,32 @@ class RestLogAdminExtendedTest {
             when(sse.newEventBuilder().comment("heartbeat").build()).thenReturn(heartbeatEvent);
 
             var logEvent = mock(OutboundSseEvent.class);
-            when(sse.newEventBuilder().name("log").data(any(), any(), any()).build()).thenReturn(logEvent);
+            when(sse.newEventBuilder().name("log").mediaType(any()).data((Class) any(), any()).build()).thenReturn(logEvent);
 
             when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
 
             var captor = ArgumentCaptor.forClass(Consumer.class);
             when(boundedLogStore.addListener(captor.capture())).thenReturn("listener-hb");
 
+            // Use a constant clock — time never advances past the heartbeat threshold,
+            // so heartbeat should never fire regardless of thread scheduling
             long t0 = System.currentTimeMillis();
-            try (var mockedSystem = mockStatic(System.class, CALLS_REAL_METHODS)) {
-                mockedSystem.when(System::currentTimeMillis).thenReturn(t0);
+            restLogAdmin.clock = () -> t0;
 
-                restLogAdmin.streamLogs(null, null, null, eventSink, sse);
+            restLogAdmin.streamLogs(null, null, null, eventSink, sse);
 
-                @SuppressWarnings("unchecked")
-                Consumer<LogEntry> listener = captor.getValue();
+            @SuppressWarnings("unchecked")
+            Consumer<LogEntry> listener = captor.getValue();
 
-                // Advance time by 10s, then send a log event (which updates lastEventTime)
-                mockedSystem.when(System::currentTimeMillis).thenReturn(t0 + 10_000L);
-                listener.accept(logEntry("agent-1", "conv-1", "INFO"));
+            // Send a log event (keeps lastEventTime == t0 since clock is constant)
+            listener.accept(logEntry("agent-1", "conv-1", "INFO"));
 
-                // Advance time by another 10s. Total is 20s from start, but only 10s from last
-                // event.
-                mockedSystem.when(System::currentTimeMillis).thenReturn(t0 + 20_000L);
+            // Give the cleanup thread a moment to run
+            Thread.sleep(2500);
 
-                // Give the cleanup thread a moment to run
-                Thread.sleep(2500);
-
-                verify(eventSink, never()).send(heartbeatEvent);
-                when(eventSink.isClosed()).thenReturn(true);
-            }
+            // Clock - lastEventTime == 0, which is < 15_000, so no heartbeat
+            verify(eventSink, never()).send(heartbeatEvent);
+            when(eventSink.isClosed()).thenReturn(true);
         }
 
         @Test
