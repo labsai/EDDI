@@ -2133,6 +2133,7 @@
     "newShort": "新建",
     "noModerator": "无主持人",
     "noResponse": "无响应",
+    "contentTruncated": "[内容已截断]",
     "protocolMaxRetries": "最大重试次数",
     "protocolMaxRounds": "最大轮次",
     "protocolOnFailure": "失败时",
@@ -2997,7 +2998,8 @@
     "board": {
       "continuePlaceholder": "继续此讨论…",
       "inputDisabledClosed": "此讨论已关闭",
-      "newDiscussion": "新建讨论"
+      "newDiscussion": "新建讨论",
+      "noResponseGenerated": "未生成响应"
     },
     "thread": {
       "fileTooLarge": "文件必须小于20MB",

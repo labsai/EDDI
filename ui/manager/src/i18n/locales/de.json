@@ -2133,6 +2133,7 @@
     "newShort": "Neu",
     "noModerator": "Kein Moderator",
     "noResponse": "Keine Antwort",
+    "contentTruncated": "[Inhalt gekürzt]",
     "protocolMaxRetries": "Max. Wiederholungen",
     "protocolMaxRounds": "Max. Runden",
     "protocolOnFailure": "Bei Fehler",
@@ -2997,7 +2998,8 @@
     "board": {
       "continuePlaceholder": "Diese Diskussion fortsetzen…",
       "inputDisabledClosed": "Diese Diskussion ist geschlossen",
-      "newDiscussion": "Neue Diskussion"
+      "newDiscussion": "Neue Diskussion",
+      "noResponseGenerated": "Keine Antwort generiert"
     },
     "thread": {
       "fileTooLarge": "Datei muss kleiner als 20MB sein",

@@ -2133,6 +2133,7 @@
     "newShort": "新規",
     "noModerator": "モデレーターなし",
     "noResponse": "応答なし",
+    "contentTruncated": "[コンテンツが切り捨てられました]",
     "protocolMaxRetries": "最大リトライ回数",
     "protocolMaxRounds": "最大ラウンド数",
     "protocolOnFailure": "失敗時",
@@ -2997,7 +2998,8 @@
     "board": {
       "continuePlaceholder": "この議論を継続…",
       "inputDisabledClosed": "この議論は終了しました",
-      "newDiscussion": "新しい議論"
+      "newDiscussion": "新しい議論",
+      "noResponseGenerated": "応答は生成されませんでした"
     },
     "thread": {
       "fileTooLarge": "ファイルは20MB以下にしてください",

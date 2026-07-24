@@ -1,8 +1,22 @@
+// ─── Shared Types ────────────────────────────────────────────────
+
+/** Structured item from moderator's JSON or emoji-formatted output (plans, verifications, etc.) */
+export interface StructuredItem {
+  subject: string;
+  description?: string;
+  assignedTo?: string;
+  priority?: number;
+  passed?: boolean;
+  feedback?: string;
+}
+
+// ─── Content Parsing ─────────────────────────────────────────────
+
 /**
  * Parse transcript entry content, which may be:
  * 1. JSON from backend `extractResponse()` — e.g. `{"output":[{"type":"text","text":"..."}],...}`
  * 2. Plain text (already extracted, or from fixed backend)
- * Returns the cleaned text string.
+ * Returns the cleaned text string. Returns "" if JSON was parsed but contained no text.
  */
 export function parseTranscriptContent(content: string): string {
   if (!content) return "";
@@ -42,6 +56,10 @@ export function parseTranscriptContent(content: string): string {
         }
 
         if (texts.length > 0) return texts.join("\n");
+
+        // JSON was valid but no text could be extracted — return empty
+        // instead of leaking raw JSON to the UI
+        return "";
       }
     } catch {
       // Not valid JSON — treat as plain text
@@ -50,6 +68,87 @@ export function parseTranscriptContent(content: string): string {
 
   return content;
 }
+
+// ─── Emoji Verification Parser ───────────────────────────────────
+
+/**
+ * Parse human-readable verification text with ✅/❌ emoji into structured items.
+ * Handles the format the backend now sends:
+ *
+ * ```
+ * ## Task Verification Results
+ *
+ * ❌ **Facility Assessment**: Failed
+ * RESULT is empty. No facility profile data...
+ *
+ * ✅ **Financial Business Case**: Passed
+ * All requirements met...
+ * ```
+ *
+ * Returns null if no ✅/❌ lines are found (fallback to markdown rendering).
+ */
+export function parseEmojiVerification(content: string): StructuredItem[] | null {
+  if (!content || (!content.includes("✅") && !content.includes("❌"))) return null;
+
+  const lines = content.split("\n");
+  const items: StructuredItem[] = [];
+  let current: StructuredItem | null = null;
+  const feedbackLines: string[] = [];
+
+  const flushCurrent = () => {
+    if (current) {
+      const feedback = feedbackLines.join("\n").trim();
+      if (feedback) current.feedback = feedback;
+      items.push(current);
+      current = null;
+      feedbackLines.length = 0;
+    }
+  };
+
+  // Match: ✅ **Subject**: Status  or  ❌ Subject: Status
+  const emojiLineRe = /^([✅❌])\s+\*{0,2}([^*:]+?)\*{0,2}\s*:\s*(.+)/;
+
+  for (const line of lines) {
+    const match = emojiLineRe.exec(line);
+    if (match) {
+      flushCurrent();
+      current = {
+        subject: (match[2] ?? "").trim(),
+        passed: match[1] === "✅",
+      };
+    } else if (current) {
+      // Skip blank lines at the very start of feedback, keep the rest
+      const trimmedLine = line.trim();
+      if (trimmedLine || feedbackLines.length > 0) {
+        feedbackLines.push(trimmedLine);
+      }
+    }
+    // Lines before first ✅/❌ (like "## Task Verification Results") are skipped
+  }
+
+  flushCurrent();
+  return items.length > 0 ? items : null;
+}
+
+// ─── Content Truncation ──────────────────────────────────────────
+
+/** Max characters before content is truncated (safety net for extreme responses) */
+const MAX_DISPLAY_LENGTH = 50_000;
+
+/**
+ * Truncate extremely long content to prevent browser performance issues.
+ * Returns the original string if under the limit.
+ */
+export function truncateContent(
+  content: string,
+  truncatedLabel: string = "[Content truncated]",
+  maxLength: number = MAX_DISPLAY_LENGTH,
+): string {
+  if (content.length <= maxLength) return content;
+  return content.substring(0, maxLength) + "\n\n" + truncatedLabel;
+}
+
+// ─── Date Formatting ─────────────────────────────────────────────
 
 /** Safely format a date/time that may be ISO string, epoch seconds, or epoch millis */
 export function safeFormatDate(value: string | number | null | undefined, style: "date" | "time" | "full" = "full"): string {

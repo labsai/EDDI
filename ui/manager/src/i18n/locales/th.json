@@ -2133,6 +2133,7 @@
     "newShort": "ใหม่",
     "noModerator": "ไม่มีผู้ดูแล",
     "noResponse": "ไม่มีการตอบกลับ",
+    "contentTruncated": "[เนื้อหาถูกตัดทอน]",
     "protocolMaxRetries": "จำนวนลองใหม่สูงสุด",
     "protocolMaxRounds": "รอบสูงสุด",
     "protocolOnFailure": "เมื่อล้มเหลว",
@@ -2997,7 +2998,8 @@
     "board": {
       "continuePlaceholder": "สานต่อการอภิปรายนี้…",
       "inputDisabledClosed": "การอภิปรายนี้ปิดแล้ว",
-      "newDiscussion": "การอภิปรายใหม่"
+      "newDiscussion": "การอภิปรายใหม่",
+      "noResponseGenerated": "ไม่มีการสร้างคำตอบ"
     },
     "thread": {
       "fileTooLarge": "ไฟล์ต้องมีขนาดไม่เกิน 20MB",

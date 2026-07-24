@@ -2133,6 +2133,7 @@
     "newShort": "नया",
     "noModerator": "कोई मॉडरेटर नहीं",
     "noResponse": "कोई प्रतिक्रिया नहीं",
+    "contentTruncated": "[सामग्री काट दी गई]",
     "protocolMaxRetries": "अधिकतम पुनः प्रयास",
     "protocolMaxRounds": "अधिकतम राउंड",
     "protocolOnFailure": "विफलता पर",
@@ -2997,7 +2998,8 @@
     "board": {
       "continuePlaceholder": "इस चर्चा को जारी रखें…",
       "inputDisabledClosed": "यह चर्चा बंद है",
-      "newDiscussion": "नई चर्चा"
+      "newDiscussion": "नई चर्चा",
+      "noResponseGenerated": "कोई प्रतिक्रिया उत्पन्न नहीं हुई"
     },
     "thread": {
       "fileTooLarge": "फ़ाइल 20MB से कम होनी चाहिए",

@@ -2177,6 +2177,7 @@
     "newShort": "New",
     "noModerator": "No moderator",
     "noResponse": "No response",
+    "contentTruncated": "[Content truncated]",
     "protocolMaxRetries": "Max Retries",
     "protocolMaxRounds": "Max Rounds",
     "protocolOnFailure": "On Failure",
@@ -3024,7 +3025,8 @@
     "board": {
       "continuePlaceholder": "Continue this discussion…",
       "inputDisabledClosed": "This discussion is closed",
-      "newDiscussion": "New Discussion"
+      "newDiscussion": "New Discussion",
+      "noResponseGenerated": "No response generated"
     },
     "thread": {
       "fileTooLarge": "File must be under 20MB",

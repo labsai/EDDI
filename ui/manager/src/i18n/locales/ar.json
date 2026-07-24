@@ -2133,6 +2133,7 @@
     "newShort": "جديد",
     "noModerator": "بدون مشرف",
     "noResponse": "لا يوجد رد",
+    "contentTruncated": "[تم اقتطاع المحتوى]",
     "protocolMaxRetries": "الحد الأقصى لإعادة المحاولة",
     "protocolMaxRounds": "الحد الأقصى للجولات",
     "protocolOnFailure": "عند الفشل",
@@ -2997,7 +2998,8 @@
     "board": {
       "continuePlaceholder": "متابعة هذه المناقشة…",
       "inputDisabledClosed": "هذه المناقشة مغلقة",
-      "newDiscussion": "مناقشة جديدة"
+      "newDiscussion": "مناقشة جديدة",
+      "noResponseGenerated": "لم يتم إنشاء استجابة"
     },
     "thread": {
       "fileTooLarge": "يجب أن يكون الملف أقل من 20 ميغابايت",

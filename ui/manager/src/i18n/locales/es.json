@@ -2133,6 +2133,7 @@
     "newShort": "Nuevo",
     "noModerator": "Sin moderador",
     "noResponse": "Sin respuesta",
+    "contentTruncated": "[Contenido truncado]",
     "protocolMaxRetries": "Reintentos máx.",
     "protocolMaxRounds": "Rondas máx.",
     "protocolOnFailure": "En caso de fallo",
@@ -2997,7 +2998,8 @@
     "board": {
       "continuePlaceholder": "Continuar esta discusión…",
       "inputDisabledClosed": "Esta discusión está cerrada",
-      "newDiscussion": "Nueva discusión"
+      "newDiscussion": "Nueva discusión",
+      "noResponseGenerated": "No se generó respuesta"
     },
     "thread": {
       "fileTooLarge": "El archivo debe ser menor de 20MB",

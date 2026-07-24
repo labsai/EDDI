@@ -1,5 +1,7 @@
 import { useMemo, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { X, AlertCircle, Sparkles, Download } from "lucide-react";
 import { cn, hashColor, formatRelativeTime } from "@/lib/utils";
 import { useGroupConversation } from "@/hooks/use-groups";
@@ -7,6 +9,7 @@ import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
 import {
   ENTRY_TYPE_INFO,
   type TranscriptEntry,
@@ -211,10 +214,15 @@ function AgentEntryCard({
 
       {/* Content */}
       <div className="ps-10">
-        {entry.content ? (
-          <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
-            {entry.content}
-          </p>
+        {entry.content?.trim() ? (
+          <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {truncateContent(
+                parseTranscriptContent(entry.content),
+                t("groups.contentTruncated", "[Content truncated]"),
+              )}
+            </ReactMarkdown>
+          </div>
         ) : (
           <p className="text-sm text-muted-foreground italic">
             {t("Workforce.history.noContent", "No content")}
@@ -266,9 +274,14 @@ function SynthesisEntryCard({
           </span>
         )}
       </div>
-      <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed ps-6">
-        {entry.content ?? ""}
-      </p>
+      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 ps-6 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {truncateContent(
+            parseTranscriptContent(entry.content ?? ""),
+            t("groups.contentTruncated", "[Content truncated]"),
+          )}
+        </ReactMarkdown>
+      </div>
     </div>
   );
 }
@@ -364,9 +377,11 @@ function SynthesizedAnswerFooter({ content }: { content: string }) {
           {t("Workforce.history.finalAnswer", "Final Synthesized Answer")}
         </h3>
       </div>
-      <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
-        {content}
-      </p>
+      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {truncateContent(content, t("groups.contentTruncated", "[Content truncated]"))}
+        </ReactMarkdown>
+      </div>
     </div>
   );
 }

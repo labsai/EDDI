@@ -2133,6 +2133,7 @@
     "newShort": "새로 만들기",
     "noModerator": "모더레이터 없음",
     "noResponse": "응답 없음",
+    "contentTruncated": "[콘텐츠가 잘렸습니다]",
     "protocolMaxRetries": "최대 재시도 횟수",
     "protocolMaxRounds": "최대 라운드",
     "protocolOnFailure": "실패 시",
@@ -2997,7 +2998,8 @@
     "board": {
       "continuePlaceholder": "이 토론 계속하기…",
       "inputDisabledClosed": "이 토론은 닫혔습니다",
-      "newDiscussion": "새 토론"
+      "newDiscussion": "새 토론",
+      "noResponseGenerated": "응답이 생성되지 않았습니다"
     },
     "thread": {
       "fileTooLarge": "파일은 20MB 미만이어야 합니다",

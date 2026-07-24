@@ -3,10 +3,11 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Clipboard, Star, MessageCircle } from "lucide-react";
+import { Check, Clipboard, Star, MessageCircle, AlertCircle } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { truncateContent } from "@/components/groups/group-utils";
 
 // ─── Pin Types & Hook ────────────────────────────────────────────
 
@@ -163,6 +164,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
   };
 
   const isStreaming = content === null;
+  const isEmpty = !isStreaming && !content?.trim();
 
   return (
     <div
@@ -255,17 +257,24 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
         >
           {isStreaming ? (
             <TypingIndicator />
+          ) : isEmpty ? (
+            <div className="flex items-center gap-1.5 py-1 text-muted-foreground">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span className="text-sm italic">
+                {t("Workforce.board.noResponseGenerated", "No response generated")}
+              </span>
+            </div>
           ) : (
-            <div className="prose prose-sm dark:prose-invert max-w-none [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
+            <div className="prose prose-sm dark:prose-invert max-w-none [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {content}
+                {truncateContent(content!, t("groups.contentTruncated", "[Content truncated]"))}
               </ReactMarkdown>
             </div>
           )}
         </div>
 
         {/* Footer — follow-up link */}
-        {content !== null && (
+        {content !== null && !isEmpty && (
           <div className="flex items-center gap-2 ps-1 mt-0.5">
             <Button
               variant="ghost"

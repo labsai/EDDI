@@ -92,6 +92,44 @@ describe("AgentResponseCard", () => {
     expect(screen.getByText("No response")).toBeInTheDocument();
   });
 
+  it("renders 'No response' for whitespace-only content", () => {
+    const whitespaceEntry: TranscriptEntry = {
+      ...baseEntry,
+      content: "   \n  ",
+    };
+    renderWithProviders(<AgentResponseCard entry={whitespaceEntry} />);
+    expect(screen.getByText("No response")).toBeInTheDocument();
+  });
+
+  it("renders emoji verification as structured cards", () => {
+    const verificationEntry: TranscriptEntry = {
+      ...baseEntry,
+      type: "VERIFICATION",
+      content:
+        "## Task Verification Results\n\n✅ **Financial Analysis**: Passed\nAll requirements met.\n\n❌ **Risk Assessment**: Failed\nNo risk data provided.",
+    };
+    const { container } = renderWithProviders(
+      <AgentResponseCard entry={verificationEntry} />
+    );
+
+    expect(screen.getByText("Financial Analysis")).toBeInTheDocument();
+    expect(screen.getByText("All requirements met.")).toBeInTheDocument();
+    expect(screen.getByText("Risk Assessment")).toBeInTheDocument();
+    expect(screen.getByText("No risk data provided.")).toBeInTheDocument();
+
+    expect(container.querySelector("svg.text-emerald-500")).toBeInTheDocument();
+    expect(container.querySelector("svg.text-destructive")).toBeInTheDocument();
+  });
+
+  it("renders plain text through ReactMarkdown", () => {
+    const plainEntry: TranscriptEntry = {
+      ...baseEntry,
+      content: "Just a plain message without formatting",
+    };
+    renderWithProviders(<AgentResponseCard entry={plainEntry} />);
+    expect(screen.getByText("Just a plain message without formatting")).toBeInTheDocument();
+  });
+
   it("renders error reason for ERROR type", () => {
     const errorEntry: TranscriptEntry = {
       ...baseEntry,
@@ -184,6 +222,45 @@ describe("AgentResponseCard", () => {
     renderWithProviders(<AgentResponseCard entry={baseEntry} />);
     expect(
       screen.getByTestId("transcript-entry-agent-001-0")
+    ).toBeInTheDocument();
+  });
+
+  it("renders 'No response' for whitespace-only content", () => {
+    const wsEntry: TranscriptEntry = {
+      ...baseEntry,
+      type: "TASK_RESULT",
+      content: "   \n  ",
+    };
+    renderWithProviders(<AgentResponseCard entry={wsEntry} />);
+    expect(screen.getByText("No response")).toBeInTheDocument();
+  });
+
+  it("renders emoji verification as structured cards", () => {
+    const verifyEntry: TranscriptEntry = {
+      ...baseEntry,
+      type: "VERIFICATION",
+      content:
+        "## Task Verification Results\n\n✅ **Financial Analysis**: Passed\nAll requirements met.\n\n❌ **Risk Assessment**: Failed\nNo risk data provided.",
+    };
+    const { container } = renderWithProviders(
+      <AgentResponseCard entry={verifyEntry} discussionStyle="TASK_FORCE" />
+    );
+    // Structured items render pass/fail subjects
+    expect(screen.getByText("Financial Analysis")).toBeInTheDocument();
+    expect(screen.getByText("Risk Assessment")).toBeInTheDocument();
+    // CheckCircle2 (pass) and XCircle (fail) icons
+    expect(container.querySelector("svg.text-emerald-500")).toBeInTheDocument();
+    expect(container.querySelector("svg.text-destructive")).toBeInTheDocument();
+  });
+
+  it("renders plain text through ReactMarkdown without issues", () => {
+    const plainEntry: TranscriptEntry = {
+      ...baseEntry,
+      content: "Simple response with no special formatting at all",
+    };
+    renderWithProviders(<AgentResponseCard entry={plainEntry} />);
+    expect(
+      screen.getByText("Simple response with no special formatting at all")
     ).toBeInTheDocument();
   });
 });
