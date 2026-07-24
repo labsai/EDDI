@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderWithProviders } from "@/test/test-utils";
 import { WorkforceShortcuts } from "@/components/workforce/workforce-shortcuts";
 
-const mockNavigate = vi.fn();
+const { mockNavigate } = vi.hoisted(() => ({ mockNavigate: vi.fn() }));
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual("react-router-dom");
   return {

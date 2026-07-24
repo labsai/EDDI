@@ -27,7 +27,7 @@ vi.mock("../../api-client", () => ({
     put: vi.fn(),
     delete: vi.fn(),
     getAuthHeader: vi.fn().mockReturnValue({}),
-    getBaseUrl: vi.fn().mockReturnValue("http://localhost:7070"),
+    getBaseUrl: vi.fn().mockReturnValue(window.location.origin),
   },
 }));
 

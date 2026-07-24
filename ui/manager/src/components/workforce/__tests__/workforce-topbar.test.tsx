@@ -3,7 +3,7 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { WorkforceTopbar } from "@/components/workforce/workforce-topbar";
 
-const mockNavigate = vi.fn();
+const { mockNavigate } = vi.hoisted(() => ({ mockNavigate: vi.fn() }));
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual("react-router-dom");
   return { ...actual, useNavigate: () => mockNavigate };
