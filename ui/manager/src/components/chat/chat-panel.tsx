@@ -877,7 +877,7 @@ function ChatInputWithSecretToggle({
     !isUploading;
 
   return (
-    <div className="border-t border-border bg-background p-4" data-tour="chat-input-area">
+    <div className="border-t border-border bg-background p-4 min-w-0" data-tour="chat-input-area">
       {/* Hidden file input for attachments */}
       <input
         ref={fileInputRef}
@@ -899,7 +899,7 @@ function ChatInputWithSecretToggle({
           ))}
         </div>
       )}
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-2 min-w-0">
         {/* 📎 Attach button */}
         <button
           type="button"
@@ -1025,7 +1025,7 @@ function ChatInputWithSecretToggle({
             disabled={disabled}
             rows={1}
             className={cn(
-              "flex-1 resize-none rounded-xl border border-input bg-card px-4 py-3 text-sm",
+              "flex-1 min-w-0 resize-none rounded-xl border border-input bg-card px-4 py-3 text-sm",
               "placeholder:text-muted-foreground",
               "focus:outline-none focus:ring-2 focus:ring-ring",
               "disabled:cursor-not-allowed disabled:opacity-50",
