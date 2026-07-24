@@ -11,6 +11,7 @@ vi.mock("@/lib/api/logs", async (importOriginal) => {
 
 describe("useSessionLogStore", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     // Reset store state between tests
     useSessionLogStore.setState({
       entries: [],

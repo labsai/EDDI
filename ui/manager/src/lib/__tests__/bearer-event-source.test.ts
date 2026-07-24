@@ -482,24 +482,26 @@ describe("BearerEventSource", () => {
   // ─── Inactivity timeout tests ────────────────────────────────────────────
 
   it("reconnects after 45s of inactivity", async () => {
-    // First response: holds the stream open forever (never closes, never sends data)
-    let resolveHold: (() => void) | undefined;
-    const holdingBody = new ReadableStream<Uint8Array>({
-      start() {
-        // Stream stays open, never enqueues or closes
-      },
-      pull() {
-        // Return a promise that never resolves — simulates idle connection
-        return new Promise<void>((r) => { resolveHold = r; });
-      },
+    // First response: stream that blocks on read until abort
+    fetchSpy.mockImplementationOnce((_url, init) => {
+      const signal = (init as RequestInit)?.signal;
+      const body = new ReadableStream<Uint8Array>({
+        pull() {
+          // Block until abort — return a promise that rejects on abort
+          return new Promise<void>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          });
+        },
+      });
+      return Promise.resolve(new Response(body, { status: 200 }));
     });
 
     // Second fetch for the reconnect
-    const reconnectBody = createSSEStream([]);
-
-    fetchSpy
-      .mockResolvedValueOnce(new Response(holdingBody, { status: 200 }))
-      .mockResolvedValueOnce(new Response(reconnectBody, { status: 200 }));
+    fetchSpy.mockResolvedValueOnce(
+      new Response(createSSEStream([]), { status: 200 })
+    );
 
     const errorFn = vi.fn();
     const openFn = vi.fn();
@@ -516,14 +518,11 @@ describe("BearerEventSource", () => {
     await vi.advanceTimersByTimeAsync(44000);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
-    // Advance past 45s — inactivity timer should fire, aborting fetch
+    // Advance past 45s — inactivity timer fires, aborts the reader
     await vi.advanceTimersByTimeAsync(2000);
 
-    // The abort causes the catch block → scheduleReconnect → onerror + 5s timer
+    // The abort causes catch → scheduleReconnect → onerror + 5s timer
     expect(errorFn).toHaveBeenCalled();
-
-    // Resolve the held stream to avoid dangling promises
-    resolveHold?.();
 
     // Advance 5s for the reconnect timer
     await vi.advanceTimersByTimeAsync(5000);
