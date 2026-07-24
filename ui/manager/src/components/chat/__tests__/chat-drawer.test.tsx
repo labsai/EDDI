@@ -59,8 +59,9 @@ describe("ChatDrawer", () => {
     });
 
     renderWithProviders(<ChatDrawer />);
+    // Only the current step label is shown (no multi-step list)
     expect(screen.getByText("Deploying agent…")).toBeInTheDocument();
-    expect(screen.getByText("Saving changes…")).toBeInTheDocument();
+    expect(screen.queryByText("Saving changes…")).not.toBeInTheDocument();
   });
 
   it("shows error step and supports retry", async () => {
