@@ -12,10 +12,10 @@ export function StreamingToggle() {
     <button
       onClick={toggleStreaming}
       className={cn(
-        "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors",
+        "flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors",
         streamingEnabled
-          ? "border-primary/30 bg-primary/10 text-primary"
-          : "border-border bg-muted text-muted-foreground"
+          ? "text-muted-foreground hover:text-foreground"
+          : "text-muted-foreground/50 hover:text-muted-foreground"
       )}
       title={t("chat.streaming")}
       aria-label={t("chat.streaming")}
@@ -23,9 +23,9 @@ export function StreamingToggle() {
       data-testid="streaming-toggle"
     >
       {streamingEnabled ? (
-        <Zap className="h-3.5 w-3.5" />
+        <Zap className="h-3 w-3" />
       ) : (
-        <ZapOff className="h-3.5 w-3.5" />
+        <ZapOff className="h-3 w-3" />
       )}
       {t("chat.streaming")}
     </button>
