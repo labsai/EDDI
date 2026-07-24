@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import type { ChatMessage as ChatMessageType, MessageAttachment } from "@/lib/api/chat";
+import { formatMarkdownText } from "@/components/groups/group-utils";
 import { isImageMime, formatBytes } from "@/lib/api/attachments";
 import { Bot, User, Copy, Check, FileText, AlertTriangle } from "lucide-react";
 
@@ -91,7 +92,7 @@ export const ChatMessage = memo(function ChatMessage({
                 /* Deliberately NO rehypeRaw: bot/LLM output is untrusted, so
                    raw HTML stays escaped rather than being injected live. */
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {message.content}
+                  {formatMarkdownText(message.content)}
                 </ReactMarkdown>
               ) : message.isStreaming ? (
                 <TypingIndicator />

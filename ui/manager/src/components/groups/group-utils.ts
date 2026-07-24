@@ -10,6 +10,35 @@ export interface StructuredItem {
   feedback?: string;
 }
 
+// ─── Markdown Normalizer ─────────────────────────────────────────
+
+/**
+ * Format and normalize markdown text to ensure proper rendering across all UI surfaces:
+ * 1. Fixes ATX headings without a space after `#` (e.g. `#Guten Tag` -> `# Guten Tag`)
+ * 2. Fixes bold/italic missing spaces after preceding words (e.g. `noch**weitere**` -> `noch **weitere**`)
+ * 3. Fixes concatenated camel-case sentence joins (e.g. `SieSind` -> `Sie Sind`, `teilIch` -> `teil Ich`)
+ * 4. Ensures blank lines before headings if preceded by inline text
+ */
+export function formatMarkdownText(text: string): string {
+  if (!text) return "";
+
+  let formatted = text;
+
+  // 1. Fix ATX headings missing space (e.g. "#Header" -> "# Header", "###Title" -> "### Title")
+  formatted = formatted.replace(/^(#{1,6})([^\s#])/gm, "$1 $2");
+
+  // 2. Fix bold/italic syntax glued to preceding letter/digit (e.g. "word**bold**" -> "word **bold**")
+  formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ])(\*{2}|_{2})([^\s*_])/g, "$1 $2");
+
+  // 3. Fix concatenated words where two sentences/phrases were joined without space (e.g. "SieSind" -> "Sie Sind", "teilIch" -> "teil Ich")
+  formatted = formatted.replace(/([a-zäöüß])([A-ZÄÖÜ])/g, "$1 $2");
+
+  // 4. Ensure headings have a blank line before them if preceded by text on a single newline
+  formatted = formatted.replace(/([^\n])\n(#{1,6}\s)/g, "$1\n\n$2");
+
+  return formatted;
+}
+
 // ─── Content Parsing ─────────────────────────────────────────────
 
 /**
@@ -20,6 +49,8 @@ export interface StructuredItem {
  */
 export function parseTranscriptContent(content: string): string {
   if (!content) return "";
+
+  let extracted = content;
 
   // Quick check: does it look like JSON?
   const trimmed = content.trim();
@@ -55,18 +86,20 @@ export function parseTranscriptContent(content: string): string {
           }
         }
 
-        if (texts.length > 0) return texts.join("\n");
-
-        // JSON was valid but no text could be extracted — return empty
-        // instead of leaking raw JSON to the UI
-        return "";
+        if (texts.length > 0) {
+          extracted = texts.join("\n\n");
+        } else {
+          // JSON was valid but no text could be extracted — return empty
+          // instead of leaking raw JSON to the UI
+          return "";
+        }
       }
     } catch {
       // Not valid JSON — treat as plain text
     }
   }
 
-  return content;
+  return formatMarkdownText(extracted);
 }
 
 // ─── Emoji Verification Parser ───────────────────────────────────

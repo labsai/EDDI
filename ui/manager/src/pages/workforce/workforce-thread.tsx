@@ -297,7 +297,9 @@ function ThreadInput({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+    const nextHeight = Math.min(Math.max(el.scrollHeight, 40), 128);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > 128 ? "auto" : "hidden";
   }, []);
 
   const handleFileSelect = useCallback(() => {
@@ -420,8 +422,11 @@ function ThreadInput({
               {att.previewUrl && att.status !== "error" ? (
                 <img
                   src={att.previewUrl}
-                  alt={att.file.name}
-                  className="h-6 w-6 rounded object-cover"
+                  alt=""
+                  className="h-6 w-6 rounded object-cover shrink-0"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = "none";
+                  }}
                 />
               ) : null}
 

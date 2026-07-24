@@ -1069,8 +1069,11 @@ function PendingAttachmentChip({
       {isImage ? (
         <img
           src={att.previewUrl}
-          alt={att.file.name}
+          alt=""
           className="h-8 w-8 shrink-0 rounded object-cover"
+          onError={(e) => {
+            (e.target as HTMLElement).style.display = "none";
+          }}
         />
       ) : (
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-muted">

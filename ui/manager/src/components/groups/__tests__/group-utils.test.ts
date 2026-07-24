@@ -155,7 +155,7 @@ describe("group-utils", () => {
       const json = JSON.stringify({
         "output:text:agent-001": [{ text: "First" }, { text: "Second" }],
       });
-      expect(parseTranscriptContent(json)).toBe("First\nSecond");
+      expect(parseTranscriptContent(json)).toBe("First\n\nSecond");
     });
 
     it("extracts text from flat key with object value", () => {

@@ -101,9 +101,10 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
   const handleInput = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
-    // Auto-grow
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+    const nextHeight = Math.min(Math.max(el.scrollHeight, 40), 128);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > 128 ? "auto" : "hidden";
   }, []);
 
   const handleFileSelect = useCallback(() => {
