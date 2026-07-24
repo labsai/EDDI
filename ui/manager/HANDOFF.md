@@ -121,9 +121,11 @@
 
 ### Test Counts
 - 277 test files passing (EDDI-Manager)
-- 3982 Tests passing (`npm run test`)
+- 4004 Tests passing (`npm run test`)
 - 112 Backend tenancy tests passing (`mvn test`)
 
 ### Last Commit Focus
-- Frontend: `fix: defensive rendering for group conversation transcript entries` on `fix/group-chat-defensive-rendering` (`549b61a3`)
-- Includes: empty content guard, emoji verification parser, consistent ReactMarkdown, content truncation, conversation-viewer markdown, i18n (11 locales), 20 new tests
+- Frontend: `feat: fix live logs — REST seeding, SSE resilience, better empty states` on `fix/group-chat-defensive-rendering` (`e5303c5e`)
+  - REST API seeding on first SSE connect (session-log-store.ts), BearerEventSource \r\n handling + 45s inactivity timeout, `seeded` state exposed through use-logs hook, 3-state empty view (loading/no-activity/connecting), 3 new i18n keys across 11 locales, 3 new tests
+- Backend: `feat: add SSE heartbeat to log stream endpoint` on `feat/v6.2.0-prep` (`cd0551925`)
+  - 15s heartbeat comment events in RestLogAdmin.streamLogs(), AtomicLong lastEventTime tracking, 3 new Mockito tests (idle heartbeat, recent-event suppression, closed-sink stop)
