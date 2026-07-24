@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { useLogStream, useHistoryLogs, useInstanceId } from "@/hooks/use-logs";
-import type { LogEntry } from "@/lib/api/logs";
+import type { LogEntry, DatabaseLogEntry } from "@/lib/api/logs";
 import type { HistoryFilters } from "@/lib/api/logs";
 import { useDeployedAgents } from "@/hooks/use-chat";
 import { getConversationDescriptors, parseConversationUri } from "@/lib/api/conversations";
@@ -439,6 +439,8 @@ function LiveTab() {
 function HistoryTab() {
   const { t } = useTranslation();
   const [filters, setFilters] = useState<HistoryFilters>({ limit: 100 });
+  const [levelFilter, setLevelFilter] = useState("");
+  const [textSearch, setTextSearch] = useState("");
 
   const { data: logs, isLoading, refetch } = useHistoryLogs(filters);
 
@@ -466,6 +468,45 @@ function HistoryTab() {
     []
   );
 
+  // Client-side level + text filtering
+  const filteredLogs = useMemo(() => {
+    if (!logs) return [];
+    let result = logs;
+    if (levelFilter) {
+      result = result.filter((e) => {
+        const lvl = (e.level ?? "").toUpperCase();
+        if (levelFilter === "ERROR") return lvl === "ERROR" || lvl === "SEVERE" || lvl === "FATAL";
+        if (levelFilter === "WARNING") return lvl === "WARNING" || lvl === "WARN";
+        if (levelFilter === "INFO") return lvl === "INFO";
+        if (levelFilter === "FINE") return lvl !== "ERROR" && lvl !== "SEVERE" && lvl !== "FATAL" && lvl !== "WARNING" && lvl !== "WARN" && lvl !== "INFO";
+        return true;
+      });
+    }
+    if (textSearch.trim()) {
+      const q = textSearch.toLowerCase();
+      result = result.filter(
+        (e) =>
+          (e.message ?? "").toLowerCase().includes(q) ||
+          (e.loggerName ?? "").toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [logs, levelFilter, textSearch]);
+
+  // Level stats
+  const levelStats = useMemo(() => {
+    const stats = { error: 0, warn: 0, info: 0, debug: 0 };
+    if (!logs) return stats;
+    for (const e of logs) {
+      const lvl = (e.level ?? "").toUpperCase();
+      if (lvl === "ERROR" || lvl === "SEVERE" || lvl === "FATAL") stats.error++;
+      else if (lvl === "WARNING" || lvl === "WARN") stats.warn++;
+      else if (lvl === "INFO") stats.info++;
+      else stats.debug++;
+    }
+    return stats;
+  }, [logs]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Filters */}
@@ -490,6 +531,23 @@ function HistoryTab() {
           data-testid="history-filter-instance"
         />
 
+        {/* Level filter */}
+        <div className="relative">
+          <select
+            value={levelFilter}
+            onChange={(e) => setLevelFilter(e.target.value)}
+            className="appearance-none rounded-lg border border-input bg-background pe-7 ps-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            data-testid="history-filter-level"
+          >
+            <option value="">{t("logs.allLevels", "All Levels")}</option>
+            <option value="ERROR">ERROR</option>
+            <option value="WARNING">WARN</option>
+            <option value="INFO">INFO</option>
+            <option value="FINE">DEBUG</option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+        </div>
+
         <div className="flex-1" />
 
         <button
@@ -506,6 +564,40 @@ function HistoryTab() {
           {t("logs.search", "Search")}
         </button>
       </div>
+
+      {/* Level stats + text search */}
+      {logs && logs.length > 0 && (
+        <div className="mb-3 flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2" data-testid="history-level-stats">
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-400">
+            <span className="h-2 w-2 rounded-full bg-red-500" />
+            {levelStats.error} {t("logs.errors", "errors")}
+          </span>
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-400">
+            <span className="h-2 w-2 rounded-full bg-amber-500" />
+            {levelStats.warn} {t("logs.warnings", "warns")}
+          </span>
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400">
+            <span className="h-2 w-2 rounded-full bg-blue-500" />
+            {levelStats.info} {t("logs.infos", "info")}
+          </span>
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-400">
+            <span className="h-2 w-2 rounded-full bg-gray-500" />
+            {levelStats.debug} {t("logs.debugs", "debug")}
+          </span>
+          <div className="flex-1" />
+          <div className="relative">
+            <Search className="pointer-events-none absolute inset-s-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={textSearch}
+              onChange={(e) => setTextSearch(e.target.value)}
+              placeholder={t("logs.searchLogs", "Search logs…")}
+              className="h-7 w-48 rounded-md border border-input bg-background ps-7 pe-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              data-testid="history-text-search"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Results */}
       <div className="flex-1 overflow-auto rounded-xl border border-border bg-card">
@@ -528,29 +620,8 @@ function HistoryTab() {
           </div>
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">
-            {logs.map((entry, idx) => (
-              <div
-                key={`${entry.timestamp}-${idx}`}
-                className="flex items-start gap-3 px-3 py-2 hover:bg-muted/30 transition-colors"
-              >
-                <span className="shrink-0 text-muted-foreground">
-                  {formatTimestamp(entry.timestamp)}
-                </span>
-                <LevelBadge level={entry.level ?? "INFO"} />
-                {entry.agentId && (
-                  <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
-                    {entry.agentId}
-                  </span>
-                )}
-                {entry.instanceId && (
-                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                    {entry.instanceId}
-                  </span>
-                )}
-                <span className="min-w-0 flex-1 break-all text-foreground">
-                  {entry.message}
-                </span>
-              </div>
+            {filteredLogs.map((entry, idx) => (
+              <LogRow key={`${entry.timestamp}-${idx}`} entry={entry} />
             ))}
           </div>
         )}
@@ -559,10 +630,12 @@ function HistoryTab() {
       {/* Count */}
       <div className="mt-2 text-end text-xs text-muted-foreground">
         {logs &&
-          t("logs.entryCount", {
-            count: logs.length,
-            defaultValue: `${logs.length} entries`,
-          })}
+          (filteredLogs.length !== logs.length
+            ? t("logs.filteredCount", { shown: filteredLogs.length, total: logs.length, defaultValue: `${filteredLogs.length} of ${logs.length} entries` })
+            : t("logs.entryCount", {
+                count: logs.length,
+                defaultValue: `${logs.length} entries`,
+              }))}
       </div>
     </div>
   );
@@ -593,7 +666,7 @@ function countFrames(frames: string): number {
 
 // ==================== Log Row Component ====================
 
-function LogRow({ entry }: { entry: LogEntry }) {
+function LogRow({ entry }: { entry: LogEntry | DatabaseLogEntry }) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
   const isStacktrace = entry.message ? hasStacktrace(entry.message) : false;
