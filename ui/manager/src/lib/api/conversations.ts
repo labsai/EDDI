@@ -123,13 +123,14 @@ export function extractInput(step: SimpleConversationStep): string | undefined {
   return entry?.value as string | undefined;
 }
 
-/** Extract agent output from a conversationOutput map (one per step).
+/** Extract individual output parts from a conversationOutput map.
+ * Returns an array of non-empty strings — one per output item.
  * Handles two formats:
  * 1. Nested (from conversationOutputs): { output: [{ type, text, delay }], quickReplies: [...] }
  * 2. Flat (from conversationSteps): { "output:text:action_name": { text: "..." }, ... }
  */
-export function extractOutput(conversationOutput?: ConversationOutput): string | undefined {
-  if (!conversationOutput) return undefined;
+export function extractOutputParts(conversationOutput?: ConversationOutput): string[] {
+  if (!conversationOutput) return [];
 
   const texts: string[] = [];
 
@@ -137,28 +138,40 @@ export function extractOutput(conversationOutput?: ConversationOutput): string |
   const outputArray = conversationOutput.output;
   if (Array.isArray(outputArray)) {
     for (const item of outputArray) {
-      if (typeof item === "string") texts.push(item);
-      else if (item?.text) texts.push(item.text as string);
+      if (typeof item === "string" && item.trim()) texts.push(item);
+      else if (item?.text && typeof item.text === "string" && (item.text as string).trim()) {
+        texts.push(item.text as string);
+      }
     }
-    if (texts.length > 0) return texts.join("\n\n");
+    if (texts.length > 0) return texts;
   }
 
   // Format 2: Flat keys like "output:text:*" (from conversationSteps)
   for (const [key, val] of Object.entries(conversationOutput)) {
     if (!key.startsWith("output:text:")) continue;
 
-    if (typeof val === "string") {
+    if (typeof val === "string" && val.trim()) {
       texts.push(val);
     } else if (Array.isArray(val)) {
       for (const item of val) {
-        if (typeof item === "string") texts.push(item);
-        else if (item?.text) texts.push(item.text);
+        if (typeof item === "string" && item.trim()) texts.push(item);
+        else if (item?.text && typeof item.text === "string" && item.text.trim()) texts.push(item.text);
       }
     } else if (val && typeof val === "object" && (val as Record<string, unknown>).text) {
-      texts.push((val as Record<string, unknown>).text as string);
+      const t = (val as Record<string, unknown>).text as string;
+      if (t.trim()) texts.push(t);
     }
   }
-  return texts.length > 0 ? texts.join("\n\n") : undefined;
+  return texts;
+}
+
+/** Extract agent output from a conversationOutput map as a single string.
+ * Multiple parts are joined with double-newline for proper markdown paragraphs.
+ * For multi-bubble rendering, use extractOutputParts() instead.
+ */
+export function extractOutput(conversationOutput?: ConversationOutput): string | undefined {
+  const parts = extractOutputParts(conversationOutput);
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 
 /** An input field requested by the backend (from InputFieldOutputItem). */

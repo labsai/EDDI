@@ -6,6 +6,7 @@ import {
   parseConversationUri,
   extractInput,
   extractOutput,
+  extractOutputParts,
   extractInputField,
   extractQuickReplies,
   extractActions,
@@ -173,6 +174,46 @@ describe("extractOutput", () => {
       output: ["text", { text: "object" }, { noText: true }],
     };
     expect(extractOutput(output)).toBe("text\n\nobject");
+  });
+});
+
+describe("extractOutputParts", () => {
+  it("returns empty array for undefined input", () => {
+    expect(extractOutputParts(undefined)).toEqual([]);
+  });
+
+  it("returns individual parts from nested output array", () => {
+    const output = {
+      output: [{ text: "Hello" }, { text: "World" }],
+    };
+    expect(extractOutputParts(output)).toEqual(["Hello", "World"]);
+  });
+
+  it("returns single-element array for single output item", () => {
+    const output = {
+      output: [{ text: "Hello world" }],
+    };
+    expect(extractOutputParts(output)).toEqual(["Hello world"]);
+  });
+
+  it("filters out empty/whitespace items", () => {
+    const output = {
+      output: [{ text: "Hello" }, { text: "  " }, { text: "World" }],
+    };
+    expect(extractOutputParts(output)).toEqual(["Hello", "World"]);
+  });
+
+  it("returns parts from flat output:text:* keys", () => {
+    const output = {
+      "output:text:greet": "Hello!",
+      "output:text:farewell": "Goodbye!",
+    };
+    expect(extractOutputParts(output)).toEqual(["Hello!", "Goodbye!"]);
+  });
+
+  it("returns empty array for empty output", () => {
+    const output = { output: [] };
+    expect(extractOutputParts(output)).toEqual([]);
   });
 });
 
