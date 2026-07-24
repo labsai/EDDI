@@ -8,6 +8,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  ArrowDown,
   History,
   Radio,
   Loader2,
@@ -237,15 +238,15 @@ function LiveTab() {
     URL.revokeObjectURL(url);
   }, [filteredEntries]);
 
-  // Auto-scroll to top (newest first)
+  // Auto-scroll to bottom (newest last — standard log tail UX)
   useEffect(() => {
     if (autoScroll && scrollRef.current && !paused) {
-      scrollRef.current.scrollTop = 0;
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [entries.length, autoScroll, paused]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
       <div className="mb-3 flex flex-wrap items-center gap-2" data-tour="logs-filters">
         {/* SSE stream status */}
@@ -364,9 +365,9 @@ function LiveTab() {
         ref={scrollRef}
         className="flex-1 overflow-auto rounded-xl border border-border bg-card"
         onScroll={(e) => {
-          // Disable auto-scroll if user scrolls up
+          // Disable auto-scroll if user scrolls away from bottom
           const el = e.currentTarget;
-          setAutoScroll(el.scrollTop < 10);
+          setAutoScroll(el.scrollTop + el.clientHeight >= el.scrollHeight - 30);
         }}
       >
         {entries.length === 0 ? (
@@ -399,12 +400,29 @@ function LiveTab() {
           </div>
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">
-            {filteredEntries.map((entry, idx) => (
+            {[...filteredEntries].reverse().map((entry, idx) => (
               <LogRow key={`${entry.timestamp}-${idx}`} entry={entry} />
             ))}
           </div>
         )}
       </div>
+
+      {/* Scroll-to-bottom indicator */}
+      {!autoScroll && entries.length > 0 && (
+        <button
+          onClick={() => {
+            if (scrollRef.current) {
+              scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }
+            setAutoScroll(true);
+          }}
+          className="absolute inset-x-0 bottom-12 mx-auto w-fit animate-bounce rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-lg backdrop-blur transition-colors hover:bg-primary/20"
+          data-testid="scroll-to-bottom"
+        >
+          <ArrowDown className="me-1.5 inline h-3 w-3" />
+          {t("logs.newLogs", "New logs")}
+        </button>
+      )}
 
       {/* Entry count */}
       <div className="mt-2 text-end text-xs text-muted-foreground">

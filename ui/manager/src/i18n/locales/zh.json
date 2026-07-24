@@ -1409,6 +1409,7 @@
     "fullscreenDescription": "全屏编辑器。按 Escape 关闭。"
   },
   "logs": {
+    "newLogs": "新日志",
     "title": "日志",
     "description": "实时监控日志流或搜索历史日志。",
     "tabLive": "实时",
@@ -1993,6 +1994,7 @@
         "step3Desc": "管控不同的群体配置环境、删除闲置组件。"
       },
       "logs": {
+    "newLogs": "新日志",
         "title": "系统日志导览",
         "step1Title": "实时与历史",
         "step1Desc": "平台提供系统日志实时数据流展示与存储索引后的历史探查手段切换。",

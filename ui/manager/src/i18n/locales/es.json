@@ -1409,6 +1409,7 @@
     "fullscreenDescription": "Editor en pantalla completa. Escape para cerrar."
   },
   "logs": {
+    "newLogs": "Nuevos logs",
     "title": "Registros",
     "description": "Supervisar el flujo de logs en tiempo real o buscar en el historial.",
     "tabLive": "En vivo",
@@ -1993,6 +1994,7 @@
         "step3Desc": "Gestione sus entornos colaborativos, edite sus políticas o elimine los grupos antiguos."
       },
       "logs": {
+    "newLogs": "Nuevos logs",
         "title": "Tour de Registros de Sistema",
         "step1Title": "Live vs Historial",
         "step1Desc": "Cambie entre el flujo en tiempo real de los registros y la búsqueda en el historial.",

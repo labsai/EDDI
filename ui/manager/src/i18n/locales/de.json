@@ -1409,6 +1409,7 @@
     "fullscreenDescription": "Vollbild-Inhaltseditor. Escape zum Schließen."
   },
   "logs": {
+    "newLogs": "Neue Logs",
     "title": "Protokolle",
     "description": "Live-Protokollstream überwachen oder historische Logs durchsuchen.",
     "tabLive": "Live",
@@ -1993,6 +1994,7 @@
         "step3Desc": "Polices bearbeiten oder verwaiste Gruppen entfernen."
       },
       "logs": {
+    "newLogs": "Neue Logs",
         "title": "Service-Logs-Tour",
         "step1Title": "Live vs Historie",
         "step1Desc": "Wählen Sie zwischen Live-Streams und Archivsuche.",

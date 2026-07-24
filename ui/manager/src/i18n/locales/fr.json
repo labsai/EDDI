@@ -1409,6 +1409,7 @@
     "fullscreenDescription": "Éditeur plein écran. Échap pour fermer."
   },
   "logs": {
+    "newLogs": "Nouveaux logs",
     "title": "Journaux",
     "description": "Surveiller le flux de logs en temps réel ou rechercher dans l'historique.",
     "tabLive": "En direct",
@@ -1993,6 +1994,7 @@
         "step3Desc": "Affichez, supprimez et réorganisez vos environnements de concert LLM."
       },
       "logs": {
+    "newLogs": "Nouveaux logs",
         "title": "Visite des Logs Systèmes",
         "step1Title": "Surveiller",
         "step1Desc": "Supervisez vos instances en basculant des flux live aux bases archivées.",

@@ -1445,6 +1445,7 @@
     "fullscreenDescription": "Full-screen content editor. Press Escape to close."
   },
   "logs": {
+    "newLogs": "New logs",
     "title": "Logs",
     "description": "Monitor real-time log stream or search historical logs.",
     "tabLive": "Live",
@@ -2064,6 +2065,7 @@
         "step3Desc": "Manage your collaborative environments, edit their policies, or delete stale groups."
       },
       "logs": {
+    "newLogs": "New logs",
         "title": "System Logs Tour",
         "step1Title": "Live vs History",
         "step1Desc": "Switch between a real-time stream of system logs and historical log search.",
