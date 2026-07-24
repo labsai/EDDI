@@ -21,7 +21,9 @@ import {
   AlertTriangle,
   Loader2,
   CheckCircle2,
+  ArrowDown,
 } from "lucide-react";
+import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { useGroup } from "@/hooks/use-groups";
 import {
   startConversation,
@@ -615,10 +617,17 @@ function WorkforceThread() {
     };
   }, []);
 
-  // Scroll to bottom whenever messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
+  const {
+    scrollRef: scrollContainerRef,
+    showScrollFab,
+    hasNewContent,
+    scrollToBottom,
+    handleScroll,
+  } = useSmartAutoScroll<HTMLDivElement>({
+    deps: [messages, isLoading],
+    bottomThreshold: 80,
+  });
 
   // ─── Initialize conversation ─────────────────────────────────
   useEffect(() => {
@@ -853,7 +862,11 @@ function WorkforceThread() {
       )}
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto ps-4 pe-4 pt-4 pb-4">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="relative flex-1 overflow-y-auto ps-4 pe-4 pt-4 pb-4"
+      >
         <div className="ms-auto me-auto max-w-3xl space-y-4">
           {messages.length === 0 && !isLoading && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -994,6 +1007,25 @@ function WorkforceThread() {
 
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Scroll-to-bottom FAB with new content pulse */}
+        {showScrollFab && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom("smooth")}
+            className="absolute bottom-4 end-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
+            title={t("chat.scrollToBottom", "Scroll to bottom")}
+            data-testid="scroll-to-bottom"
+          >
+            <ArrowDown className="h-4 w-4" />
+            {hasNewContent && (
+              <span className="absolute -top-1 -end-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+              </span>
+            )}
+          </button>
+        )}
       </div>
 
         {/* Thread input with file attachment support */}

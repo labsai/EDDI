@@ -28,6 +28,7 @@ import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer } from "@/components/debugger/debug-drawer";
 import { useDebugStore } from "@/hooks/use-debug-events";
+import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
 import {
   Bot,
@@ -80,7 +81,6 @@ export function ChatPanel() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const agentSelectorRef = useRef<HTMLDivElement>(null);
   const autoStartedRef = useRef(false);
-  const [showScrollFab, setShowScrollFab] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
 
   // Store state
@@ -134,10 +134,17 @@ export function ChatPanel() {
     setSearchParams({}, { replace: true });
   }, [searchParams, deployedAgents, setSelectedAgent, startConversation, setSearchParams]);
 
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
+  const {
+    scrollRef: scrollContainerRef,
+    showScrollFab,
+    hasNewContent,
+    scrollToBottom,
+    handleScroll,
+  } = useSmartAutoScroll<HTMLDivElement>({
+    deps: [messages, isProcessing, isThinking, currentTurnEvents.length],
+    bottomThreshold: 80,
+  });
 
   // Close agent selector on outside click
   useEffect(() => {
@@ -547,11 +554,7 @@ export function ChatPanel() {
         <div
           ref={scrollContainerRef}
           className="relative flex-1 overflow-y-auto"
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-            setShowScrollFab(distFromBottom > 200);
-          }}
+          onScroll={handleScroll}
         >
           {!selectedAgentId ? (
             <EmptyState />
@@ -607,15 +610,21 @@ export function ChatPanel() {
             </div>
           )}
 
-          {/* Scroll-to-bottom FAB */}
+          {/* Scroll-to-bottom FAB with new content pulse */}
           {showScrollFab && (
             <button
-              onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })}
+              onClick={() => scrollToBottom("smooth")}
               className="absolute bottom-4 end-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
               title={t("chat.scrollToBottom", "Scroll to bottom")}
               data-testid="scroll-to-bottom"
             >
               <ArrowDown className="h-4 w-4" />
+              {hasNewContent && (
+                <span className="absolute -top-1 -end-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+                </span>
+              )}
             </button>
           )}
         </div>
