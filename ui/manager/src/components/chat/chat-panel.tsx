@@ -122,7 +122,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
     // Find agent name from deployed agents list
     const agent = deployedAgents.find((b) => b.id === agentIdParam);
-    const agentName = agent?.name ?? "Agent";
+    const agentName = agent?.name || agentIdParam;
 
     // Auto-select and start conversation
     setSelectedAgent(agentIdParam, agentName);
@@ -448,7 +448,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                   deployedAgents.map((agent) => (
                     <button
                       key={agent.resource}
-                      onClick={() => handleSelectAgent(agent.id, agent.name)}
+                      onClick={() => handleSelectAgent(agent.id, agent.name || agent.id)}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted min-w-0",
                         agent.id === selectedAgentId &&
