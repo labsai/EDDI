@@ -121,7 +121,7 @@
 
 ### Test Counts
 - 277 test files passing (EDDI-Manager)
-- 4004 Tests passing (`npm run test`)
+- 4013 Tests passing (`npm run test`)
 - 112 Backend tenancy tests passing (`mvn test`)
 
 ### Last Commit Focus
