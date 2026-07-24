@@ -269,7 +269,7 @@ function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?
           )?.[1] ?? agent.id;
 
           return (
-            <li key={agent.id}>
+            <li key={agent.resource}>
               <button
                 type="button"
                 onClick={() =>
