@@ -3047,6 +3047,7 @@
       "hideDetails": "Hide details panel",
       "editAgent": "Edit Agent",
       "auditLogs": "Audit Logs",
+    "openStudio": "Open in Studio",
       "triggers": "View Triggers",
       "starterSelected": "Prompt added to chat input"
     },

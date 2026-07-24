@@ -3020,6 +3020,7 @@
       "hideDetails": "Details ausblenden",
       "editAgent": "Agent bearbeiten",
       "auditLogs": "Audit-Protokolle",
+    "openStudio": "Im Studio öffnen",
       "triggers": "Trigger anzeigen",
       "starterSelected": "Prompt zum Chateingabefeld hinzugefügt"
     },

@@ -3020,6 +3020,7 @@
       "hideDetails": "詳細パネルを非表示",
       "editAgent": "エージェントを編集",
       "auditLogs": "監査ログ",
+    "openStudio": "スタジオで開く",
       "triggers": "トリガーを表示",
       "starterSelected": "プロンプトを入力欄に追加しました"
     },

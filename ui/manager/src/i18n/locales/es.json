@@ -2981,6 +2981,7 @@
       "hideDetails": "Ocultar detalles",
       "editAgent": "Editar agente",
       "auditLogs": "Registros de auditoría",
+    "openStudio": "Abrir en el Estudio",
       "triggers": "Ver activadores"
     },
     "agentEditor": {

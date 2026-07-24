@@ -3020,6 +3020,7 @@
       "hideDetails": "상세 패널 숨기기",
       "editAgent": "에이전트 편집",
       "auditLogs": "감사 로그",
+    "openStudio": "스튜디오에서 열기",
       "triggers": "트리거 보기",
       "starterSelected": "프롬프트가 입력창에 추가되었습니다"
     },

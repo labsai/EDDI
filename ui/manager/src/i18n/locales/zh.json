@@ -3020,6 +3020,7 @@
       "hideDetails": "隐藏详情面板",
       "editAgent": "编辑智能体",
       "auditLogs": "审计日志",
+    "openStudio": "在工作室中打开",
       "triggers": "查看触发器",
       "starterSelected": "提示词已添加到输入框"
     },

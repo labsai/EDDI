@@ -7,7 +7,6 @@ import { getResource, RESOURCE_TYPES } from "@/lib/api/resources";
 import { getWorkflow } from "@/lib/api/workflows";
 import { useDeployedAgents } from "@/hooks/use-chat";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
-import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,7 +20,6 @@ import {
   Copy,
   Check,
   ShieldCheck,
-  Brain,
   FileText,
   Sparkles,
   Share2,
@@ -52,7 +50,6 @@ export function AgentDetailsPanel({
   className,
 }: AgentDetailsPanelProps) {
   const { t } = useTranslation();
-  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState(false);
   const [copiedPersona, setCopiedPersona] = useState(false);
   const [personaExpanded, setPersonaExpanded] = useState(false);
@@ -281,16 +278,17 @@ export function AgentDetailsPanel({
 
           {/* Quick Action Buttons */}
           <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full text-xs h-8 justify-start"
-              onClick={() => setEditingAgentId(realAgentId || agentId)}
-            >
-              <Pencil className="h-3.5 w-3.5 me-1 text-primary" />
-              {t("Workforce.chat.editAgent", "Edit Agent")}
-            </Button>
-            <Link to={`/audit?agentId=${realAgentId || agentId}`}>
+            <Link to={`/manage/agentview/${realAgentId || agentId}`}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-xs h-8 justify-start"
+              >
+                <Pencil className="h-3.5 w-3.5 me-1 text-primary" />
+                {t("Workforce.chat.editAgent", "Edit Agent")}
+              </Button>
+            </Link>
+            <Link to={`/manage/audit?agentId=${realAgentId || agentId}`}>
               <Button
                 variant="outline"
                 size="sm"
@@ -473,22 +471,25 @@ export function AgentDetailsPanel({
           {/* Workflows / Pipelines */}
           {agentData?.workflows && agentData.workflows.length > 0 && (
             <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2">
-              <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                <Layers className="h-3.5 w-3.5 text-blue-500" />
-                {t("Workforce.agentEditor.workflows", "Workflows")}
-              </h5>
-              <div className="space-y-1">
-                {agentData.workflows.map((wf, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-border/30 last:border-0">
-                    <span className="font-mono text-[11px] text-foreground/80 truncate max-w-[180px]" title={wf}>
-                      {wf}
-                    </span>
-                    <Link to={`/workflows?filter=${wf}`} className="text-muted-foreground hover:text-primary transition-colors">
-                      <ArrowUpRight className="h-3 w-3" />
-                    </Link>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between">
+                <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Layers className="h-3.5 w-3.5 text-blue-500" />
+                  {t("Workforce.agentEditor.workflows", "Workflows")}
+                </h5>
+                <span className="text-[10px] font-medium text-muted-foreground rounded-full bg-muted px-1.5 py-0.5">
+                  {agentData.workflows.length}
+                </span>
               </div>
+              <Link to={`/manage/studio/${realAgentId || agentId}`}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-xs h-8 justify-start"
+                >
+                  <ArrowUpRight className="h-3.5 w-3.5 me-1 text-blue-500" />
+                  {t("Workforce.chat.openStudio", "Open in Studio")}
+                </Button>
+              </Link>
             </div>
           )}
 
@@ -574,11 +575,6 @@ export function AgentDetailsPanel({
         </div>
       )}
 
-      {/* Agent Editor Sheet (Slide-over) */}
-      <AgentEditorSheet
-        agentId={editingAgentId}
-        onClose={() => setEditingAgentId(null)}
-      />
     </div>
   );
 }

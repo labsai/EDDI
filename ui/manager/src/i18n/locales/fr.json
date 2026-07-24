@@ -3020,6 +3020,7 @@
       "hideDetails": "Masquer les détails",
       "editAgent": "Modifier l agent",
       "auditLogs": "Journaux d audit",
+    "openStudio": "Ouvrir dans le Studio",
       "triggers": "Voir les déclencheurs",
       "starterSelected": "Prompt ajouté à la zone de texte"
     },
