@@ -80,8 +80,10 @@ export function ModeSwitcher({ collapsed = false }: ModeSwitcherProps) {
         targetIdx = MODES.length - 1;
       }
       if (targetIdx >= 0 && targetIdx !== activeIdx) {
+        const target = MODES[targetIdx];
+        if (!target) return;
         e.preventDefault();
-        handleSelect(MODES[targetIdx]);
+        handleSelect(target);
         // Focus the newly active tab after React re-render
         const container = e.currentTarget.closest("[role='tablist']");
         const tabs = container?.querySelectorAll<HTMLButtonElement>("[role='tab']");

@@ -34,8 +34,12 @@ test.describe("Resource Editor — Rules", () => {
     const jsonTab = page.getByTestId("tab-json");
     await expect(jsonTab).toBeVisible({ timeout: 10000 });
     await jsonTab.click();
-    // Custom tab buttons use aria-selected (not Radix data-state)
-    await expect(jsonTab).toHaveAttribute("aria-selected", "true");
+    // After click, wait for the tab to re-stabilize (component may re-render)
+    await expect(page.getByTestId("tab-json")).toHaveAttribute(
+      "aria-selected",
+      "true",
+      { timeout: 10000 },
+    );
   });
 
   test("shows rules editor with behavior groups", async ({ page }) => {
