@@ -2,10 +2,10 @@ import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { getAgent, parseResourceUri } from "@/lib/api/agents";
+import { getAgent, getAgentDescriptors, parseResourceUri } from "@/lib/api/agents";
 import { getResource, RESOURCE_TYPES } from "@/lib/api/resources";
 import { getWorkflow } from "@/lib/api/workflows";
-import { useDeployedAgents } from "@/hooks/use-chat";
+import { useDeployedAgents, useChatStore } from "@/hooks/use-chat";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,7 +64,17 @@ export function AgentDetailsPanel({
       a.resource === agentId
   );
 
-  const parsedAgent = matchedDescriptor ? parseResourceUri(matchedDescriptor.resource) : null;
+  // Direct descriptor fetch by agent ID — avoids dedup/filter issues in useDeployedAgents
+  const { data: directDescriptors } = useQuery({
+    queryKey: ["agent-descriptor-direct", agentId],
+    queryFn: () => getAgentDescriptors(1, 0, agentId!),
+    enabled: !!agentId && !matchedDescriptor,
+    staleTime: 60_000,
+  });
+  const directDescriptor = directDescriptors?.[0];
+
+  const resolvedDescriptor = matchedDescriptor || directDescriptor;
+  const parsedAgent = resolvedDescriptor ? parseResourceUri(resolvedDescriptor.resource) : null;
   const realAgentId = parsedAgent?.id || agentId;
   const realAgentVersion = parsedAgent?.version;
 
@@ -171,6 +181,21 @@ export function AgentDetailsPanel({
     }
   }, [t]);
 
+  // Self-heal: if the store has an ObjectId as the name but we resolved a proper name,
+  // update just the name so all components (header, empty state, input) show it correctly.
+  const resolvedName = resolvedDescriptor?.name;
+  const storeAgentId = useChatStore((s) => s.selectedAgentId);
+  const storeName = useChatStore((s) => s.selectedAgentName);
+  if (
+    resolvedName &&
+    storeAgentId === agentId &&
+    storeName !== resolvedName
+  ) {
+    queueMicrotask(() => {
+      useChatStore.setState({ selectedAgentName: resolvedName });
+    });
+  }
+
   if (!agentId) {
     return (
       <div className={cn("w-80 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden", className)}>
@@ -201,8 +226,8 @@ export function AgentDetailsPanel({
     );
   }
 
-  const displayName = agentName || matchedDescriptor?.name || agentId;
-  const description = agentData?.description || matchedDescriptor?.description;
+  const displayName = agentName || resolvedDescriptor?.name || agentId;
+  const description = agentData?.description || resolvedDescriptor?.description;
 
   return (
     <div className={cn("w-80 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden", className)}>

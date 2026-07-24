@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useParams, useLocation, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Paperclip,
@@ -44,6 +45,7 @@ import {
   type AttachmentResult,
   type AttachmentRef,
 } from "@/lib/api/attachments";
+import { getAgentDescriptors } from "@/lib/api/agents";
 import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
 import type { SimpleConversationStep } from "@/lib/api/conversations";
 import { ContextCard } from "@/components/workforce/context-card";
@@ -612,8 +614,17 @@ function WorkforceThread() {
   // Fetch board config to resolve member display name & role
   const { data: groupConfig } = useGroup(boardId, version);
   const member = groupConfig?.members.find((m) => m.agentId === memberId);
-  const memberName = member?.displayName ?? memberId;
   const memberRole = member?.role ?? null;
+
+  // Fallback: if the member isn't in the group config, fetch the agent descriptor
+  // to resolve the display name (avoids showing raw ObjectIds).
+  const { data: descriptorResults } = useQuery({
+    queryKey: ["agent-descriptor-direct", memberId],
+    queryFn: () => getAgentDescriptors(1, 0, memberId),
+    enabled: !!memberId && !member,
+    staleTime: 60_000,
+  });
+  const memberName = member?.displayName || descriptorResults?.[0]?.name || memberId;
 
   // Thread persistence
   const { getThread, registerThread, updateActivity } =
