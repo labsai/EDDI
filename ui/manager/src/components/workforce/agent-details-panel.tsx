@@ -2,7 +2,8 @@ import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { getAgent } from "@/lib/api/agents";
+import { getAgent, parseResourceUri } from "@/lib/api/agents";
+import { useDeployedAgents } from "@/hooks/use-chat";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
 import { Badge } from "@/components/ui/badge";
@@ -46,40 +47,56 @@ export function AgentDetailsPanel({
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState(false);
 
+  // Read deployed agents to resolve display name, description & real resource ID
+  const { data: deployedAgents } = useDeployedAgents();
+
+  const matchedDescriptor = deployedAgents?.find(
+    (a) =>
+      parseResourceUri(a.resource).id === agentId ||
+      a.name === agentId ||
+      a.resource === agentId
+  );
+
+  const realAgentId = matchedDescriptor
+    ? parseResourceUri(matchedDescriptor.resource).id
+    : agentId;
+
   // Fetch full agent configuration from backend
   const { data: agentData, isLoading } = useQuery({
-    queryKey: ["agent", agentId],
-    queryFn: () => getAgent(agentId!),
-    enabled: !!agentId,
+    queryKey: ["agent", realAgentId],
+    queryFn: () => getAgent(realAgentId!),
+    enabled: !!realAgentId,
     staleTime: 10_000,
+    retry: 1,
   });
 
   const handleCopyId = useCallback(async () => {
-    if (!agentId) return;
+    if (!realAgentId) return;
     try {
-      await navigator.clipboard.writeText(agentId);
+      await navigator.clipboard.writeText(realAgentId);
       setCopiedId(true);
       toast.success(t("common.copied", "Copied to clipboard"));
       setTimeout(() => setCopiedId(false), 1500);
     } catch {
       /* ignore */
     }
-  }, [agentId, t]);
+  }, [realAgentId, t]);
 
   if (!agentId) {
     return (
-      <div className={cn("w-72 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden", className)}>
-        <div className="p-3 border-b border-border flex items-center justify-between shrink-0">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className={cn("w-80 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden", className)}>
+        <div className="p-3 border-b border-border flex items-center justify-between shrink-0 bg-muted/20">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Bot className="h-3.5 w-3.5 text-primary" />
             {t("Workforce.chat.agentDetails", "Agent Details")}
           </h3>
           {onClose && (
             <button
               type="button"
               onClick={onClose}
-              className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+              className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             >
-              <PanelRightClose className="h-3.5 w-3.5" />
+              <PanelRightClose className="h-4 w-4" />
             </button>
           )}
         </div>
@@ -95,7 +112,8 @@ export function AgentDetailsPanel({
     );
   }
 
-  const displayName = agentName || agentData?.identity?.agentDid || agentId;
+  const displayName = agentName || matchedDescriptor?.name || agentId;
+  const description = agentData?.description || matchedDescriptor?.description;
 
   return (
     <div className={cn("w-80 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden", className)}>
@@ -117,7 +135,7 @@ export function AgentDetailsPanel({
         )}
       </div>
 
-      {isLoading ? (
+      {isLoading && !matchedDescriptor ? (
         <div className="p-4 space-y-4">
           <div className="flex flex-col items-center gap-2">
             <Skeleton className="h-16 w-16 rounded-full" />
@@ -128,17 +146,17 @@ export function AgentDetailsPanel({
           <Skeleton className="h-12 w-full rounded-lg" />
           <Skeleton className="h-10 w-full rounded-lg" />
         </div>
-      ) : agentData ? (
+      ) : (
         <div className="p-4 space-y-5">
           {/* Main Agent Header Card */}
           <div className="flex flex-col items-center text-center gap-2">
             <div className="relative">
               <AdvisorAvatar
                 name={displayName}
-                agentId={agentId}
+                agentId={realAgentId || agentId}
                 size="lg"
               />
-              <span className="absolute bottom-0 end-0 h-3.5 w-3.5 rounded-full bg-emerald-500 border-2 border-background shadow-xs" title="Agent Ready" />
+              <span className="absolute bottom-0 end-0 h-3.5 w-3.5 rounded-full bg-emerald-500 border-2 border-background shadow-xs" title="Agent Deployed & Ready" />
             </div>
 
             <div className="w-full min-w-0">
@@ -153,7 +171,7 @@ export function AgentDetailsPanel({
                 className="mt-1 inline-flex items-center gap-1 max-w-full rounded-full border border-border/60 bg-muted/40 px-2.5 py-0.5 text-[10px] font-mono text-muted-foreground hover:bg-muted hover:text-foreground transition-colors truncate"
                 title={t("common.copyId", "Copy Agent ID")}
               >
-                <span className="truncate">{agentId}</span>
+                <span className="truncate">{realAgentId || agentId}</span>
                 {copiedId ? (
                   <Check className="h-3 w-3 text-emerald-500 shrink-0" />
                 ) : (
@@ -161,9 +179,9 @@ export function AgentDetailsPanel({
                 )}
               </button>
 
-              {agentData.description && (
+              {description && (
                 <p className="text-xs text-muted-foreground/90 mt-2 text-start bg-muted/20 rounded-lg p-2.5 border border-border/40 leading-relaxed">
-                  {agentData.description}
+                  {description}
                 </p>
               )}
             </div>
@@ -175,12 +193,12 @@ export function AgentDetailsPanel({
               variant="outline"
               size="sm"
               className="w-full text-xs h-8 justify-start"
-              onClick={() => setEditingAgentId(agentId)}
+              onClick={() => setEditingAgentId(realAgentId || agentId)}
             >
               <Pencil className="h-3.5 w-3.5 me-1 text-primary" />
               {t("Workforce.chat.editAgent", "Edit Agent")}
             </Button>
-            <Link to={`/audit?agentId=${agentId}`}>
+            <Link to={`/audit?agentId=${realAgentId || agentId}`}>
               <Button
                 variant="outline"
                 size="sm"
@@ -193,7 +211,7 @@ export function AgentDetailsPanel({
           </div>
 
           {/* Capabilities & Skills */}
-          {agentData.capabilities && agentData.capabilities.length > 0 && (
+          {agentData?.capabilities && agentData.capabilities.length > 0 && (
             <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
@@ -219,7 +237,7 @@ export function AgentDetailsPanel({
           )}
 
           {/* Workflows / Pipelines */}
-          {agentData.workflows && agentData.workflows.length > 0 && (
+          {agentData?.workflows && agentData.workflows.length > 0 && (
             <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2">
               <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                 <Layers className="h-3.5 w-3.5 text-blue-500" />
@@ -255,10 +273,10 @@ export function AgentDetailsPanel({
                   {t("Workforce.agentEditor.a2aEnabled", "Agent-to-Agent")}
                 </span>
                 <Badge
-                  variant={agentData.a2aEnabled ? "success" : "secondary"}
+                  variant={agentData?.a2aEnabled ? "success" : "secondary"}
                   className="text-[10px]"
                 >
-                  {agentData.a2aEnabled ? t("common.on", "On") : t("common.off", "Off")}
+                  {agentData?.a2aEnabled ? t("common.on", "On") : t("common.off", "Off")}
                 </Badge>
               </div>
 
@@ -269,15 +287,15 @@ export function AgentDetailsPanel({
                   {t("Workforce.agentEditor.memoryTools", "Memory Tools")}
                 </span>
                 <Badge
-                  variant={agentData.enableMemoryTools ? "success" : "secondary"}
+                  variant={agentData?.enableMemoryTools ? "success" : "secondary"}
                   className="text-[10px]"
                 >
-                  {agentData.enableMemoryTools ? t("common.on", "On") : t("common.off", "Off")}
+                  {agentData?.enableMemoryTools ? t("common.on", "On") : t("common.off", "Off")}
                 </Badge>
               </div>
 
               {/* Message Signing */}
-              {agentData.security?.signInterAgentMessages !== undefined && (
+              {agentData?.security?.signInterAgentMessages !== undefined && (
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground flex items-center gap-1.5">
                     <ShieldCheck className="h-3 w-3 text-emerald-400" />
@@ -293,7 +311,7 @@ export function AgentDetailsPanel({
               )}
 
               {/* Memory Discipline Policy */}
-              {agentData.memoryPolicy?.strictWriteDiscipline?.enabled && (
+              {agentData?.memoryPolicy?.strictWriteDiscipline?.enabled && (
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground flex items-center gap-1.5">
                     <Database className="h-3 w-3 text-amber-400" />
@@ -306,7 +324,7 @@ export function AgentDetailsPanel({
               )}
 
               {/* HITL Configuration */}
-              {agentData.hitlConfig?.timeoutPolicy && (
+              {agentData?.hitlConfig?.timeoutPolicy && (
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground flex items-center gap-1.5">
                     <Lock className="h-3 w-3 text-amber-400" />
@@ -321,7 +339,7 @@ export function AgentDetailsPanel({
           </div>
 
           {/* Quick Triggers Link */}
-          <Link to={`/triggers?agentId=${agentId}`}>
+          <Link to={`/triggers?agentId=${realAgentId || agentId}`}>
             <Button
               variant="secondary"
               size="sm"
@@ -334,15 +352,6 @@ export function AgentDetailsPanel({
               <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground" />
             </Button>
           </Link>
-        </div>
-      ) : (
-        <div className="flex flex-1 items-center justify-center p-4">
-          <div className="text-center text-muted-foreground">
-            <Bot className="h-8 w-8 mx-auto mb-2 opacity-40" />
-            <p className="text-xs">
-              {t("Workforce.chat.selectToView", "Select an agent to view details")}
-            </p>
-          </div>
         </div>
       )}
 

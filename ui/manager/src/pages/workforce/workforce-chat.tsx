@@ -7,7 +7,8 @@ import {
   PanelRightOpen,
 } from "lucide-react";
 import { ChatPanel } from "@/components/chat/chat-panel";
-import { useChatStore } from "@/hooks/use-chat";
+import { useChatStore, useDeployedAgents } from "@/hooks/use-chat";
+import { parseResourceUri } from "@/lib/api/agents";
 import { AgentDetailsPanel } from "@/components/workforce/agent-details-panel";
 import { cn } from "@/lib/utils";
 
@@ -20,11 +21,15 @@ export function WorkforceChat() {
   const { t } = useTranslation();
   const [showDetails, setShowDetails] = usePersistedBoolean("workforce-chat-details-panel", true);
   const [searchParams] = useSearchParams();
+  const { data: deployedAgents } = useDeployedAgents();
 
-  // Read selected agent from Zustand store or fallback to URL searchParams ?agentId=
+  // Read selected agent from Zustand store, fallback to URL searchParams ?agentId=, fallback to first deployed agent
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const selectedAgentName = useChatStore((s) => s.selectedAgentName);
-  const effectiveAgentId = selectedAgentId || searchParams.get("agentId");
+  const effectiveAgentId =
+    selectedAgentId ||
+    searchParams.get("agentId") ||
+    (deployedAgents?.[0] ? parseResourceUri(deployedAgents[0].resource).id : null);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
