@@ -67,14 +67,14 @@ export function AgentDetailsPanel({
       a.resource === agentId
   );
 
-  const realAgentId = matchedDescriptor
-    ? parseResourceUri(matchedDescriptor.resource).id
-    : agentId;
+  const parsedAgent = matchedDescriptor ? parseResourceUri(matchedDescriptor.resource) : null;
+  const realAgentId = parsedAgent?.id || agentId;
+  const realAgentVersion = parsedAgent?.version;
 
   // Fetch full agent configuration from backend
   const { data: agentData, isLoading } = useQuery({
-    queryKey: ["agent", realAgentId],
-    queryFn: () => getAgent(realAgentId!),
+    queryKey: ["agent", realAgentId, realAgentVersion],
+    queryFn: () => getAgent(realAgentId!, realAgentVersion),
     enabled: !!realAgentId,
     staleTime: 10_000,
     retry: 1,
@@ -87,7 +87,7 @@ export function AgentDetailsPanel({
   const parsedWorkflow = firstWorkflowUri ? parseResourceUri(firstWorkflowUri) : null;
 
   // 2) Fetch the workflow to get its pipeline steps
-  const { data: workflowData } = useQuery({
+  const { data: workflowData, isLoading: isWorkflowLoading } = useQuery({
     queryKey: ["workflow", parsedWorkflow?.id, parsedWorkflow?.version],
     queryFn: () => getWorkflow(parsedWorkflow!.id, parsedWorkflow!.version),
     enabled: !!parsedWorkflow?.id,
@@ -99,18 +99,21 @@ export function AgentDetailsPanel({
   const llmStep = workflowData?.workflowSteps?.find(
     (step) => step.type.includes("ai.labs.llm") || step.type.includes("langchain")
   );
-  const llmStepConfigUri = (llmStep?.config as Record<string, string> | undefined)?.uri;
+  const llmStepConfigUri = llmStep?.config?.uri as string | undefined;
   const parsedLlmUri = llmStepConfigUri ? parseResourceUri(llmStepConfigUri) : null;
 
   // 4) Fetch the actual LLM resource configuration
   const llmTypeConfig = RESOURCE_TYPES.find((r) => r.slug === "llm");
-  const { data: llmConfig } = useQuery<LlmConfig>({
+  const { data: llmConfig, isLoading: isLlmLoading } = useQuery<LlmConfig>({
     queryKey: ["resource", "llm", parsedLlmUri?.id, parsedLlmUri?.version],
     queryFn: () => getResource<LlmConfig>(llmTypeConfig!, parsedLlmUri!.id, parsedLlmUri!.version),
     enabled: !!llmTypeConfig && !!parsedLlmUri?.id,
     staleTime: 30_000,
     retry: false,
   });
+
+  // The cascade is still resolving if any step in the chain is loading
+  const llmIsResolving = !!firstWorkflowUri && (isWorkflowLoading || (!llmStep && !workflowData) || isLlmLoading);
 
   // Extract actual model configuration parameters from the LLM task
   const firstTask = llmConfig?.tasks?.[0];
@@ -123,9 +126,13 @@ export function AgentDetailsPanel({
 
   const displayModel = extractedModel || (llmConfig ? "Custom LLM" : null);
   const temperature = firstTask?.parameters?.temperature ?? null;
-  const contextLimit = firstTask?.maxContextTokens
-    ? `${(firstTask.maxContextTokens / 1024).toFixed(0)}k tokens`
-    : null;
+  const maxCtx = firstTask?.maxContextTokens;
+  const contextLimit =
+    maxCtx != null && maxCtx > 0
+      ? `${(maxCtx / 1024).toFixed(0)}k tokens`
+      : maxCtx === -1
+        ? null // -1 means unlimited, omit
+        : null;
 
   // Build comprehensive list of active tool names
   const activeTools: string[] = [];
@@ -309,7 +316,7 @@ export function AgentDetailsPanel({
               )}
             </div>
             <div className="space-y-2 text-xs">
-              {!llmConfig && parsedWorkflow?.id ? (
+              {llmIsResolving ? (
                 /* Still loading LLM config */
                 <div className="space-y-1.5">
                   <Skeleton className="h-3 w-full" />
