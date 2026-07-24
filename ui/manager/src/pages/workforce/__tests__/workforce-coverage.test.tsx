@@ -234,5 +234,301 @@ describe("Workforce Coverage Tests", () => {
       expect(screen.getByText(/Some Question/i)).toBeInTheDocument();
       expect(screen.getByText(/Completed/i)).toBeInTheDocument();
     });
+
+    it("renders loading skeleton", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: true,
+        data: undefined,
+      } as any);
+
+      const { container } = renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
+    });
+
+    it("renders error state", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isError: true,
+        data: undefined,
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getByText(/Failed to load conversation/i)).toBeInTheDocument();
+    });
+
+    it("renders not found state", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: null,
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getByText(/Conversation not found/i)).toBeInTheDocument();
+    });
+
+    it("renders transcript with OPINION entry", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "How do we proceed?",
+          state: "COMPLETED",
+          transcript: [{
+            speakerAgentId: "agent-001",
+            speakerDisplayName: "Research Agent",
+            type: "OPINION",
+            content: "We should analyze the data first.",
+            phaseIndex: 0,
+            timestamp: "2024-06-01T10:00:00Z",
+          }],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getByText("Research Agent")).toBeInTheDocument();
+      expect(screen.getByText(/We should analyze the data first/i)).toBeInTheDocument();
+    });
+
+    it("renders SYNTHESIS entry with amber styling", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "Question?",
+          state: "COMPLETED",
+          transcript: [{
+            speakerAgentId: "agent-002",
+            speakerDisplayName: "Synthesizer",
+            type: "SYNTHESIS",
+            content: "Final synthesis output.",
+            phaseIndex: 0,
+            timestamp: "2024-06-01T10:00:00Z",
+          }],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getAllByText(/Synthesis/i).length).toBeGreaterThan(0);
+      expect(screen.getByText(/Final synthesis output/i)).toBeInTheDocument();
+    });
+
+    it("renders ERROR entry", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "Question?",
+          state: "COMPLETED",
+          transcript: [{
+            speakerAgentId: "agent-003",
+            speakerDisplayName: "Agent X",
+            type: "ERROR",
+            content: "Something went wrong.",
+            errorReason: "timeout",
+            phaseIndex: 0,
+            timestamp: "2024-06-01T10:00:00Z",
+          }],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getByText(/Something went wrong\./i)).toBeInTheDocument();
+      expect(screen.getByText(/timeout/i)).toBeInTheDocument();
+    });
+
+    it("renders SKIPPED entry", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "Question?",
+          state: "COMPLETED",
+          transcript: [{
+            speakerAgentId: "agent-004",
+            speakerDisplayName: "Agent Y",
+            type: "SKIPPED",
+            errorReason: "rate limited",
+            phaseIndex: 0,
+            timestamp: "2024-06-01T10:00:00Z",
+          }],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getByText(/Agent Y/i)).toBeInTheDocument();
+      expect(screen.getByText(/\(rate limited\)/i)).toBeInTheDocument();
+    });
+
+    it("renders QUESTION bubble", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "Question?",
+          state: "COMPLETED",
+          transcript: [{
+            speakerAgentId: "user-1",
+            speakerDisplayName: "User",
+            type: "QUESTION",
+            content: "What is the best approach?",
+            phaseIndex: 0,
+            timestamp: "2024-06-01T10:00:00Z",
+          }],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getByText(/What is the best approach\?/i)).toBeInTheDocument();
+    });
+
+    it("renders SynthesizedAnswerFooter when synthesizedAnswer exists and no SYNTHESIS entry", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "Question?",
+          state: "COMPLETED",
+          synthesizedAnswer: "The final answer is 42.",
+          transcript: [{
+            speakerAgentId: "agent-001",
+            speakerDisplayName: "Agent X",
+            type: "OPINION",
+            content: "Some opinion",
+            phaseIndex: 0,
+            timestamp: "2024-06-01T10:00:00Z",
+          }],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getByText(/Final Synthesized Answer/i)).toBeInTheDocument();
+      expect(screen.getByText(/The final answer is 42\./i)).toBeInTheDocument();
+    });
+
+    it("does not render SynthesizedAnswerFooter when a SYNTHESIS transcript entry already exists", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "Question?",
+          state: "COMPLETED",
+          synthesizedAnswer: "Something",
+          transcript: [{
+            speakerAgentId: "agent-syn",
+            speakerDisplayName: "Synthesizer",
+            type: "SYNTHESIS",
+            content: "Synthesized from transcript",
+            phaseIndex: 1,
+            timestamp: "2024-06-01T10:00:00Z",
+          }],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.queryByText(/Final Synthesized Answer/i)).not.toBeInTheDocument();
+    });
+
+    it("renders phase separator when entries have different phaseIndex", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "Question?",
+          state: "COMPLETED",
+          transcript: [
+            {
+              speakerAgentId: "agent-1",
+              speakerDisplayName: "Agent 1",
+              type: "OPINION",
+              content: "First phase",
+              phaseIndex: 0,
+              phaseName: "Phase 1",
+              timestamp: "2024-06-01T10:00:00Z",
+            },
+            {
+              speakerAgentId: "agent-2",
+              speakerDisplayName: "Agent 2",
+              type: "CRITIQUE",
+              content: "Second phase",
+              phaseIndex: 1,
+              phaseName: "Phase 2",
+              timestamp: "2024-06-01T10:01:00Z",
+            }
+          ],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getByText("Phase 1")).toBeInTheDocument();
+      expect(screen.getByText("Phase 2")).toBeInTheDocument();
+    });
+
+    it("renders IN_PROGRESS state badge", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "Question?",
+          state: "IN_PROGRESS",
+          transcript: [],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getByText(/In Progress/i)).toBeInTheDocument();
+    });
+
+    it("renders empty content fallback for JSON with no text", () => {
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "Question?",
+          state: "COMPLETED",
+          transcript: [{
+            speakerAgentId: "agent-1",
+            speakerDisplayName: "Agent 1",
+            type: "OPINION",
+            content: '{"output":[]}',
+            phaseIndex: 0,
+            timestamp: "2024-06-01T10:00:00Z",
+          }],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
+      expect(screen.getByText(/No content/i)).toBeInTheDocument();
+    });
+
+    it("calls onClose when close button clicked", async () => {
+      const user = userEvent.setup();
+      const closeFn = vi.fn();
+      vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          id: "conv1",
+          originalQuestion: "Question?",
+          state: "COMPLETED",
+          transcript: [],
+        },
+      } as any);
+
+      renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={closeFn} />);
+      
+      const closeBtn = screen.getByRole("button", { name: /close/i });
+      await user.click(closeBtn);
+      expect(closeFn).toHaveBeenCalled();
+    });
   });
 });

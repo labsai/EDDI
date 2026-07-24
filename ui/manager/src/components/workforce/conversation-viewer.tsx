@@ -101,6 +101,23 @@ const PHASE_ICONS: Record<string, string> = {
 /** Height in px above which we collapse a message (~6 lines) */
 const COLLAPSE_THRESHOLD = 144;
 
+// ─── Hooks ──────────────────────────────────────────────────────
+
+/** Shared collapse state for message cards */
+function useCollapsibleContent(dep: unknown) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isCollapsible, setIsCollapsible] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setIsCollapsible(contentRef.current.scrollHeight > COLLAPSE_THRESHOLD);
+    }
+  }, [dep]);
+
+  return { contentRef, isCollapsible, isExpanded, setIsExpanded };
+}
+
 // ─── Sub-components ──────────────────────────────────────────────
 
 function PhaseSeparator({
@@ -182,17 +199,9 @@ function AgentEntryCard({
   const { t } = useTranslation();
   const typeInfo = ENTRY_TYPE_INFO[entry.type as keyof typeof ENTRY_TYPE_INFO];
   const borderClass = agentBorderClass(entry.speakerAgentId);
-
-  // Collapsible long messages
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [isCollapsible, setIsCollapsible] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  useEffect(() => {
-    if (contentRef.current) {
-      setIsCollapsible(contentRef.current.scrollHeight > COLLAPSE_THRESHOLD);
-    }
-  }, [entry.content]);
+  const parsedContent = parseTranscriptContent(entry.content ?? "");
+  const hasContent = parsedContent.trim().length > 0;
+  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
 
   return (
     <div
@@ -230,7 +239,7 @@ function AgentEntryCard({
 
       {/* Content */}
       <div className="ps-10">
-        {entry.content?.trim() ? (
+        {hasContent ? (
           <>
             <div
               ref={contentRef}
@@ -242,7 +251,7 @@ function AgentEntryCard({
               <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {truncateContent(
-                    parseTranscriptContent(entry.content ?? ""),
+                    parsedContent,
                     t("groups.contentTruncated", "[Content truncated]"),
                   )}
                 </ReactMarkdown>
@@ -299,17 +308,7 @@ function SynthesisEntryCard({
   const { t } = useTranslation();
   const parsedContent = parseTranscriptContent(entry.content ?? "");
   const hasContent = parsedContent.trim().length > 0;
-
-  // Collapsible long messages
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [isCollapsible, setIsCollapsible] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  useEffect(() => {
-    if (contentRef.current) {
-      setIsCollapsible(contentRef.current.scrollHeight > COLLAPSE_THRESHOLD);
-    }
-  }, [parsedContent]);
+  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
 
   return (
     <div
@@ -457,19 +456,8 @@ function SkippedEntryCard({
 
 function SynthesizedAnswerFooter({ content }: { content: string }) {
   const { t } = useTranslation();
-
   const parsedContent = parseTranscriptContent(content);
-
-  // Collapsible long answers
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [isCollapsible, setIsCollapsible] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  useEffect(() => {
-    if (contentRef.current) {
-      setIsCollapsible(contentRef.current.scrollHeight > COLLAPSE_THRESHOLD);
-    }
-  }, [parsedContent]);
+  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
 
   return (
     <div
@@ -815,7 +803,9 @@ function ConversationViewer({
         })}
 
         {/* ── Footer: Synthesized Answer ──────────────────────── */}
-        {conversation.synthesizedAnswer?.trim() && !hasSynthesisEntry && (
+        {conversation.synthesizedAnswer &&
+          parseTranscriptContent(conversation.synthesizedAnswer).trim() &&
+          !hasSynthesisEntry && (
           <SynthesizedAnswerFooter content={conversation.synthesizedAnswer} />
         )}
 

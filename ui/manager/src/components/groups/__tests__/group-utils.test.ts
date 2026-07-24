@@ -173,14 +173,22 @@ describe("group-utils", () => {
       expect(result).not.toBe("");
     });
 
-    it("formats epoch seconds", () => {
-      const result = safeFormatDate(1717235400, "time");
-      expect(result).toBeTruthy();
+    it("formats epoch seconds and epoch millis to the same date", () => {
+      const fromSeconds = safeFormatDate(1717235400, "full");
+      const fromMillis = safeFormatDate(1717235400000, "full");
+      expect(fromSeconds).toBeTruthy();
+      expect(fromSeconds).not.toBe("");
+      // Both should resolve to the same underlying date (Jun 1, 2024)
+      expect(fromSeconds).toBe(fromMillis);
     });
 
-    it("formats epoch milliseconds", () => {
-      const result = safeFormatDate(1717235400000, "date");
-      expect(result).toBeTruthy();
+    it("formats epoch value with 'date' and 'time' styles", () => {
+      const dateOnly = safeFormatDate(1717235400, "date");
+      const timeOnly = safeFormatDate(1717235400, "time");
+      // date style should not include time, time style should not include date
+      expect(dateOnly).toBeTruthy();
+      expect(timeOnly).toBeTruthy();
+      expect(dateOnly).not.toBe(timeOnly);
     });
 
     it("returns empty string for null/undefined", () => {

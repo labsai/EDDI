@@ -122,6 +122,23 @@ function ResponseAvatar({ name }: { name: string; agentId: string }) {
 /** Height in px above which we collapse a message (~6 lines) */
 const COLLAPSE_THRESHOLD = 144;
 
+// ─── Hooks ──────────────────────────────────────────────────────
+
+/** Shared collapse state for message cards */
+function useCollapsibleContent(dep: unknown) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isCollapsible, setIsCollapsible] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setIsCollapsible(contentRef.current.scrollHeight > COLLAPSE_THRESHOLD);
+    }
+  }, [dep]);
+
+  return { contentRef, isCollapsible, isExpanded, setIsExpanded };
+}
+
 // ─── Component ───────────────────────────────────────────────────
 
 const AdvisorResponseCard = memo(function AdvisorResponseCard({
@@ -170,17 +187,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
 
   const isStreaming = content === null;
   const isEmpty = !isStreaming && !content?.trim();
-
-  // ── Collapsible long messages ─────────────────────────────────
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [isCollapsible, setIsCollapsible] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  useEffect(() => {
-    if (contentRef.current) {
-      setIsCollapsible(contentRef.current.scrollHeight > COLLAPSE_THRESHOLD);
-    }
-  }, [content]);
+  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(content);
 
   return (
     <div
