@@ -669,6 +669,7 @@
     "endConversation": "End Conversation",
     "streaming": "Streaming",
     "thinking": "Thinking...",
+    "usingTools": "Using tools",
     "connectionError": "Connection error. Please try again.",
     "empty": "Select an agent and start chatting!",
     "history": "History",

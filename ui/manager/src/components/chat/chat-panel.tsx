@@ -38,7 +38,6 @@ import {
   Loader2,
   Undo2,
   Redo2,
-  Brain,
   Lock,
   Unlock,
   Eye,
@@ -1152,7 +1151,6 @@ const INTERNAL_TASKS = new Set([
 /**
  * Sleek inline indicator shown during agent processing.
  * Shows "Thinking\u2026" with animated dots + any active tool call names.
- * Completely replaces the old yellow Processing card.
  */
 function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
   const { t } = useTranslation();
@@ -1179,45 +1177,35 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
   );
 
   return (
-    <div className="flex gap-3 px-4 py-3" data-testid="thinking-indicator">
-      {/* Avatar \u2014 matches agent message style */}
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/20 text-accent">
-        <Brain className="h-4 w-4 animate-pulse" />
-      </div>
+    <div
+      className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground/70"
+      data-testid="thinking-indicator"
+    >
+      {/* Pulsing dots */}
+      <span className="flex items-center gap-0.5">
+        <span className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:0ms]" />
+        <span className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:150ms]" />
+        <span className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:300ms]" />
+      </span>
 
-      {/* Content bubble */}
-      <div className="flex flex-col gap-1 max-w-[75%]">
-        <div className="rounded-2xl rounded-es-md px-4 py-2.5 bg-card border border-border">
-          {/* Thinking dots */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:0ms]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:150ms]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:300ms]" />
-            </div>
-            <span className="text-xs text-muted-foreground italic">
-              {hasError
-                ? t("chat.activity.error", "Error occurred")
-                : t("chat.thinking", "Thinking\u2026")}
-            </span>
-          </div>
+      {/* Status text */}
+      <span className="italic">
+        {hasError
+          ? t("chat.activity.error", "Error occurred")
+          : activeToolNames.length > 0
+            ? t("chat.usingTools", "Using tools")
+            : t("chat.thinking", "Thinking…")}
+      </span>
 
-          {/* Tool call chips \u2014 only shown when tools are being used */}
-          {activeToolNames.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {activeToolNames.map((name) => (
-                <span
-                  key={name}
-                  className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
-                >
-                  <Wrench className="h-2.5 w-2.5" />
-                  {name}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Tool names — inline, comma-separated */}
+      {activeToolNames.length > 0 && (
+        <span className="flex items-center gap-1 text-muted-foreground/50">
+          <Wrench className="h-2.5 w-2.5 shrink-0" />
+          <span className="truncate max-w-[200px]">
+            {activeToolNames.join(", ")}
+          </span>
+        </span>
+      )}
     </div>
   );
 }

@@ -642,6 +642,7 @@
     "endConversation": "会話を終了",
     "streaming": "ストリーミング",
     "thinking": "考え中...",
+    "usingTools": "ツール使用中",
     "connectionError": "接続エラーです。もう一度お試しください。",
     "empty": "Agent を選択してチャットを始めましょう！",
     "history": "履歴",

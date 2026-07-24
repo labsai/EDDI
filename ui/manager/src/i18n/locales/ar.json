@@ -642,6 +642,7 @@
     "endConversation": "إنهاء المحادثة",
     "streaming": "بث",
     "thinking": "يفكر...",
+    "usingTools": "استخدام الأدوات",
     "connectionError": "خطأ في الاتصال. يرجى المحاولة مرة أخرى.",
     "empty": "اختر Agent وابدأ الدردشة!",
     "history": "السجل",

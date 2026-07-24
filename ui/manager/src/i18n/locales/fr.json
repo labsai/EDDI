@@ -642,6 +642,7 @@
     "endConversation": "Terminer la conversation",
     "streaming": "Streaming",
     "thinking": "Réflexion en cours...",
+    "usingTools": "Utilisation des outils",
     "connectionError": "Erreur de connexion. Veuillez réessayer.",
     "empty": "Sélectionnez un agent et commencez à discuter !",
     "history": "Historique",

@@ -642,6 +642,7 @@
     "endConversation": "结束会话",
     "streaming": "流式传输",
     "thinking": "思考中...",
+    "usingTools": "使用工具",
     "connectionError": "连接错误，请重试。",
     "empty": "选择一个 Agent 并开始聊天！",
     "history": "历史记录",

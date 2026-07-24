@@ -642,6 +642,7 @@
     "endConversation": "대화 종료",
     "streaming": "스트리밍",
     "thinking": "생각 중...",
+    "usingTools": "도구 사용 중",
     "connectionError": "연결 오류입니다. 다시 시도해 주세요.",
     "empty": "Agent를 선택하고 채팅을 시작하세요!",
     "history": "기록",

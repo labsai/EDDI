@@ -642,6 +642,7 @@
     "endConversation": "Gespräch beenden",
     "streaming": "Streaming",
     "thinking": "Denkt nach...",
+    "usingTools": "Werkzeuge werden verwendet",
     "connectionError": "Verbindungsfehler. Bitte erneut versuchen.",
     "empty": "Wählen Sie einen Agent und beginnen Sie zu chatten!",
     "history": "Verlauf",

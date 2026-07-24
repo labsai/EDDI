@@ -642,6 +642,7 @@
     "endConversation": "वार्तालाप समाप्त करें",
     "streaming": "स्ट्रीमिंग",
     "thinking": "सोच रहा है...",
+    "usingTools": "टूल का उपयोग",
     "connectionError": "कनेक्शन त्रुटि। कृपया पुनः प्रयास करें।",
     "empty": "Agent चुनें और चैट शुरू करें!",
     "history": "इतिहास",
