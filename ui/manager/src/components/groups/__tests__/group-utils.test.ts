@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTranscriptContent, parseEmojiVerification, truncateContent } from "@/components/groups/group-utils";
+import { parseTranscriptContent, parseEmojiVerification, truncateContent, safeFormatDate } from "@/components/groups/group-utils";
 
 describe("group-utils", () => {
   describe("parseTranscriptContent", () => {
@@ -140,6 +140,56 @@ describe("group-utils", () => {
       const text = "1234567890";
       const result = truncateContent(text, "[Truncated]", 5);
       expect(result).toBe("12345\n\n[Truncated]");
+    });
+  });
+
+  describe("parseTranscriptContent — flat key format", () => {
+    it("extracts text from flat output:text:* keys", () => {
+      const json = JSON.stringify({
+        "output:text:agent-001": "Hello from flat key",
+      });
+      expect(parseTranscriptContent(json)).toBe("Hello from flat key");
+    });
+
+    it("extracts text from flat key with array value", () => {
+      const json = JSON.stringify({
+        "output:text:agent-001": [{ text: "First" }, { text: "Second" }],
+      });
+      expect(parseTranscriptContent(json)).toBe("First\nSecond");
+    });
+
+    it("extracts text from flat key with object value", () => {
+      const json = JSON.stringify({
+        "output:text:agent-001": { text: "From object" },
+      });
+      expect(parseTranscriptContent(json)).toBe("From object");
+    });
+  });
+
+  describe("safeFormatDate", () => {
+    it("formats ISO string dates", () => {
+      const result = safeFormatDate("2024-06-01T10:30:00Z", "full");
+      expect(result).toBeTruthy();
+      expect(result).not.toBe("");
+    });
+
+    it("formats epoch seconds", () => {
+      const result = safeFormatDate(1717235400, "time");
+      expect(result).toBeTruthy();
+    });
+
+    it("formats epoch milliseconds", () => {
+      const result = safeFormatDate(1717235400000, "date");
+      expect(result).toBeTruthy();
+    });
+
+    it("returns empty string for null/undefined", () => {
+      expect(safeFormatDate(null)).toBe("");
+      expect(safeFormatDate(undefined)).toBe("");
+    });
+
+    it("returns raw value for invalid dates as fallback", () => {
+      expect(safeFormatDate("not-a-date")).toBe("not-a-date");
     });
   });
 });
