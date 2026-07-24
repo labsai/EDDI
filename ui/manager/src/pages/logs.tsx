@@ -671,7 +671,7 @@ function LogRow({ entry }: { entry: LogEntry | DatabaseLogEntry }) {
   const { t } = useTranslation();
   const isStacktrace = entry.message ? hasStacktrace(entry.message) : false;
   const { main, frames } = isStacktrace
-    ? splitStacktrace(entry.message)
+    ? splitStacktrace(entry.message ?? "")
     : { main: entry.message, frames: "" };
   const frameCount = isStacktrace ? countFrames(frames) : 0;
 
@@ -686,7 +686,7 @@ function LogRow({ entry }: { entry: LogEntry | DatabaseLogEntry }) {
         <span className="shrink-0 text-muted-foreground">
           {formatTimestamp(entry.timestamp)}
         </span>
-        <LevelBadge level={entry.level} />
+        <LevelBadge level={entry.level ?? "INFO"} />
         {entry.agentId && (
           <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
             {entry.agentId}
