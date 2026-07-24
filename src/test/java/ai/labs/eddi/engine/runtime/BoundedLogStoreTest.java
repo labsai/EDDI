@@ -453,6 +453,34 @@ class BoundedLogStoreTest {
             List<LogEntry> entries = store.getEntries(null, null, null, 10);
             assertNull(entries.get(0).agentVersion(), "agentVersion should be null for non-numeric ExtLogRecord MDC");
         }
+
+        @Test
+        void captureWithPrintfFormatPattern_shouldFormatCorrectly() {
+            var record = new java.util.logging.LogRecord(java.util.logging.Level.WARNING, "%s, line %d in %s");
+            record.setLoggerName("com.example.ScriptEngine");
+            record.setParameters(new Object[]{"hitlConfig is configured but nothing in this agent can trigger a pause", 42, "rules.js"});
+
+            store.capture(record);
+
+            List<LogEntry> entries = store.getEntries(null, null, null, 10);
+            assertEquals(1, entries.size());
+            assertEquals("hitlConfig is configured but nothing in this agent can trigger a pause, line 42 in rules.js", entries.get(0).message());
+        }
+
+        @Test
+        void captureWithExtLogRecordPrintfPattern_shouldFormatCorrectly() {
+            var extRecord = new org.jboss.logmanager.ExtLogRecord(
+                    java.util.logging.Level.WARNING, "%s, line %d in %s",
+                    "com.example.ScriptEngine");
+            extRecord.setLoggerName("com.example.ScriptEngine");
+            extRecord.setParameters(new Object[]{"Syntax error", 10, "agent.js"});
+
+            store.capture(extRecord);
+
+            List<LogEntry> entries = store.getEntries(null, null, null, 10);
+            assertEquals(1, entries.size());
+            assertEquals("Syntax error, line 10 in agent.js", entries.get(0).message());
+        }
     }
 
     // ==================== init() Idempotency ====================

@@ -332,24 +332,47 @@ public class BoundedLogStore {
         if (msg == null)
             return "";
 
-        // ExtLogRecord handles both printf (%s) and MessageFormat ({0}) styles
+        Object[] params = record.getParameters();
+
+        // 1. Try ExtLogRecord's built-in getFormattedMessage() first
         if (record instanceof org.jboss.logmanager.ExtLogRecord extRecord) {
             try {
-                return extRecord.getFormattedMessage();
+                String formatted = extRecord.getFormattedMessage();
+                if (formatted != null && !formatted.equals(msg)) {
+                    return formatted;
+                }
+            } catch (Exception _) {
+                // fall through to manual formatting
+            }
+        }
+
+        // 2. If getFormattedMessage() returned raw msg or wasn't ExtLogRecord, format
+        // manually
+        if (params != null && params.length > 0) {
+            // Check if pattern contains printf format specifiers (%s, %d, etc.)
+            if (msg.contains("%s") || msg.contains("%d") || msg.contains("%f") || msg.contains("%n") || msg.contains("%x")) {
+                try {
+                    return String.format(msg, params);
+                } catch (Exception _) {
+                    // ignore and try MessageFormat
+                }
+            }
+
+            // Try MessageFormat ({0}, {1}, etc.)
+            try {
+                return java.text.MessageFormat.format(msg, params);
+            } catch (Exception _) {
+                // fall through to String.format fallback
+            }
+
+            // Fallback: try String.format
+            try {
+                return String.format(msg, params);
             } catch (Exception _) {
                 return msg;
             }
         }
 
-        // Fallback for plain JUL LogRecords: resolve {0}, {1}, ... placeholders
-        Object[] params = record.getParameters();
-        if (params != null && params.length > 0) {
-            try {
-                return java.text.MessageFormat.format(msg, params);
-            } catch (Exception _) {
-                return msg;
-            }
-        }
         return msg;
     }
 
