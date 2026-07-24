@@ -65,6 +65,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
         <div className="relative flex-1 min-w-0">
           <textarea
             ref={textareaRef}
+            autoFocus
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder={

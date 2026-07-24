@@ -193,6 +193,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
 
         <textarea
           ref={textareaRef}
+          autoFocus
           value={message}
           onChange={(e) => {
             setMessage(e.target.value);

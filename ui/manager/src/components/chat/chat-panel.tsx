@@ -995,6 +995,7 @@ function ChatInputWithSecretToggle({
           /* Normal mode: auto-growing textarea */
           <textarea
             ref={textareaRef}
+            autoFocus
             data-testid="chat-input"
             value={value}
             onChange={(e) => {
