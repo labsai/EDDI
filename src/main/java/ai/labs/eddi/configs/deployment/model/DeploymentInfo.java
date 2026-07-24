@@ -50,4 +50,18 @@ public class DeploymentInfo {
     public void setDeploymentStatus(DeploymentStatus deploymentStatus) {
         this.deploymentStatus = deploymentStatus;
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof DeploymentInfo that)) return false;
+        return java.util.Objects.equals(agentId, that.agentId)
+                && java.util.Objects.equals(agentVersion, that.agentVersion)
+                && environment == that.environment;
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(agentId, agentVersion, environment);
+    }
 }

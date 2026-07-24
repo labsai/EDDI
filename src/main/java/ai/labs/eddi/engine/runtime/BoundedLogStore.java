@@ -319,22 +319,35 @@ public class BoundedLogStore {
     // ==================== Private Helpers ====================
 
     /**
-     * Format a LogRecord's message, resolving {0},{1}... placeholders from the
-     * record's parameters array using a standard Formatter. Avoids deprecated
-     * ExtLogRecord.getFormattedMessage().
+     * Format a LogRecord's message, resolving placeholders from the record's
+     * parameters array.
+     *
+     * JBoss LogManager's ExtLogRecord supports both {@code {0},{1}...}
+     * (MessageFormat) and {@code %s,%d...} (printf) styles via
+     * {@link org.jboss.logmanager.ExtLogRecord#getFormattedMessage()}. For plain
+     * JUL LogRecords, we fall back to manual MessageFormat.
      */
     private static String formatRecord(java.util.logging.LogRecord record) {
         String msg = record.getMessage();
         if (msg == null)
             return "";
 
-        // Resolve {0}, {1}, ... placeholders using MessageFormat
+        // ExtLogRecord handles both printf (%s) and MessageFormat ({0}) styles
+        if (record instanceof org.jboss.logmanager.ExtLogRecord extRecord) {
+            try {
+                return extRecord.getFormattedMessage();
+            } catch (Exception _) {
+                return msg;
+            }
+        }
+
+        // Fallback for plain JUL LogRecords: resolve {0}, {1}, ... placeholders
         Object[] params = record.getParameters();
         if (params != null && params.length > 0) {
             try {
                 return java.text.MessageFormat.format(msg, params);
             } catch (Exception _) {
-                return msg; // fallback to raw pattern
+                return msg;
             }
         }
         return msg;
