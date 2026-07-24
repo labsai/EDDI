@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  RotateCw,
   MessageCircleReply,
   Loader2,
   Send,
@@ -14,43 +13,38 @@ import type { GroupConversationAction, GroupMember } from "@/lib/api/groups";
 
 interface DiscussionActionsProps {
   /** Backend-computed available operations. The bar renders EXACTLY these — the
-   *  set is never hardcoded or derived from state on the client. */
+   *  set is never hardcoded or derived from state on the client.
+   *  Note: "continue" is handled by the context-aware input, not this bar. */
   availableActions: GroupConversationAction[];
   /** Group members offered in the follow-up picker (agents only). */
   members: Pick<GroupMember, "agentId" | "displayName" | "memberType">[];
-  /** True while a continue/followup/close request is in flight. */
+  /** True while a followup/close request is in flight. */
   isPending?: boolean;
-  /** Current round (1-based) — shown as context for "continue". */
-  round?: number;
-  onContinue: (question: string) => void;
   onFollowup: (targetAgentId: string, question: string) => void;
   onCloseDiscussion: () => void;
 }
 
-type ComposerMode = "none" | "continue" | "followup";
+type ComposerMode = "none" | "followup";
 
 /**
  * Post-COMPLETED lifecycle action bar for a group discussion.
  *
  * Rendered only when the backend reports a non-empty `availableActions`
  * (COMPLETED → followup/continue/close; FAILED/CANCELLED → close; CLOSED → none,
- * so the bar disappears entirely). "Continue" starts a NEW round of the SAME
- * discussion — deliberately distinct from the DiscussionInput below, which
- * starts a brand-new discussion.
+ * so the bar disappears entirely). "Continue" is handled by the context-aware
+ * input field below — this bar provides only "Follow up with a member" and
+ * "Close discussion".
  */
 export function DiscussionActions({
   availableActions,
   members,
   isPending = false,
-  round,
-  onContinue,
   onFollowup,
   onCloseDiscussion,
 }: DiscussionActionsProps) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<ComposerMode>("none");
   const [closeOpen, setCloseOpen] = useState(false);
-  const [continueQuestion, setContinueQuestion] = useState("");
   const [followupQuestion, setFollowupQuestion] = useState("");
 
   // Only real agents can receive a direct follow-up (a nested GROUP member is not
@@ -63,23 +57,14 @@ export function DiscussionActions({
     () => eligibleMembers[0]?.agentId ?? "",
   );
 
-  const canContinue = availableActions.includes("continue");
   const canFollowup =
     availableActions.includes("followup") && eligibleMembers.length > 0;
   const canClose = availableActions.includes("close");
 
-  if (!canContinue && !canFollowup && !canClose) return null;
+  if (!canFollowup && !canClose) return null;
 
   function toggle(next: ComposerMode) {
     setMode((prev) => (prev === next ? "none" : next));
-  }
-
-  function submitContinue() {
-    const q = continueQuestion.trim();
-    if (!q || isPending) return;
-    onContinue(q);
-    setContinueQuestion("");
-    setMode("none");
   }
 
   function submitFollowup() {
@@ -97,22 +82,6 @@ export function DiscussionActions({
       data-testid="discussion-actions"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="me-1 text-xs font-medium text-muted-foreground">
-          {t("groups.discussionComplete", "Discussion complete")}
-        </span>
-        {canContinue && (
-          <Button
-            type="button"
-            variant={mode === "continue" ? "secondary" : "outline"}
-            size="sm"
-            onClick={() => toggle("continue")}
-            disabled={isPending}
-            data-testid="action-continue"
-          >
-            <RotateCw className="h-3.5 w-3.5" />
-            {t("groups.continueDiscussion", "Continue (new round)")}
-          </Button>
-        )}
         {canFollowup && (
           <Button
             type="button"
@@ -141,64 +110,6 @@ export function DiscussionActions({
           </Button>
         )}
       </div>
-
-      {/* Continue composer — a NEW round of THIS discussion (memory retained). */}
-      {mode === "continue" && canContinue && (
-        <div className="mt-2.5 space-y-1.5" data-testid="continue-composer">
-          <p className="text-[11px] text-muted-foreground">
-            {t(
-              "groups.continueHint",
-              "Re-runs all phases as a new round; every agent keeps memory of prior rounds. Attachments can't be added to a continuation.",
-            )}
-            {typeof round === "number" && round >= 1
-              ? ` ${t("groups.currentRound", "Currently on round")} ${round}.`
-              : ""}
-          </p>
-          <textarea
-            value={continueQuestion}
-            onChange={(e) => setContinueQuestion(e.target.value)}
-            placeholder={t(
-              "groups.continuePlaceholder",
-              "What should the group discuss in the next round?",
-            )}
-            className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            rows={2}
-            disabled={isPending}
-            data-testid="group-continue-input"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                submitContinue();
-              }
-            }}
-          />
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setMode("none")}
-            >
-              <X className="h-3.5 w-3.5" />
-              {t("common.cancel", "Cancel")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={submitContinue}
-              disabled={!continueQuestion.trim() || isPending}
-              data-testid="group-continue-submit"
-            >
-              {isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RotateCw className="h-3.5 w-3.5" />
-              )}
-              {t("groups.startNextRound", "Start next round")}
-            </Button>
-          </div>
-        </div>
-      )}
 
       {/* Follow-up composer — one direct question to a single member agent. */}
       {mode === "followup" && canFollowup && (

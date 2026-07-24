@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Send, Loader2, Expand } from "lucide-react";
+import { Send, Loader2, Expand, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 
@@ -8,13 +8,19 @@ interface DiscussionInputProps {
   onSubmit: (question: string) => void;
   isLoading?: boolean;
   disabled?: boolean;
+  /** Controls placeholder text, button label, and icon.
+   *  "new" = start a new discussion (default).
+   *  "continue" = continue the selected discussion. */
+  mode?: "new" | "continue";
+  /** Shown as placeholder when disabled (e.g. "Discussion is closed"). */
+  disabledMessage?: string;
 }
 
 /** Min/max heights for auto-growing textarea */
 const MIN_HEIGHT = 40;
 const MAX_HEIGHT = 120;
 
-export function DiscussionInput({ onSubmit, isLoading, disabled }: DiscussionInputProps) {
+export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", disabledMessage }: DiscussionInputProps) {
   const { t } = useTranslation();
   const [question, setQuestion] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -44,7 +50,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled }: DiscussionInp
 
   function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault();
-    if (question.trim() && !isLoading) {
+    if (question.trim() && !isLoading && !disabled) {
       onSubmit(question.trim());
       setQuestion("");
       setDialogOpen(false);
@@ -61,7 +67,13 @@ export function DiscussionInput({ onSubmit, isLoading, disabled }: DiscussionInp
             ref={textareaRef}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder={t("groups.askQuestion", "Ask a question for the group to discuss…")}
+            placeholder={
+              disabled && disabledMessage
+                ? disabledMessage
+                : mode === "continue"
+                  ? t("groups.continuePlaceholder", "Continue this discussion with a follow-up…")
+                  : t("groups.askQuestion", "Ask a question for the group to discuss…")
+            }
             className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 pe-8 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
             rows={1}
@@ -78,7 +90,10 @@ export function DiscussionInput({ onSubmit, isLoading, disabled }: DiscussionInp
           <button
             type="button"
             onClick={() => setDialogOpen(true)}
-            className="absolute end-2 inset-y-0 my-auto h-fit rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
+            disabled={disabled || isLoading}
+            aria-label={t("groups.expandInput", "Expand input")}
+            aria-expanded={dialogOpen}
+            className="absolute end-2 inset-y-0 my-auto h-fit rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title={t("groups.expandInput", "Expand input")}
           >
             <Expand className="h-3.5 w-3.5" />
@@ -92,11 +107,15 @@ export function DiscussionInput({ onSubmit, isLoading, disabled }: DiscussionInp
         >
           {isLoading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
+          ) : mode === "continue" ? (
+            <RotateCw className="h-4 w-4" />
           ) : (
             <Send className="h-4 w-4" />
           )}
           <span className="hidden sm:inline ms-1">
-            {t("groups.startDiscussion", "Discuss")}
+            {mode === "continue"
+              ? t("groups.continueButton", "Continue")
+              : t("groups.startDiscussion", "Discuss")}
           </span>
         </Button>
         {question.length > 0 && (
@@ -119,10 +138,14 @@ export function DiscussionInput({ onSubmit, isLoading, disabled }: DiscussionInp
             ref={dialogTextareaRef}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder={t("groups.askQuestion", "Ask a question for the group to discuss…")}
+            placeholder={
+              mode === "continue"
+                ? t("groups.continuePlaceholder", "Continue this discussion with a follow-up…")
+                : t("groups.askQuestion", "Ask a question for the group to discuss…")
+            }
             className="w-full resize-y rounded-lg border border-input bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow min-h-[200px]"
             rows={8}
-            disabled={isLoading}
+            disabled={isLoading || disabled}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
@@ -147,14 +170,18 @@ export function DiscussionInput({ onSubmit, isLoading, disabled }: DiscussionInp
             </Button>
             <Button
               onClick={() => handleSubmit()}
-              disabled={!question.trim() || isLoading}
+              disabled={!question.trim() || isLoading || disabled}
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin me-1" />
+              ) : mode === "continue" ? (
+                <RotateCw className="h-4 w-4 me-1" />
               ) : (
                 <Send className="h-4 w-4 me-1" />
               )}
-              {t("groups.startDiscussion", "Discuss")}
+              {mode === "continue"
+                ? t("groups.continueButton", "Continue")
+                : t("groups.startDiscussion", "Discuss")}
             </Button>
           </div>
         </div>

@@ -65,7 +65,10 @@
     "sectionExternal": "External",
     "activeConversations": "Active Conversations",
     "openapi": "OpenAPI",
-    "docs": "Documentation"
+    "docs": "Documentation",
+    "modeManager": "Manager",
+    "modeWorkforce": "Workforce",
+    "switchMode": "Switch workspace"
   },
   "theme": {
     "light": "Light",
@@ -2151,8 +2154,10 @@
     "chooseTemplate": "Choose a template or start from scratch.",
     "closeConfirmDescription": "Closing permanently ends all member conversations and cleans up any ephemeral agents. No further follow-ups or continuations are possible. This cannot be undone.",
     "composeQuestion": "Compose Question",
+    "continueButton": "Continue",
     "continueHint": "Re-runs all phases as a new round; every agent keeps memory of prior rounds. Attachments can't be added to a continuation.",
-    "continuePlaceholder": "What should the group discuss in the next round?",
+    "continuePlaceholder": "Continue this discussion with a follow-up…",
+    "continueStreamStarted": "Continuation started — streaming live",
     "count": "{{count}} groups",
     "createSuccess": "Group created successfully",
     "discussing": "Agents are discussing…",
@@ -2160,9 +2165,16 @@
     "expandInput": "Expand input",
     "followupHint": "Ask one member a direct follow-up. The agent keeps full context from the discussion; the exchange is added to the transcript.",
     "followupPlaceholder": "Ask this member a follow-up question…",
+    "inputDisabledApproval": "Awaiting approval…",
+    "inputDisabledClosed": "This discussion is closed",
+    "inputDisabledCompleted": "Discussion completed",
+    "inputDisabledEnded": "This discussion has ended",
+    "inputDisabledInProgress": "Discussion in progress…",
     "membersCount": "{{count}} Members",
     "moderator": "Moderator (for synthesis)",
     "namePlaceholder": "e.g. Advisory Board",
+    "newDiscussion": "New Discussion",
+    "newShort": "New",
     "noModerator": "No moderator",
     "noResponse": "No response",
     "protocolMaxRetries": "Max Retries",
@@ -3009,6 +3021,11 @@
     "selectGroups": "Select API groups to import as separate API Call extensions"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "Continue this discussion…",
+      "inputDisabledClosed": "This discussion is closed",
+      "newDiscussion": "New Discussion"
+    },
     "thread": {
       "fileTooLarge": "File must be under 20MB",
       "fileTypeNotAllowed": "This file type is not supported",

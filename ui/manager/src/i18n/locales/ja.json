@@ -65,7 +65,10 @@
     "sectionExternal": "外部",
     "activeConversations": "アクティブな会話",
     "openapi": "OpenAPI",
-    "docs": "ドキュメント"
+    "docs": "ドキュメント",
+    "modeManager": "マネージャー",
+    "modeWorkforce": "ワークフォース",
+    "switchMode": "ワークスペースを切替"
   },
   "theme": {
     "light": "ライト",
@@ -2107,8 +2110,10 @@
     "chooseTemplate": "テンプレートを選択するか、ゼロから始めます。",
     "closeConfirmDescription": "終了すると、すべてのメンバーの会話が完全に終了し、一時的なエージェントはクリーンアップされます。以降のフォローアップや続行はできません。元に戻せません。",
     "composeQuestion": "質問を作成",
+    "continueButton": "継続",
     "continueHint": "すべてのフェーズを新しいラウンドとして再実行します。各エージェントは以前のラウンドのメモリを保持します。続行に添付ファイルを追加することはできません。",
-    "continuePlaceholder": "次のラウンドでグループは何を議論すべきですか？",
+    "continuePlaceholder": "フォローアップ質問でこの議論を継続…",
+    "continueStreamStarted": "継続が開始されました — ライブ配信中",
     "count": "{{count}} グループ",
     "createSuccess": "グループを作成しました",
     "discussing": "エージェントが議論中…",
@@ -2116,9 +2121,16 @@
     "expandInput": "入力欄を拡大",
     "followupHint": "1 名のメンバーに直接フォローアップします。エージェントはディスカッションの全コンテキストを保持し、やり取りはトランスクリプトに追加されます。",
     "followupPlaceholder": "このメンバーにフォローアップの質問をする…",
+    "inputDisabledApproval": "承認待ち…",
+    "inputDisabledClosed": "この議論は終了しました",
+    "inputDisabledCompleted": "ディスカッション完了",
+    "inputDisabledEnded": "この議論は完了しました",
+    "inputDisabledInProgress": "議論が進行中…",
     "membersCount": "{{count}} メンバー",
     "moderator": "モデレーター（統合用）",
     "namePlaceholder": "例: Advisory Board",
+    "newDiscussion": "新しい議論",
+    "newShort": "新規",
     "noModerator": "モデレーターなし",
     "noResponse": "応答なし",
     "protocolMaxRetries": "最大リトライ回数",
@@ -2982,6 +2994,11 @@
     "selectGroups": "個別の API 呼び出し拡張としてインポートする API グループを選択"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "この議論を継続…",
+      "inputDisabledClosed": "この議論は終了しました",
+      "newDiscussion": "新しい議論"
+    },
     "thread": {
       "fileTooLarge": "ファイルは20MB以下にしてください",
       "fileTypeNotAllowed": "このファイルタイプはサポートされていません",

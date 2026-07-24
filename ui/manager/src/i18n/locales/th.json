@@ -65,7 +65,10 @@
     "sectionExternal": "ภายนอก",
     "activeConversations": "บทสนทนาที่ใช้งานอยู่",
     "openapi": "OpenAPI",
-    "docs": "เอกสาร"
+    "docs": "เอกสาร",
+    "modeManager": "ผู้จัดการ",
+    "modeWorkforce": "ทีมงาน",
+    "switchMode": "สลับพื้นที่ทำงาน"
   },
   "theme": {
     "light": "สว่าง",
@@ -2107,8 +2110,10 @@
     "chooseTemplate": "เลือกเทมเพลตหรือเริ่มจากศูนย์",
     "closeConfirmDescription": "การปิดจะสิ้นสุดการสนทนาของสมาชิกทั้งหมดอย่างถาวรและล้างเอเจนต์ชั่วคราวทั้งหมด ไม่สามารถถามติดตามหรือดำเนินการต่อได้อีก ไม่สามารถย้อนกลับได้",
     "composeQuestion": "เขียนคำถาม",
+    "continueButton": "ดำเนินการต่อ",
     "continueHint": "รันทุกเฟสใหม่เป็นรอบใหม่ เอเจนต์ทุกตัวจะเก็บความจำของรอบก่อนหน้า ไม่สามารถเพิ่มไฟล์แนบในการดำเนินการต่อได้",
-    "continuePlaceholder": "กลุ่มควรอภิปรายอะไรในรอบถัดไป?",
+    "continuePlaceholder": "สานต่อการอภิปรายนี้ด้วยคำถามติดตามผล…",
+    "continueStreamStarted": "เริ่มการอภิปรายต่อแล้ว — สตรีมมิ่งสด",
     "count": "{{count}} กลุ่ม",
     "createSuccess": "สร้างกลุ่มสำเร็จ",
     "discussing": "เอเจนต์กำลังอภิปราย…",
@@ -2116,9 +2121,16 @@
     "expandInput": "ขยายช่องป้อนข้อมูล",
     "followupHint": "ถามคำถามติดตามโดยตรงกับสมาชิกคนหนึ่ง เอเจนต์จะเก็บบริบทเต็มจากการอภิปราย การแลกเปลี่ยนจะถูกเพิ่มลงในบันทึก",
     "followupPlaceholder": "ถามคำถามติดตามกับสมาชิกคนนี้…",
+    "inputDisabledApproval": "รอการอนุมัติ…",
+    "inputDisabledClosed": "การอภิปรายนี้ปิดแล้ว",
+    "inputDisabledCompleted": "การสนทนาเสร็จสิ้น",
+    "inputDisabledEnded": "การอภิปรายนี้สิ้นสุดแล้ว",
+    "inputDisabledInProgress": "กำลังดำเนินการอภิปราย…",
     "membersCount": "{{count}} สมาชิก",
     "moderator": "ผู้ดูแล (สำหรับการสังเคราะห์)",
     "namePlaceholder": "เช่น คณะที่ปรึกษา",
+    "newDiscussion": "การอภิปรายใหม่",
+    "newShort": "ใหม่",
     "noModerator": "ไม่มีผู้ดูแล",
     "noResponse": "ไม่มีการตอบกลับ",
     "protocolMaxRetries": "จำนวนลองใหม่สูงสุด",
@@ -2982,6 +2994,11 @@
     "selectGroups": "เลือกกลุ่ม API เพื่อนำเข้าเป็นส่วนขยายการเรียก API แยกต่างหาก"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "สานต่อการอภิปรายนี้…",
+      "inputDisabledClosed": "การอภิปรายนี้ปิดแล้ว",
+      "newDiscussion": "การอภิปรายใหม่"
+    },
     "thread": {
       "fileTooLarge": "ไฟล์ต้องมีขนาดไม่เกิน 20MB",
       "fileTypeNotAllowed": "ไม่รองรับประเภทไฟล์นี้",

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { usePersistedBoolean } from "@/hooks/use-persisted-boolean";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -29,7 +30,7 @@ import { cn } from "@/lib/utils";
  */
 export function WorkforceChat() {
   const { t } = useTranslation();
-  const [showDetails, setShowDetails] = useState(false);
+  const [showDetails, setShowDetails] = usePersistedBoolean("workforce-chat-details-panel", true);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
 
   // Read selected agent from the ChatPanel's shared store

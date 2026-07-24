@@ -65,7 +65,10 @@
     "sectionExternal": "外部",
     "activeConversations": "活跃对话",
     "openapi": "OpenAPI",
-    "docs": "文档"
+    "docs": "文档",
+    "modeManager": "管理器",
+    "modeWorkforce": "团队",
+    "switchMode": "切换工作区"
   },
   "theme": {
     "light": "浅色",
@@ -2107,8 +2110,10 @@
     "chooseTemplate": "选择一个模板或从头开始。",
     "closeConfirmDescription": "关闭将永久结束所有成员对话并清理所有临时智能体。无法再进行跟进或继续。此操作无法撤销。",
     "composeQuestion": "撰写问题",
+    "continueButton": "继续",
     "continueHint": "作为新一轮重新运行所有阶段；每个智能体都保留先前轮次的记忆。继续时无法添加附件。",
-    "continuePlaceholder": "群组在下一轮应该讨论什么？",
+    "continuePlaceholder": "继续此讨论并提出后续问题…",
+    "continueStreamStarted": "已开始继续讨论 — 正在实时传输",
     "count": "{{count}} 个群组",
     "createSuccess": "群组创建成功",
     "discussing": "智能体正在讨论…",
@@ -2116,9 +2121,16 @@
     "expandInput": "展开输入",
     "followupHint": "向某位成员提出直接的跟进问题。该智能体保留讨论的完整上下文；此次交流将添加到记录中。",
     "followupPlaceholder": "向该成员提出跟进问题…",
+    "inputDisabledApproval": "等待批准中…",
+    "inputDisabledClosed": "此讨论已关闭",
+    "inputDisabledCompleted": "讨论已完成",
+    "inputDisabledEnded": "此讨论已结束",
+    "inputDisabledInProgress": "讨论正在进行中…",
     "membersCount": "{{count}} 位成员",
     "moderator": "主持人（用于综合）",
     "namePlaceholder": "例如 顾问委员会",
+    "newDiscussion": "新建讨论",
+    "newShort": "新建",
     "noModerator": "无主持人",
     "noResponse": "无响应",
     "protocolMaxRetries": "最大重试次数",
@@ -2982,6 +2994,11 @@
     "selectGroups": "选择要作为独立 API 调用扩展导入的 API 组"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "继续此讨论…",
+      "inputDisabledClosed": "此讨论已关闭",
+      "newDiscussion": "新建讨论"
+    },
     "thread": {
       "fileTooLarge": "文件必须小于20MB",
       "fileTypeNotAllowed": "不支持此文件类型",

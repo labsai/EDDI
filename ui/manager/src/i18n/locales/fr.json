@@ -65,7 +65,10 @@
     "sectionExternal": "Externe",
     "activeConversations": "Conversations actives",
     "openapi": "OpenAPI",
-    "docs": "Documentation"
+    "docs": "Documentation",
+    "modeManager": "Gestionnaire",
+    "modeWorkforce": "Équipe",
+    "switchMode": "Changer d'espace"
   },
   "theme": {
     "light": "Clair",
@@ -2107,8 +2110,10 @@
     "chooseTemplate": "Choisissez un modèle ou partez de zéro.",
     "closeConfirmDescription": "La clôture met définitivement fin à toutes les conversations des membres et nettoie les agents éphémères. Aucune relance ni continuation n'est ensuite possible. Cette action est irréversible.",
     "composeQuestion": "Composer la question",
+    "continueButton": "Continuer",
     "continueHint": "Réexécute toutes les phases comme un nouveau tour ; chaque agent conserve la mémoire des tours précédents. Impossible d'ajouter des pièces jointes à une continuation.",
-    "continuePlaceholder": "De quoi le groupe doit-il discuter au prochain tour ?",
+    "continuePlaceholder": "Poursuivez cette discussion avec une suite…",
+    "continueStreamStarted": "Reprise démarrée — diffusion en direct",
     "count": "{{count}} groupes",
     "createSuccess": "Groupe créé avec succès",
     "discussing": "Les agents discutent…",
@@ -2116,9 +2121,16 @@
     "expandInput": "Agrandir la saisie",
     "followupHint": "Posez une relance directe à un membre. L'agent conserve tout le contexte de la discussion ; l'échange est ajouté à la transcription.",
     "followupPlaceholder": "Posez une question de relance à ce membre…",
+    "inputDisabledApproval": "En attente d'approbation…",
+    "inputDisabledClosed": "Cette discussion est fermée",
+    "inputDisabledCompleted": "Discussion terminée",
+    "inputDisabledEnded": "Cette discussion est terminée",
+    "inputDisabledInProgress": "Discussion en cours…",
     "membersCount": "{{count}} membres",
     "moderator": "Modérateur (pour la synthèse)",
     "namePlaceholder": "ex. Conseil consultatif",
+    "newDiscussion": "Nouvelle discussion",
+    "newShort": "Nouveau",
     "noModerator": "Aucun modérateur",
     "noResponse": "Aucune réponse",
     "protocolMaxRetries": "Tentatives max.",
@@ -2982,6 +2994,11 @@
     "selectGroups": "Sélectionnez les groupes d'API à importer comme extensions d'appel API distinctes"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "Poursuivre cette discussion…",
+      "inputDisabledClosed": "Cette discussion est fermée",
+      "newDiscussion": "Nouvelle discussion"
+    },
     "thread": {
       "fileTooLarge": "Le fichier doit faire moins de 20 Mo",
       "fileTypeNotAllowed": "Ce type de fichier n'est pas pris en charge",

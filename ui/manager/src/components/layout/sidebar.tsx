@@ -42,6 +42,7 @@ import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onb
 import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
 import { useQuery } from "@tanstack/react-query";
 import { getEddiVersion } from "@/lib/api/system";
+import { ModeSwitcher } from "@/components/shared/mode-switcher";
 
 const navSections = [
   {
@@ -193,6 +194,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             className="h-7 w-auto invert dark:invert-0"
           />
         )}
+      </div>
+
+      {/* Mode switcher (Manager ↔ Workforce) */}
+      <div className="shrink-0 border-b border-sidebar-border p-1.5">
+        <ModeSwitcher collapsed={collapsed} />
       </div>
 
       {/* Navigation with section groupings */}

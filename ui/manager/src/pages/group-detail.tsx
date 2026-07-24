@@ -7,7 +7,7 @@ import {
   PanelRightOpen, PanelRightClose,
   PanelLeftOpen, PanelLeftClose,
   Maximize2, Minimize2, History, X,
-  AlertTriangle,
+  AlertTriangle, Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -32,7 +32,6 @@ import { cn } from "@/lib/utils";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import {
   STYLE_INFO,
-  continueGroupDiscussion,
   followupGroupMember,
   closeGroupConversation,
   type DiscussionStyle,
@@ -127,7 +126,7 @@ export function GroupDetailPage() {
   } = useGroupConversation(groupId || "", selectedConvId || "");
 
   // SSE streaming hook
-  const { streamState, startStream, approveAndStream, abortStream } = useGroupDiscussionStream();
+  const { streamState, startStream, continueStream, approveAndStream, abortStream, resetStream } = useGroupDiscussionStream();
 
   const deleteConvMutation = useDeleteGroupConversation();
   const cancelDiscussionMutation = useCancelGroupDiscussion();
@@ -150,14 +149,49 @@ export function GroupDetailPage() {
     }
   }, [conversations, selectedConvId, streamState.isStreaming, streamState.conversationId]);
 
-  const handleStartDiscussion = useCallback((question: string) => {
+  // ─── Context-aware input mode ─────────────────────────────────
+  const inputMode = useMemo((): "new" | "continue" | "disabled" => {
+    if (streamState.isStreaming) return "disabled";
+    if (!selectedConvId) return "new";
+    if (!selectedConversation) return "disabled"; // still loading
+    const actions = selectedConversation.availableActions ?? [];
+    if (actions.includes("continue")) return "continue";
+    return "disabled";
+  }, [streamState.isStreaming, selectedConvId, selectedConversation]);
+
+  const disabledMessage = useMemo(() => {
+    if (streamState.isStreaming) return t("groups.inputDisabledInProgress", "Discussion in progress…");
+    if (!selectedConvId) return undefined;
+    if (!selectedConversation) return t("common.loading", "Loading…");
+    const state = selectedConversation.state;
+    if (state === "CLOSED") return t("groups.inputDisabledClosed", "This discussion is closed");
+    if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
+    if (state === "AWAITING_APPROVAL") return t("groups.inputDisabledApproval", "Awaiting approval…");
+    if (state === "IN_PROGRESS" || state === "SYNTHESIZING") return t("groups.inputDisabledInProgress", "Discussion in progress…");
+    if (state === "COMPLETED") return t("groups.inputDisabledCompleted", "Discussion completed");
+    return undefined;
+  }, [streamState.isStreaming, selectedConvId, selectedConversation, t]);
+
+  const handleInputSubmit = useCallback((question: string) => {
     if (!groupId) return;
-    pendingDecisionRef.current = null; // abandon any un-acked prior decision
-    // Clear the selected conversation so we show the stream instead
+    if (inputMode === "continue" && selectedConvId) {
+      // SSE streaming continuation
+      continueStream(groupId, selectedConvId, question);
+      toast.info(t("groups.continueStreamStarted", "Continuation started — streaming live"));
+    } else {
+      // New discussion
+      pendingDecisionRef.current = null;
+      setSelectedConvId(null);
+      startStream(groupId, question);
+      toast.info(t("groups.discussionStarted", "Discussion started — streaming live"));
+    }
+  }, [groupId, inputMode, selectedConvId, continueStream, startStream, t]);
+
+  const handleNewDiscussion = useCallback(() => {
+    resetStream();
+    pendingDecisionRef.current = null;
     setSelectedConvId(null);
-    startStream(groupId, question);
-    toast.success(t("groups.discussionStarted", "Discussion started — streaming live"));
-  }, [groupId, startStream, t]);
+  }, [resetStream]);
 
   // Approve/reject a paused group discussion. Resumes over the approve/stream
   // SSE endpoint so the continued discussion renders live in the transcript.
@@ -223,16 +257,6 @@ export function GroupDetailPage() {
     }
   }, [groupId, queryClient]);
 
-  const continueMutation = useMutation({
-    mutationFn: ({ gcId, question }: { gcId: string; question: string }) =>
-      continueGroupDiscussion(groupId!, gcId, question),
-    onSuccess: () => {
-      toast.success(t("groups.continueStarted", "New round started"));
-      invalidateConversations();
-    },
-    onError: (err) => toast.error(friendlyGroupActionError(err, t)),
-  });
-
   const followupMutation = useMutation({
     mutationFn: ({
       gcId,
@@ -260,14 +284,6 @@ export function GroupDetailPage() {
     onError: (err) => toast.error(friendlyGroupActionError(err, t)),
   });
 
-  const handleContinueDiscussion = useCallback(
-    (question: string) => {
-      if (!groupId || !selectedConvId) return;
-      continueMutation.mutate({ gcId: selectedConvId, question });
-    },
-    [groupId, selectedConvId, continueMutation],
-  );
-
   const handleFollowupMember = useCallback(
     (targetAgentId: string, question: string) => {
       if (!groupId || !selectedConvId) return;
@@ -282,7 +298,6 @@ export function GroupDetailPage() {
   }, [groupId, selectedConvId, closeMutation]);
 
   const actionPending =
-    continueMutation.isPending ||
     followupMutation.isPending ||
     closeMutation.isPending;
 
@@ -382,11 +397,19 @@ export function GroupDetailPage() {
       ) : conversationCount > 0 ? (
         <div className="p-1 space-y-0.5">
           {conversations!.map((conv) => (
-            <button
+            <div
               key={conv.id}
+              role="button"
+              tabIndex={0}
               onClick={() => handleSelectConversation(conv.id)}
+              onKeyDown={(e) => {
+                if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+                  e.preventDefault();
+                  handleSelectConversation(conv.id);
+                }
+              }}
               className={cn(
-                "w-full text-start rounded-lg px-3 py-2 transition-all group/item",
+                "w-full text-start rounded-lg px-3 py-2 transition-all group/item cursor-pointer",
                 streamState.isStreaming && conv.id === streamState.conversationId
                   ? "bg-primary/10 border border-primary/30"
                   : selectedConvId === conv.id && !isStreamActive
@@ -455,7 +478,7 @@ export function GroupDetailPage() {
                   </button>
                 )}
               </div>
-            </button>
+            </div>
           ))}
         </div>
       ) : (
@@ -506,6 +529,7 @@ export function GroupDetailPage() {
             setHistoryOpen={setHistoryOpen}
             conversationCount={conversationCount}
             isFullscreen={isFullscreen}
+            onNewDiscussion={handleNewDiscussion}
           >
             {discussionListContent}
           </HistoryDropdown>
@@ -566,15 +590,28 @@ export function GroupDetailPage() {
                 <Clock className="h-3 w-3" />
                 {t("groups.discussions", "Discussions")}
               </h3>
-              <button
-                type="button"
-                onClick={() => setShowDiscussions(false)}
-                className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
-                title={t("groups.hideDiscussions", "Hide discussions panel")}
-                aria-label={t("groups.hideDiscussions", "Hide discussions panel")}
-              >
-                <PanelLeftClose className="h-3.5 w-3.5" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleNewDiscussion}
+                  className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/10 transition-colors"
+                  title={t("groups.newDiscussion", "New Discussion")}
+                  aria-label={t("groups.newDiscussion", "New Discussion")}
+                  data-testid="new-discussion-btn"
+                >
+                  <Plus className="h-3 w-3" />
+                  {t("groups.newShort", "New")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDiscussions(false)}
+                  className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+                  title={t("groups.hideDiscussions", "Hide discussions panel")}
+                  aria-label={t("groups.hideDiscussions", "Hide discussions panel")}
+                >
+                  <PanelLeftClose className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto">
               {discussionListContent}
@@ -625,17 +662,18 @@ export function GroupDetailPage() {
               <DiscussionActions
                 availableActions={selectedConversation.availableActions!}
                 members={safeConfig.members}
-                round={selectedConversation.round}
                 isPending={actionPending}
-                onContinue={handleContinueDiscussion}
                 onFollowup={handleFollowupMember}
                 onCloseDiscussion={handleCloseConversation}
               />
             )}
           {/* Input always at the bottom of the transcript panel */}
           <DiscussionInput
-            onSubmit={handleStartDiscussion}
+            onSubmit={handleInputSubmit}
             isLoading={streamState.isStreaming}
+            mode={inputMode === "continue" ? "continue" : "new"}
+            disabled={inputMode === "disabled"}
+            disabledMessage={disabledMessage}
           />
         </div>
 
@@ -690,12 +728,14 @@ function HistoryDropdown({
   setHistoryOpen,
   conversationCount,
   isFullscreen,
+  onNewDiscussion,
   children,
 }: {
   historyOpen: boolean;
   setHistoryOpen: (v: boolean) => void;
   conversationCount: number;
   isFullscreen?: boolean;
+  onNewDiscussion?: () => void;
   children: React.ReactNode;
 }) {
   const { t } = useTranslation();
@@ -730,11 +770,27 @@ function HistoryDropdown({
       </Button>
       {historyOpen && (
         <div className="absolute end-0 top-full mt-1 z-50 w-72 rounded-xl border border-border bg-card shadow-lg max-h-80 overflow-y-auto animate-in fade-in-0 zoom-in-95 duration-150">
-          <div className="p-3 border-b border-border">
+          <div className="p-3 border-b border-border flex items-center justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
               <Clock className="h-3 w-3" />
               {t("groups.discussions", "Discussions")}
             </h3>
+            {onNewDiscussion && (
+              <button
+                type="button"
+                onClick={() => {
+                  onNewDiscussion();
+                  setHistoryOpen(false);
+                }}
+                className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/10 transition-colors"
+                title={t("groups.newDiscussion", "New Discussion")}
+                aria-label={t("groups.newDiscussion", "New Discussion")}
+                data-testid="new-discussion-btn-mobile"
+              >
+                <Plus className="h-3 w-3" />
+                {t("groups.newShort", "New")}
+              </button>
+            )}
           </div>
           {children}
         </div>

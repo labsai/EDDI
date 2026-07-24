@@ -114,4 +114,66 @@ describe("DiscussionInput", () => {
     await user.type(screen.getByTestId("discussion-input"), "   ");
     expect(screen.getByTestId("start-discussion-btn")).toBeDisabled();
   });
+
+  describe("mode='continue'", () => {
+    it("shows continue placeholder instead of new-discussion placeholder", () => {
+      renderWithProviders(<DiscussionInput onSubmit={vi.fn()} mode="continue" />);
+      const textarea = screen.getByTestId("discussion-input");
+      expect(textarea).toHaveAttribute(
+        "placeholder",
+        expect.stringContaining("follow-up"),
+      );
+    });
+
+    it("shows Continue label on submit button", () => {
+      renderWithProviders(<DiscussionInput onSubmit={vi.fn()} mode="continue" />);
+      expect(screen.getByTestId("start-discussion-btn")).toHaveTextContent("Continue");
+    });
+
+    it("shows RotateCw icon instead of Send", () => {
+      renderWithProviders(<DiscussionInput onSubmit={vi.fn()} mode="continue" />);
+      const btn = screen.getByTestId("start-discussion-btn");
+      expect(btn.querySelector("svg.lucide-rotate-cw")).not.toBeNull();
+      expect(btn.querySelector("svg.lucide-send")).toBeNull();
+    });
+  });
+
+  describe("disabled with message", () => {
+    it("shows disabledMessage as placeholder when disabled", () => {
+      renderWithProviders(
+        <DiscussionInput
+          onSubmit={vi.fn()}
+          disabled
+          disabledMessage="This discussion is closed"
+        />,
+      );
+      const textarea = screen.getByTestId("discussion-input");
+      expect(textarea).toHaveAttribute("placeholder", "This discussion is closed");
+    });
+
+    it("button is disabled when disabled prop is true", () => {
+      renderWithProviders(
+        <DiscussionInput onSubmit={vi.fn()} disabled disabledMessage="Closed" />,
+      );
+      expect(screen.getByTestId("start-discussion-btn")).toBeDisabled();
+    });
+
+    it("expand button is disabled when component is disabled", () => {
+      renderWithProviders(
+        <DiscussionInput onSubmit={vi.fn()} disabled disabledMessage="Closed" />,
+      );
+      const expandBtn = screen.getByRole("button", { name: /expand/i });
+      expect(expandBtn).toBeDisabled();
+    });
+
+    it("blocks submission when disabled even if text is present", () => {
+      const onSubmit = vi.fn();
+      renderWithProviders(
+        <DiscussionInput onSubmit={onSubmit} disabled disabledMessage="Closed" />,
+      );
+      expect(screen.getByTestId("discussion-input")).toBeDisabled();
+      expect(screen.getByTestId("start-discussion-btn")).toBeDisabled();
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -65,7 +65,10 @@
     "sectionExternal": "बाहरी",
     "activeConversations": "सक्रिय बातचीत",
     "openapi": "OpenAPI",
-    "docs": "दस्तावेज़"
+    "docs": "दस्तावेज़",
+    "modeManager": "प्रबंधक",
+    "modeWorkforce": "कार्यबल",
+    "switchMode": "कार्यक्षेत्र बदलें"
   },
   "theme": {
     "light": "लाइट",
@@ -2107,8 +2110,10 @@
     "chooseTemplate": "एक टेम्पलेट चुनें या शुरू से आरंभ करें।",
     "closeConfirmDescription": "बंद करने से सभी सदस्य बातचीत स्थायी रूप से समाप्त हो जाती हैं और किसी भी अस्थायी एजेंट को साफ़ कर दिया जाता है। कोई और फ़ॉलो-अप या निरंतरता संभव नहीं है। इसे पूर्ववत नहीं किया जा सकता।",
     "composeQuestion": "प्रश्न रचें",
+    "continueButton": "जारी रखें",
     "continueHint": "सभी चरणों को एक नए राउंड के रूप में पुनः चलाता है; प्रत्येक एजेंट पिछले राउंड की मेमोरी रखता है। निरंतरता में अनुलग्नक नहीं जोड़े जा सकते।",
-    "continuePlaceholder": "अगले राउंड में समूह को किस पर चर्चा करनी चाहिए?",
+    "continuePlaceholder": "अनुवर्ती प्रश्न के साथ इस चर्चा को आगे बढ़ाएं…",
+    "continueStreamStarted": "निरंतरता शुरू हुई — लाइव स्ट्रीमिंग",
     "count": "{{count}} समूह",
     "createSuccess": "समूह सफलतापूर्वक बनाया गया",
     "discussing": "एजेंट चर्चा कर रहे हैं…",
@@ -2116,9 +2121,16 @@
     "expandInput": "इनपुट विस्तृत करें",
     "followupHint": "किसी एक सदस्य से सीधा फ़ॉलो-अप पूछें। एजेंट चर्चा से पूरा संदर्भ रखता है; आदान-प्रदान ट्रांसक्रिप्ट में जोड़ा जाता है।",
     "followupPlaceholder": "इस सदस्य से एक फ़ॉलो-अप प्रश्न पूछें…",
+    "inputDisabledApproval": "स्वीकृति की प्रतीक्षा है…",
+    "inputDisabledClosed": "यह चर्चा बंद है",
+    "inputDisabledCompleted": "चर्चा पूर्ण",
+    "inputDisabledEnded": "यह चर्चा समाप्त हो चुकी है",
+    "inputDisabledInProgress": "चर्चा प्रगति पर है…",
     "membersCount": "{{count}} सदस्य",
     "moderator": "मॉडरेटर (संश्लेषण के लिए)",
     "namePlaceholder": "उदा. Advisory Board",
+    "newDiscussion": "नई चर्चा",
+    "newShort": "नया",
     "noModerator": "कोई मॉडरेटर नहीं",
     "noResponse": "कोई प्रतिक्रिया नहीं",
     "protocolMaxRetries": "अधिकतम पुनः प्रयास",
@@ -2982,6 +2994,11 @@
     "selectGroups": "अलग API कॉल एक्सटेंशन के रूप में आयात करने के लिए API समूह चुनें"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "इस चर्चा को जारी रखें…",
+      "inputDisabledClosed": "यह चर्चा बंद है",
+      "newDiscussion": "नई चर्चा"
+    },
     "thread": {
       "fileTooLarge": "फ़ाइल 20MB से कम होनी चाहिए",
       "fileTypeNotAllowed": "यह फ़ाइल प्रकार समर्थित नहीं है",

@@ -4,6 +4,7 @@ import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 
 const mockStreamGroupDiscussion = vi.fn();
 const mockStreamGroupApproval = vi.fn();
+const mockStreamGroupContinue = vi.fn();
 
 vi.mock("@/lib/api/groups", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/api/groups")>();
@@ -11,6 +12,7 @@ vi.mock("@/lib/api/groups", async (importOriginal) => {
     ...original,
     streamGroupDiscussion: (...args: unknown[]) => mockStreamGroupDiscussion(...args),
     streamGroupApproval: (...args: unknown[]) => mockStreamGroupApproval(...args),
+    streamGroupContinue: (...args: unknown[]) => mockStreamGroupContinue(...args),
   };
 });
 
@@ -18,6 +20,7 @@ describe("useGroupDiscussionStream", () => {
   beforeEach(() => {
     mockStreamGroupDiscussion.mockReset();
     mockStreamGroupApproval.mockReset();
+    mockStreamGroupContinue.mockReset();
   });
 
   it("returns initial state", () => {
@@ -512,5 +515,191 @@ describe("useGroupDiscussionStream", () => {
     expect(result.current.streamState.error).toBe("Concurrent modification");
     expect(result.current.streamState.isStreaming).toBe(false);
     expect(result.current.streamState.hitlResume).toBeNull();
+  });
+
+  // ── continueStream ──
+
+  it("continueStream resets per-round derived fields while keeping transcript", async () => {
+    // First: run a full discussion to populate state
+    async function* firstRound() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-300", question: "Round 1" }) };
+      yield {
+        type: "task_plan_created",
+        data: JSON.stringify({ tasks: [{ id: "t1", subject: "R", assignedTo: "A", priority: 0 }] }),
+      };
+      yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 0, phaseName: "Execute", phaseType: "EXECUTE" }) };
+      yield { type: "speaker_start", data: JSON.stringify({ agentId: "a1", displayName: "A", phaseIndex: 0, phaseName: "Execute" }) };
+      yield { type: "speaker_complete", data: JSON.stringify({ agentId: "a1", displayName: "A", phaseIndex: 0, response: "Done" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Round 1 answer" }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(firstRound());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Round 1");
+    });
+
+    // Verify first round populated derived fields
+    expect(result.current.streamState.synthesizedAnswer).toBe("Round 1 answer");
+    expect(result.current.streamState.taskPlan).not.toBeNull();
+    expect(result.current.streamState.tasksCompleted.has("t1")).toBe(true);
+
+    // Second: continueStream — should reset derived fields
+    async function* secondRound() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-300", question: "Round 2" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Round 2 answer" }) };
+    }
+
+    mockStreamGroupContinue.mockReturnValue(secondRound());
+
+    await act(async () => {
+      await result.current.continueStream("group-1", "conv-300", "Round 2");
+    });
+
+    // Derived fields should reflect round 2 only
+    expect(result.current.streamState.synthesizedAnswer).toBe("Round 2 answer");
+    expect(result.current.streamState.taskPlan).toBeNull();
+    expect(result.current.streamState.tasksCompleted.size).toBe(0);
+    expect(result.current.streamState.tasksInProgress.size).toBe(0);
+    expect(result.current.streamState.taskVerifications.size).toBe(0);
+    expect(result.current.streamState.hitlPause).toBeNull();
+    expect(result.current.streamState.cancelInfo).toBeNull();
+  });
+
+  it("group_start appends the question on continuation (does not replace transcript)", async () => {
+    // First round
+    async function* firstRound() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-400", question: "First Q" }) };
+      yield { type: "speaker_complete", data: JSON.stringify({ agentId: "a1", displayName: "Bot", phaseIndex: 0, response: "First A" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Synthesis 1" }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(firstRound());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "First Q");
+    });
+
+    const transcriptAfterRound1 = result.current.streamState.transcript.length;
+    expect(transcriptAfterRound1).toBeGreaterThanOrEqual(2); // user question + speaker
+
+    // Continue — group_start should APPEND the new question, not replace
+    async function* continuation() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-400", question: "Follow up Q" }) };
+      yield { type: "speaker_complete", data: JSON.stringify({ agentId: "a1", displayName: "Bot", phaseIndex: 0, response: "Follow up A" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Synthesis 2" }) };
+    }
+
+    mockStreamGroupContinue.mockReturnValue(continuation());
+
+    await act(async () => {
+      await result.current.continueStream("group-1", "conv-400", "Follow up Q");
+    });
+
+    // Transcript should contain entries from BOTH rounds
+    expect(result.current.streamState.transcript.length).toBeGreaterThan(transcriptAfterRound1);
+    // First entry is still the original question
+    expect(result.current.streamState.transcript[0]?.content).toBe("First Q");
+    // New question was appended (not at index 0)
+    const followUpEntry = result.current.streamState.transcript.find(
+      (e) => e.content === "Follow up Q",
+    );
+    expect(followUpEntry).toBeDefined();
+    expect(followUpEntry?.speakerAgentId).toBe("user");
+  });
+
+  it("group_start replaces transcript for a new discussion (no prior conversationId)", async () => {
+    async function* events() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-500", question: "Brand new" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Done" }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(events());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Brand new");
+    });
+
+    expect(result.current.streamState.transcript).toHaveLength(1);
+    expect(result.current.streamState.transcript[0]?.content).toBe("Brand new");
+  });
+
+  // ── resetStream ──
+
+  it("provides resetStream as a stable callback", () => {
+    const { result, rerender } = renderHook(() => useGroupDiscussionStream());
+
+    expect(typeof result.current.resetStream).toBe("function");
+
+    const ref1 = result.current.resetStream;
+    rerender();
+    expect(result.current.resetStream).toBe(ref1);
+  });
+
+  it("resetStream clears all state back to initial", async () => {
+    // Populate state via a full discussion
+    async function* events() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-600", question: "Q" }) };
+      yield {
+        type: "task_plan_created",
+        data: JSON.stringify({ tasks: [{ id: "t1", subject: "R", assignedTo: "A", priority: 0 }] }),
+      };
+      yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 0, phaseName: "Verify", phaseType: "VERIFY" }) };
+      yield { type: "task_verified", data: JSON.stringify({ taskId: "t1", passed: true, feedback: "OK" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Done" }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(events());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Q");
+    });
+
+    // Confirm state is populated
+    expect(result.current.streamState.conversationId).toBe("conv-600");
+    expect(result.current.streamState.synthesizedAnswer).toBe("Done");
+    expect(result.current.streamState.taskPlan).not.toBeNull();
+    expect(result.current.streamState.taskVerifications.size).toBe(1);
+
+    // Reset
+    act(() => {
+      result.current.resetStream();
+    });
+
+    // Everything should be back to initial
+    expect(result.current.streamState.isStreaming).toBe(false);
+    expect(result.current.streamState.conversationId).toBeNull();
+    expect(result.current.streamState.state).toBe("CREATED");
+    expect(result.current.streamState.transcript).toEqual([]);
+    expect(result.current.streamState.synthesizedAnswer).toBeNull();
+    expect(result.current.streamState.currentPhase).toBeNull();
+    expect(result.current.streamState.error).toBeNull();
+    expect(result.current.streamState.taskPlan).toBeNull();
+    expect(result.current.streamState.taskVerifications.size).toBe(0);
+    expect(result.current.streamState.tasksInProgress.size).toBe(0);
+    expect(result.current.streamState.tasksCompleted.size).toBe(0);
+    expect(result.current.streamState.activeSpeakers.size).toBe(0);
+    expect(result.current.streamState.hitlPause).toBeNull();
+    expect(result.current.streamState.hitlResume).toBeNull();
+    expect(result.current.streamState.cancelInfo).toBeNull();
+    expect(result.current.streamState.startedAt).toBeNull();
+  });
+
+  it("provides continueStream as a stable callback", () => {
+    const { result, rerender } = renderHook(() => useGroupDiscussionStream());
+
+    expect(typeof result.current.continueStream).toBe("function");
+
+    const ref1 = result.current.continueStream;
+    rerender();
+    expect(result.current.continueStream).toBe(ref1);
   });
 });

@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { toast } from "sonner";
 import { renderPage } from "@/test/test-utils";
 import { GroupDetailPage } from "@/pages/group-detail";
 import { server } from "@/test/mocks/server";
@@ -495,14 +494,14 @@ describe("GroupDetailPage", () => {
     );
   }
 
-  it("renders the action bar for a COMPLETED conversation with exactly the backend availableActions", async () => {
+  it("renders the action bar for a COMPLETED conversation with followup and close (continue handled by input)", async () => {
     useLifecycleConv(makeLifecycleConv());
     renderGroupDetail();
 
-    // All three backend-provided actions render.
-    expect(await screen.findByTestId("action-continue")).toBeInTheDocument();
-    expect(screen.getByTestId("action-followup")).toBeInTheDocument();
+    // Continue is handled by the context-aware input, not the action bar
+    expect(await screen.findByTestId("action-followup")).toBeInTheDocument();
     expect(screen.getByTestId("action-close")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-continue")).not.toBeInTheDocument();
   });
 
   it("renders only Close for a FAILED conversation (availableActions=['close'])", async () => {
@@ -512,7 +511,6 @@ describe("GroupDetailPage", () => {
     renderGroupDetail();
 
     expect(await screen.findByTestId("action-close")).toBeInTheDocument();
-    expect(screen.queryByTestId("action-continue")).not.toBeInTheDocument();
     expect(screen.queryByTestId("action-followup")).not.toBeInTheDocument();
   });
 
@@ -530,32 +528,14 @@ describe("GroupDetailPage", () => {
     expect(screen.queryByTestId("action-close")).not.toBeInTheDocument();
   });
 
-  it("Continue calls the /continue endpoint (new round) with the typed question", async () => {
-    const user = userEvent.setup();
-    let capturedGcId = "";
-    let capturedBody: { question?: string } = {};
+  it("input switches to continue mode for a COMPLETED conversation", async () => {
     useLifecycleConv(makeLifecycleConv());
-    server.use(
-      http.post(
-        "*/groups/:groupId/conversations/:gcId/continue",
-        async ({ request, params }) => {
-          capturedGcId = params.gcId as string;
-          capturedBody = (await request.json()) as { question?: string };
-          return HttpResponse.json(makeLifecycleConv({ round: 2 }));
-        },
-      ),
-    );
-
     renderGroupDetail();
-    await user.click(await screen.findByTestId("action-continue"));
-    await user.type(
-      await screen.findByTestId("group-continue-input"),
-      "Reassess after the security patch",
-    );
-    await user.click(screen.getByTestId("group-continue-submit"));
 
-    await waitFor(() => expect(capturedGcId).toBe("gc-life"));
-    expect(capturedBody.question).toBe("Reassess after the security patch");
+    // Wait for the conversation to load and input to switch to continue mode
+    await waitFor(() => {
+      expect(screen.getByTestId("start-discussion-btn")).toHaveTextContent("Continue");
+    });
   });
 
   it("Follow up with a member calls the /followup endpoint with target + question", async () => {
@@ -627,30 +607,15 @@ describe("GroupDetailPage", () => {
     await waitFor(() => expect(closeSpy).toHaveBeenCalledWith("gc-life"));
   });
 
-  it("maps a 409 continue failure to a friendly retry message", async () => {
-    const user = userEvent.setup();
-    const errorSpy = vi.spyOn(toast, "error").mockImplementation(() => "");
-    useLifecycleConv(makeLifecycleConv());
-    server.use(
-      http.post("*/groups/:groupId/conversations/:gcId/continue", () =>
-        HttpResponse.json({ message: "conflict" }, { status: 409 }),
-      ),
+  it("input is disabled for a CLOSED conversation", async () => {
+    useLifecycleConv(
+      makeLifecycleConv({ state: "CLOSED", availableActions: [] }),
     );
-
     renderGroupDetail();
-    await user.click(await screen.findByTestId("action-continue"));
-    await user.type(
-      await screen.findByTestId("group-continue-input"),
-      "Another round",
-    );
-    await user.click(screen.getByTestId("group-continue-submit"));
 
-    await waitFor(() => {
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/Another operation is still in progress/i),
-      );
-    });
-    errorSpy.mockRestore();
+    await screen.findByTestId("synthesis-card");
+    const textarea = screen.getByTestId("discussion-input");
+    expect(textarea).toBeDisabled();
   });
 
   it("conversation state uses STATE_CONFIG for label and color", async () => {

@@ -65,7 +65,10 @@
     "sectionExternal": "Extern",
     "activeConversations": "Aktive Gespräche",
     "openapi": "OpenAPI",
-    "docs": "Dokumentation"
+    "docs": "Dokumentation",
+    "modeManager": "Manager",
+    "modeWorkforce": "Workforce",
+    "switchMode": "Arbeitsbereich wechseln"
   },
   "theme": {
     "light": "Hell",
@@ -2107,8 +2110,10 @@
     "chooseTemplate": "Wählen Sie eine Vorlage oder beginnen Sie von Grund auf.",
     "closeConfirmDescription": "Das Schließen beendet dauerhaft alle Mitglieder-Gespräche und bereinigt alle kurzlebigen Agenten. Weitere Folgefragen oder Fortsetzungen sind nicht möglich. Dies kann nicht rückgängig gemacht werden.",
     "composeQuestion": "Frage verfassen",
+    "continueButton": "Fortsetzen",
     "continueHint": "Führt alle Phasen als neue Runde erneut aus; jeder Agent behält die Erinnerung an frühere Runden. Zu einer Fortsetzung können keine Anhänge hinzugefügt werden.",
-    "continuePlaceholder": "Was soll die Gruppe in der nächsten Runde diskutieren?",
+    "continuePlaceholder": "Führen Sie diese Diskussion mit einer Nachfrage fort…",
+    "continueStreamStarted": "Fortsetzung gestartet — Live-Streaming",
     "count": "{{count}} Gruppen",
     "createSuccess": "Gruppe erfolgreich erstellt",
     "discussing": "Agenten diskutieren…",
@@ -2116,9 +2121,16 @@
     "expandInput": "Eingabe erweitern",
     "followupHint": "Stellen Sie einem Mitglied eine direkte Folgefrage. Der Agent behält den vollständigen Kontext der Diskussion; der Austausch wird zum Transkript hinzugefügt.",
     "followupPlaceholder": "Diesem Mitglied eine Folgefrage stellen…",
+    "inputDisabledApproval": "Wartet auf Genehmigung…",
+    "inputDisabledClosed": "Diese Diskussion ist geschlossen",
+    "inputDisabledCompleted": "Diskussion abgeschlossen",
+    "inputDisabledEnded": "Diese Diskussion wurde beendet",
+    "inputDisabledInProgress": "Diskussion läuft…",
     "membersCount": "{{count}} Mitglieder",
     "moderator": "Moderator (für die Zusammenfassung)",
     "namePlaceholder": "z. B. Beratungsgremium",
+    "newDiscussion": "Neue Diskussion",
+    "newShort": "Neu",
     "noModerator": "Kein Moderator",
     "noResponse": "Keine Antwort",
     "protocolMaxRetries": "Max. Wiederholungen",
@@ -2982,6 +2994,11 @@
     "selectGroups": "API-Gruppen zum Importieren als separate API-Aufruf-Erweiterungen auswählen"
   },
   "Workforce": {
+    "board": {
+      "continuePlaceholder": "Diese Diskussion fortsetzen…",
+      "inputDisabledClosed": "Diese Diskussion ist geschlossen",
+      "newDiscussion": "Neue Diskussion"
+    },
     "thread": {
       "fileTooLarge": "Datei muss kleiner als 20MB sein",
       "fileTypeNotAllowed": "Dieser Dateityp wird nicht unterstützt",

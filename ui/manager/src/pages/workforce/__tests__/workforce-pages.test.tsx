@@ -20,6 +20,9 @@ describe("Workforce Pages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useChatStore.setState({ selectedAgentId: null, selectedAgentName: null });
+    // Clear localStorage so panel-open defaults are predictable
+    localStorage.removeItem("workforce-chat-details-panel");
+    localStorage.removeItem("workforce-board-config-panel");
   });
 
   describe("WorkforceChat", () => {
@@ -41,7 +44,8 @@ describe("Workforce Pages", () => {
       // Toggle button renders when agent is selected (aria-label contains 'agent details')
       const toggleBtn = screen.getByRole("button", { name: /agent details/i });
       expect(toggleBtn).toBeInTheDocument();
-      expect(toggleBtn).toHaveAttribute("aria-expanded", "false");
+      // Default is now open (true) — panel visible by default
+      expect(toggleBtn).toHaveAttribute("aria-expanded", "true");
     });
   });
 
@@ -68,8 +72,10 @@ describe("Workforce Pages", () => {
       // "grp1" is typically provided by the mock server
       renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
 
-      // Group name is shown (grp1 = "Product Review Panel")
-      expect(await screen.findByText(/Product Review Panel/i)).toBeInTheDocument();
+      // Group name is shown (grp1 = "Product Review Panel") — may appear in
+      // both the heading and the config panel (which is open by default).
+      const matches = await screen.findAllByText(/Product Review Panel/i);
+      expect(matches.length).toBeGreaterThanOrEqual(1);
 
       // Back link
       const backLink = screen.getByRole("link", { name: /back/i });
@@ -80,8 +86,9 @@ describe("Workforce Pages", () => {
       const user = userEvent.setup();
       renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
 
-      // Wait for group load
-      expect(await screen.findByText(/Product Review Panel/i)).toBeInTheDocument();
+      // Wait for group load — may appear in both heading and config panel
+      const matches = await screen.findAllByText(/Product Review Panel/i);
+      expect(matches.length).toBeGreaterThanOrEqual(1);
 
       // Click "Team" toggle — find by aria-label
       const teamBtn = screen.getByRole("button", { name: /team|members/i });
