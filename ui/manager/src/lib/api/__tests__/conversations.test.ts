@@ -133,7 +133,7 @@ describe("extractOutput", () => {
     const output = {
       output: ["Line 1", "Line 2"],
     };
-    expect(extractOutput(output)).toBe("Line 1\nLine 2");
+    expect(extractOutput(output)).toBe("Line 1\n\nLine 2");
   });
 
   it("extracts from flat output:text:* keys with string values", () => {
@@ -141,14 +141,14 @@ describe("extractOutput", () => {
       "output:text:greet": "Hello!",
       "output:text:farewell": "Goodbye!",
     };
-    expect(extractOutput(output)).toBe("Hello!\nGoodbye!");
+    expect(extractOutput(output)).toBe("Hello!\n\nGoodbye!");
   });
 
   it("extracts from flat output:text:* keys with array values", () => {
     const output = {
       "output:text:action": ["Response 1", { text: "Response 2" }],
     };
-    expect(extractOutput(output)).toBe("Response 1\nResponse 2");
+    expect(extractOutput(output)).toBe("Response 1\n\nResponse 2");
   });
 
   it("extracts from flat output:text:* keys with object value", () => {
@@ -172,7 +172,7 @@ describe("extractOutput", () => {
     const output = {
       output: ["text", { text: "object" }, { noText: true }],
     };
-    expect(extractOutput(output)).toBe("text\nobject");
+    expect(extractOutput(output)).toBe("text\n\nobject");
   });
 });
 

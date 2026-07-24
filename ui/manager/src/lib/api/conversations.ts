@@ -140,7 +140,7 @@ export function extractOutput(conversationOutput?: ConversationOutput): string |
       if (typeof item === "string") texts.push(item);
       else if (item?.text) texts.push(item.text as string);
     }
-    if (texts.length > 0) return texts.join("\n");
+    if (texts.length > 0) return texts.join("\n\n");
   }
 
   // Format 2: Flat keys like "output:text:*" (from conversationSteps)
@@ -158,7 +158,7 @@ export function extractOutput(conversationOutput?: ConversationOutput): string |
       texts.push((val as Record<string, unknown>).text as string);
     }
   }
-  return texts.length > 0 ? texts.join("\n") : undefined;
+  return texts.length > 0 ? texts.join("\n\n") : undefined;
 }
 
 /** An input field requested by the backend (from InputFieldOutputItem). */
