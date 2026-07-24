@@ -518,7 +518,7 @@ export function AgentDetailsPanel({
               {/* Memory Tools */}
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground flex items-center gap-1.5">
-                  <Brain className="h-3 w-3 text-indigo-400" />
+                  <Database className="h-3 w-3 text-indigo-400" />
                   {t("Workforce.agentEditor.memoryTools", "Memory Tools")}
                 </span>
                 <Badge
