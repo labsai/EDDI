@@ -3039,6 +3039,24 @@
       "attachmentLimit": "Maximum {{max}} attachments per message",
       "notForwarded": "File stored but too large to send to model",
       "uploadFailed": "Upload failed: {{error}}"
+    },
+    "chat": {
+      "agentDetails": "Agent Details",
+      "selectToView": "Select an agent to view details",
+      "hideDetails": "Hide details panel",
+      "editAgent": "Edit Agent",
+      "auditLogs": "Audit Logs",
+      "triggers": "View Triggers"
+    },
+    "agentEditor": {
+      "capabilities": "Capabilities",
+      "workflows": "Workflows",
+      "features": "Features & Security",
+      "a2aEnabled": "Agent-to-Agent",
+      "memoryTools": "Memory Tools",
+      "signedMessages": "Signed Messages",
+      "strictMemory": "Strict Memory",
+      "hitlMode": "Approval Mode"
     }
   }
 }

@@ -2973,7 +2973,25 @@
     "tags": "Etiquetas",
     "templateEnabled": "Activar la resolución de plantillas",
     "templateEnabledHint": "Cuando está desactivada, los marcadores {{}} del contenido se tratan como texto literal (útil para ejemplos de código).",
-    "usageHint": "Uso:"
+    "usageHint": "Uso:",
+    "chat": {
+      "agentDetails": "Detalles del agente",
+      "selectToView": "Selecciona un agente para ver los detalles",
+      "hideDetails": "Ocultar detalles",
+      "editAgent": "Editar agente",
+      "auditLogs": "Registros de auditoría",
+      "triggers": "Ver activadores"
+    },
+    "agentEditor": {
+      "capabilities": "Capacidades",
+      "workflows": "Flujos de trabajo",
+      "features": "Funciones y Seguridad",
+      "a2aEnabled": "Agente a Agente",
+      "memoryTools": "Herramientas de memoria",
+      "signedMessages": "Mensajes firmados",
+      "strictMemory": "Memoria estricta",
+      "hitlMode": "Modo de aprobación"
+    }
   },
   "status": {
     "deployed": "Desplegado",

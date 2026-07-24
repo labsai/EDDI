@@ -1994,7 +1994,7 @@
         "step3Desc": "Polices bearbeiten oder verwaiste Gruppen entfernen."
       },
       "logs": {
-    "newLogs": "Neue Logs",
+        "newLogs": "Neue Logs",
         "title": "Service-Logs-Tour",
         "step1Title": "Live vs Historie",
         "step1Desc": "Wählen Sie zwischen Live-Streams und Archivsuche.",
@@ -3012,6 +3012,24 @@
       "attachmentLimit": "Maximal {{max}} Anhänge pro Nachricht",
       "notForwarded": "Datei gespeichert, aber zu groß für das Modell",
       "uploadFailed": "Upload fehlgeschlagen: {{error}}"
+    },
+    "chat": {
+      "agentDetails": "Agenten-Details",
+      "selectToView": "Wähle einen Agenten, um Details anzuzeigen",
+      "hideDetails": "Details ausblenden",
+      "editAgent": "Agent bearbeiten",
+      "auditLogs": "Audit-Protokolle",
+      "triggers": "Trigger anzeigen"
+    },
+    "agentEditor": {
+      "capabilities": "Fähigkeiten",
+      "workflows": "Workflows",
+      "features": "Funktionen & Sicherheit",
+      "a2aEnabled": "Agent-zu-Agent",
+      "memoryTools": "Speicher-Werkzeuge",
+      "signedMessages": "Signierte Nachrichten",
+      "strictMemory": "Strikter Speicher",
+      "hitlMode": "Freigabemodus"
     }
   }
 }

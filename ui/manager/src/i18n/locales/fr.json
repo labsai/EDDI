@@ -1994,7 +1994,7 @@
         "step3Desc": "Affichez, supprimez et réorganisez vos environnements de concert LLM."
       },
       "logs": {
-    "newLogs": "Nouveaux logs",
+        "newLogs": "Nouveaux logs",
         "title": "Visite des Logs Systèmes",
         "step1Title": "Surveiller",
         "step1Desc": "Supervisez vos instances en basculant des flux live aux bases archivées.",
@@ -3012,6 +3012,24 @@
       "attachmentLimit": "Maximum {{max}} pièces jointes par message",
       "notForwarded": "Fichier stocké mais trop volumineux pour le modèle",
       "uploadFailed": "Échec du téléchargement : {{error}}"
+    },
+    "chat": {
+      "agentDetails": "Détails de l agent",
+      "selectToView": "Sélectionnez un agent pour voir les détails",
+      "hideDetails": "Masquer les détails",
+      "editAgent": "Modifier l agent",
+      "auditLogs": "Journaux d audit",
+      "triggers": "Voir les déclencheurs"
+    },
+    "agentEditor": {
+      "capabilities": "Capacités",
+      "workflows": "Workflows",
+      "features": "Fonctionnalités & Sécurité",
+      "a2aEnabled": "Agent à Agent",
+      "memoryTools": "Outils de mémoire",
+      "signedMessages": "Messages signés",
+      "strictMemory": "Mémoire stricte",
+      "hitlMode": "Mode d approbation"
     }
   }
 }

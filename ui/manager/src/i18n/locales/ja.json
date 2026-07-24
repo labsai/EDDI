@@ -1994,7 +1994,7 @@
         "step3Desc": "共同環境を管理し、ポリシーを編集し、不要になったグループを削除します。"
       },
       "logs": {
-    "newLogs": "新しいログ",
+        "newLogs": "新しいログ",
         "title": "システムログ ツアー",
         "step1Title": "ライブと履歴",
         "step1Desc": "システムログのリアルタイムストリームと、履歴ログの検索を切り替えます。",
@@ -3012,6 +3012,24 @@
       "attachmentLimit": "メッセージあたり最大{{max}}件の添付",
       "notForwarded": "ファイルは保存されましたがモデルに送信するには大きすぎます",
       "uploadFailed": "アップロード失敗：{{error}}"
+    },
+    "chat": {
+      "agentDetails": "エージェントの詳細",
+      "selectToView": "エージェントを選択して詳細を表示",
+      "hideDetails": "詳細パネルを非表示",
+      "editAgent": "エージェントを編集",
+      "auditLogs": "監査ログ",
+      "triggers": "トリガーを表示"
+    },
+    "agentEditor": {
+      "capabilities": "機能・能力",
+      "workflows": "ワークフロー",
+      "features": "機能とセキュリティ",
+      "a2aEnabled": "エージェント間通信",
+      "memoryTools": "メモリツール",
+      "signedMessages": "署名付きメッセージ",
+      "strictMemory": "厳格メモリ",
+      "hitlMode": "承認モード"
     }
   }
 }

@@ -1994,7 +1994,7 @@
         "step3Desc": "협동 환경 관리, 정책 수정 및 더 이상 사용되지 않는 그룹들을 삭제하세요."
       },
       "logs": {
-    "newLogs": "새 로그",
+        "newLogs": "새 로그",
         "title": "시스템 로그 투어",
         "step1Title": "라이브 대 옛 기록",
         "step1Desc": "시스템 로그의 실시간 스트림과 과거 로그 검색 사이를 쉽게 전환하세요.",
@@ -3012,6 +3012,24 @@
       "attachmentLimit": "메시지당 최대 {{max}}개 첨부 파일",
       "notForwarded": "파일이 저장되었지만 모델에 전송하기에 너무 큽니다",
       "uploadFailed": "업로드 실패: {{error}}"
+    },
+    "chat": {
+      "agentDetails": "에이전트 상세 정보",
+      "selectToView": "상세 정보를 보려면 에이전트를 선택하세요",
+      "hideDetails": "상세 패널 숨기기",
+      "editAgent": "에이전트 편집",
+      "auditLogs": "감사 로그",
+      "triggers": "트리거 보기"
+    },
+    "agentEditor": {
+      "capabilities": "역량",
+      "workflows": "워크플로",
+      "features": "기능 및 보안",
+      "a2aEnabled": "에이전트 간 통신",
+      "memoryTools": "메모리 도구",
+      "signedMessages": "서명된 메시지",
+      "strictMemory": "엄격한 메모리",
+      "hitlMode": "승인 모드"
     }
   }
 }

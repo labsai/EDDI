@@ -1994,7 +1994,7 @@
         "step3Desc": "管控不同的群体配置环境、删除闲置组件。"
       },
       "logs": {
-    "newLogs": "新日志",
+        "newLogs": "新日志",
         "title": "系统日志导览",
         "step1Title": "实时与历史",
         "step1Desc": "平台提供系统日志实时数据流展示与存储索引后的历史探查手段切换。",
@@ -3012,6 +3012,24 @@
       "attachmentLimit": "每条消息最多 {{max}} 个附件",
       "notForwarded": "文件已存储但太大，无法发送给模型",
       "uploadFailed": "上传失败：{{error}}"
+    },
+    "chat": {
+      "agentDetails": "智能体详情",
+      "selectToView": "选择智能体查看详情",
+      "hideDetails": "隐藏详情面板",
+      "editAgent": "编辑智能体",
+      "auditLogs": "审计日志",
+      "triggers": "查看触发器"
+    },
+    "agentEditor": {
+      "capabilities": "能力",
+      "workflows": "工作流",
+      "features": "功能与安全",
+      "a2aEnabled": "智能体间通信",
+      "memoryTools": "内存工具",
+      "signedMessages": "签名消息",
+      "strictMemory": "严格内存",
+      "hitlMode": "审批模式"
     }
   }
 }

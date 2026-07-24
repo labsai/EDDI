@@ -8,15 +8,12 @@ import {
 import { useParams, useLocation, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { useQuery } from "@tanstack/react-query";
 import {
   Paperclip,
   X,
   ChevronLeft,
   PanelRightClose,
   PanelRightOpen,
-  Pencil,
-  MessageSquare,
   FileText,
   AlertTriangle,
   Loader2,
@@ -36,7 +33,6 @@ import {
   sendMessageWithContext,
   readConversation,
 } from "@/lib/api/chat";
-import { getAgent } from "@/lib/api/agents";
 import {
   uploadAttachment,
   deleteAttachment,
@@ -51,9 +47,9 @@ import {
 import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
 import type { SimpleConversationStep } from "@/lib/api/conversations";
 import { ContextCard } from "@/components/workforce/context-card";
+import { AgentDetailsPanel } from "@/components/workforce/agent-details-panel";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -637,13 +633,6 @@ function WorkforceThread() {
   const [showDetails, setShowDetails] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
 
-  // Fetch full agent data for the details panel
-  const { data: agentData, isLoading: agentLoading } = useQuery({
-    queryKey: ["agent-detail", memberId],
-    queryFn: () => getAgent(memberId),
-    enabled: !!memberId && showDetails,
-  });
-
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initRef = useRef(false);
@@ -1118,141 +1107,11 @@ function WorkforceThread() {
 
       {/* Right details panel */}
       {showDetails && (
-        <div className="w-72 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden">
-          <div className="p-3 border-b border-border flex items-center justify-between shrink-0">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("Workforce.chat.agentDetails", "Agent Details")}
-            </h3>
-            <button
-              type="button"
-              onClick={() => setShowDetails(false)}
-              className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={t("Workforce.chat.hideDetails", "Hide details panel")}
-            >
-              <PanelRightClose className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          {agentLoading ? (
-            <div className="p-4 space-y-4">
-              <div className="flex flex-col items-center gap-2">
-                <Skeleton className="h-14 w-14 rounded-full" />
-                <Skeleton className="h-4 w-24" />
-              </div>
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-8 w-full" />
-            </div>
-          ) : agentData ? (
-            <div className="p-4 space-y-5">
-              <div className="flex flex-col items-center text-center gap-2">
-                <AdvisorAvatar
-                  name={memberName ?? "Agent"}
-                  agentId={memberId}
-                  size="lg"
-                />
-                <div>
-                  <p className="text-sm font-semibold text-foreground">
-                    {memberName ?? "Agent"}
-                  </p>
-                  {agentData.description && (
-                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3">
-                      {agentData.description}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {agentData.capabilities && agentData.capabilities.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                    {t("Workforce.agentEditor.capabilities", "Capabilities")}
-                  </h4>
-                  <div className="flex flex-wrap gap-1.5">
-                    {agentData.capabilities.map((cap, idx) => (
-                      <Badge
-                        key={`${cap.skill}-${idx}`}
-                        variant="secondary"
-                        className="text-[10px]"
-                      >
-                        {cap.skill}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    {t("Workforce.agentEditor.a2aEnabled", "Agent-to-Agent")}
-                  </span>
-                  <Badge
-                    variant={agentData.a2aEnabled ? "success" : "secondary"}
-                    className="text-[10px]"
-                  >
-                    {agentData.a2aEnabled
-                      ? t("common.on", "On")
-                      : t("common.off", "Off")}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    {t("Workforce.agentEditor.memoryTools", "Memory Tools")}
-                  </span>
-                  <Badge
-                    variant={
-                      agentData.enableMemoryTools ? "success" : "secondary"
-                    }
-                    className="text-[10px]"
-                  >
-                    {agentData.enableMemoryTools
-                      ? t("common.on", "On")
-                      : t("common.off", "Off")}
-                  </Badge>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs font-medium text-muted-foreground mb-2 mt-4">
-                  {t("Workforce.thread.history", "Conversation History")}
-                </h4>
-                {conversationId ? (
-                  <div className="flex flex-col gap-2 rounded-lg border border-border p-3 text-xs bg-muted/30">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground flex items-center gap-1.5">
-                         <MessageSquare className="h-3.5 w-3.5" />
-                         {t("Workforce.thread.currentSession", "Current Session")}
-                      </span>
-                      <span className="font-medium text-foreground">{messages.length} {t("Workforce.thread.msgs", "msgs")}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">{t("Workforce.thread.noHistory", "No history available.")}</p>
-                )}
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full mt-2"
-                onClick={() => setEditingAgentId(memberId)}
-              >
-                <Pencil className="h-3.5 w-3.5" />
-                {t("Workforce.chat.editAgent", "Edit Agent")}
-              </Button>
-            </div>
-          ) : (
-             <div className="flex flex-1 items-center justify-center p-4">
-                <div className="text-center text-muted-foreground">
-                  <p className="text-xs">
-                    {t(
-                      "Workforce.chat.selectToView",
-                      "Select an agent to view details",
-                    )}
-                  </p>
-                </div>
-              </div>
-          )}
-        </div>
+        <AgentDetailsPanel
+          agentId={memberId}
+          agentName={memberName}
+          onClose={() => setShowDetails(false)}
+        />
       )}
 
       {/* Agent editor sheet (slide-over) */}

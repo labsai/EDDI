@@ -24,19 +24,28 @@ export function formatMarkdownText(text: string): string {
 
   let formatted = text;
 
-  // 1. Fix ATX headings missing space (e.g. "#Header" -> "# Header", "###Title" -> "### Title")
+  // 1. Fix ATX headings missing space after # (e.g. "#Header" -> "# Header", "###Title" -> "### Title")
   formatted = formatted.replace(/^(#{1,6})([^\s#])/gm, "$1 $2");
 
-  // 2. Fix spaces inside bold markers (e.g. "**Moderator **" -> "**Moderator**", "** Financial Analysis **" -> "**Financial Analysis**")
+  // 2. Fix trailing hyphens/dashes attached to opening bold markers (e.g. "Das- **Logo **" -> "Das - **Logo **")
+  formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ])-\s*\*\*/g, "$1 - **");
+
+  // 3. Normalize spaces inside double asterisks bold markers (e.g. "**Logo **" -> "**Logo**", "** Financial Analysis **" -> "**Financial Analysis**")
   formatted = formatted.replace(/\*\*\s*([^*]+?)\s*\*\*/g, "**$1**");
 
-  // 3. Fix bold/italic syntax glued to preceding letter/digit (e.g. "word**bold**" -> "word **bold**")
+  // 4. Fix missing space after closing ** when glued to next letter (e.g. "**Organisation**Differ" -> "**Organisation** Differ")
+  formatted = formatted.replace(/\*\*([a-zA-Z0-9äöüßÄÖÜ])/g, "** $1");
+
+  // 5. Fix missing space before opening ** when glued to preceding word (e.g. "word**bold**" -> "word **bold**")
   formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ])(\*{2}|_{2})([^\s*_])/g, "$1 $2");
 
-  // 4. Fix missing spaces after punctuation before capitalized words (e.g. "mich,Sie" -> "mich, Sie", "End.Next" -> "End. Next")
+  // 6. Fix missing spaces between concatenated lowercase-uppercase words caused by collapsed linebreaks (e.g. "DifferEs" -> "Differ Es", "ChatDarf" -> "Chat Darf", "StadtWien" -> "Stadt Wien")
+  formatted = formatted.replace(/([a-zäöüß])([A-ZÄÖÜ])/g, "$1 $2");
+
+  // 7. Fix missing spaces after punctuation before capitalized words (e.g. "mich,Sie" -> "mich, Sie", "End.Next" -> "End. Next")
   formatted = formatted.replace(/([,.:;!?])([A-ZÄÖÜ])/g, "$1 $2");
 
-  // 5. Ensure headings have a blank line before them if preceded by text on a single newline
+  // 8. Ensure headings have a blank line before them if preceded by text on a single newline
   formatted = formatted.replace(/([^\n])\n(#{1,6}\s)/g, "$1\n\n$2");
 
   return formatted;
