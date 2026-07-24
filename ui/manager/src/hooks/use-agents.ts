@@ -195,10 +195,21 @@ export function useDeployAgent() {
       await queryClient.cancelQueries({ queryKey: depKey });
       await queryClient.cancelQueries({ queryKey: depsKey });
 
-      queryClient.setQueryData(depKey, { status: "IN_PROGRESS" });
+      const prevDep = queryClient.getQueryData(depKey);
+      const prevDeps = queryClient.getQueryData(depsKey);
+
+      queryClient.setQueryData(depKey, (old: Record<string, unknown> | undefined) => ({ ...old, status: "IN_PROGRESS" }));
       queryClient.setQueryData(depsKey, (old: EnvironmentStatus[] | undefined) =>
         old ? old.map((s) => (s.environment === environment ? { ...s, status: "IN_PROGRESS" as const } : s)) : undefined
       );
+
+      return { prevDep, prevDeps, depKey, depsKey };
+    },
+    onError: (_err, _vars, context) => {
+      if (context) {
+        queryClient.setQueryData(context.depKey, context.prevDep);
+        queryClient.setQueryData(context.depsKey, context.prevDeps);
+      }
     },
     onSuccess: (_, { environment = "production", agentId, version }) => {
       queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
@@ -243,10 +254,21 @@ export function useUndeployAgent() {
       await queryClient.cancelQueries({ queryKey: depKey });
       await queryClient.cancelQueries({ queryKey: depsKey });
 
-      queryClient.setQueryData(depKey, { status: "NOT_FOUND" });
+      const prevDep = queryClient.getQueryData(depKey);
+      const prevDeps = queryClient.getQueryData(depsKey);
+
+      queryClient.setQueryData(depKey, (old: Record<string, unknown> | undefined) => ({ ...old, status: "NOT_FOUND" }));
       queryClient.setQueryData(depsKey, (old: EnvironmentStatus[] | undefined) =>
         old ? old.map((s) => (s.environment === environment ? { ...s, status: "NOT_FOUND" as const } : s)) : undefined
       );
+
+      return { prevDep, prevDeps, depKey, depsKey };
+    },
+    onError: (_err, _vars, context) => {
+      if (context) {
+        queryClient.setQueryData(context.depKey, context.prevDep);
+        queryClient.setQueryData(context.depsKey, context.prevDeps);
+      }
     },
     onSuccess: (_, { environment = "production", agentId, version }) => {
       queryClient.invalidateQueries({ queryKey: AGENTS_KEY });

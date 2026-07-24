@@ -2065,7 +2065,7 @@
         "step3Desc": "Manage your collaborative environments, edit their policies, or delete stale groups."
       },
       "logs": {
-    "newLogs": "New logs",
+        "newLogs": "New logs",
         "title": "System Logs Tour",
         "step1Title": "Live vs History",
         "step1Desc": "Switch between a real-time stream of system logs and historical log search.",
@@ -3046,7 +3046,8 @@
       "hideDetails": "Hide details panel",
       "editAgent": "Edit Agent",
       "auditLogs": "Audit Logs",
-      "triggers": "View Triggers"
+      "triggers": "View Triggers",
+      "starterSelected": "Prompt added to chat input"
     },
     "agentEditor": {
       "capabilities": "Capabilities",
@@ -3056,7 +3057,16 @@
       "memoryTools": "Memory Tools",
       "signedMessages": "Signed Messages",
       "strictMemory": "Strict Memory",
-      "hitlMode": "Approval Mode"
+      "hitlMode": "Approval Mode",
+      "llmConfig": "Model & LLM Engine",
+      "provider": "Pipeline",
+      "mode": "Execution Mode",
+      "personaPrompt": "Persona Prompt",
+      "starters": "Conversation Starters",
+      "channels": "Channel Connectors",
+      "temperature": "Temperature",
+      "contextWindow": "Context Limit",
+      "activeTools": "Active Tools"
     }
   }
 }

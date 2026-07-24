@@ -178,11 +178,16 @@ function formatShortTime(ts: number): string {
 
 function CopyMessageButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useTranslation();
 
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API unavailable (non-secure context or permission denied)
+    }
   }, [content]);
 
   return (
@@ -195,18 +200,18 @@ function CopyMessageButton({ content }: { content: string }) {
           ? "text-emerald-500 font-medium"
           : "text-muted-foreground/60 hover:text-foreground hover:bg-muted/50",
       )}
-      title="Copy message"
-      aria-label="Copy message"
+      title={t("chat.copyMessage", "Copy message")}
+      aria-label={t("chat.copyMessage", "Copy message")}
     >
       {copied ? (
         <>
           <Check className="h-3 w-3" />
-          <span>Copied</span>
+          <span>{t("chat.copied", "Copied")}</span>
         </>
       ) : (
         <>
           <Copy className="h-3 w-3" />
-          <span>Copy</span>
+          <span>{t("chat.copy", "Copy")}</span>
         </>
       )}
     </button>

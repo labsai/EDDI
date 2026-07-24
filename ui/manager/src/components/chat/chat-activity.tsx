@@ -22,12 +22,6 @@ import { CascadeStepTrace } from "@/components/cascade-step-trace";
 
 // ==================== Types ====================
 
-interface ChatActivityProps {
-  events: PipelineEvent[];
-  isLive: boolean;
-  totalSteps?: number;
-}
-
 interface TaskSummary {
   taskType: string;
   taskId: string;
@@ -125,6 +119,13 @@ function buildTaskSummaries(events: PipelineEvent[]): TaskSummary[] {
 }
 
 const INTERNAL_INFRA_TASKS = new Set([
+  "expressions",
+  "behavior_rules",
+  "langchain",
+  "dictionary",
+  "propertysetter",
+  "parser",
+  "output",
   "ai.labs.expressions",
   "ai.labs.behavior_rules",
   "ai.labs.langchain",

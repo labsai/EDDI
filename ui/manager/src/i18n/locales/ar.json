@@ -3019,7 +3019,8 @@
       "hideDetails": "إخفاء التفاصيل",
       "editAgent": "تعديل الوكيل",
       "auditLogs": "سجلات المراجعة",
-      "triggers": "عرض المشغلات"
+      "triggers": "عرض المشغلات",
+      "starterSelected": "تمت إفادة الإدخال بالموجه"
     },
     "agentEditor": {
       "capabilities": "القدرات",
@@ -3029,7 +3030,16 @@
       "memoryTools": "أدوات الذاكرة",
       "signedMessages": "الرسائل الموقعة",
       "strictMemory": "ذاكرة صارمة",
-      "hitlMode": "وضع الموافقة"
+      "hitlMode": "وضع الموافقة",
+      "llmConfig": "النموذج ومحرك LLM",
+      "provider": "خط الأنابيب",
+      "mode": "وضع التنفيذ",
+      "personaPrompt": "موجه الشخصية",
+      "starters": "مقبلات المحادثة",
+      "channels": "موصلات القنوات",
+      "temperature": "درجة الحرارة",
+      "contextWindow": "حد السياق",
+      "activeTools": "الأدوات النشطة"
     }
   }
 }

@@ -3019,7 +3019,8 @@
       "hideDetails": "Ocultar painel de detalhes",
       "editAgent": "Editar Agente",
       "auditLogs": "Registos de Auditoria",
-      "triggers": "Ver Gatilhos"
+      "triggers": "Ver Gatilhos",
+      "starterSelected": "Prompt adicionado à caixa de chat"
     },
     "agentEditor": {
       "capabilities": "Capacidades",
@@ -3029,7 +3030,16 @@
       "memoryTools": "Ferramentas de Memória",
       "signedMessages": "Mensagens Assinadas",
       "strictMemory": "Memória Estrita",
-      "hitlMode": "Modo de Aprovação"
+      "hitlMode": "Modo de Aprovação",
+      "llmConfig": "Modelo e Motor LLM",
+      "provider": "Pipeline",
+      "mode": "Modo de Execução",
+      "personaPrompt": "Prompt de Persona",
+      "starters": "Iniciadores de Conversa",
+      "channels": "Conectores de Canais",
+      "temperature": "Temperatura",
+      "contextWindow": "Limite de Contexto",
+      "activeTools": "Ferramentas Ativas"
     }
   }
 }

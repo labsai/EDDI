@@ -3019,7 +3019,8 @@
       "hideDetails": "隐藏详情面板",
       "editAgent": "编辑智能体",
       "auditLogs": "审计日志",
-      "triggers": "查看触发器"
+      "triggers": "查看触发器",
+      "starterSelected": "提示词已添加到输入框"
     },
     "agentEditor": {
       "capabilities": "能力",
@@ -3029,7 +3030,16 @@
       "memoryTools": "内存工具",
       "signedMessages": "签名消息",
       "strictMemory": "严格内存",
-      "hitlMode": "审批模式"
+      "hitlMode": "审批模式",
+      "llmConfig": "模型与LLM引擎",
+      "provider": "流水线",
+      "mode": "执行模式",
+      "personaPrompt": "角色系统提示词",
+      "starters": "对话开场白",
+      "channels": "通道连接器",
+      "temperature": "温度",
+      "contextWindow": "上下文限制",
+      "activeTools": "活动工具"
     }
   }
 }

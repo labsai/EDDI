@@ -3019,7 +3019,8 @@
       "hideDetails": "상세 패널 숨기기",
       "editAgent": "에이전트 편집",
       "auditLogs": "감사 로그",
-      "triggers": "트리거 보기"
+      "triggers": "트리거 보기",
+      "starterSelected": "프롬프트가 입력창에 추가되었습니다"
     },
     "agentEditor": {
       "capabilities": "역량",
@@ -3029,7 +3030,16 @@
       "memoryTools": "메모리 도구",
       "signedMessages": "서명된 메시지",
       "strictMemory": "엄격한 메모리",
-      "hitlMode": "승인 모드"
+      "hitlMode": "승인 모드",
+      "llmConfig": "모델 및 LLM 엔진",
+      "provider": "파이프라인",
+      "mode": "실행 모드",
+      "personaPrompt": "페르소나 프롬프트",
+      "starters": "대화 시작하기",
+      "channels": "채널 커넥터",
+      "temperature": "온도",
+      "contextWindow": "컨텍스트 제한",
+      "activeTools": "활성 도구"
     }
   }
 }

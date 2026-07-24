@@ -3019,7 +3019,8 @@
       "hideDetails": "Details ausblenden",
       "editAgent": "Agent bearbeiten",
       "auditLogs": "Audit-Protokolle",
-      "triggers": "Trigger anzeigen"
+      "triggers": "Trigger anzeigen",
+      "starterSelected": "Prompt zum Chateingabefeld hinzugefügt"
     },
     "agentEditor": {
       "capabilities": "Fähigkeiten",
@@ -3029,7 +3030,16 @@
       "memoryTools": "Speicher-Werkzeuge",
       "signedMessages": "Signierte Nachrichten",
       "strictMemory": "Strikter Speicher",
-      "hitlMode": "Freigabemodus"
+      "hitlMode": "Freigabemodus",
+      "llmConfig": "Modell & LLM Engine",
+      "provider": "Pipeline",
+      "mode": "Ausführungsmodus",
+      "personaPrompt": "Persona-Systemprompt",
+      "starters": "Gesprächseinstiege",
+      "channels": "Kanal-Konnektoren",
+      "temperature": "Temperatur",
+      "contextWindow": "Kontextlimit",
+      "activeTools": "Aktive Tools"
     }
   }
 }

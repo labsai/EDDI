@@ -3019,7 +3019,8 @@
       "hideDetails": "Masquer les détails",
       "editAgent": "Modifier l agent",
       "auditLogs": "Journaux d audit",
-      "triggers": "Voir les déclencheurs"
+      "triggers": "Voir les déclencheurs",
+      "starterSelected": "Prompt ajouté à la zone de texte"
     },
     "agentEditor": {
       "capabilities": "Capacités",
@@ -3029,7 +3030,16 @@
       "memoryTools": "Outils de mémoire",
       "signedMessages": "Messages signés",
       "strictMemory": "Mémoire stricte",
-      "hitlMode": "Mode d approbation"
+      "hitlMode": "Mode d approbation",
+      "llmConfig": "Modèle & Moteur LLM",
+      "provider": "Pipeline",
+      "mode": "Mode d exécution",
+      "personaPrompt": "Prompt système persona",
+      "starters": "Amorceurs de conversation",
+      "channels": "Connecteurs de canaux",
+      "temperature": "Température",
+      "contextWindow": "Limite de contexte",
+      "activeTools": "Outils actifs"
     }
   }
 }

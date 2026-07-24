@@ -522,7 +522,7 @@ function TypeBadge({ type }: { type: ValueType }) {
   return (
     <span
       className={cn(
-        "rounded-full px-1.5 py-0.2 text-[9px] font-mono font-medium border uppercase tracking-wider",
+        "rounded-full px-1.5 py-0.5 text-[9px] font-mono font-medium border uppercase tracking-wider",
         styles[type],
       )}
     >

@@ -118,7 +118,7 @@ export const ChatMessage = memo(function ChatMessage({
 
           {/* Hover actions — only for agent messages with content */}
           {!isUser && message.content && (
-            <div className={cn("transition-opacity duration-150", hovered ? "opacity-100" : "opacity-0 pointer-events-none")}>
+            <div className={cn("transition-opacity duration-150", hovered ? "opacity-100" : "opacity-0 focus-within:opacity-100")}>
               <CopyMessageButton content={message.content} />
             </div>
           )}
@@ -180,11 +180,16 @@ function MessageAttachments({ attachments }: { attachments: MessageAttachment[] 
 
 function CopyMessageButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useTranslation();
 
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API unavailable (non-secure context or permission denied)
+    }
   }, [content]);
 
   return (
@@ -196,18 +201,19 @@ function CopyMessageButton({ content }: { content: string }) {
           ? "text-emerald-500"
           : "text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
       )}
-      title="Copy message"
+      title={t("chat.copyMessage", "Copy message")}
+      aria-label={t("chat.copyMessage", "Copy message")}
       data-testid="copy-message"
     >
       {copied ? (
         <>
           <Check className="h-3 w-3" />
-          <span>Copied</span>
+          <span>{t("chat.copied", "Copied")}</span>
         </>
       ) : (
         <>
           <Copy className="h-3 w-3" />
-          <span>Copy</span>
+          <span>{t("chat.copy", "Copy")}</span>
         </>
       )}
     </button>

@@ -3019,7 +3019,8 @@
       "hideDetails": "ซ่อนแผงรายละเอียด",
       "editAgent": "แก้ไขเอเจนต์",
       "auditLogs": "บันทึกการตรวจสอบ",
-      "triggers": "ดูตัวทริกเกอร์"
+      "triggers": "ดูตัวทริกเกอร์",
+      "starterSelected": "เพิ่มพรอมต์ลงในกล่องข้อความแล้ว"
     },
     "agentEditor": {
       "capabilities": "ความสามารถ",
@@ -3029,7 +3030,16 @@
       "memoryTools": "เครื่องมือความจำ",
       "signedMessages": "ข้อความที่เซ็นชื่อ",
       "strictMemory": "หน่วยความจำเข้มงวด",
-      "hitlMode": "โหมดการอนุมัติ"
+      "hitlMode": "โหมดการอนุมัติ",
+      "llmConfig": "โมเดลและเอนจิน LLM",
+      "provider": "พายพ์ไลน์",
+      "mode": "โหมดการทำงาน",
+      "personaPrompt": "พรอมต์บทบาท",
+      "starters": "จุดเริ่มต้นการสนทนา",
+      "channels": "ตัวเชื่อมต่อช่องทาง",
+      "temperature": "อุณหภูมิ",
+      "contextWindow": "ขีดจำกัดบริบท",
+      "activeTools": "เครื่องมือที่ใช้งาน"
     }
   }
 }

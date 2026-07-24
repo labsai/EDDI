@@ -209,8 +209,10 @@ function computeTokenMetrics(entries: AuditEntry[]): TokenMetricsResult {
           inputTk += tokenUsage.inputTokens ?? 0;
           outputTk += tokenUsage.outputTokens ?? 0;
         }
-        const rawModel = (llm.model ?? llm.modelName ?? llm.modelId) as string | undefined;
-        const rawProvider = (llm.provider ?? llm.engine) as string | undefined;
+        const rawModelVal = llm.model ?? llm.modelName ?? llm.modelId;
+        const rawProviderVal = llm.provider ?? llm.engine;
+        const rawModel = typeof rawModelVal === "string" ? rawModelVal : undefined;
+        const rawProvider = typeof rawProviderVal === "string" ? rawProviderVal : undefined;
         if (rawModel && rawProvider) {
           model = rawModel.toLowerCase().includes(rawProvider.toLowerCase())
             ? rawModel

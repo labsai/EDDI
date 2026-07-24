@@ -1994,7 +1994,7 @@
         "step3Desc": "Gestione sus entornos colaborativos, edite sus políticas o elimine los grupos antiguos."
       },
       "logs": {
-    "newLogs": "Nuevos logs",
+        "newLogs": "Nuevos logs",
         "title": "Tour de Registros de Sistema",
         "step1Title": "Live vs Historial",
         "step1Desc": "Cambie entre el flujo en tiempo real de los registros y la búsqueda en el historial.",
@@ -3030,6 +3030,20 @@
       "attachmentLimit": "Máximo {{max}} archivos adjuntos por mensaje",
       "notForwarded": "Archivo almacenado pero demasiado grande para el modelo",
       "uploadFailed": "Error al subir: {{error}}"
+    },
+    "chat": {
+      "starterSelected": "Prompt añadido al campo de entrada"
+    },
+    "agentEditor": {
+      "llmConfig": "Modelo y Motor LLM",
+      "provider": "Línea de comandos",
+      "mode": "Modo de ejecución",
+      "personaPrompt": "Prompt de persona",
+      "starters": "Iniciadores de conversación",
+      "channels": "Conectores de canales",
+      "temperature": "Temperatura",
+      "contextWindow": "Límite de contexto",
+      "activeTools": "Herramientas activas"
     }
   }
 }

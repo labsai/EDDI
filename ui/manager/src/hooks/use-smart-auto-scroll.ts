@@ -68,6 +68,7 @@ export function useSmartAutoScroll<T extends HTMLElement = HTMLDivElement>({
       }
     } else {
       setHasNewContent(true);
+      setShowScrollFab(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);

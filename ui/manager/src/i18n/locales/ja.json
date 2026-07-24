@@ -3019,7 +3019,8 @@
       "hideDetails": "詳細パネルを非表示",
       "editAgent": "エージェントを編集",
       "auditLogs": "監査ログ",
-      "triggers": "トリガーを表示"
+      "triggers": "トリガーを表示",
+      "starterSelected": "プロンプトを入力欄に追加しました"
     },
     "agentEditor": {
       "capabilities": "機能・能力",
@@ -3029,7 +3030,16 @@
       "memoryTools": "メモリツール",
       "signedMessages": "署名付きメッセージ",
       "strictMemory": "厳格メモリ",
-      "hitlMode": "承認モード"
+      "hitlMode": "承認モード",
+      "llmConfig": "モデル＆LLMエンジン",
+      "provider": "パイプライン",
+      "mode": "実行モード",
+      "personaPrompt": "ペルソナプロンプト",
+      "starters": "会話のきっかけ",
+      "channels": "チャネルコネクタ",
+      "temperature": "温度",
+      "contextWindow": "コンテキスト上限",
+      "activeTools": "アクティブツール"
     }
   }
 }

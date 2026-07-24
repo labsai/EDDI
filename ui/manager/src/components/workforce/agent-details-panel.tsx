@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getAgent, parseResourceUri } from "@/lib/api/agents";
+import { getResource, RESOURCE_TYPES } from "@/lib/api/resources";
 import { useDeployedAgents } from "@/hooks/use-chat";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import type { LlmConfig } from "@/components/editors/llm/types";
 import {
   PanelRightClose,
   Pencil,
@@ -19,7 +21,6 @@ import {
   Check,
   ShieldCheck,
   Brain,
-  Zap,
   FileText,
   Sparkles,
   Share2,
@@ -28,6 +29,12 @@ import {
   ArrowUpRight,
   Database,
   Lock,
+  Cpu,
+  Radio,
+  ChevronDown,
+  ChevronUp,
+  Terminal,
+  Wrench,
 } from "lucide-react";
 
 interface AgentDetailsPanelProps {
@@ -46,6 +53,8 @@ export function AgentDetailsPanel({
   const { t } = useTranslation();
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState(false);
+  const [copiedPersona, setCopiedPersona] = useState(false);
+  const [personaExpanded, setPersonaExpanded] = useState(false);
 
   // Read deployed agents to resolve display name, description & real resource ID
   const { data: deployedAgents } = useDeployedAgents();
@@ -70,6 +79,56 @@ export function AgentDetailsPanel({
     retry: 1,
   });
 
+  // Extract LLM resource URI from agent's workflows array (e.g. "eddi://ai.labs.llm/llmstore/llms/abc123?version=1")
+  const llmWorkflowUri = agentData?.workflows?.find(
+    (uri) => uri.includes("llmstore") || uri.includes("ai.labs.llm")
+  );
+  const parsedLlmUri = llmWorkflowUri ? parseResourceUri(llmWorkflowUri) : null;
+  const llmResourceId = parsedLlmUri?.id || realAgentId;
+  const llmResourceVersion = parsedLlmUri?.version || 1;
+
+  // Fetch underlying LLM configuration from llmstore
+  const llmTypeConfig = RESOURCE_TYPES.find((r) => r.slug === "llm");
+  const { data: llmConfig } = useQuery<LlmConfig>({
+    queryKey: ["resource", "llm", llmResourceId, llmResourceVersion],
+    queryFn: () => getResource<LlmConfig>(llmTypeConfig!, llmResourceId!, llmResourceVersion),
+    enabled: !!llmTypeConfig && !!llmResourceId,
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  // Extract actual model configuration parameters from the LLM task
+  const firstTask = llmConfig?.tasks?.[0];
+  const extractedModel =
+    firstTask?.parameters?.model ||
+    firstTask?.parameters?.modelName ||
+    firstTask?.parameters?.["model.name"] ||
+    firstTask?.parameters?.["llm.model"] ||
+    (firstTask?.type ? firstTask.type.split(".").pop() : undefined);
+
+  const displayModel = extractedModel || (firstTask ? "Custom LLM" : "Standard LLM");
+  const temperature = firstTask?.parameters?.temperature || "0.7";
+  const contextLimit = firstTask?.maxContextTokens
+    ? `${(firstTask.maxContextTokens / 1024).toFixed(0)}k tokens`
+    : "128k tokens";
+
+  // Build comprehensive list of active tool names
+  const activeTools: string[] = [];
+  if (firstTask?.tools?.length) {
+    activeTools.push(...firstTask.tools);
+  }
+  if (firstTask?.builtInToolsWhitelist?.length) {
+    activeTools.push(...firstTask.builtInToolsWhitelist);
+  }
+  if (firstTask?.enableHttpCallTools) activeTools.push("HTTP Calls");
+  if (firstTask?.enableMcpCallTools) activeTools.push("MCP Tools");
+  if (agentData?.enableMemoryTools) activeTools.push("Memory");
+  if (agentData?.capabilities?.length) {
+    for (const cap of agentData.capabilities) {
+      if (!activeTools.includes(cap.skill)) activeTools.push(cap.skill);
+    }
+  }
+
   const handleCopyId = useCallback(async () => {
     if (!realAgentId) return;
     try {
@@ -81,6 +140,17 @@ export function AgentDetailsPanel({
       /* ignore */
     }
   }, [realAgentId, t]);
+
+  const handleCopyPersona = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedPersona(true);
+      toast.success(t("common.copied", "Copied to clipboard"));
+      setTimeout(() => setCopiedPersona(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  }, [t]);
 
   if (!agentId) {
     return (
@@ -210,6 +280,99 @@ export function AgentDetailsPanel({
             </Link>
           </div>
 
+          {/* Model & LLM Configuration Card */}
+          <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <Cpu className="h-3.5 w-3.5 text-purple-400" />
+                {t("Workforce.agentEditor.llmConfig", "Model & LLM Engine")}
+              </h5>
+              <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-400 bg-purple-500/5 font-mono">
+                {displayModel}
+              </Badge>
+            </div>
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">{t("Workforce.agentEditor.temperature", "Temperature")}</span>
+                <span className="font-mono text-[11px] font-medium text-foreground">{temperature}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">{t("Workforce.agentEditor.contextWindow", "Context Limit")}</span>
+                <span className="font-mono text-[11px] font-medium text-foreground">{contextLimit}</span>
+              </div>
+
+              {/* Specific Active Tools List */}
+              <div className="space-y-1 pt-1 border-t border-border/40">
+                <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
+                  <Wrench className="h-3 w-3 text-sky-400" />
+                  {t("Workforce.agentEditor.activeTools", "Active Tools")}
+                </span>
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  {activeTools.length > 0 ? (
+                    activeTools.map((tool, idx) => (
+                      <Badge
+                        key={`${tool}-${idx}`}
+                        variant="secondary"
+                        className="text-[10px] bg-sky-500/10 text-sky-400 border-sky-500/20"
+                      >
+                        {tool}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground italic">Standard Pipeline</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* System Prompt / Persona Preview Card */}
+          {description && (
+            <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Terminal className="h-3.5 w-3.5 text-emerald-400" />
+                  {t("Workforce.agentEditor.personaPrompt", "Persona Prompt")}
+                </h5>
+                <button
+                  type="button"
+                  onClick={() => handleCopyPersona(description)}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                  title={t("common.copy", "Copy Persona")}
+                >
+                  {copiedPersona ? (
+                    <Check className="h-3 w-3 text-emerald-500" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                </button>
+              </div>
+              <div
+                className={cn(
+                  "text-[11px] font-mono text-muted-foreground bg-muted/30 rounded-md p-2 border border-border/30 transition-all overflow-hidden",
+                  !personaExpanded && "line-clamp-3"
+                )}
+              >
+                {description}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPersonaExpanded((v) => !v)}
+                className="flex items-center gap-1 text-[10px] text-primary hover:underline font-medium pt-0.5"
+              >
+                {personaExpanded ? (
+                  <>
+                    <ChevronUp className="h-3 w-3" /> {t("common.showLess", "Show Less")}
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3 w-3" /> {t("common.showMore", "Expand Persona")}
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
           {/* Capabilities & Skills */}
           {agentData?.capabilities && agentData.capabilities.length > 0 && (
             <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2">
@@ -235,6 +398,27 @@ export function AgentDetailsPanel({
               </div>
             </div>
           )}
+
+          {/* Channel Connectors & Deployment Targets */}
+          <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2">
+            <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <Radio className="h-3.5 w-3.5 text-emerald-400" />
+              {t("Workforce.agentEditor.channels", "Channel Connectors")}
+            </h5>
+            <div className="flex flex-wrap gap-1.5">
+              <Badge variant="secondary" className="text-[10px] border border-border/50">
+                Web Widget
+              </Badge>
+              <Badge variant="secondary" className="text-[10px] border border-border/50">
+                REST API
+              </Badge>
+              {agentData?.a2aEnabled && (
+                <Badge variant="secondary" className="text-[10px] border border-purple-500/30 text-purple-400 bg-purple-500/5">
+                  A2A Protocol
+                </Badge>
+              )}
+            </div>
+          </div>
 
           {/* Workflows / Pipelines */}
           {agentData?.workflows && agentData.workflows.length > 0 && (
@@ -337,21 +521,6 @@ export function AgentDetailsPanel({
               )}
             </div>
           </div>
-
-          {/* Quick Triggers Link */}
-          <Link to={`/triggers?agentId=${realAgentId || agentId}`}>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="w-full text-xs justify-between mt-2"
-            >
-              <span className="flex items-center gap-1.5">
-                <Zap className="h-3.5 w-3.5 text-amber-500" />
-                {t("Workforce.chat.triggers", "View Triggers")}
-              </span>
-              <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground" />
-            </Button>
-          </Link>
         </div>
       )}
 

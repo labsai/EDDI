@@ -3019,7 +3019,8 @@
       "hideDetails": "विवरण पैनल छिपाएं",
       "editAgent": "एजेंट संपादित करें",
       "auditLogs": "ऑडिट लॉग",
-      "triggers": "ट्रिगर देखें"
+      "triggers": "ट्रिगर देखें",
+      "starterSelected": "प्रॉम्प्ट चैट इनपुट में जोड़ा गया"
     },
     "agentEditor": {
       "capabilities": "क्षमताएं",
@@ -3029,7 +3030,16 @@
       "memoryTools": "मेमोरी टूल",
       "signedMessages": "हस्ताक्षरित संदेश",
       "strictMemory": "सख्त मेमोरी",
-      "hitlMode": "अनुमोदन मोड"
+      "hitlMode": "अनुमोदन मोड",
+      "llmConfig": "मॉडल और एलएलएम इंजन",
+      "provider": "पाइपलाइन",
+      "mode": "निष्पादन मोड",
+      "personaPrompt": "पर्सोना प्रॉम्प्ट",
+      "starters": "बातचीत की शुरुआत",
+      "channels": "चैनल कनेक्टर्स",
+      "temperature": "तापमान",
+      "contextWindow": "संदर्भ सीमा",
+      "activeTools": "सक्रिय उपकरण"
     }
   }
 }

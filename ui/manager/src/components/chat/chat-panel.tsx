@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -23,11 +23,10 @@ import {
 } from "@/lib/api/attachments";
 import type { SentAttachment } from "@/hooks/use-chat";
 import { ChatMessage } from "./chat-message";
-import { ChatActivity } from "./chat-activity";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer } from "@/components/debugger/debug-drawer";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { useDebugStore, type PipelineEvent } from "@/hooks/use-debug-events";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
 import {
@@ -58,6 +57,7 @@ import {
   X,
   FileText,
   AlertTriangle,
+  Wrench,
 } from "lucide-react";
 
 /** A file the user picked, tracked through upload → ready/error. */
@@ -164,6 +164,11 @@ export function ChatPanel() {
       setSelectedAgent(agentId, agentName);
       setAgentSelectorOpen(false);
       startConversation.mutate({ agentId });
+      // Focus the chat input so user can start typing immediately
+      requestAnimationFrame(() => {
+        const input = document.querySelector<HTMLTextAreaElement>('[data-testid="chat-input"]');
+        input?.focus();
+      });
     },
     [setSelectedAgent, startConversation]
   );
@@ -574,20 +579,9 @@ export function ChatPanel() {
                 <ChatMessage key={msg.id} message={msg} />
               ))}
 
-              {/* Inline activity — live processing */}
-              {showActivity && (isProcessing || isThinking) && currentTurnEvents.length > 0 && (
-                <ChatActivity
-                  events={currentTurnEvents}
-                  isLive={true}
-                />
-              )}
-
-              {/* Thinking indicator (only when activity is hidden) */}
-              {!showActivity && isThinking && (
-                <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground animate-pulse">
-                  <Brain className="h-4 w-4" />
-                  <span className="italic">{t("chat.thinking")}</span>
-                </div>
+              {/* Inline thinking / tool-use indicator — replaces old activity card */}
+              {(isProcessing || isThinking) && (
+                <InlineThinkingIndicator events={currentTurnEvents} />
               )}
 
               {/* Rerun button — shown when last message is an error */}
@@ -1139,6 +1133,90 @@ function EmptyState() {
         <p className="mt-1 max-w-xs text-sm text-muted-foreground">
           {t("chat.empty")}
         </p>
+      </div>
+    </div>
+  );
+}
+
+// ==================== Inline Thinking Indicator ====================
+
+/** Internal pipeline tasks that should never surface in the UI. */
+const INTERNAL_TASKS = new Set([
+  "expressions", "behavior_rules", "langchain", "dictionary",
+  "propertysetter", "parser", "output",
+  "ai.labs.expressions", "ai.labs.behavior_rules", "ai.labs.langchain",
+  "ai.labs.dictionary", "ai.labs.propertysetter", "ai.labs.parser",
+  "ai.labs.output",
+]);
+
+/**
+ * Sleek inline indicator shown during agent processing.
+ * Shows "Thinking\u2026" with animated dots + any active tool call names.
+ * Completely replaces the old yellow Processing card.
+ */
+function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
+  const { t } = useTranslation();
+
+  // Extract active tool call names from events (only from non-internal tasks)
+  const activeToolNames = useMemo(() => {
+    const names: string[] = [];
+    for (const ev of events) {
+      if (INTERNAL_TASKS.has(ev.taskType)) continue;
+      if (ev.toolTrace) {
+        for (const trace of ev.toolTrace) {
+          if (trace.type === "tool_call" && trace.tool && !names.includes(trace.tool)) {
+            names.push(trace.tool);
+          }
+        }
+      }
+    }
+    return names;
+  }, [events]);
+
+  // Check for errors in visible events
+  const hasError = events.some(
+    (e) => e.type === "task_failed" && !INTERNAL_TASKS.has(e.taskType),
+  );
+
+  return (
+    <div className="flex gap-3 px-4 py-3" data-testid="thinking-indicator">
+      {/* Avatar \u2014 matches agent message style */}
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/20 text-accent">
+        <Brain className="h-4 w-4 animate-pulse" />
+      </div>
+
+      {/* Content bubble */}
+      <div className="flex flex-col gap-1 max-w-[75%]">
+        <div className="rounded-2xl rounded-es-md px-4 py-2.5 bg-card border border-border">
+          {/* Thinking dots */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:0ms]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:150ms]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:300ms]" />
+            </div>
+            <span className="text-xs text-muted-foreground italic">
+              {hasError
+                ? t("chat.activity.error", "Error occurred")
+                : t("chat.thinking", "Thinking\u2026")}
+            </span>
+          </div>
+
+          {/* Tool call chips \u2014 only shown when tools are being used */}
+          {activeToolNames.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {activeToolNames.map((name) => (
+                <span
+                  key={name}
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                >
+                  <Wrench className="h-2.5 w-2.5" />
+                  {name}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
