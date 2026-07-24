@@ -3039,7 +3039,9 @@
       "channels": "通道连接器",
       "temperature": "温度",
       "contextWindow": "上下文限制",
-      "activeTools": "活动工具"
+      "activeTools": "活动工具",
+      "noLlm": "未配置 LLM",
+      "noTools": "未配置"
     }
   }
 }

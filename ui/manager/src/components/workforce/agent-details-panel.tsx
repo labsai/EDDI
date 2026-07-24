@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getAgent, parseResourceUri } from "@/lib/api/agents";
 import { getResource, RESOURCE_TYPES } from "@/lib/api/resources";
+import { getWorkflow } from "@/lib/api/workflows";
 import { useDeployedAgents } from "@/hooks/use-chat";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
@@ -79,20 +80,34 @@ export function AgentDetailsPanel({
     retry: 1,
   });
 
-  // Extract LLM resource URI from agent's workflows array (e.g. "eddi://ai.labs.llm/llmstore/llms/abc123?version=1")
-  const llmWorkflowUri = agentData?.workflows?.find(
-    (uri) => uri.includes("llmstore") || uri.includes("ai.labs.llm")
-  );
-  const parsedLlmUri = llmWorkflowUri ? parseResourceUri(llmWorkflowUri) : null;
-  const llmResourceId = parsedLlmUri?.id || realAgentId;
-  const llmResourceVersion = parsedLlmUri?.version || 1;
+  // ── Resolve: Agent → Workflow → LLM step → LLM resource ──
 
-  // Fetch underlying LLM configuration from llmstore
+  // 1) Parse the first workflow URI from the agent
+  const firstWorkflowUri = agentData?.workflows?.[0];
+  const parsedWorkflow = firstWorkflowUri ? parseResourceUri(firstWorkflowUri) : null;
+
+  // 2) Fetch the workflow to get its pipeline steps
+  const { data: workflowData } = useQuery({
+    queryKey: ["workflow", parsedWorkflow?.id, parsedWorkflow?.version],
+    queryFn: () => getWorkflow(parsedWorkflow!.id, parsedWorkflow!.version),
+    enabled: !!parsedWorkflow?.id,
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  // 3) Find the LLM step in the pipeline and extract the LLM resource URI
+  const llmStep = workflowData?.workflowSteps?.find(
+    (step) => step.type.includes("ai.labs.llm") || step.type.includes("langchain")
+  );
+  const llmStepConfigUri = (llmStep?.config as Record<string, string> | undefined)?.uri;
+  const parsedLlmUri = llmStepConfigUri ? parseResourceUri(llmStepConfigUri) : null;
+
+  // 4) Fetch the actual LLM resource configuration
   const llmTypeConfig = RESOURCE_TYPES.find((r) => r.slug === "llm");
   const { data: llmConfig } = useQuery<LlmConfig>({
-    queryKey: ["resource", "llm", llmResourceId, llmResourceVersion],
-    queryFn: () => getResource<LlmConfig>(llmTypeConfig!, llmResourceId!, llmResourceVersion),
-    enabled: !!llmTypeConfig && !!llmResourceId,
+    queryKey: ["resource", "llm", parsedLlmUri?.id, parsedLlmUri?.version],
+    queryFn: () => getResource<LlmConfig>(llmTypeConfig!, parsedLlmUri!.id, parsedLlmUri!.version),
+    enabled: !!llmTypeConfig && !!parsedLlmUri?.id,
     staleTime: 30_000,
     retry: false,
   });
@@ -106,11 +121,11 @@ export function AgentDetailsPanel({
     firstTask?.parameters?.["llm.model"] ||
     (firstTask?.type ? firstTask.type.split(".").pop() : undefined);
 
-  const displayModel = extractedModel || (firstTask ? "Custom LLM" : "Standard LLM");
-  const temperature = firstTask?.parameters?.temperature || "0.7";
+  const displayModel = extractedModel || (llmConfig ? "Custom LLM" : null);
+  const temperature = firstTask?.parameters?.temperature ?? null;
   const contextLimit = firstTask?.maxContextTokens
     ? `${(firstTask.maxContextTokens / 1024).toFixed(0)}k tokens`
-    : "128k tokens";
+    : null;
 
   // Build comprehensive list of active tool names
   const activeTools: string[] = [];
@@ -287,19 +302,45 @@ export function AgentDetailsPanel({
                 <Cpu className="h-3.5 w-3.5 text-purple-400" />
                 {t("Workforce.agentEditor.llmConfig", "Model & LLM Engine")}
               </h5>
-              <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-400 bg-purple-500/5 font-mono">
-                {displayModel}
-              </Badge>
+              {displayModel && (
+                <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-400 bg-purple-500/5 font-mono">
+                  {displayModel}
+                </Badge>
+              )}
             </div>
             <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">{t("Workforce.agentEditor.temperature", "Temperature")}</span>
-                <span className="font-mono text-[11px] font-medium text-foreground">{temperature}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">{t("Workforce.agentEditor.contextWindow", "Context Limit")}</span>
-                <span className="font-mono text-[11px] font-medium text-foreground">{contextLimit}</span>
-              </div>
+              {!llmConfig && parsedWorkflow?.id ? (
+                /* Still loading LLM config */
+                <div className="space-y-1.5">
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-3/4" />
+                </div>
+              ) : !llmConfig ? (
+                <span className="text-[11px] text-muted-foreground italic">
+                  {t("Workforce.agentEditor.noLlm", "No LLM configured")}
+                </span>
+              ) : (
+                <>
+                  {temperature != null && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">{t("Workforce.agentEditor.temperature", "Temperature")}</span>
+                      <span className="font-mono text-[11px] font-medium text-foreground">{temperature}</span>
+                    </div>
+                  )}
+                  {contextLimit != null && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">{t("Workforce.agentEditor.contextWindow", "Context Limit")}</span>
+                      <span className="font-mono text-[11px] font-medium text-foreground">{contextLimit}</span>
+                    </div>
+                  )}
+                  {firstTask?.type && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">{t("Workforce.agentEditor.provider", "Provider")}</span>
+                      <span className="font-mono text-[11px] font-medium text-foreground capitalize">{firstTask.type.replace("ai.labs.", "")}</span>
+                    </div>
+                  )}
+                </>
+              )}
 
               {/* Specific Active Tools List */}
               <div className="space-y-1 pt-1 border-t border-border/40">
@@ -319,7 +360,9 @@ export function AgentDetailsPanel({
                       </Badge>
                     ))
                   ) : (
-                    <span className="text-[11px] text-muted-foreground italic">Standard Pipeline</span>
+                    <span className="text-[11px] text-muted-foreground italic">
+                      {t("Workforce.agentEditor.noTools", "None configured")}
+                    </span>
                   )}
                 </div>
               </div>

@@ -3039,7 +3039,9 @@
       "channels": "채널 커넥터",
       "temperature": "온도",
       "contextWindow": "컨텍스트 제한",
-      "activeTools": "활성 도구"
+      "activeTools": "활성 도구",
+      "noLlm": "LLM 미구성",
+      "noTools": "미구성"
     }
   }
 }

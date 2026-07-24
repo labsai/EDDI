@@ -3043,7 +3043,9 @@
       "channels": "Conectores de canales",
       "temperature": "Temperatura",
       "contextWindow": "Límite de contexto",
-      "activeTools": "Herramientas activas"
+      "activeTools": "Herramientas activas",
+      "noLlm": "Sin LLM configurado",
+      "noTools": "Sin configurar"
     }
   }
 }

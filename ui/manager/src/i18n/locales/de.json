@@ -3032,14 +3032,16 @@
       "strictMemory": "Strikter Speicher",
       "hitlMode": "Freigabemodus",
       "llmConfig": "Modell & LLM Engine",
-      "provider": "Pipeline",
+      "provider": "Anbieter",
       "mode": "Ausführungsmodus",
       "personaPrompt": "Persona-Systemprompt",
       "starters": "Gesprächseinstiege",
       "channels": "Kanal-Konnektoren",
       "temperature": "Temperatur",
       "contextWindow": "Kontextlimit",
-      "activeTools": "Aktive Tools"
+      "activeTools": "Aktive Tools",
+      "noLlm": "Kein LLM konfiguriert",
+      "noTools": "Keine konfiguriert"
     }
   }
 }

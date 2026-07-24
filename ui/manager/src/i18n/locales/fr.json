@@ -3032,14 +3032,16 @@
       "strictMemory": "Mémoire stricte",
       "hitlMode": "Mode d approbation",
       "llmConfig": "Modèle & Moteur LLM",
-      "provider": "Pipeline",
+      "provider": "Fournisseur",
       "mode": "Mode d exécution",
       "personaPrompt": "Prompt système persona",
       "starters": "Amorceurs de conversation",
       "channels": "Connecteurs de canaux",
       "temperature": "Température",
       "contextWindow": "Limite de contexte",
-      "activeTools": "Outils actifs"
+      "activeTools": "Outils actifs",
+      "noLlm": "Aucun LLM configuré",
+      "noTools": "Aucun configuré"
     }
   }
 }

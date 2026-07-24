@@ -3039,7 +3039,9 @@
       "channels": "موصلات القنوات",
       "temperature": "درجة الحرارة",
       "contextWindow": "حد السياق",
-      "activeTools": "الأدوات النشطة"
+      "activeTools": "الأدوات النشطة",
+      "noLlm": "لم يتم تكوين LLM",
+      "noTools": "لم يتم التكوين"
     }
   }
 }

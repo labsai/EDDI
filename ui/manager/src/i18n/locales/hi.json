@@ -3039,7 +3039,9 @@
       "channels": "चैनल कनेक्टर्स",
       "temperature": "तापमान",
       "contextWindow": "संदर्भ सीमा",
-      "activeTools": "सक्रिय उपकरण"
+      "activeTools": "सक्रिय उपकरण",
+      "noLlm": "कोई LLM कॉन्फ़िगर नहीं",
+      "noTools": "कोई कॉन्फ़िगर नहीं"
     }
   }
 }
