@@ -1440,4 +1440,79 @@ class GroupConversationServiceTest {
             verify(conversationStore, never()).compareAndSetState(any(), any(), any());
         }
     }
+    // =================================================================
+    // formatVerificationForDisplay (private) — tested via reflection
+    // =================================================================
+
+    @Nested
+    class FormatVerificationForDisplayTests {
+
+        private Method formatMethod;
+
+        @BeforeEach
+        void setUp() throws Exception {
+            formatMethod = GroupConversationService.class.getDeclaredMethod(
+                    "formatVerificationForDisplay", GroupConversation.class, List.class, String.class);
+            formatMethod.setAccessible(true);
+        }
+
+        private String invoke(String rawContent) throws Exception {
+            return (String) formatMethod.invoke(service, new GroupConversation(), List.of(), rawContent);
+        }
+
+        @Test
+        void nullContent_returnsNull() throws Exception {
+            assertNull(invoke(null));
+        }
+
+        @Test
+        void noJsonBracket_returnsRawContent() throws Exception {
+            assertEquals("No json here", invoke("No json here"));
+        }
+
+        @Test
+        void validJson_passedTrue_showsCheckmark() throws Exception {
+            String raw = "[{\"subject\":\"Task 1\", \"passed\":true, \"feedback\":\"Good\"}]";
+            when(jsonSerialization.deserialize(raw, List.class)).thenReturn(List.of(
+                    Map.of("subject", "Task 1", "passed", true, "feedback", "Good")));
+
+            String result = invoke(raw);
+            assertTrue(result.contains("✅ **Task 1**: Passed"));
+            assertTrue(result.contains("Good"));
+            assertTrue(result.startsWith("## Task Verification Results"));
+        }
+
+        @Test
+        void validJson_passedFalse_showsX() throws Exception {
+            String raw = "[{\"subject\":\"Task 2\", \"passed\":false, \"feedback\":\"Bad\"}]";
+            when(jsonSerialization.deserialize(raw, List.class)).thenReturn(List.of(
+                    Map.of("subject", "Task 2", "passed", false, "feedback", "Bad")));
+
+            String result = invoke(raw);
+            assertTrue(result.contains("❌ **Task 2**: Failed"));
+            assertTrue(result.contains("Bad"));
+        }
+
+        @Test
+        void withMarkdownFencesAndTextAfter_stripsFencesAndAppendsText() throws Exception {
+            String raw = "```json\n[{\"subject\":\"T1\", \"passed\":true}]\n```\nOverall Assessment: Great";
+            String jsonPart = "[{\"subject\":\"T1\", \"passed\":true}]";
+            when(jsonSerialization.deserialize(jsonPart, List.class)).thenReturn(List.of(
+                    Map.of("subject", "T1", "passed", true)));
+
+            String result = invoke(raw);
+            assertTrue(result.contains("✅ **T1**: Passed"));
+            assertTrue(result.endsWith("Overall Assessment: Great"));
+            assertFalse(result.contains("```"));
+        }
+
+        @Test
+        void invalidJson_returnsRawContent() throws Exception {
+            String raw = "[invalid json]";
+            when(jsonSerialization.deserialize(raw, List.class)).thenThrow(new RuntimeException("Parse error"));
+
+            String result = invoke(raw);
+            assertEquals(raw, result);
+        }
+    }
 }

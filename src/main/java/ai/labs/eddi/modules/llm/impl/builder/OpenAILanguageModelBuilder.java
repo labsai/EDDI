@@ -26,6 +26,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_LOG_RESPONSES = "logResponses";
     private static final String KEY_RESPONSE_FORMAT = "responseFormat";
     private static final String KEY_BASE_URL = "baseUrl";
+    private static final String KEY_MAX_TOKENS = "maxTokens";
     private static final String TYPE_JSON = "json";
 
     @Override
@@ -45,6 +46,9 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
         }
         if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
             builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
+        }
+        if (!isNullOrEmpty(parameters.get(KEY_MAX_TOKENS))) {
+            builder.maxTokens(Integer.parseInt(parameters.get(KEY_MAX_TOKENS)));
         }
         if (TYPE_JSON.equalsIgnoreCase(parameters.get(KEY_RESPONSE_FORMAT))) {
             builder.responseFormat("json_object");
@@ -75,6 +79,9 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
         }
         if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
             builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
+        }
+        if (!isNullOrEmpty(parameters.get(KEY_MAX_TOKENS))) {
+            builder.maxTokens(Integer.parseInt(parameters.get(KEY_MAX_TOKENS)));
         }
         if (TYPE_JSON.equalsIgnoreCase(parameters.get(KEY_RESPONSE_FORMAT))) {
             builder.responseFormat("json_object");

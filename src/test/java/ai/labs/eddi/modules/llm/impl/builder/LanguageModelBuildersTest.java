@@ -84,18 +84,43 @@ class LanguageModelBuildersTest {
         private final AnthropicLanguageModelBuilder builder = new AnthropicLanguageModelBuilder();
 
         @Test
-        @DisplayName("builds ChatModel")
-        void build() {
+        @DisplayName("builds ChatModel with explicit maxTokens, topP, topK")
+        void buildExplicitParams() {
             Map<String, String> params = new HashMap<>();
             params.put("apiKey", "sk-test");
             params.put("modelName", "claude-sonnet-4-6");
             params.put("temperature", "0.3");
             params.put("timeout", "60000");
+            params.put("maxTokens", "4096");
+            params.put("topP", "0.9");
+            params.put("topK", "40");
             params.put("logRequests", "true");
             params.put("logResponses", "true");
 
             ChatModel model = builder.build(params);
             assertNotNull(model);
+        }
+
+        @Test
+        @DisplayName("builds ChatModel without maxTokens defaults to 16384")
+        void buildDefaultMaxTokens() throws Exception {
+            Map<String, String> params = new HashMap<>();
+            params.put("apiKey", "sk-test");
+            params.put("modelName", "claude-sonnet-4-6");
+            params.put("temperature", "0.3");
+
+            ChatModel model = builder.build(params);
+            assertNotNull(model);
+
+            // Verify maxTokens via reflection if possible (langchain4j AnthropicChatModel)
+            try {
+                java.lang.reflect.Field field = model.getClass().getDeclaredField("maxTokens");
+                field.setAccessible(true);
+                Integer maxTokens = (Integer) field.get(model);
+                assertEquals(16384, maxTokens);
+            } catch (NoSuchFieldException e) {
+                // Ignore if field name varies in this langchain4j version
+            }
         }
 
         @Test

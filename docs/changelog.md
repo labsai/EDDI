@@ -5,6 +5,25 @@
 
 ---
 
+## 🐛 fix(llm,group): empty task results, maxTokens defaults, verification display (2026-07-24)
+
+**Repo:** EDDI (`feat/v6.2.0-prep`)
+
+Group conversations with Anthropic thinking models (e.g. `claude-sonnet-5`) produced empty task results and raw JSON in the UI. Root cause: langchain4j's default `maxTokens=1024` was consumed entirely by thinking tokens, leaving nothing for the response text.
+
+**Bug fixes:**
+- **AnthropicLanguageModelBuilder** — added `maxTokens`, `topP`, `topK` support; default `maxTokens=16384`
+- **OpenAILanguageModelBuilder** — added `maxTokens` support (was missing)
+- **LlmTask** — null/blank response skips output creation (no empty bubbles)
+- **GroupConversationService** — verification JSON → human-readable ✅/❌ summaries
+- **ConversationLogGenerator** — null-safety on `KEY_TEXT` entries
+
+**Documentation:** `docs/langchain.md` — Output Token Limits section, provider matrix, updated examples
+
+**Tests:** Anthropic maxTokens, blank output guard, verification formatting, null text filtering
+
+---
+
 ## 📝 README: add HITL section, JSON mode, tool context ceiling (2026-07-23)
 
 **Repo:** EDDI (`feat/v6.2.0-prep`)

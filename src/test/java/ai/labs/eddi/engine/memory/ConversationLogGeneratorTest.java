@@ -494,5 +494,28 @@ class ConversationLogGeneratorTest {
             assertEquals(1, log.getMessages().size());
             assertEquals("assistant", log.getMessages().getFirst().getRole());
         }
+
+        @Test
+        @DisplayName("null text in output map — filters nulls out")
+        void nullTextInOutputMap() {
+            var memory = mock(IConversationMemory.class);
+            var outputs = new ArrayList<ConversationOutput>();
+            var output = new ConversationOutput();
+            output.put("input", "hello");
+            Map<String, Object> mapWithNull = new java.util.HashMap<>();
+            mapWithNull.put("text", null);
+            Map<String, Object> mapWithText = new java.util.HashMap<>();
+            mapWithText.put("text", "valid");
+            output.put("output", List.of(mapWithNull, mapWithText));
+            outputs.add(output);
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            var generator = new ConversationLogGenerator(memory);
+            ConversationLog log = generator.generate();
+
+            assertEquals(2, log.getMessages().size());
+            assertEquals("assistant", log.getMessages().get(1).getRole());
+            assertEquals("valid", log.getMessages().get(1).getContent().getFirst().getValue());
+        }
     }
 }

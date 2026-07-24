@@ -692,8 +692,16 @@ public class LlmTask implements ILifecycleTask {
         if (shouldAddToOutput) {
             var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), responseContent);
             currentStep.storeData(outputData);
-            var outputItem = new TextOutputItem(responseContent, 0);
-            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+            // Only add to conversation output if there is actual text.
+            // Null/blank responses (e.g. from token budget exhaustion or
+            // thinking-only turns) should not produce empty message bubbles.
+            if (responseContent != null && !responseContent.isBlank()) {
+                var outputItem = new TextOutputItem(responseContent, 0);
+                currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+            } else {
+                LOGGER.warnf("LLM response was null or blank for task '%s' (type=%s) — skipping output",
+                        task.getId(), task.getType());
+            }
         }
 
         prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);

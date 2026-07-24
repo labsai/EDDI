@@ -126,6 +126,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `logResponses`             | boolean | Log API responses (sync and streaming)                | false             |
 | **API Configuration**      |         |                                                       |                   |
 | `temperature`              | string  | Model temperature (0-1)                               | Provider-specific |
+| `maxTokens`                | string  | Maximum output tokens per response — see [Output Token Limits](#output-token-limits) | Provider-specific |
 | `timeout`                  | string  | Request timeout (milliseconds) — see [Timeouts](#timeouts-and-streaming) | Provider-specific |
 
 > **These three settings are part of a model's identity.** Two tasks that differ only in `timeout`, `logRequests` or `logResponses` get two separate cached model instances, so a task always runs with the settings it declares regardless of which task was constructed first.
@@ -133,6 +134,41 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 > **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
 >
 > **An unusable `timeout` is ignored, not fatal.** The value is normalised once before it reaches a provider builder: it is trimmed, and dropped entirely when it is blank, non-numeric (`"30s"`) or non-positive (`"0"`, historically "no timeout"), with a WARN naming the model type. Provider builders parse the value with an unguarded `Long.parseLong`, so without this a stored config carrying one of those values would fail on every turn. `" 5000 "` and `"5000"` are the same timeout and share one cached model.
+### Output Token Limits
+
+The `maxTokens` parameter controls the **maximum number of output tokens** the LLM can generate per response. This is a ceiling, not a target — the model generates only what it needs and stops. Setting it higher does not increase cost unless the model actually produces more tokens; the `timeout` parameter is the real cost safety net.
+
+> [!WARNING]
+> **Anthropic + Extended Thinking**: Models with extended thinking (e.g. `claude-sonnet-5`, `claude-sonnet-4`) count **thinking tokens** toward `maxTokens`. If the limit is too low, thinking can consume the entire budget, leaving **zero tokens for the actual response** — resulting in empty/null output. This is a silent failure: the API returns successfully, token usage shows consumption, but `text()` is `null`.
+
+#### Provider Limits and EDDI Defaults
+
+| Provider | Config Key | Max Output Capability | EDDI Default (if omitted) | Notes |
+|----------|------------|----------------------|--------------------------|-------|
+| **Anthropic** | `maxTokens` | 8,192 (standard) / 128,000 (with extended thinking) | **16,384** | Required by API. Set higher for thinking models |
+| **Gemini** | `maxOutputTokens` | 65,536 | Provider SDK default | Use `maxOutputTokens` (not `maxTokens`) |
+| **OpenAI** | `maxTokens` | 4,096–16,384 (model-dependent) | Provider SDK default | |
+| **Azure OpenAI** | `maxTokens` | Same as OpenAI | Provider SDK default | |
+| **Bedrock** | `maxTokens` | Model-dependent | Provider SDK default | |
+| **Mistral** | `maxTokens` | 32,768 | Provider SDK default | |
+| **Oracle GenAI** | `maxTokens` | Model-dependent | Provider SDK default | |
+
+#### Recommended Settings
+
+For most conversational use cases:
+```json
+"maxTokens": "16384"
+```
+
+For complex analysis, multi-step reasoning, or models with extended thinking:
+```json
+"maxTokens": "32768"
+```
+
+For maximum output (e.g. long-form document generation):
+```json
+"maxTokens": "65536"
+```
 
 ### Timeouts and Streaming
 
@@ -206,9 +242,10 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
       "description": "Anthropic Claude chat",
       "parameters": {
         "apiKey": "your-anthropic-api-key",
-        "modelName": "claude-3-opus-20240229",
+        "modelName": "claude-sonnet-4-20250514",
         "temperature": "0.7",
-        "timeout": "15000",
+        "maxTokens": "16384",
+        "timeout": "60000",
         "systemMessage": "You are a helpful assistant",
         "includeFirstAgentMessage": "false",
         "addToOutput": "true"
@@ -218,7 +255,9 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 }
 ```
 
-**Note**: Anthropic doesn't allow the first message to be from the agent, so `includeFirstAgentMessage` should be set to `false`.
+> **Important**: Anthropic doesn't allow the first message to be from the agent, so `includeFirstAgentMessage` should be set to `false`.
+>
+> **maxTokens**: Anthropic requires `max_tokens` in every request. If omitted, EDDI defaults to **16384**. For models with **extended thinking** (e.g. `claude-sonnet-5`), thinking tokens count toward this budget — set it higher (e.g. `"32768"` or `"65536"`) for complex analysis tasks.
 
 #### Google Gemini (Vertex AI)
 
@@ -375,7 +414,7 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
         "modelId": "anthropic.claude-v2",
         "region": "us-east-1",
         "temperature": "0.7",
-        "maxTokens": "1024",
+        "maxTokens": "16384",
         "timeout": "30000",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
@@ -402,7 +441,7 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
         "compartmentId": "ocid1.compartment.oc1..your-compartment-id",
         "configProfile": "DEFAULT",
         "temperature": "0.7",
-        "maxTokens": "1024",
+        "maxTokens": "16384",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
       }

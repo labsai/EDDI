@@ -1979,15 +1979,25 @@ public class GroupConversationService implements IGroupConversationService {
         }
 
         TranscriptEntry verifyEntry = executeAgentTurn(verifier, gc, verifyInput, protocol, phaseIdx, phase, null, listener);
-        gc.getTranscript().add(verifyEntry);
-
-        if (listener != null) {
-            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
-                    verifier.agentId(), verifier.displayName(), verifyEntry.content(), phaseIdx, phase.name()));
-        }
 
         // Parse verification results — same three-tier fallback
         parseAndApplyVerification(gc, completedTasks, verifyEntry.content(), listener);
+
+        // Replace raw JSON with a human-readable summary for the transcript.
+        // The JSON was needed for parseAndApplyVerification above; users should
+        // see formatted pass/fail results, not raw JSON.
+        String formattedContent = formatVerificationForDisplay(gc, completedTasks, verifyEntry.content());
+        TranscriptEntry displayEntry = new TranscriptEntry(
+                verifyEntry.speakerAgentId(), verifyEntry.speakerDisplayName(),
+                formattedContent, verifyEntry.phaseIndex(), verifyEntry.phaseName(),
+                verifyEntry.type(), verifyEntry.timestamp(), verifyEntry.errorReason(),
+                verifyEntry.targetAgentId());
+        gc.getTranscript().add(displayEntry);
+
+        if (listener != null) {
+            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
+                    verifier.agentId(), verifier.displayName(), formattedContent, phaseIdx, phase.name()));
+        }
     }
 
     /**
@@ -2115,6 +2125,66 @@ public class GroupConversationService implements IGroupConversationService {
         } catch (Exception e) {
             LOGGER.debugf("Verification JSON parse failed: %s", e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Converts raw verification output (typically JSON) into a human-readable
+     * summary suitable for display in the UI. Falls back to the raw content if
+     * formatting fails.
+     */
+    @SuppressWarnings("unchecked")
+    private String formatVerificationForDisplay(GroupConversation gc, List<TaskItem> completedTasks, String rawContent) {
+        if (rawContent == null || !rawContent.contains("[")) {
+            return rawContent;
+        }
+
+        try {
+            int jsonStart = rawContent.indexOf('[');
+            int jsonEnd = rawContent.lastIndexOf(']');
+            if (jsonStart < 0 || jsonEnd <= jsonStart) {
+                return rawContent;
+            }
+            String json = rawContent.substring(jsonStart, jsonEnd + 1);
+            var items = jsonSerialization.deserialize(json, List.class);
+            if (items == null || items.isEmpty()) {
+                return rawContent;
+            }
+
+            var sb = new StringBuilder("## Task Verification Results\n\n");
+            for (Object item : items) {
+                if (item instanceof Map<?, ?> map) {
+                    String subject = map.containsKey("subject") ? String.valueOf(map.get("subject")) : "Unknown Task";
+                    boolean passed = true;
+                    if (map.containsKey("passed")) {
+                        Object passedVal = map.get("passed");
+                        passed = Boolean.TRUE.equals(passedVal) || "true".equalsIgnoreCase(String.valueOf(passedVal));
+                    }
+                    String feedback = map.containsKey("feedback") ? String.valueOf(map.get("feedback")) : "";
+
+                    sb.append(passed ? "✅" : "❌").append(" **").append(subject).append("**: ");
+                    sb.append(passed ? "Passed" : "Failed").append("\n");
+                    if (!feedback.isBlank()) {
+                        sb.append(feedback).append("\n");
+                    }
+                    sb.append("\n");
+                }
+            }
+
+            // Append any text outside the JSON (e.g. "Overall Assessment: ...")
+            String afterJson = rawContent.substring(jsonEnd + 1).trim();
+            // Strip markdown code fence closing if present
+            if (afterJson.startsWith("```")) {
+                afterJson = afterJson.substring(3).trim();
+            }
+            if (!afterJson.isBlank()) {
+                sb.append(afterJson);
+            }
+
+            return sb.toString().trim();
+        } catch (Exception e) {
+            LOGGER.debugf("Failed to format verification for display: %s", e.getMessage());
+            return rawContent;
         }
     }
 
