@@ -115,24 +115,27 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   // Auto-start conversation from ?agentId= query param
   useEffect(() => {
     const agentIdParam = searchParams.get("agentId");
-    if (!agentIdParam || !deployedAgents) return;
+    if (!agentIdParam) return;
 
     // Skip if this agent is already selected (prevents duplicate starts)
     if (agentIdParam === selectedAgentId) {
-      // Still clean the URL param
+      // Still clean the URL params
       setSearchParams({}, { replace: true });
       return;
     }
 
-    // Find agent name from deployed agents list
-    const agent = deployedAgents.find((b) => b.id === agentIdParam);
-    const agentName = agent?.name || agentIdParam;
+    // Resolve agent name: URL param > deployed agents lookup > fallback to ID
+    const agentNameParam = searchParams.get("agentName");
+    const agentName =
+      agentNameParam ||
+      deployedAgents?.find((b) => b.id === agentIdParam)?.name ||
+      agentIdParam;
 
     // Auto-select and start conversation
     setSelectedAgent(agentIdParam, agentName);
     startConversation.mutate({ agentId: agentIdParam });
 
-    // Remove query param so refresh doesn't re-create
+    // Remove query params so refresh doesn't re-create
     setSearchParams({}, { replace: true });
   }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, startConversation, setSearchParams]);
 

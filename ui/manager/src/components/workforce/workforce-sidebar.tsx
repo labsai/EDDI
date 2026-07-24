@@ -275,7 +275,7 @@ function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?
                 onClick={() =>
                   boardId
                     ? navigate(`/workforce/${boardId}/thread/${agentId}`)
-                    : navigate(`/workforce/chat?agentId=${agentId}`)
+                    : navigate(`/workforce/chat?agentId=${agentId}&agentName=${encodeURIComponent(agent.name || agentId)}`)
                 }
                 title={collapsed ? (agent.name || agentId) : undefined}
                 aria-label={collapsed ? (agent.name || agentId) : undefined}
