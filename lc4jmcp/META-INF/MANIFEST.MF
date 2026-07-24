@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Created-By: Maven Source Plugin 3.4.0
+Java-Version: 17
+

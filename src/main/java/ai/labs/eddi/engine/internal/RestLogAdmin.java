@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.runtime.InstanceIdProducer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
@@ -133,7 +134,7 @@ public class RestLogAdmin implements IRestLogAdmin {
 
     private void sendEvent(SseEventSink eventSink, Sse sse, LogEntry entry, AtomicLong lastEventTime) {
         try {
-            OutboundSseEvent event = sse.newEventBuilder().name("log").data(entry).build();
+            OutboundSseEvent event = sse.newEventBuilder().name("log").data(LogEntry.class, entry, MediaType.APPLICATION_JSON_TYPE).build();
             eventSink.send(event).exceptionally(t -> {
                 log.debugv("Failed to send SSE log event: {0}", t.getMessage());
                 return null;

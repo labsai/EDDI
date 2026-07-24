@@ -1,0 +1,38 @@
+Subject: RE: WAIC 2026 Showcase — E.D.D.I / labs.ai — Materials Submission
+
+Dear [Organizer Name],
+
+Thank you for the kind invitation and for selecting labs.ai as a Trusted Partner for the WAIC 2026 showcase.
+
+1. Confirmation of Presence
+
+We will not be attending WAIC 2026 in person and therefore do not require a physical display board. We are happy to participate through the digital showcase components (on-screen carousel, promotional video, and Certificate of Recognition).
+
+2. Digital Materials
+
+All materials have been uploaded to the following shared folder:
+
+[INSERT CLOUD FOLDER LINK HERE]
+
+The folder contains:
+
+- 01-logo/ — Organization logo in SVG (vector, infinitely scalable) and high-resolution PNG formats with transparent backgrounds
+- 02-solution-images/ — Seven solution screenshots (all ≥1920×1080) showing the platform dashboard, multi-agent conversations, security vault, audit trail, and more
+- 03-descriptions/ — Solution description (149 words) and company profile (97 words)
+- 04-presentation/ — 16:9 showcase presentation (PPTX, 7 slides) suitable for the promotional video
+
+3. Participant Information
+
+[OPTION A: Form attached / forwarded]
+Please find the completed participant information form attached.
+
+[OPTION B: If already submitted for another WAIC activity]
+We have already submitted the participant information form for [other WAIC activity] — please refer to that submission.
+
+Please do not hesitate to reach out if you need any additional materials or adjustments.
+
+Best regards,
+
+[Your Name]
+labs.ai
+https://eddi.labs.ai

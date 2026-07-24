@@ -59,7 +59,7 @@ class RestLogAdminExtendedTest {
             eventSink = mock(SseEventSink.class);
             sse = mock(Sse.class, RETURNS_DEEP_STUBS);
             var event = mock(OutboundSseEvent.class);
-            when(sse.newEventBuilder().name(anyString()).data(any()).build()).thenReturn(event);
+            when(sse.newEventBuilder().name(anyString()).data(any(), any(), any()).build()).thenReturn(event);
             when(eventSink.send(any(OutboundSseEvent.class)))
                     .thenReturn(CompletableFuture.completedFuture(null));
             when(eventSink.isClosed()).thenReturn(false);
@@ -136,7 +136,7 @@ class RestLogAdminExtendedTest {
         void handlesSendException() {
             var eventSink = mock(SseEventSink.class);
             var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
-            when(sse.newEventBuilder().name(anyString()).data(any()).build())
+            when(sse.newEventBuilder().name(anyString()).data(any(), any(), any()).build())
                     .thenThrow(new RuntimeException("Build failed"));
             when(eventSink.isClosed()).thenReturn(false);
 
@@ -165,7 +165,7 @@ class RestLogAdminExtendedTest {
             var event = mock(OutboundSseEvent.class);
             when(sse.newEventBuilder()).thenReturn(builder);
             when(builder.name(anyString())).thenReturn(builder);
-            when(builder.data(any())).thenReturn(builder);
+            when(builder.data(any(), any(), any())).thenReturn(builder);
             when(builder.build()).thenReturn(event);
             when(eventSink.send(any(OutboundSseEvent.class)))
                     .thenReturn(CompletableFuture.completedFuture(null));
@@ -182,9 +182,9 @@ class RestLogAdminExtendedTest {
 
             // Verify order: entry3, then entry2, then entry1
             var inOrder = inOrder(builder);
-            inOrder.verify(builder).data(entry3);
-            inOrder.verify(builder).data(entry2);
-            inOrder.verify(builder).data(entry1);
+            inOrder.verify(builder).data(eq(LogEntry.class), eq(entry3), any());
+            inOrder.verify(builder).data(eq(LogEntry.class), eq(entry2), any());
+            inOrder.verify(builder).data(eq(LogEntry.class), eq(entry1), any());
             verify(eventSink, times(3)).send(event);
         }
     }
@@ -202,10 +202,10 @@ class RestLogAdminExtendedTest {
             var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
             when(eventSink.isClosed()).thenReturn(false);
             when(eventSink.send(any())).thenReturn(CompletableFuture.completedFuture(null));
-            
+
             var heartbeatEvent = mock(OutboundSseEvent.class);
             when(sse.newEventBuilder().comment("heartbeat").build()).thenReturn(heartbeatEvent);
-            
+
             when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
             when(boundedLogStore.addListener(any())).thenReturn("listener-hb");
 
@@ -213,15 +213,16 @@ class RestLogAdminExtendedTest {
             try (var mockedSystem = mockStatic(System.class, CALLS_REAL_METHODS)) {
                 // Initialize to t0
                 mockedSystem.when(System::currentTimeMillis).thenReturn(t0);
-                
+
                 restLogAdmin.streamLogs(null, null, null, eventSink, sse);
-                
+
                 // Advance time by 20 seconds
                 mockedSystem.when(System::currentTimeMillis).thenReturn(t0 + 20_000L);
-                
-                // Verify that within ~3 seconds (to allow Thread.sleep(2000) to wake up), heartbeat is sent
+
+                // Verify that within ~3 seconds (to allow Thread.sleep(2000) to wake up),
+                // heartbeat is sent
                 verify(eventSink, timeout(3000).atLeastOnce()).send(heartbeatEvent);
-                
+
                 when(eventSink.isClosed()).thenReturn(true);
             }
         }
@@ -233,37 +234,38 @@ class RestLogAdminExtendedTest {
             var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
             when(eventSink.isClosed()).thenReturn(false);
             when(eventSink.send(any())).thenReturn(CompletableFuture.completedFuture(null));
-            
+
             var heartbeatEvent = mock(OutboundSseEvent.class);
             when(sse.newEventBuilder().comment("heartbeat").build()).thenReturn(heartbeatEvent);
-            
+
             var logEvent = mock(OutboundSseEvent.class);
-            when(sse.newEventBuilder().name("log").data(any()).build()).thenReturn(logEvent);
+            when(sse.newEventBuilder().name("log").data(any(), any(), any()).build()).thenReturn(logEvent);
 
             when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
-            
+
             var captor = ArgumentCaptor.forClass(Consumer.class);
             when(boundedLogStore.addListener(captor.capture())).thenReturn("listener-hb");
 
             long t0 = System.currentTimeMillis();
             try (var mockedSystem = mockStatic(System.class, CALLS_REAL_METHODS)) {
                 mockedSystem.when(System::currentTimeMillis).thenReturn(t0);
-                
+
                 restLogAdmin.streamLogs(null, null, null, eventSink, sse);
-                
+
                 @SuppressWarnings("unchecked")
                 Consumer<LogEntry> listener = captor.getValue();
-                
+
                 // Advance time by 10s, then send a log event (which updates lastEventTime)
                 mockedSystem.when(System::currentTimeMillis).thenReturn(t0 + 10_000L);
                 listener.accept(logEntry("agent-1", "conv-1", "INFO"));
-                
-                // Advance time by another 10s. Total is 20s from start, but only 10s from last event.
+
+                // Advance time by another 10s. Total is 20s from start, but only 10s from last
+                // event.
                 mockedSystem.when(System::currentTimeMillis).thenReturn(t0 + 20_000L);
-                
+
                 // Give the cleanup thread a moment to run
                 Thread.sleep(2500);
-                
+
                 verify(eventSink, never()).send(heartbeatEvent);
                 when(eventSink.isClosed()).thenReturn(true);
             }
@@ -275,15 +277,15 @@ class RestLogAdminExtendedTest {
             var eventSink = mock(SseEventSink.class);
             var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
             when(eventSink.isClosed()).thenReturn(true);
-            
+
             var heartbeatEvent = mock(OutboundSseEvent.class);
             when(sse.newEventBuilder().comment("heartbeat").build()).thenReturn(heartbeatEvent);
-            
+
             when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
             when(boundedLogStore.addListener(any())).thenReturn("listener-hb");
 
             restLogAdmin.streamLogs(null, null, null, eventSink, sse);
-            
+
             Thread.sleep(2500);
             verify(eventSink, never()).send(any());
         }
