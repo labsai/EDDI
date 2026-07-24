@@ -373,7 +373,7 @@ export function ChatPanel() {
   }, [rerunConversation, t]);
 
   return (
-    <div className="flex h-full overflow-hidden rounded-xl border border-border bg-background shadow-sm">
+    <div className="flex h-full min-w-0 overflow-hidden rounded-xl border border-border bg-background shadow-sm">
       {/* History panel */}
       <ChatHistory
         open={historyOpen}
@@ -381,7 +381,7 @@ export function ChatPanel() {
       />
 
       {/* Main chat area */}
-      <div className="flex flex-1 flex-col">
+      <div className="flex flex-1 flex-col min-w-0 min-h-0">
         {/* Top bar */}
         <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
           {/* History toggle */}
@@ -556,7 +556,7 @@ export function ChatPanel() {
         {/* Messages */}
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto"
+          className="relative flex-1 overflow-y-auto min-h-0"
           onScroll={handleScroll}
         >
           {!selectedAgentId ? (

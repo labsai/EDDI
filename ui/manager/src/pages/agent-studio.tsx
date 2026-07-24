@@ -226,7 +226,7 @@ export function AgentStudioPage() {
 
         {/* Right: Chat + Debug */}
         {rightPanelOpen && (
-          <div className="w-96 shrink-0 border-s border-border overflow-hidden hidden md:flex md:flex-col">
+          <div className="w-96 shrink-0 border-s border-border overflow-hidden hidden md:flex md:flex-col min-h-0 min-w-0">
             <ChatPanel />
           </div>
         )}
