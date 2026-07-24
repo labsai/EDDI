@@ -78,7 +78,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const agentSelectorRef = useRef<HTMLDivElement>(null);
-  const autoStartedRef = useRef(false);
+
   const [contextOpen, setContextOpen] = useState(false);
 
   // Store state
@@ -114,11 +114,15 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
   // Auto-start conversation from ?agentId= query param
   useEffect(() => {
-    if (autoStartedRef.current) return;
     const agentIdParam = searchParams.get("agentId");
     if (!agentIdParam || !deployedAgents) return;
 
-    autoStartedRef.current = true;
+    // Skip if this agent is already selected (prevents duplicate starts)
+    if (agentIdParam === selectedAgentId) {
+      // Still clean the URL param
+      setSearchParams({}, { replace: true });
+      return;
+    }
 
     // Find agent name from deployed agents list
     const agent = deployedAgents.find((b) => b.id === agentIdParam);
@@ -130,7 +134,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
     // Remove query param so refresh doesn't re-create
     setSearchParams({}, { replace: true });
-  }, [searchParams, deployedAgents, setSelectedAgent, startConversation, setSearchParams]);
+  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, startConversation, setSearchParams]);
 
   // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
   const {
