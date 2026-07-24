@@ -1,5 +1,13 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useSessionLogStore, _connectForTesting } from "@/hooks/session-log-store";
+
+vi.mock("@/lib/api/logs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/logs")>();
+  return {
+    ...actual,
+    getRecentLogs: vi.fn().mockResolvedValue([]),
+  };
+});
 
 describe("useSessionLogStore", () => {
   beforeEach(() => {
@@ -7,6 +15,7 @@ describe("useSessionLogStore", () => {
     useSessionLogStore.setState({
       entries: [],
       connected: false,
+      seeded: false,
     });
   });
 
@@ -132,6 +141,140 @@ describe("useSessionLogStore", () => {
     // Trigger onerror
     es.onerror?.();
     expect(useSessionLogStore.getState().connected).toBe(false);
+
+    connection.close();
+  });
+
+  it("starts with seeded = false", () => {
+    expect(useSessionLogStore.getState().seeded).toBe(false);
+  });
+
+  it("seeds from REST API on first connect when entries are empty", async () => {
+    const { getRecentLogs } = await import("@/lib/api/logs");
+    const mockGetRecentLogs = vi.mocked(getRecentLogs);
+    mockGetRecentLogs.mockResolvedValueOnce([
+      {
+        timestamp: 1000,
+        level: "INFO",
+        loggerName: "test",
+        message: "Historical entry",
+        environment: undefined,
+        agentId: undefined,
+        agentVersion: undefined,
+        conversationId: undefined,
+        userId: undefined,
+        instanceId: undefined,
+      },
+    ]);
+
+    const connection = _connectForTesting();
+    const es = connection.getEventSource();
+    expect(es).not.toBeNull();
+    if (!es) return;
+
+    // Trigger onopen — should call getRecentLogs since entries are empty
+    await es.onopen?.();
+
+    // Wait for the async seed to complete
+    await vi.waitFor(() => {
+      expect(useSessionLogStore.getState().seeded).toBe(true);
+    });
+
+    expect(useSessionLogStore.getState().entries).toHaveLength(1);
+    expect(useSessionLogStore.getState().entries[0]!.message).toBe("Historical entry");
+
+    connection.close();
+  });
+
+  it("deduplicates entries during REST seed merge", async () => {
+    const { getRecentLogs } = await import("@/lib/api/logs");
+    const mockGetRecentLogs = vi.mocked(getRecentLogs);
+    const sharedEntry = {
+      timestamp: 2000,
+      level: "WARN" as const,
+      loggerName: "dup",
+      message: "Duplicate msg",
+      environment: undefined,
+      agentId: undefined,
+      agentVersion: undefined,
+      conversationId: undefined,
+      userId: undefined,
+      instanceId: undefined,
+    };
+
+    mockGetRecentLogs.mockResolvedValueOnce([sharedEntry]);
+
+    const connection = _connectForTesting();
+    const es = connection.getEventSource();
+    if (!es) return;
+
+    // Trigger onopen (entries empty → triggers REST seed)
+    const openPromise = es.onopen?.();
+
+    // Simulate an SSE event arriving while REST is in-flight (same entry)
+    es.onmessage?.(new MessageEvent("message", { data: JSON.stringify(sharedEntry) }));
+    expect(useSessionLogStore.getState().entries).toHaveLength(1);
+
+    await openPromise;
+    await vi.waitFor(() => {
+      expect(useSessionLogStore.getState().seeded).toBe(true);
+    });
+
+    // Should still be 1 after dedup, not 2
+    expect(useSessionLogStore.getState().entries).toHaveLength(1);
+
+    connection.close();
+  });
+
+  it("sets seeded = true even if REST seed fails", async () => {
+    const { getRecentLogs } = await import("@/lib/api/logs");
+    const mockGetRecentLogs = vi.mocked(getRecentLogs);
+    mockGetRecentLogs.mockRejectedValueOnce(new Error("Network error"));
+
+    const connection = _connectForTesting();
+    const es = connection.getEventSource();
+    if (!es) return;
+
+    await es.onopen?.();
+
+    await vi.waitFor(() => {
+      expect(useSessionLogStore.getState().seeded).toBe(true);
+    });
+
+    // No entries since REST failed and no SSE events arrived
+    expect(useSessionLogStore.getState().entries).toHaveLength(0);
+
+    connection.close();
+  });
+
+  it("skips REST seed when entries are already present", async () => {
+    const { getRecentLogs } = await import("@/lib/api/logs");
+    const mockGetRecentLogs = vi.mocked(getRecentLogs);
+
+    // Pre-populate store
+    useSessionLogStore.setState({
+      entries: [{
+        timestamp: 5000,
+        level: "INFO",
+        loggerName: "pre",
+        message: "Pre-existing",
+        environment: undefined,
+        agentId: undefined,
+        agentVersion: undefined,
+        conversationId: undefined,
+        userId: undefined,
+        instanceId: undefined,
+      }],
+    });
+
+    const connection = _connectForTesting();
+    const es = connection.getEventSource();
+    if (!es) return;
+
+    await es.onopen?.();
+
+    // Should NOT have called getRecentLogs since entries were not empty
+    expect(mockGetRecentLogs).not.toHaveBeenCalled();
 
     connection.close();
   });

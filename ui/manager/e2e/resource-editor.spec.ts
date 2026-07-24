@@ -32,6 +32,7 @@ test.describe("Resource Editor — Rules", () => {
 
   test("can switch to JSON tab", async ({ page }) => {
     const jsonTab = page.getByTestId("tab-json");
+    await expect(jsonTab).toBeVisible({ timeout: 10000 });
     await jsonTab.click();
     // Custom tab buttons use aria-selected (not Radix data-state)
     await expect(jsonTab).toHaveAttribute("aria-selected", "true");

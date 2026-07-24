@@ -413,4 +413,171 @@ describe("BearerEventSource", () => {
 
     es.close();
   });
+
+  // ─── CRLF normalization tests ────────────────────────────────────────────
+
+  it("handles \\r\\n line endings in SSE blocks", async () => {
+    // Simulate a server sending Windows-style line endings
+    const body = createSSEStream(["event: log\r\ndata: crlf-payload\r\n\r\n"]);
+    fetchSpy.mockResolvedValueOnce(
+      new Response(body, { status: 200 })
+    );
+
+    const listenerFn = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.addEventListener("log", listenerFn);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(listenerFn).toHaveBeenCalledTimes(1);
+    const event = listenerFn.mock.calls[0]![0] as MessageEvent;
+    expect(event.type).toBe("log");
+    expect(event.data).toBe("crlf-payload");
+
+    es.close();
+  });
+
+  it("handles lone \\r line endings in SSE blocks", async () => {
+    // Old Mac-style line endings
+    const body = createSSEStream(["event: log\rdata: cr-payload\r\r"]);
+    fetchSpy.mockResolvedValueOnce(
+      new Response(body, { status: 200 })
+    );
+
+    const listenerFn = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.addEventListener("log", listenerFn);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(listenerFn).toHaveBeenCalledTimes(1);
+    const event = listenerFn.mock.calls[0]![0] as MessageEvent;
+    expect(event.type).toBe("log");
+    expect(event.data).toBe("cr-payload");
+
+    es.close();
+  });
+
+  it("handles mixed \\r\\n and \\n in the same block", async () => {
+    const body = createSSEStream(["event: log\r\ndata: mixed\n\r\n"]);
+    fetchSpy.mockResolvedValueOnce(
+      new Response(body, { status: 200 })
+    );
+
+    const listenerFn = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.addEventListener("log", listenerFn);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(listenerFn).toHaveBeenCalledTimes(1);
+    expect((listenerFn.mock.calls[0]![0] as MessageEvent).data).toBe("mixed");
+
+    es.close();
+  });
+
+  // ─── Inactivity timeout tests ────────────────────────────────────────────
+
+  it("reconnects after 45s of inactivity", async () => {
+    // First response: holds the stream open forever (never closes, never sends data)
+    let resolveHold: (() => void) | undefined;
+    const holdingBody = new ReadableStream<Uint8Array>({
+      start() {
+        // Stream stays open, never enqueues or closes
+      },
+      pull() {
+        // Return a promise that never resolves — simulates idle connection
+        return new Promise<void>((r) => { resolveHold = r; });
+      },
+    });
+
+    // Second fetch for the reconnect
+    const reconnectBody = createSSEStream([]);
+
+    fetchSpy
+      .mockResolvedValueOnce(new Response(holdingBody, { status: 200 }))
+      .mockResolvedValueOnce(new Response(reconnectBody, { status: 200 }));
+
+    const errorFn = vi.fn();
+    const openFn = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.onerror = errorFn;
+    es.onopen = openFn;
+
+    // Let initial connect resolve
+    await vi.advanceTimersByTimeAsync(0);
+    expect(openFn).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // Advance 44s — should NOT have reconnected yet
+    await vi.advanceTimersByTimeAsync(44000);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // Advance past 45s — inactivity timer should fire, aborting fetch
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // The abort causes the catch block → scheduleReconnect → onerror + 5s timer
+    expect(errorFn).toHaveBeenCalled();
+
+    // Resolve the held stream to avoid dangling promises
+    resolveHold?.();
+
+    // Advance 5s for the reconnect timer
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    es.close();
+  });
+
+  it("resets inactivity timer on each data chunk", async () => {
+    // Two chunks with a gap — first arrives at t=0, second at ~t=40s
+    let sendSecondChunk: (() => void) | undefined;
+    let closeStream: (() => void) | undefined;
+    const encoder = new TextEncoder();
+
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        // First chunk immediately
+        controller.enqueue(encoder.encode("data: chunk1\n\n"));
+        // Second chunk after external trigger
+        new Promise<void>((r) => { sendSecondChunk = r; }).then(() => {
+          controller.enqueue(encoder.encode("data: chunk2\n\n"));
+          new Promise<void>((r) => { closeStream = r; }).then(() => {
+            controller.close();
+          });
+        });
+      },
+    });
+
+    fetchSpy.mockResolvedValueOnce(new Response(body, { status: 200 }));
+
+    const msgFn = vi.fn();
+    const errorFn = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.onmessage = msgFn;
+    es.onerror = errorFn;
+
+    // Let connect + first chunk arrive
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(msgFn).toHaveBeenCalledTimes(1);
+
+    // Advance 40s — still within 45s window (timer was reset when chunk1 arrived)
+    await vi.advanceTimersByTimeAsync(40000);
+    expect(errorFn).not.toHaveBeenCalled();
+
+    // Send second chunk at t≈40s — resets the timer
+    sendSecondChunk?.();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(msgFn).toHaveBeenCalledTimes(2);
+
+    // Close cleanly
+    closeStream?.();
+    await vi.advanceTimersByTimeAsync(10);
+
+    es.close();
+  });
 });
