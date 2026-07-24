@@ -290,7 +290,7 @@ describe("Workforce Coverage Tests", () => {
       expect(screen.getByText(/We should analyze the data first/i)).toBeInTheDocument();
     });
 
-    it("renders SYNTHESIS entry with amber styling", () => {
+    it("renders SYNTHESIS entry with label and content", () => {
       vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
         isLoading: false,
         isError: false,

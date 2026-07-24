@@ -236,19 +236,19 @@ describe("LogsPage", () => {
   });
 
   it("shows loading state when not yet seeded", () => {
-    vi.mocked(useLogStream).mockReturnValue({ entries: [], sseConnected: true, seeded: false, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
+    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: true, seeded: false, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
     renderLogs();
     expect(screen.getByText("Loading recent logs…")).toBeInTheDocument();
   });
 
   it("shows no-activity state when seeded but empty", () => {
-    vi.mocked(useLogStream).mockReturnValue({ entries: [], sseConnected: true, seeded: true, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
+    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: true, seeded: true, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
     renderLogs();
     expect(screen.getByText("No recent log activity.")).toBeInTheDocument();
   });
 
   it("shows connecting state when not connected", () => {
-    vi.mocked(useLogStream).mockReturnValue({ entries: [], sseConnected: false, seeded: true, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
+    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: false, seeded: true, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
     renderLogs();
     expect(screen.getByText("Connecting to stream...")).toBeInTheDocument();
   });

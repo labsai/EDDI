@@ -95,6 +95,9 @@ function connect() {
         } catch {
           useSessionLogStore.setState({ seeded: true });
         }
+      } else {
+        // Entries already exist from SSE — mark seeded so UI doesn't show loading
+        useSessionLogStore.setState({ seeded: true });
       }
     };
   } catch {

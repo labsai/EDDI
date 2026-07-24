@@ -65,6 +65,32 @@ export function ModeSwitcher({ collapsed = false }: ModeSwitcherProps) {
     [activeKey, navigate],
   );
 
+  // Keyboard handler for ARIA tabs (arrow keys, Home/End)
+  const handleTabKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLButtonElement>) => {
+      const activeIdx = MODES.findIndex((m) => m.key === activeKey);
+      let targetIdx = -1;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        targetIdx = (activeIdx + 1) % MODES.length;
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        targetIdx = (activeIdx - 1 + MODES.length) % MODES.length;
+      } else if (e.key === "Home") {
+        targetIdx = 0;
+      } else if (e.key === "End") {
+        targetIdx = MODES.length - 1;
+      }
+      if (targetIdx >= 0 && targetIdx !== activeIdx) {
+        e.preventDefault();
+        handleSelect(MODES[targetIdx]);
+        // Focus the newly active tab after React re-render
+        const container = e.currentTarget.closest("[role='tablist']");
+        const tabs = container?.querySelectorAll<HTMLButtonElement>("[role='tab']");
+        tabs?.[targetIdx]?.focus();
+      }
+    },
+    [activeKey, handleSelect],
+  );
+
   // ── Collapsed: icon-only toggle ──
   if (collapsed) {
     const inactiveMode = MODES.find((m) => m.key !== activeKey)!;
@@ -85,7 +111,7 @@ export function ModeSwitcher({ collapsed = false }: ModeSwitcherProps) {
     );
   }
 
-  // ── Expanded: segmented pill ──
+
   return (
     <div
       className="flex items-center gap-0.5 rounded-lg bg-sidebar-accent/5 p-0.5"
@@ -101,7 +127,9 @@ export function ModeSwitcher({ collapsed = false }: ModeSwitcherProps) {
             key={mode.key}
             role="tab"
             aria-selected={isActive}
+            tabIndex={isActive ? 0 : -1}
             onClick={() => handleSelect(mode)}
+            onKeyDown={handleTabKeyDown}
             className={cn(
               "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-all duration-200",
               isActive

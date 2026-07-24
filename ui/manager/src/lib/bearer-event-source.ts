@@ -91,10 +91,14 @@ export class BearerEventSource {
         this.resetInactivityTimer();
         if (done) break;
         
-        let chunk = decoder.decode(value, { stream: true });
-        chunk = chunk.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
-        
+
+        // Normalize CRLF on the accumulated buffer (not per-chunk, because
+        // \r\n may be split across two reader.read() calls). Hold back a
+        // trailing lone \r — it may be the first half of \r\n in the next chunk.
+        buffer = buffer.replace(/\r\n/g, "\n").replace(/\r(?!$)/g, "\n");
+
         // SSE blocks are separated by double newlines
         const blocks = buffer.split("\n\n");
         buffer = blocks.pop() ?? "";
