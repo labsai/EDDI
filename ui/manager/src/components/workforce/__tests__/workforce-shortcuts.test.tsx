@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderWithProviders } from "@/test/test-utils";
 import { WorkforceShortcuts } from "@/components/workforce/workforce-shortcuts";
 
