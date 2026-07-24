@@ -401,7 +401,7 @@ function LiveTab() {
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">
             {[...filteredEntries].reverse().map((entry, idx) => (
-              <LogRow key={`${entry.timestamp}-${idx}`} entry={entry} />
+              <LogRow key={`${entry.timestamp}-${filteredEntries.length - 1 - idx}`} entry={entry} />
             ))}
           </div>
         )}
