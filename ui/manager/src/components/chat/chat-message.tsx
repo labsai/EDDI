@@ -43,7 +43,7 @@ export const ChatMessage = memo(function ChatMessage({
   return (
     <div
       className={cn(
-        "group relative flex gap-3 px-4 py-3",
+        "group relative flex gap-3 px-4 py-3 min-w-0",
         isUser ? "flex-row-reverse" : "flex-row"
       )}
       onMouseEnter={() => setHovered(true)}
@@ -66,7 +66,7 @@ export const ChatMessage = memo(function ChatMessage({
       </div>
 
       {/* Content column */}
-      <div className={cn("flex flex-col gap-1 max-w-[75%]", isUser && "items-end")}>
+      <div className={cn("flex flex-col gap-1 max-w-[75%] overflow-hidden", isUser && "items-end")}>
         {/* Bubble */}
         <div
           className={cn(
@@ -87,7 +87,7 @@ export const ChatMessage = memo(function ChatMessage({
               )}
             </div>
           ) : (
-            <div className="prose prose-sm dark:prose-invert max-w-none [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
+            <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden break-words [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:overflow-x-auto [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
               {message.content ? (
                 /* Deliberately NO rehypeRaw: bot/LLM output is untrusted, so
                    raw HTML stays escaped rather than being injected live. */

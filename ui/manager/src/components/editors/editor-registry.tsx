@@ -99,6 +99,7 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
  */
 export const EXTENSION_TO_SLUG: Record<string, string> = {
   "eddi://ai.labs.rules": "rules",
+  "eddi://ai.labs.behavior": "rules",
   "eddi://ai.labs.apicalls": "apicalls",
   "eddi://ai.labs.llm": "llm",
   "eddi://ai.labs.output": "output",
