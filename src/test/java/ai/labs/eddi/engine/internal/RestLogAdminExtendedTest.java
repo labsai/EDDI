@@ -60,7 +60,7 @@ class RestLogAdminExtendedTest {
             eventSink = mock(SseEventSink.class);
             sse = mock(Sse.class, RETURNS_DEEP_STUBS);
             var event = mock(OutboundSseEvent.class);
-            when(sse.newEventBuilder().name(anyString()).mediaType(any()).data((Class) any(), any()).build()).thenReturn(event);
+            when(sse.newEventBuilder().name(anyString()).mediaType(any()).data(any(Class.class), any()).build()).thenReturn(event);
             when(eventSink.send(any(OutboundSseEvent.class)))
                     .thenReturn(CompletableFuture.completedFuture(null));
             when(eventSink.isClosed()).thenReturn(false);
@@ -137,7 +137,7 @@ class RestLogAdminExtendedTest {
         void handlesSendException() {
             var eventSink = mock(SseEventSink.class);
             var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
-            when(sse.newEventBuilder().name(anyString()).mediaType(any()).data((Class) any(), any()).build())
+            when(sse.newEventBuilder().name(anyString()).mediaType(any()).data(any(Class.class), any()).build())
                     .thenThrow(new RuntimeException("Build failed"));
             when(eventSink.isClosed()).thenReturn(false);
 
@@ -167,7 +167,7 @@ class RestLogAdminExtendedTest {
             when(sse.newEventBuilder()).thenReturn(builder);
             when(builder.name(anyString())).thenReturn(builder);
             when(builder.mediaType(any())).thenReturn(builder);
-            when(builder.data((Class) any(), any())).thenReturn(builder);
+            when(builder.data(any(Class.class), any())).thenReturn(builder);
             when(builder.build()).thenReturn(event);
             when(eventSink.send(any(OutboundSseEvent.class)))
                     .thenReturn(CompletableFuture.completedFuture(null));
@@ -211,22 +211,21 @@ class RestLogAdminExtendedTest {
             when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
             when(boundedLogStore.addListener(any())).thenReturn("listener-hb");
 
-            // Controllable clock: starts at t0, then jumps 20s ahead
             long t0 = System.currentTimeMillis();
             var time = new AtomicLong(t0);
-            restLogAdmin.clock = time::get;
+            var admin = new RestLogAdmin(boundedLogStore, databaseLogs, instanceIdProducer, time::get);
 
-            restLogAdmin.streamLogs(null, null, null, eventSink, sse);
+            admin.streamLogs(null, null, null, eventSink, sse);
 
             // Advance time by 20 seconds (exceeds 15s heartbeat interval)
             time.set(t0 + 20_000L);
 
-            // Verify that within ~3 seconds (to allow Thread.sleep(2000) in cleanup
-            // thread),
-            // heartbeat is sent
-            verify(eventSink, timeout(3000).atLeastOnce()).send(heartbeatEvent);
-
-            when(eventSink.isClosed()).thenReturn(true);
+            try {
+                // Verify heartbeat is sent within 5s (allows Thread.sleep(2000) + scheduling)
+                verify(eventSink, timeout(5000).atLeastOnce()).send(heartbeatEvent);
+            } finally {
+                when(eventSink.isClosed()).thenReturn(true);
+            }
         }
 
         @Test
@@ -241,32 +240,38 @@ class RestLogAdminExtendedTest {
             when(sse.newEventBuilder().comment("heartbeat").build()).thenReturn(heartbeatEvent);
 
             var logEvent = mock(OutboundSseEvent.class);
-            when(sse.newEventBuilder().name("log").mediaType(any()).data((Class) any(), any()).build()).thenReturn(logEvent);
+            when(sse.newEventBuilder().name("log").mediaType(any()).data(any(Class.class), any()).build()).thenReturn(logEvent);
 
             when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
 
             var captor = ArgumentCaptor.forClass(Consumer.class);
             when(boundedLogStore.addListener(captor.capture())).thenReturn("listener-hb");
 
-            // Use a constant clock — time never advances past the heartbeat threshold,
-            // so heartbeat should never fire regardless of thread scheduling
+            // Clock advances past 15s threshold, but a log event at t0+18s keeps
+            // lastEventTime fresh
             long t0 = System.currentTimeMillis();
-            restLogAdmin.clock = () -> t0;
+            var time = new AtomicLong(t0);
+            var admin = new RestLogAdmin(boundedLogStore, databaseLogs, instanceIdProducer, time::get);
 
-            restLogAdmin.streamLogs(null, null, null, eventSink, sse);
+            admin.streamLogs(null, null, null, eventSink, sse);
 
             @SuppressWarnings("unchecked")
             Consumer<LogEntry> listener = captor.getValue();
 
-            // Send a log event (keeps lastEventTime == t0 since clock is constant)
+            // Advance to 18s — send a log event which updates lastEventTime to t0+18s
+            time.set(t0 + 18_000L);
             listener.accept(logEntry("agent-1", "conv-1", "INFO"));
 
-            // Give the cleanup thread a moment to run
-            Thread.sleep(2500);
+            // Advance to 20s — only 2s since last event, well below 15s threshold
+            time.set(t0 + 20_000L);
 
-            // Clock - lastEventTime == 0, which is < 15_000, so no heartbeat
-            verify(eventSink, never()).send(heartbeatEvent);
-            when(eventSink.isClosed()).thenReturn(true);
+            try {
+                Thread.sleep(2500);
+                // (t0+20_000) - (t0+18_000) = 2_000 < 15_000 → no heartbeat
+                verify(eventSink, never()).send(heartbeatEvent);
+            } finally {
+                when(eventSink.isClosed()).thenReturn(true);
+            }
         }
 
         @Test

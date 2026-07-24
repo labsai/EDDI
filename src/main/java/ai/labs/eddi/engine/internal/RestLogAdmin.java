@@ -40,15 +40,20 @@ public class RestLogAdmin implements IRestLogAdmin {
     private final BoundedLogStore boundedLogStore;
     private final IDatabaseLogs databaseLogs;
     private final InstanceIdProducer instanceIdProducer;
-
-    // Package-private for testing — allows injecting a controllable time source
-    LongSupplier clock = System::currentTimeMillis;
+    private final LongSupplier clock;
 
     @Inject
     public RestLogAdmin(BoundedLogStore boundedLogStore, IDatabaseLogs databaseLogs, InstanceIdProducer instanceIdProducer) {
+        this(boundedLogStore, databaseLogs, instanceIdProducer, System::currentTimeMillis);
+    }
+
+    // Package-private constructor for testing — allows injecting a controllable
+    // time source
+    RestLogAdmin(BoundedLogStore boundedLogStore, IDatabaseLogs databaseLogs, InstanceIdProducer instanceIdProducer, LongSupplier clock) {
         this.boundedLogStore = boundedLogStore;
         this.databaseLogs = databaseLogs;
         this.instanceIdProducer = instanceIdProducer;
+        this.clock = clock;
     }
 
     @Override
@@ -143,7 +148,7 @@ public class RestLogAdmin implements IRestLogAdmin {
                 log.debugv("Failed to send SSE log event: {0}", t.getMessage());
                 return null;
             });
-            lastEventTime.set(System.currentTimeMillis());
+            lastEventTime.set(clock.getAsLong());
         } catch (Exception e) {
             log.debugv("Error sending SSE log event: {0}", e.getMessage());
         }
