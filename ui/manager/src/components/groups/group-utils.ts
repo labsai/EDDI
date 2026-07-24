@@ -30,8 +30,8 @@ export function formatMarkdownText(text: string): string {
   // 2. Fix bold/italic syntax glued to preceding letter/digit (e.g. "word**bold**" -> "word **bold**")
   formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ])(\*{2}|_{2})([^\s*_])/g, "$1 $2");
 
-  // 3. Fix concatenated words where two sentences/phrases were joined without space (e.g. "SieSind" -> "Sie Sind", "teilIch" -> "teil Ich")
-  formatted = formatted.replace(/([a-zäöüß])([A-ZÄÖÜ])/g, "$1 $2");
+  // 3. Fix missing spaces after punctuation before capitalized words (e.g. "mich,Sie" -> "mich, Sie", "End.Next" -> "End. Next")
+  formatted = formatted.replace(/([,.:;!?])([A-ZÄÖÜ])/g, "$1 $2");
 
   // 4. Ensure headings have a blank line before them if preceded by text on a single newline
   formatted = formatted.replace(/([^\n])\n(#{1,6}\s)/g, "$1\n\n$2");

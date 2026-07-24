@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
@@ -178,6 +178,13 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
   const hasRunning = rawTasks.some((t) => t.status === "running");
 
   const shouldPulse = isLive && hasRunning;
+
+  // Auto-expand if tool calls, cascade steps, or errors are present
+  useEffect(() => {
+    if (toolCallCount > 0 || cascadeSteps.length > 0 || rawTasks.some((t) => t.status === "error")) {
+      setExpanded(true);
+    }
+  }, [toolCallCount, cascadeSteps.length, rawTasks]);
 
   // In end-user chat mode, if there are no tool calls, cascade steps, or errors, and processing is done, stay hidden
   if (!showInternalSteps && !isLive && tasks.length === 0 && cascadeSteps.length === 0) return null;

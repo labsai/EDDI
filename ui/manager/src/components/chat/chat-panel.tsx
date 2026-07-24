@@ -78,7 +78,6 @@ export function ChatPanel() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const agentSelectorRef = useRef<HTMLDivElement>(null);
   const autoStartedRef = useRef(false);
   const [contextOpen, setContextOpen] = useState(false);
