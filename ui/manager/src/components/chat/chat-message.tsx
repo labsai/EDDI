@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import type { ChatMessage as ChatMessageType, MessageAttachment } from "@/lib/api/chat";
+import { formatMarkdownText } from "@/components/groups/group-utils";
 import { isImageMime, formatBytes } from "@/lib/api/attachments";
 import { Bot, User, Copy, Check, FileText, AlertTriangle } from "lucide-react";
 
@@ -42,7 +43,7 @@ export const ChatMessage = memo(function ChatMessage({
   return (
     <div
       className={cn(
-        "group relative flex gap-3 px-4 py-3",
+        "group relative flex gap-3 px-4 py-3 min-w-0",
         isUser ? "flex-row-reverse" : "flex-row"
       )}
       onMouseEnter={() => setHovered(true)}
@@ -65,7 +66,7 @@ export const ChatMessage = memo(function ChatMessage({
       </div>
 
       {/* Content column */}
-      <div className={cn("flex flex-col gap-1 max-w-[75%]", isUser && "items-end")}>
+      <div className={cn("flex flex-col gap-1 max-w-[75%] overflow-hidden", isUser && "items-end")}>
         {/* Bubble */}
         <div
           className={cn(
@@ -86,12 +87,12 @@ export const ChatMessage = memo(function ChatMessage({
               )}
             </div>
           ) : (
-            <div className="prose prose-sm dark:prose-invert max-w-none [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
+            <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden break-words [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:overflow-x-auto [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
               {message.content ? (
                 /* Deliberately NO rehypeRaw: bot/LLM output is untrusted, so
                    raw HTML stays escaped rather than being injected live. */
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {message.content}
+                  {formatMarkdownText(message.content)}
                 </ReactMarkdown>
               ) : message.isStreaming ? (
                 <TypingIndicator />
@@ -104,7 +105,7 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* Timestamp + hover actions row */}
         <div className={cn(
-          "flex items-center gap-1.5 px-1",
+          "flex h-5 items-center gap-1.5 px-1",
           isUser ? "flex-row-reverse" : "flex-row"
         )}>
           {/* Timestamp */}
@@ -116,8 +117,10 @@ export const ChatMessage = memo(function ChatMessage({
           </span>
 
           {/* Hover actions — only for agent messages with content */}
-          {!isUser && message.content && hovered && (
-            <CopyMessageButton content={message.content} />
+          {!isUser && message.content && (
+            <div className={cn("transition-opacity duration-150", hovered ? "opacity-100" : "opacity-0 focus-within:opacity-100")}>
+              <CopyMessageButton content={message.content} />
+            </div>
           )}
         </div>
       </div>
@@ -177,11 +180,16 @@ function MessageAttachments({ attachments }: { attachments: MessageAttachment[] 
 
 function CopyMessageButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useTranslation();
 
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API unavailable (non-secure context or permission denied)
+    }
   }, [content]);
 
   return (
@@ -193,18 +201,19 @@ function CopyMessageButton({ content }: { content: string }) {
           ? "text-emerald-500"
           : "text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
       )}
-      title="Copy message"
+      title={t("chat.copyMessage", "Copy message")}
+      aria-label={t("chat.copyMessage", "Copy message")}
       data-testid="copy-message"
     >
       {copied ? (
         <>
           <Check className="h-3 w-3" />
-          <span>Copied</span>
+          <span>{t("chat.copied", "Copied")}</span>
         </>
       ) : (
         <>
           <Copy className="h-3 w-3" />
-          <span>Copy</span>
+          <span>{t("chat.copy", "Copy")}</span>
         </>
       )}
     </button>

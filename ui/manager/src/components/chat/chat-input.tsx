@@ -49,6 +49,7 @@ export function ChatInput({ onSend, disabled, isProcessing }: ChatInputProps) {
       <div className="flex items-end gap-2">
         <textarea
           ref={textareaRef}
+          autoFocus
           data-testid="chat-input"
           value={value}
           onChange={(e) => {

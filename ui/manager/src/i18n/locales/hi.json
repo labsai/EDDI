@@ -642,6 +642,7 @@
     "endConversation": "वार्तालाप समाप्त करें",
     "streaming": "स्ट्रीमिंग",
     "thinking": "सोच रहा है...",
+    "usingTools": "टूल का उपयोग",
     "connectionError": "कनेक्शन त्रुटि। कृपया पुनः प्रयास करें।",
     "empty": "Agent चुनें और चैट शुरू करें!",
     "history": "इतिहास",
@@ -1409,6 +1410,7 @@
     "fullscreenDescription": "फ़ुलस्क्रीन संपादक। बंद करने के लिए Escape दबाएं।"
   },
   "logs": {
+    "newLogs": "नए लॉग",
     "title": "लॉग",
     "description": "रियलटाइम लॉग स्ट्रीम की निगरानी करें या ऐतिहासिक लॉग खोजें।",
     "tabLive": "लाइव",
@@ -1424,6 +1426,9 @@
     "clear": "साफ़ करें",
     "search": "खोजें",
     "waitingForLogs": "लॉग की प्रतीक्षा...",
+    "loadingRecentLogs": "हाल के लॉग लोड हो रहे हैं...",
+    "noRecentLogs": "कोई हालिया लॉग गतिविधि नहीं है।",
+    "noRecentLogsHint": "नए लॉग यहाँ दिखाई देंगे जैसे वे बैकएंड से स्ट्रीम होते हैं।",
     "connectingStream": "स्ट्रीम से जुड़ रहा है...",
     "noHistoryLogs": "कोई ऐतिहासिक लॉग नहीं मिला।",
     "entryCount": "{{count}} प्रविष्टियां",
@@ -1990,6 +1995,7 @@
         "step3Desc": "अपने सहयोगी वातावरण प्रबंधित करें, उनकी नीतियां संपादित करें, या पुराने समूहों को हटा दें।"
       },
       "logs": {
+        "newLogs": "नए लॉग",
         "title": "सिस्टम लॉग्ज़ टूर",
         "step1Title": "लाइव बनाम इतिहास",
         "step1Desc": "सिस्टम लॉग की वास्तविक समय की धारा और ऐतिहासिक लॉग खोज के बीच स्विच करें।",
@@ -2133,6 +2139,7 @@
     "newShort": "नया",
     "noModerator": "कोई मॉडरेटर नहीं",
     "noResponse": "कोई प्रतिक्रिया नहीं",
+    "contentTruncated": "[सामग्री काट दी गई]",
     "protocolMaxRetries": "अधिकतम पुनः प्रयास",
     "protocolMaxRounds": "अधिकतम राउंड",
     "protocolOnFailure": "विफलता पर",
@@ -2997,14 +3004,47 @@
     "board": {
       "continuePlaceholder": "इस चर्चा को जारी रखें…",
       "inputDisabledClosed": "यह चर्चा बंद है",
-      "newDiscussion": "नई चर्चा"
+      "newDiscussion": "नई चर्चा",
+      "noResponseGenerated": "कोई प्रतिक्रिया उत्पन्न नहीं हुई"
     },
     "thread": {
       "fileTooLarge": "फ़ाइल 20MB से कम होनी चाहिए",
       "fileTypeNotAllowed": "यह फ़ाइल प्रकार समर्थित नहीं है",
       "attachmentLimit": "प्रति संदेश अधिकतम {{max}} अटैचमेंट",
       "notForwarded": "फ़ाइल संग्रहीत लेकिन मॉडल के लिए बहुत बड़ी",
-      "uploadFailed": "अपलोड विफल: {{error}}"
+      "uploadFailed": "अपलोड विफल: {{error}}",
+      "noResponse": "कोई प्रतिक्रिया नहीं"
+    },
+    "chat": {
+      "agentDetails": "एजेंट विवरण",
+      "selectToView": "विवरण देखने के लिए एजेंट चुनें",
+      "hideDetails": "विवरण पैनल छिपाएं",
+      "editAgent": "एजेंट संपादित करें",
+      "auditLogs": "ऑडिट लॉग",
+    "openStudio": "मैनेजर में खोलें",
+      "triggers": "ट्रिगर देखें",
+      "starterSelected": "प्रॉम्प्ट चैट इनपुट में जोड़ा गया"
+    },
+    "agentEditor": {
+      "capabilities": "क्षमताएं",
+      "workflows": "कार्यप्रवाह",
+      "features": "विशेषताएं और सुरक्षा",
+      "a2aEnabled": "एजेंट-टू-एजेंट",
+      "memoryTools": "मेमोरी टूल",
+      "signedMessages": "हस्ताक्षरित संदेश",
+      "strictMemory": "सख्त मेमोरी",
+      "hitlMode": "अनुमोदन मोड",
+      "llmConfig": "मॉडल और एलएलएम इंजन",
+      "provider": "पाइपलाइन",
+      "mode": "निष्पादन मोड",
+      "personaPrompt": "पर्सोना प्रॉम्प्ट",
+      "starters": "बातचीत की शुरुआत",
+      "channels": "चैनल कनेक्टर्स",
+      "temperature": "तापमान",
+      "contextWindow": "संदर्भ सीमा",
+      "activeTools": "सक्रिय उपकरण",
+      "noLlm": "कोई LLM कॉन्फ़िगर नहीं",
+      "noTools": "कोई कॉन्फ़िगर नहीं"
     }
   }
 }

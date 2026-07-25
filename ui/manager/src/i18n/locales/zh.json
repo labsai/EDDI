@@ -642,6 +642,7 @@
     "endConversation": "结束会话",
     "streaming": "流式传输",
     "thinking": "思考中...",
+    "usingTools": "使用工具",
     "connectionError": "连接错误，请重试。",
     "empty": "选择一个 Agent 并开始聊天！",
     "history": "历史记录",
@@ -1409,6 +1410,7 @@
     "fullscreenDescription": "全屏编辑器。按 Escape 关闭。"
   },
   "logs": {
+    "newLogs": "新日志",
     "title": "日志",
     "description": "实时监控日志流或搜索历史日志。",
     "tabLive": "实时",
@@ -1424,6 +1426,9 @@
     "clear": "清除",
     "search": "搜索",
     "waitingForLogs": "等待日志...",
+    "loadingRecentLogs": "正在加载近期日志...",
+    "noRecentLogs": "没有近期日志活动。",
+    "noRecentLogsHint": "新的日志将从后端流式传输到此处。",
     "connectingStream": "正在连接流...",
     "noHistoryLogs": "未找到历史日志。",
     "entryCount": "{{count}} 条记录",
@@ -1990,6 +1995,7 @@
         "step3Desc": "管控不同的群体配置环境、删除闲置组件。"
       },
       "logs": {
+        "newLogs": "新日志",
         "title": "系统日志导览",
         "step1Title": "实时与历史",
         "step1Desc": "平台提供系统日志实时数据流展示与存储索引后的历史探查手段切换。",
@@ -2133,6 +2139,7 @@
     "newShort": "新建",
     "noModerator": "无主持人",
     "noResponse": "无响应",
+    "contentTruncated": "[内容已截断]",
     "protocolMaxRetries": "最大重试次数",
     "protocolMaxRounds": "最大轮次",
     "protocolOnFailure": "失败时",
@@ -2997,14 +3004,47 @@
     "board": {
       "continuePlaceholder": "继续此讨论…",
       "inputDisabledClosed": "此讨论已关闭",
-      "newDiscussion": "新建讨论"
+      "newDiscussion": "新建讨论",
+      "noResponseGenerated": "未生成响应"
     },
     "thread": {
       "fileTooLarge": "文件必须小于20MB",
       "fileTypeNotAllowed": "不支持此文件类型",
       "attachmentLimit": "每条消息最多 {{max}} 个附件",
       "notForwarded": "文件已存储但太大，无法发送给模型",
-      "uploadFailed": "上传失败：{{error}}"
+      "uploadFailed": "上传失败：{{error}}",
+      "noResponse": "无响应"
+    },
+    "chat": {
+      "agentDetails": "智能体详情",
+      "selectToView": "选择智能体查看详情",
+      "hideDetails": "隐藏详情面板",
+      "editAgent": "编辑智能体",
+      "auditLogs": "审计日志",
+    "openStudio": "在管理器中打开",
+      "triggers": "查看触发器",
+      "starterSelected": "提示词已添加到输入框"
+    },
+    "agentEditor": {
+      "capabilities": "能力",
+      "workflows": "工作流",
+      "features": "功能与安全",
+      "a2aEnabled": "智能体间通信",
+      "memoryTools": "内存工具",
+      "signedMessages": "签名消息",
+      "strictMemory": "严格内存",
+      "hitlMode": "审批模式",
+      "llmConfig": "模型与LLM引擎",
+      "provider": "流水线",
+      "mode": "执行模式",
+      "personaPrompt": "角色系统提示词",
+      "starters": "对话开场白",
+      "channels": "通道连接器",
+      "temperature": "温度",
+      "contextWindow": "上下文限制",
+      "activeTools": "活动工具",
+      "noLlm": "未配置 LLM",
+      "noTools": "未配置"
     }
   }
 }

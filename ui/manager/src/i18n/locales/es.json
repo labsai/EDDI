@@ -642,6 +642,7 @@
     "endConversation": "Finalizar conversación",
     "streaming": "Streaming",
     "thinking": "Pensando...",
+    "usingTools": "Usando herramientas",
     "connectionError": "Error de conexión. Intente de nuevo.",
     "empty": "¡Seleccione un agent y comience a chatear!",
     "history": "Historial",
@@ -1409,6 +1410,7 @@
     "fullscreenDescription": "Editor en pantalla completa. Escape para cerrar."
   },
   "logs": {
+    "newLogs": "Nuevos logs",
     "title": "Registros",
     "description": "Supervisar el flujo de logs en tiempo real o buscar en el historial.",
     "tabLive": "En vivo",
@@ -1424,6 +1426,9 @@
     "clear": "Limpiar",
     "search": "Buscar",
     "waitingForLogs": "Esperando logs...",
+    "loadingRecentLogs": "Cargando logs recientes…",
+    "noRecentLogs": "No hay actividad reciente en los logs.",
+    "noRecentLogsHint": "Los nuevos logs aparecerán aquí a medida que se transmitan desde el backend.",
     "connectingStream": "Conectando al stream...",
     "noHistoryLogs": "No se encontraron logs históricos.",
     "entryCount": "{{count}} entradas",
@@ -1990,6 +1995,7 @@
         "step3Desc": "Gestione sus entornos colaborativos, edite sus políticas o elimine los grupos antiguos."
       },
       "logs": {
+        "newLogs": "Nuevos logs",
         "title": "Tour de Registros de Sistema",
         "step1Title": "Live vs Historial",
         "step1Desc": "Cambie entre el flujo en tiempo real de los registros y la búsqueda en el historial.",
@@ -2133,6 +2139,7 @@
     "newShort": "Nuevo",
     "noModerator": "Sin moderador",
     "noResponse": "Sin respuesta",
+    "contentTruncated": "[Contenido truncado]",
     "protocolMaxRetries": "Reintentos máx.",
     "protocolMaxRounds": "Rondas máx.",
     "protocolOnFailure": "En caso de fallo",
@@ -2997,14 +3004,47 @@
     "board": {
       "continuePlaceholder": "Continuar esta discusión…",
       "inputDisabledClosed": "Esta discusión está cerrada",
-      "newDiscussion": "Nueva discusión"
+      "newDiscussion": "Nueva discusión",
+      "noResponseGenerated": "No se generó respuesta"
     },
     "thread": {
       "fileTooLarge": "El archivo debe ser menor de 20MB",
       "fileTypeNotAllowed": "Este tipo de archivo no es compatible",
       "attachmentLimit": "Máximo {{max}} archivos adjuntos por mensaje",
       "notForwarded": "Archivo almacenado pero demasiado grande para el modelo",
-      "uploadFailed": "Error al subir: {{error}}"
+      "uploadFailed": "Error al subir: {{error}}",
+      "noResponse": "Sin respuesta"
+    },
+    "chat": {
+      "agentDetails": "Detalles del agente",
+      "selectToView": "Seleccione un agente para ver detalles",
+      "hideDetails": "Ocultar panel de detalles",
+      "editAgent": "Editar agente",
+      "auditLogs": "Registros de auditoría",
+      "openStudio": "Abrir en Manager",
+      "triggers": "Ver disparadores",
+      "starterSelected": "Prompt añadido al campo de entrada"
+    },
+    "agentEditor": {
+      "capabilities": "Capacidades",
+      "workflows": "Flujos de trabajo",
+      "features": "Características y seguridad",
+      "a2aEnabled": "Agente a agente",
+      "memoryTools": "Herramientas de memoria",
+      "signedMessages": "Mensajes firmados",
+      "strictMemory": "Memoria estricta",
+      "hitlMode": "Modo de aprobación",
+      "llmConfig": "Modelo y Motor LLM",
+      "provider": "Línea de comandos",
+      "mode": "Modo de ejecución",
+      "personaPrompt": "Prompt de persona",
+      "starters": "Iniciadores de conversación",
+      "channels": "Conectores de canales",
+      "temperature": "Temperatura",
+      "contextWindow": "Límite de contexto",
+      "activeTools": "Herramientas activas",
+      "noLlm": "Sin LLM configurado",
+      "noTools": "Sin configurar"
     }
   }
 }

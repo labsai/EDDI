@@ -669,6 +669,7 @@
     "endConversation": "End Conversation",
     "streaming": "Streaming",
     "thinking": "Thinking...",
+    "usingTools": "Using tools",
     "connectionError": "Connection error. Please try again.",
     "empty": "Select an agent and start chatting!",
     "history": "History",
@@ -1445,6 +1446,7 @@
     "fullscreenDescription": "Full-screen content editor. Press Escape to close."
   },
   "logs": {
+    "newLogs": "New logs",
     "title": "Logs",
     "description": "Monitor real-time log stream or search historical logs.",
     "tabLive": "Live",
@@ -1460,6 +1462,9 @@
     "clear": "Clear",
     "search": "Search",
     "waitingForLogs": "Waiting for logs...",
+    "loadingRecentLogs": "Loading recent logs…",
+    "noRecentLogs": "No recent log activity.",
+    "noRecentLogsHint": "New logs will appear here as they stream in from the backend.",
     "connectingStream": "Connecting to stream...",
     "noHistoryLogs": "No historical logs found.",
     "noHistoryHint": "Try adjusting the filters or search for a different agent or conversation.",
@@ -2061,6 +2066,7 @@
         "step3Desc": "Manage your collaborative environments, edit their policies, or delete stale groups."
       },
       "logs": {
+        "newLogs": "New logs",
         "title": "System Logs Tour",
         "step1Title": "Live vs History",
         "step1Desc": "Switch between a real-time stream of system logs and historical log search.",
@@ -2177,6 +2183,7 @@
     "newShort": "New",
     "noModerator": "No moderator",
     "noResponse": "No response",
+    "contentTruncated": "[Content truncated]",
     "protocolMaxRetries": "Max Retries",
     "protocolMaxRounds": "Max Rounds",
     "protocolOnFailure": "On Failure",
@@ -3024,14 +3031,47 @@
     "board": {
       "continuePlaceholder": "Continue this discussion…",
       "inputDisabledClosed": "This discussion is closed",
-      "newDiscussion": "New Discussion"
+      "newDiscussion": "New Discussion",
+      "noResponseGenerated": "No response generated"
     },
     "thread": {
       "fileTooLarge": "File must be under 20MB",
       "fileTypeNotAllowed": "This file type is not supported",
       "attachmentLimit": "Maximum {{max}} attachments per message",
       "notForwarded": "File stored but too large to send to model",
-      "uploadFailed": "Upload failed: {{error}}"
+      "uploadFailed": "Upload failed: {{error}}",
+      "noResponse": "No response"
+    },
+    "chat": {
+      "agentDetails": "Agent Details",
+      "selectToView": "Select an agent to view details",
+      "hideDetails": "Hide details panel",
+      "editAgent": "Edit Agent",
+      "auditLogs": "Audit Logs",
+    "openStudio": "Open in Manager",
+      "triggers": "View Triggers",
+      "starterSelected": "Prompt added to chat input"
+    },
+    "agentEditor": {
+      "capabilities": "Capabilities",
+      "workflows": "Workflows",
+      "features": "Features & Security",
+      "a2aEnabled": "Agent-to-Agent",
+      "memoryTools": "Memory Tools",
+      "signedMessages": "Signed Messages",
+      "strictMemory": "Strict Memory",
+      "hitlMode": "Approval Mode",
+      "llmConfig": "Model & LLM Engine",
+      "provider": "Provider",
+      "mode": "Execution Mode",
+      "personaPrompt": "Persona Prompt",
+      "starters": "Conversation Starters",
+      "channels": "Channel Connectors",
+      "temperature": "Temperature",
+      "contextWindow": "Context Limit",
+      "activeTools": "Active Tools",
+      "noLlm": "No LLM configured",
+      "noTools": "None configured"
     }
   }
 }

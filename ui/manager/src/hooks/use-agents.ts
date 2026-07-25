@@ -14,6 +14,7 @@ import {
   getDeploymentStatuses,
   type Agent,
   type AgentDescriptor,
+  type EnvironmentStatus,
   parseResourceUri,
 } from "@/lib/api/agents";
 
@@ -188,9 +189,41 @@ export function useDeployAgent() {
       agentId: string;
       version: number;
     }) => deployAgent(environment, agentId, version),
-    onSuccess: () => {
+    onMutate: async ({ environment = "production", agentId, version }) => {
+      const depKey = [...AGENTS_KEY, "deployment", environment, agentId, version];
+      const depsKey = [...AGENTS_KEY, "deploymentStatuses", agentId, version];
+      await queryClient.cancelQueries({ queryKey: depKey });
+      await queryClient.cancelQueries({ queryKey: depsKey });
+
+      const prevDep = queryClient.getQueryData(depKey);
+      const prevDeps = queryClient.getQueryData(depsKey);
+
+      queryClient.setQueryData(depKey, (old: Record<string, unknown> | undefined) => ({ ...old, status: "IN_PROGRESS" }));
+      queryClient.setQueryData(depsKey, (old: EnvironmentStatus[] | undefined) =>
+        old ? old.map((s) => (s.environment === environment ? { ...s, status: "IN_PROGRESS" as const } : s)) : undefined
+      );
+
+      return { prevDep, prevDeps, depKey, depsKey };
+    },
+    onError: (_err, _vars, context) => {
+      if (context) {
+        queryClient.setQueryData(context.depKey, context.prevDep);
+        queryClient.setQueryData(context.depsKey, context.prevDeps);
+      }
+    },
+    onSuccess: (_, { environment = "production", agentId, version }) => {
       queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
       queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+
+      const depKey = [...AGENTS_KEY, "deployment", environment, agentId, version];
+      const depsKey = [...AGENTS_KEY, "deploymentStatuses", agentId, version];
+
+      [1000, 2500, 4500, 7000].forEach((delay) => {
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: depKey });
+          queryClient.invalidateQueries({ queryKey: depsKey });
+        }, delay);
+      });
     },
   });
 }
@@ -215,9 +248,41 @@ export function useUndeployAgent() {
         endAllActiveConversations,
         undeployAllPreviousVersions,
       }),
-    onSuccess: () => {
+    onMutate: async ({ environment = "production", agentId, version }) => {
+      const depKey = [...AGENTS_KEY, "deployment", environment, agentId, version];
+      const depsKey = [...AGENTS_KEY, "deploymentStatuses", agentId, version];
+      await queryClient.cancelQueries({ queryKey: depKey });
+      await queryClient.cancelQueries({ queryKey: depsKey });
+
+      const prevDep = queryClient.getQueryData(depKey);
+      const prevDeps = queryClient.getQueryData(depsKey);
+
+      queryClient.setQueryData(depKey, (old: Record<string, unknown> | undefined) => ({ ...old, status: "NOT_FOUND" }));
+      queryClient.setQueryData(depsKey, (old: EnvironmentStatus[] | undefined) =>
+        old ? old.map((s) => (s.environment === environment ? { ...s, status: "NOT_FOUND" as const } : s)) : undefined
+      );
+
+      return { prevDep, prevDeps, depKey, depsKey };
+    },
+    onError: (_err, _vars, context) => {
+      if (context) {
+        queryClient.setQueryData(context.depKey, context.prevDep);
+        queryClient.setQueryData(context.depsKey, context.prevDeps);
+      }
+    },
+    onSuccess: (_, { environment = "production", agentId, version }) => {
       queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
       queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+
+      const depKey = [...AGENTS_KEY, "deployment", environment, agentId, version];
+      const depsKey = [...AGENTS_KEY, "deploymentStatuses", agentId, version];
+
+      [1000, 2500].forEach((delay) => {
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: depKey });
+          queryClient.invalidateQueries({ queryKey: depsKey });
+        }, delay);
+      });
     },
   });
 }

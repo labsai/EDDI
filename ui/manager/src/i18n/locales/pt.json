@@ -339,7 +339,7 @@
     "saveError": "Falha ao salvar o agent",
     "deployToEnv": "Implantar em {{env}}",
     "undeployFromEnv": "Remover de {{env}}",
-    "openStudio": "Abrir no Estúdio",
+    "openStudio": "Abrir no Studio",
     "maxKeyLength": "Comprimento máx. da chave",
     "maxValueLength": "Comprimento máx. do valor",
     "maxWritesPerTurn": "Escritas máx./turno",
@@ -642,6 +642,7 @@
     "endConversation": "Encerrar conversa",
     "streaming": "Transmissão",
     "thinking": "Pensando...",
+    "usingTools": "Usando ferramentas",
     "connectionError": "Erro de conexão. Tente novamente.",
     "empty": "Selecione um agent e comece a conversar!",
     "history": "Histórico",
@@ -1409,6 +1410,7 @@
     "fullscreenDescription": "Editor em tela cheia. Escape para fechar."
   },
   "logs": {
+    "newLogs": "Novos logs",
     "title": "Registros",
     "description": "Monitorar o fluxo de logs em tempo real ou pesquisar no histórico.",
     "tabLive": "Ao vivo",
@@ -1424,6 +1426,9 @@
     "clear": "Limpar",
     "search": "Pesquisar",
     "waitingForLogs": "Aguardando logs...",
+    "loadingRecentLogs": "Carregando logs recentes...",
+    "noRecentLogs": "Nenhuma atividade recente de log.",
+    "noRecentLogsHint": "Novos logs aparecerão aqui à medida que forem transmitidos do backend.",
     "connectingStream": "Conectando ao stream...",
     "noHistoryLogs": "Nenhum log histórico encontrado.",
     "entryCount": "{{count}} entradas",
@@ -1990,6 +1995,7 @@
         "step3Desc": "Remodele os debates virtuais ativos ou expurgue configurações passadas de espaços paralelos integrados lógicos online diretos locais livres práticos eficazes vivos ágeis textuais contínuos dinâmicos seguros fortes fluidos limpos aplicáveis cloud práticos ágeis físicos fluidos visuais vitais lógicos amplos reais simples."
       },
       "logs": {
+        "newLogs": "Novos logs",
         "title": "Tour de Logs",
         "step1Title": "Registros em Aberto Live Físico Vital Local Constante Lógico Flexível Rápido Forte Eficaz Físico Direto Textual Prático Cloud",
         "step1Desc": "Tenha observação contínua de respostas em tela para análises pontuais autônomas textuais operacionais vitais seguras textuais limpas fáceis reais práticas dinâmicas rápidas cloud fortes seguras visuais ativas flexíveis autônomas livres lógicas seguras amplas eficazes dinâmicas fluidas diretas seguras físicas rápidas atuais online práticas",
@@ -2133,6 +2139,7 @@
     "newShort": "Novo",
     "noModerator": "Sem moderador",
     "noResponse": "Sem resposta",
+    "contentTruncated": "[Conteúdo truncado]",
     "protocolMaxRetries": "Tentativas máx.",
     "protocolMaxRounds": "Rodadas máx.",
     "protocolOnFailure": "Em caso de falha",
@@ -2997,14 +3004,47 @@
     "board": {
       "continuePlaceholder": "Continuar esta discussão…",
       "inputDisabledClosed": "Esta discussão está fechada",
-      "newDiscussion": "Nova discussão"
+      "newDiscussion": "Nova discussão",
+      "noResponseGenerated": "Nenhuma resposta gerada"
     },
     "thread": {
       "fileTooLarge": "O arquivo deve ter menos de 20MB",
       "fileTypeNotAllowed": "Este tipo de arquivo não é suportado",
       "attachmentLimit": "Máximo de {{max}} anexos por mensagem",
       "notForwarded": "Arquivo armazenado mas grande demais para o modelo",
-      "uploadFailed": "Falha no upload: {{error}}"
+      "uploadFailed": "Falha no upload: {{error}}",
+      "noResponse": "Sem resposta"
+    },
+    "chat": {
+      "agentDetails": "Detalhes do Agente",
+      "selectToView": "Selecione um agente para ver detalhes",
+      "hideDetails": "Ocultar painel de detalhes",
+      "editAgent": "Editar Agente",
+      "auditLogs": "Registos de Auditoria",
+    "openStudio": "Abrir no Manager",
+      "triggers": "Ver Gatilhos",
+      "starterSelected": "Prompt adicionado à caixa de chat"
+    },
+    "agentEditor": {
+      "capabilities": "Capacidades",
+      "workflows": "Fluxos de Trabalho",
+      "features": "Funcionalidades e Segurança",
+      "a2aEnabled": "Agente para Agente",
+      "memoryTools": "Ferramentas de Memória",
+      "signedMessages": "Mensagens Assinadas",
+      "strictMemory": "Memória Estrita",
+      "hitlMode": "Modo de Aprovação",
+      "llmConfig": "Modelo e Motor LLM",
+      "provider": "Provedor",
+      "mode": "Modo de Execução",
+      "personaPrompt": "Prompt de Persona",
+      "starters": "Iniciadores de Conversa",
+      "channels": "Conectores de Canais",
+      "temperature": "Temperatura",
+      "contextWindow": "Limite de Contexto",
+      "activeTools": "Ferramentas Ativas",
+      "noLlm": "Nenhum LLM configurado",
+      "noTools": "Nenhum configurado"
     }
   }
 }

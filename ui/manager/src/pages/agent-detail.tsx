@@ -126,6 +126,10 @@ export function AgentDetailPage() {
   const isDeployed = status === "READY";
   const isBusy = deployMutation.isPending || undeployMutation.isPending || status === "IN_PROGRESS";
 
+  // Derive agent display name from the version descriptor (the full agent
+  // config returned by useAgent does NOT include name/description).
+  const agentDisplayName = versions?.[0]?.name || id!;
+
   // Version staleness detection for workflow references
   const workflowUris = useMemo(
     () => (agent?.workflows ?? []).filter((u) => u.includes("://")),
@@ -362,7 +366,7 @@ export function AgentDetailPage() {
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
                   const chatStore = useChatStore.getState();
-                  drawerStore.open(id!, id!);
+                  drawerStore.open(id!, agentDisplayName);
                   drawerStore.setStep("deploying");
                   try {
                     await deployAgent("production", id!, resolvedVersion);
@@ -378,7 +382,7 @@ export function AgentDetailPage() {
                     queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
-                    chatStore.setSelectedAgent(id!, id!);
+                    chatStore.setSelectedAgent(id!, agentDisplayName);
                     await startConversationMutation.mutateAsync({ agentId: id! });
                     drawerStore.setStep("ready");
                   } catch (err) {
@@ -400,11 +404,11 @@ export function AgentDetailPage() {
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
                   const chatStore = useChatStore.getState();
-                  drawerStore.open(id!, id!);
+                  drawerStore.open(id!, agentDisplayName);
                   if (isDeployed) {
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
-                    chatStore.setSelectedAgent(id!, id!);
+                    chatStore.setSelectedAgent(id!, agentDisplayName);
                     try {
                       await startConversationMutation.mutateAsync({ agentId: id! });
                       drawerStore.setStep("ready");

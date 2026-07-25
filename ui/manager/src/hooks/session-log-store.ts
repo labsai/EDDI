@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { createLogEventSource, type LogEntry } from "@/lib/api/logs";
+import { createLogEventSource, type LogEntry, getRecentLogs } from "@/lib/api/logs";
 import type { BearerEventSource } from "@/lib/bearer-event-source";
 
 /**
@@ -17,11 +17,13 @@ const MAX_SESSION_ENTRIES = 1000;
 interface SessionLogState {
   entries: LogEntry[];
   connected: boolean;
+  seeded: boolean;
 }
 
 export const useSessionLogStore = create<SessionLogState>(() => ({
   entries: [],
   connected: false,
+  seeded: false,
 }));
 
 // ─── Auto-connect SSE on module load ─────────────────────────────────────────
@@ -61,8 +63,42 @@ function connect() {
       setTimeout(connect, 5000);
     };
 
-    eventSource.onopen = () => {
+    eventSource.onopen = async () => {
       useSessionLogStore.setState({ connected: true });
+      
+      if (useSessionLogStore.getState().entries.length === 0) {
+        try {
+          const recentLogs = await getRecentLogs({ limit: 200 });
+          useSessionLogStore.setState((s) => {
+            const merged = [...s.entries, ...recentLogs];
+            const seen = new Set<string>();
+            const unique: LogEntry[] = [];
+            
+            for (const entry of merged) {
+              const key = `${entry.timestamp}-${entry.message}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                unique.push(entry);
+              }
+            }
+            
+            unique.sort((a, b) => b.timestamp - a.timestamp);
+            
+            return {
+              entries:
+                unique.length > MAX_SESSION_ENTRIES
+                  ? unique.slice(0, MAX_SESSION_ENTRIES)
+                  : unique,
+              seeded: true,
+            };
+          });
+        } catch {
+          useSessionLogStore.setState({ seeded: true });
+        }
+      } else {
+        // Entries already exist from SSE — mark seeded so UI doesn't show loading
+        useSessionLogStore.setState({ seeded: true });
+      }
     };
   } catch {
     useSessionLogStore.setState({ connected: false });

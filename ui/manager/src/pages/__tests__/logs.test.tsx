@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { LogsPage } from "@/pages/logs";
+import { useLogStream } from "@/hooks/use-logs";
 import userEvent from "@testing-library/user-event";
 
 // ─── Mocks ─────────────────────────────────────────────────────────────
@@ -16,6 +17,7 @@ vi.mock("@/hooks/use-logs", () => ({
       { timestamp: 1700000002000, level: "WARNING", message: "Low memory", loggerName: "sys" },
     ],
     sseConnected: true,
+    seeded: true,
     paused: false,
     setPaused: vi.fn(),
     clearEntries: vi.fn(),
@@ -231,5 +233,23 @@ describe("LogsPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Test Agent")).toBeInTheDocument();
     });
+  });
+
+  it("shows loading state when not yet seeded", () => {
+    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: true, seeded: false, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
+    renderLogs();
+    expect(screen.getByText("Loading recent logs…")).toBeInTheDocument();
+  });
+
+  it("shows no-activity state when seeded but empty", () => {
+    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: true, seeded: true, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
+    renderLogs();
+    expect(screen.getByText("No recent log activity.")).toBeInTheDocument();
+  });
+
+  it("shows connecting state when not connected", () => {
+    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: false, seeded: true, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
+    renderLogs();
+    expect(screen.getByText("Connecting to stream...")).toBeInTheDocument();
   });
 });

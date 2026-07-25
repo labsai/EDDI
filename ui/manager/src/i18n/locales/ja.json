@@ -642,6 +642,7 @@
     "endConversation": "会話を終了",
     "streaming": "ストリーミング",
     "thinking": "考え中...",
+    "usingTools": "ツール使用中",
     "connectionError": "接続エラーです。もう一度お試しください。",
     "empty": "Agent を選択してチャットを始めましょう！",
     "history": "履歴",
@@ -1409,6 +1410,7 @@
     "fullscreenDescription": "フルスクリーンエディタ。Escapeで閉じます。"
   },
   "logs": {
+    "newLogs": "新しいログ",
     "title": "ログ",
     "description": "リアルタイムのログストリームを監視するか、履歴ログを検索します。",
     "tabLive": "ライブ",
@@ -1424,6 +1426,9 @@
     "clear": "クリア",
     "search": "検索",
     "waitingForLogs": "ログを待っています...",
+    "loadingRecentLogs": "最近のログを読み込んでいます...",
+    "noRecentLogs": "最近のログ アクティビティはありません。",
+    "noRecentLogsHint": "新しいログはバックエンドからストリーミングされるとここに表示されます。",
     "connectingStream": "ストリームに接続中...",
     "noHistoryLogs": "履歴ログが見つかりません。",
     "entryCount": "{{count}} 件",
@@ -1990,6 +1995,7 @@
         "step3Desc": "共同環境を管理し、ポリシーを編集し、不要になったグループを削除します。"
       },
       "logs": {
+        "newLogs": "新しいログ",
         "title": "システムログ ツアー",
         "step1Title": "ライブと履歴",
         "step1Desc": "システムログのリアルタイムストリームと、履歴ログの検索を切り替えます。",
@@ -2133,6 +2139,7 @@
     "newShort": "新規",
     "noModerator": "モデレーターなし",
     "noResponse": "応答なし",
+    "contentTruncated": "[コンテンツが切り捨てられました]",
     "protocolMaxRetries": "最大リトライ回数",
     "protocolMaxRounds": "最大ラウンド数",
     "protocolOnFailure": "失敗時",
@@ -2997,14 +3004,47 @@
     "board": {
       "continuePlaceholder": "この議論を継続…",
       "inputDisabledClosed": "この議論は終了しました",
-      "newDiscussion": "新しい議論"
+      "newDiscussion": "新しい議論",
+      "noResponseGenerated": "応答は生成されませんでした"
     },
     "thread": {
       "fileTooLarge": "ファイルは20MB以下にしてください",
       "fileTypeNotAllowed": "このファイルタイプはサポートされていません",
       "attachmentLimit": "メッセージあたり最大{{max}}件の添付",
       "notForwarded": "ファイルは保存されましたがモデルに送信するには大きすぎます",
-      "uploadFailed": "アップロード失敗：{{error}}"
+      "uploadFailed": "アップロード失敗：{{error}}",
+      "noResponse": "応答なし"
+    },
+    "chat": {
+      "agentDetails": "エージェントの詳細",
+      "selectToView": "エージェントを選択して詳細を表示",
+      "hideDetails": "詳細パネルを非表示",
+      "editAgent": "エージェントを編集",
+      "auditLogs": "監査ログ",
+    "openStudio": "マネージャーで開く",
+      "triggers": "トリガーを表示",
+      "starterSelected": "プロンプトを入力欄に追加しました"
+    },
+    "agentEditor": {
+      "capabilities": "機能・能力",
+      "workflows": "ワークフロー",
+      "features": "機能とセキュリティ",
+      "a2aEnabled": "エージェント間通信",
+      "memoryTools": "メモリツール",
+      "signedMessages": "署名付きメッセージ",
+      "strictMemory": "厳格メモリ",
+      "hitlMode": "承認モード",
+      "llmConfig": "モデル＆LLMエンジン",
+      "provider": "パイプライン",
+      "mode": "実行モード",
+      "personaPrompt": "ペルソナプロンプト",
+      "starters": "会話のきっかけ",
+      "channels": "チャネルコネクタ",
+      "temperature": "温度",
+      "contextWindow": "コンテキスト上限",
+      "activeTools": "アクティブツール",
+      "noLlm": "LLM未設定",
+      "noTools": "未設定"
     }
   }
 }

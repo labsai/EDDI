@@ -3,10 +3,11 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Clipboard, Star, MessageCircle } from "lucide-react";
+import { Check, Clipboard, Star, MessageCircle, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { truncateContent } from "@/components/groups/group-utils";
 
 // ─── Pin Types & Hook ────────────────────────────────────────────
 
@@ -116,6 +117,28 @@ function ResponseAvatar({ name }: { name: string; agentId: string }) {
   );
 }
 
+// ─── Constants ───────────────────────────────────────────────────
+
+/** Height in px above which we collapse a message (~6 lines) */
+const COLLAPSE_THRESHOLD = 144;
+
+// ─── Hooks ──────────────────────────────────────────────────────
+
+/** Shared collapse state for message cards */
+function useCollapsibleContent(dep: unknown) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isCollapsible, setIsCollapsible] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setIsCollapsible(contentRef.current.scrollHeight > COLLAPSE_THRESHOLD);
+    }
+  }, [dep]);
+
+  return { contentRef, isCollapsible, isExpanded, setIsExpanded };
+}
+
 // ─── Component ───────────────────────────────────────────────────
 
 const AdvisorResponseCard = memo(function AdvisorResponseCard({
@@ -163,6 +186,8 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
   };
 
   const isStreaming = content === null;
+  const isEmpty = !isStreaming && !content?.trim();
+  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(content);
 
   return (
     <div
@@ -197,7 +222,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
           )}
 
           {/* Hover actions */}
-          {content !== null && (
+          {content !== null && !isEmpty && (
             <div
               className={cn(
                 "ms-auto flex items-center gap-0.5",
@@ -255,17 +280,55 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
         >
           {isStreaming ? (
             <TypingIndicator />
-          ) : (
-            <div className="prose prose-sm dark:prose-invert max-w-none [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {content}
-              </ReactMarkdown>
+          ) : isEmpty ? (
+            <div className="flex items-center gap-1.5 py-1 text-muted-foreground">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span className="text-sm italic">
+                {t("Workforce.board.noResponseGenerated", "No response generated")}
+              </span>
             </div>
+          ) : (
+            <>
+              <div
+                ref={contentRef}
+                className={cn(
+                  "relative transition-[max-height] duration-300 ease-in-out overflow-hidden",
+                  isCollapsible && !isExpanded && "max-h-36",
+                )}
+              >
+                <div className="prose prose-sm dark:prose-invert max-w-none [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {truncateContent(content!, t("groups.contentTruncated", "[Content truncated]"))}
+                  </ReactMarkdown>
+                </div>
+                {isCollapsible && !isExpanded && (
+                  <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-card to-transparent pointer-events-none" />
+                )}
+              </div>
+              {isCollapsible && (
+                <button
+                  onClick={() => setIsExpanded((v) => !v)}
+                  className="flex items-center gap-1 mt-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  {isExpanded ? (
+                    <>
+                      <ChevronUp className="h-3 w-3" />
+                      {t("common.showLess", "Show less")}
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-3 w-3" />
+                      {t("common.showMore", "Show more")}
+                    </>
+                  )}
+                </button>
+              )}
+            </>
           )}
         </div>
 
         {/* Footer — follow-up link */}
-        {content !== null && (
+        {content !== null && !isEmpty && (
           <div className="flex items-center gap-2 ps-1 mt-0.5">
             <Button
               variant="ghost"

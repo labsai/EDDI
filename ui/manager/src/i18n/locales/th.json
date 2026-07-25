@@ -339,7 +339,7 @@
     "saveError": "บันทึก Agent ล้มเหลว",
     "deployToEnv": "Deploy ไปยัง {{env}}",
     "undeployFromEnv": "ถอนจาก {{env}}",
-    "openStudio": "เปิดในสตูดิโอ",
+    "openStudio": "เปิดใน Studio",
     "maxKeyLength": "ความยาวคีย์สูงสุด",
     "maxValueLength": "ความยาวค่าสูงสุด",
     "maxWritesPerTurn": "เขียนสูงสุด/รอบ",
@@ -642,6 +642,7 @@
     "endConversation": "จบการสนทนา",
     "streaming": "สตรีมมิ่ง",
     "thinking": "กำลังคิด...",
+    "usingTools": "ใช้เครื่องมือ",
     "connectionError": "ข้อผิดพลาดในการเชื่อมต่อ กรุณาลองใหม่",
     "empty": "เลือก Agent และเริ่มแชทเลย!",
     "history": "ประวัติ",
@@ -1409,6 +1410,7 @@
     "fullscreenDescription": "ตัวแก้ไขเต็มหน้าจอ กด Escape เพื่อปิด"
   },
   "logs": {
+    "newLogs": "บันทึกใหม่",
     "title": "บันทึก",
     "description": "ตรวจสอบสตรีมบันทึกแบบเรียลไทม์หรือค้นหาบันทึกประวัติ",
     "tabLive": "สด",
@@ -1424,6 +1426,9 @@
     "clear": "ล้าง",
     "search": "ค้นหา",
     "waitingForLogs": "กำลังรอบันทึก...",
+    "loadingRecentLogs": "กำลังโหลดบันทึกล่าสุด...",
+    "noRecentLogs": "ไม่มีกิจกรรมบันทึกล่าสุด",
+    "noRecentLogsHint": "บันทึกใหม่จะปรากฏที่นี่เมื่อมีการสตรีมจากแบ็กเอนด์",
     "connectingStream": "กำลังเชื่อมต่อกับสตรีม...",
     "noHistoryLogs": "ไม่พบบันทึกประวัติ",
     "entryCount": "{{count}} รายการ",
@@ -1990,6 +1995,7 @@
         "step3Desc": "ปัดกวาดความยุ่งยากด้วยตารางกรุ๊ป ล้างหรือแก้ไขการสั่งงานหมู่ได้จบที่นี่."
       },
       "logs": {
+        "newLogs": "บันทึกใหม่",
         "title": "ทัวร์ System Logs",
         "step1Title": "ความจริง และ อดีตกาล",
         "step1Desc": "สามารถดูปันทึกกิจกรรมตอนนี้ หรือสลับหาประวัติตามเวลาผ่านมา.",
@@ -2133,6 +2139,7 @@
     "newShort": "ใหม่",
     "noModerator": "ไม่มีผู้ดูแล",
     "noResponse": "ไม่มีการตอบกลับ",
+    "contentTruncated": "[เนื้อหาถูกตัดทอน]",
     "protocolMaxRetries": "จำนวนลองใหม่สูงสุด",
     "protocolMaxRounds": "รอบสูงสุด",
     "protocolOnFailure": "เมื่อล้มเหลว",
@@ -2997,14 +3004,47 @@
     "board": {
       "continuePlaceholder": "สานต่อการอภิปรายนี้…",
       "inputDisabledClosed": "การอภิปรายนี้ปิดแล้ว",
-      "newDiscussion": "การอภิปรายใหม่"
+      "newDiscussion": "การอภิปรายใหม่",
+      "noResponseGenerated": "ไม่มีการสร้างคำตอบ"
     },
     "thread": {
       "fileTooLarge": "ไฟล์ต้องมีขนาดไม่เกิน 20MB",
       "fileTypeNotAllowed": "ไม่รองรับประเภทไฟล์นี้",
       "attachmentLimit": "แนบไฟล์ได้สูงสุด {{max}} ไฟล์ต่อข้อความ",
       "notForwarded": "ไฟล์ถูกจัดเก็บแล้วแต่ใหญ่เกินไปสำหรับโมเดล",
-      "uploadFailed": "อัปโหลดล้มเหลว: {{error}}"
+      "uploadFailed": "อัปโหลดล้มเหลว: {{error}}",
+      "noResponse": "ไม่มีการตอบกลับ"
+    },
+    "chat": {
+      "agentDetails": "รายละเอียดเอเจนต์",
+      "selectToView": "เลือกเอเจนต์เพื่อดูรายละเอียด",
+      "hideDetails": "ซ่อนแผงรายละเอียด",
+      "editAgent": "แก้ไขเอเจนต์",
+      "auditLogs": "บันทึกการตรวจสอบ",
+    "openStudio": "เปิดใน Manager",
+      "triggers": "ดูตัวทริกเกอร์",
+      "starterSelected": "เพิ่มพรอมต์ลงในกล่องข้อความแล้ว"
+    },
+    "agentEditor": {
+      "capabilities": "ความสามารถ",
+      "workflows": "เวิร์กโฟลว์",
+      "features": "ฟีเจอร์และความปลอดภัย",
+      "a2aEnabled": "เอเจนต์ถึงเอเจนต์",
+      "memoryTools": "เครื่องมือความจำ",
+      "signedMessages": "ข้อความที่เซ็นชื่อ",
+      "strictMemory": "หน่วยความจำเข้มงวด",
+      "hitlMode": "โหมดการอนุมัติ",
+      "llmConfig": "โมเดลและเอนจิน LLM",
+      "provider": "พายพ์ไลน์",
+      "mode": "โหมดการทำงาน",
+      "personaPrompt": "พรอมต์บทบาท",
+      "starters": "จุดเริ่มต้นการสนทนา",
+      "channels": "ตัวเชื่อมต่อช่องทาง",
+      "temperature": "อุณหภูมิ",
+      "contextWindow": "ขีดจำกัดบริบท",
+      "activeTools": "เครื่องมือที่ใช้งาน",
+      "noLlm": "ไม่ได้กำหนดค่า LLM",
+      "noTools": "ไม่ได้กำหนดค่า"
     }
   }
 }

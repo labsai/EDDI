@@ -24,6 +24,7 @@ import {
   type InputField,
   extractInput,
   extractOutput,
+  extractOutputParts,
   extractInputField,
   extractQuickReplies,
 } from "@/lib/api/conversations";
@@ -316,15 +317,15 @@ export function useStartConversation() {
         false
       );
 
-      // Convert welcome steps to ChatMessages
+      // Convert welcome steps to ChatMessages — one bubble per output part
       const outputs = snapshot.conversationOutputs ?? [];
       for (const output of outputs) {
-        const text = extractOutput(output);
-        if (text) {
+        const parts = extractOutputParts(output);
+        for (const part of parts) {
           store.getState().addMessage({
             id: `welcome-${Date.now()}-${Math.random()}`,
             role: "agent",
-            content: text,
+            content: part,
             timestamp: Date.now(),
           });
         }
@@ -482,20 +483,20 @@ export function useSendMessage() {
           );
         }
 
-        // Extract agent output from the last conversationOutput
+        // Extract agent output parts from the last conversationOutput
         const lastOutput = snapshot.conversationOutputs?.[
           (snapshot.conversationOutputs?.length ?? 1) - 1
         ];
-        const output = extractOutput(lastOutput);
+        const parts = extractOutputParts(lastOutput);
 
-        // Replace the typing placeholder with the real response
+        // Replace the typing placeholder with one bubble per part
         store.setState((s) => {
           const msgs = s.messages.filter((m) => m.id !== typingId);
-          if (output) {
+          for (const part of parts) {
             msgs.push({
-              id: `agent-${Date.now()}`,
+              id: `agent-${Date.now()}-${Math.random()}`,
               role: "agent",
-              content: output,
+              content: part,
               timestamp: Date.now(),
             });
           }
@@ -822,7 +823,7 @@ function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMes
   for (let i = 0; i < (snapshot.conversationSteps ?? []).length; i++) {
     const step = snapshot.conversationSteps[i];
     const input = step ? extractInput(step) : undefined;
-    const output = extractOutput(outputs[i]);
+    const parts = extractOutputParts(outputs[i]);
     if (input) {
       messages.push({
         id: `user-${messages.length}-${Date.now()}`,
@@ -831,11 +832,11 @@ function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMes
         timestamp: Date.now(),
       });
     }
-    if (output) {
+    for (const part of parts) {
       messages.push({
-        id: `agent-${messages.length}-${Date.now()}`,
+        id: `agent-${messages.length}-${Date.now()}-${Math.random()}`,
         role: "agent",
-        content: output,
+        content: part,
         timestamp: Date.now(),
       });
     }

@@ -642,6 +642,7 @@
     "endConversation": "Terminer la conversation",
     "streaming": "Streaming",
     "thinking": "Réflexion en cours...",
+    "usingTools": "Utilisation des outils",
     "connectionError": "Erreur de connexion. Veuillez réessayer.",
     "empty": "Sélectionnez un agent et commencez à discuter !",
     "history": "Historique",
@@ -1409,6 +1410,7 @@
     "fullscreenDescription": "Éditeur plein écran. Échap pour fermer."
   },
   "logs": {
+    "newLogs": "Nouveaux logs",
     "title": "Journaux",
     "description": "Surveiller le flux de logs en temps réel ou rechercher dans l'historique.",
     "tabLive": "En direct",
@@ -1424,6 +1426,9 @@
     "clear": "Effacer",
     "search": "Rechercher",
     "waitingForLogs": "En attente de logs...",
+    "loadingRecentLogs": "Chargement des logs récents…",
+    "noRecentLogs": "Aucune activité récente dans les logs.",
+    "noRecentLogsHint": "Les nouveaux logs apparaîtront ici au fur et à mesure qu'ils sont diffusés depuis le backend.",
     "connectingStream": "Connexion au stream...",
     "noHistoryLogs": "Aucun log historique trouvé.",
     "entryCount": "{{count}} entrées",
@@ -1990,6 +1995,7 @@
         "step3Desc": "Affichez, supprimez et réorganisez vos environnements de concert LLM."
       },
       "logs": {
+        "newLogs": "Nouveaux logs",
         "title": "Visite des Logs Systèmes",
         "step1Title": "Surveiller",
         "step1Desc": "Supervisez vos instances en basculant des flux live aux bases archivées.",
@@ -2133,6 +2139,7 @@
     "newShort": "Nouveau",
     "noModerator": "Aucun modérateur",
     "noResponse": "Aucune réponse",
+    "contentTruncated": "[Contenu tronqué]",
     "protocolMaxRetries": "Tentatives max.",
     "protocolMaxRounds": "Tours max.",
     "protocolOnFailure": "En cas d'échec",
@@ -2997,14 +3004,47 @@
     "board": {
       "continuePlaceholder": "Poursuivre cette discussion…",
       "inputDisabledClosed": "Cette discussion est fermée",
-      "newDiscussion": "Nouvelle discussion"
+      "newDiscussion": "Nouvelle discussion",
+      "noResponseGenerated": "Aucune réponse générée"
     },
     "thread": {
       "fileTooLarge": "Le fichier doit faire moins de 20 Mo",
       "fileTypeNotAllowed": "Ce type de fichier n'est pas pris en charge",
       "attachmentLimit": "Maximum {{max}} pièces jointes par message",
       "notForwarded": "Fichier stocké mais trop volumineux pour le modèle",
-      "uploadFailed": "Échec du téléchargement : {{error}}"
+      "uploadFailed": "Échec du téléchargement : {{error}}",
+      "noResponse": "Pas de réponse"
+    },
+    "chat": {
+      "agentDetails": "Détails de l agent",
+      "selectToView": "Sélectionnez un agent pour voir les détails",
+      "hideDetails": "Masquer les détails",
+      "editAgent": "Modifier l agent",
+      "auditLogs": "Journaux d audit",
+    "openStudio": "Ouvrir dans le Manager",
+      "triggers": "Voir les déclencheurs",
+      "starterSelected": "Prompt ajouté à la zone de texte"
+    },
+    "agentEditor": {
+      "capabilities": "Capacités",
+      "workflows": "Workflows",
+      "features": "Fonctionnalités & Sécurité",
+      "a2aEnabled": "Agent à Agent",
+      "memoryTools": "Outils de mémoire",
+      "signedMessages": "Messages signés",
+      "strictMemory": "Mémoire stricte",
+      "hitlMode": "Mode d approbation",
+      "llmConfig": "Modèle & Moteur LLM",
+      "provider": "Fournisseur",
+      "mode": "Mode d exécution",
+      "personaPrompt": "Prompt système persona",
+      "starters": "Amorceurs de conversation",
+      "channels": "Connecteurs de canaux",
+      "temperature": "Température",
+      "contextWindow": "Limite de contexte",
+      "activeTools": "Outils actifs",
+      "noLlm": "Aucun LLM configuré",
+      "noTools": "Aucun configuré"
     }
   }
 }

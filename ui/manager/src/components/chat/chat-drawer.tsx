@@ -12,23 +12,15 @@ import {
   MessageSquarePlus,
   Loader2,
   Send,
-  CheckCircle2,
   AlertCircle,
   RefreshCw,
   Rocket,
 } from "lucide-react";
 
 /* ─── Step progress indicator ─── */
-const STEP_ORDER: ChatDrawerStep[] = ["saving", "deploying", "starting", "ready"];
 
 function StepProgress({ current, error }: { current: ChatDrawerStep; error: string | null }) {
   const { t } = useTranslation();
-
-  const steps = [
-    { key: "saving", label: t("chatDrawer.saving", "Saving changes…") },
-    { key: "deploying", label: t("chatDrawer.deploying", "Deploying agent…") },
-    { key: "starting", label: t("chatDrawer.starting", "Starting conversation…") },
-  ];
 
   if (current === "error") {
     return (
@@ -43,35 +35,19 @@ function StepProgress({ current, error }: { current: ChatDrawerStep; error: stri
     );
   }
 
-  const currentIdx = STEP_ORDER.indexOf(current);
+  // Single-line label for the current step
+  const stepLabels: Record<string, string> = {
+    saving: t("chatDrawer.saving", "Saving changes…"),
+    deploying: t("chatDrawer.deploying", "Deploying agent…"),
+    starting: t("chatDrawer.starting", "Starting conversation…"),
+  };
 
   return (
-    <div className="space-y-3 py-6">
-      {steps.map((step, idx) => {
-        const isDone = currentIdx > idx;
-        const isActive = currentIdx === idx;
-        return (
-          <div key={step.key} className="flex items-center gap-3 px-4">
-            {isDone ? (
-              <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
-            ) : isActive ? (
-              <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
-            ) : (
-              <div className="h-5 w-5 shrink-0 rounded-full border-2 border-muted-foreground/30" />
-            )}
-            <span
-              className={cn(
-                "text-sm",
-                isDone && "text-emerald-600 dark:text-emerald-400 line-through opacity-70",
-                isActive && "font-medium text-foreground",
-                !isDone && !isActive && "text-muted-foreground"
-              )}
-            >
-              {step.label}
-            </span>
-          </div>
-        );
-      })}
+    <div className="flex items-center gap-3 py-6 px-4">
+      <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
+      <span className="text-sm font-medium text-foreground">
+        {stepLabels[current] ?? t("chatDrawer.preparing", "Preparing…")}
+      </span>
     </div>
   );
 }

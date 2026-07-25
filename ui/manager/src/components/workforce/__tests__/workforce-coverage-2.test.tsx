@@ -963,7 +963,7 @@ describe("Workforce Components – Coverage Batch 2", () => {
       });
 
       const a2aToggle = screen.getByRole("switch", {
-        name: /Agent-to-Agent Communication/i,
+        name: /Agent-to-Agent/i,
       });
       const memoryToggle = screen.getByRole("switch", {
         name: /Memory Tools/i,
@@ -983,7 +983,7 @@ describe("Workforce Components – Coverage Batch 2", () => {
       });
 
       const a2aToggle = screen.getByRole("switch", {
-        name: /Agent-to-Agent Communication/i,
+        name: /Agent-to-Agent/i,
       });
       const initialChecked = a2aToggle.getAttribute("aria-checked");
 

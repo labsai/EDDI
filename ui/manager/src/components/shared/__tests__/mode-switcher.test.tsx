@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
 
@@ -19,102 +19,69 @@ describe("ModeSwitcher", () => {
     localStorage.clear();
   });
 
-  it("renders the trigger button", () => {
+  it("renders the segmented pill with both options visible", () => {
     renderWithProviders(<ModeSwitcher collapsed={false} />);
-    const trigger = screen.getByRole("button", { name: /switch workspace/i });
-    expect(trigger).toBeInTheDocument();
+    expect(screen.getByTestId("mode-option-manager")).toBeInTheDocument();
+    expect(screen.getByTestId("mode-option-workforce")).toBeInTheDocument();
   });
 
-  it("shows 'Manager' label when expanded and on /manage route", () => {
+  it("shows both 'Manager' and 'Workforce' labels when expanded", () => {
     renderWithProviders(<ModeSwitcher collapsed={false} />);
     expect(screen.getByText("Manager")).toBeInTheDocument();
+    expect(screen.getByText("Workforce")).toBeInTheDocument();
   });
 
-  it("hides label text when collapsed", () => {
+  it("marks Manager as active tab when on /manage route", () => {
+    renderWithProviders(<ModeSwitcher collapsed={false} />);
+    const managerTab = screen.getByTestId("mode-option-manager");
+    const workforceTab = screen.getByTestId("mode-option-workforce");
+    expect(managerTab).toHaveAttribute("aria-selected", "true");
+    expect(workforceTab).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("renders icon-only toggle when collapsed", () => {
     renderWithProviders(<ModeSwitcher collapsed={true} />);
-    // When collapsed, the text label is not rendered (icon-only)
-    expect(screen.queryByText("Manager")).not.toBeInTheDocument();
-    // But the trigger is still accessible via aria-label
-    expect(screen.getByRole("button", { name: /switch workspace/i })).toBeInTheDocument();
-  });
-
-  it("opens dropdown on click and shows both options", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
-
-    await user.click(screen.getByRole("button", { name: /switch workspace/i }));
-    const menu = screen.getByRole("menu");
-    expect(menu).toBeInTheDocument();
-
-    const items = within(menu).getAllByRole("menuitem");
-    expect(items).toHaveLength(2);
-  });
-
-  it("closes dropdown on Escape", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
-
-    await user.click(screen.getByRole("button", { name: /switch workspace/i }));
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-  });
-
-  it("navigates to /workforce and persists preference when selecting Workforce", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
-
-    // Open dropdown
-    await user.click(screen.getByRole("button", { name: /switch workspace/i }));
-
-    // Click on Workforce option
-    const workforceOption = screen.getByTestId("mode-option-workforce");
-    await user.click(workforceOption);
-
-    // Should navigate to /workforce
-    expect(mockNavigate).toHaveBeenCalledWith("/workforce");
-    // Should persist preference
-    expect(localStorage.getItem("eddi-landing-preference")).toBe("workforce");
-    // Dropdown should close
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-  });
-
-  it("does not navigate when selecting the already-active mode", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
-
-    await user.click(screen.getByRole("button", { name: /switch workspace/i }));
-
-    // Click on Manager (already active since pathname is /manage/agents)
-    const managerOption = screen.getByTestId("mode-option-manager");
-    await user.click(managerOption);
-
-    // Should NOT navigate since we're already on manager
-    expect(mockNavigate).not.toHaveBeenCalled();
-    // Dropdown should close
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-  });
-
-  it("shows checkmark on the active mode option", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
-
-    await user.click(screen.getByRole("button", { name: /switch workspace/i }));
-
-    // Manager (active) should have a checkmark icon
-    const managerOption = screen.getByTestId("mode-option-manager");
-    expect(managerOption.querySelector("svg.lucide-check")).not.toBeNull();
-
-    // Workforce (inactive) should NOT have a checkmark
-    const workforceOption = screen.getByTestId("mode-option-workforce");
-    expect(workforceOption.querySelector("svg.lucide-check")).toBeNull();
-  });
-
-  it("has correct aria attributes on trigger", () => {
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
+    // Collapsed shows only a single toggle button (opposite mode icon)
     const trigger = screen.getByRole("button", { name: /switch workspace/i });
-    expect(trigger).toHaveAttribute("aria-haspopup", "true");
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toBeInTheDocument();
+    // No text labels in collapsed mode
+    expect(screen.queryByText("Manager")).not.toBeInTheDocument();
+    expect(screen.queryByText("Workforce")).not.toBeInTheDocument();
+  });
+
+  it("navigates to /workforce and persists preference when clicking Workforce", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ModeSwitcher collapsed={false} />);
+
+    await user.click(screen.getByTestId("mode-option-workforce"));
+
+    expect(mockNavigate).toHaveBeenCalledWith("/workforce");
+    expect(localStorage.getItem("eddi-landing-preference")).toBe("workforce");
+  });
+
+  it("does not navigate when clicking the already-active mode", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ModeSwitcher collapsed={false} />);
+
+    // Click Manager (already active since pathname is /manage/agents)
+    await user.click(screen.getByTestId("mode-option-manager"));
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("collapsed toggle navigates to opposite mode", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ModeSwitcher collapsed={true} />);
+
+    // When on /manage, clicking should navigate to /workforce
+    await user.click(screen.getByRole("button", { name: /switch workspace/i }));
+
+    expect(mockNavigate).toHaveBeenCalledWith("/workforce");
+    expect(localStorage.getItem("eddi-landing-preference")).toBe("workforce");
+  });
+
+  it("has tablist role for accessibility", () => {
+    renderWithProviders(<ModeSwitcher collapsed={false} />);
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
   });
 });

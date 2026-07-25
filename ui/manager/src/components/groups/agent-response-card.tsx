@@ -8,7 +8,8 @@ import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
 import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
-import { parseTranscriptContent, safeFormatDate } from "./group-utils";
+import { parseTranscriptContent, formatMarkdownText, parseEmojiVerification, truncateContent, safeFormatDate } from "./group-utils";
+import type { StructuredItem } from "./group-utils";
 
 /** Style-aware badge colors for different discussion roles */
 const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<TranscriptEntryType, "default" | "secondary" | "success" | "warning" | "destructive" | "outline">>>> = {
@@ -32,10 +33,7 @@ function hasHtml(content: string): boolean {
   return /<[a-z][\s\S]*>/i.test(content);
 }
 
-/** Check if content looks like markdown (headings, bold, lists, links etc.) */
-function hasMarkdown(content: string): boolean {
-  return /^#{1,6}\s|\*\*|\*[^*]|^\s*[-*+]\s|^\s*\d+\.\s|\[.+\]\(.+\)|^>\s|```/m.test(content);
-}
+
 
 function defaultBadgeVariant(
   type: TranscriptEntryType
@@ -65,15 +63,7 @@ function defaultBadgeVariant(
 /** Height in px above which we collapse a message (~6 lines of text) */
 const COLLAPSE_THRESHOLD = 144;
 
-/** Structured item from moderator's JSON output (plans, verifications, etc.) */
-interface StructuredItem {
-  subject: string;
-  description?: string;
-  assignedTo?: string;
-  priority?: number;
-  passed?: boolean;
-  feedback?: string;
-}
+// StructuredItem is now imported from ./group-utils
 
 /** Validate parsed array has structured items with 'subject' field */
 function validateStructuredArray(arr: unknown): StructuredItem[] | null {
@@ -144,9 +134,17 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
   const badgeVar = (discussionStyle && STYLE_BADGE_OVERRIDES[discussionStyle]?.[entry.type])
     || defaultBadgeVariant(entry.type);
 
-  const parsedContent = entry.content ? parseTranscriptContent(entry.content) : null;
+  const rawParsed = entry.content ? parseTranscriptContent(entry.content) : null;
+  // Guard: treat whitespace-only content as empty and auto-format markdown syntax
+  const parsedContent = rawParsed?.trim() ? formatMarkdownText(rawParsed) : null;
   // Try parsing as structured JSON array — check both raw and unwrapped content (no type gate)
   let structuredItems = tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent);
+
+  // For VERIFICATION entries, also try emoji-based text parsing (✅/❌ format from backend)
+  if (!structuredItems && isVerification) {
+    structuredItems = (entry.content ? parseEmojiVerification(entry.content) : null)
+      ?? (parsedContent ? parseEmojiVerification(parsedContent) : null);
+  }
 
   // For PLAN entries with pre-configured tasks: convert TaskDefinition[] → StructuredItem[]
   if (!structuredItems && isPlan && preConfiguredTasks && preConfiguredTasks.length > 0) {
@@ -308,20 +306,14 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
                   className="text-sm text-foreground/90 leading-relaxed [&_ul]:ms-4 [&_ul]:list-disc [&_li]:mb-0.5 [&_strong]:font-semibold"
                   dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(parsedContent) }}
                 />
-              ) : hasMarkdown(parsedContent) ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_hr]:border-border">
-                  {/* Deliberately NO rehypeRaw: this is the allowHtml=false path,
-                      so raw HTML in agent output must stay escaped. Rendering it
-                      would inject attacker-controlled markup (e.g. an <iframe
-                      srcdoc> executing with full app-origin access). The opt-in
-                      HTML path above is the one that renders, via DOMPurify. */}
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {parsedContent}
-                  </ReactMarkdown>
-                </div>
               ) : (
-                <div className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">
-                  {parsedContent}
+                <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_hr]:border-border [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                  {/* Deliberately NO rehypeRaw: agent output is attacker-influenceable
+                      (prompt injection). Raw HTML must stay escaped. The opt-in
+                      HTML path above uses DOMPurify for explicit sanitization. */}
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {truncateContent(parsedContent, t("groups.contentTruncated", "[Content truncated]"))}
+                  </ReactMarkdown>
                 </div>
               )}
               {/* Fade-out gradient when collapsed — bg matches card context */}

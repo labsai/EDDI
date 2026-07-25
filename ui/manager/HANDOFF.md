@@ -120,11 +120,12 @@
 - Boardroom files: `src/pages/boardroom/`, `src/components/boardroom/`, `src/styles/advisory.css`
 
 ### Test Counts
-- 271 test files passing (EDDI-Manager)
-- 3937 Tests passing (`npm run test`)
-- 76.59% statement coverage
+- 277 test files passing (EDDI-Manager)
+- 4013 Tests passing (`npm run test`)
 - 112 Backend tenancy tests passing (`mvn test`)
 
 ### Last Commit Focus
-- Frontend: `fix: address PR review feedback — bugs, coverage, code quality` on `feat/group-chat-followup-ux` (`44084657`)
-- Includes: mode switcher, live logging optimisation, disabled bypass fix, keyboard a11y fix, usePersistedBoolean DRY, GROUP_CONVERSATIONS_KEY export, i18n updates
+- Frontend: `feat: fix live logs — REST seeding, SSE resilience, better empty states` on `fix/group-chat-defensive-rendering` (`e5303c5e`)
+  - REST API seeding on first SSE connect (session-log-store.ts), BearerEventSource \r\n handling + 45s inactivity timeout, `seeded` state exposed through use-logs hook, 3-state empty view (loading/no-activity/connecting), 3 new i18n keys across 11 locales, 3 new tests
+- Backend: `feat: add SSE heartbeat to log stream endpoint` on `feat/v6.2.0-prep` (`cd0551925`)
+  - 15s heartbeat comment events in RestLogAdmin.streamLogs(), AtomicLong lastEventTime tracking, 3 new Mockito tests (idle heartbeat, recent-event suppression, closed-sink stop)

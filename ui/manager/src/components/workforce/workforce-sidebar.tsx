@@ -269,13 +269,13 @@ function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?
           )?.[1] ?? agent.id;
 
           return (
-            <li key={agent.id}>
+            <li key={agent.resource}>
               <button
                 type="button"
                 onClick={() =>
                   boardId
                     ? navigate(`/workforce/${boardId}/thread/${agentId}`)
-                    : navigate(`/workforce/chat?agentId=${agentId}`)
+                    : navigate(`/workforce/chat?agentId=${agentId}&agentName=${encodeURIComponent(agent.name || agentId)}`)
                 }
                 title={collapsed ? (agent.name || agentId) : undefined}
                 aria-label={collapsed ? (agent.name || agentId) : undefined}

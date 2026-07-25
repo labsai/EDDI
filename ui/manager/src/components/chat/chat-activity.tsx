@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
@@ -21,12 +21,6 @@ import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
 import { CascadeStepTrace } from "@/components/cascade-step-trace";
 
 // ==================== Types ====================
-
-interface ChatActivityProps {
-  events: PipelineEvent[];
-  isLive: boolean;
-  totalSteps?: number;
-}
 
 interface TaskSummary {
   taskType: string;
@@ -124,36 +118,78 @@ function buildTaskSummaries(events: PipelineEvent[]): TaskSummary[] {
   return tasks;
 }
 
-// ==================== Component ====================
+const INTERNAL_INFRA_TASKS = new Set([
+  "expressions",
+  "behavior_rules",
+  "langchain",
+  "dictionary",
+  "propertysetter",
+  "parser",
+  "output",
+  "ai.labs.expressions",
+  "ai.labs.behavior_rules",
+  "ai.labs.langchain",
+  "ai.labs.dictionary",
+  "ai.labs.propertysetter",
+  "ai.labs.parser",
+  "ai.labs.output",
+]);
 
-export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) {
+interface ChatActivityProps {
+  events: PipelineEvent[];
+  isLive: boolean;
+  totalSteps?: number;
+  /** If true, shows internal pipeline steps (expressions, behavior_rules, etc.) even when no tool calls or errors occurred. Defaults to false. */
+  showInternalSteps?: boolean;
+}
+
+export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = false }: ChatActivityProps) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(isLive);
+  const [expanded, setExpanded] = useState(false);
 
-  const tasks = useMemo(() => buildTaskSummaries(events), [events]);
+  const rawTasks = useMemo(() => buildTaskSummaries(events), [events]);
   const cascadeSteps = useMemo(() => buildCascadeSteps(events), [events]);
 
   const totalDuration = useMemo(
-    () => tasks.reduce((sum, task) => sum + (task.durationMs ?? 0), 0),
-    [tasks],
+    () => rawTasks.reduce((sum, task) => sum + (task.durationMs ?? 0), 0),
+    [rawTasks],
   );
 
   const toolCallCount = useMemo(
     () =>
-      tasks.reduce((sum, task) => {
+      rawTasks.reduce((sum, task) => {
         if (!task.toolTrace) return sum;
         return sum + task.toolTrace.filter((t) => t.type === "tool_call").length;
       }, 0),
-    [tasks],
+    [rawTasks],
   );
 
-  const completedCount = tasks.filter((t) => t.status === "complete").length;
-  const hasRunning = tasks.some((t) => t.status === "running");
+  // Filter tasks: in end-user chat mode, hide internal Quarkus pipeline steps unless they have tool calls or errors
+  const tasks = useMemo(() => {
+    if (showInternalSteps) return rawTasks;
+    return rawTasks.filter((task) => {
+      const hasTools = task.toolTrace?.some((e) => e.type === "tool_call");
+      const hasError = task.status === "error";
+      const isInternal = INTERNAL_INFRA_TASKS.has(task.taskType);
+      return !isInternal || hasTools || hasError;
+    });
+  }, [rawTasks, showInternalSteps]);
 
-  // Auto-expand when live processing starts, auto-collapse when done
+  const completedCount = rawTasks.filter((t) => t.status === "complete").length;
+  const hasRunning = rawTasks.some((t) => t.status === "running");
+
   const shouldPulse = isLive && hasRunning;
 
-  if (tasks.length === 0 && cascadeSteps.length === 0) return null;
+  // Auto-expand if tool calls, cascade steps, or errors are present
+  useEffect(() => {
+    if (toolCallCount > 0 || cascadeSteps.length > 0 || rawTasks.some((t) => t.status === "error")) {
+      setExpanded(true);
+    }
+  }, [toolCallCount, cascadeSteps.length, rawTasks]);
+
+  // In end-user chat mode, if there are no tool calls, cascade steps, or errors, and processing is done, stay hidden
+  if (!showInternalSteps && !isLive && tasks.length === 0 && cascadeSteps.length === 0) return null;
+  if (rawTasks.length === 0 && cascadeSteps.length === 0) return null;
 
   return (
     <div className="flex justify-center px-4 py-1" data-testid="chat-activity">
@@ -189,13 +225,15 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
               <span className="text-primary font-medium">
                 {t("chat.activity.processing", "Processing…")}
                 <span className="ms-1.5 text-muted-foreground font-normal">
-                  {completedCount}/{totalSteps ?? tasks.length}
+                  {toolCallCount > 0
+                    ? t("chat.activity.toolCallsCount", "{{count}} tool calls", { count: toolCallCount })
+                    : `${completedCount}/${totalSteps ?? rawTasks.length}`}
                 </span>
               </span>
             ) : (
               <span>
                 <span className="font-medium text-foreground">
-                  {tasks.length} {t("chat.activity.steps", "steps")}
+                  {rawTasks.length} {t("chat.activity.steps", "steps")}
                 </span>
                 <span className="mx-1.5 text-border">·</span>
                 <span className="font-mono">{formatDuration(totalDuration)}</span>

@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Settings2, Users, Check, ChevronDown } from "lucide-react";
+import { Settings2, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Constants ──────────────────────────────────────────────────
@@ -40,11 +40,8 @@ export function ModeSwitcher({ collapsed = false }: ModeSwitcherProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
 
-  // Helper for mode labels using literal t() calls per coding guidelines
+  // Helper for mode labels
   function getModeLabel(key: string): string {
     return key === "manager"
       ? t("nav.modeManager", "Manager")
@@ -55,74 +52,10 @@ export function ModeSwitcher({ collapsed = false }: ModeSwitcherProps) {
   const activeKey = location.pathname.startsWith("/workforce")
     ? "workforce"
     : "manager";
-  const activeMode = MODES.find((m) => m.key === activeKey)!;
-
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return;
-    const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open]);
-
-  // Focus first item on open
-  useEffect(() => {
-    if (open) {
-      requestAnimationFrame(() => {
-        const first = ref.current?.querySelector<HTMLElement>('[role="menuitem"]');
-        first?.focus();
-      });
-    }
-  }, [open]);
-
-  // Keyboard navigation within the dropdown
-  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    const items = ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]');
-    if (!items || items.length === 0) return;
-    const arr = Array.from(items);
-    const idx = arr.indexOf(document.activeElement as HTMLElement);
-
-    let next: number | null = null;
-    switch (e.key) {
-      case "ArrowDown":
-        next = (idx + 1) % arr.length;
-        break;
-      case "ArrowUp":
-        next = (idx - 1 + arr.length) % arr.length;
-        break;
-      case "Home":
-        next = 0;
-        break;
-      case "End":
-        next = arr.length - 1;
-        break;
-      default:
-        return;
-    }
-    e.preventDefault();
-    arr[next]?.focus();
-  }, []);
 
   const handleSelect = useCallback(
     (mode: ModeOption) => {
-      setOpen(false);
       if (mode.key !== activeKey) {
-        // Update landing preference
         try {
           localStorage.setItem(LANDING_PREF_KEY, mode.prefValue);
         } catch { /* storage unavailable */ }
@@ -132,86 +65,86 @@ export function ModeSwitcher({ collapsed = false }: ModeSwitcherProps) {
     [activeKey, navigate],
   );
 
-  const ActiveIcon = activeMode.icon;
+  // Keyboard handler for ARIA tabs (arrow keys, Home/End)
+  const handleTabKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLButtonElement>) => {
+      const activeIdx = MODES.findIndex((m) => m.key === activeKey);
+      let targetIdx = -1;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        targetIdx = (activeIdx + 1) % MODES.length;
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        targetIdx = (activeIdx - 1 + MODES.length) % MODES.length;
+      } else if (e.key === "Home") {
+        targetIdx = 0;
+      } else if (e.key === "End") {
+        targetIdx = MODES.length - 1;
+      }
+      if (targetIdx >= 0 && targetIdx !== activeIdx) {
+        const target = MODES[targetIdx];
+        if (!target) return;
+        e.preventDefault();
+        handleSelect(target);
+        // Focus the newly active tab after React re-render
+        const container = e.currentTarget.closest("[role='tablist']");
+        const tabs = container?.querySelectorAll<HTMLButtonElement>("[role='tab']");
+        tabs?.[targetIdx]?.focus();
+      }
+    },
+    [activeKey, handleSelect],
+  );
 
-  return (
-    <div ref={ref} className="relative">
-      {/* ── Trigger ── */}
+  // ── Collapsed: icon-only toggle ──
+  if (collapsed) {
+    const inactiveMode = MODES.find((m) => m.key !== activeKey)!;
+    const InactiveIcon = inactiveMode.icon;
+    return (
       <button
-        ref={triggerRef}
-        onClick={() => setOpen((p) => !p)}
+        onClick={() => handleSelect(inactiveMode)}
         className={cn(
-          "flex w-full items-center rounded-lg transition-all",
+          "flex w-full items-center justify-center rounded-lg p-2 transition-all",
           "text-sidebar-foreground/70 hover:bg-sidebar-accent/10 hover:text-sidebar-foreground",
-          collapsed
-            ? "justify-center p-2"
-            : "gap-2.5 px-3 py-2",
         )}
-        aria-haspopup="true"
-        aria-expanded={open}
         aria-label={t("nav.switchMode", "Switch workspace")}
+        title={getModeLabel(inactiveMode.key)}
         data-testid="mode-switcher-trigger"
       >
-        <ActiveIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
-        {!collapsed && (
-          <>
-            <span className="flex-1 truncate text-start text-sm font-medium">
-              {getModeLabel(activeKey)}
-            </span>
-            <ChevronDown
-              className={cn(
-                "h-3.5 w-3.5 shrink-0 transition-transform duration-200",
-                open && "rotate-180",
-              )}
-              aria-hidden="true"
-            />
-          </>
-        )}
+        <InactiveIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
       </button>
+    );
+  }
 
-      {/* ── Dropdown ── */}
-      {open && (
-        <div
-          className={cn(
-            "absolute z-50 w-52 rounded-xl border border-sidebar-border bg-sidebar p-1 shadow-xl shadow-black/20",
-            collapsed
-              ? "start-14 top-0"
-              : "start-2 top-full mt-1",
-          )}
-          role="menu"
-          aria-label={t("nav.switchMode", "Switch workspace")}
-          onKeyDown={handleMenuKeyDown}
-          data-testid="mode-switcher-menu"
-        >
-          {MODES.map((mode) => {
-            const isActive = mode.key === activeKey;
-            const Icon = mode.icon;
-            return (
-              <button
-                key={mode.key}
-                onClick={() => handleSelect(mode)}
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start text-sm transition-colors",
-                  isActive
-                    ? "bg-sidebar-accent/10 text-sidebar-accent font-medium"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent/10 focus:bg-sidebar-accent/10",
-                )}
-                role="menuitem"
-                tabIndex={-1}
-                data-testid={`mode-option-${mode.key}`}
-              >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span className="flex-1 truncate">
-                  {getModeLabel(mode.key)}
-                </span>
-                {isActive && (
-                  <Check className="h-3.5 w-3.5 shrink-0 text-sidebar-accent" aria-hidden="true" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
+
+  return (
+    <div
+      className="flex items-center gap-0.5 rounded-lg bg-sidebar-accent/5 p-0.5"
+      role="tablist"
+      aria-label={t("nav.switchMode", "Switch workspace")}
+      data-testid="mode-switcher-trigger"
+    >
+      {MODES.map((mode) => {
+        const isActive = mode.key === activeKey;
+        const Icon = mode.icon;
+        return (
+          <button
+            key={mode.key}
+            role="tab"
+            aria-selected={isActive}
+            tabIndex={isActive ? 0 : -1}
+            onClick={() => handleSelect(mode)}
+            onKeyDown={handleTabKeyDown}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-all duration-200",
+              isActive
+                ? "bg-sidebar-accent/15 text-sidebar-accent shadow-sm"
+                : "text-sidebar-foreground/50 hover:text-sidebar-foreground/80",
+            )}
+            data-testid={`mode-option-${mode.key}`}
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{getModeLabel(mode.key)}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

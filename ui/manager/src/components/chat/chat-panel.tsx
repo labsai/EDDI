@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -23,11 +23,11 @@ import {
 } from "@/lib/api/attachments";
 import type { SentAttachment } from "@/hooks/use-chat";
 import { ChatMessage } from "./chat-message";
-import { ChatActivity } from "./chat-activity";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer } from "@/components/debugger/debug-drawer";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { useDebugStore, type PipelineEvent } from "@/hooks/use-debug-events";
+import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
 import {
   Bot,
@@ -38,7 +38,6 @@ import {
   Loader2,
   Undo2,
   Redo2,
-  Brain,
   Lock,
   Unlock,
   Eye,
@@ -57,6 +56,7 @@ import {
   X,
   FileText,
   AlertTriangle,
+  Wrench,
 } from "lucide-react";
 
 /** A file the user picked, tracked through upload → ready/error. */
@@ -70,17 +70,15 @@ interface PendingAttachment {
   error?: string;
 }
 
-export function ChatPanel() {
+export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const agentSelectorRef = useRef<HTMLDivElement>(null);
-  const autoStartedRef = useRef(false);
-  const [showScrollFab, setShowScrollFab] = useState(false);
+
   const [contextOpen, setContextOpen] = useState(false);
 
   // Store state
@@ -116,28 +114,42 @@ export function ChatPanel() {
 
   // Auto-start conversation from ?agentId= query param
   useEffect(() => {
-    if (autoStartedRef.current) return;
     const agentIdParam = searchParams.get("agentId");
-    if (!agentIdParam || !deployedAgents) return;
+    if (!agentIdParam) return;
 
-    autoStartedRef.current = true;
+    // Skip if this agent is already selected (prevents duplicate starts)
+    if (agentIdParam === selectedAgentId) {
+      // Still clean the URL params
+      setSearchParams({}, { replace: true });
+      return;
+    }
 
-    // Find agent name from deployed agents list
-    const agent = deployedAgents.find((b) => b.id === agentIdParam);
-    const agentName = agent?.name ?? "Agent";
+    // Resolve agent name: URL param > deployed agents lookup > fallback to ID
+    const agentNameParam = searchParams.get("agentName");
+    const agentName =
+      agentNameParam ||
+      deployedAgents?.find((b) => b.id === agentIdParam)?.name ||
+      agentIdParam;
 
     // Auto-select and start conversation
     setSelectedAgent(agentIdParam, agentName);
     startConversation.mutate({ agentId: agentIdParam });
 
-    // Remove query param so refresh doesn't re-create
+    // Remove query params so refresh doesn't re-create
     setSearchParams({}, { replace: true });
-  }, [searchParams, deployedAgents, setSelectedAgent, startConversation, setSearchParams]);
+  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, startConversation, setSearchParams]);
 
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
+  const {
+    scrollRef: scrollContainerRef,
+    showScrollFab,
+    hasNewContent,
+    scrollToBottom,
+    handleScroll,
+  } = useSmartAutoScroll<HTMLDivElement>({
+    deps: [messages, isProcessing, isThinking, currentTurnEvents.length],
+    bottomThreshold: 80,
+  });
 
   // Close agent selector on outside click
   useEffect(() => {
@@ -158,6 +170,11 @@ export function ChatPanel() {
       setSelectedAgent(agentId, agentName);
       setAgentSelectorOpen(false);
       startConversation.mutate({ agentId });
+      // Focus the chat input after the dropdown closes and UI settles
+      setTimeout(() => {
+        const input = document.querySelector<HTMLTextAreaElement>('[data-testid="chat-input"]');
+        input?.focus();
+      }, 150);
     },
     [setSelectedAgent, startConversation]
   );
@@ -363,31 +380,41 @@ export function ChatPanel() {
   }, [rerunConversation, t]);
 
   return (
-    <div className="flex h-full overflow-hidden rounded-xl border border-border bg-background shadow-sm">
-      {/* History panel */}
-      <ChatHistory
-        open={historyOpen}
-        onNewConversation={handleNewConversation}
-      />
+    <div className={cn(
+      "flex h-full min-w-0 overflow-hidden bg-background",
+      !embedded && "rounded-xl border border-border shadow-sm"
+    )}>
+      {/* History panel — hidden in embedded mode (no room for nested side panels) */}
+      {!embedded && (
+        <ChatHistory
+          open={historyOpen}
+          onNewConversation={handleNewConversation}
+        />
+      )}
 
       {/* Main chat area */}
-      <div className="flex flex-1 flex-col">
+      <div className="flex flex-1 flex-col min-w-0 min-h-0">
         {/* Top bar */}
-        <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-          {/* History toggle */}
-          <button
-            onClick={() => setHistoryOpen((p) => !p)}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-              historyOpen
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-            title={t("chat.history")}
-            data-testid="history-toggle"
-          >
-            <History className="h-4 w-4" />
-          </button>
+        <div className={cn(
+          "flex items-center border-b border-border",
+          embedded ? "gap-1 px-2 py-1.5" : "gap-2 px-4 py-2.5"
+        )}>
+          {/* History toggle — hidden in embedded mode */}
+          {!embedded && (
+            <button
+              onClick={() => setHistoryOpen((p) => !p)}
+              className={cn(
+                "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                historyOpen
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+              title={t("chat.history")}
+              data-testid="history-toggle"
+            >
+              <History className="h-4 w-4" />
+            </button>
+          )}
 
           {/* Agent selector */}
           <div ref={agentSelectorRef} className="relative flex-1">
@@ -415,7 +442,7 @@ export function ChatPanel() {
 
             {/* Dropdown */}
             {agentSelectorOpen && (
-              <div className="absolute inset-s-0 top-full z-50 mt-1 w-full rounded-lg border border-border bg-popover p-1 shadow-lg">
+              <div className="absolute inset-s-0 top-full z-50 mt-1 w-full max-h-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg">
                 {agentsLoading ? (
                   <div className="flex items-center justify-center py-3">
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -427,19 +454,19 @@ export function ChatPanel() {
                 ) : (
                   deployedAgents.map((agent) => (
                     <button
-                      key={agent.id}
-                      onClick={() => handleSelectAgent(agent.id, agent.name)}
+                      key={agent.resource}
+                      onClick={() => handleSelectAgent(agent.id, agent.name || agent.id)}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted",
+                        "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted min-w-0",
                         agent.id === selectedAgentId &&
                           "bg-primary/10 text-primary font-medium"
                       )}
                     >
                       <Bot className="h-4 w-4 shrink-0" />
-                      <div className="flex-1 text-start">
+                      <div className="flex-1 min-w-0 text-start">
                         <p className="truncate font-medium">{agent.name}</p>
                         {agent.description && (
-                          <p className="truncate text-xs text-muted-foreground">
+                          <p className="line-clamp-2 text-xs text-muted-foreground/80 leading-snug">
                             {agent.description}
                           </p>
                         )}
@@ -451,23 +478,25 @@ export function ChatPanel() {
             )}
           </div>
 
-          {/* Streaming toggle */}
-          <StreamingToggle />
+          {/* Streaming toggle — hidden in embedded mode to save space */}
+          {!embedded && <StreamingToggle />}
 
-          {/* Activity toggle */}
-          <button
-            onClick={toggleShowActivity}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-              showActivity
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
-            title={showActivity ? t("chat.hideActivity", "Hide Activity") : t("chat.showActivity", "Show Activity")}
-            data-testid="activity-toggle"
-          >
-            <Activity className="h-4 w-4" />
-          </button>
+          {/* Activity toggle — hidden in embedded mode */}
+          {!embedded && (
+            <button
+              onClick={toggleShowActivity}
+              className={cn(
+                "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                showActivity
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+              title={showActivity ? t("chat.hideActivity", "Hide Activity") : t("chat.showActivity", "Show Activity")}
+              data-testid="activity-toggle"
+            >
+              <Activity className="h-4 w-4" />
+            </button>
+          )}
 
           {/* Top bar actions */}
           {conversationId && (
@@ -525,7 +554,7 @@ export function ChatPanel() {
             </div>
           </div>
         )}
-        {conversationId && (
+        {conversationId && !embedded && (
           <button
             onClick={() => setContextOpen((p) => !p)}
             className={cn(
@@ -546,12 +575,8 @@ export function ChatPanel() {
         {/* Messages */}
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto"
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-            setShowScrollFab(distFromBottom > 200);
-          }}
+          className="relative flex-1 overflow-y-auto min-h-0"
+          onScroll={handleScroll}
         >
           {!selectedAgentId ? (
             <EmptyState />
@@ -567,25 +592,14 @@ export function ChatPanel() {
               </div>
             </div>
           ) : (
-            <div className="py-4">
+            <div className={embedded ? "py-2" : "py-4"}>
               {messages.map((msg) => (
                 <ChatMessage key={msg.id} message={msg} />
               ))}
 
-              {/* Inline activity — live processing */}
-              {showActivity && (isProcessing || isThinking) && currentTurnEvents.length > 0 && (
-                <ChatActivity
-                  events={currentTurnEvents}
-                  isLive={true}
-                />
-              )}
-
-              {/* Thinking indicator (only when activity is hidden) */}
-              {!showActivity && isThinking && (
-                <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground animate-pulse">
-                  <Brain className="h-4 w-4" />
-                  <span className="italic">{t("chat.thinking")}</span>
-                </div>
+              {/* Inline thinking / tool-use indicator — replaces old activity card */}
+              {(isProcessing || isThinking) && (
+                <InlineThinkingIndicator events={currentTurnEvents} />
               )}
 
               {/* Rerun button — shown when last message is an error */}
@@ -607,15 +621,21 @@ export function ChatPanel() {
             </div>
           )}
 
-          {/* Scroll-to-bottom FAB */}
+          {/* Scroll-to-bottom FAB with new content pulse */}
           {showScrollFab && (
             <button
-              onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })}
+              onClick={() => scrollToBottom("smooth")}
               className="absolute bottom-4 end-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
               title={t("chat.scrollToBottom", "Scroll to bottom")}
               data-testid="scroll-to-bottom"
             >
               <ArrowDown className="h-4 w-4" />
+              {hasNewContent && (
+                <span className="absolute -top-1 -end-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+                </span>
+              )}
             </button>
           )}
         </div>
@@ -700,6 +720,7 @@ export function ChatPanel() {
             hasReadyAttachment={hasReadyAttachment}
             onUndo={conversationId && undoAvailable && !isProcessing ? () => undoConversation.mutate() : undefined}
             onRedo={conversationId && redoAvailable && !isProcessing ? () => redoConversation.mutate() : undefined}
+            embedded={embedded}
           />
         )}
       </div>
@@ -814,6 +835,7 @@ function ChatInputWithSecretToggle({
   hasReadyAttachment = false,
   onUndo,
   onRedo,
+  embedded = false,
 }: {
   onSend: (message: string, isSecret?: boolean) => void;
   disabled?: boolean;
@@ -829,6 +851,7 @@ function ChatInputWithSecretToggle({
   hasReadyAttachment?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
+  embedded?: boolean;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -864,7 +887,7 @@ function ChatInputWithSecretToggle({
     !isUploading;
 
   return (
-    <div className="border-t border-border bg-background p-4" data-tour="chat-input-area">
+    <div className="border-t border-border bg-background p-4 min-w-0" data-tour="chat-input-area">
       {/* Hidden file input for attachments */}
       <input
         ref={fileInputRef}
@@ -886,7 +909,7 @@ function ChatInputWithSecretToggle({
           ))}
         </div>
       )}
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-2 min-w-0">
         {/* 📎 Attach button */}
         <button
           type="button"
@@ -995,6 +1018,7 @@ function ChatInputWithSecretToggle({
           /* Normal mode: auto-growing textarea */
           <textarea
             ref={textareaRef}
+            autoFocus={!embedded}
             data-testid="chat-input"
             value={value}
             onChange={(e) => {
@@ -1011,7 +1035,7 @@ function ChatInputWithSecretToggle({
             disabled={disabled}
             rows={1}
             className={cn(
-              "flex-1 resize-none rounded-xl border border-input bg-card px-4 py-3 text-sm",
+              "flex-1 min-w-0 resize-none rounded-xl border border-input bg-card px-4 py-3 text-sm",
               "placeholder:text-muted-foreground",
               "focus:outline-none focus:ring-2 focus:ring-ring",
               "disabled:cursor-not-allowed disabled:opacity-50",
@@ -1068,8 +1092,11 @@ function PendingAttachmentChip({
       {isImage ? (
         <img
           src={att.previewUrl}
-          alt={att.file.name}
+          alt=""
           className="h-8 w-8 shrink-0 rounded object-cover"
+          onError={(e) => {
+            (e.target as HTMLElement).style.display = "none";
+          }}
         />
       ) : (
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-muted">
@@ -1128,6 +1155,79 @@ function EmptyState() {
           {t("chat.empty")}
         </p>
       </div>
+    </div>
+  );
+}
+
+// ==================== Inline Thinking Indicator ====================
+
+/** Internal pipeline tasks that should never surface in the UI. */
+const INTERNAL_TASKS = new Set([
+  "expressions", "behavior_rules", "langchain", "dictionary",
+  "propertysetter", "parser", "output",
+  "ai.labs.expressions", "ai.labs.behavior_rules", "ai.labs.langchain",
+  "ai.labs.dictionary", "ai.labs.propertysetter", "ai.labs.parser",
+  "ai.labs.output",
+]);
+
+/**
+ * Sleek inline indicator shown during agent processing.
+ * Shows "Thinking\u2026" with animated dots + any active tool call names.
+ */
+function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
+  const { t } = useTranslation();
+
+  // Extract active tool call names from events (only from non-internal tasks)
+  const activeToolNames = useMemo(() => {
+    const names: string[] = [];
+    for (const ev of events) {
+      if (INTERNAL_TASKS.has(ev.taskType)) continue;
+      if (ev.toolTrace) {
+        for (const trace of ev.toolTrace) {
+          if (trace.type === "tool_call" && trace.tool && !names.includes(trace.tool)) {
+            names.push(trace.tool);
+          }
+        }
+      }
+    }
+    return names;
+  }, [events]);
+
+  // Check for errors in visible events
+  const hasError = events.some(
+    (e) => e.type === "task_failed" && !INTERNAL_TASKS.has(e.taskType),
+  );
+
+  return (
+    <div
+      className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground/70"
+      data-testid="thinking-indicator"
+    >
+      {/* Pulsing dots */}
+      <span className="flex items-center gap-0.5">
+        <span className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:0ms]" />
+        <span className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:150ms]" />
+        <span className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:300ms]" />
+      </span>
+
+      {/* Status text */}
+      <span className="italic">
+        {hasError
+          ? t("chat.activity.error", "Error occurred")
+          : activeToolNames.length > 0
+            ? t("chat.usingTools", "Using tools")
+            : t("chat.thinking", "Thinking…")}
+      </span>
+
+      {/* Tool names — inline, comma-separated */}
+      {activeToolNames.length > 0 && (
+        <span className="flex items-center gap-1 text-muted-foreground/50">
+          <Wrench className="h-2.5 w-2.5 shrink-0" />
+          <span className="truncate max-w-[200px]">
+            {activeToolNames.join(", ")}
+          </span>
+        </span>
+      )}
     </div>
   );
 }

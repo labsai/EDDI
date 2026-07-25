@@ -1,12 +1,15 @@
-import { useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { X, AlertCircle, Sparkles, Download } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { X, AlertCircle, Sparkles, Download, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, hashColor, formatRelativeTime } from "@/lib/utils";
 import { useGroupConversation } from "@/hooks/use-groups";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
 import {
   ENTRY_TYPE_INFO,
   type TranscriptEntry,
@@ -93,6 +96,28 @@ const PHASE_ICONS: Record<string, string> = {
   VERIFICATION: "☑️",
 };
 
+// ─── Constants ───────────────────────────────────────────────────
+
+/** Height in px above which we collapse a message (~6 lines) */
+const COLLAPSE_THRESHOLD = 144;
+
+// ─── Hooks ──────────────────────────────────────────────────────
+
+/** Shared collapse state for message cards */
+function useCollapsibleContent(dep: unknown) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isCollapsible, setIsCollapsible] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setIsCollapsible(contentRef.current.scrollHeight > COLLAPSE_THRESHOLD);
+    }
+  }, [dep]);
+
+  return { contentRef, isCollapsible, isExpanded, setIsExpanded };
+}
+
 // ─── Sub-components ──────────────────────────────────────────────
 
 function PhaseSeparator({
@@ -174,6 +199,9 @@ function AgentEntryCard({
   const { t } = useTranslation();
   const typeInfo = ENTRY_TYPE_INFO[entry.type as keyof typeof ENTRY_TYPE_INFO];
   const borderClass = agentBorderClass(entry.speakerAgentId);
+  const parsedContent = parseTranscriptContent(entry.content ?? "");
+  const hasContent = parsedContent.trim().length > 0;
+  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
 
   return (
     <div
@@ -211,10 +239,46 @@ function AgentEntryCard({
 
       {/* Content */}
       <div className="ps-10">
-        {entry.content ? (
-          <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
-            {entry.content}
-          </p>
+        {hasContent ? (
+          <>
+            <div
+              ref={contentRef}
+              className={cn(
+                "relative transition-[max-height] duration-300 ease-in-out overflow-hidden",
+                isCollapsible && !isExpanded && "max-h-36",
+              )}
+            >
+              <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {truncateContent(
+                    parsedContent,
+                    t("groups.contentTruncated", "[Content truncated]"),
+                  )}
+                </ReactMarkdown>
+              </div>
+              {isCollapsible && !isExpanded && (
+                <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-card to-transparent pointer-events-none" />
+              )}
+            </div>
+            {isCollapsible && (
+              <button
+                onClick={() => setIsExpanded((v) => !v)}
+                className="flex items-center gap-1 mt-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+              >
+                {isExpanded ? (
+                  <>
+                    <ChevronUp className="h-3 w-3" />
+                    {t("common.showLess", "Show less")}
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3 w-3" />
+                    {t("common.showMore", "Show more")}
+                  </>
+                )}
+              </button>
+            )}
+          </>
         ) : (
           <p className="text-sm text-muted-foreground italic">
             {t("Workforce.history.noContent", "No content")}
@@ -242,6 +306,9 @@ function SynthesisEntryCard({
   index: number;
 }) {
   const { t } = useTranslation();
+  const parsedContent = parseTranscriptContent(entry.content ?? "");
+  const hasContent = parsedContent.trim().length > 0;
+  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
 
   return (
     <div
@@ -266,9 +333,49 @@ function SynthesisEntryCard({
           </span>
         )}
       </div>
-      <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed ps-6">
-        {entry.content ?? ""}
-      </p>
+      <div
+        ref={contentRef}
+        className={cn(
+          "relative transition-[max-height] duration-300 ease-in-out overflow-hidden",
+          isCollapsible && !isExpanded && "max-h-36",
+        )}
+      >
+        {hasContent ? (
+          <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 ps-6 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {truncateContent(
+                parsedContent,
+                t("groups.contentTruncated", "[Content truncated]"),
+              )}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground italic ps-6">
+            {t("Workforce.history.noContent", "No content")}
+          </p>
+        )}
+        {isCollapsible && !isExpanded && (
+          <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-amber-50 dark:from-amber-500/10 to-transparent pointer-events-none" />
+        )}
+      </div>
+      {isCollapsible && (
+        <button
+          onClick={() => setIsExpanded((v) => !v)}
+          className="flex items-center gap-1 mt-1 ps-6 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+        >
+          {isExpanded ? (
+            <>
+              <ChevronUp className="h-3 w-3" />
+              {t("common.showLess", "Show less")}
+            </>
+          ) : (
+            <>
+              <ChevronDown className="h-3 w-3" />
+              {t("common.showMore", "Show more")}
+            </>
+          )}
+        </button>
+      )}
     </div>
   );
 }
@@ -349,6 +456,8 @@ function SkippedEntryCard({
 
 function SynthesizedAnswerFooter({ content }: { content: string }) {
   const { t } = useTranslation();
+  const parsedContent = parseTranscriptContent(content);
+  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
 
   return (
     <div
@@ -364,9 +473,40 @@ function SynthesizedAnswerFooter({ content }: { content: string }) {
           {t("Workforce.history.finalAnswer", "Final Synthesized Answer")}
         </h3>
       </div>
-      <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
-        {content}
-      </p>
+      <div
+        ref={contentRef}
+        className={cn(
+          "relative transition-[max-height] duration-300 ease-in-out overflow-hidden",
+          isCollapsible && !isExpanded && "max-h-36",
+        )}
+      >
+        <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {truncateContent(parsedContent, t("groups.contentTruncated", "[Content truncated]"))}
+          </ReactMarkdown>
+        </div>
+        {isCollapsible && !isExpanded && (
+          <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-amber-100/50 dark:from-amber-500/5 to-transparent pointer-events-none" />
+        )}
+      </div>
+      {isCollapsible && (
+        <button
+          onClick={() => setIsExpanded((v) => !v)}
+          className="flex items-center gap-1 mt-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+        >
+          {isExpanded ? (
+            <>
+              <ChevronUp className="h-3 w-3" />
+              {t("common.showLess", "Show less")}
+            </>
+          ) : (
+            <>
+              <ChevronDown className="h-3 w-3" />
+              {t("common.showMore", "Show more")}
+            </>
+          )}
+        </button>
+      )}
     </div>
   );
 }
@@ -663,7 +803,9 @@ function ConversationViewer({
         })}
 
         {/* ── Footer: Synthesized Answer ──────────────────────── */}
-        {conversation.synthesizedAnswer?.trim() && !hasSynthesisEntry && (
+        {conversation.synthesizedAnswer &&
+          parseTranscriptContent(conversation.synthesizedAnswer).trim() &&
+          !hasSynthesisEntry && (
           <SynthesizedAnswerFooter content={conversation.synthesizedAnswer} />
         )}
 

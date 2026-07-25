@@ -348,6 +348,21 @@ function WorkforceDashboard() {
       {/* ─── Pillar 1: Your Digital Workforce ────────────────── */}
       <WorkforceSection />
 
+      {/* ─── Quick Actions ───────────────────────────────────── */}
+      <section
+        aria-label={t("quickActions.title", "Quick Actions")}
+        className="br-section-enter"
+        style={{ '--enter-delay': '50ms' } as React.CSSProperties}
+      >
+        <h2 className="text-lg font-semibold text-foreground mb-3">
+          {t("quickActions.title", "Quick Actions")}
+        </h2>
+        <QuickActions />
+      </section>
+
+      {/* ─── Knowledge Health ────────────────────────────────── */}
+      <KnowledgeHealthCard />
+
       {/* ─── Templates ────────────────────────────────────────── */}
       <TemplatesPanel
         onUseTemplate={(template: DiscussionTemplate) => {
@@ -576,21 +591,6 @@ function WorkforceDashboard() {
           </div>
         </div>
       )}
-
-      {/* ─── Pillar 3: Quick Actions ─────────────────────────── */}
-      <section
-        aria-label={t("quickActions.title", "Quick Actions")}
-        className="br-section-enter"
-        style={{ '--enter-delay': '200ms' } as React.CSSProperties}
-      >
-        <h2 className="text-lg font-semibold text-foreground mb-3">
-          {t("quickActions.title", "Quick Actions")}
-        </h2>
-        <QuickActions />
-      </section>
-
-      {/* ─── Knowledge Health ────────────────────────────────── */}
-      <KnowledgeHealthCard />
 
       {/* Mobile FAB */}
       <MobileFab />

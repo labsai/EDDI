@@ -65,6 +65,7 @@ export function useLogStream(filters: LogFilters = {}) {
   // ── Session store path (unfiltered) ──────────────────────────
   const sessionEntries = useSessionLogStore((s) => s.entries);
   const sessionConnected = useSessionLogStore((s) => s.connected);
+  const sessionSeeded = useSessionLogStore((s) => s.seeded);
 
   // ── Filtered SSE path ────────────────────────────────────────
   const [filteredEntries, setFilteredEntries] = useState<LogEntry[]>([]);
@@ -164,6 +165,7 @@ export function useLogStream(filters: LogFilters = {}) {
       ? filteredEntries
       : sessionEntries.slice(0, MAX_LOG_ENTRIES),
     sseConnected: filtered ? filteredConnected : sessionConnected,
+    seeded: filtered ? true : sessionSeeded,
     paused,
     setPaused,
     clearEntries,

@@ -7,6 +7,7 @@ import { cn, getInitials } from "@/lib/utils";
 import { AdvisorResponseCard } from "@/components/workforce/advisor-response-card";
 import type { TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
 import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
+import { formatMarkdownText } from "@/components/groups/group-utils";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -211,7 +212,7 @@ function SynthesisCard({ content, delay }: { content: string; delay: number }) {
         )}
       >
         <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatMarkdownText(content)}</ReactMarkdown>
         </div>
         {collapsible && !expanded && (
           <div className="absolute bottom-0 inset-x-0 h-12 bg-gradient-to-t from-card to-transparent pointer-events-none" />

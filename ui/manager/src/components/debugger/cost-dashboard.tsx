@@ -134,8 +134,8 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
                     )}
                   >
                     <td className="py-1.5 px-2 text-muted-foreground">{i + 1}</td>
-                    <td className="py-1.5 px-2 truncate max-w-[100px]" title={turn.modelName ?? ""}>
-                      {turn.modelName ? turn.modelName.replace(/^(gpt-|claude-)/, "") : "-"}
+                    <td className="py-1.5 px-2 text-foreground font-medium truncate max-w-[200px]" title={turn.modelName ?? ""}>
+                      {turn.modelName || "-"}
                     </td>
                     <td className="py-1.5 px-2 text-end text-[10px]">
                       <span className="text-muted-foreground">↑{turn.inputTokens}</span>{" "}
@@ -209,7 +209,19 @@ function computeTokenMetrics(entries: AuditEntry[]): TokenMetricsResult {
           inputTk += tokenUsage.inputTokens ?? 0;
           outputTk += tokenUsage.outputTokens ?? 0;
         }
-        if (llm.modelName) model = String(llm.modelName);
+        const rawModelVal = llm.model ?? llm.modelName ?? llm.modelId;
+        const rawProviderVal = llm.provider ?? llm.engine;
+        const rawModel = typeof rawModelVal === "string" ? rawModelVal : undefined;
+        const rawProvider = typeof rawProviderVal === "string" ? rawProviderVal : undefined;
+        if (rawModel && rawProvider) {
+          model = rawModel.toLowerCase().includes(rawProvider.toLowerCase())
+            ? rawModel
+            : `${rawProvider} / ${rawModel}`;
+        } else if (rawModel) {
+          model = rawModel;
+        } else if (rawProvider) {
+          model = rawProvider;
+        }
       }
       cost += entry.cost ?? 0;
       duration += entry.durationMs ?? 0;

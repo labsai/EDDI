@@ -7,21 +7,26 @@ import {
 } from "react";
 import { useParams, useLocation, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   Paperclip,
   X,
   ChevronLeft,
   PanelRightClose,
   PanelRightOpen,
-  Pencil,
-  MessageSquare,
   FileText,
   AlertTriangle,
   Loader2,
   CheckCircle2,
+  ArrowDown,
+  Copy,
+  Check,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { parseTranscriptContent, formatMarkdownText } from "@/components/groups/group-utils";
+import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { useGroup } from "@/hooks/use-groups";
 import {
   startConversation,
@@ -29,7 +34,6 @@ import {
   sendMessageWithContext,
   readConversation,
 } from "@/lib/api/chat";
-import { getAgent } from "@/lib/api/agents";
 import {
   uploadAttachment,
   deleteAttachment,
@@ -41,12 +45,13 @@ import {
   type AttachmentResult,
   type AttachmentRef,
 } from "@/lib/api/attachments";
+import { getAgentDescriptors } from "@/lib/api/agents";
 import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
 import type { SimpleConversationStep } from "@/lib/api/conversations";
 import { ContextCard } from "@/components/workforce/context-card";
+import { AgentDetailsPanel } from "@/components/workforce/agent-details-panel";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -166,7 +171,54 @@ function parseConversationSteps(
   return messages;
 }
 
-// ─── Typing Indicator ────────────────────────────────────────────
+function formatShortTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function CopyMessageButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+  const { t } = useTranslation();
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API unavailable (non-secure context or permission denied)
+    }
+  }, [content]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 transition-opacity duration-150",
+        copied
+          ? "text-emerald-500 font-medium"
+          : "text-muted-foreground/60 hover:text-foreground hover:bg-muted/50",
+      )}
+      title={t("chat.copyMessage", "Copy message")}
+      aria-label={t("chat.copyMessage", "Copy message")}
+    >
+      {copied ? (
+        <>
+          <Check className="h-3 w-3" />
+          <span>{t("chat.copied", "Copied")}</span>
+        </>
+      ) : (
+        <>
+          <Copy className="h-3 w-3" />
+          <span>{t("chat.copy", "Copy")}</span>
+        </>
+      )}
+    </button>
+  );
+}
 
 function TypingDots() {
   return (
@@ -297,7 +349,9 @@ function ThreadInput({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+    const nextHeight = Math.min(Math.max(el.scrollHeight, 40), 128);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > 128 ? "auto" : "hidden";
   }, []);
 
   const handleFileSelect = useCallback(() => {
@@ -420,8 +474,11 @@ function ThreadInput({
               {att.previewUrl && att.status !== "error" ? (
                 <img
                   src={att.previewUrl}
-                  alt={att.file.name}
-                  className="h-6 w-6 rounded object-cover"
+                  alt=""
+                  className="h-6 w-6 rounded object-cover shrink-0"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = "none";
+                  }}
                 />
               ) : null}
 
@@ -479,6 +536,7 @@ function ThreadInput({
 
         <textarea
           ref={textareaRef}
+          autoFocus
           value={message}
           onChange={(e) => {
             setMessage(e.target.value);
@@ -556,8 +614,17 @@ function WorkforceThread() {
   // Fetch board config to resolve member display name & role
   const { data: groupConfig } = useGroup(boardId, version);
   const member = groupConfig?.members.find((m) => m.agentId === memberId);
-  const memberName = member?.displayName ?? memberId;
   const memberRole = member?.role ?? null;
+
+  // Fallback: if the member isn't in the group config, fetch the agent descriptor
+  // to resolve the display name (avoids showing raw ObjectIds).
+  const { data: descriptorResults } = useQuery({
+    queryKey: ["agent-descriptor-direct", memberId],
+    queryFn: () => getAgentDescriptors(1, 0, memberId),
+    enabled: !!memberId && !member,
+    staleTime: 60_000,
+  });
+  const memberName = member?.displayName || descriptorResults?.[0]?.name || memberId;
 
   // Thread persistence
   const { getThread, registerThread, updateActivity } =
@@ -582,13 +649,6 @@ function WorkforceThread() {
   const [showDetails, setShowDetails] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
 
-  // Fetch full agent data for the details panel
-  const { data: agentData, isLoading: agentLoading } = useQuery({
-    queryKey: ["agent-detail", memberId],
-    queryFn: () => getAgent(memberId),
-    enabled: !!memberId && showDetails,
-  });
-
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initRef = useRef(false);
@@ -609,10 +669,17 @@ function WorkforceThread() {
     };
   }, []);
 
-  // Scroll to bottom whenever messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
+  const {
+    scrollRef: scrollContainerRef,
+    showScrollFab,
+    hasNewContent,
+    scrollToBottom,
+    handleScroll,
+  } = useSmartAutoScroll<HTMLDivElement>({
+    deps: [messages, isLoading],
+    bottomThreshold: 80,
+  });
 
   // ─── Initialize conversation ─────────────────────────────────
   useEffect(() => {
@@ -847,7 +914,11 @@ function WorkforceThread() {
       )}
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto ps-4 pe-4 pt-4 pb-4">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="relative flex-1 overflow-y-auto ps-4 pe-4 pt-4 pb-4"
+      >
         <div className="ms-auto me-auto max-w-3xl space-y-4">
           {messages.length === 0 && !isLoading && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -877,7 +948,7 @@ function WorkforceThread() {
             <div
               key={`${msg.role}-${msg.timestamp}-${idx}`}
               className={cn(
-                "flex",
+                "group/msg flex",
                 msg.role === "user" ? "justify-end" : "justify-start",
               )}
             >
@@ -891,75 +962,105 @@ function WorkforceThread() {
                 </div>
               )}
 
-              <div
-                className={cn(
-                  "max-w-lg rounded-2xl ps-4 pe-4 py-2.5 text-sm",
-                  msg.role === "user"
-                    ? "rounded-ee-md bg-primary text-primary-foreground"
-                    : cn(
-                        "rounded-es-md border",
-                        "bg-card dark:bg-card",
-                        "border-border",
-                        "text-foreground",
-                      ),
-                )}
-              >
-                {msg.role === "agent" && (
-                  <p className="mb-1 text-xs font-medium text-muted-foreground">
-                    {memberName}
-                  </p>
-                )}
+              <div className="flex flex-col min-w-0 max-w-lg">
+                <div
+                  className={cn(
+                    "rounded-2xl ps-4 pe-4 py-2.5 text-sm",
+                    msg.role === "user"
+                      ? "rounded-ee-md bg-primary text-primary-foreground"
+                      : cn(
+                          "rounded-es-md border",
+                          "bg-card dark:bg-card",
+                          "border-border",
+                          "text-foreground",
+                        ),
+                  )}
+                >
+                  {msg.role === "agent" && (
+                    <p className="mb-1 text-xs font-medium text-muted-foreground">
+                      {memberName}
+                    </p>
+                  )}
 
-                {/* Attachment rendering on messages */}
-                {msg.attachments && msg.attachments.length > 0 && (
-                  <div className="mb-1.5 space-y-1.5">
-                    {msg.attachments.map((att) => (
-                      <div key={att.storageRef}>
-                        {/* Image preview */}
-                        {isImageMime(att.mimeType) && att.previewUrl ? (
-                          <img
-                            src={att.previewUrl}
-                            alt={att.fileName}
-                            className="max-h-40 max-w-[220px] rounded-lg object-cover"
-                          />
-                        ) : (
-                          /* Non-image file chip */
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1.5 rounded-full ps-2.5 pe-2.5 py-1 text-xs",
-                              msg.role === "user"
-                                ? "bg-white/20 text-primary-foreground"
-                                : "bg-muted text-muted-foreground",
-                            )}
-                          >
-                            <FileText className="h-3 w-3" />
-                            <span className="max-w-32 truncate">{att.fileName}</span>
-                            {att.sizeBytes != null && (
-                              <span className="opacity-60">{formatBytes(att.sizeBytes)}</span>
-                            )}
-                          </span>
-                        )}
-                        {/* Warning when file not forwarded to model */}
-                        {att.forwardableInline === false && (
-                          <span
-                            data-testid="attachment-not-forwarded"
-                            className={cn(
-                              "mt-0.5 inline-flex items-center gap-1 rounded-full ps-2 pe-2 py-0.5 text-[10px]",
-                              msg.role === "user"
-                                ? "bg-amber-500/20 text-amber-100"
-                                : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-                            )}
-                          >
-                            <AlertTriangle className="h-2.5 w-2.5" />
-                            {t("Workforce.thread.notForwarded", "File stored but too large to send to model")}
-                          </span>
-                        )}
+                  {/* Attachment rendering on messages */}
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="mb-1.5 space-y-1.5">
+                      {msg.attachments.map((att) => (
+                        <div key={att.storageRef}>
+                          {/* Image preview */}
+                          {isImageMime(att.mimeType) && att.previewUrl ? (
+                            <img
+                              src={att.previewUrl}
+                              alt=""
+                              className="max-h-40 max-w-[220px] rounded-lg object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLElement).style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            /* Non-image file chip */
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1.5 rounded-full ps-2.5 pe-2.5 py-1 text-xs",
+                                msg.role === "user"
+                                  ? "bg-white/20 text-primary-foreground"
+                                  : "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              <FileText className="h-3 w-3" />
+                              <span className="max-w-32 truncate">{att.fileName}</span>
+                              {att.sizeBytes != null && (
+                                <span className="opacity-60">{formatBytes(att.sizeBytes)}</span>
+                              )}
+                            </span>
+                          )}
+                          {/* Warning when file not forwarded to model */}
+                          {att.forwardableInline === false && (
+                            <span
+                              data-testid="attachment-not-forwarded"
+                              className={cn(
+                                "mt-0.5 inline-flex items-center gap-1 rounded-full ps-2 pe-2 py-0.5 text-[10px]",
+                                msg.role === "user"
+                                  ? "bg-amber-500/20 text-amber-100"
+                                  : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+                              )}
+                            >
+                              <AlertTriangle className="h-2.5 w-2.5" />
+                              {t("Workforce.thread.notForwarded", "File stored but too large to send to model")}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {msg.role === "agent" ? (() => {
+                    const parsed = parseTranscriptContent(msg.content);
+                    if (!parsed.trim()) return <p className="italic text-muted-foreground">{t("Workforce.thread.noResponse", "No response")}</p>;
+                    return (
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {formatMarkdownText(parsed)}
+                        </ReactMarkdown>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    );
+                  })() : (
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  )}
+                </div>
 
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                {/* Timestamp & copy button row — fixed h-5 prevents hover layout shift */}
+                <div
+                  className={cn(
+                    "mt-0.5 flex h-5 items-center gap-1.5 px-1 text-[10px] text-muted-foreground/60 select-none",
+                    msg.role === "user" ? "justify-end" : "justify-start",
+                  )}
+                >
+                  <span>{formatShortTime(msg.timestamp)}</span>
+                  {msg.content && (
+                    <CopyMessageButton content={parseTranscriptContent(msg.content)} />
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -988,6 +1089,25 @@ function WorkforceThread() {
 
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Scroll-to-bottom FAB with new content pulse */}
+        {showScrollFab && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom("smooth")}
+            className="absolute bottom-4 end-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
+            title={t("chat.scrollToBottom", "Scroll to bottom")}
+            data-testid="scroll-to-bottom"
+          >
+            <ArrowDown className="h-4 w-4" />
+            {hasNewContent && (
+              <span className="absolute -top-1 -end-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+              </span>
+            )}
+          </button>
+        )}
       </div>
 
         {/* Thread input with file attachment support */}
@@ -1007,141 +1127,11 @@ function WorkforceThread() {
 
       {/* Right details panel */}
       {showDetails && (
-        <div className="w-72 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden">
-          <div className="p-3 border-b border-border flex items-center justify-between shrink-0">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("Workforce.chat.agentDetails", "Agent Details")}
-            </h3>
-            <button
-              type="button"
-              onClick={() => setShowDetails(false)}
-              className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={t("Workforce.chat.hideDetails", "Hide details panel")}
-            >
-              <PanelRightClose className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          {agentLoading ? (
-            <div className="p-4 space-y-4">
-              <div className="flex flex-col items-center gap-2">
-                <Skeleton className="h-14 w-14 rounded-full" />
-                <Skeleton className="h-4 w-24" />
-              </div>
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-8 w-full" />
-            </div>
-          ) : agentData ? (
-            <div className="p-4 space-y-5">
-              <div className="flex flex-col items-center text-center gap-2">
-                <AdvisorAvatar
-                  name={memberName ?? "Agent"}
-                  agentId={memberId}
-                  size="lg"
-                />
-                <div>
-                  <p className="text-sm font-semibold text-foreground">
-                    {memberName ?? "Agent"}
-                  </p>
-                  {agentData.description && (
-                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3">
-                      {agentData.description}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {agentData.capabilities && agentData.capabilities.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                    {t("Workforce.agentEditor.capabilities", "Capabilities")}
-                  </h4>
-                  <div className="flex flex-wrap gap-1.5">
-                    {agentData.capabilities.map((cap, idx) => (
-                      <Badge
-                        key={`${cap.skill}-${idx}`}
-                        variant="secondary"
-                        className="text-[10px]"
-                      >
-                        {cap.skill}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    {t("Workforce.agentEditor.a2aEnabled", "Agent-to-Agent")}
-                  </span>
-                  <Badge
-                    variant={agentData.a2aEnabled ? "success" : "secondary"}
-                    className="text-[10px]"
-                  >
-                    {agentData.a2aEnabled
-                      ? t("common.on", "On")
-                      : t("common.off", "Off")}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    {t("Workforce.agentEditor.memoryTools", "Memory Tools")}
-                  </span>
-                  <Badge
-                    variant={
-                      agentData.enableMemoryTools ? "success" : "secondary"
-                    }
-                    className="text-[10px]"
-                  >
-                    {agentData.enableMemoryTools
-                      ? t("common.on", "On")
-                      : t("common.off", "Off")}
-                  </Badge>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs font-medium text-muted-foreground mb-2 mt-4">
-                  {t("Workforce.thread.history", "Conversation History")}
-                </h4>
-                {conversationId ? (
-                  <div className="flex flex-col gap-2 rounded-lg border border-border p-3 text-xs bg-muted/30">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground flex items-center gap-1.5">
-                         <MessageSquare className="h-3.5 w-3.5" />
-                         {t("Workforce.thread.currentSession", "Current Session")}
-                      </span>
-                      <span className="font-medium text-foreground">{messages.length} {t("Workforce.thread.msgs", "msgs")}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">{t("Workforce.thread.noHistory", "No history available.")}</p>
-                )}
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full mt-2"
-                onClick={() => setEditingAgentId(memberId)}
-              >
-                <Pencil className="h-3.5 w-3.5" />
-                {t("Workforce.chat.editAgent", "Edit Agent")}
-              </Button>
-            </div>
-          ) : (
-             <div className="flex flex-1 items-center justify-center p-4">
-                <div className="text-center text-muted-foreground">
-                  <p className="text-xs">
-                    {t(
-                      "Workforce.chat.selectToView",
-                      "Select an agent to view details",
-                    )}
-                  </p>
-                </div>
-              </div>
-          )}
-        </div>
+        <AgentDetailsPanel
+          agentId={memberId}
+          agentName={memberName}
+          onClose={() => setShowDetails(false)}
+        />
       )}
 
       {/* Agent editor sheet (slide-over) */}
