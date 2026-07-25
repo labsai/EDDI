@@ -100,6 +100,9 @@ const INITIAL_STATE: WizardState = {
 const MODEL_SUGGESTIONS: Record<string, string[]> = {
   anthropic: [
     // Anthropic API uses dashes in version numbers (e.g. sonnet-4-6 = v4.6)
+    "claude-fable-5",
+    "claude-opus-5",
+    "claude-sonnet-5",
     "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
@@ -107,6 +110,9 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "claude-haiku-4-5",
   ],
   openai: [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
     "gpt-5.5",
     "gpt-5.5-pro",
     "gpt-5.4",
@@ -120,7 +126,10 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "o3-mini",
   ],
   gemini: [
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-pro",
     "gemini-3.1-pro-preview",
     "gemini-3.1-pro-preview-customtools",
     "gemini-3.1-flash-lite",
@@ -130,7 +139,10 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
   "gemini-vertex": [
     // Gemini models
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-pro",
     "gemini-3.1-pro-preview",
     "gemini-3.1-flash-lite",
     "gemini-2.5-pro",
