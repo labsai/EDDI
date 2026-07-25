@@ -213,8 +213,14 @@ export function safeFormatDate(
 ): string {
   if (val == null || val === "") return "";
   try {
-    let ts = typeof val === "number" ? val : Date.parse(String(val));
-    if (isNaN(ts)) return String(val);
+    const str = String(val);
+    let ts =
+      typeof val === "number"
+        ? val
+        : /^\d+(\.\d+)?$/.test(str.trim())
+          ? Number(val)
+          : Date.parse(str);
+    if (Number.isNaN(ts)) return str;
     // If epoch seconds (10 digits), convert to millis
     if (ts > 0 && ts < 1e11) ts *= 1000;
     const date = new Date(ts);

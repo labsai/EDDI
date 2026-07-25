@@ -3012,7 +3012,8 @@
       "fileTypeNotAllowed": "このファイルタイプはサポートされていません",
       "attachmentLimit": "メッセージあたり最大{{max}}件の添付",
       "notForwarded": "ファイルは保存されましたがモデルに送信するには大きすぎます",
-      "uploadFailed": "アップロード失敗：{{error}}"
+      "uploadFailed": "アップロード失敗：{{error}}",
+      "noResponse": "応答なし"
     },
     "chat": {
       "agentDetails": "エージェントの詳細",

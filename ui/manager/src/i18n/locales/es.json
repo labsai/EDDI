@@ -3012,7 +3012,8 @@
       "fileTypeNotAllowed": "Este tipo de archivo no es compatible",
       "attachmentLimit": "Máximo {{max}} archivos adjuntos por mensaje",
       "notForwarded": "Archivo almacenado pero demasiado grande para el modelo",
-      "uploadFailed": "Error al subir: {{error}}"
+      "uploadFailed": "Error al subir: {{error}}",
+      "noResponse": "Sin respuesta"
     },
     "chat": {
       "agentDetails": "Detalles del agente",

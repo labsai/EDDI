@@ -720,6 +720,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             hasReadyAttachment={hasReadyAttachment}
             onUndo={conversationId && undoAvailable && !isProcessing ? () => undoConversation.mutate() : undefined}
             onRedo={conversationId && redoAvailable && !isProcessing ? () => redoConversation.mutate() : undefined}
+            embedded={embedded}
           />
         )}
       </div>
@@ -834,6 +835,7 @@ function ChatInputWithSecretToggle({
   hasReadyAttachment = false,
   onUndo,
   onRedo,
+  embedded = false,
 }: {
   onSend: (message: string, isSecret?: boolean) => void;
   disabled?: boolean;
@@ -849,6 +851,7 @@ function ChatInputWithSecretToggle({
   hasReadyAttachment?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
+  embedded?: boolean;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -1015,7 +1018,7 @@ function ChatInputWithSecretToggle({
           /* Normal mode: auto-growing textarea */
           <textarea
             ref={textareaRef}
-            autoFocus
+            autoFocus={!embedded}
             data-testid="chat-input"
             value={value}
             onChange={(e) => {

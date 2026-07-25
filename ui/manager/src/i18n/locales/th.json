@@ -3012,7 +3012,8 @@
       "fileTypeNotAllowed": "ไม่รองรับประเภทไฟล์นี้",
       "attachmentLimit": "แนบไฟล์ได้สูงสุด {{max}} ไฟล์ต่อข้อความ",
       "notForwarded": "ไฟล์ถูกจัดเก็บแล้วแต่ใหญ่เกินไปสำหรับโมเดล",
-      "uploadFailed": "อัปโหลดล้มเหลว: {{error}}"
+      "uploadFailed": "อัปโหลดล้มเหลว: {{error}}",
+      "noResponse": "ไม่มีการตอบกลับ"
     },
     "chat": {
       "agentDetails": "รายละเอียดเอเจนต์",

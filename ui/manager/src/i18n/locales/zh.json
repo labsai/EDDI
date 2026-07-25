@@ -3012,7 +3012,8 @@
       "fileTypeNotAllowed": "不支持此文件类型",
       "attachmentLimit": "每条消息最多 {{max}} 个附件",
       "notForwarded": "文件已存储但太大，无法发送给模型",
-      "uploadFailed": "上传失败：{{error}}"
+      "uploadFailed": "上传失败：{{error}}",
+      "noResponse": "无响应"
     },
     "chat": {
       "agentDetails": "智能体详情",

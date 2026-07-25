@@ -1034,13 +1034,17 @@ function WorkforceThread() {
                     </div>
                   )}
 
-                  {msg.role === "agent" ? (
-                    <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {formatMarkdownText(parseTranscriptContent(msg.content))}
-                      </ReactMarkdown>
-                    </div>
-                  ) : (
+                  {msg.role === "agent" ? (() => {
+                    const parsed = parseTranscriptContent(msg.content);
+                    if (!parsed.trim()) return <p className="italic text-muted-foreground">{t("Workforce.thread.noResponse", "No response")}</p>;
+                    return (
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {formatMarkdownText(parsed)}
+                        </ReactMarkdown>
+                      </div>
+                    );
+                  })() : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
                 </div>

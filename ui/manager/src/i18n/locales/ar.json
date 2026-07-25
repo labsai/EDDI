@@ -3012,7 +3012,8 @@
       "fileTypeNotAllowed": "نوع الملف هذا غير مدعوم",
       "attachmentLimit": "الحد الأقصى {{max}} مرفقات لكل رسالة",
       "notForwarded": "تم تخزين الملف لكنه كبير جداً للنموذج",
-      "uploadFailed": "فشل الرفع: {{error}}"
+      "uploadFailed": "فشل الرفع: {{error}}",
+      "noResponse": "لا توجد استجابة"
     },
     "chat": {
       "agentDetails": "تفاصيل الوكيل",

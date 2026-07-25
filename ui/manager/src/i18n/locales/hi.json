@@ -3012,7 +3012,8 @@
       "fileTypeNotAllowed": "यह फ़ाइल प्रकार समर्थित नहीं है",
       "attachmentLimit": "प्रति संदेश अधिकतम {{max}} अटैचमेंट",
       "notForwarded": "फ़ाइल संग्रहीत लेकिन मॉडल के लिए बहुत बड़ी",
-      "uploadFailed": "अपलोड विफल: {{error}}"
+      "uploadFailed": "अपलोड विफल: {{error}}",
+      "noResponse": "कोई प्रतिक्रिया नहीं"
     },
     "chat": {
       "agentDetails": "एजेंट विवरण",

@@ -3012,7 +3012,8 @@
       "fileTypeNotAllowed": "Dieser Dateityp wird nicht unterstützt",
       "attachmentLimit": "Maximal {{max}} Anhänge pro Nachricht",
       "notForwarded": "Datei gespeichert, aber zu groß für das Modell",
-      "uploadFailed": "Upload fehlgeschlagen: {{error}}"
+      "uploadFailed": "Upload fehlgeschlagen: {{error}}",
+      "noResponse": "Keine Antwort"
     },
     "chat": {
       "agentDetails": "Agenten-Details",

@@ -3012,7 +3012,8 @@
       "fileTypeNotAllowed": "이 파일 유형은 지원되지 않습니다",
       "attachmentLimit": "메시지당 최대 {{max}}개 첨부 파일",
       "notForwarded": "파일이 저장되었지만 모델에 전송하기에 너무 큽니다",
-      "uploadFailed": "업로드 실패: {{error}}"
+      "uploadFailed": "업로드 실패: {{error}}",
+      "noResponse": "응답 없음"
     },
     "chat": {
       "agentDetails": "에이전트 상세 정보",

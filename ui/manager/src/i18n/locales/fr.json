@@ -3012,7 +3012,8 @@
       "fileTypeNotAllowed": "Ce type de fichier n'est pas pris en charge",
       "attachmentLimit": "Maximum {{max}} pièces jointes par message",
       "notForwarded": "Fichier stocké mais trop volumineux pour le modèle",
-      "uploadFailed": "Échec du téléchargement : {{error}}"
+      "uploadFailed": "Échec du téléchargement : {{error}}",
+      "noResponse": "Pas de réponse"
     },
     "chat": {
       "agentDetails": "Détails de l agent",
