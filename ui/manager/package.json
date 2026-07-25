@@ -75,7 +75,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.3",
-    "@playwright/test": "^1.50.0",
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/vite": "^4.2.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
