@@ -2974,26 +2974,7 @@
     "tags": "Etiquetas",
     "templateEnabled": "Activar la resolución de plantillas",
     "templateEnabledHint": "Cuando está desactivada, los marcadores {{}} del contenido se tratan como texto literal (útil para ejemplos de código).",
-    "usageHint": "Uso:",
-    "chat": {
-      "agentDetails": "Detalles del agente",
-      "selectToView": "Selecciona un agente para ver los detalles",
-      "hideDetails": "Ocultar detalles",
-      "editAgent": "Editar agente",
-      "auditLogs": "Registros de auditoría",
-    "openStudio": "Abrir en el Manager",
-      "triggers": "Ver activadores"
-    },
-    "agentEditor": {
-      "capabilities": "Capacidades",
-      "workflows": "Flujos de trabajo",
-      "features": "Funciones y Seguridad",
-      "a2aEnabled": "Agente a Agente",
-      "memoryTools": "Herramientas de memoria",
-      "signedMessages": "Mensajes firmados",
-      "strictMemory": "Memoria estricta",
-      "hitlMode": "Modo de aprobación"
-    }
+    "usageHint": "Uso:"
   },
   "status": {
     "deployed": "Desplegado",
@@ -3034,9 +3015,24 @@
       "uploadFailed": "Error al subir: {{error}}"
     },
     "chat": {
+      "agentDetails": "Detalles del agente",
+      "selectToView": "Seleccione un agente para ver detalles",
+      "hideDetails": "Ocultar panel de detalles",
+      "editAgent": "Editar agente",
+      "auditLogs": "Registros de auditoría",
+      "openStudio": "Abrir en Manager",
+      "triggers": "Ver disparadores",
       "starterSelected": "Prompt añadido al campo de entrada"
     },
     "agentEditor": {
+      "capabilities": "Capacidades",
+      "workflows": "Flujos de trabajo",
+      "features": "Características y seguridad",
+      "a2aEnabled": "Agente a agente",
+      "memoryTools": "Herramientas de memoria",
+      "signedMessages": "Mensajes firmados",
+      "strictMemory": "Memoria estricta",
+      "hitlMode": "Modo de aprobación",
       "llmConfig": "Modelo y Motor LLM",
       "provider": "Línea de comandos",
       "mode": "Modo de ejecución",

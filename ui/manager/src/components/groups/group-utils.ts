@@ -33,8 +33,8 @@ export function formatMarkdownText(text: string): string {
   formatted = formatted.replace(/^(#{1,6})([^\s#])/gm, "$1 $2");
 
   // 2. Fix ATX headings glued directly to preceding text on same line (e.g. "Schließlich## 🌐" -> "Schließlich\n\n## 🌐")
-  formatted = formatted.replace(/([^\s\n])(#{1,6}\s)/g, "$1\n\n$2");
-  formatted = formatted.replace(/([^\s\n])(#{1,6}[^\s#])/g, "$1\n\n$2");
+  formatted = formatted.replace(/([^\s\n#])(#{1,6}\s)/g, "$1\n\n$2");
+  formatted = formatted.replace(/([^\s\n#])(#{1,6}[^\s#])/g, "$1\n\n$2");
 
   // 3. Fix list/dash attached to colons (e.g. "bedeutet:- Zuerst" -> "bedeutet: - Zuerst")
   formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ]):-\s*/g, "$1: - ");
