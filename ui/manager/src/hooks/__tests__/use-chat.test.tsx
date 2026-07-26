@@ -15,7 +15,10 @@ import {
   useRedoConversation,
   useRerunConversation,
   useSendMessage,
+  useResumeOrStartConversation,
+  pickResumableConversation,
 } from "@/hooks/use-chat";
+import type { ConversationDescriptor } from "@/lib/api/conversations";
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -653,5 +656,160 @@ describe("useSendMessage", () => {
     expect(state.messages).toHaveLength(0);
     expect(state.isPaused).toBe(true);
     expect(state.isProcessing).toBe(false);
+  });
+
+  // ── Resuming instead of piling up empty conversations ──
+
+  describe("pickResumableConversation", () => {
+    function descriptor(
+      id: string,
+      conversationState: ConversationDescriptor["conversationState"],
+      lastModifiedOn: number,
+    ): ConversationDescriptor {
+      return {
+        resource: `eddi://ai.labs.conversation/conversationstore/conversations/${id}`,
+        name: "",
+        description: "",
+        createdOn: lastModifiedOn,
+        lastModifiedOn,
+        agentId: "agent1",
+        agentVersion: 1,
+        conversationState,
+      };
+    }
+
+    it("returns null for missing or empty history", () => {
+      expect(pickResumableConversation(undefined)).toBeNull();
+      expect(pickResumableConversation([])).toBeNull();
+    });
+
+    it("picks the most recently touched conversation regardless of list order", () => {
+      const picked = pickResumableConversation([
+        descriptor("older", "READY", 1_000),
+        descriptor("newest", "READY", 3_000),
+        descriptor("middle", "READY", 2_000),
+      ]);
+      expect(picked?.resource).toContain("newest");
+    });
+
+    it("skips terminal and mid-turn conversations", () => {
+      const picked = pickResumableConversation([
+        descriptor("ended", "ENDED", 9_000),
+        descriptor("errored", "ERROR", 8_000),
+        descriptor("running", "IN_PROGRESS", 7_000),
+        descriptor("resumable", "READY", 1_000),
+      ]);
+      expect(picked?.resource).toContain("resumable");
+    });
+
+    it("resumes a conversation paused for human approval", () => {
+      const picked = pickResumableConversation([descriptor("paused", "AWAITING_HUMAN", 1_000)]);
+      expect(picked?.resource).toContain("paused");
+    });
+
+    it("returns null when nothing is resumable", () => {
+      expect(
+        pickResumableConversation([
+          descriptor("ended", "ENDED", 9_000),
+          descriptor("errored", "ERROR", 8_000),
+        ]),
+      ).toBeNull();
+    });
+  });
+
+  describe("useLoadConversation", () => {
+    // Two loads can overlap — a double-click in the render gap before the list
+    // disables itself, or a resume racing a history pick. The conversation the
+    // user asked for last must win, not whichever read finishes last.
+    it("keeps the most recently requested conversation when two loads overlap", async () => {
+      server.use(
+        http.get("*/agents/slow-conv", async () => {
+          await new Promise((r) => setTimeout(r, 60));
+          return HttpResponse.json({
+            conversationSteps: [
+              { conversationStep: [{ key: "input:initial", value: "slow question" }] },
+            ],
+            conversationOutputs: [{ output: [{ type: "text", text: "slow answer" }] }],
+          });
+        }),
+        http.get("*/agents/fast-conv", () =>
+          HttpResponse.json({
+            conversationSteps: [
+              { conversationStep: [{ key: "input:initial", value: "fast question" }] },
+            ],
+            conversationOutputs: [{ output: [{ type: "text", text: "fast answer" }] }],
+          }),
+        ),
+      );
+
+      const wrapper = createWrapper();
+      const slow = renderHook(() => useLoadConversation(), { wrapper });
+      const fast = renderHook(() => useLoadConversation(), { wrapper });
+
+      // Requested first, resolves last.
+      slow.result.current.mutate({ agentId: "agent1", conversationId: "slow-conv" });
+      fast.result.current.mutate({ agentId: "agent1", conversationId: "fast-conv" });
+
+      await waitFor(() => expect(slow.result.current.isSuccess).toBe(true));
+      await waitFor(() => expect(fast.result.current.isSuccess).toBe(true));
+
+      const state = useChatStore.getState();
+      expect(state.conversationId).toBe("fast-conv");
+      expect(state.messages.some((m) => m.content === "fast answer")).toBe(true);
+      expect(state.messages.some((m) => m.content === "slow answer")).toBe(false);
+    });
+  });
+
+  describe("useResumeOrStartConversation", () => {
+    it("reopens the agent's most recent conversation", async () => {
+      server.use(
+        http.get("*/agents/conv1", () =>
+          HttpResponse.json({
+            conversationSteps: [
+              { conversationStep: [{ key: "input:initial", value: "Earlier question" }] },
+            ],
+            conversationOutputs: [{ output: [{ type: "text", text: "Earlier answer" }] }],
+          }),
+        ),
+      );
+
+      const { result } = renderHook(() => useResumeOrStartConversation(), {
+        wrapper: createWrapper(),
+      });
+      result.current.mutate({ agentId: "agent1" });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(useChatStore.getState().conversationId).toBe("conv1");
+      expect(
+        useChatStore.getState().messages.some((m) => m.content === "Earlier answer"),
+      ).toBe(true);
+    });
+
+    it("starts a new conversation when the history request fails", async () => {
+      server.use(
+        http.get("*/conversationstore/conversations", () =>
+          HttpResponse.json({ error: "boom" }, { status: 500 }),
+        ),
+        http.post("*/agents/agent1/start", () =>
+          HttpResponse.json(null, {
+            status: 201,
+            headers: {
+              Location: "eddi://ai.labs.conversation/conversationstore/conversations/fresh-1",
+            },
+          }),
+        ),
+        http.get("*/agents/fresh-1", () =>
+          HttpResponse.json({ conversationSteps: [], conversationOutputs: [] }),
+        ),
+      );
+
+      const { result } = renderHook(() => useResumeOrStartConversation(), {
+        wrapper: createWrapper(),
+      });
+      result.current.mutate({ agentId: "agent1" });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(useChatStore.getState().conversationId).toBe("fresh-1");
+    });
   });
 });

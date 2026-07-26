@@ -47,7 +47,11 @@ import {
 import { granularityLabel } from "@/lib/hitl-labels";
 import { parseResourceUri } from "@/lib/api/agents";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
-import { getGroupTemplates, type GroupTemplate } from "@/lib/group-templates";
+import {
+  getGroupTemplates,
+  DEFAULT_AGENT_TIMEOUT_SECONDS,
+  type GroupTemplate,
+} from "@/lib/group-templates";
 import {
   setupAgent,
   LLM_PROVIDERS,
@@ -308,7 +312,7 @@ export function GroupWizardPage() {
           ? applyApprovalPhases(getStylePhases(state.style, state.maxRounds), state.approvalPhases)
           : null,
       protocol: {
-        agentTimeoutSeconds: 60,
+        agentTimeoutSeconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
         onAgentFailure: "SKIP",
         maxRetries: 2,
         onMemberUnavailable: "SKIP",

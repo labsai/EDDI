@@ -38,9 +38,8 @@ describe("ChatPanel", () => {
     expect(screen.getByText("Select an agent and start chatting!")).toBeInTheDocument();
   });
 
-  it("loads and allows selecting deployed agents", async () => {
-    const user = userEvent.setup();
-    
+  /** Handlers every agent-selection test needs: one deployed agent to pick. */
+  function useDeployedAgent1() {
     server.use(
       http.get("*/agentstore/agents/descriptors", () => {
         return HttpResponse.json([
@@ -61,6 +60,61 @@ describe("ChatPanel", () => {
       http.get("*/deployment/production/agentstore/agents/agent1/version/1", () => {
         return HttpResponse.json({ status: "READY" });
       }),
+    );
+  }
+
+  async function selectCustomerSupportBot() {
+    const user = userEvent.setup();
+    renderWithProviders(<ChatPanel />);
+
+    const selector = screen.getByTestId("agent-selector");
+    expect(selector).toBeInTheDocument();
+
+    await user.click(selector);
+    const option = await screen.findByText("Customer Support Bot");
+    await user.click(option);
+  }
+
+  // Picking an agent reopens where the user left off. Starting a fresh
+  // conversation on every open used to litter history with empty entries and
+  // silently drop the thread the user was in.
+  it("selecting an agent reopens its most recent conversation", async () => {
+    useDeployedAgent1();
+    let started = false;
+    server.use(
+      http.post("*/agents/agent1/start", () => {
+        started = true;
+        return HttpResponse.json(null, {
+          status: 201,
+          headers: {
+            Location: "eddi://ai.labs.conversation/conversationstore/conversations/conv123",
+          },
+        });
+      }),
+      // conv1 is the mock's most recent READY conversation for agent1.
+      http.get("*/agents/conv1", () => {
+        return HttpResponse.json({
+          conversationSteps: [{ conversationStep: [{ key: "input:initial", value: "Earlier question" }] }],
+          conversationOutputs: [{ output: [{ type: "text", text: "Earlier answer" }] }],
+        });
+      }),
+    );
+
+    await selectCustomerSupportBot();
+
+    await waitFor(() => {
+      expect(useChatStore.getState().selectedAgentId).toBe("agent1");
+      expect(useChatStore.getState().conversationId).toBe("conv1");
+    });
+    expect(await screen.findByText("Earlier answer")).toBeInTheDocument();
+    expect(started).toBe(false);
+  });
+
+  it("selecting an agent with nothing resumable starts a new conversation", async () => {
+    useDeployedAgent1();
+    server.use(
+      // No conversation history for this agent at all.
+      http.get("*/conversationstore/conversations", () => HttpResponse.json([])),
       http.post("*/agents/agent1/start", () => {
         return HttpResponse.json(null, {
           status: 201,
@@ -72,29 +126,44 @@ describe("ChatPanel", () => {
       http.get("*/agents/conv123", () => {
         return HttpResponse.json({
           conversationSteps: [],
-          conversationOutputs: [
-            {
-              output: [{ type: "text", text: "Welcome to support!" }],
-            },
-          ],
+          conversationOutputs: [{ output: [{ type: "text", text: "Welcome to support!" }] }],
         });
-      })
+      }),
     );
 
-    renderWithProviders(<ChatPanel />);
-
-    const selector = screen.getByTestId("agent-selector");
-    expect(selector).toBeInTheDocument();
-    
-    await user.click(selector);
-    
-    const option = await screen.findByText("Customer Support Bot");
-    await user.click(option);
+    await selectCustomerSupportBot();
 
     await waitFor(() => {
       expect(useChatStore.getState().selectedAgentId).toBe("agent1");
       expect(useChatStore.getState().conversationId).toBe("conv123");
       expect(screen.getByText("Welcome to support!")).toBeInTheDocument();
+    });
+  });
+
+  it("falls back to a new conversation when the resumable one cannot be read", async () => {
+    useDeployedAgent1();
+    server.use(
+      http.get("*/agents/conv1", () => HttpResponse.json({ error: "gone" }, { status: 404 })),
+      http.post("*/agents/agent1/start", () => {
+        return HttpResponse.json(null, {
+          status: 201,
+          headers: {
+            Location: "eddi://ai.labs.conversation/conversationstore/conversations/conv123",
+          },
+        });
+      }),
+      http.get("*/agents/conv123", () => {
+        return HttpResponse.json({
+          conversationSteps: [],
+          conversationOutputs: [{ output: [{ type: "text", text: "Welcome to support!" }] }],
+        });
+      }),
+    );
+
+    await selectCustomerSupportBot();
+
+    await waitFor(() => {
+      expect(useChatStore.getState().conversationId).toBe("conv123");
     });
   });
 

@@ -11,6 +11,9 @@ import type { GroupConversationState } from "@/lib/api/groups";
 interface SessionHistoryProps {
   groupId: string;
   selectedId: string | null;
+  /** Conversation this tab is currently streaming, if any — always rendered as
+   *  live, without waiting for the list poll to catch up. */
+  streamingId?: string | null;
   onSelect: (convId: string) => void;
   onClose?: () => void;
   className?: string;
@@ -69,6 +72,7 @@ function getStateI18nKey(state: GroupConversationState): string {
 function SessionHistory({
   groupId,
   selectedId,
+  streamingId,
   onSelect,
   onClose,
   className,
@@ -114,6 +118,10 @@ function SessionHistory({
         {!isLoading &&
           conversations?.map((conv) => {
             const isSelected = conv.id === selectedId;
+            const isLive =
+              conv.id === streamingId ||
+              conv.state === "IN_PROGRESS" ||
+              conv.state === "SYNTHESIZING";
             const badgeConfig = STATE_BADGE[conv.state] ?? STATE_BADGE.CREATED;
             const timestamp = conv.lastModified
               ? new Date(conv.lastModified).getTime()
@@ -142,8 +150,20 @@ function SessionHistory({
 
                 {/* Bottom row: badge + timestamp */}
                 <div className="flex items-center gap-2 mt-1.5">
-                  <Badge variant={badgeConfig.variant} className="text-[10px]">
-                    {t(getStateI18nKey(conv.state), badgeConfig.label)}
+                  <Badge
+                    variant={badgeConfig.variant}
+                    className="text-[10px] gap-1"
+                    data-testid={isLive ? `session-live-${conv.id}` : undefined}
+                  >
+                    {isLive && (
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+                    )}
+                    {/* While we hold the stream, "Live" beats the polled state,
+                        which lags by up to one poll — except during synthesis,
+                        where the specific label is more informative. */}
+                    {conv.id === streamingId && conv.state !== "SYNTHESIZING"
+                      ? t("Workforce.board.liveNow", "Live")
+                      : t(getStateI18nKey(conv.state), badgeConfig.label)}
                   </Badge>
                   {timestamp > 0 && (
                     <span className="text-xs text-muted-foreground">

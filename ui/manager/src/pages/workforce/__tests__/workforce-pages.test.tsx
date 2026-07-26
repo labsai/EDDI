@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
 import { renderWithProviders, renderPage, userEvent } from "@/test/test-utils";
+import { server } from "@/test/mocks/server";
 import { useChatStore } from "@/hooks/use-chat";
 
 import { WorkforceChat } from "../workforce-chat";
@@ -99,6 +101,74 @@ describe("Workforce Pages", () => {
         const panels = screen.getAllByRole("dialog");
         expect(panels.length).toBeGreaterThan(0);
       });
+    });
+
+    // The board offered two ways into history — the Sessions slide-over and a
+    // link to the full-page history. Only the slide-over remains.
+    it("offers exactly one history affordance and no link to the history page", async () => {
+      renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
+      await screen.findAllByText(/Product Review Panel/i);
+
+      expect(
+        screen.queryByRole("link", { name: /view history/i }),
+      ).not.toBeInTheDocument();
+      // The Sessions slide-over toggle is the single remaining entry point.
+      expect(screen.getByRole("button", { name: "Sessions" })).toBeInTheDocument();
+    });
+
+    // Reloading mid-discussion used to land on an empty board with no sign the
+    // task force was still working.
+    it("picks up a still-running discussion on load and flags it as ongoing", async () => {
+      server.use(
+        // Scoped to gc-3b so the test proves *that* conversation was restored,
+        // not merely that some conversation got selected.
+        http.get("*/groups/:groupId/conversations/:convId", ({ params }) => {
+          if (params.convId !== "gc-3b") {
+            return HttpResponse.json({ error: "unexpected conversation" }, { status: 404 });
+          }
+          return HttpResponse.json({
+            id: "gc-3b",
+            groupId: "grp3",
+            state: "IN_PROGRESS",
+            originalQuestion: "Synthesize competitor analysis data",
+            transcript: [
+              {
+                speakerAgentId: "user",
+                speakerDisplayName: "User",
+                content: "Synthesize competitor analysis data",
+                phaseIndex: -1,
+                phaseName: null,
+                type: "QUESTION",
+                timestamp: new Date().toISOString(),
+                errorReason: null,
+                targetAgentId: null,
+              },
+            ],
+            synthesizedAnswer: null,
+            availableActions: [],
+          });
+        }),
+      );
+
+      // grp3's mock history contains one IN_PROGRESS discussion (gc-3b), and the
+      // URL carries no ?conversation= — as after a browser reload.
+      renderPage("/workforce/grp3?version=1", <WorkforceBoard />, "/workforce/:boardId");
+
+      expect(await screen.findByTestId("board-live-badge")).toHaveTextContent(/in progress/i);
+      expect(await screen.findByTestId("transcript-live-row")).toBeInTheDocument();
+    });
+
+    it("shows no ongoing indicator for a settled discussion", async () => {
+      // grp1's conversations are all COMPLETED/FAILED — nothing to resume.
+      renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
+
+      // Anchor on a positive signal that only renders once the conversations
+      // query has resolved — a bare absence check could pass before the data
+      // that would contradict it ever arrives.
+      expect(
+        await screen.findByRole("button", { name: /view past sessions/i }),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("board-live-badge")).not.toBeInTheDocument();
     });
   });
 

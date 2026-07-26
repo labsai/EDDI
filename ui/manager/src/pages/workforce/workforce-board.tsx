@@ -6,7 +6,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronLeft, PanelRightOpen, PanelRightClose, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useGroup, useGroupConversations, useGroupConversation, GROUP_CONVERSATIONS_KEY } from "@/hooks/use-groups";
+import {
+  useGroup,
+  useGroupConversations,
+  useGroupConversation,
+  isActiveConversationState,
+  GROUP_CONVERSATIONS_KEY,
+} from "@/hooks/use-groups";
 import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { BoardTranscript } from "@/components/workforce/board-transcript";
 import { BoardInput } from "@/components/workforce/board-input";
@@ -54,16 +60,6 @@ function SettingsIcon() {
   );
 }
 
-function HistoryIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-      <path d="M3 3v5h5" />
-      <path d="M12 7v5l4 2" />
-    </svg>
-  );
-}
-
 function ClockIcon() {
   return (
     <svg
@@ -104,11 +100,29 @@ function StopIcon() {
 function WorkforceBoard() {
   const { t } = useTranslation();
   const { boardId } = useParams<{ boardId: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const version = Number(searchParams.get("version")) || 1;
 
+  // ─── Selected conversation (URL-backed) ────────────────────────
+  // The selection lives in the URL so a page reload — or a shared link — lands
+  // back on the same discussion instead of an empty new one.
+  const selectedConvId = searchParams.get("conversation");
+  const setSelectedConvId = useCallback(
+    (convId: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (convId) next.set("conversation", convId);
+          else next.delete("conversation");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
   // ─── State ─────────────────────────────────────────────────────
-  const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showConfig, setShowConfig] = usePersistedBoolean("workforce-board-config-panel", true);
@@ -123,19 +137,59 @@ function WorkforceBoard() {
     boardId ?? "",
     selectedConvId ?? "",
   );
-  const { streamState, startStream, continueStream, abortStream, resetStream } = useGroupDiscussionStream();
+  // Bound to this board, so a discussion started here keeps streaming (and
+  // stays visible) after navigating away and back.
+  const { streamState, startStream, continueStream, abortStream, resetStream } =
+    useGroupDiscussionStream(boardId);
   const queryClient = useQueryClient();
 
-  // ─── Auto-select conversation when stream completes ────────────
+  // ─── Per-board one-shot guards ────────────────────────────────
+  // Switching task forces keeps this component mounted (same route, different
+  // param), so the guards below have to be cleared by hand — otherwise board B
+  // inherits board A's "already restored / already synced" state. Declared
+  // before the effects that use them so it runs first on a board switch.
+  const syncedStreamConvRef = useRef<string | null>(null);
+  const restoredRef = useRef(false);
   useEffect(() => {
-    if (streamState.state === "COMPLETED" && streamState.conversationId) {
-      setSelectedConvId(streamState.conversationId);
-      // Invalidate to refresh availableActions after a continuation round
-      if (boardId) {
-        queryClient.invalidateQueries({ queryKey: [...GROUP_CONVERSATIONS_KEY, boardId] });
-      }
-    }
-  }, [streamState.state, streamState.conversationId, boardId, queryClient]);
+    syncedStreamConvRef.current = null;
+    restoredRef.current = false;
+  }, [boardId]);
+
+  // ─── Keep the URL pointed at the streaming conversation ────────
+  // Written as soon as the backend hands out the id (not only on completion),
+  // so a reload mid-discussion resumes on the running conversation. Synced once
+  // per conversation, so browsing older sessions mid-stream isn't yanked back.
+  useEffect(() => {
+    const streamConvId = streamState.conversationId;
+    if (!streamConvId || syncedStreamConvRef.current === streamConvId) return;
+    syncedStreamConvRef.current = streamConvId;
+    setSelectedConvId(streamConvId);
+  }, [streamState.conversationId, setSelectedConvId]);
+
+  // Refresh the sessions list when a round settles, so its state badge and the
+  // conversation's availableActions reflect the new state.
+  useEffect(() => {
+    if (!boardId || streamState.isStreaming || !streamState.conversationId) return;
+    queryClient.invalidateQueries({ queryKey: [...GROUP_CONVERSATIONS_KEY, boardId] });
+  }, [streamState.isStreaming, streamState.state, streamState.conversationId, boardId, queryClient]);
+
+  // ─── Restore an ongoing discussion after a reload ──────────────
+  // Runs once per board: if we arrive without a conversation in the URL and
+  // nothing is streaming in this tab, adopt the most recent still-running
+  // discussion so a refresh mid-discussion keeps following it.
+  useEffect(() => {
+    if (restoredRef.current || !conversations) return;
+    restoredRef.current = true;
+    if (selectedConvId || streamState.conversationId) return;
+    const ongoing = conversations
+      .filter((c) => isActiveConversationState(c.state))
+      .sort(
+        (a, b) =>
+          new Date(b.lastModified ?? b.created ?? 0).getTime() -
+          new Date(a.lastModified ?? a.created ?? 0).getTime(),
+      )[0];
+    if (ongoing) setSelectedConvId(ongoing.id);
+  }, [conversations, selectedConvId, streamState.conversationId, setSelectedConvId]);
 
   // Close slide-over panels on Escape + restore focus
   useEffect(() => {
@@ -186,16 +240,44 @@ function WorkforceBoard() {
   const isStreaming = streamState.isStreaming;
   const hasStreamTranscript = streamState.transcript.length > 0;
 
-  // Use stream transcript when available, otherwise fall back to selected conversation
-  const displayTranscript = hasStreamTranscript
+  /** The stream belongs to what's on screen: either nothing is selected yet
+   *  (the URL sync lands a tick later) or the selection is the stream's own
+   *  conversation. Single source of truth for every signal below, so they
+   *  cannot disagree about a null selection. */
+  const streamIsForCurrentView =
+    !selectedConvId || selectedConvId === streamState.conversationId;
+
+  // Show the live transcript for the conversation the stream is driving; when
+  // the user browses another session, show that one from the server instead.
+  const viewingStream = hasStreamTranscript && streamIsForCurrentView;
+
+  const displayTranscript = viewingStream
     ? streamState.transcript
     : selectedConversation?.transcript ?? [];
 
-  const displaySynthesis = hasStreamTranscript
+  const displaySynthesis = viewingStream
     ? streamState.synthesizedAnswer
     : selectedConversation?.synthesizedAnswer ?? null;
 
   const members = groupConfig?.members ?? [];
+
+  // ─── Ongoing-discussion signals ───────────────────────────────
+  // Two ways a discussion can be running: this tab holds the SSE connection
+  // (isStreaming), or the backend is still working on it and we only see it
+  // through polling — after a reload, or when it was started elsewhere.
+  // Deliberately not gated on hasStreamTranscript: the gap between "stream
+  // opened" and the first group_start event would otherwise render the idle
+  // "Ready for discussion" placeholder over a discussion that is under way.
+  const viewingRunningConversation = isActiveConversationState(selectedConversation?.state);
+  const streamingCurrentView = isStreaming && streamIsForCurrentView;
+  const isOngoing = streamingCurrentView || viewingRunningConversation;
+  /** Running server-side, but this tab isn't the one streaming it. */
+  const isFollowingRemotely = isOngoing && !streamingCurrentView;
+  /** A live stream is running for a conversation other than the one on screen.
+   *  Requires an explicit selection — "nothing selected" means we are already
+   *  looking at the stream, not away from it. */
+  const liveElsewhere =
+    isStreaming && !!streamState.conversationId && !!selectedConvId && !streamIsForCurrentView;
 
   // ─── Context-aware input mode ─────────────────────────────────
   const inputMode = useMemo((): "new" | "continue" | "disabled" => {
@@ -232,18 +314,21 @@ function WorkforceBoard() {
         startStream(boardId, question);
       }
     },
-    [boardId, inputMode, selectedConvId, continueStream, startStream, t],
+    [boardId, inputMode, selectedConvId, continueStream, startStream, setSelectedConvId, t],
   );
 
-  const handleSelectConversation = useCallback((convId: string) => {
-    setSelectedConvId(convId);
-    setShowHistory(false);
-  }, []);
+  const handleSelectConversation = useCallback(
+    (convId: string) => {
+      setSelectedConvId(convId);
+      setShowHistory(false);
+    },
+    [setSelectedConvId],
+  );
 
   const handleNewDiscussion = useCallback(() => {
     resetStream();
     setSelectedConvId(null);
-  }, [resetStream]);
+  }, [resetStream, setSelectedConvId]);
 
   // ─── Lifecycle mutations ──────────────────────────────────────
   const invalidateConversations = useCallback(() => {
@@ -339,11 +424,64 @@ function WorkforceBoard() {
           <h2 className="text-sm font-semibold text-foreground truncate">
             {groupConfig?.name ?? t("Workforce.board.title", "Task Force")}
           </h2>
-          {isStreaming && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+
+          {/* Announcement channel for the badge below. Mounted unconditionally:
+              a live region inserted together with its content is usually not
+              announced, and this also carries the running hint, which is
+              otherwise title-only and so invisible to keyboard and touch. */}
+          <span className="sr-only" role="status">
+            {isOngoing
+              ? isFollowingRemotely
+                ? t(
+                    "Workforce.board.runningHint",
+                    "This discussion is still running — new answers appear automatically.",
+                  )
+                : t("Workforce.board.live", "Live")
+              : ""}
+          </span>
+
+          {/* Ongoing indicator — the discussion is running, whether this tab is
+              streaming it or only polling for it after a reload. */}
+          {isOngoing && (
+            <span
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 rounded-full ps-2 pe-2.5 py-0.5",
+                "border border-primary/30 bg-primary/10 text-xs font-medium text-primary",
+              )}
+              data-testid="board-live-badge"
+              title={
+                isFollowingRemotely
+                  ? t(
+                      "Workforce.board.runningHint",
+                      "This discussion is still running — new answers appear automatically.",
+                    )
+                  : undefined
+              }
+            >
               <span className="inline-block h-2 w-2 rounded-full bg-primary animate-pulse" />
-              {t("Workforce.board.live", "Live")}
+              {isFollowingRemotely
+                ? t("Workforce.board.running", "In progress")
+                : t("Workforce.board.live", "Live")}
+              {!isFollowingRemotely && streamState.currentPhase?.name && (
+                <span className="max-sm:hidden font-normal text-primary/70">
+                  · {streamState.currentPhase.name}
+                </span>
+              )}
             </span>
+          )}
+
+          {/* A discussion is streaming, but the user is looking at another one */}
+          {liveElsewhere && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 text-xs text-primary"
+              onClick={() => setSelectedConvId(streamState.conversationId)}
+              data-testid="back-to-live-btn"
+            >
+              <span className="inline-block h-2 w-2 rounded-full bg-primary animate-pulse" />
+              {t("Workforce.board.backToLive", "Back to live discussion")}
+            </Button>
           )}
         </div>
 
@@ -398,17 +536,6 @@ function WorkforceBoard() {
           >
             <ClockIcon />
           </Button>
-          <Link
-            to={`/workforce/${boardId}/history`}
-            className={cn(
-              "inline-flex items-center justify-center rounded-md h-8 w-8 transition-colors",
-              "hover:bg-muted text-muted-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            )}
-            aria-label={t("Workforce.board.viewHistory", "View history")}
-          >
-            <HistoryIcon />
-          </Link>
           <ExportMenu
               conversation={selectedConversation ?? null}
               groupName={groupConfig?.name}
@@ -440,47 +567,70 @@ function WorkforceBoard() {
       <div className="flex flex-1 min-h-0">
         {/* Main content — transcript + input */}
         <div className="flex flex-1 min-h-0 flex-col">
-          {/* Transcript area */}
-          <div className="flex-1 overflow-y-auto ps-4 pe-4 pt-4 pb-4">
-        {displayTranscript.length > 0 ? (
-          <BoardTranscript
-            transcript={displayTranscript}
-            boardId={boardId}
-            synthesizedAnswer={displaySynthesis}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center max-w-sm">
-              <p className="text-lg font-medium text-foreground mb-1">
-                {t("Workforce.board.emptyTitle", "Ready for discussion")}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {t(
-                  "Workforce.board.emptyDescription",
-                  "Ask a question and your task force will discuss it.",
+          {/* Transcript area — BoardTranscript owns the scroll box so it can
+              keep itself pinned to the newest message while streaming. */}
+          {displayTranscript.length > 0 ? (
+            <BoardTranscript
+              transcript={displayTranscript}
+              boardId={boardId}
+              synthesizedAnswer={displaySynthesis}
+              isLive={isOngoing}
+              className="flex-1 min-h-0 ps-4 pe-4 pt-4 pb-4"
+            />
+          ) : (
+            <div className="flex flex-1 min-h-0 items-center justify-center ps-4 pe-4">
+              <div className="text-center max-w-sm">
+                {/* A discussion is running but hasn't produced anything we can
+                    render yet (e.g. straight after a reload) — don't pretend
+                    the board is idle. */}
+                {isOngoing ? (
+                  <>
+                    <p className="flex items-center justify-center gap-2 text-lg font-medium text-foreground mb-1">
+                      <span className="inline-block h-2 w-2 rounded-full bg-primary animate-pulse" />
+                      {t("Workforce.board.startingTitle", "Discussion in progress")}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {t(
+                        "Workforce.board.startingDescription",
+                        "Your task force is working on it — answers appear here as they come in.",
+                      )}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                <p className="text-lg font-medium text-foreground mb-1">
+                  {t("Workforce.board.emptyTitle", "Ready for discussion")}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {t(
+                    "Workforce.board.emptyDescription",
+                    "Ask a question and your task force will discuss it.",
+                  )}
+                </p>
+                  </>
                 )}
-              </p>
-              {conversations && conversations.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="mt-3 text-primary"
-                  onClick={() => setShowHistory(true)}
-                >
-                  {t("Workforce.board.viewHistory", "View history")}
-                </Button>
-              )}
+                {conversations && conversations.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-3 text-primary"
+                    onClick={() => setShowHistory(true)}
+                  >
+                    {/* Opens the Sessions panel — label it as such now that the
+                        separate history page is no longer linked from here. */}
+                    {t("Workforce.board.viewSessions", "View past sessions")}
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Streaming error banner (inline, when transcript is visible) */}
-        {streamState.error && hasStreamTranscript && (
-          <div className="mt-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3">
-            <p className="text-xs text-destructive">{streamState.error}</p>
-          </div>
-        )}
-      </div>
+          {/* Streaming error banner (inline, when transcript is visible) */}
+          {streamState.error && hasStreamTranscript && (
+            <div className="mx-4 mb-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3">
+              <p className="text-xs text-destructive">{streamState.error}</p>
+            </div>
+          )}
 
       {/* Post-COMPLETED lifecycle actions (followup, close) */}
       {!isStreaming &&
@@ -594,6 +744,7 @@ function WorkforceBoard() {
             <SessionHistory
               groupId={boardId}
               selectedId={selectedConvId}
+              streamingId={isStreaming ? streamState.conversationId : null}
               onSelect={handleSelectConversation}
               onClose={() => {
                 setShowHistory(false);

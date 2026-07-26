@@ -10,6 +10,7 @@ import { useCreateGroup } from "@/hooks/use-groups";
 import {
   getGroupTemplates,
   buildGroupFromTemplate,
+  DEFAULT_AGENT_TIMEOUT_SECONDS,
 } from "@/lib/group-templates";
 import {
   parseGroupResourceUri,
@@ -246,7 +247,7 @@ function WorkforceWizard() {
           maxRounds: 1,
           phases: null,
           protocol: {
-            agentTimeoutSeconds: 60,
+            agentTimeoutSeconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
             onAgentFailure: "SKIP" as const,
             maxRetries: 2,
             onMemberUnavailable: "SKIP" as const,

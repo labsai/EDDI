@@ -1,6 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
+import {
+  useGroupDiscussionStream,
+  useStreamingGroupIds,
+  useGroupStreamStore,
+} from "@/hooks/use-group-discussion-stream";
 
 const mockStreamGroupDiscussion = vi.fn();
 const mockStreamGroupApproval = vi.fn();
@@ -21,6 +25,12 @@ describe("useGroupDiscussionStream", () => {
     mockStreamGroupDiscussion.mockReset();
     mockStreamGroupApproval.mockReset();
     mockStreamGroupContinue.mockReset();
+  });
+
+  // The store is module-level and survives the whole file — without this, a
+  // test that fails mid-stream leaks its state into every test after it.
+  afterEach(() => {
+    useGroupStreamStore.setState({ streams: {} });
   });
 
   it("returns initial state", () => {
@@ -701,5 +711,143 @@ describe("useGroupDiscussionStream", () => {
     const ref1 = result.current.continueStream;
     rerender();
     expect(result.current.continueStream).toBe(ref1);
+  });
+
+  // ── Navigation resilience (store-backed state) ──
+
+  it("keeps a group's stream state across unmount — a remounted board sees it", async () => {
+    async function* events() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-nav", question: "Q" }) };
+      yield { type: "speaker_complete", data: JSON.stringify({ agentId: "a1", displayName: "Bot", phaseIndex: 0, response: "A" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Done" }) };
+    }
+    mockStreamGroupDiscussion.mockReturnValue(events());
+
+    const first = renderHook(() => useGroupDiscussionStream("group-nav"));
+    await act(async () => {
+      await first.result.current.startStream("group-nav", "Q");
+    });
+    expect(first.result.current.streamState.transcript).toHaveLength(2);
+
+    // Navigate away…
+    first.unmount();
+
+    // …and back: the board binds by groupId and picks the discussion up again.
+    const second = renderHook(() => useGroupDiscussionStream("group-nav"));
+    expect(second.result.current.streamState.conversationId).toBe("conv-nav");
+    expect(second.result.current.streamState.transcript).toHaveLength(2);
+    expect(second.result.current.streamState.synthesizedAnswer).toBe("Done");
+
+    act(() => second.result.current.resetStream());
+  });
+
+  it("keeps each group's stream separate", async () => {
+    async function* eventsA() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-a", question: "A?" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "A!" }) };
+    }
+    async function* eventsB() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-b", question: "B?" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "B!" }) };
+    }
+    mockStreamGroupDiscussion.mockReturnValueOnce(eventsA()).mockReturnValueOnce(eventsB());
+
+    const a = renderHook(() => useGroupDiscussionStream("group-a"));
+    const b = renderHook(() => useGroupDiscussionStream("group-b"));
+
+    await act(async () => {
+      await a.result.current.startStream("group-a", "A?");
+    });
+    await act(async () => {
+      await b.result.current.startStream("group-b", "B?");
+    });
+
+    expect(a.result.current.streamState.conversationId).toBe("conv-a");
+    expect(a.result.current.streamState.synthesizedAnswer).toBe("A!");
+    expect(b.result.current.streamState.conversationId).toBe("conv-b");
+    expect(b.result.current.streamState.synthesizedAnswer).toBe("B!");
+
+    act(() => {
+      a.result.current.resetStream();
+      b.result.current.resetStream();
+    });
+  });
+
+  it("a superseded stream cannot write over the discussion that replaced it", async () => {
+    // First stream never terminates on its own; it is superseded mid-flight and
+    // then fails — the classic "start a new discussion right away" sequence.
+    let failFirst: ((e: Error) => void) | undefined;
+    const firstBlocked = new Promise<void>((_resolve, reject) => {
+      failFirst = reject;
+    });
+    async function* first() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-old", question: "Old" }) };
+      await firstBlocked;
+    }
+    async function* second() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-new", question: "New" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "New answer" }) };
+    }
+    mockStreamGroupDiscussion.mockReturnValueOnce(first()).mockReturnValueOnce(second());
+
+    const { result } = renderHook(() => useGroupDiscussionStream("group-race"));
+
+    await act(async () => {
+      result.current.startStream("group-race", "Old");
+      await Promise.resolve();
+    });
+    expect(result.current.streamState.conversationId).toBe("conv-old");
+
+    // Second discussion supersedes the first…
+    await act(async () => {
+      await result.current.startStream("group-race", "New");
+    });
+    expect(result.current.streamState.conversationId).toBe("conv-new");
+    expect(result.current.streamState.state).toBe("COMPLETED");
+
+    // …and the first one's late failure must not touch it.
+    await act(async () => {
+      failFirst?.(new Error("late failure from the abandoned stream"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(result.current.streamState.state).toBe("COMPLETED");
+    expect(result.current.streamState.error).toBeNull();
+    expect(result.current.streamState.synthesizedAnswer).toBe("New answer");
+
+    act(() => result.current.resetStream());
+  });
+
+  it("useStreamingGroupIds reports only groups whose stream is still live", async () => {
+    // Never yields a terminal event, so the stream stays open.
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    async function* pending() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-live", question: "Q" }) };
+      await gate;
+    }
+    mockStreamGroupDiscussion.mockReturnValue(pending());
+
+    const stream = renderHook(() => useGroupDiscussionStream("group-live"));
+    const ids = renderHook(() => useStreamingGroupIds());
+
+    expect(ids.result.current).toEqual([]);
+
+    await act(async () => {
+      stream.result.current.startStream("group-live", "Q");
+      await Promise.resolve();
+    });
+    expect(ids.result.current).toEqual(["group-live"]);
+
+    await act(async () => {
+      release?.();
+      await gate;
+    });
+    act(() => stream.result.current.abortStream());
+    expect(ids.result.current).toEqual([]);
+
+    act(() => stream.result.current.resetStream());
   });
 });

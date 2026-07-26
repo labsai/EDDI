@@ -286,6 +286,25 @@ export const MODEL_TYPES = [
   "oracle-genai",
 ] as const;
 
+/**
+ * Built-in tool names the backend recognises in `builtInToolsWhitelist`
+ * (see `AgentOrchestrator.collectAllBuiltInTools`).
+ *
+ * Switching an agent to whitelist mode replaces the "all built-in tools"
+ * default with exactly this list, so anything missing here is a capability the
+ * user can no longer enable. Three of the last four are additionally
+ * self-gating server-side — `readattachment` only appears when the conversation
+ * has files, `conversationRecall` only with a rolling summary, `usermemory`
+ * only when the agent has persistent memory — so listing them cannot switch on
+ * something the agent isn't configured for. `fetch_page` is not gated: it is a
+ * plain tool for paging through an oversized tool response, and was simply
+ * missing from this list.
+ *
+ * Dynamic-agent tools (create_sub_agent, converse_with_agent,
+ * find_agents_by_capability, teardown_agent) are deliberately absent: they let
+ * an agent spawn other agents and belong to the Dynamic Agents configuration,
+ * not a generic tool picker.
+ */
 export const BUILT_IN_TOOLS = [
   "calculator",
   "datetime",
@@ -295,4 +314,8 @@ export const BUILT_IN_TOOLS = [
   "textsummarizer",
   "pdfreader",
   "weather",
+  "fetch_page",
+  "readattachment",
+  "conversationRecall",
+  "usermemory",
 ] as const;

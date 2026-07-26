@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { create } from "zustand";
 import {
   streamGroupDiscussion,
   streamGroupContinue,
@@ -70,6 +71,7 @@ export interface GroupStreamState {
   } | null;
 }
 
+/** Shared empty state handed to consumers that have no stream yet. Never mutated. */
 const initialState: GroupStreamState = {
   isStreaming: false,
   conversationId: null,
@@ -90,169 +92,296 @@ const initialState: GroupStreamState = {
   cancelInfo: null,
 };
 
-// ─── Hook ───────────────────────────────────────────────────────
+/** A clean state with its own collection instances (the shared `initialState`
+ *  ones must never be written to). */
+function freshState(): GroupStreamState {
+  return {
+    ...initialState,
+    activeSpeakers: new Set(),
+    tasksInProgress: new Set(),
+    tasksCompleted: new Set(),
+    taskVerifications: new Map(),
+  };
+}
+
+// ─── Store ──────────────────────────────────────────────────────
 
 /**
- * Hook for SSE-streamed group discussions.
- *
- * Usage:
- *   const { streamState, startStream, abortStream } = useGroupDiscussionStream();
- *   startStream(groupId, question);  // starts SSE
- *   // streamState updates in real-time as events arrive
+ * Group discussion streams live in a module-level store rather than in
+ * component state, keyed by group id. A discussion keeps streaming (and keeps
+ * accumulating its transcript) while the user navigates elsewhere in the app,
+ * so coming back to the board shows the live discussion instead of a blank
+ * slate. The connections outlive React, so they are never aborted on unmount —
+ * only explicitly, via abortStream/resetStream or a terminal SSE event.
  */
-export function useGroupDiscussionStream() {
-  const [streamState, setStreamState] = useState<GroupStreamState>(initialState);
-  const abortRef = useRef<AbortController | null>(null);
+interface GroupStreamStore {
+  /** Live stream state per group id. */
+  streams: Record<string, GroupStreamState>;
+  update: (groupId: string, updater: (s: GroupStreamState) => GroupStreamState) => void;
+  startStream: (groupId: string, question: string) => Promise<void>;
+  continueStream: (groupId: string, gcId: string, question: string) => Promise<void>;
+  approveAndStream: (groupId: string, gcId: string, request: GroupApprovalRequest) => Promise<void>;
+  abortStream: (groupId: string) => void;
+  resetStream: (groupId: string) => void;
+}
 
-  // Drain an SSE event source into state, then settle isStreaming. Shared by the
-  // initial-discussion and approve/resume flows.
-  const consumeStream = useCallback(
-    async (events: AsyncGenerator<GroupSSEEvent>, abort: AbortController) => {
-      try {
-        for await (const event of events) {
-          const isDone = handleSSEEvent(event, setStreamState);
-          if (isDone) {
-            abort.abort();
-            break;
-          }
-        }
-      } catch (e) {
-        // AbortError is expected when we abort after a terminal event
-        if (e instanceof DOMException && e.name === "AbortError") {
-          // expected — swallow
-        } else {
-          const errorMsg = e instanceof Error ? e.message : String(e);
-          setStreamState((s) => ({
-            ...s,
-            isStreaming: false,
-            state: "FAILED",
-            error: errorMsg,
-            errorKind: "generic",
-          }));
-        }
-      }
+/** In-flight abort controllers, one per group. Kept outside the store because
+ *  they are not render state. */
+const abortControllers = new Map<string, AbortController>();
 
-      // Safety-net: if the stream ended without a done event
-      setStreamState((s) => (s.isStreaming ? { ...s, isStreaming: false } : s));
-    },
-    [],
-  );
+function swapController(groupId: string): AbortController {
+  abortControllers.get(groupId)?.abort();
+  const abort = new AbortController();
+  abortControllers.set(groupId, abort);
+  return abort;
+}
 
-  const startStream = useCallback(async (groupId: string, question: string) => {
-    // Abort any existing stream
-    abortRef.current?.abort();
-    const abort = new AbortController();
-    abortRef.current = abort;
+export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
+  streams: {},
 
-    // Reset state with fresh collection instances (don't reuse shared refs from initialState)
-    setStreamState({
-      ...initialState,
+  update: (groupId, updater) =>
+    set((store) => ({
+      streams: {
+        ...store.streams,
+        [groupId]: updater(store.streams[groupId] ?? freshState()),
+      },
+    })),
+
+  startStream: async (groupId, question) => {
+    const abort = swapController(groupId);
+    const update = get().update;
+
+    update(groupId, () => ({
+      ...freshState(),
       isStreaming: true,
       state: "IN_PROGRESS",
       startedAt: new Date().toISOString(),
-      activeSpeakers: new Set(),
-      tasksInProgress: new Set(),
-      tasksCompleted: new Set(),
-      taskVerifications: new Map(),
-    });
+    }));
 
-    await consumeStream(streamGroupDiscussion(groupId, question, undefined, abort.signal), abort);
-  }, [consumeStream]);
+    await consumeStream(
+      groupId,
+      streamGroupDiscussion(groupId, question, undefined, abort.signal),
+      abort,
+      update,
+    );
+  },
 
   /**
    * Submit an approve/reject decision for a paused group discussion AND stream
    * the resumed progress over the same connection. Preserves the existing
    * transcript so a live pause→resume appends rather than restarts.
    */
-  const approveAndStream = useCallback(
-    async (groupId: string, gcId: string, request: GroupApprovalRequest) => {
-      abortRef.current?.abort();
-      const abort = new AbortController();
-      abortRef.current = abort;
+  approveAndStream: async (groupId, gcId, request) => {
+    const abort = swapController(groupId);
+    const update = get().update;
 
-      setStreamState((s) => ({
-        ...s,
-        isStreaming: true,
-        state: "IN_PROGRESS",
-        conversationId: gcId,
-        hitlPause: null,
-        hitlResume: null,
-        error: null,
-        startedAt: s.startedAt ?? new Date().toISOString(),
-        activeSpeakers: new Set(),
-      }));
+    update(groupId, (s) => ({
+      ...s,
+      isStreaming: true,
+      state: "IN_PROGRESS",
+      conversationId: gcId,
+      hitlPause: null,
+      hitlResume: null,
+      error: null,
+      startedAt: s.startedAt ?? new Date().toISOString(),
+      activeSpeakers: new Set(),
+    }));
 
-      await consumeStream(streamGroupApproval(groupId, gcId, request, abort.signal), abort);
-    },
-    [consumeStream],
-  );
+    await consumeStream(
+      groupId,
+      streamGroupApproval(groupId, gcId, request, abort.signal),
+      abort,
+      update,
+    );
+  },
 
   /**
    * Continue a COMPLETED discussion as a new round via SSE streaming.
    * Preserves the existing transcript so the new round appends rather than
    * replaces — same pattern as approveAndStream.
    */
-  const continueStream = useCallback(
-    async (groupId: string, gcId: string, question: string) => {
-      abortRef.current?.abort();
-      const abort = new AbortController();
-      abortRef.current = abort;
+  continueStream: async (groupId, gcId, question) => {
+    const abort = swapController(groupId);
+    const update = get().update;
 
-      setStreamState((s) => ({
-        ...s,
-        isStreaming: true,
-        state: "IN_PROGRESS",
-        conversationId: gcId,
-        error: null,
-        errorKind: null,
-        startedAt: s.startedAt ?? new Date().toISOString(),
-        // Keep transcript (appended by group_start handler), but reset
-        // per-round derived fields so stale data doesn't leak into the UI.
-        synthesizedAnswer: null,
-        currentPhase: null,
-        taskPlan: null,
-        taskVerifications: new Map(),
-        tasksInProgress: new Set(),
-        tasksCompleted: new Set(),
-        activeSpeakers: new Set(),
-        hitlPause: null,
-        hitlResume: null,
-        cancelInfo: null,
-      }));
-
-      await consumeStream(
-        streamGroupContinue(groupId, gcId, question, undefined, abort.signal),
-        abort,
-      );
-    },
-    [consumeStream],
-  );
-
-  const abortStream = useCallback(() => {
-    abortRef.current?.abort();
-    setStreamState((s) => ({
+    update(groupId, (s) => ({
       ...s,
-      isStreaming: false,
+      isStreaming: true,
+      state: "IN_PROGRESS",
+      conversationId: gcId,
+      error: null,
+      errorKind: null,
+      startedAt: s.startedAt ?? new Date().toISOString(),
+      // Keep transcript (appended by group_start handler), but reset
+      // per-round derived fields so stale data doesn't leak into the UI.
+      synthesizedAnswer: null,
+      currentPhase: null,
+      taskPlan: null,
+      taskVerifications: new Map(),
+      tasksInProgress: new Set(),
+      tasksCompleted: new Set(),
+      activeSpeakers: new Set(),
+      hitlPause: null,
+      hitlResume: null,
+      cancelInfo: null,
     }));
-  }, []);
+
+    await consumeStream(
+      groupId,
+      streamGroupContinue(groupId, gcId, question, undefined, abort.signal),
+      abort,
+      update,
+    );
+  },
+
+  abortStream: (groupId) => {
+    abortControllers.get(groupId)?.abort();
+    abortControllers.delete(groupId);
+    get().update(groupId, (s) => ({ ...s, isStreaming: false }));
+  },
 
   /** Abort any in-flight stream AND fully reset to the initial clean state.
    *  Use this when the user explicitly starts a new discussion (clears stale
    *  transcript, synthesized answer, etc). */
-  const resetStream = useCallback(() => {
-    abortRef.current?.abort();
-    setStreamState({
-      ...initialState,
-      activeSpeakers: new Set(),
-      tasksInProgress: new Set(),
-      tasksCompleted: new Set(),
-      taskVerifications: new Map(),
+  resetStream: (groupId) => {
+    abortControllers.get(groupId)?.abort();
+    abortControllers.delete(groupId);
+    // Drop the entry rather than storing a blank one: consumers fall back to
+    // the shared initial state, and finished transcripts don't accumulate for
+    // every board visited this session.
+    set((store) => {
+      if (!(groupId in store.streams)) return store;
+      const rest = { ...store.streams };
+      delete rest[groupId];
+      return { streams: rest };
     });
+  },
+}));
+
+type UpdateFn = GroupStreamStore["update"];
+
+/** Drain an SSE event source into the group's state, then settle isStreaming.
+ *  Shared by the start / continue / approve-resume flows. */
+async function consumeStream(
+  groupId: string,
+  events: AsyncGenerator<GroupSSEEvent>,
+  abort: AbortController,
+  update: UpdateFn,
+) {
+  // A superseded loop (new discussion started, or the user hit Stop) may still
+  // run for a tick or fail afterwards. Its writes must not land on the stream
+  // that replaced it — otherwise a fresh discussion flips back to "not
+  // streaming", or inherits the old one's error.
+  const setState = (updater: (s: GroupStreamState) => GroupStreamState) => {
+    if (abortControllers.get(groupId) !== abort) return;
+    update(groupId, updater);
+  };
+
+  try {
+    for await (const event of events) {
+      const isDone = handleSSEEvent(event, setState);
+      if (isDone) {
+        abort.abort();
+        break;
+      }
+    }
+  } catch (e) {
+    // AbortError is expected when we abort after a terminal event
+    if (e instanceof DOMException && e.name === "AbortError") {
+      // expected — swallow
+    } else {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      setState((s) => ({
+        ...s,
+        isStreaming: false,
+        state: "FAILED",
+        error: errorMsg,
+        errorKind: "generic",
+      }));
+    }
+  }
+
+  // Safety-net: if the stream ended without a done event
+  setState((s) => (s.isStreaming ? { ...s, isStreaming: false } : s));
+
+  // Unregister once finished. The map is the supersession source of truth, so
+  // leaving a dead controller behind would have swapController re-abort an
+  // already-aborted one on the next start. Only clear our own entry — a stream
+  // that superseded us owns the slot now.
+  if (abortControllers.get(groupId) === abort) {
+    abortControllers.delete(groupId);
+  }
+}
+
+// ─── Selectors ──────────────────────────────────────────────────
+
+/**
+ * Ids of the groups that currently have a live stream — for "this task force is
+ * still talking" affordances outside the board itself (sidebar, cards).
+ * The selector projects to a joined string so its result is referentially
+ * stable between unrelated store updates.
+ */
+export function useStreamingGroupIds(): string[] {
+  const joined = useGroupStreamStore((store) =>
+    Object.keys(store.streams)
+      .filter((id) => store.streams[id]?.isStreaming)
+      .sort()
+      .join(","),
+  );
+  return useMemo(() => (joined ? joined.split(",") : []), [joined]);
+}
+
+// ─── Hook ───────────────────────────────────────────────────────
+
+/**
+ * Hook for SSE-streamed group discussions.
+ *
+ * Usage:
+ *   const { streamState, startStream, abortStream } = useGroupDiscussionStream(groupId);
+ *   startStream(groupId, question);  // starts SSE
+ *   // streamState updates in real-time as events arrive
+ *
+ * Passing `groupId` binds the hook to that group's stream, so a discussion
+ * started earlier (even from another screen) is picked up on mount. Without it
+ * the hook only observes the stream it started itself.
+ */
+export function useGroupDiscussionStream(groupId?: string) {
+  // Group of the stream this hook instance started, used when no explicit
+  // groupId is bound.
+  const [startedGroupId, setStartedGroupId] = useState<string | null>(null);
+  const key = groupId ?? startedGroupId;
+
+  const streamState =
+    useGroupStreamStore((store) => (key ? store.streams[key] : undefined)) ?? initialState;
+
+  const startStream = useCallback(async (gid: string, question: string) => {
+    setStartedGroupId(gid);
+    await useGroupStreamStore.getState().startStream(gid, question);
   }, []);
 
-  // Abort any in-flight stream when the consuming component unmounts, so the
-  // SSE connection is released and no setState runs after teardown.
-  useEffect(() => () => abortRef.current?.abort(), []);
+  const continueStream = useCallback(
+    async (gid: string, gcId: string, question: string) => {
+      setStartedGroupId(gid);
+      await useGroupStreamStore.getState().continueStream(gid, gcId, question);
+    },
+    [],
+  );
+
+  const approveAndStream = useCallback(
+    async (gid: string, gcId: string, request: GroupApprovalRequest) => {
+      setStartedGroupId(gid);
+      await useGroupStreamStore.getState().approveAndStream(gid, gcId, request);
+    },
+    [],
+  );
+
+  const abortStream = useCallback(() => {
+    if (key) useGroupStreamStore.getState().abortStream(key);
+  }, [key]);
+
+  const resetStream = useCallback(() => {
+    if (key) useGroupStreamStore.getState().resetStream(key);
+  }, [key]);
 
   return { streamState, startStream, continueStream, approveAndStream, abortStream, resetStream };
 }
@@ -265,7 +394,7 @@ export function useGroupDiscussionStream() {
  */
 function handleSSEEvent(
   event: GroupSSEEvent,
-  setState: React.Dispatch<React.SetStateAction<GroupStreamState>>
+  setState: (updater: (s: GroupStreamState) => GroupStreamState) => void
 ): boolean {
   switch (event.type) {
     case "group_start": {
