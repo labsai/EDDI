@@ -162,8 +162,16 @@ class AgentOrchestratorBranchTest {
             when(memory.getCurrentStep()).thenReturn(step);
             when(memory.getConversationId()).thenReturn("conv-1");
             if (present) {
+                // A real Attachment, not a placeholder Object: the gate counts
+                // coerced attachments, so a stand-in would not represent a turn
+                // that actually carries a file.
+                var attachment = new ai.labs.eddi.engine.memory.model.Attachment();
+                attachment.setStorageRef("ref-current");
+                attachment.setFileName("current.pdf");
+                attachment.setMimeType("application/pdf");
+
                 IData data = mock(IData.class);
-                doReturn(List.of(new Object())).when(data).getResult();
+                doReturn(List.of(attachment)).when(data).getResult();
                 doReturn(data).when(step).getData(MemoryKeys.ATTACHMENTS);
             } else {
                 doReturn(null).when(step).getData(MemoryKeys.ATTACHMENTS);
@@ -264,6 +272,39 @@ class AgentOrchestratorBranchTest {
             task.setEnableBuiltInTools(true);
 
             assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        /**
+         * enableBuiltInTools defaults to false — every agent the wizards create has it
+         * off — so gating attachment reading behind it meant an uploaded file was
+         * readable for exactly one turn and never again. It reads a blob already stored
+         * under this conversation, so it is not the kind of outbound, billable
+         * capability that switch exists to gate.
+         */
+        @Test
+        @DisplayName("added when the conversation has files even with built-in tools OFF")
+        void addedWithBuiltInToolsDisabled() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachmentsOnAnEarlierTurnOnly();
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(false);
+
+            List<Object> tools = orchestrator.collectEnabledTools(task, memory);
+
+            assertTrue(hasReadAttachmentTool(tools));
+            // …and nothing else comes along for the ride.
+            assertEquals(1, tools.size());
+        }
+
+        @Test
+        @DisplayName("NOT added with built-in tools OFF and no files anywhere in the conversation")
+        void notAddedWithBuiltInToolsDisabledAndNoAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachments(false);
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(false);
+
+            assertTrue(orchestrator.collectEnabledTools(task, memory).isEmpty());
         }
 
         @Test

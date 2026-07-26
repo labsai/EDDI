@@ -6,7 +6,10 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.model.Attachment;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -461,16 +464,96 @@ class AttachmentContextExtractorTest {
             assertEquals(1, result.size());
         }
 
+        /**
+         * Only blob-backed attachments can be fetched on a later turn. A URL reference
+         * is not in the attachment store and an inline base64 payload is never
+         * persisted, so surfacing either would advertise a file that readAttachment
+         * then fails to fetch.
+         */
         @Test
-        void shouldDeduplicateUrlAndUnnamedAttachmentsToo() {
+        void shouldOmitAttachmentsThatCannotBeFetchedLater() {
             Attachment byUrl = new Attachment();
             byUrl.setUrl("https://example.com/a.png");
             byUrl.setMimeType("image/png");
-            Attachment sameUrl = new Attachment();
-            sameUrl.setUrl("https://example.com/a.png");
-            sameUrl.setMimeType("image/png");
 
-            IConversationMemory memory = memoryWithSteps(List.of(byUrl), List.of(sameUrl));
+            Attachment inline = new Attachment();
+            inline.setMimeType("application/pdf");
+            inline.setFileName("inline.pdf");
+            inline.setBase64Data("JVBERi0=");
+
+            IConversationMemory memory = memoryWithSteps(List.of(byUrl), List.of(inline));
+
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        /**
+         * The regression that mattered: everything before the current turn has been
+         * through the conversation store, where {@code ResultSnapshot#result} is a bare
+         * Object — so attachments come back as maps, not Attachments. Both the Mongo
+         * and Postgres stores repair only {@code context*} entries on load, so an
+         * {@code instanceof Attachment} test alone matched nothing from turn two
+         * onwards, which is precisely when this lookup is needed.
+         */
+        @Test
+        void shouldRecoverAttachmentsAfterAConversationStoreRoundTrip() throws Exception {
+            ConversationMemory memory = new ConversationMemory("conv-1", "agent-1", 1, "user-1");
+            Attachment pdf = new Attachment("application/pdf", "report.pdf", 1234L, "ref-1");
+            memory.getCurrentStep().storeData(
+                    new ai.labs.eddi.engine.memory.model.Data<>(MemoryKeys.ATTACHMENTS.key(), List.of(pdf)));
+            memory.startNextStep(); // the follow-up turn, carrying no file of its own
+
+            // Persist and reload the way both stores do: Jackson to JSON and back
+            // into the snapshot, then rebuild the in-memory representation.
+            ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+            ConversationMemorySnapshot snapshot = ConversationMemoryUtilities.convertConversationMemory(memory);
+            ConversationMemorySnapshot reloaded = mapper.readValue(
+                    mapper.writeValueAsString(snapshot), ConversationMemorySnapshot.class);
+            IConversationMemory restored = ConversationMemoryUtilities.convertConversationMemorySnapshot(reloaded);
+
+            List<Attachment> result = AttachmentContextExtractor.attachmentsFromPreviousTurns(restored);
+
+            assertEquals(1, result.size(), "an earlier turn's file must survive the store round trip");
+            assertEquals("report.pdf", result.get(0).getFileName());
+            assertEquals("ref-1", result.get(0).getStorageRef());
+            assertEquals("application/pdf", result.get(0).getMimeType());
+            assertEquals(1234L, result.get(0).getSizeBytes());
+            assertEquals(Attachment.ContentSource.STORED, result.get(0).getContentSource());
+        }
+
+        @Test
+        void shouldRecoverTheMapFormWrittenBackByTheStore() {
+            // The exact shape Jackson hands back for a persisted Attachment.
+            Map<String, Object> persisted = new HashMap<>();
+            persisted.put("mimeType", "application/pdf");
+            persisted.put("fileName", "earlier.pdf");
+            persisted.put("storageRef", "ref-9");
+            persisted.put("sizeBytes", 42);
+
+            IConversationMemory memory = memoryWithSteps(List.of(persisted));
+
+            List<Attachment> result = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory);
+
+            assertEquals(1, result.size());
+            assertEquals("earlier.pdf", result.get(0).getFileName());
+            assertEquals(42L, result.get(0).getSizeBytes());
+        }
+
+        @Test
+        void shouldIgnoreMapsThatAreNotAttachments() {
+            IConversationMemory memory = memoryWithSteps(List.of(Map.of("some", "unrelated data")));
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        @Test
+        void shouldDeduplicateAcrossLiveAndPersistedForms() {
+            Map<String, Object> persisted = new HashMap<>();
+            persisted.put("storageRef", "ref-1");
+            persisted.put("fileName", "report.pdf");
+            persisted.put("mimeType", "application/pdf");
+
+            IConversationMemory memory = memoryWithSteps(
+                    List.of(stored("ref-1", "report.pdf")),
+                    List.of(persisted));
 
             assertEquals(1, AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).size());
         }

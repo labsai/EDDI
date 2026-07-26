@@ -1995,6 +1995,21 @@ class AgentOrchestrator {
         List<Object> tools = new ArrayList<>();
 
         if (task.getEnableBuiltInTools() == null || !task.getEnableBuiltInTools()) {
+            // Reading a file the user attached to THIS conversation is not an
+            // opt-in capability — it is the only way an uploaded document reaches
+            // the model after the turn it arrived on, and AttachmentForwarder's
+            // reminder note explicitly points the model at this tool.
+            //
+            // enableBuiltInTools defaults to false and exists to gate outbound,
+            // billable capabilities (web search, scraping, HTTP). readAttachment
+            // has neither property: it reads a blob already stored under this
+            // conversation and authorized by ownership or an explicit grant. Left
+            // behind that switch, attachment support silently worked for exactly
+            // one turn for every agent the wizards create.
+            //
+            // An explicit builtInToolsWhitelist is still honoured below — a list
+            // someone actually wrote is a decision; this default is not.
+            addReadAttachmentToolIfEnabled(tools, memory);
             return tools;
         }
 
@@ -2187,13 +2202,18 @@ class AgentOrchestrator {
         if (attachmentStore == null || attachmentTextExtractor == null) {
             return;
         }
+        if (memory == null || memory.getCurrentStep() == null) {
+            return;
+        }
         // Exact-match read (getData, not the prefix-scanning getLatestData):
         // "attachments"
         // is a prefix of the attachments:extracts/errors keys the forwarder persists.
         IData<List<?>> attachmentData = memory.getCurrentStep().getData(MemoryKeys.ATTACHMENTS);
-        int thisTurn = attachmentData != null && attachmentData.getResult() != null
-                ? attachmentData.getResult().size()
-                : 0;
+        // Coerced, not raw-counted: on a resumed turn these are maps, and a raw
+        // count would also count entries that are not attachments at all.
+        int thisTurn = attachmentData == null
+                ? 0
+                : AttachmentContextExtractor.attachmentsFrom(attachmentData.getResult()).size();
         // Memory-only scan — no attachment-store round trip on turns without files.
         int earlierTurns = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).size();
         if (thisTurn == 0 && earlierTurns == 0) {

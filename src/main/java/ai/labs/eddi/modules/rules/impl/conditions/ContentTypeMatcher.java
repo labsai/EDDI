@@ -4,9 +4,9 @@
  */
 package ai.labs.eddi.modules.rules.impl.conditions;
 
+import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.modules.rules.impl.Rule;
 
 import java.util.HashMap;
@@ -98,10 +98,10 @@ public class ContentTypeMatcher implements IRuleCondition {
             return FAIL;
         }
 
-        List<?> rawAttachments = data.getResult();
-        long matchCount = rawAttachments.stream()
-                .filter(obj -> obj instanceof Attachment)
-                .map(obj -> (Attachment) obj)
+        // Coerced, not cast: on a HITL resume the current step comes back from the
+        // conversation store, where these are plain maps — a cast-only filter would
+        // silently stop matching content-type rules on resumed turns.
+        long matchCount = AttachmentContextExtractor.attachmentsFrom(data.getResult()).stream()
                 .filter(att -> att.matchesMimeType(mimeType))
                 .count();
 

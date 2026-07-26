@@ -392,13 +392,10 @@ public class AttachmentForwarder {
         if (data == null || data.getResult() == null) {
             return List.of();
         }
-        List<Attachment> attachments = new ArrayList<>();
-        for (Object o : data.getResult()) {
-            if (o instanceof Attachment a) {
-                attachments.add(a);
-            }
-        }
-        return attachments;
+        // Coerced, not cast: a HITL resume re-enters the same step of a conversation
+        // reloaded from the store, where these are plain maps. Casting alone dropped
+        // every attachment on a resumed turn.
+        return AttachmentContextExtractor.attachmentsFrom(data.getResult());
     }
 
     private static int lastUserMessageIndex(List<ChatMessage> messages) {

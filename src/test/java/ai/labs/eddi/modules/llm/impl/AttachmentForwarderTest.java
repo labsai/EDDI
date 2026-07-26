@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENTS;
@@ -125,6 +126,36 @@ class AttachmentForwarderTest {
             // The document itself stays out of the prompt — only the pointer is added.
             assertFalse(note.contains("%PDF"), note);
             verifyNoInteractions(httpClient);
+        }
+
+        /**
+         * A HITL resume re-enters the SAME step of a conversation reloaded from the
+         * store, so "current step" does not imply "live objects" — the entries are
+         * plain maps there. Casting instead of coercing dropped every attachment on a
+         * resumed turn, silently un-attaching the file the user was approving.
+         */
+        @Test
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void currentStepReloadedFromTheStore_stillForwardsTheAttachment() throws Exception {
+            byte[] pdf = tinyPdf("Resumed after approval");
+            when(store.load(eq("ref-1"), any())).thenReturn(pdf);
+
+            // The map form Jackson hands back for a persisted Attachment.
+            Map<String, Object> persisted = new java.util.HashMap<>();
+            persisted.put("storageRef", "ref-1");
+            persisted.put("fileName", "report.pdf");
+            persisted.put("mimeType", "application/pdf");
+            persisted.put("sizeBytes", pdf.length);
+
+            IData data = mock(IData.class);
+            when(data.getResult()).thenReturn(List.of(persisted));
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(data);
+
+            List<ChatMessage> messages = messages(UserMessage.from("Summarize it"));
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size(), "the reloaded attachment must still reach the model");
         }
 
         @Test
