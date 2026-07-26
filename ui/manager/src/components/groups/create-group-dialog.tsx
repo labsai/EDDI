@@ -16,7 +16,11 @@ import {
   type MemberFailurePolicy,
   type MemberUnavailablePolicy,
 } from "@/lib/api/groups";
-import { getGroupTemplates, type GroupTemplate } from "@/lib/group-templates";
+import {
+  getGroupTemplates,
+  DEFAULT_AGENT_TIMEOUT_SECONDS,
+  type GroupTemplate,
+} from "@/lib/group-templates";
 
 interface CreateGroupDialogProps {
   open: boolean;
@@ -56,7 +60,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
 
   // Advanced protocol settings
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [agentTimeout, setAgentTimeout] = useState(60);
+  const [agentTimeout, setAgentTimeout] = useState(DEFAULT_AGENT_TIMEOUT_SECONDS);
   const [onAgentFailure, setOnAgentFailure] = useState<MemberFailurePolicy>("SKIP");
   const [maxRetries, setMaxRetries] = useState(2);
   const [onMemberUnavailable, setOnMemberUnavailable] = useState<MemberUnavailablePolicy>("SKIP");
@@ -400,7 +404,11 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                         <input
                           type="number"
                           value={agentTimeout}
-                          onChange={(e) => setAgentTimeout(Math.max(10, parseInt(e.target.value) || 60))}
+                          onChange={(e) =>
+                            setAgentTimeout(
+                              Math.max(10, parseInt(e.target.value) || DEFAULT_AGENT_TIMEOUT_SECONDS),
+                            )
+                          }
                           className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
                           min={10}
                           max={600}

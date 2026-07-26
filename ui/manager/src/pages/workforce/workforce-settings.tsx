@@ -35,6 +35,7 @@ import {
   type MemberUnavailablePolicy,
 } from "@/lib/api/groups";
 import type { GroupHitlConfig, HitlTimeoutPolicy, HitlGranularity, HitlRejectionPolicy } from "@/lib/api/hitl";
+import { DEFAULT_AGENT_TIMEOUT_SECONDS } from "@/lib/group-templates";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -82,7 +83,7 @@ function SectionHeader({
 // ─── Default Config Values (module-level for stable references) ──
 
 const DEFAULT_PROTOCOL: ProtocolConfig = {
-  agentTimeoutSeconds: 30, onAgentFailure: "SKIP", maxRetries: 2,
+  agentTimeoutSeconds: DEFAULT_AGENT_TIMEOUT_SECONDS, onAgentFailure: "SKIP", maxRetries: 2,
   onMemberUnavailable: "SKIP", maxTurns: 0,
 };
 const DEFAULT_HITL: GroupHitlConfig = {

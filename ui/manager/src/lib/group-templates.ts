@@ -121,6 +121,18 @@ export function getGroupTemplates(t: TFunction): GroupTemplate[] {
 }
 
 /**
+ * Per-member response timeout written into a group's protocol at creation.
+ *
+ * This is stored on the group config, so it — not any backend default —
+ * decides when a member is cut off and recorded as SKIPPED. Reasoning models
+ * on a long prompt regularly need well over a minute, so the previous 60s
+ * produced "Skipped (Timeout after 60s)" cards for slower members.
+ * Existing task forces keep whatever value they were created with; change it
+ * per task force under Settings → Protocol & Resilience.
+ */
+export const DEFAULT_AGENT_TIMEOUT_SECONDS = 180;
+
+/**
  * Build an AgentGroupConfiguration from a template.
  * Members are placeholders — users must assign real agent IDs.
  */
@@ -152,7 +164,7 @@ export function buildGroupFromTemplate(
     maxRounds: overrides?.maxRounds ?? template.maxRounds,
     phases: null, // Preset styles auto-expand
     protocol: {
-      agentTimeoutSeconds: 60,
+      agentTimeoutSeconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
       onAgentFailure: "SKIP",
       maxRetries: 2,
       onMemberUnavailable: "SKIP",
