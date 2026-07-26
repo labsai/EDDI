@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
+import { useStreamingGroupIds } from "@/hooks/use-group-discussion-stream";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { useTheme } from "@/components/layout/theme-provider";
 import { STYLE_INFO, type DiscussionStyle } from "@/lib/api/groups";
@@ -41,6 +42,9 @@ export function WorkforceSidebar({
   const { theme, setTheme } = useTheme();
 
   const { data: boards } = useEnrichedGroupDescriptors(50);
+  // Task forces with a discussion running right now — so leaving the board
+  // doesn't hide the fact that it is still going.
+  const streamingBoardIds = useStreamingGroupIds();
 
   const cycleTheme = () => {
     const order: Array<"light" | "dark" | "system"> = [
@@ -171,6 +175,7 @@ export function WorkforceSidebar({
         <ul className="flex flex-col gap-0.5" aria-label={t("Workforce.boardList", "Task Force list")}>
           {boards?.map((board) => {
             const isActive = board.id === boardId;
+            const isLive = streamingBoardIds.includes(board.id);
             const styleKey = (board.style ?? "ROUND_TABLE") as DiscussionStyle;
             const style = STYLE_INFO[styleKey] ?? STYLE_INFO.ROUND_TABLE;
 
@@ -181,11 +186,17 @@ export function WorkforceSidebar({
                   onClick={() =>
                     navigate(`/workforce/${board.id}?version=${board.version ?? 1}`)
                   }
-                  title={collapsed ? board.name : undefined}
+                  title={
+                    collapsed
+                      ? isLive
+                        ? `${board.name} — ${t("Workforce.board.live", "Live")}`
+                        : board.name
+                      : undefined
+                  }
                   aria-label={collapsed ? board.name : undefined}
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-start text-sm transition-colors",
+                    "relative flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-start text-sm transition-colors",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     isActive
                       ? "bg-primary/10 text-primary"
@@ -197,11 +208,29 @@ export function WorkforceSidebar({
                     {style.icon}
                   </span>
 
+                  {/* Collapsed: the dot rides on the style icon */}
+                  {collapsed && isLive && (
+                    <span
+                      className="absolute top-1 end-2 h-2 w-2 rounded-full bg-primary animate-pulse"
+                      data-testid={`sidebar-live-${board.id}`}
+                      aria-hidden
+                    />
+                  )}
+
                   {!collapsed && (
                     <>
                       <span className="min-w-0 flex-1 truncate">
                         {board.name || t("Workforce.untitled", "Untitled")}
                       </span>
+                      {isLive && (
+                        <span
+                          className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-primary"
+                          data-testid={`sidebar-live-${board.id}`}
+                        >
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                          {t("Workforce.board.live", "Live")}
+                        </span>
+                      )}
                       <span className="flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground">
                         <Users className="h-3 w-3" />
                         {board.memberCount}

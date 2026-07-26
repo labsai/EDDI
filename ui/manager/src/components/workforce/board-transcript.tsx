@@ -15,6 +15,9 @@ interface BoardTranscriptProps {
   transcript: TranscriptEntry[];
   boardId: string;
   synthesizedAnswer?: string | null;
+  /** The discussion is still running — keeps a visible "working" row pinned to
+   *  the bottom so the transcript never looks finished while it isn't. */
+  isLive?: boolean;
 
   className?: string;
 }
@@ -309,12 +312,34 @@ function EnhancedResponseEntry({
   );
 }
 
+/** Bottom-of-transcript "still running" row. */
+function LiveRow() {
+  const { t } = useTranslation();
+
+  return (
+    // No role="status" — the transcript container is already an aria-live
+    // region, and nesting one inside it announces the row twice.
+    <div
+      className="flex items-center gap-2 py-3 text-xs text-muted-foreground"
+      data-testid="transcript-live-row"
+    >
+      <span className="flex items-center gap-1" aria-hidden>
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "160ms" }} />
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "320ms" }} />
+      </span>
+      {t("Workforce.board.stillDiscussing", "The task force is still discussing…")}
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────────
 
 function BoardTranscript({
   transcript,
   boardId,
   synthesizedAnswer,
+  isLive = false,
   className,
 }: BoardTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -328,13 +353,15 @@ function BoardTranscript({
       el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
   }, []);
 
-  // Auto-scroll to bottom on new entries
+  // Auto-scroll to bottom as content arrives. `lastContent` is in the deps so a
+  // placeholder turning into a real answer scrolls too, not just new entries.
+  const lastContent = transcript[transcript.length - 1]?.content ?? null;
   useEffect(() => {
     const el = scrollRef.current;
     if (el && isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [transcript.length, synthesizedAnswer]);
+  }, [transcript.length, lastContent, synthesizedAnswer, isLive]);
 
   // Check if transcript already contains a SYNTHESIS entry
   const hasSynthesisEntry = transcript.some((e) => e.type === "SYNTHESIS");
@@ -413,6 +440,8 @@ function BoardTranscript({
       {synthesizedAnswer && !hasSynthesisEntry && (
         <SynthesisCard content={synthesizedAnswer} delay={Math.min(transcript.length * 60, 600)} />
       )}
+
+      {isLive && <LiveRow />}
     </div>
   );
 }

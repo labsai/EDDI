@@ -14,10 +14,19 @@ import {
   deleteGroupConversation,
   deleteGroupWithMembers,
   type AgentGroupConfiguration,
+  type GroupConversationState,
 } from "@/lib/api/groups";
 
 const GROUPS_KEY = ["groups"] as const;
 export const GROUP_CONVERSATIONS_KEY = ["groupConversations"] as const;
+
+/** Conversation states in which the backend is still working on the discussion,
+ *  so the UI should keep polling and show it as ongoing. */
+export function isActiveConversationState(
+  state: GroupConversationState | undefined,
+): boolean {
+  return state === "IN_PROGRESS" || state === "SYNTHESIZING";
+}
 
 // ─── Group Config Hooks ──────────────────────────────────────────
 
@@ -115,6 +124,10 @@ export function useGroupConversations(groupId: string, limit = 20, index = 0) {
     queryKey: [...GROUP_CONVERSATIONS_KEY, groupId, { limit, index }],
     queryFn: () => listGroupConversations(groupId, limit, index),
     enabled: !!groupId,
+    // Keep the list live while any discussion is still running, so its state
+    // badge flips on its own instead of needing a manual reload.
+    refetchInterval: (query) =>
+      query.state.data?.some((c) => isActiveConversationState(c.state)) ? 5000 : false,
   });
 }
 
@@ -123,13 +136,10 @@ export function useGroupConversation(groupId: string, conversationId: string) {
     queryKey: [...GROUP_CONVERSATIONS_KEY, groupId, conversationId],
     queryFn: () => getGroupConversation(groupId, conversationId),
     enabled: !!groupId && !!conversationId,
-    refetchInterval: (query) => {
-      // Poll while discussion is in progress
-      const state = query.state.data?.state;
-      return state === "IN_PROGRESS" || state === "SYNTHESIZING"
-        ? 3000
-        : false;
-    },
+    refetchInterval: (query) =>
+      // Poll while the discussion is in progress — this is what keeps a
+      // reloaded page (no SSE connection) following a running discussion.
+      isActiveConversationState(query.state.data?.state) ? 3000 : false,
   });
 }
 
