@@ -29,6 +29,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -2114,7 +2115,7 @@ class AgentOrchestrator {
             addUserMemoryToolIfEnabled(tools, memory);
             // Auto-add conversation recall tool if rolling summary is active
             addConversationRecallToolIfEnabled(tools, task, memory);
-            // Auto-add the readAttachment tool when this turn has attachments
+            // Auto-add the readAttachment tool when the conversation has attachments
             addReadAttachmentToolIfEnabled(tools, memory);
         }
 
@@ -2171,10 +2172,16 @@ class AgentOrchestrator {
     }
 
     /**
-     * Constructs and adds a {@link ReadAttachmentTool} when this turn carries
-     * attachments, giving the LLM on-demand access to attachment text (recall of an
-     * earlier turn's file, oversize files not inlined, page-targeted PDF reads).
-     * The conversation id is implicit — the tool never takes it as a parameter.
+     * Constructs and adds a {@link ReadAttachmentTool} when this conversation has
+     * attachments — from this turn or any earlier one — giving the LLM on-demand
+     * access to attachment text (recall of an earlier turn's file, oversize files
+     * not inlined, page-targeted PDF reads). The conversation id is implicit — the
+     * tool never takes it as a parameter.
+     * <p>
+     * Gating on the current turn alone defeated the tool's main purpose: a file is
+     * inlined only on the turn it arrives, so a follow-up question about it reached
+     * a model with neither the document nor any way to fetch it — and the model
+     * would answer that no file had ever been shared.
      */
     private void addReadAttachmentToolIfEnabled(List<Object> tools, IConversationMemory memory) {
         if (attachmentStore == null || attachmentTextExtractor == null) {
@@ -2184,13 +2191,19 @@ class AgentOrchestrator {
         // "attachments"
         // is a prefix of the attachments:extracts/errors keys the forwarder persists.
         IData<List<?>> attachmentData = memory.getCurrentStep().getData(MemoryKeys.ATTACHMENTS);
-        if (attachmentData == null || attachmentData.getResult() == null || attachmentData.getResult().isEmpty()) {
+        int thisTurn = attachmentData != null && attachmentData.getResult() != null
+                ? attachmentData.getResult().size()
+                : 0;
+        // Memory-only scan — no attachment-store round trip on turns without files.
+        int earlierTurns = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).size();
+        if (thisTurn == 0 && earlierTurns == 0) {
             return;
         }
         var tool = new ReadAttachmentTool(attachmentStore, attachmentTextExtractor, memory.getConversationId());
         tools.add(tool);
-        LOGGER.infof("[ATTACHMENTS] ReadAttachmentTool enabled for conversation='%s' with %d attachment(s)",
-                sanitize(memory.getConversationId()), attachmentData.getResult().size());
+        LOGGER.infof(
+                "[ATTACHMENTS] ReadAttachmentTool enabled for conversation='%s' (%d this turn, %d from earlier turns)",
+                sanitize(memory.getConversationId()), thisTurn, earlierTurns);
     }
 
     /**

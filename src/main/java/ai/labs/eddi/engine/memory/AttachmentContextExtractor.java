@@ -227,6 +227,68 @@ public final class AttachmentContextExtractor {
         return new ExtractionResult(out, errors);
     }
 
+    /**
+     * Attachments carried by the <em>earlier</em> turns of this conversation, most
+     * recent first and de-duplicated by storage reference (falling back to file
+     * name).
+     * <p>
+     * An attachment is inlined into the LLM message only on the turn it arrives —
+     * re-sending a document on every subsequent turn would burn the context window.
+     * Without this lookup, though, a follow-up question about a file uploaded two
+     * turns ago reaches a model that has no trace of it, and the
+     * {@code readAttachment} tool — which reads per <em>conversation</em>, not per
+     * turn — is never even offered. Callers use this to keep an uploaded file
+     * reachable for the rest of the conversation.
+     * <p>
+     * Read straight from conversation memory (no attachment-store round trip), so
+     * this is safe to call on every turn.
+     *
+     * @param memory
+     *            the conversation memory for the current turn (may be null)
+     * @return earlier turns' attachments, newest turn first (never null)
+     */
+    public static List<Attachment> attachmentsFromPreviousTurns(IConversationMemory memory) {
+        if (memory == null) {
+            return Collections.emptyList();
+        }
+        IConversationMemory.IConversationStepStack previousSteps = memory.getPreviousSteps();
+        if (previousSteps == null || previousSteps.size() == 0) {
+            return Collections.emptyList();
+        }
+
+        // Keyed by identity so the same file re-sent across turns is listed once,
+        // insertion-ordered so the most recent turn's attachments come first.
+        Map<String, Attachment> unique = new LinkedHashMap<>();
+        for (int i = 0; i < previousSteps.size(); i++) {
+            // Exact-match read: "attachments" is a prefix of the
+            // attachments:extracts / attachments:errors keys the forwarder persists,
+            // so a prefix scan would return the wrong entry.
+            IData<List<?>> data = previousSteps.get(i).getData(MemoryKeys.ATTACHMENTS);
+            if (data == null || data.getResult() == null) {
+                continue;
+            }
+            for (Object value : data.getResult()) {
+                if (value instanceof Attachment attachment) {
+                    unique.putIfAbsent(identity(attachment), attachment);
+                }
+            }
+        }
+        return List.copyOf(unique.values());
+    }
+
+    /**
+     * Stable de-duplication key: the storage ref if there is one, else the name.
+     */
+    private static String identity(Attachment att) {
+        if (att.getStorageRef() != null) {
+            return "ref:" + att.getStorageRef();
+        }
+        if (att.getUrl() != null) {
+            return "url:" + att.getUrl();
+        }
+        return "name:" + displayName(att);
+    }
+
     private static String displayName(Attachment att) {
         if (att.getFileName() != null) {
             return att.getFileName();

@@ -170,6 +170,31 @@ class AgentOrchestratorBranchTest {
             }
         }
 
+        /**
+         * Stub an earlier turn that carried a file, with nothing on the current turn —
+         * the "uploaded a PDF, then asked a follow-up question" case. Also covers group
+         * members, whose private conversation gets the attachment injected on their
+         * first turn only.
+         */
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        private void withAttachmentsOnAnEarlierTurnOnly() {
+            withAttachments(false);
+            var attachment = new ai.labs.eddi.engine.memory.model.Attachment();
+            attachment.setStorageRef("ref-1");
+            attachment.setFileName("report.pdf");
+            attachment.setMimeType("application/pdf");
+
+            var previousStep = mock(IConversationMemory.IConversationStep.class);
+            IData data = mock(IData.class);
+            doReturn(List.of(attachment)).when(data).getResult();
+            doReturn(data).when(previousStep).getData(MemoryKeys.ATTACHMENTS);
+
+            var stack = mock(IConversationMemory.IConversationStepStack.class);
+            when(stack.size()).thenReturn(1);
+            when(stack.get(0)).thenReturn(previousStep);
+            when(memory.getPreviousSteps()).thenReturn(stack);
+        }
+
         private boolean hasReadAttachmentTool(List<Object> tools) {
             return tools.stream().anyMatch(t -> t instanceof ReadAttachmentTool);
         }
@@ -220,7 +245,7 @@ class AgentOrchestratorBranchTest {
         }
 
         @Test
-        @DisplayName("NOT added when the turn has no attachments")
+        @DisplayName("NOT added when neither this turn nor any earlier turn had attachments")
         void notAddedWithoutAttachments() {
             orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
             withAttachments(false);
@@ -228,6 +253,29 @@ class AgentOrchestratorBranchTest {
             task.setEnableBuiltInTools(true);
 
             assertFalse(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        @Test
+        @DisplayName("added when only an EARLIER turn had attachments (follow-up question about a file)")
+        void addedWhenOnlyAnEarlierTurnHadAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachmentsOnAnEarlierTurnOnly();
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+
+            assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        @Test
+        @DisplayName("added via whitelist when only an earlier turn had attachments")
+        void addedViaWhitelistWhenOnlyAnEarlierTurnHadAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachmentsOnAnEarlierTurnOnly();
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("readattachment"));
+
+            assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
         }
     }
 

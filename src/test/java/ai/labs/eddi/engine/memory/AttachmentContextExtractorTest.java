@@ -402,6 +402,121 @@ class AttachmentContextExtractorTest {
         }
     }
 
+    // ==================== Earlier-turn lookup ====================
+
+    /**
+     * {@link AttachmentContextExtractor#attachmentsFromPreviousTurns} is what keeps
+     * an uploaded file reachable after the turn it arrived on — both for the
+     * reminder note on the outgoing message and for offering the readAttachment
+     * tool at all.
+     */
+    @Nested
+    class AttachmentsFromPreviousTurns {
+
+        @Test
+        void shouldReturnEmptyForNullMemory() {
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(null).isEmpty());
+        }
+
+        @Test
+        void shouldReturnEmptyWhenThereAreNoPreviousSteps() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            when(memory.getPreviousSteps()).thenReturn(null);
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+
+            IConversationMemory.IConversationStepStack empty = mock(IConversationMemory.IConversationStepStack.class);
+            when(empty.size()).thenReturn(0);
+            when(memory.getPreviousSteps()).thenReturn(empty);
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        @Test
+        void shouldReturnEmptyWhenNoPreviousStepCarriedAttachments() {
+            IConversationMemory memory = memoryWithSteps(List.of(), List.of());
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        @Test
+        void shouldCollectAttachmentsAcrossSteps() {
+            Attachment pdf = stored("ref-pdf", "report.pdf");
+            Attachment image = stored("ref-img", "chart.png");
+            // Step 0 is the most recent previous turn.
+            IConversationMemory memory = memoryWithSteps(List.of(image), List.of(pdf));
+
+            List<Attachment> result = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory);
+
+            assertEquals(2, result.size());
+            assertEquals("chart.png", result.get(0).getFileName(), "newest turn first");
+            assertEquals("report.pdf", result.get(1).getFileName());
+        }
+
+        @Test
+        void shouldDeduplicateTheSameFileResentAcrossTurns() {
+            IConversationMemory memory = memoryWithSteps(
+                    List.of(stored("ref-pdf", "report.pdf")),
+                    List.of(stored("ref-pdf", "report.pdf")));
+
+            List<Attachment> result = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory);
+
+            assertEquals(1, result.size());
+        }
+
+        @Test
+        void shouldDeduplicateUrlAndUnnamedAttachmentsToo() {
+            Attachment byUrl = new Attachment();
+            byUrl.setUrl("https://example.com/a.png");
+            byUrl.setMimeType("image/png");
+            Attachment sameUrl = new Attachment();
+            sameUrl.setUrl("https://example.com/a.png");
+            sameUrl.setMimeType("image/png");
+
+            IConversationMemory memory = memoryWithSteps(List.of(byUrl), List.of(sameUrl));
+
+            assertEquals(1, AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).size());
+        }
+
+        @Test
+        void shouldIgnoreNonAttachmentEntries() {
+            IConversationMemory memory = memoryWithSteps(List.of("not an attachment", 42));
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        private static Attachment stored(String ref, String fileName) {
+            Attachment att = new Attachment();
+            att.setStorageRef(ref);
+            att.setFileName(fileName);
+            att.setMimeType("application/pdf");
+            return att;
+        }
+
+        /**
+         * Build a memory whose previous-step stack yields one step per argument, in the
+         * order given (index 0 = most recent, matching the real stack).
+         */
+        @SafeVarargs
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        private static IConversationMemory memoryWithSteps(List<Object>... stepAttachments) {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IConversationStepStack stack = mock(IConversationMemory.IConversationStepStack.class);
+            when(stack.size()).thenReturn(stepAttachments.length);
+
+            for (int i = 0; i < stepAttachments.length; i++) {
+                IConversationMemory.IConversationStep step = mock(IConversationMemory.IConversationStep.class);
+                if (stepAttachments[i].isEmpty()) {
+                    when(step.getData(MemoryKeys.ATTACHMENTS)).thenReturn(null);
+                } else {
+                    IData data = mock(IData.class);
+                    when(data.getResult()).thenReturn(stepAttachments[i]);
+                    when(step.getData(MemoryKeys.ATTACHMENTS)).thenReturn(data);
+                }
+                when(stack.get(i)).thenReturn(step);
+            }
+
+            when(memory.getPreviousSteps()).thenReturn(stack);
+            return memory;
+        }
+    }
+
     // ==================== Helpers ====================
 
     private static Context createContext(Object value) {
