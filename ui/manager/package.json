@@ -95,7 +95,7 @@
     "jsdom": "^26.0.0",
     "lint-staged": "^15.4.3",
     "msw": "^2.7.0",
-    "postcss": "^8.4.49",
+    "postcss": "^8.5.21",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.9.0",
     "typescript-eslint": "^8.20.0",
