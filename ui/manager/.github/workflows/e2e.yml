@@ -38,7 +38,7 @@ jobs:
       - name: Run UI E2E tests
         run: npm run test:e2e
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: ui-e2e-report
@@ -124,7 +124,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: docker compose -f ${{ matrix.compose-file }} logs > backend-logs.txt 2>&1
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: backend-e2e-report-${{ matrix.database }}
