@@ -303,6 +303,14 @@ async function consumeStream(
 
   // Safety-net: if the stream ended without a done event
   setState((s) => (s.isStreaming ? { ...s, isStreaming: false } : s));
+
+  // Unregister once finished. The map is the supersession source of truth, so
+  // leaving a dead controller behind would have swapController re-abort an
+  // already-aborted one on the next start. Only clear our own entry — a stream
+  // that superseded us owns the slot now.
+  if (abortControllers.get(groupId) === abort) {
+    abortControllers.delete(groupId);
+  }
 }
 
 // ─── Selectors ──────────────────────────────────────────────────

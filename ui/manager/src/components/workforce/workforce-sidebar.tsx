@@ -193,7 +193,16 @@ export function WorkforceSidebar({
                         : board.name
                       : undefined
                   }
-                  aria-label={collapsed ? board.name : undefined}
+                  // Collapsed, the name is the only accessible text and the dot
+                  // is decorative — fold the live state into it, or screen
+                  // readers never learn the task force is running.
+                  aria-label={
+                    collapsed
+                      ? isLive
+                        ? `${board.name} — ${t("Workforce.board.live", "Live")}`
+                        : board.name
+                      : undefined
+                  }
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
                     "relative flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-start text-sm transition-colors",

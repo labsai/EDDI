@@ -856,8 +856,18 @@ export function useConversationHistory(agentId: string | null) {
   });
 }
 
+/** Monotonic ticket for conversation loads — see loadConversationIntoStore. */
+let latestLoadRequest = 0;
+
 /** Read a conversation from the backend and make it the store's active one. */
 async function loadConversationIntoStore(agentId: string, conversationId: string) {
+  // Loads can overlap: two clicks in the render gap before the list disables
+  // itself, or a resume racing a history pick. The store must reflect the most
+  // recently *requested* conversation, not whichever read happened to finish
+  // last — otherwise the pane shows one conversation while the list highlights
+  // another.
+  const request = ++latestLoadRequest;
+
   // Read first, touch the store second. Clearing up front meant a failed read
   // wiped the conversation the user was looking at and left a blank pane with
   // nothing to go back to.
@@ -867,6 +877,8 @@ async function loadConversationIntoStore(agentId: string, conversationId: string
     conversationId,
     false
   );
+
+  if (request !== latestLoadRequest) return snapshot; // superseded mid-flight
 
   const store = useChatStore;
   store.getState().clearMessages();

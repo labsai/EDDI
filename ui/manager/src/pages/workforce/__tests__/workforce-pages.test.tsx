@@ -120,8 +120,13 @@ describe("Workforce Pages", () => {
     // task force was still working.
     it("picks up a still-running discussion on load and flags it as ongoing", async () => {
       server.use(
-        http.get("*/groups/:groupId/conversations/:convId", () =>
-          HttpResponse.json({
+        // Scoped to gc-3b so the test proves *that* conversation was restored,
+        // not merely that some conversation got selected.
+        http.get("*/groups/:groupId/conversations/:convId", ({ params }) => {
+          if (params.convId !== "gc-3b") {
+            return HttpResponse.json({ error: "unexpected conversation" }, { status: 404 });
+          }
+          return HttpResponse.json({
             id: "gc-3b",
             groupId: "grp3",
             state: "IN_PROGRESS",
@@ -141,8 +146,8 @@ describe("Workforce Pages", () => {
             ],
             synthesizedAnswer: null,
             availableActions: [],
-          }),
-        ),
+          });
+        }),
       );
 
       // grp3's mock history contains one IN_PROGRESS discussion (gc-3b), and the
@@ -156,11 +161,14 @@ describe("Workforce Pages", () => {
     it("shows no ongoing indicator for a settled discussion", async () => {
       // grp1's conversations are all COMPLETED/FAILED — nothing to resume.
       renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
-      await screen.findAllByText(/Product Review Panel/i);
 
-      await waitFor(() => {
-        expect(screen.queryByTestId("board-live-badge")).not.toBeInTheDocument();
-      });
+      // Anchor on a positive signal that only renders once the conversations
+      // query has resolved — a bare absence check could pass before the data
+      // that would contradict it ever arrives.
+      expect(
+        await screen.findByRole("button", { name: /view past sessions/i }),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("board-live-badge")).not.toBeInTheDocument();
     });
   });
 

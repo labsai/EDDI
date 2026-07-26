@@ -292,11 +292,13 @@ export const MODEL_TYPES = [
  *
  * Switching an agent to whitelist mode replaces the "all built-in tools"
  * default with exactly this list, so anything missing here is a capability the
- * user can no longer enable. The last four are self-gating server-side —
- * `readattachment` only appears when the conversation has files,
- * `conversationRecall` only with a rolling summary, `usermemory` only when the
- * agent has persistent memory — so listing them cannot switch on something the
- * agent isn't configured for.
+ * user can no longer enable. Three of the last four are additionally
+ * self-gating server-side — `readattachment` only appears when the conversation
+ * has files, `conversationRecall` only with a rolling summary, `usermemory`
+ * only when the agent has persistent memory — so listing them cannot switch on
+ * something the agent isn't configured for. `fetch_page` is not gated: it is a
+ * plain tool for paging through an oversized tool response, and was simply
+ * missing from this list.
  *
  * Dynamic-agent tools (create_sub_agent, converse_with_agent,
  * find_agents_by_capability, teardown_agent) are deliberately absent: they let

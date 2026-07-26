@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useCallback, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -355,8 +355,10 @@ function BoardTranscript({
 
   // Auto-scroll to bottom as content arrives. `lastContent` is in the deps so a
   // placeholder turning into a real answer scrolls too, not just new entries.
+  // Layout effect, not effect: scrolling after paint shows one frame at the old
+  // offset before snapping down, which reads as a jump on every streamed turn.
   const lastContent = transcript[transcript.length - 1]?.content ?? null;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight;

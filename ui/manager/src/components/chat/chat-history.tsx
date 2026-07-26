@@ -37,7 +37,9 @@ export function ChatHistory({ open, onNewConversation }: ChatHistoryProps) {
               error: getErrorMessage(err),
             }),
           ),
-        onSettled: () => setLoadingId(null),
+        // Only clear the spinner if this row is still the one loading — a
+        // superseded click must not switch off the newer row's spinner.
+        onSettled: () => setLoadingId((curr) => (curr === convId ? null : curr)),
       },
     );
   };

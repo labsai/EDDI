@@ -83,7 +83,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
     setMembers([]);
     setModeratorAgentId("");
     setShowAdvanced(false);
-    setAgentTimeout(60);
+    setAgentTimeout(DEFAULT_AGENT_TIMEOUT_SECONDS);
     setOnAgentFailure("SKIP");
     setMaxRetries(2);
     setOnMemberUnavailable("SKIP");

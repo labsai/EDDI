@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import {
   useGroupDiscussionStream,
   useStreamingGroupIds,
+  useGroupStreamStore,
 } from "@/hooks/use-group-discussion-stream";
 
 const mockStreamGroupDiscussion = vi.fn();
@@ -24,6 +25,12 @@ describe("useGroupDiscussionStream", () => {
     mockStreamGroupDiscussion.mockReset();
     mockStreamGroupApproval.mockReset();
     mockStreamGroupContinue.mockReset();
+  });
+
+  // The store is module-level and survives the whole file — without this, a
+  // test that fails mid-stream leaks its state into every test after it.
+  afterEach(() => {
+    useGroupStreamStore.setState({ streams: {} });
   });
 
   it("returns initial state", () => {

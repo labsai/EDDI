@@ -240,11 +240,16 @@ function WorkforceBoard() {
   const isStreaming = streamState.isStreaming;
   const hasStreamTranscript = streamState.transcript.length > 0;
 
+  /** The stream belongs to what's on screen: either nothing is selected yet
+   *  (the URL sync lands a tick later) or the selection is the stream's own
+   *  conversation. Single source of truth for every signal below, so they
+   *  cannot disagree about a null selection. */
+  const streamIsForCurrentView =
+    !selectedConvId || selectedConvId === streamState.conversationId;
+
   // Show the live transcript for the conversation the stream is driving; when
   // the user browses another session, show that one from the server instead.
-  const viewingStream =
-    hasStreamTranscript &&
-    (!selectedConvId || selectedConvId === streamState.conversationId);
+  const viewingStream = hasStreamTranscript && streamIsForCurrentView;
 
   const displayTranscript = viewingStream
     ? streamState.transcript
@@ -260,13 +265,19 @@ function WorkforceBoard() {
   // Two ways a discussion can be running: this tab holds the SSE connection
   // (isStreaming), or the backend is still working on it and we only see it
   // through polling — after a reload, or when it was started elsewhere.
+  // Deliberately not gated on hasStreamTranscript: the gap between "stream
+  // opened" and the first group_start event would otherwise render the idle
+  // "Ready for discussion" placeholder over a discussion that is under way.
   const viewingRunningConversation = isActiveConversationState(selectedConversation?.state);
-  const isOngoing = (viewingStream && isStreaming) || viewingRunningConversation;
+  const streamingCurrentView = isStreaming && streamIsForCurrentView;
+  const isOngoing = streamingCurrentView || viewingRunningConversation;
   /** Running server-side, but this tab isn't the one streaming it. */
-  const isFollowingRemotely = isOngoing && !(viewingStream && isStreaming);
-  /** A live stream is running for a conversation other than the one on screen. */
+  const isFollowingRemotely = isOngoing && !streamingCurrentView;
+  /** A live stream is running for a conversation other than the one on screen.
+   *  Requires an explicit selection — "nothing selected" means we are already
+   *  looking at the stream, not away from it. */
   const liveElsewhere =
-    isStreaming && !!streamState.conversationId && selectedConvId !== streamState.conversationId;
+    isStreaming && !!streamState.conversationId && !!selectedConvId && !streamIsForCurrentView;
 
   // ─── Context-aware input mode ─────────────────────────────────
   const inputMode = useMemo((): "new" | "continue" | "disabled" => {
@@ -414,6 +425,21 @@ function WorkforceBoard() {
             {groupConfig?.name ?? t("Workforce.board.title", "Task Force")}
           </h2>
 
+          {/* Announcement channel for the badge below. Mounted unconditionally:
+              a live region inserted together with its content is usually not
+              announced, and this also carries the running hint, which is
+              otherwise title-only and so invisible to keyboard and touch. */}
+          <span className="sr-only" role="status">
+            {isOngoing
+              ? isFollowingRemotely
+                ? t(
+                    "Workforce.board.runningHint",
+                    "This discussion is still running — new answers appear automatically.",
+                  )
+                : t("Workforce.board.live", "Live")
+              : ""}
+          </span>
+
           {/* Ongoing indicator — the discussion is running, whether this tab is
               streaming it or only polling for it after a reload. */}
           {isOngoing && (
@@ -422,7 +448,6 @@ function WorkforceBoard() {
                 "flex shrink-0 items-center gap-1.5 rounded-full ps-2 pe-2.5 py-0.5",
                 "border border-primary/30 bg-primary/10 text-xs font-medium text-primary",
               )}
-              aria-live="polite"
               data-testid="board-live-badge"
               title={
                 isFollowingRemotely

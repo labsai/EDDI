@@ -249,8 +249,10 @@ function WorkforceAnalytics() {
     {/* The Workforce shell clips its main area, so this page owns its own
         scroll box — otherwise everything below the fold is unreachable. The
         scroller spans the full width (scrollbar at the window edge) and the
-        content stays centred inside it. */}
-    <main
+        content stays centred inside it.
+        A section, not a main: the shell already renders <main id="workforce-main">
+        around the outlet, and nested main landmarks are invalid. */}
+    <section
       className="flex-1 min-h-0 overflow-y-auto"
       aria-label={t("analyticsPage.title", "Insights")}
     >
@@ -434,7 +436,7 @@ function WorkforceAnalytics() {
         </div>
       </div>
     </div>
-    </main>
+    </section>
 
       {/* Agent Performance Sheet */}
       <AgentPerformanceSheet

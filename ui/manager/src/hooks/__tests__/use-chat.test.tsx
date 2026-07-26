@@ -717,6 +717,49 @@ describe("useSendMessage", () => {
     });
   });
 
+  describe("useLoadConversation", () => {
+    // Two loads can overlap — a double-click in the render gap before the list
+    // disables itself, or a resume racing a history pick. The conversation the
+    // user asked for last must win, not whichever read finishes last.
+    it("keeps the most recently requested conversation when two loads overlap", async () => {
+      server.use(
+        http.get("*/agents/slow-conv", async () => {
+          await new Promise((r) => setTimeout(r, 60));
+          return HttpResponse.json({
+            conversationSteps: [
+              { conversationStep: [{ key: "input:initial", value: "slow question" }] },
+            ],
+            conversationOutputs: [{ output: [{ type: "text", text: "slow answer" }] }],
+          });
+        }),
+        http.get("*/agents/fast-conv", () =>
+          HttpResponse.json({
+            conversationSteps: [
+              { conversationStep: [{ key: "input:initial", value: "fast question" }] },
+            ],
+            conversationOutputs: [{ output: [{ type: "text", text: "fast answer" }] }],
+          }),
+        ),
+      );
+
+      const wrapper = createWrapper();
+      const slow = renderHook(() => useLoadConversation(), { wrapper });
+      const fast = renderHook(() => useLoadConversation(), { wrapper });
+
+      // Requested first, resolves last.
+      slow.result.current.mutate({ agentId: "agent1", conversationId: "slow-conv" });
+      fast.result.current.mutate({ agentId: "agent1", conversationId: "fast-conv" });
+
+      await waitFor(() => expect(slow.result.current.isSuccess).toBe(true));
+      await waitFor(() => expect(fast.result.current.isSuccess).toBe(true));
+
+      const state = useChatStore.getState();
+      expect(state.conversationId).toBe("fast-conv");
+      expect(state.messages.some((m) => m.content === "fast answer")).toBe(true);
+      expect(state.messages.some((m) => m.content === "slow answer")).toBe(false);
+    });
+  });
+
   describe("useResumeOrStartConversation", () => {
     it("reopens the agent's most recent conversation", async () => {
       server.use(
