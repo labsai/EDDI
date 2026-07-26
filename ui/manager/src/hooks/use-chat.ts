@@ -20,6 +20,8 @@ import {
 } from "@/lib/api/attachments";
 import {
   getConversationDescriptors,
+  parseConversationUri,
+  type ConversationDescriptor,
   type SimpleConversationMemorySnapshot,
   type InputField,
   extractInput,
@@ -854,44 +856,119 @@ export function useConversationHistory(agentId: string | null) {
   });
 }
 
+/** Read a conversation from the backend and make it the store's active one. */
+async function loadConversationIntoStore(agentId: string, conversationId: string) {
+  // Read first, touch the store second. Clearing up front meant a failed read
+  // wiped the conversation the user was looking at and left a blank pane with
+  // nothing to go back to.
+  const snapshot = await readConversation(
+    "production",
+    agentId,
+    conversationId,
+    false
+  );
+
+  const store = useChatStore;
+  store.getState().clearMessages();
+  store.getState().setConversationId(conversationId);
+
+  const messages = snapshotToMessages(snapshot);
+  store.getState().replaceMessages(messages);
+  store.getState().setUndoRedo(
+    snapshot.conversationSteps.length > 0,
+    snapshot.redoAvailable ?? false
+  );
+  // Re-establish the pause state when loading a conversation that is still
+  // AWAITING_HUMAN — otherwise a paused conversation opened from history
+  // would show an enabled input with no banner until a send is rejected 409.
+  // The snapshot carries the backend hitlPauseReason, so surface it rather
+  // than falling back to the generic default banner text.
+  store.getState().setPaused(
+    snapshot.conversationState === "AWAITING_HUMAN",
+    snapshot.hitlPauseReason ?? null,
+  );
+
+  return snapshot;
+}
+
 /** Load an existing conversation to resume it. */
 export function useLoadConversation() {
-  const store = useChatStore;
   return useMutation({
-    mutationFn: async ({
+    mutationFn: ({
       agentId,
       conversationId,
     }: {
       agentId: string;
       conversationId: string;
-    }) => {
-      store.getState().clearMessages();
-      store.getState().setConversationId(conversationId);
+    }) => loadConversationIntoStore(agentId, conversationId),
+  });
+}
 
-      const snapshot = await readConversation(
-        "production",
-        agentId,
-        conversationId,
-        false
-      );
+/**
+ * Conversation states a user can pick up where they left off. `ENDED` and
+ * `ERROR` are terminal, and `IN_PROGRESS` means a turn is still executing —
+ * dropping into any of those would be worse than a clean start.
+ */
+const RESUMABLE_STATES: ReadonlySet<string> = new Set(["READY", "AWAITING_HUMAN"]);
 
-      const messages = snapshotToMessages(snapshot);
-      store.getState().replaceMessages(messages);
-      store.getState().setUndoRedo(
-        snapshot.conversationSteps.length > 0,
-        snapshot.redoAvailable ?? false
-      );
-      // Re-establish the pause state when loading a conversation that is still
-      // AWAITING_HUMAN — otherwise a paused conversation opened from history
-      // would show an enabled input with no banner until a send is rejected 409.
-      // The snapshot carries the backend hitlPauseReason, so surface it rather
-      // than falling back to the generic default banner text.
-      store.getState().setPaused(
-        snapshot.conversationState === "AWAITING_HUMAN",
-        snapshot.hitlPauseReason ?? null,
-      );
+/**
+ * Pick the conversation to reopen for an agent: the most recently touched one
+ * the user can continue, or `null` when there is nothing worth resuming.
+ * Exported for tests.
+ */
+export function pickResumableConversation(
+  descriptors: ConversationDescriptor[] | undefined,
+): ConversationDescriptor | null {
+  if (!descriptors?.length) return null;
+  return (
+    [...descriptors]
+      .filter((c) => RESUMABLE_STATES.has(c.conversationState))
+      // The backend does not promise an order — sort rather than trust index 0.
+      .sort((a, b) => (b.lastModifiedOn ?? 0) - (a.lastModifiedOn ?? 0))[0] ?? null
+  );
+}
 
-      return snapshot;
+/**
+ * Open an agent's chat: resume the conversation the user was last in, and only
+ * start a new one when there is nothing to resume.
+ *
+ * Opening a chat used to always POST a new conversation, so every visit — and
+ * every page reload — minted another empty one. History filled up with untouched
+ * entries that looked broken when clicked (they load fine; there is simply
+ * nothing in them), and the user never landed back where they left off.
+ * Starting fresh is still available explicitly, via "New Conversation".
+ */
+export function useResumeOrStartConversation() {
+  const queryClient = useQueryClient();
+  const startConversationMutation = useStartConversation();
+
+  return useMutation({
+    mutationFn: async ({ agentId }: { agentId: string }) => {
+      let resumable: ConversationDescriptor | null = null;
+      try {
+        const descriptors = await queryClient.fetchQuery({
+          queryKey: [...CHAT_KEY, "history", agentId],
+          queryFn: () => getConversationDescriptors(50, 0, "", agentId),
+          staleTime: 30_000,
+        });
+        resumable = pickResumableConversation(descriptors);
+      } catch {
+        // History is a convenience, not a precondition — fall through to a new
+        // conversation rather than leaving the user with a dead chat panel.
+      }
+
+      if (resumable) {
+        const conversationId = parseConversationUri(resumable.resource);
+        try {
+          await loadConversationIntoStore(agentId, conversationId);
+          return conversationId;
+        } catch {
+          // The descriptor pointed at something we cannot read (deleted,
+          // migrated, permissions) — start clean instead of failing.
+        }
+      }
+
+      return startConversationMutation.mutateAsync({ agentId });
     },
   });
 }

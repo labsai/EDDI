@@ -2,10 +2,12 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
 import {
   useChatStore,
   useDeployedAgents,
   useStartConversation,
+  useResumeOrStartConversation,
   useSendMessage,
   useEndConversation,
   useUndoConversation,
@@ -107,17 +109,20 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   // Queries & mutations
   const { data: deployedAgents, isLoading: agentsLoading } = useDeployedAgents();
   const startConversation = useStartConversation();
+  // Opening a chat reopens the last conversation; only "New Conversation"
+  // deliberately starts a fresh one.
+  const openConversation = useResumeOrStartConversation();
   const sendMessage = useSendMessage();
   const endConversation = useEndConversation();
   const undoConversation = useUndoConversation();
   const redoConversation = useRedoConversation();
 
-  // Auto-start conversation from ?agentId= query param
+  // Open the chat for the ?agentId= query param
   useEffect(() => {
     const agentIdParam = searchParams.get("agentId");
     if (!agentIdParam) return;
 
-    // Skip if this agent is already selected (prevents duplicate starts)
+    // Skip if this agent is already selected (prevents duplicate opens)
     if (agentIdParam === selectedAgentId) {
       // Still clean the URL params
       setSearchParams({}, { replace: true });
@@ -131,13 +136,16 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
       deployedAgents?.find((b) => b.id === agentIdParam)?.name ||
       agentIdParam;
 
-    // Auto-select and start conversation
+    // Auto-select and reopen the agent's last conversation (or start one)
     setSelectedAgent(agentIdParam, agentName);
-    startConversation.mutate({ agentId: agentIdParam });
+    openConversation.mutate(
+      { agentId: agentIdParam },
+      { onError: (err) => toast.error(getErrorMessage(err)) },
+    );
 
-    // Remove query params so refresh doesn't re-create
+    // Remove query params so refresh doesn't re-open
     setSearchParams({}, { replace: true });
-  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, startConversation, setSearchParams]);
+  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, openConversation, setSearchParams]);
 
   // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
   const {
@@ -169,20 +177,27 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     (agentId: string, agentName: string) => {
       setSelectedAgent(agentId, agentName);
       setAgentSelectorOpen(false);
-      startConversation.mutate({ agentId });
+      openConversation.mutate(
+        { agentId },
+        { onError: (err) => toast.error(getErrorMessage(err)) },
+      );
       // Focus the chat input after the dropdown closes and UI settles
       setTimeout(() => {
         const input = document.querySelector<HTMLTextAreaElement>('[data-testid="chat-input"]');
         input?.focus();
       }, 150);
     },
-    [setSelectedAgent, startConversation]
+    [setSelectedAgent, openConversation]
   );
 
+  /** Explicit fresh start — the one path that always creates a conversation. */
   const handleNewConversation = useCallback(() => {
     if (!selectedAgentId) return;
     useChatStore.getState().clearMessages();
-    startConversation.mutate({ agentId: selectedAgentId });
+    startConversation.mutate(
+      { agentId: selectedAgentId },
+      { onError: (err) => toast.error(getErrorMessage(err)) },
+    );
   }, [selectedAgentId, startConversation]);
 
   // ── Attachment upload ──
@@ -585,9 +600,13 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
               <div className="text-center">
                 <Bot className="mx-auto h-12 w-12 text-muted-foreground/30" />
                 <p className="mt-3 text-sm text-muted-foreground">
-                  {startConversation.isPending
+                  {startConversation.isPending || openConversation.isPending
                     ? t("chat.thinking")
-                    : t("chat.empty")}
+                    : conversationId
+                      ? // An opened conversation that turned out to hold no
+                        // turns — say so, so it doesn't read as a failed load.
+                        t("chat.emptyConversation", "This conversation has no messages yet.")
+                      : t("chat.empty")}
                 </p>
               </div>
             </div>

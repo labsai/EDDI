@@ -1,6 +1,9 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useChatStore, useConversationHistory, useLoadConversation } from "@/hooks/use-chat";
+import { getErrorMessage } from "@/lib/api-client";
 import { parseConversationUri, type ConversationDescriptor } from "@/lib/api/conversations";
 import { Plus, History, Loader2 } from "lucide-react";
 
@@ -15,11 +18,28 @@ export function ChatHistory({ open, onNewConversation }: ChatHistoryProps) {
   const conversationId = useChatStore((s) => s.conversationId);
   const { data: conversations, isLoading } = useConversationHistory(selectedAgentId);
   const loadConversation = useLoadConversation();
+  // Which item the user clicked, so the spinner sits on that row rather than
+  // the whole list going quietly inert.
+  const [loadingId, setLoadingId] = useState<string | null>(null);
 
   const handleResume = (conv: ConversationDescriptor) => {
     if (!selectedAgentId) return;
     const convId = parseConversationUri(conv.resource);
-    loadConversation.mutate({ agentId: selectedAgentId, conversationId: convId });
+    setLoadingId(convId);
+    loadConversation.mutate(
+      { agentId: selectedAgentId, conversationId: convId },
+      {
+        // Without this a failed read left the pane blank with no explanation —
+        // indistinguishable from "this conversation is empty".
+        onError: (err) =>
+          toast.error(
+            t("chat.loadConversationFailed", "Couldn't load this conversation: {{error}}", {
+              error: getErrorMessage(err),
+            }),
+          ),
+        onSettled: () => setLoadingId(null),
+      },
+    );
   };
 
   if (!open) return null;
@@ -69,7 +89,10 @@ export function ChatHistory({ open, onNewConversation }: ChatHistoryProps) {
                         : "text-foreground hover:bg-muted"
                     )}
                   >
-                    <span className="truncate text-xs font-medium">
+                    <span className="flex items-center gap-1.5 truncate text-xs font-medium">
+                      {loadingId === convId && (
+                        <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                      )}
                       {convId.substring(0, 12)}…
                     </span>
                     <div className="flex items-center gap-2">
