@@ -5,6 +5,20 @@
 
 ---
 
+## 🔒 fix(ci): remove accidentally-committed langchain4j-mcp decompiled sources (2026-07-27)
+
+**Repo:** EDDI (`feat/v6.2.0-prep`)
+
+Both the **Dependency Review** and **Trivy Filesystem Scan** CI checks were failing on this branch with 3 HIGH-severity Jackson CVEs (GHSA-r7wm-3cxj-wff9, CVE-2026-54512, CVE-2026-54513).
+
+**Root cause:** commit `702e2f79b` (`fix: serialize SSE log events as JSON instead of toString()`, 2026-07-24) accidentally committed a decompiled copy of the `langchain4j-mcp` jar into a new top-level `lc4jmcp/` directory (123 files) — leftover from decompiling the jar to debug the `toString()` logging issue, swept up by a broad `git add`. The directory sat outside `src/main/java`, was never referenced by `pom.xml` or any source file, and Maven never compiled it — but its embedded `META-INF/maven/dev.langchain4j/langchain4j-mcp/pom.xml` (the jar's own build-time manifest) declared `jackson-databind:2.21.3` / `jackson-core:2.21.3`, which both scanners picked up as if it were a real dependency manifest.
+
+**Verification:** `./mvnw dependency:tree -Dincludes=com.fasterxml.jackson.core` confirms the actual resolved build uses `jackson-databind:2.22.0` / `jackson-core:2.22.0` (patched, via `quarkus-jackson:3.37.4` and `langchain4j:1.18.0`) — this was never a real vulnerability in the shipped app, just dead decompiled code confusing the scanners.
+
+**Fix:** `git rm -r lc4jmcp` — no source or config referenced it, so removal is inert.
+
+---
+
 ## 🧪 test(ui): close entity streams and assert real content in welcome/workforce tests (2026-07-26)
 
 **Repo:** EDDI (`feat/v6.2.0-prep`)
