@@ -9,7 +9,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -26,31 +28,42 @@ class RestWorkforceResourceTest {
         resource = new RestWorkforceResource();
     }
 
-    @Test
-    @DisplayName("viewDefault should delegate to viewHtml and return 200")
-    void viewDefaultDelegatesToViewHtml() {
-        Response response = resource.viewDefault();
-        assertEquals(200, response.getStatus());
+    /**
+     * Consumes the response entity stream fully and closes it, so the test does not
+     * leak the open classpath resource.
+     */
+    private static String readEntity(Response response) throws IOException {
         assertNotNull(response.getEntity(), "Entity must not be null");
         assertInstanceOf(InputStream.class, response.getEntity());
+        try (InputStream stream = (InputStream) response.getEntity()) {
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test
+    @DisplayName("viewDefault should delegate to viewHtml and return 200")
+    void viewDefaultDelegatesToViewHtml() throws IOException {
+        Response response = resource.viewDefault();
+        assertEquals(200, response.getStatus());
+        assertFalse(readEntity(response).isEmpty(), "Entity must not be empty");
     }
 
     @Test
     @DisplayName("viewHtml should return 200 with a readable workforce.html entity")
-    void viewHtmlReturnsOkWithEntity() {
+    void viewHtmlReturnsOkWithEntity() throws IOException {
         Response response = resource.viewHtml();
         assertEquals(200, response.getStatus());
-        assertNotNull(response.getEntity(), "Entity must not be null");
-        assertInstanceOf(InputStream.class, response.getEntity());
+        assertTrue(readEntity(response).contains("<html"),
+                "Entity must be the workforce.html document");
     }
 
     @Test
     @DisplayName("viewDefault and viewHtml should both serve the workforce.html SPA shell")
-    void viewDefaultAndViewHtmlServeSameShell() {
+    void viewDefaultAndViewHtmlServeSameShell() throws IOException {
         Response r1 = resource.viewDefault();
         Response r2 = resource.viewHtml();
         assertEquals(r1.getStatus(), r2.getStatus());
-        assertNotNull(r1.getEntity(), "viewDefault entity must not be null");
-        assertNotNull(r2.getEntity(), "viewHtml entity must not be null");
+        assertEquals(readEntity(r1), readEntity(r2),
+                "Both endpoints must serve identical content");
     }
 }

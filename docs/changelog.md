@@ -5,6 +5,25 @@
 
 ---
 
+## 🧪 test(ui): close entity streams and assert real content in welcome/workforce tests (2026-07-26)
+
+**Repo:** EDDI (`feat/v6.2.0-prep`)
+
+Copilot review feedback on `RestWelcomeResourceTest` / `RestWorkforceResourceTest`: the tests left the returned `InputStream` entity open and never read it, despite a display name promising a "readable" entity.
+
+**Changes (test-only, no production code touched):**
+- Added a private `readEntity(Response)` helper to both test classes — asserts a non-null `InputStream` entity, reads it fully inside try-with-resources (closing the classpath stream), returns UTF-8 content
+- `viewHtmlReturnsOkWithEntity` now asserts the body contains `<html`, matching its display name instead of only checking the entity type
+- `viewDefaultAndViewHtmlServeSameShell` now compares the two bodies for equality — previously it only asserted both entities were non-null, which never actually proved both endpoints serve the same shell
+
+**Design decision:** assert on `<html>` rather than any Vite-generated markup. `welcome.html` / `workforce.html` are SPA shells regenerated on every Manager/chat-UI asset update, so hashed asset filenames or inline styles would make content-specific assertions stale on the next `chore: update Manager UI assets` commit.
+
+**Files:** `RestWelcomeResourceTest.java`, `RestWorkforceResourceTest.java` (6 tests, all green)
+
+**Noted, not fixed:** `RestManagerResourceTest` wraps several calls in `try { … } catch (Exception e) { /* expected */ }`, which passes regardless of whether the code under test behaves correctly. Out of scope for this review fixup — worth tightening separately.
+
+---
+
 ## 🐛 fix(memory): orphaned ConversationDescriptors on conversation deletion (2026-07-24)
 
 **Repo:** EDDI (`feat/v6.2.0-prep`)
