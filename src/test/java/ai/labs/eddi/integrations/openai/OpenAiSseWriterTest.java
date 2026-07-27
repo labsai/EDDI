@@ -179,7 +179,7 @@ class OpenAiSseWriterTest {
         writer.content("");
 
         assertEquals("", body(), "an empty delta carries no information");
-        assertFalse(writer.hasSentContent());
+        assertFalse(writer.hasStarted(), "a skipped delta must not even open the stream");
     }
 
     @Test
@@ -215,6 +215,17 @@ class OpenAiSseWriterTest {
             writer.content("b");
             writer.finish("stop");
         }, "a disconnected client is routine; it must not raise once per token");
+    }
+
+    @Test
+    void hasStartedTracksTheOpeningFrame_notContent() {
+        var writer = writer();
+        assertFalse(writer.hasStarted());
+
+        writer.finish("stop");
+
+        assertTrue(writer.hasStarted(),
+                "finish() opens the stream too — the flag means 'started', not 'sent content'");
     }
 
     private static int countOccurrences(String haystack, String needle) {

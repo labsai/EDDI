@@ -206,8 +206,29 @@ class AgentModelResolverTest {
 
         assertEquals(AGENT_ID_SUPPORT, resolved.agentId());
         assertTrue(resolved.stateless());
-        assertEquals("support-a3f9c1:stateless", resolved.modelId(),
+        assertEquals("support-a3f9c1:stateless", resolved.requestedModelId(),
                 "the echoed model id must match what the client sent");
+        assertEquals("support-a3f9c1:stateless", resolved.canonicalModelId(),
+                "the canonical id keeps the suffix — it is a listed model in its own right");
+    }
+
+    @Test
+    void resolve_byName_reportsTheCanonicalIdNotTheTypedOne() throws Exception {
+        // GET /v1/models/{id} echoes the canonical id. A client that round-trips
+        // the answer must get something the catalogue actually lists.
+        givenAgent(AGENT_ID_SUPPORT, "Customer Support");
+
+        var resolved = resolver().resolve("Customer Support");
+
+        assertEquals("Customer Support", resolved.requestedModelId());
+        assertEquals("customer-support-a3f9c1", resolved.canonicalModelId());
+    }
+
+    @Test
+    void resolve_carriesTheDescriptorTimestamp() throws Exception {
+        givenAgent(AGENT_ID_SUPPORT, "Support");
+
+        assertEquals(1_700_000_000L, resolver().resolve("support-a3f9c1").createdEpochSeconds());
     }
 
     @Test

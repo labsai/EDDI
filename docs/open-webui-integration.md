@@ -237,7 +237,9 @@ This is safe because the adapter has no message-count heuristic — truncating h
 | `GET /v1/models/{id}` | ✅ |
 | `POST /v1/chat/completions` (`stream:false`) | ✅ JSON |
 | `POST /v1/chat/completions` (`stream:true`) | ✅ SSE |
-| `/v1/embeddings`, `/v1/completions`, `/v1/audio/*`, `/v1/images/*` | ❌ `404` with an OpenAI error body |
+| `/v1/embeddings`, `/v1/completions`, `/v1/audio/*`, `/v1/images/*` | ❌ Plain `404` (see note) |
+
+> **Note:** unimplemented `/v1` paths match no JAX-RS resource, so they return Quarkus' standard `404` rather than an OpenAI error envelope. Every path the adapter *does* serve uses the envelope. Adding a catch-all route would risk shadowing the real endpoints for a purely cosmetic gain, so it is deliberately not done.
 
 ### Request fields
 
@@ -299,9 +301,9 @@ Every failure uses the OpenAI envelope:
 | Agent not deployed | 503 | `agent_not_ready` |
 | Conversation busy / concurrency cap | 429 | — |
 | Turn timed out | 504 | `timeout` |
-| Adapter disabled, or unknown `/v1/*` path | 404 | `unknown_endpoint` |
+| Adapter disabled | 404 | `unknown_endpoint` |
 
-> **On streams:** once SSE headers are flushed the status is fixed at `200`. Failures during a stream therefore arrive as a content delta prefixed with ⚠️, followed by `finish_reason: "stop"` and `[DONE]`. This is a protocol constraint, not a shortcut — a stream that simply stopped would look like a hang.
+> **On streams:** once SSE headers are flushed the status is fixed at `200`. Failures during a stream therefore arrive as a content delta prefixed with ⚠️, followed by `finish_reason: "stop"` and `[DONE]`. This is a protocol constraint, not a shortcut — a stream that simply stopped would look like a hang. The concurrency cap applies the same way: a stream that cannot get a slot delivers a ⚠️ busy notice in-band instead of a `429`, because the `200` was already committed when the body started.
 
 ---
 

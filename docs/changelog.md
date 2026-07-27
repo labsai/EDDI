@@ -31,7 +31,19 @@ New `/v1` surface presenting deployed agents as OpenAI "models", so Open WebUI, 
 - In-flight completions are semaphore-bounded — each holds a worker thread, since the bridge blocks on the turn as the Slack handler does.
 - **Reused, not duplicated:** `ConversationOutputExtractor.extractResponse()` already existed in `engine/memory` (added upstream) and handles more output formats than the Slack-local copy the plan proposed extracting. Phase 2 of the plan became unnecessary. Noted separately: `SlackHitlSupport.extractSlackResponseText` still duplicates it and should delegate.
 
-**Tests:** 104 unit tests, all green. Mutation-checked — reverting the model-ambiguity guard, the identity refusal, and the HITL sentinel distinction each makes the relevant tests fail. `RestOpenAiAdapterTest` (`@QuarkusTest`, binds a socket) is deferred to CI per the local-environment constraint.
+**Self-review pass** (after the feature was complete) found and fixed six defects, each now covered by a test:
+- **Semaphore permit leak.** The streaming path handed its permit to the `StreamingOutput` body to release. If that body never runs — a client disconnecting before serialization starts, say — the permit is never reclaimed, and after `max-concurrent-requests` such events the adapter returns 429 *permanently*, until restart. The resource now releases unconditionally and the stream body takes its own permit inside one try/finally.
+- **`GET /v1/models/{id}` echoed the caller's string, not the canonical id** — a lookup by agent name returned `{"id":"Customer Support"}`, which is absent from `GET /v1/models`, so a client round-tripping the answer would ask for a model that does not exist. `ResolvedModel` now carries requested and canonical ids separately (plus the descriptor timestamp, which was hardcoded to 0).
+- **`InterruptedException` was swallowed** in the turn wait, leaving the worker thread looking healthy with its shutdown signal gone.
+- **A null exception message rendered to the user as the literal text "null"** in the stream error path (NPEs carry no message).
+- **`hasSentContent()` lied** — it returned "the stream has started", true even after a content-free `finish()`. Renamed `hasStarted()`.
+- **The `eddi.openai.requests` counter documented in the plan was never implemented.** Added with `mode` and `outcome` tags, so `paused` (reviewers behind) and `busy` (clients racing) are distinguishable from real errors.
+
+Also verified rather than assumed: `quarkus.rest.jackson.optimization.enable-reflection-free-serializers=false` in this project, so `@JsonProperty` on record components works — `finish_reason` and `owned_by` serialize correctly. Added `OpenAiWireFormatTest` to pin that, since the non-streaming response shape had no coverage at all.
+
+Corrected a documentation claim rather than the code: unimplemented `/v1` paths (`/v1/embeddings` etc.) return Quarkus' plain 404, not an OpenAI error envelope. A catch-all route would risk shadowing the real endpoints for a cosmetic gain.
+
+**Tests:** 119 unit tests, all green. Mutation-checked — reverting the model-ambiguity guard, the identity refusal, and the HITL sentinel distinction each makes the relevant tests fail. `RestOpenAiAdapterTest` (`@QuarkusTest`, binds a socket) is deferred to CI per the local-environment constraint.
 
 **Not implemented (v1):** `/v1/embeddings`, `tool_calls` passthrough (would cause double-execution — EDDI's tools do not exist in Open WebUI), `n > 1`, `logprobs`. Quick replies and `inputField` outputs are dropped; only text reaches OpenAI clients.
 

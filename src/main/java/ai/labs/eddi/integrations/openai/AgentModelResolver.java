@@ -99,13 +99,22 @@ public class AgentModelResolver {
     /**
      * A model identifier resolved to a concrete agent.
      *
+     * @param requestedModelId
+     *            exactly what the client sent — echoed back in completion
+     *            responses, because OpenAI clients match the {@code model} field
+     *            against what they asked for
+     * @param canonicalModelId
+     *            the catalogue id, including the {@value #STATELESS_SUFFIX} suffix
+     *            when applicable — what {@code GET /v1/models} lists, and what a
+     *            single-model lookup must report
      * @param stateless
      *            whether the caller asked for the one-shot variant — the
      *            conversation is ended immediately after the turn and no
      *            user-conversation mapping is stored
      */
     public record ResolvedModel(String agentId, Environment environment, String displayName,
-            String modelId, boolean stateless) {
+            String requestedModelId, String canonicalModelId, long createdEpochSeconds,
+            boolean stateless) {
     }
 
     /** Raised when no deployed agent matches the requested model id. */
@@ -213,8 +222,9 @@ public class AgentModelResolver {
     }
 
     private ResolvedModel toResolved(Entry entry, String requestedModel, boolean stateless) {
+        String canonical = stateless ? entry.modelId() + STATELESS_SUFFIX : entry.modelId();
         return new ResolvedModel(entry.agentId(), config.getEnvironment(), entry.displayName(),
-                requestedModel, stateless);
+                requestedModel, canonical, entry.createdEpochSeconds(), stateless);
     }
 
     private Catalogue catalogue() {

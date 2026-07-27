@@ -91,8 +91,12 @@ public class OpenAiSseWriter {
         write(DONE_FRAME);
     }
 
-    /** Whether any content delta has been written. */
-    public boolean hasSentContent() {
+    /**
+     * Whether anything has been written yet — i.e. whether the opening role frame
+     * has gone out. Note this becomes true on {@link #finish} as well, so it means
+     * "the stream has started", not "content was sent".
+     */
+    public boolean hasStarted() {
         return roleSent;
     }
 

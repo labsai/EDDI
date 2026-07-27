@@ -60,9 +60,9 @@ class OpenAiConversationBridgeTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final AgentModelResolver.ResolvedModel statefulModel = new AgentModelResolver.ResolvedModel(
-            AGENT_ID_SUPPORT, Environment.production, "Support", "support-a3f9c1", false);
+            AGENT_ID_SUPPORT, Environment.production, "Support", "support-a3f9c1", "support-a3f9c1", 0L, false);
     private final AgentModelResolver.ResolvedModel statelessModel = new AgentModelResolver.ResolvedModel(
-            AGENT_ID_SUPPORT, Environment.production, "Support", "support-a3f9c1:stateless", true);
+            AGENT_ID_SUPPORT, Environment.production, "Support", "support-a3f9c1:stateless", "support-a3f9c1:stateless", 0L, true);
 
     @BeforeEach
     void setUp() throws Exception {
@@ -113,6 +113,30 @@ class OpenAiConversationBridgeTest {
             handler.onSkipped(snapshot);
             return null;
         }).when(conversationService).say(any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    /** Drive sayStreaming's handler with the given script. */
+    private void givenStreamingEmits(java.util.function.Consumer<IConversationService.StreamingResponseHandler> script)
+            throws Exception {
+        doAnswer(invocation -> {
+            script.accept(invocation.getArgument(5));
+            return null;
+        }).when(conversationService).sayStreaming(any(), anyBoolean(), anyBoolean(), any(), any(), any());
+    }
+
+    /** A prepared stateless turn — no store interaction needed. */
+    private OpenAiConversationBridge.PreparedTurn statelessTurn() throws Exception {
+        return bridge.prepare(statelessModel, simpleRequest(), headers(null), USER_ID);
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int index = haystack.indexOf(needle);
+        while (index >= 0) {
+            count++;
+            index = haystack.indexOf(needle, index + needle.length());
+        }
+        return count;
     }
 
     private SimpleConversationMemorySnapshot snapshotWithText(String text, ConversationState state) {
@@ -398,6 +422,66 @@ class OpenAiConversationBridgeTest {
                 () -> bridge.say(turn, statefulModel, USER_ID, headers("chat-a"), simpleRequest()));
 
         verify(conversationService, times(2)).say(any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    // ─── streaming ───
+
+    @Test
+    void stream_emitsSnapshotTextOnlyWhenNoTokenArrived() throws Exception {
+        // Rule-based agents produce text at onComplete, not as tokens.
+        givenStreamingEmits(handler -> handler.onComplete(snapshotWithText("block reply", ConversationState.READY)));
+        var turn = statelessTurn();
+        var out = new java.io.ByteArrayOutputStream();
+
+        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L));
+
+        assertTrue(out.toString(java.nio.charset.StandardCharsets.UTF_8).contains("block reply"));
+    }
+
+    @Test
+    void stream_doesNotRepeatSnapshotTextAfterTokens() throws Exception {
+        // Emitting both would deliver the whole reply twice.
+        givenStreamingEmits(handler -> {
+            handler.onToken("stream");
+            handler.onToken("ed");
+            handler.onComplete(snapshotWithText("streamed", ConversationState.READY));
+        });
+        var turn = statelessTurn();
+        var out = new java.io.ByteArrayOutputStream();
+
+        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L));
+
+        String body = out.toString(java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(1, countOccurrences(body, "\"content\":\"stream\""));
+        assertFalse(body.contains("\"content\":\"streamed\""), "the snapshot text must not follow the tokens");
+    }
+
+    @Test
+    void stream_errorWithNullMessage_doesNotWriteTheWordNull() throws Exception {
+        // NPEs and similar carry a null message; "⚠️ null" is what the user would
+        // otherwise read.
+        givenStreamingEmits(handler -> handler.onError(new NullPointerException()));
+        var turn = statelessTurn();
+        var out = new java.io.ByteArrayOutputStream();
+
+        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L));
+
+        String body = out.toString(java.nio.charset.StandardCharsets.UTF_8);
+        assertFalse(body.contains("null"), "got: " + body);
+        assertTrue(body.contains("NullPointerException"));
+    }
+
+    @Test
+    void stream_alwaysTerminates_evenWhenTheHandlerNeverFires() throws Exception {
+        givenStreamingEmits(handler -> {
+            // Deliberately silent: an undocumented path must not hang the client.
+        });
+        var turn = statelessTurn();
+        var out = new java.io.ByteArrayOutputStream();
+
+        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L));
+
+        assertTrue(out.toString(java.nio.charset.StandardCharsets.UTF_8).endsWith("data: [DONE]\n\n"));
     }
 
     // ─── request validation ───

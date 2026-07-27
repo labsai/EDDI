@@ -109,6 +109,16 @@ public class OpenAiConversationBridge {
         turnTimer = meterRegistry.timer("eddi.openai.request.duration");
     }
 
+    /**
+     * Count one finished turn. {@code outcome} separates the states an operator
+     * needs to tell apart — a wave of {@code paused} means reviewers are behind, a
+     * wave of {@code busy} means clients are racing themselves, and neither is an
+     * error.
+     */
+    private void countTurn(String mode, String outcome) {
+        meterRegistry.counter("eddi.openai.requests", "mode", mode, "outcome", outcome).increment();
+    }
+
     /** One prepared turn: which conversation to talk to, and what to say. */
     public record PreparedTurn(String conversationId, InputData inputData, boolean stateless) {
     }
@@ -243,8 +253,11 @@ public class OpenAiConversationBridge {
     public TurnOutcome say(PreparedTurn turn, AgentModelResolver.ResolvedModel model,
                            String userId, Map<String, String> headers, ChatCompletionRequest request) {
         long start = System.nanoTime();
+        String outcomeTag = "error";
         try {
-            return render(sendAndWait(turn.conversationId(), turn.inputData()));
+            TurnOutcome outcome = render(sendAndWait(turn.conversationId(), turn.inputData()));
+            outcomeTag = outcome.paused() ? "paused" : "ok";
+            return outcome;
         } catch (IConversationService.ConversationEndedException e) {
             if (turn.stateless()) {
                 throw OpenAiApiException.serverError(null, "The conversation ended before it could be used.");
@@ -253,17 +266,24 @@ public class OpenAiConversationBridge {
             deleteMapping(intent, userId);
             String fresh = getOrCreateConversation(model, userId, intent);
             try {
-                return render(sendAndWait(fresh, turn.inputData()));
+                TurnOutcome outcome = render(sendAndWait(fresh, turn.inputData()));
+                outcomeTag = outcome.paused() ? "paused" : "ok";
+                return outcome;
             } catch (Exception retryFailure) {
-                throw asApiException(retryFailure);
+                OpenAiApiException apiException = asApiException(retryFailure);
+                outcomeTag = apiException.getStatus() == 429 ? "busy" : "error";
+                throw apiException;
             }
         } catch (Exception e) {
-            throw asApiException(e);
+            OpenAiApiException apiException = asApiException(e);
+            outcomeTag = apiException.getStatus() == 429 ? "busy" : "error";
+            throw apiException;
         } finally {
             if (turn.stateless()) {
                 endQuietly(turn.conversationId());
             }
             turnTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+            countTurn("sync", outcomeTag);
         }
     }
 
@@ -302,6 +322,11 @@ public class OpenAiConversationBridge {
         } catch (TimeoutException e) {
             throw OpenAiApiException.timeout("The agent did not respond within "
                     + config.getRequestTimeoutSeconds() + " seconds.");
+        } catch (InterruptedException e) {
+            // Restore the flag before unwinding: swallowing it leaves the worker
+            // thread looking healthy to the pool while its shutdown signal is gone.
+            Thread.currentThread().interrupt();
+            throw OpenAiApiException.serverError(null, "The request was interrupted before the agent replied.");
         }
     }
 
@@ -342,6 +367,7 @@ public class OpenAiConversationBridge {
     public void stream(PreparedTurn turn, OpenAiSseWriter writer) {
         long start = System.nanoTime();
         boolean[] anyToken = {false};
+        String[] outcomeTag = {"ok"};
         try {
             conversationService.sayStreaming(turn.conversationId(), false, true, Collections.emptyList(),
                     turn.inputData(), new IConversationService.StreamingResponseHandler() {
@@ -370,6 +396,7 @@ public class OpenAiConversationBridge {
                             }
                             if (snapshot != null
                                     && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                                outcomeTag[0] = "paused";
                                 writer.content("\n\n" + PAUSE_NOTICE_PREFIX
                                         + " Conversation: " + snapshot.getConversationId());
                             }
@@ -380,6 +407,7 @@ public class OpenAiConversationBridge {
                         public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
                             boolean stillAwaiting = snapshot != null
                                     && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
+                            outcomeTag[0] = stillAwaiting ? "paused" : "busy";
                             writer.content(stillAwaiting
                                     ? STILL_AWAITING_NOTICE
                                     : "⚠️ The conversation is busy with another turn or is no longer active. "
@@ -391,13 +419,15 @@ public class OpenAiConversationBridge {
                         public void onError(Throwable error) {
                             LOGGER.errorf("OpenAI adapter stream failed for conversation %s: %s",
                                     sanitize(turn.conversationId()), error.getMessage());
-                            writer.content("\n\n⚠️ " + error.getMessage());
+                            outcomeTag[0] = "error";
+                            writer.content("\n\n⚠️ " + describe(error));
                             writer.finish(Choice.FINISH_STOP);
                         }
                     });
         } catch (Exception e) {
             OpenAiApiException apiException = asApiException(e);
-            writer.content("⚠️ " + apiException.getMessage());
+            outcomeTag[0] = apiException.getStatus() == 429 ? "busy" : "error";
+            writer.content("⚠️ " + describe(apiException));
         } finally {
             // Belt and braces: the handler terminates on every documented path,
             // but an undocumented one must not leave the client waiting forever.
@@ -406,7 +436,22 @@ public class OpenAiConversationBridge {
                 endQuietly(turn.conversationId());
             }
             turnTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+            countTurn("stream", outcomeTag[0]);
         }
+    }
+
+    /**
+     * A human-readable description of a failure. NPEs and similar carry a null
+     * message, which would otherwise reach the user as the literal text "null".
+     */
+    private static String describe(Throwable error) {
+        if (error == null) {
+            return "The agent failed for an unknown reason.";
+        }
+        String message = error.getMessage();
+        return message == null || message.isBlank()
+                ? error.getClass().getSimpleName()
+                : message;
     }
 
     /** Translate a turn failure into the OpenAI error envelope. */

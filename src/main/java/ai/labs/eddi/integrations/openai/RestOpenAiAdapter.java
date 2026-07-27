@@ -107,9 +107,11 @@ public class RestOpenAiAdapter {
     public ModelObject retrieveModel(@PathParam("modelId") String modelId) {
         requireEnabled();
         var resolved = resolveOrFail(modelId);
-        // The catalogue carries the creation timestamp; re-deriving it here would
-        // mean a second store round-trip for a field no client acts on.
-        return ModelObject.of(resolved.modelId(), 0L);
+        // The CANONICAL id, not what the caller typed. A lookup by agent name or
+        // bare slug must still report the id that GET /v1/models lists, or a
+        // client that round-trips the answer would ask for something absent from
+        // the catalogue.
+        return ModelObject.of(resolved.canonicalModelId(), resolved.createdEpochSeconds());
     }
 
     /**
@@ -145,14 +147,12 @@ public class RestOpenAiAdapter {
         if (!inFlight.tryAcquire()) {
             throw OpenAiApiException.busy("Too many concurrent requests. Please retry shortly.");
         }
-        boolean handedOffToStream = false;
         try {
             var turn = bridge.prepare(model, request, headers, userId);
             String completionId = "chatcmpl-eddi-" + UUID.randomUUID();
             long created = Instant.now().getEpochSecond();
 
             if (request.isStreaming()) {
-                handedOffToStream = true;
                 return streamingResponse(turn, completionId, request.model(), created);
             }
 
@@ -164,11 +164,13 @@ public class RestOpenAiAdapter {
                     .header(HEADER_CONVERSATION_ID, turn.conversationId())
                     .build();
         } finally {
-            // The streaming body runs after this method returns, so it releases
-            // the permit itself once the stream is done.
-            if (!handedOffToStream) {
-                inFlight.release();
-            }
+            // Released unconditionally, including on the streaming path. Handing
+            // the permit to the StreamingOutput body would leak it whenever that
+            // body never runs — a client that disconnects before serialization
+            // starts, say — and a leaked permit is never reclaimed, so the adapter
+            // would 429 permanently after enough of them. The stream acquires its
+            // own permit instead (see streamingResponse).
+            inFlight.release();
         }
     }
 
@@ -177,11 +179,21 @@ public class RestOpenAiAdapter {
      * {@code @Produces} ordering cannot decide it, and {@code X-Accel-Buffering}
      * defeats proxy buffering that would otherwise hold tokens back until the
      * response completed — which looks exactly like a hung agent.
+     * <p>
+     * The body takes its own permit, acquired and released inside one try/finally
+     * so neither can be orphaned. A stream that cannot get one degrades to a busy
+     * notice in-band rather than an HTTP error, because by the time the body runs
+     * the 200 status has already been committed.
      */
     private Response streamingResponse(OpenAiConversationBridge.PreparedTurn turn,
                                        String completionId, String model, long created) {
         StreamingOutput body = out -> {
             var writer = new OpenAiSseWriter(out, objectMapper, completionId, model, created);
+            if (!inFlight.tryAcquire()) {
+                writer.content("⚠️ Too many concurrent requests. Please retry shortly.");
+                writer.finish(Choice.FINISH_STOP);
+                return;
+            }
             try {
                 bridge.stream(turn, writer);
             } finally {
