@@ -162,12 +162,45 @@ class AgentOrchestratorBranchTest {
             when(memory.getCurrentStep()).thenReturn(step);
             when(memory.getConversationId()).thenReturn("conv-1");
             if (present) {
+                // A real Attachment, not a placeholder Object: the gate counts
+                // coerced attachments, so a stand-in would not represent a turn
+                // that actually carries a file.
+                var attachment = new ai.labs.eddi.engine.memory.model.Attachment();
+                attachment.setStorageRef("ref-current");
+                attachment.setFileName("current.pdf");
+                attachment.setMimeType("application/pdf");
+
                 IData data = mock(IData.class);
-                doReturn(List.of(new Object())).when(data).getResult();
+                doReturn(List.of(attachment)).when(data).getResult();
                 doReturn(data).when(step).getData(MemoryKeys.ATTACHMENTS);
             } else {
                 doReturn(null).when(step).getData(MemoryKeys.ATTACHMENTS);
             }
+        }
+
+        /**
+         * Stub an earlier turn that carried a file, with nothing on the current turn —
+         * the "uploaded a PDF, then asked a follow-up question" case. Also covers group
+         * members, whose private conversation gets the attachment injected on their
+         * first turn only.
+         */
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        private void withAttachmentsOnAnEarlierTurnOnly() {
+            withAttachments(false);
+            var attachment = new ai.labs.eddi.engine.memory.model.Attachment();
+            attachment.setStorageRef("ref-1");
+            attachment.setFileName("report.pdf");
+            attachment.setMimeType("application/pdf");
+
+            var previousStep = mock(IConversationMemory.IConversationStep.class);
+            IData data = mock(IData.class);
+            doReturn(List.of(attachment)).when(data).getResult();
+            doReturn(data).when(previousStep).getData(MemoryKeys.ATTACHMENTS);
+
+            var stack = mock(IConversationMemory.IConversationStepStack.class);
+            when(stack.size()).thenReturn(1);
+            when(stack.get(0)).thenReturn(previousStep);
+            when(memory.getPreviousSteps()).thenReturn(stack);
         }
 
         private boolean hasReadAttachmentTool(List<Object> tools) {
@@ -197,11 +230,30 @@ class AgentOrchestratorBranchTest {
             assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
         }
 
+        /**
+         * Attachment reading is not whitelist-governed. Excluding it never stopped the
+         * model seeing the file — AttachmentForwarder inlines a document on the turn it
+         * arrives with no whitelist check — it only stopped recall on later turns. And
+         * "readattachment" was not offerable in the Manager before 6.2.0, so every
+         * whitelist written until then omits it by construction.
+         */
         @Test
-        @DisplayName("NOT added when whitelist excludes it")
-        void notAddedWhenWhitelistExcludes() {
+        @DisplayName("added even when the whitelist omits it")
+        void addedWhenWhitelistOmitsIt() {
             orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
             withAttachments(true);
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+
+            assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        @Test
+        @DisplayName("still NOT added when the whitelist omits it and there are no files")
+        void notAddedWhenWhitelistOmitsItAndNoAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachments(false);
             var task = new LlmConfiguration.Task();
             task.setEnableBuiltInTools(true);
             task.setBuiltInToolsWhitelist(List.of("calculator"));
@@ -220,7 +272,7 @@ class AgentOrchestratorBranchTest {
         }
 
         @Test
-        @DisplayName("NOT added when the turn has no attachments")
+        @DisplayName("NOT added when neither this turn nor any earlier turn had attachments")
         void notAddedWithoutAttachments() {
             orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
             withAttachments(false);
@@ -228,6 +280,96 @@ class AgentOrchestratorBranchTest {
             task.setEnableBuiltInTools(true);
 
             assertFalse(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        @Test
+        @DisplayName("added when only an EARLIER turn had attachments (follow-up question about a file)")
+        void addedWhenOnlyAnEarlierTurnHadAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachmentsOnAnEarlierTurnOnly();
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+
+            assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        /**
+         * enableBuiltInTools defaults to false — every agent the wizards create has it
+         * off — so gating attachment reading behind it meant an uploaded file was
+         * readable for exactly one turn and never again. It reads a blob already stored
+         * under this conversation, so it is not the kind of outbound, billable
+         * capability that switch exists to gate.
+         */
+        @Test
+        @DisplayName("added when the conversation has files even with built-in tools OFF")
+        void addedWithBuiltInToolsDisabled() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachmentsOnAnEarlierTurnOnly();
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(false);
+
+            List<Object> tools = orchestrator.collectEnabledTools(task, memory);
+
+            assertTrue(hasReadAttachmentTool(tools));
+            // …and nothing else comes along for the ride.
+            assertEquals(1, tools.size());
+        }
+
+        @Test
+        @DisplayName("NOT added with built-in tools OFF and no files anywhere in the conversation")
+        void notAddedWithBuiltInToolsDisabledAndNoAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachments(false);
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(false);
+
+            assertTrue(orchestrator.collectEnabledTools(task, memory).isEmpty());
+        }
+
+        /**
+         * The tool can only serve what the attachment store holds. An inline payload is
+         * never persisted and a URL is not in the store, so both are unreadable through
+         * it — and both are already inlined by AttachmentForwarder on this turn.
+         * Offering a tool whose listAttachments reports nothing would only contradict
+         * the document sitting in the same message.
+         */
+        @Test
+        @DisplayName("NOT added when this turn's only attachments cannot be fetched from the store")
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        void notAddedForInlineOrUrlOnlyAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            var step = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(step);
+            when(memory.getConversationId()).thenReturn("conv-1");
+
+            var inline = new ai.labs.eddi.engine.memory.model.Attachment();
+            inline.setMimeType("application/pdf");
+            inline.setFileName("inline.pdf");
+            inline.setBase64Data("JVBERi0=");
+            var byUrl = new ai.labs.eddi.engine.memory.model.Attachment();
+            byUrl.setMimeType("image/png");
+            byUrl.setUrl("https://example.com/a.png");
+
+            IData data = mock(IData.class);
+            doReturn(List.of(inline, byUrl)).when(data).getResult();
+            doReturn(data).when(step).getData(MemoryKeys.ATTACHMENTS);
+
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+
+            assertFalse(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        @Test
+        @DisplayName("added via whitelist when only an earlier turn had attachments")
+        void addedViaWhitelistWhenOnlyAnEarlierTurnHadAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachmentsOnAnEarlierTurnOnly();
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("readattachment"));
+
+            assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
         }
     }
 

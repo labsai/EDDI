@@ -84,19 +84,50 @@ class LanguageModelBuildersTest {
         private final AnthropicLanguageModelBuilder builder = new AnthropicLanguageModelBuilder();
 
         @Test
-        @DisplayName("builds ChatModel")
-        void build() {
+        @DisplayName("builds ChatModel with explicit maxTokens, topP, topK")
+        void buildExplicitParams() {
             Map<String, String> params = new HashMap<>();
             params.put("apiKey", "sk-test");
             params.put("modelName", "claude-sonnet-4-6");
             params.put("temperature", "0.3");
             params.put("timeout", "60000");
+            params.put("maxTokens", "4096");
+            params.put("topP", "0.9");
+            params.put("topK", "40");
             params.put("logRequests", "true");
             params.put("logResponses", "true");
 
             ChatModel model = builder.build(params);
             assertNotNull(model);
         }
+
+        @Test
+        @DisplayName("builds ChatModel without maxTokens defaults to 16384")
+        void buildDefaultMaxTokens() {
+            Map<String, String> params = new HashMap<>();
+            params.put("apiKey", "sk-test");
+            params.put("modelName", "claude-sonnet-4-6");
+            params.put("temperature", "0.3");
+
+            ChatModel model = builder.build(params);
+            assertNotNull(model);
+
+            // Read the default through public API rather than reflection. There is no
+            // 'maxTokens' field to reflect on: AnthropicChatModel stores the builder's
+            // maxTokens as defaultRequestParameters.maxOutputTokens, so the old
+            // getDeclaredField("maxTokens") always threw NoSuchFieldException and the
+            // assertion inside the try was never reached — the test verified nothing
+            // for as long as it has existed.
+            //
+            // This matters more than a tidy-up: langchain4j falls back to 1024 output
+            // tokens when maxTokens is unset, which is the exact footgun
+            // DEFAULT_MAX_TOKENS exists to avoid for extended-thinking models.
+            assertEquals(Integer.valueOf(16384), model.defaultRequestParameters().maxOutputTokens());
+        }
+
+        // Lenient parsing of unparseable numeric parameters is covered by
+        // ModelParameterValuesTest — that is where the logic lives, and it runs
+        // without constructing a real HTTP client.
 
         @Test
         @DisplayName("builds StreamingChatModel")

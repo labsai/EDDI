@@ -86,6 +86,14 @@ public class GroupConversationService implements IGroupConversationService {
     private static final Logger LOGGER = Logger.getLogger(GroupConversationService.class);
     private static final Environment DEFAULT_ENV = Environment.production;
 
+    /**
+     * Default per-agent-turn timeout (seconds) when not configured via
+     * {@code protocol.agentTimeoutSeconds}. 180s covers thinking models (e.g.
+     * claude-sonnet-5) and synthesis phases comfortably. Was 60s, which caused
+     * timeouts on synthesis with extended thinking.
+     */
+    private static final int DEFAULT_AGENT_TIMEOUT_SECONDS = 180;
+
     private final IAgentGroupStore groupStore;
     private final IGroupConversationStore conversationStore;
     private final IConversationService conversationService;
@@ -1728,7 +1736,7 @@ public class GroupConversationService implements IGroupConversationService {
         // not transcript context.
 
         List<GroupDiscussionException> errors = Collections.synchronizedList(new ArrayList<>());
-        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
+        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
         int maxWaves = 100; // safety cap to prevent infinite loops
 
         // Wave loop: re-query executable tasks after each wave completes.
@@ -1979,15 +1987,25 @@ public class GroupConversationService implements IGroupConversationService {
         }
 
         TranscriptEntry verifyEntry = executeAgentTurn(verifier, gc, verifyInput, protocol, phaseIdx, phase, null, listener);
-        gc.getTranscript().add(verifyEntry);
-
-        if (listener != null) {
-            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
-                    verifier.agentId(), verifier.displayName(), verifyEntry.content(), phaseIdx, phase.name()));
-        }
 
         // Parse verification results — same three-tier fallback
         parseAndApplyVerification(gc, completedTasks, verifyEntry.content(), listener);
+
+        // Replace raw JSON with a human-readable summary for the transcript.
+        // The JSON was needed for parseAndApplyVerification above; users should
+        // see formatted pass/fail results, not raw JSON.
+        String formattedContent = formatVerificationForDisplay(verifyEntry.content());
+        TranscriptEntry displayEntry = new TranscriptEntry(
+                verifyEntry.speakerAgentId(), verifyEntry.speakerDisplayName(),
+                formattedContent, verifyEntry.phaseIndex(), verifyEntry.phaseName(),
+                verifyEntry.type(), verifyEntry.timestamp(), verifyEntry.errorReason(),
+                verifyEntry.targetAgentId());
+        gc.getTranscript().add(displayEntry);
+
+        if (listener != null) {
+            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
+                    verifier.agentId(), verifier.displayName(), formattedContent, phaseIdx, phase.name()));
+        }
     }
 
     /**
@@ -2087,14 +2105,18 @@ public class GroupConversationService implements IGroupConversationService {
             boolean anyVerified = false;
             for (Object item : items) {
                 if (item instanceof Map<?, ?> map) {
-                    String subject = map.containsKey("subject") ? String.valueOf(map.get("subject")) : null;
+                    // Test the value, not the key: a JSON "subject": null satisfies
+                    // containsKey, and String.valueOf then yields the literal "null" —
+                    // which is not null, so the guard below waves it through to a task
+                    // match that can never succeed, silently dropping the verification.
+                    String subject = stringOrNull(map.get("subject"));
                     // Read 'passed' boolean directly from JSON
                     boolean passed = true; // default to passed
                     if (map.containsKey("passed")) {
                         Object passedVal = map.get("passed");
                         passed = Boolean.TRUE.equals(passedVal) || "true".equalsIgnoreCase(String.valueOf(passedVal));
                     }
-                    String feedback = map.containsKey("feedback") ? String.valueOf(map.get("feedback")) : null;
+                    String feedback = stringOrNull(map.get("feedback"));
 
                     if (subject != null) {
                         for (TaskItem task : completedTasks) {
@@ -2115,6 +2137,86 @@ public class GroupConversationService implements IGroupConversationService {
         } catch (Exception e) {
             LOGGER.debugf("Verification JSON parse failed: %s", e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * A map value as a string, or {@code null} when the key is absent <em>or</em>
+     * explicitly null.
+     * <p>
+     * {@code containsKey} is true for a JSON {@code "subject": null}, and
+     * {@code String.valueOf} turns that into the literal four-character string
+     * "null" — which then passes every {@code != null} guard and reaches users as a
+     * task named "null". Deserialized LLM output is exactly where that happens.
+     *
+     * @param value
+     *            a value read from a deserialized JSON map
+     * @return its string form, or null
+     */
+    private static String stringOrNull(Object value) {
+        return value != null ? String.valueOf(value) : null;
+    }
+
+    /**
+     * Converts raw verification output (typically JSON) into a human-readable
+     * summary suitable for display in the UI. Falls back to the raw content if
+     * formatting fails.
+     */
+    @SuppressWarnings("unchecked")
+    private String formatVerificationForDisplay(String rawContent) {
+        if (rawContent == null || !rawContent.contains("[")) {
+            return rawContent;
+        }
+
+        try {
+            int jsonStart = rawContent.indexOf('[');
+            int jsonEnd = rawContent.lastIndexOf(']');
+            if (jsonStart < 0 || jsonEnd <= jsonStart) {
+                return rawContent;
+            }
+            String json = rawContent.substring(jsonStart, jsonEnd + 1);
+            var items = jsonSerialization.deserialize(json, List.class);
+            if (items == null || items.isEmpty()) {
+                return rawContent;
+            }
+
+            var sb = new StringBuilder("## Task Verification Results\n\n");
+            for (Object item : items) {
+                if (item instanceof Map<?, ?> map) {
+                    // Test the value, not the key — otherwise a JSON "subject": null
+                    // renders to the user as the literal word "null" instead of
+                    // falling back to "Unknown Task".
+                    String subject = Objects.requireNonNullElse(stringOrNull(map.get("subject")), "Unknown Task");
+                    boolean passed = true;
+                    if (map.containsKey("passed")) {
+                        Object passedVal = map.get("passed");
+                        passed = Boolean.TRUE.equals(passedVal) || "true".equalsIgnoreCase(String.valueOf(passedVal));
+                    }
+                    String feedback = Objects.requireNonNullElse(stringOrNull(map.get("feedback")), "");
+
+                    sb.append(passed ? "✅" : "❌").append(" **").append(subject).append("**: ");
+                    sb.append(passed ? "Passed" : "Failed").append("\n");
+                    if (!feedback.isBlank()) {
+                        sb.append(feedback).append("\n");
+                    }
+                    sb.append("\n");
+                }
+            }
+
+            // Append any text outside the JSON (e.g. "Overall Assessment: ...")
+            String afterJson = rawContent.substring(jsonEnd + 1).trim();
+            // Strip markdown code fence closing if present
+            if (afterJson.startsWith("```")) {
+                afterJson = afterJson.substring(3).trim();
+            }
+            if (!afterJson.isBlank()) {
+                sb.append(afterJson);
+            }
+
+            return sb.toString().trim();
+        } catch (Exception e) {
+            LOGGER.debugf("Failed to format verification for display: %s", e.getMessage());
+            return rawContent;
         }
     }
 
@@ -2277,7 +2379,7 @@ public class GroupConversationService implements IGroupConversationService {
             }
         }, executorService)).toList();
 
-        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
+        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
         for (int i = 0; i < futures.size(); i++) {
             try {
                 TranscriptEntry entry = futures.get(i).get(timeout, TimeUnit.SECONDS);
@@ -2436,7 +2538,7 @@ public class GroupConversationService implements IGroupConversationService {
         // Call through ConversationService with retry
         int retries = 0;
         int maxRetries = protocol.maxRetries() > 0 ? protocol.maxRetries() : 2;
-        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
+        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
 
         while (true) {
             try {

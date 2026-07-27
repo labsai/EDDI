@@ -14,6 +14,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Duration;
 import java.util.Map;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.intValue;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -21,9 +25,23 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_API_KEY = "apiKey";
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_MODEL_NAME = "modelName";
+    private static final String KEY_MAX_TOKENS = "maxTokens";
+    private static final String KEY_TOP_P = "topP";
+    private static final String KEY_TOP_K = "topK";
     private static final String KEY_TIMEOUT = "timeout";
     private static final String KEY_LOG_REQUESTS = "logRequests";
     private static final String KEY_LOG_RESPONSES = "logResponses";
+
+    /**
+     * Default max output tokens when not configured. Anthropic's langchain4j
+     * default is 1024, which is far too low for models with extended thinking (e.g.
+     * claude-sonnet-5) — thinking tokens consume the budget and leave nothing for
+     * the actual text response. 16384 matches Claude's natural output limit without
+     * extended thinking. Setting this higher has no cost impact (the model only
+     * generates what it needs); the timeout parameter is the real cost safety net,
+     * not this ceiling.
+     */
+    private static final int DEFAULT_MAX_TOKENS = 16384;
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
@@ -35,12 +53,16 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
             builder.modelName(parameters.get(KEY_MODEL_NAME));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
-        }
+        // Lenient reads: these values are typed by a user in the Manager, so a
+        // stray character is a config mistake, not a reason to fail every
+        // conversation this agent serves with an uncaught NumberFormatException.
+        Integer maxTokens = intValue(parameters, KEY_MAX_TOKENS);
+        builder.maxTokens(maxTokens != null ? maxTokens : DEFAULT_MAX_TOKENS);
+
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyDouble(parameters, KEY_TOP_P, builder::topP);
+        applyInt(parameters, KEY_TOP_K, builder::topK);
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
         }
@@ -61,12 +83,16 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
             builder.modelName(parameters.get(KEY_MODEL_NAME));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
-        }
+        // Lenient reads: these values are typed by a user in the Manager, so a
+        // stray character is a config mistake, not a reason to fail every
+        // conversation this agent serves with an uncaught NumberFormatException.
+        Integer maxTokens = intValue(parameters, KEY_MAX_TOKENS);
+        builder.maxTokens(maxTokens != null ? maxTokens : DEFAULT_MAX_TOKENS);
+
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyDouble(parameters, KEY_TOP_P, builder::topP);
+        applyInt(parameters, KEY_TOP_K, builder::topK);
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
         }

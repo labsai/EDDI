@@ -138,10 +138,10 @@ public final class ConversationOutputExtractor {
     }
 
     /**
-     * Returns {@code true} if the string is non-null, non-empty, and not
-     * purely whitespace. Combines {@link RuntimeUtilities#isNullOrEmpty}
-     * with an additional blank check to avoid treating whitespace-only
-     * content as meaningful agent output.
+     * Returns {@code true} if the string is non-null, non-empty, and not purely
+     * whitespace. Combines {@link RuntimeUtilities#isNullOrEmpty} with an
+     * additional blank check to avoid treating whitespace-only content as
+     * meaningful agent output.
      */
     private static boolean hasText(String s) {
         return !RuntimeUtilities.isNullOrEmpty(s) && !s.isBlank();

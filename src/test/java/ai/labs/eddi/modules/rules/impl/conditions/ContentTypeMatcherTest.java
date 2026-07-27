@@ -467,6 +467,41 @@ class ContentTypeMatcherTest {
 
             assertEquals(FAIL, matcher.execute(memory, List.of()));
         }
+
+        /**
+         * A HITL resume re-enters the same step of a conversation reloaded from the
+         * store, where attachments come back as plain maps rather than Attachment
+         * instances. A cast-only filter silently stopped matching content-type rules on
+         * those turns.
+         */
+        @Test
+        @DisplayName("should match the map form that a reloaded step comes back as")
+        void matchesAttachmentsReloadedFromTheStore() {
+            matcher.setConfigs(Map.of("mimeType", "image/*"));
+            List<?> persisted = List.of(Map.of(
+                    "storageRef", "r1",
+                    "fileName", "a.png",
+                    "mimeType", "image/png",
+                    "sizeBytes", 100));
+            doReturn(new Data<>("attachments", persisted)).when(currentStep)
+                    .getData(ArgumentMatchers.<MemoryKey<?>>any());
+
+            assertEquals(SUCCESS, matcher.execute(memory, List.of()));
+        }
+
+        @Test
+        @DisplayName("should not match a reloaded attachment of another type")
+        void doesNotMatchReloadedAttachmentOfAnotherType() {
+            matcher.setConfigs(Map.of("mimeType", "image/*"));
+            List<?> persisted = List.of(Map.of(
+                    "storageRef", "r1",
+                    "fileName", "report.pdf",
+                    "mimeType", "application/pdf"));
+            doReturn(new Data<>("attachments", persisted)).when(currentStep)
+                    .getData(ArgumentMatchers.<MemoryKey<?>>any());
+
+            assertEquals(FAIL, matcher.execute(memory, List.of()));
+        }
     }
 
     // ─── Clone ──────────────────────────────────────────────────

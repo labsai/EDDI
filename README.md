@@ -4,7 +4,7 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge?v=2)](https://www.bestpractices.dev/projects/12355) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/labsai/EDDI/badge)](https://securityscorecards.dev/viewer/?uri=github.com/labsai/EDDI) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade)
 
-[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-9%2C000%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E90%25-brightgreen)
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-11%2C000%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E90%25-brightgreen)
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Latest Release](https://img.shields.io/github/v/release/labsai/EDDI?label=latest&color=blue)](https://github.com/labsai/EDDI/releases) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
 
@@ -249,6 +249,7 @@ Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node librari
 
 - 🔀 **Intelligent Routing** — Direct conversations to different agents based on context, rules, and intent
 - 🗣️ **Group Conversations** — Multi-agent debates with 6 built-in discussion styles: Round Table, Peer Review, Devil's Advocate, Delphi, Debate, and Task Force
+- 🔄 **Follow-up & Continue** — After a group discussion completes, follow up with any specific member agent or continue all phases with a new question — agents retain full context across rounds
 - 💬 **Slack Integration** — Deploy agents to Slack channels and run multi-agent debates directly in threads
 - 🪆 **Nested Groups** — Compose groups of groups for tournament brackets, red-team vs blue-team, and panel reviews
 - 🤖 **Dynamic Agents** — Create, recruit, and delegate to new agents at runtime during group discussions with configurable guardrails
@@ -264,6 +265,11 @@ Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node librari
 | **Enterprise Cloud** | Azure OpenAI · Amazon Bedrock · Oracle GenAI · Google Vertex AI       |
 | **Self-Hosted**      | Ollama · Jlama · Hugging Face                                         |
 | **Compatible**       | Any OpenAI-compatible endpoint (DeepSeek, Cohere, etc.) via `baseUrl` |
+
+- 🔀 **Multi-Model Cascading** — Start with cheap/fast models, escalate to powerful ones based on confidence ([details](#-smart-model-cascading))
+- 📋 **JSON Response Mode** — `jsonResponseFormat` policy (`auto` | `on` | `off`) negotiates structured JSON output across all execution paths with provider-aware rules
+- 🔧 **Tool Calling** — Native function/tool calling across all providers that support it
+- 🗄️ **Tool Result Caching** — Per-tool cache scoping (`GLOBAL`, `USER`, `CONVERSATION`) to avoid redundant calls; fail-safe to `USER` on misconfiguration
 
 ### 🔗 Standards & Interoperability
 
@@ -286,12 +292,13 @@ EDDI implements open standards — not proprietary APIs:
 - 📝 **Rolling Summary** — Incremental LLM-powered summarization of older turns with a **Conversation Recall Tool** for drill-back into compressed history
 - 🔧 **Property Extraction** — Config-driven slot-filling with `longTerm` / `conversation` / `step` scoping — EDDI's importance extraction mechanism
 - 🛡️ **Memory Policy (Commit Flags)** — Strict write discipline marks failed task output as uncommitted (hidden from LLM context) and injects concise error digests for graceful degradation
+- 🧹 **Tool Context Ceiling** — `maxToolContextTokens` caps tool output within a single turn (default 60k tokens), evicting oldest tool exchanges to prevent provider context-window errors while preserving tool-call pairing
 - 🔄 **Conversation State** — Full history with undo/redo support
 
 ### 📚 RAG (Retrieval-Augmented Generation)
 
 - 📦 **7 Embedding Providers** — OpenAI, Ollama, Azure OpenAI, Mistral, Bedrock, Cohere, Vertex AI
-- 🗄️ **5 Vector Stores** — pgvector, In-Memory, MongoDB Atlas, Elasticsearch, Qdrant
+- 🗄️ **6 Vector Stores** — pgvector, Chroma, In-Memory, MongoDB Atlas, Elasticsearch, Qdrant
 - 🌐 **httpCall RAG** — Zero-infrastructure RAG via any search API (BM25, Elasticsearch, custom)
 - 📥 **REST Ingestion API** — Async document ingestion with status tracking
 
@@ -310,6 +317,17 @@ EDDI implements open standards — not proprietary APIs:
 | 🔙 **Conversation Recall**                     | Drill back into summarized conversation history                               |
 | 📎 **Multimodal Attachments**                  | Image, PDF, audio, and video input with MIME-based routing                    |
 
+### 📎 Multimodal Attachments
+
+- 📤 **3 Input Paths** — URL reference, base64 inline, or file upload (`POST /conversations/{id}/attachments` with multipart/form-data)
+- 🗄️ **DB-Agnostic Storage** — GridFS (MongoDB) or bytea (PostgreSQL) via `IAttachmentStore` SPI with grant-based access control and per-tenant quotas
+- 📄 **Hybrid PDF Extraction** — PDFs are auto-extracted to text (shared `AttachmentTextExtractor`) and forwarded as inline context to any LLM, not just vision models
+- 🔍 **readAttachment Tool** — Agents can recall attachments from earlier turns in multi-turn conversations
+- 🧠 **Model Capability Gating** — `ModelCapabilityService` routes images to vision-capable LLMs and falls back to text metadata for others
+- 🔀 **Content-Type Routing** — `contentTypeMatcher` behavior rule condition routes `image/*`, `application/pdf`, etc. to different workflows
+- 👥 **Group Parity** — Attachments fan out with grant injection so group member agents can access the original user's files
+- 🗑️ **GDPR Cleanup** — `deleteByConversation()` cascades to attachment storage when conversations are erased
+
 ### ⏰ Scheduled Execution & Heartbeats
 
 - 🫀 **Heartbeat Triggers** — Periodic agent wake-ups at configurable intervals for proactive behavior (inspired by [OpenClaw's](https://openclaw.ai) heartbeat architecture)
@@ -324,6 +342,18 @@ EDDI implements open standards — not proprietary APIs:
 - 📊 **4 Confidence Strategies** — Structured output, heuristic, judge model, or none
 - 💰 **Per-Conversation Budgets** — Automatic cost tracking with budget caps and eviction
 - 🏢 **Tenant Cost Ceilings** — Monthly cost budgets per tenant with automatic enforcement
+- 🔢 **Tenant Agent Quotas** — `maxAgentsPerTenant` enforcement on agent deployment
+
+### ✋ Human-in-the-Loop Governance
+
+- 🚦 **Turn-Level Approval** — `PAUSE_CONVERSATION` action halts the entire pipeline; new user input returns `409 Conflict` until a human resumes
+- 🔧 **Per-Tool-Call Gating** — Individual tool invocations can require human approval before execution, with glob-pattern allow/exempt lists across built-in, HTTP, MCP, A2A, dynamic, and memory tools
+- 👥 **Group Phase Approval** — Multi-agent discussion phases can require human sign-off at `PHASE` or `TASK` granularity
+- ⏱️ **Timeout Policies** — `WAIT_INDEFINITELY`, `AUTO_APPROVE`, `AUTO_REJECT`, or `ABORT` when humans don't respond in time
+- 🔁 **No-Progress Guard** — Detects infinite approval loops (identical pause fingerprints after automated decisions) and breaks the cycle
+- 💬 **Slack Approvals** — Interactive Block Kit cards with redacted argument previews and approver whitelists
+- 🔌 **MCP Approvals** — External clients can list pending approvals and approve/reject via MCP tools
+- 🔄 **Crash Recovery** — Pending approvals survive server restarts; timeout timers are re-armed automatically
 
 ### 🔐 Enterprise Security & Compliance
 
@@ -376,6 +406,7 @@ EDDI implements open standards — not proprietary APIs:
 - 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits spans with `task.id`, `task.type`, `conversation.id`, and `agent.id`
 - 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
 - 🔄 **NATS JetStream** — Async event bus for distributed processing
+- 🛟 **Error Handling & Recovery** — Automatic retry with exponential backoff, MCP circuit breakers (3 failures / 60s cooldown), LLM response validation (`onEmpty` / `onTruncation` / `onRefusal`), streaming timeout retry, and admin endpoint to reset stuck conversations
 - ⚡ **Virtual Threads** — Java 25 virtual threads for true OS-level concurrency (no Python GIL or Node.js event loop bottleneck)
 - 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL; switch with one env var. Single Docker image for both
 - 🏗️ **Red Hat Certified** — Container certification with automated preflight checks in CI/CD
@@ -411,6 +442,7 @@ EDDI implements open standards — not proprietary APIs:
 | **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention                  |
 | **[Memory Policy](docs/memory-policy.md)**                   | Commit flags and strict write discipline            |
 | **[Model Cascading](docs/model-cascade.md)**                 | Cost-optimized multi-model routing                 |
+| **[Human-in-the-Loop](docs/hitl.md)**                        | Approval gates, timeout policies, Slack & MCP surfaces |
 | **[Scheduling & Heartbeats](docs/scheduling.md)**            | Cron schedules, heartbeats, dream consolidation    |
 | **[Agent Sync](docs/agent-sync-guide.md)**                   | Live instance-to-instance sync and upgrade imports |
 | **[Import / Export](docs/import-export-an-agent.md)**        | ZIP-based agent portability and merge              |

@@ -5,6 +5,101 @@
 
 ---
 
+## 🔒 fix(ci): remove accidentally-committed langchain4j-mcp decompiled sources (2026-07-27)
+
+**Repo:** EDDI (`feat/v6.2.0-prep`)
+
+Both the **Dependency Review** and **Trivy Filesystem Scan** CI checks were failing on this branch with 3 HIGH-severity Jackson CVEs (GHSA-r7wm-3cxj-wff9, CVE-2026-54512, CVE-2026-54513).
+
+**Root cause:** commit `702e2f79b` (`fix: serialize SSE log events as JSON instead of toString()`, 2026-07-24) accidentally committed a decompiled copy of the `langchain4j-mcp` jar into a new top-level `lc4jmcp/` directory (123 files) — leftover from decompiling the jar to debug the `toString()` logging issue, swept up by a broad `git add`. The directory sat outside `src/main/java`, was never referenced by `pom.xml` or any source file, and Maven never compiled it — but its embedded `META-INF/maven/dev.langchain4j/langchain4j-mcp/pom.xml` (the jar's own build-time manifest) declared `jackson-databind:2.21.3` / `jackson-core:2.21.3`, which both scanners picked up as if it were a real dependency manifest.
+
+**Verification:** `./mvnw dependency:tree -Dincludes=com.fasterxml.jackson.core` confirms the actual resolved build uses `jackson-databind:2.22.0` / `jackson-core:2.22.0` (patched, via `quarkus-jackson:3.37.4` and `langchain4j:1.18.0`) — this was never a real vulnerability in the shipped app, just dead decompiled code confusing the scanners.
+
+**Fix:** `git rm -r lc4jmcp` — no source or config referenced it, so removal is inert.
+
+---
+
+## 🧪 test(ui): close entity streams and assert real content in welcome/workforce tests (2026-07-26)
+
+**Repo:** EDDI (`feat/v6.2.0-prep`)
+
+Copilot review feedback on `RestWelcomeResourceTest` / `RestWorkforceResourceTest`: the tests left the returned `InputStream` entity open and never read it, despite a display name promising a "readable" entity.
+
+**Changes (test-only, no production code touched):**
+- Added a private `readEntity(Response)` helper to both test classes — asserts a non-null `InputStream` entity, reads it fully inside try-with-resources (closing the classpath stream), returns UTF-8 content
+- `viewHtmlReturnsOkWithEntity` now asserts the body contains `<html`, matching its display name instead of only checking the entity type
+- `viewDefaultAndViewHtmlServeSameShell` now compares the two bodies for equality — previously it only asserted both entities were non-null, which never actually proved both endpoints serve the same shell
+
+**Design decision:** assert on `<html>` rather than any Vite-generated markup. `welcome.html` / `workforce.html` are SPA shells regenerated on every Manager/chat-UI asset update, so hashed asset filenames or inline styles would make content-specific assertions stale on the next `chore: update Manager UI assets` commit.
+
+**Files:** `RestWelcomeResourceTest.java`, `RestWorkforceResourceTest.java` (6 tests, all green)
+
+**Noted, not fixed:** `RestManagerResourceTest` wraps several calls in `try { … } catch (Exception e) { /* expected */ }`, which passes regardless of whether the code under test behaves correctly. Out of scope for this review fixup — worth tightening separately.
+
+---
+
+## 🐛 fix(memory): orphaned ConversationDescriptors on conversation deletion (2026-07-24)
+
+**Repo:** EDDI (`feat/v6.2.0-prep`)
+
+ConversationDescriptors (created at conversation start by `ConversationSetup`) were never cleaned up when a conversation was permanently deleted, causing "Memory snapshot not found — Descriptor is orphaned" warnings on every conversation listing.
+
+**Root cause:** `ConversationDescriptorStore.deleteAllDescriptor()` existed but was never called in any deletion path. Three separate hard-delete paths all deleted the memory snapshot but left the descriptor behind.
+
+**Fixes (all in production code):**
+- **RestConversationStore.deleteConversationLog** — added `conversationDescriptorStore.deleteAllDescriptor()` after permanent snapshot deletion
+- **RestConversationStore.permanentlyDeleteEndedConversationLogs** — added descriptor cleanup in both the happy path (old enough to delete) and the catch path (orphaned snapshot without DocumentDescriptor)
+- **GdprComplianceService.deleteUserData** — added `IConversationDescriptorStore` dependency, hoisted conversation ID resolution before step 2 (eliminating a duplicate DB query), added step 4a to delete descriptors per-conversation before the bulk snapshot delete
+
+**Files:**
+- `RestConversationStore.java` — 3 `deleteAllDescriptor` calls added
+- `GdprComplianceService.java` — new dependency, hoisted ID resolution, new step 4a, updated Javadoc
+- `RestConversationStoreTest.java` — 9 verify assertions added (positive + negative)
+- `GdprComplianceServiceTest.java` — mock added, constructors updated, `inOrder` verification for deletion ordering
+
+**Design decision:** soft-delete (`deletePermanently=false`) does NOT touch the descriptor — the `DocumentDescriptorFilter` JAX-RS interceptor still handles soft-deletion via its existing mechanism. Only hard-deletes clean up the ConversationDescriptor.
+
+---
+
+## 🐛 fix(llm,group): empty task results, maxTokens defaults, verification display (2026-07-24)
+
+**Repo:** EDDI (`feat/v6.2.0-prep`)
+
+Group conversations with Anthropic thinking models (e.g. `claude-sonnet-5`) produced empty task results and raw JSON in the UI. Root cause: langchain4j's default `maxTokens=1024` was consumed entirely by thinking tokens, leaving nothing for the response text.
+
+**Bug fixes:**
+- **AnthropicLanguageModelBuilder** — added `maxTokens`, `topP`, `topK` support; default `maxTokens=16384`
+- **OpenAILanguageModelBuilder** — added `maxTokens` support (was missing)
+- **LlmTask** — null/blank response skips output creation (no empty bubbles)
+- **GroupConversationService** — verification JSON → human-readable ✅/❌ summaries
+- **ConversationLogGenerator** — null-safety on `KEY_TEXT` entries
+
+**Documentation:** `docs/langchain.md` — Output Token Limits section, provider matrix, updated examples
+
+**Tests:** Anthropic maxTokens, blank output guard, verification formatting, null text filtering
+
+---
+
+## 📝 README: add HITL section, JSON mode, tool context ceiling (2026-07-23)
+
+**Repo:** EDDI (`feat/v6.2.0-prep`)
+
+The README's Features section was missing Human-in-the-Loop Governance entirely — despite HITL being a Phase 9b completed feature with a 479-line dedicated doc (`docs/hitl.md`). This was the biggest gap found after a systematic comparison of the README against `AGENTS.md` completed features, `docs/changelog.md`, and all documentation files.
+
+**Changes to `README.md`:**
+- **Added `### 🛑 Human-in-the-Loop Governance` section** (8 bullets) between Smart Model Cascading and Enterprise Security — covers turn-level approval, per-tool-call gating, group phase approval, timeout policies, no-progress guard, Slack/MCP approval surfaces, and crash recovery
+- **Added HITL link to Documentation table** — `docs/hitl.md` was not linked
+- **Added JSON Response Mode** to LLM Provider Support — `jsonResponseFormat` policy (`auto`/`on`/`off`) with provider-aware negotiation
+- **Added Tool Context Ceiling** to Memory & Context Management — `maxToolContextTokens` (default 60k) prevents provider context-window errors from tool loops
+- **Added Tool Calling and Multi-Model Cascading cross-reference** under LLM Provider Support
+
+**What was deliberately NOT added** (internal hardening, not README material):
+- Constant-time HMAC, versioned audit HMAC v2, tool-cache scope fail-safe, HTTP logging guard, SSE secret redaction, budget enforcement warnings, stream resilience — these belong in release notes
+- Provider count stays at 12 — verified against `docs/langchain.md` (the authoritative source per §2 rule 7); Vertex AI is a sub-type of Gemini, not a separate provider
+- `docs/template-preview.md` link not added — file doesn't exist yet
+
+---
+
 ## 🧵 Model registry: a rotation landing mid-build could re-cache a stale model (2026-07-23)
 
 **Repo:** EDDI (`fix/chatmodel-stale-rebuild-race`)

@@ -33,8 +33,15 @@ public class AttachmentTextExtractor {
 
     private static final Logger LOGGER = Logger.getLogger(AttachmentTextExtractor.class);
 
-    /** Fallback cap when configuration yields a non-positive value. */
-    public static final int DEFAULT_MAX_CHARS = 10_000;
+    /**
+     * Fallback cap when configuration yields a non-positive value (~12k tokens).
+     * <p>
+     * Kept in step with {@code LlmConfiguration.ToolResponseLimits#defaultMaxChars}
+     * and {@code eddi.attachments.extraction.max-chars}: an extracted document goes
+     * straight into a tool response, so a stricter cap here just clamps the file
+     * before the layer that actually guards the context window gets a say.
+     */
+    public static final int DEFAULT_MAX_CHARS = 50_000;
 
     private static final String TRUNCATION_SUFFIX_FMT = "\n\n[Content truncated - showing first %d characters]";
 
@@ -43,7 +50,7 @@ public class AttachmentTextExtractor {
     @Inject
     public AttachmentTextExtractor(
             @ConfigProperty(name = "eddi.attachments.extraction.max-chars",
-                            defaultValue = "10000") int defaultMaxChars) {
+                            defaultValue = "50000") int defaultMaxChars) {
         this.defaultMaxChars = defaultMaxChars > 0 ? defaultMaxChars : DEFAULT_MAX_CHARS;
     }
 

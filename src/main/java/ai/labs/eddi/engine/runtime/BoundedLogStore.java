@@ -319,24 +319,67 @@ public class BoundedLogStore {
     // ==================== Private Helpers ====================
 
     /**
-     * Format a LogRecord's message, resolving {0},{1}... placeholders from the
-     * record's parameters array using a standard Formatter. Avoids deprecated
-     * ExtLogRecord.getFormattedMessage().
+     * Format a LogRecord's message, resolving placeholders from the record's
+     * parameters array.
+     *
+     * JBoss LogManager's ExtLogRecord supports both {@code {0},{1}...}
+     * (MessageFormat) and {@code %s,%d...} (printf) styles via
+     * {@link org.jboss.logmanager.ExtLogRecord#getFormattedMessage()}. For plain
+     * JUL LogRecords, we fall back to manual MessageFormat.
      */
     private static String formatRecord(java.util.logging.LogRecord record) {
         String msg = record.getMessage();
         if (msg == null)
             return "";
 
-        // Resolve {0}, {1}, ... placeholders using MessageFormat
         Object[] params = record.getParameters();
+
+        // 1. Try ExtLogRecord's built-in getFormattedMessage() first
+        if (record instanceof org.jboss.logmanager.ExtLogRecord extRecord) {
+            try {
+                String formatted = extRecord.getFormattedMessage();
+                if (formatted != null && !formatted.equals(msg)) {
+                    return formatted;
+                }
+            } catch (Exception _) {
+                // fall through to manual formatting
+            }
+        }
+
+        // 2. If getFormattedMessage() returned raw msg or wasn't ExtLogRecord, format
+        // manually
         if (params != null && params.length > 0) {
+            // Any '%' is enough to attempt printf — String.format throws on a
+            // malformed pattern and we fall through, so it can decide for itself.
+            //
+            // Enumerating specifiers missed every indexed, padded or grouped form:
+            // %1$s, %02d, %,d, %5.2f, %b, %e. Those matter because the MessageFormat
+            // attempt below does NOT throw on them — with no {0} placeholders it
+            // returns the pattern unchanged, so the String.format fallback further
+            // down is never reached and the raw "%1$s" is what reaches the viewer.
+            if (msg.indexOf('%') >= 0) {
+                try {
+                    return String.format(msg, params);
+                } catch (Exception _) {
+                    // ignore and try MessageFormat
+                }
+            }
+
+            // Try MessageFormat ({0}, {1}, etc.)
             try {
                 return java.text.MessageFormat.format(msg, params);
             } catch (Exception _) {
-                return msg; // fallback to raw pattern
+                // fall through to String.format fallback
+            }
+
+            // Fallback: try String.format
+            try {
+                return String.format(msg, params);
+            } catch (Exception _) {
+                return msg;
             }
         }
+
         return msg;
     }
 

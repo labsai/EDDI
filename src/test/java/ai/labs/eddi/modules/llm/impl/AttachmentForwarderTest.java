@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENTS;
@@ -96,6 +97,103 @@ class AttachmentForwarderTest {
             List<ChatMessage> messages = messages(new SystemMessage("s"), AiMessage.from("a"));
             forwarder.forward(messages, memory, "openai", "gpt-4o");
             assertEquals(2, messages.size());
+        }
+    }
+
+    // ==================== Earlier-turn attachments ====================
+
+    /**
+     * A file is inlined only on the turn it arrives. On later turns the model must
+     * still be told the file exists, or it answers that nothing was ever shared.
+     */
+    @Nested
+    class EarlierTurns {
+
+        @Test
+        void turnWithoutAttachments_notesFilesFromEarlierTurns() {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            mockPreviousTurnAttachments(storedPdf("ref-1", "Panera_Valuation.pdf"));
+            List<ChatMessage> messages = messages(UserMessage.from("tl;dr of the pdf"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size());
+            String note = ((TextContent) enhanced.contents().get(1)).text();
+            assertTrue(note.contains("Panera_Valuation.pdf"), note);
+            assertTrue(note.contains("application/pdf"), note);
+            assertTrue(note.contains("readAttachment"), note);
+            // The document itself stays out of the prompt — only the pointer is added.
+            assertFalse(note.contains("%PDF"), note);
+            verifyNoInteractions(httpClient);
+        }
+
+        /**
+         * A HITL resume re-enters the SAME step of a conversation reloaded from the
+         * store, so "current step" does not imply "live objects" — the entries are
+         * plain maps there. Casting instead of coercing dropped every attachment on a
+         * resumed turn, silently un-attaching the file the user was approving.
+         */
+        @Test
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void currentStepReloadedFromTheStore_stillForwardsTheAttachment() throws Exception {
+            byte[] pdf = tinyPdf("Resumed after approval");
+            when(store.load(eq("ref-1"), any())).thenReturn(pdf);
+
+            // The map form Jackson hands back for a persisted Attachment.
+            Map<String, Object> persisted = new java.util.HashMap<>();
+            persisted.put("storageRef", "ref-1");
+            persisted.put("fileName", "report.pdf");
+            persisted.put("mimeType", "application/pdf");
+            persisted.put("sizeBytes", pdf.length);
+
+            IData data = mock(IData.class);
+            when(data.getResult()).thenReturn(List.of(persisted));
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(data);
+
+            List<ChatMessage> messages = messages(UserMessage.from("Summarize it"));
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size(), "the reloaded attachment must still reach the model");
+        }
+
+        @Test
+        void turnWithoutAttachments_andNoEarlierFiles_leavesMessageUntouched() {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(memory.getPreviousSteps()).thenReturn(null);
+            List<ChatMessage> messages = messages(UserMessage.from("Hi"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage unchanged = (UserMessage) messages.get(0);
+            assertEquals(1, unchanged.contents().size());
+        }
+
+        @Test
+        void turnWithItsOwnAttachments_doesNotAlsoAppendTheEarlierTurnNote() {
+            mockAttachments(urlImage());
+            mockPreviousTurnAttachments(storedPdf("ref-1", "earlier.pdf"));
+            List<ChatMessage> messages = messages(UserMessage.from("Describe"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            // Original text + the image — no reminder note piled on top.
+            assertEquals(2, enhanced.contents().size());
+            assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
+        }
+
+        @Test
+        void noUserMessageToAnnotate_isANoOp() {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            mockPreviousTurnAttachments(storedPdf("ref-1", "earlier.pdf"));
+            List<ChatMessage> messages = messages(new SystemMessage("s"), AiMessage.from("a"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            assertEquals(2, messages.size());
+            assertInstanceOf(SystemMessage.class, messages.get(0));
         }
     }
 
@@ -530,6 +628,31 @@ class AttachmentForwarderTest {
         IData data = mock(IData.class);
         when(data.getResult()).thenReturn(List.of(attachments));
         when(currentStep.getData(ATTACHMENTS)).thenReturn(data);
+    }
+
+    /**
+     * Stub {@code memory.getPreviousSteps()} with a single earlier step carrying
+     * the given attachments.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private void mockPreviousTurnAttachments(Attachment... attachments) {
+        IConversationMemory.IConversationStep step = mock(IConversationMemory.IConversationStep.class);
+        IData data = mock(IData.class);
+        when(data.getResult()).thenReturn(List.of(attachments));
+        when(step.getData(ATTACHMENTS)).thenReturn(data);
+
+        IConversationMemory.IConversationStepStack stack = mock(IConversationMemory.IConversationStepStack.class);
+        when(stack.size()).thenReturn(1);
+        when(stack.get(0)).thenReturn(step);
+        when(memory.getPreviousSteps()).thenReturn(stack);
+    }
+
+    private static Attachment storedPdf(String ref, String fileName) {
+        Attachment att = new Attachment();
+        att.setStorageRef(ref);
+        att.setFileName(fileName);
+        att.setMimeType("application/pdf");
+        return att;
     }
 
     private static byte[] tinyPdf(String text) throws Exception {

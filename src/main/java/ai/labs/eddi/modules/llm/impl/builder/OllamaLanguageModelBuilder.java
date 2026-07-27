@@ -14,6 +14,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Duration;
 import java.util.Map;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -34,9 +35,7 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
             builder.modelName(parameters.get(KEY_MODEL));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
-        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
         }
@@ -57,9 +56,7 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
             builder.modelName(parameters.get(KEY_MODEL));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
-        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
         }

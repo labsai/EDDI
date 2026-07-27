@@ -12,6 +12,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.io.IOException;
 import java.util.Map;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -55,12 +57,8 @@ public class OracleGenAiLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_COMPARTMENT_ID))) {
             builder.compartmentId(parameters.get(KEY_COMPARTMENT_ID));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_MAX_TOKENS))) {
-            builder.maxTokens(Integer.parseInt(parameters.get(KEY_MAX_TOKENS)));
-        }
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyInt(parameters, KEY_MAX_TOKENS, builder::maxTokens);
 
         return builder.build();
     }

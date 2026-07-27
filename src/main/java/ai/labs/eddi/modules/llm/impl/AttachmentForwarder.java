@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
@@ -138,6 +139,7 @@ public class AttachmentForwarder {
         }
         List<Attachment> attachments = readAttachments(memory);
         if (attachments.isEmpty()) {
+            noteAttachmentsFromEarlierTurns(messages, memory);
             return;
         }
         int lastUserIdx = lastUserMessageIndex(messages);
@@ -168,6 +170,61 @@ public class AttachmentForwarder {
         }
         recordMetrics(added, errors.size());
         persist(memory.getCurrentStep(), extracts, errors);
+    }
+
+    /**
+     * Largest number of earlier-turn files named in the reminder note. Beyond this
+     * the note says how many more there are and leaves finding them to
+     * {@code listAttachments}.
+     */
+    private static final int MAX_EARLIER_ATTACHMENTS_NOTED = 10;
+
+    /**
+     * On a turn that carries no attachments of its own, remind the model of the
+     * files uploaded earlier in this conversation and point it at the
+     * {@code readAttachment} tool.
+     * <p>
+     * A document is inlined only on the turn it arrives — re-sending it every turn
+     * would burn the context window. But with no trace of it in the message at all,
+     * a model asked "summarize the PDF" one turn later will confidently answer that
+     * no PDF was ever shared. This one-line note is the cheap middle ground: the
+     * content stays out of the prompt, the knowledge that it exists does not.
+     */
+    private void noteAttachmentsFromEarlierTurns(List<ChatMessage> messages, IConversationMemory memory) {
+        List<Attachment> earlier = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory);
+        if (earlier.isEmpty()) {
+            return;
+        }
+        int lastUserIdx = lastUserMessageIndex(messages);
+        if (lastUserIdx < 0) {
+            return;
+        }
+
+        StringBuilder note = new StringBuilder(
+                "[Files shared earlier in this conversation and still available: ");
+        int named = Math.min(earlier.size(), MAX_EARLIER_ATTACHMENTS_NOTED);
+        for (int i = 0; i < named; i++) {
+            Attachment att = earlier.get(i);
+            if (i > 0) {
+                note.append(", ");
+            }
+            note.append(att.getFileName() != null ? att.getFileName() : "unnamed");
+            if (att.getMimeType() != null) {
+                note.append(" (").append(att.getMimeType()).append(')');
+            }
+        }
+        if (earlier.size() > named) {
+            note.append(", and ").append(earlier.size() - named).append(" more");
+        }
+        note.append(". Their content is not included in this message — use the readAttachment tool ")
+                .append("to read one, or listAttachments to see them all. Do not claim no file was shared.]");
+
+        UserMessage original = (UserMessage) messages.get(lastUserIdx);
+        List<Content> contents = new ArrayList<>(original.contents());
+        contents.add(TextContent.from(note.toString()));
+        messages.set(lastUserIdx, UserMessage.from(contents));
+        LOGGER.debugf("Noted %d attachment(s) from earlier turns for conversation='%s'",
+                earlier.size(), memory.getConversationId());
     }
 
     private void recordMetrics(int forwarded, int errored) {
@@ -335,13 +392,10 @@ public class AttachmentForwarder {
         if (data == null || data.getResult() == null) {
             return List.of();
         }
-        List<Attachment> attachments = new ArrayList<>();
-        for (Object o : data.getResult()) {
-            if (o instanceof Attachment a) {
-                attachments.add(a);
-            }
-        }
-        return attachments;
+        // Coerced, not cast: a HITL resume re-enters the same step of a conversation
+        // reloaded from the store, where these are plain maps. Casting alone dropped
+        // every attachment on a resumed turn.
+        return AttachmentContextExtractor.attachmentsFrom(data.getResult());
     }
 
     private static int lastUserMessageIndex(List<ChatMessage> messages) {

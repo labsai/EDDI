@@ -453,6 +453,85 @@ class BoundedLogStoreTest {
             List<LogEntry> entries = store.getEntries(null, null, null, 10);
             assertNull(entries.get(0).agentVersion(), "agentVersion should be null for non-numeric ExtLogRecord MDC");
         }
+
+        @Test
+        void captureWithPrintfFormatPattern_shouldFormatCorrectly() {
+            var record = new java.util.logging.LogRecord(java.util.logging.Level.WARNING, "%s, line %d in %s");
+            record.setLoggerName("com.example.ScriptEngine");
+            record.setParameters(new Object[]{"hitlConfig is configured but nothing in this agent can trigger a pause", 42, "rules.js"});
+
+            store.capture(record);
+
+            List<LogEntry> entries = store.getEntries(null, null, null, 10);
+            assertEquals(1, entries.size());
+            assertEquals("hitlConfig is configured but nothing in this agent can trigger a pause, line 42 in rules.js", entries.get(0).message());
+        }
+
+        @Test
+        void captureWithExtLogRecordPrintfPattern_shouldFormatCorrectly() {
+            var extRecord = new org.jboss.logmanager.ExtLogRecord(
+                    java.util.logging.Level.WARNING, "%s, line %d in %s",
+                    "com.example.ScriptEngine");
+            extRecord.setLoggerName("com.example.ScriptEngine");
+            extRecord.setParameters(new Object[]{"Syntax error", 10, "agent.js"});
+
+            store.capture(extRecord);
+
+            List<LogEntry> entries = store.getEntries(null, null, null, 10);
+            assertEquals(1, entries.size());
+            assertEquals("Syntax error, line 10 in agent.js", entries.get(0).message());
+        }
+
+        /**
+         * Indexed, padded and grouped specifiers matched none of the enumerated
+         * "%s/%d/%f/%n/%x" cases, and MessageFormat does not throw on them — with no
+         * {0} placeholders it returns the pattern unchanged, so the raw "%1$s" reached
+         * the log viewer instead of the formatted message.
+         */
+        @Test
+        void captureWithIndexedPrintfSpecifiers_shouldFormatCorrectly() {
+            // Neither "%1$s" nor "%2$d" contains the literal "%s"/"%d" the old check
+            // looked for, so this reached the viewer as the raw pattern.
+            var record = new java.util.logging.LogRecord(
+                    java.util.logging.Level.WARNING, "agent %1$s failed after %2$d attempts");
+            record.setLoggerName("com.example.Retry");
+            record.setParameters(new Object[]{"support-bot", 7});
+
+            store.capture(record);
+
+            List<LogEntry> entries = store.getEntries(null, null, null, 10);
+            assertEquals(1, entries.size());
+            assertEquals("agent support-bot failed after 7 attempts", entries.get(0).message());
+        }
+
+        @Test
+        void captureWithPaddedPrintfSpecifier_shouldFormatCorrectly() {
+            // "%03d" likewise does not contain "%d".
+            var record = new java.util.logging.LogRecord(
+                    java.util.logging.Level.INFO, "retrying in %03d ms");
+            record.setLoggerName("com.example.Retry");
+            record.setParameters(new Object[]{5});
+
+            store.capture(record);
+
+            List<LogEntry> entries = store.getEntries(null, null, null, 10);
+            assertEquals("retrying in 005 ms", entries.get(0).message());
+        }
+
+        @Test
+        void captureWithMessageFormatPatternContainingPercent_shouldStillUseMessageFormat() {
+            // A literal percent must not drag a MessageFormat pattern down the printf
+            // path: String.format rejects "% f", so it falls through as intended.
+            var record = new java.util.logging.LogRecord(
+                    java.util.logging.Level.INFO, "progress 50% for {0}");
+            record.setLoggerName("com.example.Progress");
+            record.setParameters(new Object[]{"batch-1"});
+
+            store.capture(record);
+
+            List<LogEntry> entries = store.getEntries(null, null, null, 10);
+            assertEquals("progress 50% for batch-1", entries.get(0).message());
+        }
     }
 
     // ==================== init() Idempotency ====================

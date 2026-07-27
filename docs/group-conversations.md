@@ -285,7 +285,7 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
 ```json
 {
   "protocol": {
-    "agentTimeoutSeconds": 60,
+    "agentTimeoutSeconds": 180,
     "onAgentFailure": "SKIP",
     "maxRetries": 2,
     "onMemberUnavailable": "SKIP"
@@ -295,10 +295,12 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
 
 | Setting | Options | Default |
 |---|---|---|
-| `agentTimeoutSeconds` | Any positive integer | 60 |
+| `agentTimeoutSeconds` | Any positive integer | 180 |
 | `onAgentFailure` | `SKIP`, `RETRY`, `ABORT` | `SKIP` |
 | `maxRetries` | 0+ | 2 |
 | `onMemberUnavailable` | `SKIP`, `FAIL` | `SKIP` |
+
+> **Timeout guidance**: 180s covers thinking models (e.g. `claude-sonnet-5`) and synthesis phases comfortably. For tool-calling agents with multiple tool loops, consider `300`–`600`. The timeout is per agent turn, not per phase.
 
 ## REST API
 

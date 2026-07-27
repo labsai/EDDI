@@ -349,6 +349,7 @@ public class RestConversationStore implements IRestConversationStore {
 
             deleteAttachmentsForConversation(conversationId);
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
+            conversationDescriptorStore.deleteAllDescriptor(conversationId);
             log.info(format("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId)));
         }
 
@@ -408,11 +409,13 @@ public class RestConversationStore implements IRestConversationStore {
                     var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, 0);
                     if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
                         documentDescriptorStore.deleteAllDescriptor(endedConversationId);
+                        conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                         deleteAttachmentsForConversation(endedConversationId);
                         conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                         amountOfEndedConversations++;
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
+                    conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                     deleteAttachmentsForConversation(endedConversationId);
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                     log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
