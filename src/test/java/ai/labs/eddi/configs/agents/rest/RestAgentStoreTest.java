@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.agents.rest;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -48,6 +49,8 @@ class RestAgentStoreTest {
     private IScheduleStore scheduleStore;
     @Mock
     private CapabilityRegistryService capabilityRegistryService;
+    @Mock
+    private IDeploymentStore deploymentStore;
 
     private RestAgentStore restAgentStore;
 
@@ -55,7 +58,7 @@ class RestAgentStoreTest {
     void setUp() {
         openMocks(this);
         restAgentStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
-                capabilityRegistryService);
+                capabilityRegistryService, deploymentStore);
     }
 
     /** Helper to create a dummy DocumentDescriptor for reference-count mocking */
@@ -73,6 +76,28 @@ class RestAgentStoreTest {
             restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
 
             verify(restWorkflowStore, never()).deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean());
+            verify(AgentStore).delete(eq(AGENT_ID), eq(1));
+        }
+
+        @Test
+        @DisplayName("should delete the Agent's deployment records even without cascade")
+        void deleteAgent_deletesDeploymentRecords() throws Exception {
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
+
+            // A surviving deployment record makes the runtime retry — and fail — the
+            // redeploy
+            // of a now-missing Agent on every startup.
+            verify(deploymentStore).deleteDeploymentInfos(AGENT_ID);
+        }
+
+        @Test
+        @DisplayName("should still delete the Agent when clearing its deployment records fails")
+        void deleteAgent_deploymentCleanupFailureIsNotFatal() throws Exception {
+            when(deploymentStore.deleteDeploymentInfos(AGENT_ID))
+                    .thenThrow(new IResourceStore.ResourceStoreException("boom", new RuntimeException()));
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
+
             verify(AgentStore).delete(eq(AGENT_ID), eq(1));
         }
 

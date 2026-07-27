@@ -18,7 +18,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 | --------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------ |
 | **EDDI** (this repo)                                            | Java 25, Quarkus, MongoDB  | Backend engine, REST API, lifecycle pipeline                 |
 | **[quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi)** | Java 21, Quarkus Extension | Quarkus SDK — `@Inject EddiClient`, Dev Services, MCP bridge |
-| **EDDI-Manager**                                                | React 19, Vite, Tailwind   | Admin dashboard (served from EDDI at `/chat/production`)     |
+| **EDDI-Manager**                                                | React 19, Vite, Tailwind   | Admin dashboard (served from EDDI at `/manage`; `/` redirects to the `/welcome` chooser, `/workforce` is the group-conversation workspace) |
 | **eddi-chat-ui**                                                | React, TypeScript          | Standalone chat widget                                       |
 | **eddi-website**                                                | Astro, Starlight           | Marketing site + documentation at eddi.labs.ai               |
 

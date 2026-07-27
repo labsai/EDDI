@@ -102,6 +102,43 @@ class AgentDeploymentManagementTest {
         }
 
         @Test
+        @DisplayName("retires a deployment record whose Agent config no longer exists")
+        void retiresStaleDeploymentRecord() throws Exception {
+            var info = new DeploymentInfo();
+            info.setEnvironment(Environment.production);
+            info.setAgentId("deletedAgent");
+            info.setAgentVersion(1);
+
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(info));
+            when(agentStore.read("deletedAgent", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            management.checkDeployments();
+
+            // Without this the runtime re-attempts the deploy and logs an ERROR on every
+            // startup.
+            verify(agentFactory, never()).deployAgent(any(), eq("deletedAgent"), anyInt(), any());
+            verify(deploymentStore).setDeploymentInfo("production", "deletedAgent", 1, DeploymentInfo.DeploymentStatus.undeployed);
+        }
+
+        @Test
+        @DisplayName("still deploys when the Agent lookup fails for a reason other than not-found")
+        void doesNotRetireOnStoreTrouble() throws Exception {
+            var info = new DeploymentInfo();
+            info.setEnvironment(Environment.production);
+            info.setAgentId("agent1");
+            info.setAgentVersion(1);
+
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(info));
+            when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceStoreException("db down", new RuntimeException()));
+
+            management.checkDeployments();
+
+            // A store outage is not proof the Agent is gone — the record must survive.
+            verify(agentFactory).deployAgent(Environment.production, "agent1", 1, null);
+            verify(deploymentStore, never()).setDeploymentInfo(anyString(), anyString(), anyInt(), eq(DeploymentInfo.DeploymentStatus.undeployed));
+        }
+
+        @Test
         @DisplayName("skips agents with null agentId")
         void skipsNullAgentId() throws Exception {
             var info = new DeploymentInfo();

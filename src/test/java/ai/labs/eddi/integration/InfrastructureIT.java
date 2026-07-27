@@ -70,12 +70,16 @@ public class InfrastructureIT {
     @Order(5)
     @DisplayName("OpenAPI spec should return valid document")
     void openApiSpec() {
-        // 200 = OpenAPI doc available (extension on classpath, path configured)
-        // 404 = SmallRye OpenAPI extension not available in test profile
+        // Served at /openapi, not the Quarkus default /q/openapi — see
+        // quarkus.smallrye-openapi.path in application.properties. Asserting the real
+        // path
+        // with a real body; accepting 404 here would let the endpoint break unnoticed.
         given()
-                .get("/q/openapi")
+                .get("/openapi")
                 .then().assertThat()
-                .statusCode(anyOf(equalTo(200), equalTo(404)));
+                .statusCode(200)
+                .body(containsString("openapi"))
+                .body(containsString("/agentstore/agents"));
     }
 
     @Test

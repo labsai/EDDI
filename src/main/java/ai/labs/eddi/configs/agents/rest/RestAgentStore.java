@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.rest.RestWorkflowStore;
@@ -47,12 +48,14 @@ public class RestAgentStore implements IRestAgentStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IScheduleStore scheduleStore;
     private final CapabilityRegistryService capabilityRegistryService;
+    private final IDeploymentStore deploymentStore;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
 
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService) {
+            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService,
+            IDeploymentStore deploymentStore) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore);
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
@@ -60,6 +63,7 @@ public class RestAgentStore implements IRestAgentStore {
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.scheduleStore = scheduleStore;
         this.capabilityRegistryService = capabilityRegistryService;
+        this.deploymentStore = deploymentStore;
     }
 
     /**
@@ -278,6 +282,19 @@ public class RestAgentStore implements IRestAgentStore {
             }
         }
         capabilityRegistryService.unregister(id);
+
+        // Deployment records outlive the Agent unless we clear them here: the runtime
+        // would keep
+        // trying to redeploy a config that no longer exists, failing on every startup.
+        try {
+            int deletedDeployments = deploymentStore.deleteDeploymentInfos(id);
+            if (deletedDeployments > 0) {
+                log.infof("Cascade-deleted %d deployment record(s) for Agent %s", deletedDeployments, id);
+            }
+        } catch (Exception e) {
+            log.warnf("Failed to delete deployment record(s) for Agent %s: %s", id, e.getMessage());
+        }
+
         return restVersionInfo.delete(id, version, permanent);
     }
 

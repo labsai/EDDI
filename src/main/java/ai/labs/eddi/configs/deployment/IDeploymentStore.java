@@ -22,4 +22,12 @@ public interface IDeploymentStore {
     List<DeploymentInfo> readDeploymentInfos() throws IResourceStore.ResourceStoreException;
 
     List<DeploymentInfo> readDeploymentInfos(DeploymentStatus deploymentStatus) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Deletes every deployment record belonging to an Agent, across all
+     * environments and versions.
+     *
+     * @return the number of deployment records removed
+     */
+    int deleteDeploymentInfos(String agentId) throws IResourceStore.ResourceStoreException;
 }

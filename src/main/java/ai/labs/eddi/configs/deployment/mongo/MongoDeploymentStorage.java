@@ -91,6 +91,11 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
         }
     }
 
+    @Override
+    public int deleteDeploymentInfos(String agentId) {
+        return (int) deploymentsCollection.deleteMany(eq(FIELD_AGENT_ID, agentId)).getDeletedCount();
+    }
+
     private static Document createFilter(String environment, String agentId, Integer agentVersion) {
         var filter = new Document();
         filter.put(FIELD_ENVIRONMENT, environment);

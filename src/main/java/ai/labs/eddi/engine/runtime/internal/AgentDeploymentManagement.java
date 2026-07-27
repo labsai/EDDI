@@ -154,6 +154,22 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                     .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null)
                     .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo)).forEach(deploymentInfo -> {
                         try {
+                            // A deployment record can outlive its Agent (deleted before this cascade
+                            // existed, or
+                            // removed straight from the datastore). AgentFactory.deployAgent reports that
+                            // by
+                            // logging an ERROR and returning normally, so the catch blocks below never see
+                            // it and
+                            // the record is retried on every startup. Detect it up front and retire the
+                            // record.
+                            if (isAgentConfigMissing(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion())) {
+                                LOGGER.warn(format("Agent config no longer exists (id=%s, version=%d) — retiring stale deployment record",
+                                        deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
+                                deploymentStore.setDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
+                                        deploymentInfo.getAgentVersion(), undeployed);
+                                return;
+                            }
+
                             agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
                                     null);
 
@@ -179,6 +195,22 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                     });
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * True only when the Agent config is provably gone. A store failure is not
+     * proof of absence, so anything other than a not-found answer leaves the
+     * deployment record untouched.
+     */
+    private boolean isAgentConfigMissing(String agentId, Integer agentVersion) {
+        try {
+            agentStore.read(agentId, agentVersion);
+            return false;
+        } catch (ResourceNotFoundException e) {
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 

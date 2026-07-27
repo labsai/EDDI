@@ -24,4 +24,14 @@ public interface IDeploymentStorage {
     List<DeploymentInfo> readDeploymentInfos() throws IResourceStore.ResourceStoreException;
 
     List<DeploymentInfo> readDeploymentInfos(String deploymentStatus) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Deletes every deployment record belonging to an Agent, across all
+     * environments and versions. Called when the Agent itself is deleted — a
+     * deployment record whose Agent no longer exists makes the runtime attempt (and
+     * fail) a redeploy on every startup.
+     *
+     * @return the number of deployment records removed
+     */
+    int deleteDeploymentInfos(String agentId) throws IResourceStore.ResourceStoreException;
 }
