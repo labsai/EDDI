@@ -283,9 +283,14 @@ public class RestAgentStore implements IRestAgentStore {
         }
         capabilityRegistryService.unregister(id);
 
-        // Deployment records outlive the Agent unless we clear them here: the runtime
-        // would keep
-        // trying to redeploy a config that no longer exists, failing on every startup.
+        // Deliberately after the delete: it validates its arguments internally and
+        // throws
+        // on a stale or unknown version, which would otherwise leave a still-live Agent
+        // stripped of the deployment records it needs to come back up.
+        Response response = restVersionInfo.delete(id, version, permanent);
+
+        // Records left behind here make the runtime retry a doomed redeploy on every
+        // startup.
         try {
             int deletedDeployments = deploymentStore.deleteDeploymentInfos(id);
             if (deletedDeployments > 0) {
@@ -295,7 +300,7 @@ public class RestAgentStore implements IRestAgentStore {
             log.warnf("Failed to delete deployment record(s) for Agent %s: %s", id, e.getMessage());
         }
 
-        return restVersionInfo.delete(id, version, permanent);
+        return response;
     }
 
     @Override

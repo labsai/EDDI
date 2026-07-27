@@ -21,6 +21,10 @@ Findings from a full smoke test of `labsai/eddi:6.2.0-b638` against **both** dat
 - `RestAgentStore.deleteAgent`: clears the Agent's deployment records; a failure here logs a warning and still deletes the Agent
 - `AgentDeploymentManagement.checkDeployments`: checks up front whether the Agent config still exists and retires the record instead of attempting a doomed deploy. `isAgentConfigMissing` treats **only** `ResourceNotFoundException` as proof of absence — a store outage leaves the record untouched, so a transient DB failure can never mass-retire live deployments.
 
+Three call sites delete Agents, not one. `McpAdminTools.deleteAgent` delegates to `RestAgentStore` and inherits the cascade, but `GroupConversationService`'s ephemeral cleanup and `TeardownAgentTool` call `agentStore.deleteAllPermanently` directly — and dynamic sub-agents *do* get deployment records, because `AgentSetupService.deployAndWait` goes through `RestAgentAdministration`. Every ephemeral group agent was therefore orphaning a record. Both now retire their records too (null-tolerant, non-fatal), following the existing field-injection pattern in those classes so the directly-constructed unit tests keep working.
+
+**Ordering:** the cascade runs *after* `restVersionInfo.delete`, not before. That method validates its arguments internally and throws on a stale or unknown version — clearing the records first would strip a still-live Agent of what it needs to come back up. Pinned by a test.
+
 **Design note:** the pre-check was chosen over making `deployAgent` rethrow — that method's dummy-agent-on-failure contract is relied on by the on-demand deploy path, and widening it for this would have been a far riskier change than a cheap existence check.
 
 Verified against the real Postgres instance: the April orphan flipped `deployed` → `undeployed`, the ERROR + stack trace was replaced by a single `WARN … retiring stale deployment record`, and deleting a fresh Agent logged `Cascade-deleted 1 deployment record(s)` with the row gone.
