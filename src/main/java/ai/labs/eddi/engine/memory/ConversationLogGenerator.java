@@ -120,7 +120,11 @@ public class ConversationLogGenerator {
                         if (outputList.getFirst() instanceof Map) {
                             @SuppressWarnings("unchecked")
                             var mapList = (List<Map<String, Object>>) outputList;
-                            var joinedOutput = mapList.stream().map(item -> item.get(KEY_TEXT).toString()).collect(Collectors.joining(" "));
+                            var joinedOutput = mapList.stream()
+                                    .map(item -> item.get(KEY_TEXT))
+                                    .filter(java.util.Objects::nonNull)
+                                    .map(Object::toString)
+                                    .collect(Collectors.joining(" "));
                             content.setType(text);
                             content.setValue(joinedOutput);
                             conversationLog.getMessages().add(new ConversationPart(KEY_ROLE_ASSISTANT, outputContentList));

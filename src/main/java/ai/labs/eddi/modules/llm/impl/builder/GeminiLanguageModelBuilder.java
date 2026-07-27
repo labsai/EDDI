@@ -14,6 +14,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Duration;
 import java.util.Map;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -44,21 +47,15 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
             builder.modelName(parameters.get(KEY_MODEL_NAME));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_MAX_OUTPUT_TOKENS))) {
-            builder.maxOutputTokens(Integer.parseInt(parameters.get(KEY_MAX_OUTPUT_TOKENS)));
-        }
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyInt(parameters, KEY_MAX_OUTPUT_TOKENS, builder::maxOutputTokens);
         if (!isNullOrEmpty(parameters.get(KEY_ALLOW_CODE_EXECUTION))) {
             builder.allowCodeExecution(Boolean.parseBoolean(parameters.get(KEY_ALLOW_CODE_EXECUTION)));
         }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES))) {
             builder.logRequestsAndResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES)));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
-        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
 
         return builder.build();
     }
@@ -73,21 +70,15 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
             builder.modelName(parameters.get(KEY_MODEL_NAME));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_MAX_OUTPUT_TOKENS))) {
-            builder.maxOutputTokens(Integer.parseInt(parameters.get(KEY_MAX_OUTPUT_TOKENS)));
-        }
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyInt(parameters, KEY_MAX_OUTPUT_TOKENS, builder::maxOutputTokens);
         if (!isNullOrEmpty(parameters.get(KEY_ALLOW_CODE_EXECUTION))) {
             builder.allowCodeExecution(Boolean.parseBoolean(parameters.get(KEY_ALLOW_CODE_EXECUTION)));
         }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES))) {
             builder.logRequestsAndResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES)));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
-        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
 
         return builder.build();
     }

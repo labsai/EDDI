@@ -692,8 +692,22 @@ public class LlmTask implements ILifecycleTask {
         if (shouldAddToOutput) {
             var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), responseContent);
             currentStep.storeData(outputData);
-            var outputItem = new TextOutputItem(responseContent, 0);
-            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+            // Only add to conversation output if there is actual text.
+            // Null/blank responses (e.g. from token budget exhaustion or
+            // thinking-only turns) should not produce empty message bubbles.
+            if (producesRenderableOutput(responseContent)) {
+                var outputItem = new TextOutputItem(responseContent, 0);
+                currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+            } else {
+                // DEBUG, not WARN: this is a documented-expected outcome (a
+                // thinking-only turn, or an exhausted token budget), so at WARN it
+                // recurs in healthy operation without telling an operator anything
+                // they can act on. Carries the conversation id so that when someone
+                // does turn debug on to chase "the agent didn't answer", the line
+                // identifies which conversation — which the WARN never did.
+                LOGGER.debugf("LLM response was null or blank for task '%s' (type=%s) in conversation '%s' — skipping output",
+                        task.getId(), task.getType(), sanitize(memory.getConversationId()));
+            }
         }
 
         prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
@@ -1199,6 +1213,22 @@ public class LlmTask implements ILifecycleTask {
         if (name != null)
             return name;
         return processedParams.get("deploymentName");
+    }
+
+    /**
+     * Whether an LLM response should become a rendered message bubble.
+     * <p>
+     * A turn can legitimately produce no text — token budget exhaustion, or a
+     * thinking-only turn — and those must not surface as empty bubbles. Extracted
+     * so the rule is asserted against the code that runs rather than against a copy
+     * of the expression re-typed in a test.
+     *
+     * @param responseContent
+     *            the model's text response (may be null)
+     * @return true when there is something worth showing the user
+     */
+    static boolean producesRenderableOutput(String responseContent) {
+        return responseContent != null && !responseContent.isBlank();
     }
 
     @Override

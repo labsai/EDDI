@@ -14,6 +14,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Duration;
 import java.util.Map;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -26,6 +29,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_LOG_RESPONSES = "logResponses";
     private static final String KEY_RESPONSE_FORMAT = "responseFormat";
     private static final String KEY_BASE_URL = "baseUrl";
+    private static final String KEY_MAX_TOKENS = "maxTokens";
     private static final String TYPE_JSON = "json";
 
     @Override
@@ -40,12 +44,9 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
             builder.modelName(parameters.get(KEY_MODEL_NAME));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
-        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyInt(parameters, KEY_MAX_TOKENS, builder::maxTokens);
         if (TYPE_JSON.equalsIgnoreCase(parameters.get(KEY_RESPONSE_FORMAT))) {
             builder.responseFormat("json_object");
         }
@@ -70,12 +71,9 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
             builder.modelName(parameters.get(KEY_MODEL_NAME));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
-        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyInt(parameters, KEY_MAX_TOKENS, builder::maxTokens);
         if (TYPE_JSON.equalsIgnoreCase(parameters.get(KEY_RESPONSE_FORMAT))) {
             builder.responseFormat("json_object");
         }

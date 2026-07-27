@@ -227,6 +227,161 @@ public final class AttachmentContextExtractor {
         return new ExtractionResult(out, errors);
     }
 
+    /**
+     * Attachments from the <em>earlier</em> turns of this conversation that can
+     * still be fetched, most recent first and de-duplicated by storage reference.
+     * <p>
+     * An attachment is inlined into the LLM message only on the turn it arrives —
+     * re-sending a document on every subsequent turn would burn the context window.
+     * Without this lookup, though, a follow-up question about a file uploaded two
+     * turns ago reaches a model that has no trace of it, and the
+     * {@code readAttachment} tool — which reads per <em>conversation</em>, not per
+     * turn — is never even offered. Callers use this to keep an uploaded file
+     * reachable for the rest of the conversation.
+     * <p>
+     * Only blob-backed attachments (a {@code storageRef}) are returned: that is
+     * exactly what {@link ai.labs.eddi.engine.attachments.IAttachmentStore} can
+     * serve later. An inline base64 payload is deliberately never persisted, and a
+     * URL reference is not in the store either, so neither can be re-read on a
+     * later turn — listing them would only advertise a file the tool then fails to
+     * fetch.
+     * <p>
+     * Read straight from conversation memory (no attachment-store round trip), so
+     * this is safe to call on every turn.
+     *
+     * @param memory
+     *            the conversation memory for the current turn (may be null)
+     * @return earlier turns' still-retrievable attachments, newest turn first
+     *         (never null)
+     */
+    public static List<Attachment> attachmentsFromPreviousTurns(IConversationMemory memory) {
+        if (memory == null) {
+            return Collections.emptyList();
+        }
+        IConversationMemory.IConversationStepStack previousSteps = memory.getPreviousSteps();
+        if (previousSteps == null || previousSteps.size() == 0) {
+            return Collections.emptyList();
+        }
+
+        // Keyed by identity so the same file re-sent across turns is listed once,
+        // insertion-ordered so the most recent turn's attachments come first.
+        Map<String, Attachment> unique = new LinkedHashMap<>();
+        for (int i = 0; i < previousSteps.size(); i++) {
+            // Exact-match read: "attachments" is a prefix of the
+            // attachments:extracts / attachments:errors keys the forwarder persists,
+            // so a prefix scan would return the wrong entry.
+            IData<List<?>> data = previousSteps.get(i).getData(MemoryKeys.ATTACHMENTS);
+            if (data == null || data.getResult() == null) {
+                continue;
+            }
+            for (Object value : data.getResult()) {
+                Attachment attachment = asAttachment(value);
+                // Retrievable only: see the note on inline/URL attachments above.
+                if (attachment != null && attachment.getStorageRef() != null) {
+                    unique.putIfAbsent(identity(attachment), attachment);
+                }
+            }
+        }
+        return List.copyOf(unique.values());
+    }
+
+    /**
+     * Read an ATTACHMENTS memory entry into {@link Attachment}s, accepting both the
+     * live objects and the map form a step comes back as once it has been through
+     * the conversation store.
+     * <p>
+     * Use this for <em>every</em> read of {@link MemoryKeys#ATTACHMENTS}, including
+     * the current step: a HITL resume re-enters the same step of a conversation
+     * reloaded from the store, so "current step" does not imply "live objects". A
+     * bare {@code instanceof Attachment} filter silently drops everything there.
+     * <p>
+     * No retrievability filter — a current-turn attachment may legitimately be an
+     * inline or URL payload, both of which are forwardable on the turn they arrive.
+     *
+     * @param rawStepData
+     *            the value of an ATTACHMENTS data entry (may be null)
+     * @return the attachments it holds, in order (never null)
+     */
+    public static List<Attachment> attachmentsFrom(List<?> rawStepData) {
+        if (rawStepData == null || rawStepData.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Attachment> attachments = new ArrayList<>();
+        for (Object value : rawStepData) {
+            Attachment attachment = asAttachment(value);
+            if (attachment != null) {
+                attachments.add(attachment);
+            }
+        }
+        return attachments;
+    }
+
+    /**
+     * Coerce one stored ATTACHMENTS entry back into an {@link Attachment}.
+     * <p>
+     * The current turn's entries are the live objects, but every earlier turn has
+     * been through the conversation store, and
+     * {@code ConversationMemorySnapshot.ResultSnapshot#getResult()} is a bare
+     * {@code Object} — so Jackson hands those back as plain maps, not
+     * {@code Attachment}s. Both the Mongo and Postgres stores repair only
+     * {@code context*} entries on load ({@code fixContextTypes}); everything else,
+     * this key included, stays a map. An {@code instanceof Attachment} test alone
+     * therefore matches nothing from turn two onwards, which is exactly when this
+     * lookup matters.
+     * <p>
+     * {@code base64Data} is {@code @JsonIgnore}d and never persisted, so a
+     * recovered attachment is a stored/URL reference — which is all the
+     * readAttachment tool needs.
+     *
+     * @param value
+     *            a live Attachment, or the map form read back from the store
+     * @return the attachment, or {@code null} if the entry is neither
+     */
+    private static Attachment asAttachment(Object value) {
+        if (value instanceof Attachment attachment) {
+            return attachment;
+        }
+        if (!(value instanceof Map<?, ?> map)) {
+            return null;
+        }
+
+        String storageRef = stringValue(map, FIELD_STORAGE_REF);
+        String url = stringValue(map, "url");
+        String mimeType = stringValue(map, "mimeType");
+        if (storageRef == null && url == null && mimeType == null) {
+            // Not an attachment shape — leave it alone rather than inventing one.
+            return null;
+        }
+
+        Attachment attachment = new Attachment();
+        attachment.setStorageRef(storageRef);
+        attachment.setUrl(url);
+        attachment.setMimeType(mimeType);
+        attachment.setFileName(stringValue(map, "fileName"));
+        if (map.get("sizeBytes") instanceof Number sizeBytes) {
+            attachment.setSizeBytes(sizeBytes.longValue());
+        }
+        return attachment;
+    }
+
+    /** Non-blank string field from a map of unknown key/value types. */
+    private static String stringValue(Map<?, ?> map, String key) {
+        return map.get(key) instanceof String s && !s.isBlank() ? s : null;
+    }
+
+    /**
+     * Stable de-duplication key: the storage ref if there is one, else the name.
+     */
+    private static String identity(Attachment att) {
+        if (att.getStorageRef() != null) {
+            return "ref:" + att.getStorageRef();
+        }
+        if (att.getUrl() != null) {
+            return "url:" + att.getUrl();
+        }
+        return "name:" + displayName(att);
+    }
+
     private static String displayName(Attachment att) {
         if (att.getFileName() != null) {
             return att.getFileName();

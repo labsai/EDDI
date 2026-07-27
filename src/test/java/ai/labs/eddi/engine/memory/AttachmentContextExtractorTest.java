@@ -6,7 +6,10 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.model.Attachment;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -399,6 +402,201 @@ class AttachmentContextExtractorTest {
         void shouldReturnUnchangedWhenValueNotAMap() {
             Context original = createContext("not a map");
             assertSame(original, AttachmentContextExtractor.scrubInlinePayload("attachment_0", original));
+        }
+    }
+
+    // ==================== Earlier-turn lookup ====================
+
+    /**
+     * {@link AttachmentContextExtractor#attachmentsFromPreviousTurns} is what keeps
+     * an uploaded file reachable after the turn it arrived on — both for the
+     * reminder note on the outgoing message and for offering the readAttachment
+     * tool at all.
+     */
+    @Nested
+    class AttachmentsFromPreviousTurns {
+
+        @Test
+        void shouldReturnEmptyForNullMemory() {
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(null).isEmpty());
+        }
+
+        @Test
+        void shouldReturnEmptyWhenThereAreNoPreviousSteps() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            when(memory.getPreviousSteps()).thenReturn(null);
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+
+            IConversationMemory.IConversationStepStack empty = mock(IConversationMemory.IConversationStepStack.class);
+            when(empty.size()).thenReturn(0);
+            when(memory.getPreviousSteps()).thenReturn(empty);
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        @Test
+        void shouldReturnEmptyWhenNoPreviousStepCarriedAttachments() {
+            IConversationMemory memory = memoryWithSteps(List.of(), List.of());
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        @Test
+        void shouldCollectAttachmentsAcrossSteps() {
+            Attachment pdf = stored("ref-pdf", "report.pdf");
+            Attachment image = stored("ref-img", "chart.png");
+            // Step 0 is the most recent previous turn.
+            IConversationMemory memory = memoryWithSteps(List.of(image), List.of(pdf));
+
+            List<Attachment> result = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory);
+
+            assertEquals(2, result.size());
+            assertEquals("chart.png", result.get(0).getFileName(), "newest turn first");
+            assertEquals("report.pdf", result.get(1).getFileName());
+        }
+
+        @Test
+        void shouldDeduplicateTheSameFileResentAcrossTurns() {
+            IConversationMemory memory = memoryWithSteps(
+                    List.of(stored("ref-pdf", "report.pdf")),
+                    List.of(stored("ref-pdf", "report.pdf")));
+
+            List<Attachment> result = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory);
+
+            assertEquals(1, result.size());
+        }
+
+        /**
+         * Only blob-backed attachments can be fetched on a later turn. A URL reference
+         * is not in the attachment store and an inline base64 payload is never
+         * persisted, so surfacing either would advertise a file that readAttachment
+         * then fails to fetch.
+         */
+        @Test
+        void shouldOmitAttachmentsThatCannotBeFetchedLater() {
+            Attachment byUrl = new Attachment();
+            byUrl.setUrl("https://example.com/a.png");
+            byUrl.setMimeType("image/png");
+
+            Attachment inline = new Attachment();
+            inline.setMimeType("application/pdf");
+            inline.setFileName("inline.pdf");
+            inline.setBase64Data("JVBERi0=");
+
+            IConversationMemory memory = memoryWithSteps(List.of(byUrl), List.of(inline));
+
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        /**
+         * The regression that mattered: everything before the current turn has been
+         * through the conversation store, where {@code ResultSnapshot#result} is a bare
+         * Object — so attachments come back as maps, not Attachments. Both the Mongo
+         * and Postgres stores repair only {@code context*} entries on load, so an
+         * {@code instanceof Attachment} test alone matched nothing from turn two
+         * onwards, which is precisely when this lookup is needed.
+         */
+        @Test
+        void shouldRecoverAttachmentsAfterAConversationStoreRoundTrip() throws Exception {
+            ConversationMemory memory = new ConversationMemory("conv-1", "agent-1", 1, "user-1");
+            Attachment pdf = new Attachment("application/pdf", "report.pdf", 1234L, "ref-1");
+            memory.getCurrentStep().storeData(
+                    new ai.labs.eddi.engine.memory.model.Data<>(MemoryKeys.ATTACHMENTS.key(), List.of(pdf)));
+            memory.startNextStep(); // the follow-up turn, carrying no file of its own
+
+            // Persist and reload the way both stores do: Jackson to JSON and back
+            // into the snapshot, then rebuild the in-memory representation.
+            ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+            ConversationMemorySnapshot snapshot = ConversationMemoryUtilities.convertConversationMemory(memory);
+            ConversationMemorySnapshot reloaded = mapper.readValue(
+                    mapper.writeValueAsString(snapshot), ConversationMemorySnapshot.class);
+            IConversationMemory restored = ConversationMemoryUtilities.convertConversationMemorySnapshot(reloaded);
+
+            List<Attachment> result = AttachmentContextExtractor.attachmentsFromPreviousTurns(restored);
+
+            assertEquals(1, result.size(), "an earlier turn's file must survive the store round trip");
+            assertEquals("report.pdf", result.get(0).getFileName());
+            assertEquals("ref-1", result.get(0).getStorageRef());
+            assertEquals("application/pdf", result.get(0).getMimeType());
+            assertEquals(1234L, result.get(0).getSizeBytes());
+            assertEquals(Attachment.ContentSource.STORED, result.get(0).getContentSource());
+        }
+
+        @Test
+        void shouldRecoverTheMapFormWrittenBackByTheStore() {
+            // The exact shape Jackson hands back for a persisted Attachment.
+            Map<String, Object> persisted = new HashMap<>();
+            persisted.put("mimeType", "application/pdf");
+            persisted.put("fileName", "earlier.pdf");
+            persisted.put("storageRef", "ref-9");
+            persisted.put("sizeBytes", 42);
+
+            IConversationMemory memory = memoryWithSteps(List.of(persisted));
+
+            List<Attachment> result = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory);
+
+            assertEquals(1, result.size());
+            assertEquals("earlier.pdf", result.get(0).getFileName());
+            assertEquals(42L, result.get(0).getSizeBytes());
+        }
+
+        @Test
+        void shouldIgnoreMapsThatAreNotAttachments() {
+            IConversationMemory memory = memoryWithSteps(List.of(Map.of("some", "unrelated data")));
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        @Test
+        void shouldDeduplicateAcrossLiveAndPersistedForms() {
+            Map<String, Object> persisted = new HashMap<>();
+            persisted.put("storageRef", "ref-1");
+            persisted.put("fileName", "report.pdf");
+            persisted.put("mimeType", "application/pdf");
+
+            IConversationMemory memory = memoryWithSteps(
+                    List.of(stored("ref-1", "report.pdf")),
+                    List.of(persisted));
+
+            assertEquals(1, AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).size());
+        }
+
+        @Test
+        void shouldIgnoreNonAttachmentEntries() {
+            IConversationMemory memory = memoryWithSteps(List.of("not an attachment", 42));
+            assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        private static Attachment stored(String ref, String fileName) {
+            Attachment att = new Attachment();
+            att.setStorageRef(ref);
+            att.setFileName(fileName);
+            att.setMimeType("application/pdf");
+            return att;
+        }
+
+        /**
+         * Build a memory whose previous-step stack yields one step per argument, in the
+         * order given (index 0 = most recent, matching the real stack).
+         */
+        @SafeVarargs
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        private static IConversationMemory memoryWithSteps(List<Object>... stepAttachments) {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IConversationStepStack stack = mock(IConversationMemory.IConversationStepStack.class);
+            when(stack.size()).thenReturn(stepAttachments.length);
+
+            for (int i = 0; i < stepAttachments.length; i++) {
+                IConversationMemory.IConversationStep step = mock(IConversationMemory.IConversationStep.class);
+                if (stepAttachments[i].isEmpty()) {
+                    when(step.getData(MemoryKeys.ATTACHMENTS)).thenReturn(null);
+                } else {
+                    IData data = mock(IData.class);
+                    when(data.getResult()).thenReturn(stepAttachments[i]);
+                    when(step.getData(MemoryKeys.ATTACHMENTS)).thenReturn(data);
+                }
+                when(stack.get(i)).thenReturn(step);
+            }
+
+            when(memory.getPreviousSteps()).thenReturn(stack);
+            return memory;
         }
     }
 

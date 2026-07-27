@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
@@ -47,6 +48,7 @@ class GdprComplianceServiceTest {
     private GdprComplianceService service;
     private Instance<IAttachmentStore> attachmentStorageInstance;
     private IAttachmentStore attachmentStore;
+    private IConversationDescriptorStore conversationDescriptorStore;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -58,6 +60,7 @@ class GdprComplianceServiceTest {
         auditStore = mock(IAuditStore.class);
         auditLedgerService = mock(AuditLedgerService.class);
         hitlToolJournalStore = mock(IHitlToolJournalStore.class);
+        conversationDescriptorStore = mock(IConversationDescriptorStore.class);
 
         attachmentStorageInstance = mock(Instance.class);
         attachmentStore = mock(IAttachmentStore.class);
@@ -66,7 +69,8 @@ class GdprComplianceServiceTest {
         service = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore);
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore,
+                conversationDescriptorStore);
     }
 
     @Test
@@ -119,9 +123,11 @@ class GdprComplianceServiceTest {
 
         // Then — journal deletion runs per conversation, BEFORE conversations are
         // deleted
-        var inOrder = inOrder(hitlToolJournalStore, conversationMemoryStore);
+        var inOrder = inOrder(hitlToolJournalStore, conversationDescriptorStore, conversationMemoryStore);
         inOrder.verify(hitlToolJournalStore).deleteByConversationId("conv-1");
         inOrder.verify(hitlToolJournalStore).deleteByConversationId("conv-2");
+        inOrder.verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
+        inOrder.verify(conversationDescriptorStore).deleteAllDescriptor("conv-2");
         inOrder.verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
     }
 
@@ -216,7 +222,8 @@ class GdprComplianceServiceTest {
         var serviceWithAttachments = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachInstance, hitlToolJournalStore);
+                auditLedgerService, attachInstance, hitlToolJournalStore,
+                conversationDescriptorStore);
 
         when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
@@ -247,7 +254,8 @@ class GdprComplianceServiceTest {
         var serviceWithAttachments = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachInstance, hitlToolJournalStore);
+                auditLedgerService, attachInstance, hitlToolJournalStore,
+                conversationDescriptorStore);
 
         when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))

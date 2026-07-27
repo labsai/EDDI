@@ -29,6 +29,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -1994,6 +1995,12 @@ class AgentOrchestrator {
         List<Object> tools = new ArrayList<>();
 
         if (task.getEnableBuiltInTools() == null || !task.getEnableBuiltInTools()) {
+            // readAttachment is not governed by the built-in tools config at all —
+            // it is part of attachment support, added here and in
+            // collectAllBuiltInTools whenever the conversation actually has files.
+            // See the note there for why neither the switch nor the whitelist gates
+            // it.
+            addReadAttachmentToolIfEnabled(tools, memory);
             return tools;
         }
 
@@ -2055,8 +2062,6 @@ class AgentOrchestrator {
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
                 addConversationRecallToolIfEnabled(tools, task, memory);
-            if (whitelist.contains("readattachment"))
-                addReadAttachmentToolIfEnabled(tools, memory);
             // Dynamic agent tools (whitelist-gated, shared tracking lists)
             {
                 List<String> sharedCreatedIds = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -2114,9 +2119,26 @@ class AgentOrchestrator {
             addUserMemoryToolIfEnabled(tools, memory);
             // Auto-add conversation recall tool if rolling summary is active
             addConversationRecallToolIfEnabled(tools, task, memory);
-            // Auto-add the readAttachment tool when this turn has attachments
-            addReadAttachmentToolIfEnabled(tools, memory);
         }
+
+        // Outside the whitelist branch on purpose: readAttachment is part of
+        // attachment support, not a capability the built-in tools config governs.
+        //
+        // It only ever appears when the conversation actually has files, and it
+        // reads a blob already stored under that conversation and authorized by
+        // ownership or an explicit grant — no outbound call, no cost. That is
+        // nothing like the web search / scraping / HTTP tools enableBuiltInTools
+        // exists to gate.
+        //
+        // Two things make gating it actively wrong rather than merely strict.
+        // AttachmentForwarder inlines a document on the turn it arrives with no
+        // whitelist check at all, so excluding this tool never stopped the model
+        // seeing the file — it only stopped it seeing the file on any LATER turn.
+        // And the Manager could not even offer "readattachment" as a choice until
+        // 6.2.0, so every whitelist written before then omits it by construction;
+        // honouring that omission would leave attachment recall broken for every
+        // existing whitelisted agent.
+        addReadAttachmentToolIfEnabled(tools, memory);
 
         return tools;
     }
@@ -2171,26 +2193,51 @@ class AgentOrchestrator {
     }
 
     /**
-     * Constructs and adds a {@link ReadAttachmentTool} when this turn carries
-     * attachments, giving the LLM on-demand access to attachment text (recall of an
-     * earlier turn's file, oversize files not inlined, page-targeted PDF reads).
-     * The conversation id is implicit — the tool never takes it as a parameter.
+     * Constructs and adds a {@link ReadAttachmentTool} when this conversation has
+     * attachments — from this turn or any earlier one — giving the LLM on-demand
+     * access to attachment text (recall of an earlier turn's file, oversize files
+     * not inlined, page-targeted PDF reads). The conversation id is implicit — the
+     * tool never takes it as a parameter.
+     * <p>
+     * Gating on the current turn alone defeated the tool's main purpose: a file is
+     * inlined only on the turn it arrives, so a follow-up question about it reached
+     * a model with neither the document nor any way to fetch it — and the model
+     * would answer that no file had ever been shared.
      */
     private void addReadAttachmentToolIfEnabled(List<Object> tools, IConversationMemory memory) {
         if (attachmentStore == null || attachmentTextExtractor == null) {
+            return;
+        }
+        if (memory == null || memory.getCurrentStep() == null) {
             return;
         }
         // Exact-match read (getData, not the prefix-scanning getLatestData):
         // "attachments"
         // is a prefix of the attachments:extracts/errors keys the forwarder persists.
         IData<List<?>> attachmentData = memory.getCurrentStep().getData(MemoryKeys.ATTACHMENTS);
-        if (attachmentData == null || attachmentData.getResult() == null || attachmentData.getResult().isEmpty()) {
+        // Coerced, not raw-counted: on a resumed turn these are maps, and a raw
+        // count would also count entries that are not attachments at all.
+        //
+        // Restricted to blob-backed files, matching attachmentsFromPreviousTurns:
+        // the tool can only serve what the attachment store holds. An inline or
+        // URL-only attachment is already inlined by AttachmentForwarder on this
+        // turn, so offering a tool whose listAttachments would report nothing
+        // would only contradict the document sitting in the same message.
+        int thisTurn = attachmentData == null
+                ? 0
+                : (int) AttachmentContextExtractor.attachmentsFrom(attachmentData.getResult()).stream()
+                        .filter(attachment -> attachment.getStorageRef() != null)
+                        .count();
+        // Memory-only scan — no attachment-store round trip on turns without files.
+        int earlierTurns = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).size();
+        if (thisTurn == 0 && earlierTurns == 0) {
             return;
         }
         var tool = new ReadAttachmentTool(attachmentStore, attachmentTextExtractor, memory.getConversationId());
         tools.add(tool);
-        LOGGER.infof("[ATTACHMENTS] ReadAttachmentTool enabled for conversation='%s' with %d attachment(s)",
-                sanitize(memory.getConversationId()), attachmentData.getResult().size());
+        LOGGER.infof(
+                "[ATTACHMENTS] ReadAttachmentTool enabled for conversation='%s' (%d this turn, %d from earlier turns)",
+                sanitize(memory.getConversationId()), thisTurn, earlierTurns);
     }
 
     /**

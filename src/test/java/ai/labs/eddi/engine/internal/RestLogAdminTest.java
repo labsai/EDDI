@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.runtime.InstanceIdProducer;
+import jakarta.ws.rs.core.MediaType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -119,7 +120,18 @@ class RestLogAdminTest {
             var sse = mock(jakarta.ws.rs.sse.Sse.class, RETURNS_DEEP_STUBS);
             var event = mock(jakarta.ws.rs.sse.OutboundSseEvent.class);
 
-            when(sse.newEventBuilder().name(anyString()).data(any()).build()).thenReturn(event);
+            // The stub chain must mirror RestLogAdmin#sendEvent exactly. With
+            // RETURNS_DEEP_STUBS an unmatched link silently yields a *different* deep
+            // stub, so build() returns some other OutboundSseEvent and the verify
+            // below fails comparing two unrelated mocks. This drifted when sendEvent
+            // started setting mediaType and switched to data(Class, Object) to
+            // serialize log entries as JSON.
+            when(sse.newEventBuilder()
+                    .name(anyString())
+                    .mediaType(any(MediaType.class))
+                    .data(any(Class.class), any())
+                    .build())
+                    .thenReturn(event);
             when(eventSink.send(any(jakarta.ws.rs.sse.OutboundSseEvent.class)))
                     .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
             when(eventSink.isClosed()).thenReturn(true); // close immediately to prevent cleanup thread from running long

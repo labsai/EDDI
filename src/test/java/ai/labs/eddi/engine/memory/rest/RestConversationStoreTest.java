@@ -147,6 +147,7 @@ class RestConversationStoreTest {
             restConversationStore.deleteConversationLog("conv-1", true);
 
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
         }
 
         @Test
@@ -162,6 +163,7 @@ class RestConversationStoreTest {
             // pause-terminating end is attributed to system:admin-end.
             verify(conversationService).endConversation("conv-paused", "system:admin-end");
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-paused");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-paused");
         }
 
         @Test
@@ -175,6 +177,7 @@ class RestConversationStoreTest {
             verify(conversationService, never()).endConversation(any());
             verify(conversationService, never()).endConversation(any(), any());
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-ready");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-ready");
         }
 
         @Test
@@ -183,6 +186,7 @@ class RestConversationStoreTest {
             restConversationStore.deleteConversationLog("conv-1", false);
 
             verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore, never()).deleteAllDescriptor(any());
         }
 
         @Test
@@ -208,6 +212,7 @@ class RestConversationStoreTest {
 
             verify(attachmentStorage).deleteByConversation("conv-1");
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
         }
 
         @Test
@@ -225,6 +230,7 @@ class RestConversationStoreTest {
             // Should not throw — logs warning and continues
             assertDoesNotThrow(() -> store.deleteConversationLog("conv-1", true));
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
         }
     }
 
@@ -261,6 +267,7 @@ class RestConversationStoreTest {
             assertEquals(1, result);
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-old");
             verify(documentDescriptorStore).deleteAllDescriptor("conv-old");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-old");
         }
 
         @Test
@@ -276,6 +283,7 @@ class RestConversationStoreTest {
 
             assertEquals(0, result);
             verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot("conv-recent");
+            verify(conversationDescriptorStore, never()).deleteAllDescriptor(any());
         }
 
         @Test
@@ -290,6 +298,7 @@ class RestConversationStoreTest {
 
             assertEquals(0, result);
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-orphan");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-orphan");
         }
 
         @Test

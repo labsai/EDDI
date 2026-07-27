@@ -11,6 +11,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Duration;
 import java.util.Map;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -64,17 +67,11 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
             builder.baseUrl(huggingFaceUrl);
         }
 
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
-        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
 
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
-        }
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
 
-        if (!isNullOrEmpty(parameters.get(KEY_MAX_NEW_TOKENS))) {
-            builder.maxNewTokens(Integer.parseInt(parameters.get(KEY_MAX_NEW_TOKENS)));
-        }
+        applyInt(parameters, KEY_MAX_NEW_TOKENS, builder::maxNewTokens);
 
         if (!isNullOrEmpty(parameters.get(KEY_WAIT_FOR_MODEL))) {
             builder.waitForModel(Boolean.parseBoolean(parameters.get(KEY_WAIT_FOR_MODEL)));
