@@ -1,6 +1,9 @@
 {
   "realm": "eddi",
   "enabled": true,
+  "displayName": "EDDI",
+  "displayNameHtml": "EDDI",
+  "loginTheme": "eddi",
   "sslRequired": "none",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,

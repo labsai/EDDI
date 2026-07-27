@@ -5,6 +5,45 @@
 
 ---
 
+## 🎨 Keycloak login theme matching the EDDI corporate identity (2026-07-27)
+
+**Repo:** EDDI (`feat/keycloak-eddi-theme`)
+
+Users redirected from the Manager or Workforce UI to Keycloak went from EDDI's amber-on-near-black design to stock Keycloak blue-on-white. This adds an `eddi` **login** theme — three text/asset files, **no FreeMarker overrides** — plus the wiring to activate and ship it.
+
+**What changed.**
+
+- `keycloak/themes/eddi/login/theme.properties` — `parent=keycloak.v2`, `styles=css/styles.css css/eddi-login.css`, `kcHtmlClass=login-pf pf-v5-theme-dark`.
+- `keycloak/themes/eddi/login/resources/css/eddi-login.css` — the palette, a block of PatternFly global-token overrides, and a short list of targeted rules (logo, page background, card border, button label, autofill).
+- `.../resources/img/{logo_eddi.png,favicon.ico}` — byte-identical copies of the app's own assets.
+- `keycloak/eddi-realm.json` — `loginTheme`, `displayName`, `displayNameHtml`.
+- `docker-compose.auth.yml` — bind-mounts `./keycloak/themes/eddi` into `/opt/keycloak/themes/eddi`.
+- `install.sh` — fetches the four theme files (non-fatally; only the realm JSON stays fatal), and sets `loginTheme` through the Admin API after startup.
+- `planning/keycloak-eddi-theme.md` — the full design, the verified-facts table, and the corrections below.
+
+**How it works.** Three layers. `kcHtmlClass` adds PatternFly 5's built-in `.pf-v5-theme-dark` to `<html>`, which flips every PF component the login pages use — including ones we would never enumerate (tiles, data lists, helper text, panels). A `:root` block of `--pf-v5-global--*` overrides then recolours PF's dark defaults to EDDI's stone/amber palette. A handful of targeted rules cover what tokens cannot express. We own zero FreeMarker, so a Keycloak upgrade can only break this loudly.
+
+**Design decisions.**
+
+- **Pure CSS over template overrides.** Every `.ftl` we do not ship is a file we do not re-diff on every upgrade. The logo is applied to `#kc-header-wrapper` with accessible image replacement (`text-indent: -9999px`), keeping `displayNameHtml` in the accessibility tree so screen readers still announce "EDDI".
+- **`styles` must name the parent stylesheet.** Theme properties merge key-by-key with the child winning, so `styles` *replaces* rather than appends; omitting `css/styles.css` silently drops all base styling. It resolves up the inheritance chain, so we ship no copy.
+- **Prefer global-token overrides to component rules.** Component rules are what rot on upgrade.
+- **Login theme only.** The account console, admin console and email templates remain stock; adding them later means sibling directories reusing the same palette block.
+
+**Three things the live run corrected — none were visible from source reading alone.**
+
+1. **`:where()` specificity 0 does not mean `:root` always wins.** PF's dark theme also sets *component* variables on *component elements* (`:where(.pf-v5-theme-dark) .pf-v5-c-login { --pf-v5-c-login__main--BackgroundColor: … }`). Custom properties resolve from the nearest declaring element, so that beats `:root` regardless of specificity.
+2. **The dark theme re-points components at a different tier of globals.** The primary button reads `primary-color--300`/`--400`, the card `BackgroundColor--300`, form controls `BackgroundColor--400`, the underline `BorderColor--400`. Overriding only the `--100` tier left the Sign In button Keycloak blue (`#06c`) and the card the wrong grey. Both tiers are now set.
+3. **Field-level error text reads `danger-color--200`.** Set to a red-700 (`#b91c1c`) it rendered at ~2.4:1 on the card — a WCAG failure on the most important message on a failed login. On a dark surface the higher tiers must get *lighter*, not darker; it is now red-400 at **6.40:1**.
+
+**Verification.** Against a running `quay.io/keycloak/keycloak:26.0` on a fresh volume, reading computed styles rather than eyeballing. Realm import log clean. All assets 200, including the inherited `css/styles.css` and our favicon. Flows exercised: sign-in, failed login, update password (forced action), re-authenticate, logout confirmation, forgot password, error page. Contrast: button label 9.20:1, links 10.61:1, labels 6.91:1, error text 6.40:1 — all past AA. Mobile 375×812: no horizontal overflow. Full measurements in `planning/keycloak-eddi-theme.md` §6.1.
+
+**Operational note — existing installations.** Realm import is one-shot: Keycloak skips realms that already exist, so editing `eddi-realm.json` does **not** reach an existing deployment. `install.sh` now applies `loginTheme` through the Admin API so upgrades pick it up; for local development the equivalent is `docker compose -f docker-compose.yml -f docker-compose.auth.yml down -v` (⚠️ destroys `keycloak-data` — all users and sessions).
+
+**Incidental finding, not fixed here.** `"temporary": true` on an imported credential does **not** create an `UPDATE_PASSWORD` required action in Keycloak 26 — the seeded users log straight through (`requiredActions` is empty after import). That makes the comment at the top of `docker-compose.auth.yml` ("password change required on first login") inaccurate. Left untouched as out of scope; recorded as F19 in the plan.
+
+---
+
 ## 🔒 fix(ci): remove accidentally-committed langchain4j-mcp decompiled sources (2026-07-27)
 
 **Repo:** EDDI (`feat/v6.2.0-prep`)

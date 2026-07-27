@@ -51,6 +51,10 @@ services:
     volumes:
       - keycloak-data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro
+      # Custom login theme (activated via "loginTheme" in eddi-realm.json).
+      # Mount the single theme directory, not ./keycloak/themes as
+      # /opt/keycloak/themes — the latter would shadow the custom-theme root.
+      - ./keycloak/themes/eddi:/opt/keycloak/themes/eddi:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && timeout 2 cat <&3 | grep -q '200'"]
       interval: 10s

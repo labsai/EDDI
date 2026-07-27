@@ -643,7 +643,16 @@ resolve_compose_files() {
 
   # Download Keycloak realm if auth enabled
   if [[ "$WITH_AUTH" == "true" ]]; then
-    local kc_files=("keycloak/eddi-realm.json")
+    # The realm JSON is required; the login-theme files are cosmetic. Both are
+    # bind-mounted by docker-compose.auth.yml, and a missing theme directory
+    # would leave Docker to create an empty one — so they must be fetched here.
+    local kc_files=(
+      "keycloak/eddi-realm.json"
+      "keycloak/themes/eddi/login/theme.properties"
+      "keycloak/themes/eddi/login/resources/css/eddi-login.css"
+      "keycloak/themes/eddi/login/resources/img/logo_eddi.png"
+      "keycloak/themes/eddi/login/resources/img/favicon.ico"
+    )
     for kf in "${kc_files[@]}"; do
       local kf_target="$EDDI_DIR/$kf"
       local kf_dir
@@ -658,8 +667,14 @@ resolve_compose_files() {
         echo -ne "  Downloading ${kf}... "
         if curl -fsSL "${kf_url}" -o "$kf_target"; then
           echo -e "${GREEN}✅${RESET}"
-        else
+        elif [[ "$kf" == "keycloak/eddi-realm.json" ]]; then
           fail "Failed to download ${kf} (required for Keycloak).\n     URL: ${kf_url}"
+        else
+          # Cosmetic asset — don't abort the install, but don't leave a
+          # truncated file behind either.
+          rm -f "$kf_target"
+          echo ""
+          warn "Failed to download ${kf} — login page will use the default Keycloak theme"
         fi
       fi
     done
@@ -896,6 +911,56 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
     echo -e "${GREEN}✅${RESET}"
   else
     echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${update_status} — CORS may not work for port ${EDDI_PORT})${RESET}"
+  fi
+
+  # ── EDDI login theme ────────────────────────────────────
+  # Realm import is one-shot: Keycloak skips realms that already exist, so a
+  # change to eddi-realm.json never reaches an existing installation. Set the
+  # theme through the Admin API so upgrades pick it up too. Idempotent.
+  echo -ne "  Applying EDDI login theme  "
+
+  local realm_config updated_realm=""
+  realm_config=$(curl -sf \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${kc_base}/admin/realms/eddi" 2>/dev/null) || true
+
+  if [[ -z "$realm_config" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not read realm config — theme not applied)${RESET}"
+    return 0
+  fi
+
+  # GET-modify-PUT the full representation, same as the client update above.
+  if [[ "$json_tool" == "jq" ]]; then
+    updated_realm=$(echo "$realm_config" | jq \
+      '.loginTheme = "eddi" | .displayName = "EDDI" | .displayNameHtml = "EDDI"' \
+      2>/dev/null) || updated_realm=""
+  else
+    updated_realm=$(echo "$realm_config" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+d['loginTheme'] = 'eddi'
+d['displayName'] = 'EDDI'
+d['displayNameHtml'] = 'EDDI'
+print(json.dumps(d))" 2>/dev/null) || updated_realm=""
+  fi
+
+  if [[ -z "$updated_realm" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not patch realm config — theme not applied)${RESET}"
+    return 0
+  fi
+
+  local theme_status
+  theme_status=$(curl -sf -o /dev/null -w "%{http_code}" -X PUT \
+    -H "Authorization: Bearer ${admin_token}" \
+    -H "Content-Type: application/json" \
+    "${kc_base}/admin/realms/eddi" \
+    -d "$updated_realm" \
+    2>/dev/null) || theme_status="000"
+
+  if [[ "$theme_status" == "204" ]]; then
+    echo -e "${GREEN}✅${RESET}"
+  else
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${theme_status} — login page will use the default theme)${RESET}"
   fi
 }
 
