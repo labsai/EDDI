@@ -1482,6 +1482,25 @@ class GroupConversationServiceTest {
             assertTrue(result.startsWith("## Task Verification Results"));
         }
 
+        /**
+         * An explicit JSON null satisfies containsKey, so String.valueOf used to render
+         * the literal word "null" to the user instead of the fallback. Deserialized LLM
+         * output is exactly where a null-valued key shows up.
+         */
+        @Test
+        void nullSubjectAndFeedback_useFallbacksNotTheWordNull() throws Exception {
+            String raw = "[{\"subject\":null, \"passed\":true, \"feedback\":null}]";
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("subject", null);
+            item.put("passed", true);
+            item.put("feedback", null);
+            when(jsonSerialization.deserialize(raw, List.class)).thenReturn(List.of(item));
+
+            String result = invoke(raw);
+            assertTrue(result.contains("**Unknown Task**"), result);
+            assertFalse(result.contains("null"), "the literal word 'null' must never reach the user: " + result);
+        }
+
         @Test
         void validJson_passedFalse_showsX() throws Exception {
             String raw = "[{\"subject\":\"Task 2\", \"passed\":false, \"feedback\":\"Bad\"}]";

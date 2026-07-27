@@ -2105,14 +2105,18 @@ public class GroupConversationService implements IGroupConversationService {
             boolean anyVerified = false;
             for (Object item : items) {
                 if (item instanceof Map<?, ?> map) {
-                    String subject = map.containsKey("subject") ? String.valueOf(map.get("subject")) : null;
+                    // Test the value, not the key: a JSON "subject": null satisfies
+                    // containsKey, and String.valueOf then yields the literal "null" —
+                    // which is not null, so the guard below waves it through to a task
+                    // match that can never succeed, silently dropping the verification.
+                    String subject = stringOrNull(map.get("subject"));
                     // Read 'passed' boolean directly from JSON
                     boolean passed = true; // default to passed
                     if (map.containsKey("passed")) {
                         Object passedVal = map.get("passed");
                         passed = Boolean.TRUE.equals(passedVal) || "true".equalsIgnoreCase(String.valueOf(passedVal));
                     }
-                    String feedback = map.containsKey("feedback") ? String.valueOf(map.get("feedback")) : null;
+                    String feedback = stringOrNull(map.get("feedback"));
 
                     if (subject != null) {
                         for (TaskItem task : completedTasks) {
@@ -2134,6 +2138,23 @@ public class GroupConversationService implements IGroupConversationService {
             LOGGER.debugf("Verification JSON parse failed: %s", e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * A map value as a string, or {@code null} when the key is absent <em>or</em>
+     * explicitly null.
+     * <p>
+     * {@code containsKey} is true for a JSON {@code "subject": null}, and
+     * {@code String.valueOf} turns that into the literal four-character string
+     * "null" — which then passes every {@code != null} guard and reaches users as a
+     * task named "null". Deserialized LLM output is exactly where that happens.
+     *
+     * @param value
+     *            a value read from a deserialized JSON map
+     * @return its string form, or null
+     */
+    private static String stringOrNull(Object value) {
+        return value != null ? String.valueOf(value) : null;
     }
 
     /**
@@ -2162,13 +2183,16 @@ public class GroupConversationService implements IGroupConversationService {
             var sb = new StringBuilder("## Task Verification Results\n\n");
             for (Object item : items) {
                 if (item instanceof Map<?, ?> map) {
-                    String subject = map.containsKey("subject") ? String.valueOf(map.get("subject")) : "Unknown Task";
+                    // Test the value, not the key — otherwise a JSON "subject": null
+                    // renders to the user as the literal word "null" instead of
+                    // falling back to "Unknown Task".
+                    String subject = Objects.requireNonNullElse(stringOrNull(map.get("subject")), "Unknown Task");
                     boolean passed = true;
                     if (map.containsKey("passed")) {
                         Object passedVal = map.get("passed");
                         passed = Boolean.TRUE.equals(passedVal) || "true".equalsIgnoreCase(String.valueOf(passedVal));
                     }
-                    String feedback = map.containsKey("feedback") ? String.valueOf(map.get("feedback")) : "";
+                    String feedback = Objects.requireNonNullElse(stringOrNull(map.get("feedback")), "");
 
                     sb.append(passed ? "✅" : "❌").append(" **").append(subject).append("**: ");
                     sb.append(passed ? "Passed" : "Failed").append("\n");
