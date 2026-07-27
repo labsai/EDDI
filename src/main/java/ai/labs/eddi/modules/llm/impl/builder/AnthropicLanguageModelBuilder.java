@@ -14,9 +14,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Duration;
 import java.util.Map;
 
-import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.doubleValue;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.intValue;
-import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.longValue;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -58,22 +59,10 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
         Integer maxTokens = intValue(parameters, KEY_MAX_TOKENS);
         builder.maxTokens(maxTokens != null ? maxTokens : DEFAULT_MAX_TOKENS);
 
-        Long timeout = longValue(parameters, KEY_TIMEOUT);
-        if (timeout != null) {
-            builder.timeout(Duration.ofMillis(timeout));
-        }
-        Double temperature = doubleValue(parameters, KEY_TEMPERATURE);
-        if (temperature != null) {
-            builder.temperature(temperature);
-        }
-        Double topP = doubleValue(parameters, KEY_TOP_P);
-        if (topP != null) {
-            builder.topP(topP);
-        }
-        Integer topK = intValue(parameters, KEY_TOP_K);
-        if (topK != null) {
-            builder.topK(topK);
-        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyDouble(parameters, KEY_TOP_P, builder::topP);
+        applyInt(parameters, KEY_TOP_K, builder::topK);
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
         }
@@ -100,22 +89,10 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
         Integer maxTokens = intValue(parameters, KEY_MAX_TOKENS);
         builder.maxTokens(maxTokens != null ? maxTokens : DEFAULT_MAX_TOKENS);
 
-        Long timeout = longValue(parameters, KEY_TIMEOUT);
-        if (timeout != null) {
-            builder.timeout(Duration.ofMillis(timeout));
-        }
-        Double temperature = doubleValue(parameters, KEY_TEMPERATURE);
-        if (temperature != null) {
-            builder.temperature(temperature);
-        }
-        Double topP = doubleValue(parameters, KEY_TOP_P);
-        if (topP != null) {
-            builder.topP(topP);
-        }
-        Integer topK = intValue(parameters, KEY_TOP_K);
-        if (topK != null) {
-            builder.topK(topK);
-        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyDouble(parameters, KEY_TOP_P, builder::topP);
+        applyInt(parameters, KEY_TOP_K, builder::topK);
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
         }

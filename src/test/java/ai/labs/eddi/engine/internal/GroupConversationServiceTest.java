@@ -1452,12 +1452,12 @@ class GroupConversationServiceTest {
         @BeforeEach
         void setUp() throws Exception {
             formatMethod = GroupConversationService.class.getDeclaredMethod(
-                    "formatVerificationForDisplay", GroupConversation.class, List.class, String.class);
+                    "formatVerificationForDisplay", String.class);
             formatMethod.setAccessible(true);
         }
 
         private String invoke(String rawContent) throws Exception {
-            return (String) formatMethod.invoke(service, new GroupConversation(), List.of(), rawContent);
+            return (String) formatMethod.invoke(service, rawContent);
         }
 
         @Test

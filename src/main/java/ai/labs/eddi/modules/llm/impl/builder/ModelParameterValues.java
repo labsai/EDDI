@@ -7,6 +7,9 @@ package ai.labs.eddi.modules.llm.impl.builder;
 import org.jboss.logging.Logger;
 
 import java.util.Map;
+import java.util.function.DoubleConsumer;
+import java.util.function.IntConsumer;
+import java.util.function.LongConsumer;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -66,6 +69,37 @@ final class ModelParameterValues {
             return Double.valueOf(raw.trim());
         } catch (NumberFormatException e) {
             return rejected(key, raw, "decimal");
+        }
+    }
+
+    /**
+     * Hand a parsed integer to {@code setter}, or do nothing when the key is absent
+     * or unusable — leaving the model's own default in place.
+     * <p>
+     * The apply-form exists because the read-then-null-check form is three lines at
+     * every one of the ~36 call sites across the builders, and that is where a
+     * transcription slip hides.
+     */
+    static void applyInt(Map<String, String> parameters, String key, IntConsumer setter) {
+        Integer value = intValue(parameters, key);
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    /** Long variant of {@link #applyInt}. */
+    static void applyLong(Map<String, String> parameters, String key, LongConsumer setter) {
+        Long value = longValue(parameters, key);
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    /** Double variant of {@link #applyInt}. */
+    static void applyDouble(Map<String, String> parameters, String key, DoubleConsumer setter) {
+        Double value = doubleValue(parameters, key);
+        if (value != null) {
+            setter.accept(value);
         }
     }
 

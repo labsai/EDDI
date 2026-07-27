@@ -10,6 +10,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.doubleValue;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.intValue;
@@ -71,6 +74,57 @@ class ModelParameterValuesTest {
             assertNull(intValue(params("maxTokens", ""), "maxTokens"));
             assertNull(intValue(params("maxTokens", null), "maxTokens"));
             assertNull(intValue(null, "maxTokens"));
+        }
+    }
+
+    /**
+     * The apply-form is what the builders actually call — one line per parameter
+     * instead of a read plus a null check, which is where a transcription slip
+     * would hide across the ~36 call sites.
+     */
+    @Nested
+    @DisplayName("apply* — the form the builders use")
+    class ApplyForms {
+
+        @Test
+        @DisplayName("hands a parsed value to the setter")
+        void appliesParsedValues() {
+            AtomicInteger intSeen = new AtomicInteger(-1);
+            AtomicLong longSeen = new AtomicLong(-1);
+            AtomicReference<Double> doubleSeen = new AtomicReference<>();
+
+            ModelParameterValues.applyInt(params("maxTokens", "8192"), "maxTokens", intSeen::set);
+            ModelParameterValues.applyLong(params("timeout", "60000"), "timeout", longSeen::set);
+            ModelParameterValues.applyDouble(params("temperature", "0.3"), "temperature", doubleSeen::set);
+
+            assertEquals(8192, intSeen.get());
+            assertEquals(60000L, longSeen.get());
+            assertEquals(0.3d, doubleSeen.get());
+        }
+
+        @Test
+        @DisplayName("leaves the setter untouched for an unparseable value, so the model default stands")
+        void skipsSetterForUnparseable() {
+            AtomicInteger intSeen = new AtomicInteger(-1);
+            AtomicLong longSeen = new AtomicLong(-1);
+            AtomicReference<Double> doubleSeen = new AtomicReference<>();
+
+            ModelParameterValues.applyInt(params("maxTokens", "16k"), "maxTokens", intSeen::set);
+            ModelParameterValues.applyLong(params("timeout", "30s"), "timeout", longSeen::set);
+            // A European decimal comma is the realistic typo here.
+            ModelParameterValues.applyDouble(params("temperature", "0,3"), "temperature", doubleSeen::set);
+
+            assertEquals(-1, intSeen.get(), "setter must not run");
+            assertEquals(-1L, longSeen.get(), "setter must not run");
+            assertNull(doubleSeen.get(), "setter must not run");
+        }
+
+        @Test
+        @DisplayName("leaves the setter untouched for an absent key")
+        void skipsSetterForMissingKey() {
+            AtomicInteger seen = new AtomicInteger(-1);
+            ModelParameterValues.applyInt(params("other", "5"), "maxTokens", seen::set);
+            assertEquals(-1, seen.get());
         }
     }
 

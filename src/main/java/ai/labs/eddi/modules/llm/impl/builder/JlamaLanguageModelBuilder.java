@@ -10,6 +10,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Map;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -35,9 +38,7 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
             builder.temperature(Float.parseFloat(parameters.get(KEY_TEMPERATURE)));
         }
 
-        if (!isNullOrEmpty(parameters.get(KEY_MAX_TOKENS))) {
-            builder.maxTokens(Integer.parseInt(parameters.get(KEY_MAX_TOKENS)));
-        }
+        applyInt(parameters, KEY_MAX_TOKENS, builder::maxTokens);
 
         return builder.build();
     }

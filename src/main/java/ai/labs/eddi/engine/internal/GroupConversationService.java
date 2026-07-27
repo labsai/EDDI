@@ -1994,7 +1994,7 @@ public class GroupConversationService implements IGroupConversationService {
         // Replace raw JSON with a human-readable summary for the transcript.
         // The JSON was needed for parseAndApplyVerification above; users should
         // see formatted pass/fail results, not raw JSON.
-        String formattedContent = formatVerificationForDisplay(gc, completedTasks, verifyEntry.content());
+        String formattedContent = formatVerificationForDisplay(verifyEntry.content());
         TranscriptEntry displayEntry = new TranscriptEntry(
                 verifyEntry.speakerAgentId(), verifyEntry.speakerDisplayName(),
                 formattedContent, verifyEntry.phaseIndex(), verifyEntry.phaseName(),
@@ -2142,7 +2142,7 @@ public class GroupConversationService implements IGroupConversationService {
      * formatting fails.
      */
     @SuppressWarnings("unchecked")
-    private String formatVerificationForDisplay(GroupConversation gc, List<TaskItem> completedTasks, String rawContent) {
+    private String formatVerificationForDisplay(String rawContent) {
         if (rawContent == null || !rawContent.contains("[")) {
             return rawContent;
         }
