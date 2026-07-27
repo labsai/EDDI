@@ -1995,20 +1995,11 @@ class AgentOrchestrator {
         List<Object> tools = new ArrayList<>();
 
         if (task.getEnableBuiltInTools() == null || !task.getEnableBuiltInTools()) {
-            // Reading a file the user attached to THIS conversation is not an
-            // opt-in capability — it is the only way an uploaded document reaches
-            // the model after the turn it arrived on, and AttachmentForwarder's
-            // reminder note explicitly points the model at this tool.
-            //
-            // enableBuiltInTools defaults to false and exists to gate outbound,
-            // billable capabilities (web search, scraping, HTTP). readAttachment
-            // has neither property: it reads a blob already stored under this
-            // conversation and authorized by ownership or an explicit grant. Left
-            // behind that switch, attachment support silently worked for exactly
-            // one turn for every agent the wizards create.
-            //
-            // An explicit builtInToolsWhitelist is still honoured below — a list
-            // someone actually wrote is a decision; this default is not.
+            // readAttachment is not governed by the built-in tools config at all —
+            // it is part of attachment support, added here and in
+            // collectAllBuiltInTools whenever the conversation actually has files.
+            // See the note there for why neither the switch nor the whitelist gates
+            // it.
             addReadAttachmentToolIfEnabled(tools, memory);
             return tools;
         }
@@ -2071,8 +2062,6 @@ class AgentOrchestrator {
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
                 addConversationRecallToolIfEnabled(tools, task, memory);
-            if (whitelist.contains("readattachment"))
-                addReadAttachmentToolIfEnabled(tools, memory);
             // Dynamic agent tools (whitelist-gated, shared tracking lists)
             {
                 List<String> sharedCreatedIds = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -2130,9 +2119,26 @@ class AgentOrchestrator {
             addUserMemoryToolIfEnabled(tools, memory);
             // Auto-add conversation recall tool if rolling summary is active
             addConversationRecallToolIfEnabled(tools, task, memory);
-            // Auto-add the readAttachment tool when the conversation has attachments
-            addReadAttachmentToolIfEnabled(tools, memory);
         }
+
+        // Outside the whitelist branch on purpose: readAttachment is part of
+        // attachment support, not a capability the built-in tools config governs.
+        //
+        // It only ever appears when the conversation actually has files, and it
+        // reads a blob already stored under that conversation and authorized by
+        // ownership or an explicit grant — no outbound call, no cost. That is
+        // nothing like the web search / scraping / HTTP tools enableBuiltInTools
+        // exists to gate.
+        //
+        // Two things make gating it actively wrong rather than merely strict.
+        // AttachmentForwarder inlines a document on the turn it arrives with no
+        // whitelist check at all, so excluding this tool never stopped the model
+        // seeing the file — it only stopped it seeing the file on any LATER turn.
+        // And the Manager could not even offer "readattachment" as a choice until
+        // 6.2.0, so every whitelist written before then omits it by construction;
+        // honouring that omission would leave attachment recall broken for every
+        // existing whitelisted agent.
+        addReadAttachmentToolIfEnabled(tools, memory);
 
         return tools;
     }

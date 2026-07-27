@@ -695,7 +695,7 @@ public class LlmTask implements ILifecycleTask {
             // Only add to conversation output if there is actual text.
             // Null/blank responses (e.g. from token budget exhaustion or
             // thinking-only turns) should not produce empty message bubbles.
-            if (responseContent != null && !responseContent.isBlank()) {
+            if (producesRenderableOutput(responseContent)) {
                 var outputItem = new TextOutputItem(responseContent, 0);
                 currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
             } else {
@@ -1207,6 +1207,22 @@ public class LlmTask implements ILifecycleTask {
         if (name != null)
             return name;
         return processedParams.get("deploymentName");
+    }
+
+    /**
+     * Whether an LLM response should become a rendered message bubble.
+     * <p>
+     * A turn can legitimately produce no text — token budget exhaustion, or a
+     * thinking-only turn — and those must not surface as empty bubbles. Extracted
+     * so the rule is asserted against the code that runs rather than against a copy
+     * of the expression re-typed in a test.
+     *
+     * @param responseContent
+     *            the model's text response (may be null)
+     * @return true when there is something worth showing the user
+     */
+    static boolean producesRenderableOutput(String responseContent) {
+        return responseContent != null && !responseContent.isBlank();
     }
 
     @Override

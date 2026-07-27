@@ -475,7 +475,7 @@ class ContentTypeMatcherTest {
          * those turns.
          */
         @Test
-        @DisplayName("should match the map form a reloaded step comes back as")
+        @DisplayName("should match the map form that a reloaded step comes back as")
         void matchesAttachmentsReloadedFromTheStore() {
             matcher.setConfigs(Map.of("mimeType", "image/*"));
             List<?> persisted = List.of(Map.of(

@@ -112,16 +112,26 @@ class LanguageModelBuildersTest {
             ChatModel model = builder.build(params);
             assertNotNull(model);
 
-            // Verify maxTokens via reflection if possible (langchain4j AnthropicChatModel)
+            // Verify maxTokens via reflection (langchain4j AnthropicChatModel).
+            // Fails loudly if the field is gone: swallowing NoSuchFieldException made
+            // this assertion silently vanish on a langchain4j upgrade, leaving a
+            // green test that no longer checked the 16384 default it exists to
+            // protect — the whole point of DEFAULT_MAX_TOKENS.
             try {
                 java.lang.reflect.Field field = model.getClass().getDeclaredField("maxTokens");
                 field.setAccessible(true);
                 Integer maxTokens = (Integer) field.get(model);
                 assertEquals(16384, maxTokens);
             } catch (NoSuchFieldException e) {
-                // Ignore if field name varies in this langchain4j version
+                fail("Cannot verify the default maxTokens: no 'maxTokens' field on "
+                        + model.getClass().getName()
+                        + " — langchain4j renamed it; update this assertion rather than skipping it.");
             }
         }
+
+        // Lenient parsing of unparseable numeric parameters is covered by
+        // ModelParameterValuesTest — that is where the logic lives, and it runs
+        // without constructing a real HTTP client.
 
         @Test
         @DisplayName("builds StreamingChatModel")

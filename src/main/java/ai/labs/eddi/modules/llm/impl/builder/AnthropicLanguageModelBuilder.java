@@ -14,6 +14,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Duration;
 import java.util.Map;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.doubleValue;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.intValue;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.longValue;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -49,22 +52,27 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
             builder.modelName(parameters.get(KEY_MODEL_NAME));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_MAX_TOKENS))) {
-            builder.maxTokens(Integer.parseInt(parameters.get(KEY_MAX_TOKENS)));
-        } else {
-            builder.maxTokens(DEFAULT_MAX_TOKENS);
+        // Lenient reads: these values are typed by a user in the Manager, so a
+        // stray character is a config mistake, not a reason to fail every
+        // conversation this agent serves with an uncaught NumberFormatException.
+        Integer maxTokens = intValue(parameters, KEY_MAX_TOKENS);
+        builder.maxTokens(maxTokens != null ? maxTokens : DEFAULT_MAX_TOKENS);
+
+        Long timeout = longValue(parameters, KEY_TIMEOUT);
+        if (timeout != null) {
+            builder.timeout(Duration.ofMillis(timeout));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
+        Double temperature = doubleValue(parameters, KEY_TEMPERATURE);
+        if (temperature != null) {
+            builder.temperature(temperature);
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
+        Double topP = doubleValue(parameters, KEY_TOP_P);
+        if (topP != null) {
+            builder.topP(topP);
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TOP_P))) {
-            builder.topP(Double.parseDouble(parameters.get(KEY_TOP_P)));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_TOP_K))) {
-            builder.topK(Integer.parseInt(parameters.get(KEY_TOP_K)));
+        Integer topK = intValue(parameters, KEY_TOP_K);
+        if (topK != null) {
+            builder.topK(topK);
         }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
@@ -86,22 +94,27 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
             builder.modelName(parameters.get(KEY_MODEL_NAME));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_MAX_TOKENS))) {
-            builder.maxTokens(Integer.parseInt(parameters.get(KEY_MAX_TOKENS)));
-        } else {
-            builder.maxTokens(DEFAULT_MAX_TOKENS);
+        // Lenient reads: these values are typed by a user in the Manager, so a
+        // stray character is a config mistake, not a reason to fail every
+        // conversation this agent serves with an uncaught NumberFormatException.
+        Integer maxTokens = intValue(parameters, KEY_MAX_TOKENS);
+        builder.maxTokens(maxTokens != null ? maxTokens : DEFAULT_MAX_TOKENS);
+
+        Long timeout = longValue(parameters, KEY_TIMEOUT);
+        if (timeout != null) {
+            builder.timeout(Duration.ofMillis(timeout));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
+        Double temperature = doubleValue(parameters, KEY_TEMPERATURE);
+        if (temperature != null) {
+            builder.temperature(temperature);
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
+        Double topP = doubleValue(parameters, KEY_TOP_P);
+        if (topP != null) {
+            builder.topP(topP);
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TOP_P))) {
-            builder.topP(Double.parseDouble(parameters.get(KEY_TOP_P)));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_TOP_K))) {
-            builder.topK(Integer.parseInt(parameters.get(KEY_TOP_K)));
+        Integer topK = intValue(parameters, KEY_TOP_K);
+        if (topK != null) {
+            builder.topK(topK);
         }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));

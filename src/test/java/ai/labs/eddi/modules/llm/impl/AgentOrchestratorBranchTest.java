@@ -230,11 +230,30 @@ class AgentOrchestratorBranchTest {
             assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
         }
 
+        /**
+         * Attachment reading is not whitelist-governed. Excluding it never stopped the
+         * model seeing the file — AttachmentForwarder inlines a document on the turn it
+         * arrives with no whitelist check — it only stopped recall on later turns. And
+         * "readattachment" was not offerable in the Manager before 6.2.0, so every
+         * whitelist written until then omits it by construction.
+         */
         @Test
-        @DisplayName("NOT added when whitelist excludes it")
-        void notAddedWhenWhitelistExcludes() {
+        @DisplayName("added even when the whitelist omits it")
+        void addedWhenWhitelistOmitsIt() {
             orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
             withAttachments(true);
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+
+            assertTrue(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
+        @Test
+        @DisplayName("still NOT added when the whitelist omits it and there are no files")
+        void notAddedWhenWhitelistOmitsItAndNoAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            withAttachments(false);
             var task = new LlmConfiguration.Task();
             task.setEnableBuiltInTools(true);
             task.setBuiltInToolsWhitelist(List.of("calculator"));

@@ -468,53 +468,49 @@ class LlmTaskTest {
     class BlankOutputGuard {
 
         /**
-         * Tests the output guard condition from LlmTask line ~698:
-         * {@code if (responseContent != null && !responseContent.isBlank())} This is a
-         * focused unit test on the guard logic rather than mocking the entire execute()
-         * pipeline which has too many intermediate steps.
+         * Exercises {@link LlmTask#producesRenderableOutput(String)} — the guard that
+         * decides whether an LLM response becomes a message bubble. Previously these
+         * tests re-typed the guard expression inline, so they asserted
+         * {@code String.isBlank()} and would have passed even with the production guard
+         * deleted.
          */
 
         @Test
         @org.junit.jupiter.api.DisplayName("Non-blank text passes the guard")
         void nonBlankText_passesGuard() {
-            String responseContent = "Valid output";
-            assertTrue(responseContent != null && !responseContent.isBlank(),
+            assertTrue(LlmTask.producesRenderableOutput("Valid output"),
                     "Non-blank text should pass the output guard");
 
             // Verify TextOutputItem can be created with valid text
-            var outputItem = new ai.labs.eddi.modules.output.model.types.TextOutputItem(responseContent, 0);
+            var outputItem = new ai.labs.eddi.modules.output.model.types.TextOutputItem("Valid output", 0);
             assertEquals("Valid output", outputItem.getText());
         }
 
         @Test
         @org.junit.jupiter.api.DisplayName("Null text is blocked by the guard")
         void nullText_blockedByGuard() {
-            String responseContent = null;
-            assertFalse(responseContent != null && !responseContent.isBlank(),
+            assertFalse(LlmTask.producesRenderableOutput(null),
                     "Null text should be blocked by the output guard");
         }
 
         @Test
         @org.junit.jupiter.api.DisplayName("Blank text is blocked by the guard")
         void blankText_blockedByGuard() {
-            String responseContent = "   \n  \t  ";
-            assertFalse(responseContent != null && !responseContent.isBlank(),
+            assertFalse(LlmTask.producesRenderableOutput("   \n  \t  "),
                     "Blank/whitespace text should be blocked by the output guard");
         }
 
         @Test
         @org.junit.jupiter.api.DisplayName("Empty string is blocked by the guard")
         void emptyString_blockedByGuard() {
-            String responseContent = "";
-            assertFalse(responseContent != null && !responseContent.isBlank(),
+            assertFalse(LlmTask.producesRenderableOutput(""),
                     "Empty string should be blocked by the output guard");
         }
 
         @Test
         @org.junit.jupiter.api.DisplayName("Text with content and whitespace passes the guard")
         void textWithWhitespace_passesGuard() {
-            String responseContent = "  Hello world  \n";
-            assertTrue(responseContent != null && !responseContent.isBlank(),
+            assertTrue(LlmTask.producesRenderableOutput("  Hello world  \n"),
                     "Text with content (even with surrounding whitespace) should pass");
         }
     }
