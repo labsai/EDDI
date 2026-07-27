@@ -103,7 +103,7 @@ class LanguageModelBuildersTest {
 
         @Test
         @DisplayName("builds ChatModel without maxTokens defaults to 16384")
-        void buildDefaultMaxTokens() throws Exception {
+        void buildDefaultMaxTokens() {
             Map<String, String> params = new HashMap<>();
             params.put("apiKey", "sk-test");
             params.put("modelName", "claude-sonnet-4-6");
@@ -112,21 +112,17 @@ class LanguageModelBuildersTest {
             ChatModel model = builder.build(params);
             assertNotNull(model);
 
-            // Verify maxTokens via reflection (langchain4j AnthropicChatModel).
-            // Fails loudly if the field is gone: swallowing NoSuchFieldException made
-            // this assertion silently vanish on a langchain4j upgrade, leaving a
-            // green test that no longer checked the 16384 default it exists to
-            // protect — the whole point of DEFAULT_MAX_TOKENS.
-            try {
-                java.lang.reflect.Field field = model.getClass().getDeclaredField("maxTokens");
-                field.setAccessible(true);
-                Integer maxTokens = (Integer) field.get(model);
-                assertEquals(16384, maxTokens);
-            } catch (NoSuchFieldException e) {
-                fail("Cannot verify the default maxTokens: no 'maxTokens' field on "
-                        + model.getClass().getName()
-                        + " — langchain4j renamed it; update this assertion rather than skipping it.");
-            }
+            // Read the default through public API rather than reflection. There is no
+            // 'maxTokens' field to reflect on: AnthropicChatModel stores the builder's
+            // maxTokens as defaultRequestParameters.maxOutputTokens, so the old
+            // getDeclaredField("maxTokens") always threw NoSuchFieldException and the
+            // assertion inside the try was never reached — the test verified nothing
+            // for as long as it has existed.
+            //
+            // This matters more than a tidy-up: langchain4j falls back to 1024 output
+            // tokens when maxTokens is unset, which is the exact footgun
+            // DEFAULT_MAX_TOKENS exists to avoid for extended-thinking models.
+            assertEquals(Integer.valueOf(16384), model.defaultRequestParameters().maxOutputTokens());
         }
 
         // Lenient parsing of unparseable numeric parameters is covered by
