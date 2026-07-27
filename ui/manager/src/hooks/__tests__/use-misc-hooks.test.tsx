@@ -301,25 +301,18 @@ describe("useSetupAgent", () => {
 
 describe("useCreateApiAgent", () => {
   it("creates an API agent", async () => {
-    server.use(
-      http.post("*/agentsetup/api", () => {
-        return HttpResponse.json({
-          agentId: "api-agent",
-          agentVersion: 1,
-          workflowId: "wf-api",
-          workflowVersion: 1,
-        });
-      })
-    );
     const { result } = renderHook(() => useCreateApiAgent(), {
       wrapper: createWrapper(),
     });
     await act(async () => {
+      // `agentName` is the field the backend requires; sending `name` fails.
       result.current.mutate({
-        name: "API Agent",
-        description: "Test",
-      } as never);
+        agentName: "API Agent",
+        systemPrompt: "You are an API agent.",
+        openApiSpec: "openapi: 3.1.0",
+      });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.agentName).toBe("API Agent");
   });
 });

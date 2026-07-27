@@ -68,7 +68,8 @@
     "docs": "Dokumentation",
     "modeManager": "Manager",
     "modeWorkforce": "Workforce",
-    "switchMode": "Arbeitsbereich wechseln"
+    "switchMode": "Arbeitsbereich wechseln",
+    "operator": "Plattform-Operator"
   },
   "theme": {
     "light": "Hell",
@@ -3021,7 +3022,7 @@
       "hideDetails": "Details ausblenden",
       "editAgent": "Agent bearbeiten",
       "auditLogs": "Audit-Protokolle",
-    "openStudio": "Im Manager öffnen",
+      "openStudio": "Im Manager öffnen",
       "triggers": "Trigger anzeigen",
       "starterSelected": "Prompt zum Chateingabefeld hinzugefügt"
     },
@@ -3045,6 +3046,103 @@
       "activeTools": "Aktive Tools",
       "noLlm": "Kein LLM konfiguriert",
       "noTools": "Keine konfiguriert"
+    }
+  },
+  "operator": {
+    "title": "Plattform-Operator",
+    "subtitle": "Stellen Sie Fragen zu dieser EDDI-Installation — der Operator schlägt sie für Sie nach.",
+    "readOnlyChip": "Nur Lesezugriff",
+    "configError": "Die Operator-Konfiguration konnte nicht geladen werden",
+    "empty": {
+      "title": "Der Plattform-Operator ist deaktiviert",
+      "description": "Aktivieren Sie ihn, um mit einem Agenten zu chatten, der Ihre Agenten, Workflows, Konversationen, Deployments und Logs einsehen und erklären kann. Er hat ausschließlich Lesezugriff und kann nichts verändern.",
+      "action": "Plattform-Operator aktivieren"
+    },
+    "discovery": {
+      "title": "Ihr Plattform-Operator",
+      "description": "Ein Assistent, der diese Installation untersucht und erklärt. Standardmäßig deaktiviert, nur Lesezugriff, ein Klick zum Aktivieren.",
+      "action": "Aktivieren"
+    },
+    "activation": {
+      "title": "Plattform-Operator aktivieren",
+      "subtitle": "Wählen Sie das Modell für den Operator, prüfen Sie seine Anweisungen und starten Sie das Deployment.",
+      "modelStep": "Modell",
+      "reviewStep": "Prompt & Überprüfung",
+      "provider": "Anbieter",
+      "model": "Modell",
+      "baseUrl": "Basis-URL",
+      "apiKey": "API-Schlüssel des Modells",
+      "apiKeyHint": "Der Schlüssel Ihres LLM-Anbieters. Dies ist kein EDDI-Zugangsdatum.",
+      "apiKeyPlaceholder": "API-Schlüssel einfügen oder einen Vault-Schlüssel wählen",
+      "vaultDown": "Der Secrets-Vault ist nicht verfügbar, daher können Schlüssel derzeit nicht darin abgelegt werden. Ein hier eingegebener Schlüssel wird an das Backend weitergereicht, das ihn nach Möglichkeit im Vault speichert.",
+      "environment": "Umgebung",
+      "authMode": "Authentifizierung des Operators",
+      "authModeHint": "Der Operator ruft Ihre EDDI-Admin-API auf. Diese Einstellung legt fest, welche Zugangsdaten diese Aufrufe mitführen.",
+      "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen den Modus mit Ihrer Identität.",
+      "tokenAtRestWarning": "Ihr Anmelde-Token wird mit jeder Nachricht gesendet, damit die Aufrufe des Operators unter Ihrer Identität laufen. Es wird im Konversationsdatensatz in der Datenbank gespeichert und ist überall dort sichtbar, wo Konversationsdetails angezeigt werden.",
+      "tokenAtRestAck": "Mir ist bewusst, dass mein Zugriffstoken im Konversationsverlauf gespeichert wird.",
+      "safetyPreamble": "Sicherheitsregeln (nicht bearbeitbar)",
+      "safetyPreambleHint": "Wird immer vorangestellt. Sie weist den Operator an, alles von seinen Tools Zurückgelieferte als nicht vertrauenswürdige Daten zu behandeln.",
+      "promptBody": "Anweisungen für den Operator",
+      "promptBodyHint": "Passen Sie an, wie sich der Operator vorstellt und wie er arbeitet.",
+      "tools": "Tools, die er erhält ({{count}})",
+      "activate": "Aktivieren & deployen"
+    },
+    "authMode": {
+      "none": {
+        "label": "Keine Zugangsdaten",
+        "description": "Tool-Aufrufe enthalten keinen Authorization-Header. Funktioniert nur, wenn für diese EDDI-Installation die Authentifizierung deaktiviert ist."
+      },
+      "caller-context": {
+        "label": "Ihre Identität",
+        "description": "Tool-Aufrufe laufen unter dem angemeldeten Benutzer, mit dessen Berechtigungen und Audit-Spur. Erforderlich, wenn die Authentifizierung aktiviert ist."
+      }
+    },
+    "stage": {
+      "idle": "",
+      "validating": "Es wird geprüft, ob diese Installation die benötigten Endpunkte bereitstellt …",
+      "provisioning": "Operator-Agent wird erstellt …",
+      "resolving-version": "Agent-Version wird ermittelt …",
+      "saving": "Konfiguration wird gespeichert …",
+      "done": "Fertig"
+    },
+    "status": {
+      "title": "Operator",
+      "provider": "Anbieter",
+      "environment": "Umgebung",
+      "authMode": "Authentifiziert als",
+      "version": "Version",
+      "checking": "Wird geprüft …",
+      "ready": "Deployt",
+      "inProgress": "Wird deployt …",
+      "error": "Deployment-Fehler",
+      "notFound": "Nicht deployt",
+      "errorHelp": "Der Operator-Agent konnte nicht deployt werden. Konfigurieren Sie ihn neu, um es erneut zu versuchen, oder prüfen Sie die Plattform-Logs auf die zugrunde liegende Ursache.",
+      "reconfigure": "Neu konfigurieren",
+      "deactivate": "Deaktivieren",
+      "reset": "Operator löschen",
+      "deactivateConfirmTitle": "Plattform-Operator deaktivieren?",
+      "deactivateConfirmBody": "Der Operator wird undeployt und antwortet nicht mehr. Seine Konfiguration bleibt erhalten, sodass Sie ihn später wieder aktivieren können.",
+      "resetConfirmTitle": "Plattform-Operator löschen?",
+      "resetConfirmBody": "Der Operator-Agent und alle für ihn erstellten Ressourcen werden dauerhaft gelöscht, ebenso seine gespeicherte Konfiguration. Dies kann nicht rückgängig gemacht werden."
+    },
+    "chat": {
+      "empty": "Fragen Sie nach Ihrer Installation. Der Operator schlägt nach und zeigt Ihnen jeden Aufruf, den er macht.",
+      "placeholder": "Fragen Sie nach Agenten, Konversationen, Deployments, Logs …",
+      "send": "Senden",
+      "stop": "Stoppen",
+      "newConversation": "Neue Konversation beginnen"
+    },
+    "starters": {
+      "whatsDeployed": "Was ist derzeit deployt?",
+      "recentConversations": "Zeige mir die neuesten Konversationen",
+      "healthCheck": "Gibt es auf dieser Plattform Probleme?",
+      "diagnoseAgent": "Warum lässt sich einer meiner Agenten nicht deployen?"
+    },
+    "toast": {
+      "activated": "Plattform-Operator aktiviert",
+      "deactivated": "Plattform-Operator deaktiviert",
+      "reset": "Plattform-Operator gelöscht"
     }
   }
 }

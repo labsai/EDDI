@@ -68,7 +68,8 @@
     "docs": "Documentação",
     "modeManager": "Gerenciador",
     "modeWorkforce": "Equipe",
-    "switchMode": "Alternar espaço"
+    "switchMode": "Alternar espaço",
+    "operator": "Operador da plataforma"
   },
   "theme": {
     "light": "Claro",
@@ -3021,7 +3022,7 @@
       "hideDetails": "Ocultar painel de detalhes",
       "editAgent": "Editar Agente",
       "auditLogs": "Registos de Auditoria",
-    "openStudio": "Abrir no Manager",
+      "openStudio": "Abrir no Manager",
       "triggers": "Ver Gatilhos",
       "starterSelected": "Prompt adicionado à caixa de chat"
     },
@@ -3045,6 +3046,103 @@
       "activeTools": "Ferramentas Ativas",
       "noLlm": "Nenhum LLM configurado",
       "noTools": "Nenhum configurado"
+    }
+  },
+  "operator": {
+    "title": "Operador da plataforma",
+    "subtitle": "Pergunte sobre esta instalação do EDDI — o operador consulta por si.",
+    "readOnlyChip": "Somente leitura",
+    "configError": "Não foi possível carregar a configuração do operador",
+    "empty": {
+      "title": "O operador da plataforma está desativado",
+      "description": "Ative-o para conversar com um agente capaz de inspecionar os seus agentes, fluxos de trabalho, conversas, implantações e registos, e explicar o que encontra. É somente leitura e não pode alterar nada.",
+      "action": "Ativar o operador da plataforma"
+    },
+    "discovery": {
+      "title": "O seu operador da plataforma",
+      "description": "Um assistente que inspeciona e explica esta instalação. Desativado por predefinição, somente leitura, um clique para ativar.",
+      "action": "Ativar"
+    },
+    "activation": {
+      "title": "Ativar o operador da plataforma",
+      "subtitle": "Escolha o modelo que executará o operador, reveja as suas instruções e implante.",
+      "modelStep": "Modelo",
+      "reviewStep": "Prompt e revisão",
+      "provider": "Fornecedor",
+      "model": "Modelo",
+      "baseUrl": "URL base",
+      "apiKey": "Chave de API do modelo",
+      "apiKeyHint": "A chave do seu fornecedor de LLM. Não é uma credencial do EDDI.",
+      "apiKeyPlaceholder": "Cole a sua chave de API ou escolha uma chave do cofre",
+      "vaultDown": "O cofre de segredos está indisponível, por isso as chaves não podem ser guardadas nele neste momento. Uma chave introduzida aqui é encaminhada para o backend, que a guarda no cofre se conseguir.",
+      "environment": "Ambiente",
+      "authMode": "Como o operador se autentica",
+      "authModeHint": "O operador chama a sua API de administração do EDDI. Isto define que credenciais essas chamadas transportam.",
+      "authNoneBlocked": "Esta instalação tem a autenticação ativada, pelo que chamadas de ferramentas não autenticadas seriam rejeitadas. O operador seria implantado com sucesso e depois falharia em todas as consultas. Escolha antes o modo com a sua identidade.",
+      "tokenAtRestWarning": "O seu token de sessão é enviado com cada mensagem para que as chamadas do operador sejam executadas em seu nome. Fica guardado no registo da conversa na base de dados e é visível onde quer que os detalhes da conversa sejam apresentados.",
+      "tokenAtRestAck": "Compreendo que o meu token de acesso será guardado no histórico de conversas.",
+      "safetyPreamble": "Regras de segurança (não editáveis)",
+      "safetyPreambleHint": "São sempre antepostas. Instruem o operador a tratar tudo o que as suas ferramentas devolvem como dados não fiáveis.",
+      "promptBody": "Instruções do operador",
+      "promptBodyHint": "Edite como o operador se apresenta e como trabalha.",
+      "tools": "Ferramentas que receberá ({{count}})",
+      "activate": "Ativar e implantar"
+    },
+    "authMode": {
+      "none": {
+        "label": "Sem credenciais",
+        "description": "As chamadas de ferramentas não transportam cabeçalho Authorization. Só funciona quando esta instalação do EDDI tem a autenticação desativada."
+      },
+      "caller-context": {
+        "label": "A sua identidade",
+        "description": "As chamadas de ferramentas são executadas como o utilizador autenticado, com as permissões e o rasto de auditoria desse utilizador. Necessário quando a autenticação está ativada."
+      }
+    },
+    "stage": {
+      "idle": "",
+      "validating": "A verificar se esta instalação expõe os endpoints de que o operador precisa…",
+      "provisioning": "A criar o agente operador…",
+      "resolving-version": "A determinar a versão do agente…",
+      "saving": "A guardar a configuração…",
+      "done": "Concluído"
+    },
+    "status": {
+      "title": "Operador",
+      "provider": "Fornecedor",
+      "environment": "Ambiente",
+      "authMode": "Autentica-se como",
+      "version": "Versão",
+      "checking": "A verificar…",
+      "ready": "Implantado",
+      "inProgress": "A implantar…",
+      "error": "Erro de implantação",
+      "notFound": "Não implantado",
+      "errorHelp": "O agente operador não foi implantado. Reconfigure-o para tentar novamente ou consulte os registos da plataforma para ver o erro subjacente.",
+      "reconfigure": "Reconfigurar",
+      "deactivate": "Desativar",
+      "reset": "Eliminar operador",
+      "deactivateConfirmTitle": "Desativar o operador da plataforma?",
+      "deactivateConfirmBody": "O operador é retirado da implantação e deixa de responder. A sua configuração é mantida, para que o possa reativar mais tarde.",
+      "resetConfirmTitle": "Eliminar o operador da plataforma?",
+      "resetConfirmBody": "O agente operador e todos os recursos criados para ele são eliminados permanentemente, juntamente com a sua configuração guardada. Esta ação não pode ser anulada."
+    },
+    "chat": {
+      "empty": "Pergunte sobre a sua instalação. O operador consulta e mostra-lhe cada chamada que faz.",
+      "placeholder": "Pergunte sobre agentes, conversas, implantações, registos…",
+      "send": "Enviar",
+      "stop": "Parar",
+      "newConversation": "Iniciar uma nova conversa"
+    },
+    "starters": {
+      "whatsDeployed": "O que está implantado neste momento?",
+      "recentConversations": "Mostra-me as conversas mais recentes",
+      "healthCheck": "Há algo com problemas nesta plataforma?",
+      "diagnoseAgent": "Porque é que um dos meus agentes não consegue ser implantado?"
+    },
+    "toast": {
+      "activated": "Operador da plataforma ativado",
+      "deactivated": "Operador da plataforma desativado",
+      "reset": "Operador da plataforma eliminado"
     }
   }
 }

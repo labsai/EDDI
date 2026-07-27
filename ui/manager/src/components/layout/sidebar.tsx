@@ -33,6 +33,7 @@ import {
   Cable,
   Variable,
   HandMetal,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -49,6 +50,7 @@ const navSections = [
     labelKey: "nav.sectionCore",
     items: [
       { path: "/manage", icon: LayoutDashboard, labelKey: "nav.dashboard" },
+      { path: "/manage/operator", icon: Sparkles, labelKey: "nav.operator" },
       { path: "/manage/agents", icon: Bot, labelKey: "nav.agents" },
       { path: "/manage/workflows", icon: Workflow, labelKey: "nav.packages" },
       { path: "/manage/groups", icon: Boxes, labelKey: "nav.groups" },

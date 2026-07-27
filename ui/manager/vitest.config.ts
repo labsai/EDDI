@@ -10,7 +10,10 @@ export default mergeConfig(
       setupFiles: ["./src/test/setup.ts"],
       testTimeout: 30_000,
       css: true,
-      exclude: ["e2e/**", "node_modules/**"],
+      // `.claude/worktrees/**` holds checkouts of other branches. Their test
+      // files resolve `@/` through this config, so without excluding them a
+      // local run executes another branch's tests against this branch's mocks.
+      exclude: ["e2e/**", "node_modules/**", ".claude/**"],
       server: {
         deps: {
           // monaco-editor is ~40 MB; tests mock @monaco-editor/react so

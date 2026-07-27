@@ -45,7 +45,7 @@ describe("useCreateApiAgent", () => {
     });
 
     result.current.mutate({
-      name: "API Agent",
+      agentName: "API Agent",
       systemPrompt: "You are a helpful assistant.",
       provider: "anthropic",
       model: "claude-sonnet-4-6",

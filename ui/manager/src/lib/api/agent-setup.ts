@@ -19,7 +19,12 @@ export interface SetupAgentRequest {
 }
 
 export interface CreateApiAgentRequest {
-  name: string;
+  /**
+   * Backend field name is `agentName` — see the `CreateApiAgentRequest` record in
+   * `AgentSetupService`, which rejects a blank one with "Agent name is required".
+   * This used to be sent as `name`, which the backend silently dropped.
+   */
+  agentName: string;
   systemPrompt: string;
   openApiSpec: string;
   provider?: string;

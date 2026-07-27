@@ -20,6 +20,7 @@ import {
   Cloud,
   CheckCircle2,
   AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 import {
   useDashboardStats,
@@ -37,6 +38,7 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { parseConversationUri } from "@/lib/api/conversations";
 import { useAgentDescriptors } from "@/hooks/use-agents";
+import { useOperatorConfig } from "@/hooks/use-operator";
 
 // ─── State badge color helper ────────────────────────────────────────────────
 
@@ -193,6 +195,9 @@ export function DashboardPage() {
           </span>
         </div>
       </div>
+
+      {/* ─── Platform Operator discovery ─── */}
+      <OperatorDiscoveryCard />
 
       {/* Stats cards */}
       <div className="cq-stat-grid" data-tour="dashboard-stats">
@@ -421,5 +426,38 @@ export function DashboardPage() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Discovery card for the Platform Operator.
+ *
+ * The operator is off by default, which makes it easy to never find. This card
+ * is the entry point; it disappears once the operator is running so the
+ * dashboard doesn't nag about a decision already made.
+ */
+function OperatorDiscoveryCard() {
+  const { t } = useTranslation();
+  const { data: config, isLoading } = useOperatorConfig();
+
+  if (isLoading || (config?.enabled && config.agentId)) return null;
+
+  return (
+    <Card className="border-primary/30 bg-primary/5" data-testid="operator-discovery-card">
+      <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
+        <div className="flex items-start gap-3">
+          <Sparkles className="mt-0.5 h-6 w-6 shrink-0 text-primary" />
+          <div>
+            <p className="font-medium">{t("operator.discovery.title")}</p>
+            <p className="text-sm text-muted-foreground">
+              {t("operator.discovery.description")}
+            </p>
+          </div>
+        </div>
+        <Button asChild>
+          <Link to="/manage/operator">{t("operator.discovery.action")}</Link>
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

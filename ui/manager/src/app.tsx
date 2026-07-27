@@ -37,6 +37,7 @@ import { ChannelsPage } from "@/pages/channels";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 import { ApprovalsPage } from "@/pages/approvals";
 import { LandingPage } from "@/pages/landing-page";
+import { OperatorPage } from "@/pages/operator";
 
 import { WorkforceLayout } from "@/components/workforce/workforce-layout";
 import { WorkforceDashboard } from "@/pages/workforce/workforce-dashboard";
@@ -92,6 +93,7 @@ export function App() {
         <Route path="/manage/workflowview/:id" element={<WorkflowDetailPage />} />
         <Route path="/manage/conversations" element={<ConversationsPage />} />
         <Route path="/manage/conversations/monitoring" element={<ConversationMonitoringPage />} />
+        <Route path="/manage/operator" element={<OperatorPage />} />
         <Route path="/manage/coordinator" element={<CoordinatorPage />} />
         <Route path="/manage/schedules" element={<SchedulesPage />} />
         <Route path="/manage/logs" element={<LogsPage />} />

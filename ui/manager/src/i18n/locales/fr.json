@@ -68,7 +68,8 @@
     "docs": "Documentation",
     "modeManager": "Gestionnaire",
     "modeWorkforce": "Équipe",
-    "switchMode": "Changer d'espace"
+    "switchMode": "Changer d'espace",
+    "operator": "Opérateur de plateforme"
   },
   "theme": {
     "light": "Clair",
@@ -3021,7 +3022,7 @@
       "hideDetails": "Masquer les détails",
       "editAgent": "Modifier l agent",
       "auditLogs": "Journaux d audit",
-    "openStudio": "Ouvrir dans le Manager",
+      "openStudio": "Ouvrir dans le Manager",
       "triggers": "Voir les déclencheurs",
       "starterSelected": "Prompt ajouté à la zone de texte"
     },
@@ -3045,6 +3046,103 @@
       "activeTools": "Outils actifs",
       "noLlm": "Aucun LLM configuré",
       "noTools": "Aucun configuré"
+    }
+  },
+  "operator": {
+    "title": "Opérateur de plateforme",
+    "subtitle": "Posez vos questions sur ce déploiement EDDI — il fait les recherches pour vous.",
+    "readOnlyChip": "Lecture seule",
+    "configError": "Impossible de charger la configuration de l'opérateur",
+    "empty": {
+      "title": "L'opérateur de plateforme est désactivé",
+      "description": "Activez-le pour discuter avec un agent capable d'inspecter vos agents, workflows, conversations, déploiements et journaux, et d'expliquer ce qu'il trouve. Il est en lecture seule et ne peut rien modifier.",
+      "action": "Activer l'opérateur de plateforme"
+    },
+    "discovery": {
+      "title": "Découvrez votre opérateur de plateforme",
+      "description": "Un assistant qui inspecte et explique ce déploiement. Désactivé par défaut, en lecture seule, un clic pour l'activer.",
+      "action": "Activer"
+    },
+    "activation": {
+      "title": "Activer l'opérateur de plateforme",
+      "subtitle": "Choisissez le modèle qui fera fonctionner l'opérateur, vérifiez ses instructions et déployez.",
+      "modelStep": "Modèle",
+      "reviewStep": "Prompt et vérification",
+      "provider": "Fournisseur",
+      "model": "Modèle",
+      "baseUrl": "URL de base",
+      "apiKey": "Clé API du modèle",
+      "apiKeyHint": "La clé de votre fournisseur LLM. Il ne s'agit pas d'un identifiant EDDI.",
+      "apiKeyPlaceholder": "Collez votre clé API ou choisissez une clé du coffre",
+      "vaultDown": "Le coffre à secrets est indisponible, les clés ne peuvent donc pas y être stockées pour le moment. Une clé saisie ici est transmise au backend, qui la met au coffre s'il le peut.",
+      "environment": "Environnement",
+      "authMode": "Authentification de l'opérateur",
+      "authModeHint": "L'opérateur appelle votre API d'administration EDDI. Ce réglage détermine les identifiants portés par ces appels.",
+      "authNoneBlocked": "L'authentification est activée sur ce déploiement : les appels d'outils non authentifiés seraient rejetés. L'opérateur se déploierait correctement puis échouerait à chaque recherche. Choisissez plutôt le mode utilisant votre identité.",
+      "tokenAtRestWarning": "Votre jeton de connexion est envoyé avec chaque message afin que les appels de l'opérateur s'exécutent en votre nom. Il est enregistré dans la conversation en base de données et visible partout où le détail des conversations est affiché.",
+      "tokenAtRestAck": "Je comprends que mon jeton d'accès sera stocké dans l'historique des conversations.",
+      "safetyPreamble": "Règles de sécurité (non modifiables)",
+      "safetyPreambleHint": "Toujours ajoutées en tête. Elles indiquent à l'opérateur de traiter tout ce que renvoient ses outils comme des données non fiables.",
+      "promptBody": "Instructions de l'opérateur",
+      "promptBodyHint": "Modifiez la façon dont l'opérateur se présente et travaille.",
+      "tools": "Outils qui lui seront confiés ({{count}})",
+      "activate": "Activer et déployer"
+    },
+    "authMode": {
+      "none": {
+        "label": "Aucun identifiant",
+        "description": "Les appels d'outils ne portent aucun en-tête Authorization. Ne fonctionne que si l'authentification est désactivée sur ce déploiement EDDI."
+      },
+      "caller-context": {
+        "label": "Votre identité",
+        "description": "Les appels d'outils s'exécutent en tant qu'utilisateur connecté, avec ses permissions et sa piste d'audit. Requis lorsque l'authentification est activée."
+      }
+    },
+    "stage": {
+      "idle": "",
+      "validating": "Vérification que ce déploiement expose les points de terminaison nécessaires…",
+      "provisioning": "Création de l'agent opérateur…",
+      "resolving-version": "Résolution de la version de l'agent…",
+      "saving": "Enregistrement de la configuration…",
+      "done": "Terminé"
+    },
+    "status": {
+      "title": "Opérateur",
+      "provider": "Fournisseur",
+      "environment": "Environnement",
+      "authMode": "S'authentifie en tant que",
+      "version": "Version",
+      "checking": "Vérification…",
+      "ready": "Déployé",
+      "inProgress": "Déploiement…",
+      "error": "Erreur de déploiement",
+      "notFound": "Non déployé",
+      "errorHelp": "Le déploiement de l'agent opérateur a échoué. Reconfigurez-le pour réessayer, ou consultez les journaux de la plateforme pour connaître l'erreur sous-jacente.",
+      "reconfigure": "Reconfigurer",
+      "deactivate": "Désactiver",
+      "reset": "Supprimer l'opérateur",
+      "deactivateConfirmTitle": "Désactiver l'opérateur de plateforme ?",
+      "deactivateConfirmBody": "L'opérateur est retiré du déploiement et cesse de répondre. Sa configuration est conservée, vous pourrez le réactiver plus tard.",
+      "resetConfirmTitle": "Supprimer l'opérateur de plateforme ?",
+      "resetConfirmBody": "L'agent opérateur et toutes les ressources créées pour lui sont définitivement supprimés, ainsi que sa configuration enregistrée. Cette action est irréversible."
+    },
+    "chat": {
+      "empty": "Interrogez votre déploiement. L'opérateur fait les recherches et vous montre chaque appel qu'il effectue.",
+      "placeholder": "Agents, conversations, déploiements, journaux…",
+      "send": "Envoyer",
+      "stop": "Arrêter",
+      "newConversation": "Démarrer une nouvelle conversation"
+    },
+    "starters": {
+      "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",
+      "recentConversations": "Montre-moi les conversations les plus récentes",
+      "healthCheck": "Y a-t-il un problème sur cette plateforme ?",
+      "diagnoseAgent": "Pourquoi le déploiement d'un de mes agents échoue-t-il ?"
+    },
+    "toast": {
+      "activated": "Opérateur de plateforme activé",
+      "deactivated": "Opérateur de plateforme désactivé",
+      "reset": "Opérateur de plateforme supprimé"
     }
   }
 }
