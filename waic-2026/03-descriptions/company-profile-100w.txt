@@ -1,5 +1,0 @@
-labs.ai develops E.D.D.I, an open-source multi-agent orchestration middleware for conversational AI. Selected as a UNIDO Trusted Partner for Industrial AI in the Global South, labs.ai builds production-grade AI infrastructure that enables organizations to deploy, govern, and scale AI agents without code changes.
-
-E.D.D.I is built on Java 25 and Quarkus, ships as a Red Hat-certified Docker image, and supports both MongoDB and PostgreSQL. The platform implements comprehensive compliance frameworks (GDPR, HIPAA, EU AI Act) and integrates with 12 LLM providers including OpenAI, Anthropic, Google, and self-hosted models.
-
-Website: https://eddi.labs.ai

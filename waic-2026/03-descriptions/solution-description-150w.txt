@@ -1,7 +1,0 @@
-E.D.D.I (Enhanced Dialog Driven Interface) is a production-grade, config-driven multi-agent orchestration middleware for industrial AI. It coordinates users, AI agents, and business systems through intelligent routing, persistent memory, and API orchestration — without writing code.
-
-Agent behavior is defined in versioned JSON configurations, enabling rapid deployment and updates without recompilation. EDDI supports 12 LLM providers, implements open standards (MCP, A2A, OpenAPI, OAuth 2.0), and offers built-in compliance for GDPR, HIPAA, EU AI Act, and international privacy regulations.
-
-Key capabilities include multi-agent group conversations with six debate styles, smart model cascading for cost optimization, enterprise security with envelope-encrypted secrets vault, and cloud-native deployment on Docker, Kubernetes, and OpenShift. With 12,000+ tests and over 90% code coverage, EDDI is the enterprise-grade bridge between AI innovation and production governance.
-
-Open source. Apache 2.0. Red Hat certified.

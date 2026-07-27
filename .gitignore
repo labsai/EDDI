@@ -77,6 +77,10 @@ test-output.txt
 
 # AI session files (keep locally, don't push)
 .gemini/
+.claude/
+
+# Event/marketing material — kept locally, not part of the product
+waic-2026/
 
 eddi-audit-deadletter.jsonl
 
