@@ -155,6 +155,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | Test Coverage            | 12,000+ tests, >90% instruction / >80% branch coverage, OpenSSF Gold compliance                     |
 | —     | Security Hardening v6.0.2 | SSRF prevention, SafeHttpClient, auth guard, vault salt, security headers, CodeQL + Trivy CI       |
 | 9b    | HITL Framework           | Two human-approval gates (turn-level `PAUSE_CONVERSATION` + per-tool-call gating), timeout/no-progress policies, audit ledger, Slack + MCP approval surfaces, crash recovery — see [`docs/hitl.md`](docs/hitl.md) |
+| —     | OpenAI-Compatible API    | `/v1` adapter presenting deployed agents as OpenAI models for Open WebUI and OpenAI SDK clients; per-chat conversation isolation, streaming, multimodal, HITL-aware — see [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
 
 ### In Progress / Upcoming
 

@@ -1,8 +1,16 @@
 # OpenAI-Compatible API Adapter (Open WebUI Integration) — Implementation Plan
 
-> **Status:** Ready to implement. Supersedes the four earlier drafts.
-> **Target:** EDDI backend (Java 25 / Quarkus 3.37.x), new package `ai.labs.eddi.integrations.openai`.
-> **Audience:** the engineer or agent implementing this. Everything needed to code it is here.
+> **Status: IMPLEMENTED** on `feat/openai-api-adapter`. Kept as the design record — it holds the research and the reasoning behind each decision. User-facing documentation is [`docs/open-webui-integration.md`](../docs/open-webui-integration.md).
+> **Target:** EDDI backend (Java 25 / Quarkus 3.37.x), package `ai.labs.eddi.integrations.openai`.
+
+## Deltas discovered during implementation
+
+Four things differed from the plan below. They are recorded here rather than edited in, so the plan still reads as what was decided in advance.
+
+1. **Phase 2 was unnecessary.** `ConversationOutputExtractor.extractResponse()` already exists in `engine/memory` (landed upstream) and handles strictly more output formats than the Slack-local copy this plan proposed extracting — including a plain-String `output`, an `output` map with a `text` key, the `reply` key, and a blank check. The adapter uses it directly. `SlackHitlSupport.extractSlackResponseText` still duplicates it; deduplicating that is tracked separately.
+2. **`@Blocking` is `io.smallrye.common.annotation.Blocking`**, not `org.jboss.resteasy.reactive.Blocking`, in this Quarkus version. `StreamingOutput` worked as expected — the `RoutingContext` fallback was not needed.
+3. **The resolved userId reaches the resource via `@Context ContainerRequestContext`**, which the auth filter populates with a request property. Cleaner than the `ResteasyContext` lookup first attempted.
+4. **Slugging needed Unicode folding.** `[^a-z0-9]+` alone turned `Übersicht` into `bersicht`, mangling every non-ASCII agent name. NFD normalisation plus combining-mark stripping was added; caught by its own test.
 
 ---
 

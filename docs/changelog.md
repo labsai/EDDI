@@ -5,6 +5,38 @@
 
 ---
 
+## ✨ feat(openai): OpenAI-compatible API adapter for Open WebUI (2026-07-27)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+New `/v1` surface presenting deployed agents as OpenAI "models", so Open WebUI, the Python `openai` SDK, LangChain and LiteLLM can drive EDDI conversations. New package `integrations/openai/`, parallel to `integrations/slack/`. **Disabled by default.** Full guide: [`docs/open-webui-integration.md`](open-webui-integration.md); design rationale in [`planning/openai-api-adapter-plan.md`](../planning/openai-api-adapter-plan.md).
+
+**Four earlier drafts of this plan were built on premises that turned out to be false.** Each was verified against source before implementing; the corrections shaped the design:
+
+- **Content negotiation cannot dispatch sync vs streaming.** The plan routed on `Accept` via two `@Produces` methods. But `openai-python` hardcodes `Accept: application/json` and never varies it by `stream`, and Open WebUI sends no `Accept` header at all (it sniffs the *response* content-type). Every streaming request would have landed on the JSON method. → **one method, dispatching on the `stream` field of the body**, which is what the OpenAI spec says and what vLLM/llama.cpp/LiteLLM/Ollama all do.
+- **Open WebUI does not map `chat_id` to the `user` field.** [#27174](https://github.com/open-webui/open-webui/pull/27174) is an *issue*, closed as *not planned*; `payload['user']` is set only for pipeline models and is an object, not a chat id. The plan's entire per-chat isolation mechanism did not exist. → **key on `X-OpenWebUI-Chat-Id`** ([#15813](https://github.com/open-webui/open-webui/pull/15813), gated by `ENABLE_FORWARD_USER_INFO_HEADERS`), with `user` as a defensively-typed fallback.
+- **`IRestAgentAdministration` is `@RolesAllowed({"eddi-admin","eddi-editor"})` at type level**, and Quarkus enforces it via a CDI interceptor. Injecting it for `/v1/models`, as planned, would have 403'd for every ordinary caller. → read `IAgentFactory` + `IDocumentDescriptorStore` directly. REST facades are the authorization boundary; a public surface must not reach around one.
+- **The auth story did not exist.** `quarkus.http.auth.permission.authenticated.paths=/,/*` captures `/v1/*`, so an `sk-…` bearer would be rejected by OIDC before the adapter ran. → explicit `/v1/*` permission entry plus two modes (`permit` + shared key, or `authenticated` + OIDC), constant-time key compare, and a startup guard.
+- **`UtilityAgentProvisioner` was cut.** It had an unauthenticated caller creating and deploying an agent, cloning another agent's credential reference and consuming `maxAgentsPerTenant` quota — blocked by the role checks above anyway, and in tension with Pillar 1 (the engine authoring agent config at runtime). → replaced by **`<model>:stateless` variants**: start, say, end. No writes, no roles, and useful beyond title generation.
+- **The new-chat heuristic was cut.** `userMessageCount == 1 && hasTurns → endConversation` is unreliable (regenerate and edit-and-resend look identical to a first message), destructive (memory loss is irrecoverable), and directly contradicted the plan's own recommended Open WebUI Filter, which strips history to the last user message — under which *every* turn would have destroyed the conversation. A new chat is a new chat key, which is a new intent. No inference needed.
+- **HITL was unaddressed.** `onSkipped` fires for both `AWAITING_HUMAN` and `IN_PROGRESS`; the plan mapped both to "conversation busy", which would make any agent using `PAUSE_CONVERSATION` permanently unusable with a misleading message. → sentinel-snapshot discrimination, mirroring `SlackEventHandler`, and pauses surface as **chat text with `200`**, never as an HTTP error — a 4xx makes clients discard the user's message.
+
+**Components** (`src/main/java/ai/labs/eddi/integrations/openai/`): `RestOpenAiAdapter` (`/v1`), `OpenAiConversationBridge`, `AgentModelResolver`, `OpenAiMessageMapper`, `OpenAiSseWriter`, `OpenAiAuthFilter`, `OpenAiStartupGuard`, `OpenAiCompatConfig`, `OpenAiApiException` + `OpenAiExceptionMapper`, and 11 wire DTOs under `model/`.
+
+**Other design decisions:**
+- Model ids are `<slug>-<last 6 of agentId>`. Agent names are not unique, so a bare slug would be non-deterministic with two agents called "Support". Name and slug lookups are accepted but only when unique; an ambiguous match returns 400 listing candidates rather than guessing.
+- Slugging folds accents via NFD rather than dropping them — `Übersicht` was slugging to `bersicht`, mangling every non-ASCII agent name. Caught by its own test.
+- Images map to `attachment_N` context entries, so they flow through the existing `AttachmentForwarder` with its vision gating, byte caps and SSRF-guarded fetching. Zero core changes. Two parsing fixes: `data:image/png,payload` is legal and has no `;` (scanning to `;` threw), and remote URLs get a concrete MIME from the extension — `image/*` passes the forwarder's `startsWith("image/")` gate but is rejected by providers when handed to `ImageContent.from`.
+- `usage` is omitted rather than zero-filled: EDDI does not surface per-request token counts here, and zeros would render as a factual "0 tokens".
+- In-flight completions are semaphore-bounded — each holds a worker thread, since the bridge blocks on the turn as the Slack handler does.
+- **Reused, not duplicated:** `ConversationOutputExtractor.extractResponse()` already existed in `engine/memory` (added upstream) and handles more output formats than the Slack-local copy the plan proposed extracting. Phase 2 of the plan became unnecessary. Noted separately: `SlackHitlSupport.extractSlackResponseText` still duplicates it and should delegate.
+
+**Tests:** 104 unit tests, all green. Mutation-checked — reverting the model-ambiguity guard, the identity refusal, and the HITL sentinel distinction each makes the relevant tests fail. `RestOpenAiAdapterTest` (`@QuarkusTest`, binds a socket) is deferred to CI per the local-environment constraint.
+
+**Not implemented (v1):** `/v1/embeddings`, `tool_calls` passthrough (would cause double-execution — EDDI's tools do not exist in Open WebUI), `n > 1`, `logprobs`. Quick replies and `inputField` outputs are dropped; only text reaches OpenAI clients.
+
+---
+
 ## 🔒 fix(ci): remove accidentally-committed langchain4j-mcp decompiled sources (2026-07-27)
 
 **Repo:** EDDI (`feat/v6.2.0-prep`)
