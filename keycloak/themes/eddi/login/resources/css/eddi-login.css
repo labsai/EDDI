@@ -54,7 +54,11 @@
 :root {
     /* Surfaces. --light-100 drives the login card in the LIGHT theme, --300 in
        the dark theme; --100 drives inputs in light, --400 in dark. Set all four
-       so the result does not depend on which theme class is present. */
+       so the result does not depend on which theme class is present.
+       Trade-off: collapsing 100/300/400 onto one colour removes PF's tonal
+       separation between a surface and a raised element on top of it. The only
+       login page where that shows is the WebAuthn recovery-codes panel
+       (pf-v5-c-panel pf-m-raised), which ends up flush with the card. */
     --pf-v5-global--BackgroundColor--100:       var(--eddi-surface);
     --pf-v5-global--BackgroundColor--light-100: var(--eddi-surface);
     --pf-v5-global--BackgroundColor--150:       var(--eddi-surface-alt);
@@ -162,6 +166,9 @@
     border-radius: 8px;
 }
 
+/* The footer band is the "New user? Register" strip emitted by login.ftl. It
+   does not render while the realm has registrationAllowed=false, so this rule
+   is styled ahead of time rather than verified live. */
 .pf-v5-c-login__main-footer-band {
     border-top: 1px solid var(--eddi-border);
     background-color: var(--eddi-bg);
@@ -205,8 +212,7 @@
 }
 
 /* --- Labels and secondary text ------------------------------------------ */
-.pf-v5-c-form__label-text,
-.pf-v5-c-login__main-header-desc {
+.pf-v5-c-form__label-text {
     color: var(--eddi-muted);
 }
 

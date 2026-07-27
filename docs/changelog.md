@@ -42,6 +42,13 @@ Users redirected from the Manager or Workforce UI to Keycloak went from EDDI's a
 
 **Incidental finding, not fixed here.** `"temporary": true` on an imported credential does **not** create an `UPDATE_PASSWORD` required action in Keycloak 26 — the seeded users log straight through (`requiredActions` is empty after import). That makes the comment at the top of `docker-compose.auth.yml` ("password change required on first login") inaccurate. Left untouched as out of scope; recorded as F19 in the plan.
 
+**Review pass — four things the first commit had not established.**
+
+1. **Graceful degradation confirmed.** Emptying the theme directory while `loginTheme: eddi` stays set — exactly what a failed `install.sh` asset download produces — yields **HTTP 200 with the built-in theme** and `ERROR ... Failed to find LOGIN theme eddi, using built-in themes` in the log. So the decision to make theme downloads non-fatal is safe: a cosmetic failure cannot take authentication down.
+2. **The verification protocol is not vacuous.** Run against that deliberately broken state, both §6 step 2 (log grep) and step 3 (html-class and stylesheet assertions) fail as designed. Checks that cannot fail are worthless; these can.
+3. **The `install.sh` realm update was executed, not just written.** Against a realm reset to `loginTheme: ""`, the GET-modify-PUT returns 204, sets all three fields, and is idempotent on a second run.
+4. **A dead CSS selector removed.** `.pf-v5-c-login__main-header-desc` matches nothing and appears in no `keycloak.v2` template — the same mistake (styling an element the theme never emits) that killed the original `div.kc-logo-text` approach, reproduced at low stakes. Found by auditing every selector in our stylesheet against the live DOM. `.pf-v5-c-login__main-footer-band` was checked the same way and **kept**: it is emitted by `login.ftl` and only hidden because `registrationAllowed: false`. Also verified the keyboard focus ring — `:focus-visible` needs a real key event to match, and does then give `solid 2px #f59e0b` at 8.25:1 on the card, past WCAG 2.2's 3:1 for non-text indicators.
+
 ---
 
 ## 🔒 fix(ci): remove accidentally-committed langchain4j-mcp decompiled sources (2026-07-27)

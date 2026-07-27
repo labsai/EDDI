@@ -674,6 +674,17 @@ Contrast (computed, WCAG AA needs 4.5:1):
 | Error text on card | **6.40:1** |
 | Error-page message on card | **17.72:1** |
 
+Robustness and process checks from the review pass:
+
+| Check | Result |
+|---|---|
+| `loginTheme: eddi` with an **empty** theme dir (the failed-download state) | HTTP **200**, falls back to the built-in theme, logs `ERROR … Failed to find LOGIN theme eddi`. A cosmetic failure cannot break authentication — which is what makes the non-fatal `warn` in `install.sh` the right call |
+| §6 step 2 + step 3 run against that broken state | Both **fail as designed** — the verification protocol is not vacuous |
+| `install.sh` realm update executed against a realm reset to `loginTheme: ""` | **204**, all three fields set, idempotent on re-run |
+| Every selector in `eddi-login.css` audited against the live DOM | One dead selector found and removed (`.pf-v5-c-login__main-header-desc` — in no `keycloak.v2` template). `.pf-v5-c-login__main-footer-band` kept: emitted by `login.ftl`, hidden only by `registrationAllowed: false` |
+| Keyboard focus ring (real `Tab`, not programmatic `.focus()`) | `solid 2px #f59e0b`, **8.25:1** on the card — past WCAG 2.2's 3:1 for non-text indicators. Note `:focus-visible` does **not** match programmatic focus, so scripted checks alone would have reported it missing |
+| Autofill rule selector `.pf-v5-c-form-control > input` | Structurally correct (matches 2 inputs). The rendered autofill appearance was **not** exercised — it needs saved browser credentials |
+
 Flows exercised end to end, all correctly themed: sign-in · failed login (error text + status icon) ·
 update password (forced required action) · re-authenticate (`prompt=login`, username-hidden variant) ·
 logout confirmation · forgot password · error page (`Client not found`). Realm import log clean — no
