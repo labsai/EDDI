@@ -2217,9 +2217,17 @@ class AgentOrchestrator {
         IData<List<?>> attachmentData = memory.getCurrentStep().getData(MemoryKeys.ATTACHMENTS);
         // Coerced, not raw-counted: on a resumed turn these are maps, and a raw
         // count would also count entries that are not attachments at all.
+        //
+        // Restricted to blob-backed files, matching attachmentsFromPreviousTurns:
+        // the tool can only serve what the attachment store holds. An inline or
+        // URL-only attachment is already inlined by AttachmentForwarder on this
+        // turn, so offering a tool whose listAttachments would report nothing
+        // would only contradict the document sitting in the same message.
         int thisTurn = attachmentData == null
                 ? 0
-                : AttachmentContextExtractor.attachmentsFrom(attachmentData.getResult()).size();
+                : (int) AttachmentContextExtractor.attachmentsFrom(attachmentData.getResult()).stream()
+                        .filter(attachment -> attachment.getStorageRef() != null)
+                        .count();
         // Memory-only scan — no attachment-store round trip on turns without files.
         int earlierTurns = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).size();
         if (thisTurn == 0 && earlierTurns == 0) {

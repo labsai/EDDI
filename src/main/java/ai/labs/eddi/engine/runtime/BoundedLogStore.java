@@ -349,8 +349,15 @@ public class BoundedLogStore {
         // 2. If getFormattedMessage() returned raw msg or wasn't ExtLogRecord, format
         // manually
         if (params != null && params.length > 0) {
-            // Check if pattern contains printf format specifiers (%s, %d, etc.)
-            if (msg.contains("%s") || msg.contains("%d") || msg.contains("%f") || msg.contains("%n") || msg.contains("%x")) {
+            // Any '%' is enough to attempt printf — String.format throws on a
+            // malformed pattern and we fall through, so it can decide for itself.
+            //
+            // Enumerating specifiers missed every indexed, padded or grouped form:
+            // %1$s, %02d, %,d, %5.2f, %b, %e. Those matter because the MessageFormat
+            // attempt below does NOT throw on them — with no {0} placeholders it
+            // returns the pattern unchanged, so the String.format fallback further
+            // down is never reached and the raw "%1$s" is what reaches the viewer.
+            if (msg.indexOf('%') >= 0) {
                 try {
                     return String.format(msg, params);
                 } catch (Exception _) {

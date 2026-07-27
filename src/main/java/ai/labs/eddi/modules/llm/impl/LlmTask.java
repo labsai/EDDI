@@ -699,8 +699,14 @@ public class LlmTask implements ILifecycleTask {
                 var outputItem = new TextOutputItem(responseContent, 0);
                 currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
             } else {
-                LOGGER.warnf("LLM response was null or blank for task '%s' (type=%s) — skipping output",
-                        task.getId(), task.getType());
+                // DEBUG, not WARN: this is a documented-expected outcome (a
+                // thinking-only turn, or an exhausted token budget), so at WARN it
+                // recurs in healthy operation without telling an operator anything
+                // they can act on. Carries the conversation id so that when someone
+                // does turn debug on to chase "the agent didn't answer", the line
+                // identifies which conversation — which the WARN never did.
+                LOGGER.debugf("LLM response was null or blank for task '%s' (type=%s) in conversation '%s' — skipping output",
+                        task.getId(), task.getType(), sanitize(memory.getConversationId()));
             }
         }
 

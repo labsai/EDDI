@@ -326,6 +326,40 @@ class AgentOrchestratorBranchTest {
             assertTrue(orchestrator.collectEnabledTools(task, memory).isEmpty());
         }
 
+        /**
+         * The tool can only serve what the attachment store holds. An inline payload is
+         * never persisted and a URL is not in the store, so both are unreadable through
+         * it — and both are already inlined by AttachmentForwarder on this turn.
+         * Offering a tool whose listAttachments reports nothing would only contradict
+         * the document sitting in the same message.
+         */
+        @Test
+        @DisplayName("NOT added when this turn's only attachments cannot be fetched from the store")
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        void notAddedForInlineOrUrlOnlyAttachments() {
+            orchestrator.setAttachmentServices(mock(IAttachmentStore.class), new AttachmentTextExtractor(10_000));
+            var step = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(step);
+            when(memory.getConversationId()).thenReturn("conv-1");
+
+            var inline = new ai.labs.eddi.engine.memory.model.Attachment();
+            inline.setMimeType("application/pdf");
+            inline.setFileName("inline.pdf");
+            inline.setBase64Data("JVBERi0=");
+            var byUrl = new ai.labs.eddi.engine.memory.model.Attachment();
+            byUrl.setMimeType("image/png");
+            byUrl.setUrl("https://example.com/a.png");
+
+            IData data = mock(IData.class);
+            doReturn(List.of(inline, byUrl)).when(data).getResult();
+            doReturn(data).when(step).getData(MemoryKeys.ATTACHMENTS);
+
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+
+            assertFalse(hasReadAttachmentTool(orchestrator.collectEnabledTools(task, memory)));
+        }
+
         @Test
         @DisplayName("added via whitelist when only an earlier turn had attachments")
         void addedViaWhitelistWhenOnlyAnEarlierTurnHadAttachments() {
