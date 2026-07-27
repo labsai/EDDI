@@ -10,6 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Map;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -32,9 +33,10 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
             builder.authToken(parameters.get(KEY_AUTH_TOKEN));
         }
 
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Float.parseFloat(parameters.get(KEY_TEMPERATURE)));
-        }
+        // Parsed as a double and narrowed: this setter takes a float, and a separate
+        // float helper would buy nothing — every value a float accepts, a double
+        // accepts too.
+        applyDouble(parameters, KEY_TEMPERATURE, temperature -> builder.temperature((float) temperature));
 
         applyInt(parameters, KEY_MAX_TOKENS, builder::maxTokens);
 

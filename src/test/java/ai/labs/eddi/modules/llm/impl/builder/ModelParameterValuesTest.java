@@ -78,6 +78,31 @@ class ModelParameterValuesTest {
     }
 
     /**
+     * Blank is absent, not invalid. {@code isNullOrEmpty} only tests
+     * {@code isEmpty()}, so a parameter left as " " used to reach the parser and be
+     * reported as "not a valid integer" — a warning about a value nobody set.
+     */
+    @Nested
+    @DisplayName("blank values")
+    class BlankValues {
+
+        @Test
+        @DisplayName("whitespace-only is treated as absent, not as a parse failure")
+        void whitespaceOnlyIsAbsent() {
+            assertNull(intValue(params("maxTokens", "   "), "maxTokens"));
+            assertNull(longValue(params("timeout", "\t"), "timeout"));
+            assertNull(doubleValue(params("temperature", " \n "), "temperature"));
+        }
+
+        @Test
+        @DisplayName("a padded but valid value still parses")
+        void paddedValueStillParses() {
+            assertEquals(8192, intValue(params("maxTokens", "  8192  "), "maxTokens"));
+            assertEquals(0.3d, doubleValue(params("temperature", " 0.3 "), "temperature"));
+        }
+    }
+
+    /**
      * The apply-form is what the builders actually call — one line per parameter
      * instead of a read plus a null check, which is where a transcription slip
      * would hide across the ~36 call sites.

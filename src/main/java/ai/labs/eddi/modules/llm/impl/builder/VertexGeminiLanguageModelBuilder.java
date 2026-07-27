@@ -10,6 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Map;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -42,9 +43,10 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
             builder.modelName(parameters.get(KEY_MODEL_ID));
         }
 
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Float.parseFloat(parameters.get(KEY_TEMPERATURE)));
-        }
+        // Parsed as a double and narrowed: this setter takes a float, and a separate
+        // float helper would buy nothing — every value a float accepts, a double
+        // accepts too.
+        applyDouble(parameters, KEY_TEMPERATURE, temperature -> builder.temperature((float) temperature));
 
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));

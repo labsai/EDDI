@@ -11,8 +11,6 @@ import java.util.function.DoubleConsumer;
 import java.util.function.IntConsumer;
 import java.util.function.LongConsumer;
 
-import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
-
 /**
  * Lenient numeric reads for the free-form {@code parameters} map an LLM
  * configuration carries.
@@ -40,7 +38,7 @@ final class ModelParameterValues {
             return null;
         }
         try {
-            return Integer.valueOf(raw.trim());
+            return Integer.valueOf(raw);
         } catch (NumberFormatException e) {
             return rejected(key, raw, "integer");
         }
@@ -53,7 +51,7 @@ final class ModelParameterValues {
             return null;
         }
         try {
-            return Long.valueOf(raw.trim());
+            return Long.valueOf(raw);
         } catch (NumberFormatException e) {
             return rejected(key, raw, "long");
         }
@@ -66,7 +64,7 @@ final class ModelParameterValues {
             return null;
         }
         try {
-            return Double.valueOf(raw.trim());
+            return Double.valueOf(raw);
         } catch (NumberFormatException e) {
             return rejected(key, raw, "decimal");
         }
@@ -103,12 +101,25 @@ final class ModelParameterValues {
         }
     }
 
+    /**
+     * The trimmed value, or {@code null} when the key is absent, empty or nothing
+     * but whitespace.
+     * <p>
+     * Blank is absent, not invalid: {@code isNullOrEmpty} only tests
+     * {@code isEmpty()}, so a key left as " " used to reach the parser and be
+     * reported as "not a valid integer" — a warning about a value the user never
+     * really set. Trimming here also spares each parser its own trim.
+     */
     private static String rawValue(Map<String, String> parameters, String key) {
         if (parameters == null) {
             return null;
         }
         String raw = parameters.get(key);
-        return isNullOrEmpty(raw) ? null : raw;
+        if (raw == null) {
+            return null;
+        }
+        raw = raw.trim();
+        return raw.isEmpty() ? null : raw;
     }
 
     private static <T> T rejected(String key, String raw, String expected) {
