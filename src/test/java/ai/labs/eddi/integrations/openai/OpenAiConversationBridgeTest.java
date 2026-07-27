@@ -1,0 +1,439 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.integrations.openai;
+
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
+import ai.labs.eddi.integrations.openai.model.ChatCompletionRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.net.URI;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static ai.labs.eddi.integrations.openai.OpenAiTestFixtures.AGENT_ID_SUPPORT;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * Unit tests for {@link OpenAiConversationBridge}.
+ * <p>
+ * Two guarantees carry the design and are asserted directly: distinct chat ids
+ * must produce distinct conversations (otherwise one user's chat windows share
+ * a memory), and a dropped turn must be told apart from a completed one
+ * (otherwise a paused conversation replays the previous reply forever).
+ */
+class OpenAiConversationBridgeTest {
+
+    private static final String CONVERSATION_ID = "66c0ffee0000000000000001";
+    private static final String OTHER_CONVERSATION_ID = "66c0ffee0000000000000002";
+    private static final String USER_ID = "u_812";
+
+    private IConversationService conversationService;
+    private IUserConversationStore userConversationStore;
+    private OpenAiConversationBridge bridge;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private final AgentModelResolver.ResolvedModel statefulModel = new AgentModelResolver.ResolvedModel(
+            AGENT_ID_SUPPORT, Environment.production, "Support", "support-a3f9c1", false);
+    private final AgentModelResolver.ResolvedModel statelessModel = new AgentModelResolver.ResolvedModel(
+            AGENT_ID_SUPPORT, Environment.production, "Support", "support-a3f9c1:stateless", true);
+
+    @BeforeEach
+    void setUp() throws Exception {
+        conversationService = mock(IConversationService.class);
+        userConversationStore = mock(IUserConversationStore.class);
+
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult(
+                        CONVERSATION_ID, URI.create("eddi://conversation/" + CONVERSATION_ID)));
+        when(conversationService.getConversationState(any(String.class))).thenReturn(ConversationState.READY);
+
+        bridge = new OpenAiConversationBridge(conversationService, userConversationStore,
+                new OpenAiMessageMapper(objectMapper, 5), OpenAiTestFixtures.enabledConfig(),
+                new SimpleMeterRegistry());
+        bridge.initMetrics();
+    }
+
+    private ChatCompletionRequest request(String json) throws Exception {
+        return objectMapper.readValue(json, ChatCompletionRequest.class);
+    }
+
+    private ChatCompletionRequest simpleRequest() throws Exception {
+        return request("""
+                {"model":"support-a3f9c1","messages":[{"role":"user","content":"Hi"}]}""");
+    }
+
+    private Map<String, String> headers(String chatId) {
+        Map<String, String> headers = new HashMap<>();
+        if (chatId != null) {
+            headers.put(OpenAiAuthFilter.HEADER_CHAT_ID, chatId);
+        }
+        return headers;
+    }
+
+    /** Make the next say() invoke onComplete with the given snapshot. */
+    private void givenSayCompletes(SimpleConversationMemorySnapshot snapshot) throws Exception {
+        doAnswer(invocation -> {
+            IConversationService.ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    /** Make the next say() invoke onSkipped with the given snapshot. */
+    private void givenSaySkipped(SimpleConversationMemorySnapshot snapshot) throws Exception {
+        doAnswer(invocation -> {
+            IConversationService.ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onSkipped(snapshot);
+            return null;
+        }).when(conversationService).say(any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    private SimpleConversationMemorySnapshot snapshotWithText(String text, ConversationState state) {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationId(CONVERSATION_ID);
+        snapshot.setConversationState(state);
+        var output = new ConversationOutput();
+        output.put("output", List.of(text));
+        snapshot.setConversationOutputs(List.of(output));
+        return snapshot;
+    }
+
+    // ─── session keys: the isolation guarantee ───
+
+    @Test
+    void chatIdHeaderBecomesTheChatKey() throws Exception {
+        assertEquals("chat-4f2b", bridge.resolveChatKey(headers("chat-4f2b"), simpleRequest()));
+    }
+
+    @Test
+    void chatIdHeaderIsMatchedCaseInsensitively() throws Exception {
+        Map<String, String> lowercased = Map.of("x-openwebui-chat-id", "chat-4f2b");
+
+        assertEquals("chat-4f2b", bridge.resolveChatKey(lowercased, simpleRequest()));
+    }
+
+    @Test
+    void userFieldIsTheFallbackChatKey() throws Exception {
+        var request = request("""
+                {"model":"m","messages":[{"role":"user","content":"Hi"}],"user":"chat-99"}""");
+
+        assertEquals("chat-99", bridge.resolveChatKey(headers(null), request));
+    }
+
+    @Test
+    void chatIdHeaderWinsOverUserField() throws Exception {
+        var request = request("""
+                {"model":"m","messages":[{"role":"user","content":"Hi"}],"user":"chat-99"}""");
+
+        assertEquals("chat-4f2b", bridge.resolveChatKey(headers("chat-4f2b"), request));
+    }
+
+    @Test
+    void noChatIdentity_yieldsNullKey() throws Exception {
+        assertEquals(null, bridge.resolveChatKey(headers(null), simpleRequest()));
+    }
+
+    @Test
+    void differentChatIds_produceDifferentIntents() {
+        String first = bridge.buildIntent(AGENT_ID_SUPPORT, "chat-a");
+        String second = bridge.buildIntent(AGENT_ID_SUPPORT, "chat-b");
+
+        assertNotEquals(first, second,
+                "two Open WebUI chat windows must not share one EDDI conversation");
+        assertTrue(first.startsWith("channel:openai:" + AGENT_ID_SUPPORT + ":"));
+    }
+
+    @Test
+    void nullChatKey_fallsBackToDefaultSlot() {
+        assertEquals("channel:openai:" + AGENT_ID_SUPPORT + ":default",
+                bridge.buildIntent(AGENT_ID_SUPPORT, null));
+    }
+
+    @Test
+    void prepare_isolatesConversationsPerChatId() throws Exception {
+        // Two chats, no existing mappings: each must start its own conversation
+        // and store its own mapping under its own intent.
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+
+        bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+        bridge.prepare(statefulModel, simpleRequest(), headers("chat-b"), USER_ID);
+
+        ArgumentCaptor<UserConversation> captor = ArgumentCaptor.forClass(UserConversation.class);
+        verify(userConversationStore, times(2)).createUserConversation(captor.capture());
+
+        List<UserConversation> mappings = captor.getAllValues();
+        assertNotEquals(mappings.get(0).getIntent(), mappings.get(1).getIntent());
+        verify(conversationService, times(2)).startConversation(any(), any(), eq(USER_ID), any());
+    }
+
+    // ─── conversation reuse ───
+
+    @Test
+    void existingActiveMappingIsReused_noNewConversation() throws Exception {
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(new UserConversation(
+                "channel:openai:x", USER_ID, Environment.production, AGENT_ID_SUPPORT, CONVERSATION_ID));
+
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        assertEquals(CONVERSATION_ID, turn.conversationId());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    void endedMappingIsReplaced_notReused() throws Exception {
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(new UserConversation(
+                "channel:openai:x", USER_ID, Environment.production, AGENT_ID_SUPPORT, OTHER_CONVERSATION_ID));
+        when(conversationService.getConversationState(OTHER_CONVERSATION_ID)).thenReturn(ConversationState.ENDED);
+
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        assertEquals(CONVERSATION_ID, turn.conversationId());
+        verify(userConversationStore).deleteUserConversation(any(), eq(USER_ID));
+        verify(conversationService).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    void unreadableMappedConversationIsTreatedAsStale() throws Exception {
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(new UserConversation(
+                "channel:openai:x", USER_ID, Environment.production, AGENT_ID_SUPPORT, OTHER_CONVERSATION_ID));
+        when(conversationService.getConversationState(OTHER_CONVERSATION_ID))
+                .thenThrow(new RuntimeException("gone"));
+
+        assertEquals(CONVERSATION_ID,
+                bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID).conversationId());
+    }
+
+    @Test
+    void createRace_adoptsTheWinnerAndEndsTheOrphan() throws Exception {
+        // Two first messages arrive together. (intent, userId) is uniquely indexed,
+        // so one insert loses; that request must adopt the winner's conversation
+        // rather than fail, and must not leave its own conversation orphaned.
+        when(userConversationStore.readUserConversation(any(), any()))
+                .thenReturn(null)
+                .thenReturn(new UserConversation("channel:openai:x", USER_ID, Environment.production,
+                        AGENT_ID_SUPPORT, OTHER_CONVERSATION_ID));
+        doAnswer(invocation -> {
+            throw new IResourceStore.ResourceAlreadyExistsException("duplicate");
+        }).when(userConversationStore).createUserConversation(any());
+
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        assertEquals(OTHER_CONVERSATION_ID, turn.conversationId());
+        verify(conversationService).endConversation(CONVERSATION_ID);
+    }
+
+    // ─── stateless variant ───
+
+    @Test
+    void statelessModel_storesNoMapping() throws Exception {
+        var turn = bridge.prepare(statelessModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        assertTrue(turn.stateless());
+        verify(userConversationStore, never()).createUserConversation(any());
+        verify(userConversationStore, never()).readUserConversation(any(), any());
+    }
+
+    @Test
+    void statelessTurn_endsTheConversationEvenOnFailure() throws Exception {
+        doAnswer(invocation -> {
+            throw new IllegalStateException("agent exploded");
+        }).when(conversationService).say(any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        var turn = bridge.prepare(statelessModel, simpleRequest(), headers(null), USER_ID);
+
+        assertThrows(OpenAiApiException.class,
+                () -> bridge.say(turn, statelessModel, USER_ID, headers(null), simpleRequest()));
+
+        verify(conversationService).endConversation(CONVERSATION_ID);
+    }
+
+    @Test
+    void statelessTurn_endsTheConversationOnSuccess() throws Exception {
+        givenSayCompletes(snapshotWithText("Title", ConversationState.READY));
+        var turn = bridge.prepare(statelessModel, simpleRequest(), headers(null), USER_ID);
+
+        assertEquals("Title", bridge.say(turn, statelessModel, USER_ID, headers(null), simpleRequest()).text());
+
+        verify(conversationService).endConversation(CONVERSATION_ID);
+    }
+
+    // ─── HITL discrimination ───
+
+    @Test
+    void skippedWhileAwaitingHuman_saysAReviewerMustAct() throws Exception {
+        var paused = new SimpleConversationMemorySnapshot();
+        paused.setConversationState(ConversationState.AWAITING_HUMAN);
+        givenSaySkipped(paused);
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        var outcome = bridge.say(turn, statefulModel, USER_ID, headers("chat-a"), simpleRequest());
+
+        assertTrue(outcome.paused());
+        assertEquals(OpenAiConversationBridge.STILL_AWAITING_NOTICE, outcome.text());
+    }
+
+    @Test
+    void skippedWhileBusy_is429_notAPauseNotice() throws Exception {
+        var busy = new SimpleConversationMemorySnapshot();
+        busy.setConversationState(ConversationState.IN_PROGRESS);
+        givenSaySkipped(busy);
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        var exception = assertThrows(OpenAiApiException.class,
+                () -> bridge.say(turn, statefulModel, USER_ID, headers("chat-a"), simpleRequest()));
+
+        assertEquals(429, exception.getStatus(), "clients back off on 429; a 500 would just surface as an error");
+    }
+
+    @Test
+    void completedButPaused_returnsOutputPlusNotice_notAnError() throws Exception {
+        // A 4xx here would make the client discard the user's message; the pause
+        // has to arrive as ordinary assistant text.
+        givenSayCompletes(snapshotWithText("Working on it", ConversationState.AWAITING_HUMAN));
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        var outcome = bridge.say(turn, statefulModel, USER_ID, headers("chat-a"), simpleRequest());
+
+        assertTrue(outcome.paused());
+        assertTrue(outcome.text().startsWith("Working on it"));
+        assertTrue(outcome.text().contains(OpenAiConversationBridge.PAUSE_NOTICE_PREFIX));
+        assertTrue(outcome.text().contains(CONVERSATION_ID), "the reviewer needs the conversation id");
+    }
+
+    @Test
+    void pausedWithNoOutput_returnsOnlyTheNotice() {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationId(CONVERSATION_ID);
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+
+        var outcome = bridge.render(snapshot);
+
+        assertTrue(outcome.paused());
+        assertTrue(outcome.text().startsWith(OpenAiConversationBridge.PAUSE_NOTICE_PREFIX));
+    }
+
+    // ─── rendering ───
+
+    @Test
+    void normalCompletion_returnsTheAgentText() throws Exception {
+        givenSayCompletes(snapshotWithText("Hello there", ConversationState.READY));
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        var outcome = bridge.say(turn, statefulModel, USER_ID, headers("chat-a"), simpleRequest());
+
+        assertEquals("Hello there", outcome.text());
+        assertFalse(outcome.paused());
+    }
+
+    @Test
+    void emptyOutput_returnsAPlaceholder_notAnEmptyMessage() {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+
+        assertEquals(OpenAiConversationBridge.NO_OUTPUT_NOTICE, bridge.render(snapshot).text());
+    }
+
+    // ─── self-heal ───
+
+    @Test
+    void endedConversationMidTurn_retriesOnceOnAFreshConversation() throws Exception {
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        var successSnapshot = snapshotWithText("recovered", ConversationState.READY);
+        doAnswer(invocation -> {
+            throw new IConversationService.ConversationEndedException("ended");
+        }).doAnswer(invocation -> {
+            IConversationService.ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onComplete(successSnapshot);
+            return null;
+        }).when(conversationService).say(any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        var outcome = bridge.say(turn, statefulModel, USER_ID, headers("chat-a"), simpleRequest());
+
+        assertEquals("recovered", outcome.text());
+        verify(conversationService, times(2)).say(any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void endedConversationTwice_failsInsteadOfLooping() throws Exception {
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        doAnswer(invocation -> {
+            throw new IConversationService.ConversationEndedException("ended");
+        }).when(conversationService).say(any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertThrows(OpenAiApiException.class,
+                () -> bridge.say(turn, statefulModel, USER_ID, headers("chat-a"), simpleRequest()));
+
+        verify(conversationService, times(2)).say(any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    // ─── request validation ───
+
+    @Test
+    void requestWithoutUserMessage_is400() throws Exception {
+        var request = request("""
+                {"model":"support-a3f9c1","messages":[{"role":"system","content":"be nice"}]}""");
+
+        var exception = assertThrows(OpenAiApiException.class,
+                () -> bridge.prepare(statefulModel, request, headers("chat-a"), USER_ID));
+
+        assertEquals(400, exception.getStatus());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    void agentNotReady_is503() throws Exception {
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenThrow(new IConversationService.AgentNotReadyException("not deployed"));
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+
+        var exception = assertThrows(OpenAiApiException.class,
+                () -> bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID));
+
+        assertEquals(503, exception.getStatus());
+    }
+
+    @Test
+    void channelIntentIsRecordedOnTheConversation() throws Exception {
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+
+        bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        ArgumentCaptor<Map<String, ai.labs.eddi.engine.model.Context>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(conversationService).startConversation(any(), any(), any(), captor.capture());
+        assertTrue(captor.getValue().containsKey(OpenAiConversationBridge.CONTEXT_CHANNEL_INTENT));
+    }
+}
