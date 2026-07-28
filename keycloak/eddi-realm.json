@@ -5,7 +5,11 @@
   "displayNameHtml": "EDDI",
   "loginTheme": "eddi",
   "internationalizationEnabled": true,
-  "supportedLocales": ["en"],
+  "supportedLocales": [
+    "ar", "ca", "cs", "da", "de", "el", "en", "es", "fa", "fi",
+    "fr", "hu", "it", "ja", "ko", "lt", "lv", "nl", "no", "pl",
+    "pt", "pt-BR", "ru", "sk", "sv", "th", "tr", "uk", "zh-CN", "zh-TW"
+  ],
   "defaultLocale": "en",
   "sslRequired": "none",
   "registrationAllowed": false,

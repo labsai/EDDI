@@ -653,6 +653,9 @@ resolve_compose_files() {
       "keycloak/themes/eddi/login/resources/img/logo_eddi.png"
       "keycloak/themes/eddi/login/resources/img/favicon.ico"
       "keycloak/themes/eddi/login/resources/fonts/noto-sans-latin-variable.woff2"
+      "keycloak/themes/eddi/login/resources/fonts/noto-sans-latin-ext-variable.woff2"
+      "keycloak/themes/eddi/login/resources/fonts/noto-sans-cyrillic-variable.woff2"
+      "keycloak/themes/eddi/login/resources/fonts/noto-sans-greek-variable.woff2"
       "keycloak/themes/eddi/login/resources/js/eddi-a11y.js"
     )
     for kf in "${kc_files[@]}"; do
@@ -935,7 +938,7 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
   if [[ "$json_tool" == "jq" ]]; then
     updated_realm=$(echo "$realm_config" | jq \
       '.loginTheme = "eddi" | .displayName = "EDDI" | .displayNameHtml = "EDDI"
-       | .internationalizationEnabled = true | .supportedLocales = ["en"] | .defaultLocale = "en"' \
+       | .internationalizationEnabled = true | .supportedLocales = ["ar","ca","cs","da","de","el","en","es","fa","fi","fr","hu","it","ja","ko","lt","lv","nl","no","pl","pt","pt-BR","ru","sk","sv","th","tr","uk","zh-CN","zh-TW"] | .defaultLocale = "en"' \
       2>/dev/null) || updated_realm=""
   else
     updated_realm=$(echo "$realm_config" | python3 -c "
@@ -946,7 +949,7 @@ d['displayName'] = 'EDDI'
 d['displayNameHtml'] = 'EDDI'
 # Emits lang/dir on <html> (WCAG 3.1.1). One locale means no locale switcher.
 d['internationalizationEnabled'] = True
-d['supportedLocales'] = ['en']
+d['supportedLocales'] = ['ar','ca','cs','da','de','el','en','es','fa','fi','fr','hu','it','ja','ko','lt','lv','nl','no','pl','pt','pt-BR','ru','sk','sv','th','tr','uk','zh-CN','zh-TW']
 d['defaultLocale'] = 'en'
 print(json.dumps(d))" 2>/dev/null) || updated_realm=""
   fi

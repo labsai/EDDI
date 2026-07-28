@@ -39,6 +39,53 @@
                    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+/* The realm offers all 30 locales Keycloak ships translations for, so the Latin
+   subset alone would leave Czech, Polish, Turkish, Hungarian, Baltic, Russian,
+   Ukrainian and Greek in a fallback face — and for the Latin-ext languages that
+   means fallback glyphs *inside* otherwise-branded words ("Přihlásit"), which
+   reads as broken rather than as a different font. These three subsets fix that.
+
+   Cost, measured rather than assumed: `unicode-range` normally defers a subset
+   until the page uses it, but the locale switcher lists all 30 languages under
+   their native names, so Latin-ext, Cyrillic and Greek glyphs are present in the
+   DOM on every page and all four files are fetched (~245 KB). That is accepted
+   here: the fetch is `font-display: swap` so it never blocks paint, it is cached
+   for the session, and the page already loads a ~1.5 MB PatternFly stylesheet —
+   the fonts are not the bottleneck.
+
+   Arabic, Farsi, Thai and CJK are deliberately not bundled: those files are far
+   larger, they do not mix inside words with Latin, and every OS ships a
+   competent face for them. */
+@font-face {
+    font-family: "Noto Sans Variable";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url(../fonts/noto-sans-latin-ext-variable.woff2) format("woff2-variations");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+                   U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF,
+                   U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Noto Sans Variable";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url(../fonts/noto-sans-cyrillic-variable.woff2) format("woff2-variations");
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+    font-family: "Noto Sans Variable";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url(../fonts/noto-sans-greek-variable.woff2) format("woff2-variations");
+    unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1,
+                   U+03A3-03FF;
+}
+
 /* --- EDDI palette (mirrors the Manager's Tailwind tokens) ----------------- */
 :root {
     /* Mirrors the Manager's --font-sans, minus the subsets we do not ship. */
@@ -51,23 +98,108 @@
     --eddi-radius:    6px;  /* controls: inputs, buttons */
     --eddi-radius-lg: 12px; /* the login card */
 
-    --eddi-bg:            #0c0a09; /* stone-950  page background            */
-    --eddi-surface:       #18181b; /* zinc-900   login card, inputs         */
+    /* Taken from the Manager's own `.dark` token block, not eyeballed. Note
+       #0c0a09 is its --color-primary-foreground (the label on an amber fill),
+       NOT the page background — the page is #09090b. */
+    --eddi-bg:            #09090b; /* zinc-950   page background            */
+    --eddi-surface:       #18181b; /* zinc-900   login card                 */
     --eddi-surface-alt:   #1f1f23; /*            hover / raised surfaces    */
     --eddi-border:        #27272a; /* zinc-800   card + input borders       */
     --eddi-border-strong: #3f3f46; /* zinc-700                              */
     --eddi-primary:       #f59e0b; /* amber-500  buttons, focus, accents    */
     --eddi-primary-hover: #d97706; /* amber-600                             */
+    --eddi-on-primary:    #0c0a09; /* label on an amber fill                */
     --eddi-link:          #fbbf24; /* amber-400  links                      */
     --eddi-fg:            #fafaf9; /* stone-50   primary text               */
     --eddi-muted:         #a1a1aa; /* zinc-400   labels, secondary text     */
-    --eddi-error:         #ef4444; /* red-500                               */
+    --eddi-error:         #ef4444; /* red-500 — see note below              */
     --eddi-success:       #22c55e; /* green-500                             */
+    --eddi-focus:         #f59e0b; /* focus ring                            */
+
+    /* The Manager's --color-destructive is #dc2626 in both its themes. On our
+       dark card that is ~3.2:1, under the 4.5:1 needed for text, so the dark
+       mode uses red-500 for the accent and red-400 for the message itself.
+       Light mode below uses the Manager's value exactly, where it passes. */
+
+    /* Surface treatments that have to differ per colour scheme. Keeping them as
+       tokens is what lets the light block stay short. */
+    --eddi-recess:        rgba(0, 0, 0, .35);
+    --eddi-inset-shadow:  inset 0 1px 2px rgba(0, 0, 0, .45);
+    --eddi-card-sheen:    linear-gradient(180deg, rgba(255, 255, 255, .035), transparent 140px);
+    --eddi-card-edge:     inset 0 1px 0 0 rgba(255, 255, 255, .05);
+    --eddi-card-shadow:   0 24px 64px -16px rgba(0, 0, 0, .85);
+    --eddi-logo-filter:   none;
 
     /* Native form controls, scrollbars and autofill follow this. PF5's dark
        theme sets it too; repeated here so the page degrades sanely if the
        .pf-v5-theme-dark class is ever dropped. */
     color-scheme: dark;
+}
+
+/* --- Light mode -----------------------------------------------------------
+ * The Manager ships a theme toggle whose default is `system`, so a user on a
+ * light OS already gets a light Manager. Following prefers-color-scheme here
+ * matches that default. There is deliberately NO switcher on this page: the
+ * Manager owns the explicit choice, its localStorage is cross-origin from
+ * Keycloak so we could not read it anyway, and a second control would compete
+ * with the design.
+ *
+ * Values come from the Manager's own light token block, not from taste.
+ *
+ * Because every PatternFly token above is declared as var(--eddi-…), the whole
+ * component set follows from reassigning the palette — that indirection is what
+ * keeps this block to a palette swap plus the handful of treatments that are
+ * inherently directional (a highlight lit from above, a recess, a shadow).
+ * ------------------------------------------------------------------------ */
+@media (prefers-color-scheme: light) {
+    :root {
+        --eddi-bg:            #fafaf9; /* stone-50   page background        */
+        --eddi-surface:       #ffffff; /*            login card             */
+        --eddi-surface-alt:   #f5f5f4; /* stone-100                         */
+        --eddi-border:        #e7e5e4; /* stone-200                         */
+        --eddi-border-strong: #d6d3d1; /* stone-300                         */
+        --eddi-fg:            #1c1917; /* stone-900  primary text           */
+        --eddi-muted:         #78716c; /* stone-500  labels                 */
+        --eddi-error:         #dc2626; /* the Manager's destructive         */
+
+        /* Amber-400 links and an amber-500 focus ring are ~1.7:1 and ~2.1:1 on
+           white. Both step down the amber ramp until they clear their bars
+           (4.5:1 for link text, 3:1 for a focus indicator). */
+        --eddi-link:          #b45309; /* amber-700                         */
+        --eddi-focus:         #b45309; /* amber-700                         */
+
+        --eddi-recess:        #f5f5f4;
+        --eddi-inset-shadow:  inset 0 1px 2px rgba(28, 25, 23, .06);
+        --eddi-card-sheen:    none;
+        --eddi-card-edge:     inset 0 1px 0 0 rgba(255, 255, 255, .9);
+        --eddi-card-shadow:   0 10px 30px -12px rgba(28, 25, 23, .18);
+
+        /* The wordmark ships as a white monochrome PNG. Inverting it produces
+           black on the same transparency — invert() leaves the alpha channel
+           alone — which is why no second asset is needed. */
+        --eddi-logo-filter:   invert(1);
+
+        /* PF's elevation tokens are tuned for near-black and read as smears on
+           stone-50. */
+        --pf-v5-global--BoxShadow--lg: 0 6px 18px rgba(28, 25, 23, .10);
+        --pf-v5-global--BoxShadow--xl: 0 12px 32px rgba(28, 25, 23, .14);
+
+        color-scheme: light;
+    }
+
+    /* On a light page the bloom cannot read as emitted light — at any visible
+       alpha it reads as a stain. It becomes a faint warm wash, and the vignette
+       flips from near-black to a cool grey so the card still separates. */
+    .login-pf body {
+        background:
+            radial-gradient(34% 24% at 50% 29%,
+                rgba(245, 158, 11, .10),
+                rgba(245, 158, 11, .04) 45%,
+                transparent 78%),
+            radial-gradient(78% 48% at 50% 108%, rgba(120, 113, 108, .10), transparent 72%),
+            var(--eddi-bg);
+        background-attachment: fixed;
+    }
 }
 
 /* --- PatternFly 5 global tokens ------------------------------------------
@@ -215,6 +347,7 @@
     background-repeat: no-repeat;
     background-position: center;
     background-size: contain;
+    filter: var(--eddi-logo-filter); /* inverted to black in light mode */
 
     text-indent: -9999px;
     overflow: hidden;
@@ -231,10 +364,8 @@
 
     /* Light from above: a 1px inset highlight along the top edge and a falloff
        into the surface, then a real shadow so the panel sits off the page. */
-    background-image: linear-gradient(180deg, rgba(255, 255, 255, .035), transparent 140px);
-    box-shadow:
-        inset 0 1px 0 0 rgba(255, 255, 255, .05),
-        0 24px 64px -16px rgba(0, 0, 0, .85);
+    background-image: var(--eddi-card-sheen);
+    box-shadow: var(--eddi-card-edge), var(--eddi-card-shadow);
 }
 
 /* SIGNATURE — the light source. A hairline amber rule across the top edge,
@@ -281,10 +412,10 @@
  * WCAG AA failure. Force near-black text: ~10:1.
  * ------------------------------------------------------------------------ */
 .pf-v5-c-button.pf-m-primary {
-    --pf-v5-c-button--m-primary--Color:         var(--eddi-bg);
-    --pf-v5-c-button--m-primary--hover--Color:  var(--eddi-bg);
-    --pf-v5-c-button--m-primary--focus--Color:  var(--eddi-bg);
-    --pf-v5-c-button--m-primary--active--Color: var(--eddi-bg);
+    --pf-v5-c-button--m-primary--Color:         var(--eddi-on-primary);
+    --pf-v5-c-button--m-primary--hover--Color:  var(--eddi-on-primary);
+    --pf-v5-c-button--m-primary--focus--Color:  var(--eddi-on-primary);
+    --pf-v5-c-button--m-primary--active--Color: var(--eddi-on-primary);
     font-weight: 600;
     letter-spacing: .01em;
     padding-block: 10px;
@@ -321,18 +452,18 @@
 .pf-v5-c-form-control,
 .pf-v5-c-input-group {
     --pf-v5-c-form-control--BackgroundColor: transparent;
-    background-color: rgba(0, 0, 0, .35);
+    background-color: var(--eddi-recess);
     border: 1px solid var(--eddi-border);
     border-radius: var(--eddi-radius);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .45);
+    box-shadow: var(--eddi-inset-shadow);
 }
 
 .pf-v5-c-form-control:focus-within,
 .pf-v5-c-input-group:focus-within {
-    border-color: var(--eddi-primary);
+    border-color: var(--eddi-focus);
     box-shadow:
-        inset 0 1px 2px rgba(0, 0, 0, .45),
-        0 0 0 3px rgba(245, 158, 11, .16);
+        var(--eddi-inset-shadow),
+        0 0 0 3px color-mix(in srgb, var(--eddi-focus) 18%, transparent);
 }
 
 /* The password field is an input-group: the field and the visibility toggle are
@@ -412,6 +543,9 @@
  * outline that all but disappears here.
  * ------------------------------------------------------------------------ */
 :focus-visible {
-    outline: 2px solid var(--eddi-primary);
+    /* --eddi-focus, not --eddi-primary: the brand amber stays amber-500 in both
+       schemes, but on a white card that is 2.15:1 — under WCAG 2.4.11's 3:1 for
+       a focus indicator. The token steps down to amber-700 in light mode. */
+    outline: 2px solid var(--eddi-focus);
     outline-offset: 2px;
 }
