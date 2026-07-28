@@ -465,9 +465,30 @@ An EDDI turn can carry eight output types; the OpenAI protocol carries one strin
 | `agentFace` | dropped — an avatar has no text equivalent |
 | `other` | dropped |
 
-Quick replies render as their literal **values**, not as a numbered list: the user types the next message by hand here, and numbering would invite `2` as an answer, which no input matcher recognises. The value is what a chat UI puts on the button, so it is what the user would type; the `expressions` field stays internal.
+A turn combining a text item with quick replies arrives as one assistant message:
+
+```
+Which LLM provider should this agent use?
+
+_Suggested replies:_ `Anthropic` · `OpenAI` · `Gemini` · `Ollama (local)`
+```
+
+Blocks are joined with a blank line, so each renders as its own paragraph. Values are de-duplicated, blank ones skipped, and original order preserved.
 
 This rendering is local to the adapter. The shared `ConversationOutputExtractor` is unchanged — its other callers feed agent-to-agent prompts, where interaction affordances would be noise.
+
+#### Why quick replies show the value, and why typing it works
+
+A quick reply has two halves: a `value` the user sees (`Anthropic`) and an `expressions` token the behaviour rules match (`select_anthropic`). Rendering the *value* is not merely cosmetic — it is the half that round-trips.
+
+`InputParserTask.prepareTemporaryDictionaries()` looks at the **previous** turn's output and, for every quick reply it finds, registers a temporary dictionary entry mapping the `value` to its `expressions` (`DictionaryUtilities.convertQuickReplies` — `addWord` for single words, `addPhrase` when the value contains a space). So when the user reads `` `Anthropic` `` and types `Anthropic`, the parser resolves it to `select_anthropic` and the matching rule fires, with no dictionary configured on the agent. This is why the Agent Father works over `/v1` despite its parser step declaring `"dictionaries": []`.
+
+Two consequences worth knowing:
+
+- **Rendering the `expressions` token instead would break this.** `select_anthropic` is not in any dictionary; only the value is registered. Showing the internal token would also leak implementation detail at the user.
+- **The window is exactly one turn.** The temporary dictionary is rebuilt from the immediately preceding output, so quick replies are answerable on the *next* message only. If the user types something unrelated first, the options are no longer matchable by name and the agent falls back to whatever its `*` rules do.
+
+Numbering (`1.`, `2.`) is deliberately avoided for the same reason: nothing registers `2` as an answer, so a numbered list would invite input the parser cannot resolve.
 
 ---
 
