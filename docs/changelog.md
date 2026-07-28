@@ -32,10 +32,12 @@ An agent could only call an API with a *static* credential baked into its apical
 1. **Same-origin only.** The token is released only when the outbound call targets the exact `scheme://host:port` the caller addressed, taken from the inbound request rather than configuration. An agent config naming a third-party host therefore cannot exfiltrate a user's token, and the feature needs no allow-list to be safe out of the box.
 2. **Headers only.** `${caller:token}` in a query parameter is rejected — tokens in URLs leak through access logs, proxies and browser history. `${caller:userId}` is allowed anywhere.
 3. **Fails closed.** An unsatisfiable reference throws rather than resolving to `""`, which would silently send `Bearer ` and surface far away as a puzzling 401.
-4. **Never stored.** Resolution happens while building the request; `scrubSensitiveHeaders` already strips authorization headers before the request is written to conversation memory.
+4. **Never stored.** Resolution happens while building the request, and `scrubSensitiveHeaders` redacts it before the request is written to conversation memory. Header-*name* matching alone was not enough — a token placed in an unconventionally named header would have slipped through — so the resolved token is additionally matched by value.
 5. **Opt-out.** `eddi.caller-identity.enabled` (default `true`) forbids the feature outright.
 
-**Tests.** `CallerIdentityResolverTest` (19) and `CallerIdentityContextTest` (7) — same-origin refusals (host, port, scheme downgrade), fail-closed paths, regex-escaping of tokens containing `$`/`\`, thread isolation, and clearing on pooled threads. Disabling the same-origin guard fails 4 tests (mutation-checked). All 227 `ConversationService*Test` tests still pass.
+**Async boundaries.** Two further hand-offs lose a `ThreadLocal` binding and had to be covered explicitly, or `${caller:token}` would fail closed for no reason the config author could see: the HITL **resume** path (`runtime.submitCallable(resumeCallable, ...)`) and **fire-and-forget batch** calls in `ApiCallExecutor`. `CallerIdentityContext.propagate()` carries the binding across the latter; the resume path captures its own caller, since a resume is itself an authenticated request.
+
+**Tests.** `CallerIdentityResolverTest` (24) and `CallerIdentityContextTest` (10) — same-origin refusals (host, port, scheme downgrade), fail-closed paths, regex-escaping of tokens containing `$`/`\`, thread isolation, and clearing on pooled threads. Disabling the same-origin guard fails 4 tests (mutation-checked). All 227 `ConversationService*Test` tests still pass.
 
 **Note for the manager:** the operator's `caller-context` auth mode should now provision `apiAuth` as `Bearer ${caller:token}` and stop putting the token in conversation context — which removes the token-at-rest warning from the activation flow.
 

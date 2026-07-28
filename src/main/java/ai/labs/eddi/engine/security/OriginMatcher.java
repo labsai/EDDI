@@ -13,8 +13,8 @@ import java.util.Locale;
  * Two origins match when scheme, host and effective port are equal, with the
  * default port for the scheme treated as equal to the explicit one — so
  * {@code https://eddi.example} and {@code https://eddi.example:443} are the
- * same origin. Host comparison is case-insensitive; scheme and host are the
- * only things compared, never the path.
+ * same origin. Host comparison is case-insensitive. Only scheme, host and port
+ * take part in the comparison — path and query are ignored.
  *
  * @author ginccc
  */

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
@@ -65,11 +66,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
     private final CallerIdentityResolver callerIdentityResolver;
+    private final CallerIdentityContext callerIdentityContext;
     private final boolean ssrfProtectionEnabled;
 
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
+            CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
@@ -78,6 +81,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.callerIdentityResolver = callerIdentityResolver;
+        this.callerIdentityContext = callerIdentityContext;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
     }
 
@@ -239,7 +243,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 batchRequest.setExecuteCallsSequentially(false);
             }
 
-            runtime.submitCallable(() -> {
+            runtime.submitCallable(callerIdentityContext.propagate(() -> {
                 List<Object> batchIterationList = prePostUtils.buildListFromJson(batchRequest.getIterationObjectName(),
                         batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), null, templateDataObjects);
 
@@ -257,7 +261,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     }
                 }
                 return null;
-            }, null);
+            }), null);
         } else {
             IRequest request = buildRequest(targetServerUrl, callRequest, templateDataObjects);
             executeFireAndForgetCall(request, callName);
@@ -413,9 +417,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * Scrub sensitive header values from the request map before it is stored in
      * conversation memory. This prevents resolved secrets (API keys, bearer tokens)
      * from being persisted to the database.
+     * <p>
+     * Header-name matching only catches conventional names, so a resolved caller
+     * token is additionally matched by value — otherwise placing it in an
+     * arbitrarily named header would defeat the redaction.
      */
     @SuppressWarnings("unchecked")
-    private static void scrubSensitiveHeaders(Map<String, Object> requestMap) {
+    private void scrubSensitiveHeaders(Map<String, Object> requestMap) {
         Object headersObj = requestMap.get("headers");
         if (headersObj instanceof Map) {
             var headers = (Map<String, Object>) headersObj;
@@ -428,6 +436,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     entry.setValue("<REDACTED>");
                 } else if (entry.getValue() instanceof String val && (val.contains("${vault:") || val.contains("${eddivault:"))) {
                     entry.setValue("<REDACTED>");
+                } else if (entry.getValue() instanceof String val) {
+                    // Catches a caller token placed in an unconventionally named
+                    // header, which the name patterns above would miss.
+                    entry.setValue(callerIdentityResolver.redactCallerToken(val, "<REDACTED>"));
                 }
             }
             requestMap.put("headers", scrubbed);

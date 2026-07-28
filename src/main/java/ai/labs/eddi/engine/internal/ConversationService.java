@@ -1464,6 +1464,11 @@ public class ConversationService implements IConversationService {
 
             Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, memory.getUserId());
 
+            // The resume is itself an authenticated request, so the pipeline it
+            // continues should run as the person who approved — captured here, on
+            // the request thread, for the same reason as in the say path.
+            final CallerIdentity resumeCallerIdentity = callerIdentityContext.capture();
+
             Callable<Void> resumeCallable = () -> {
                 // #3: a cancel or a terminal end may have landed between the CAS
                 // and this execution (flag on the registered memory, or DB-only in
@@ -1588,7 +1593,7 @@ public class ConversationService implements IConversationService {
             Callable<Void> guardedResume = () -> {
                 try {
                     waitForExecutionFinishOrTimeout(loggingContext, conversationId,
-                            runtime.submitCallable(resumeCallable, resumeFinished, null));
+                            runtime.submitCallable(withCallerIdentity(resumeCallable, resumeCallerIdentity), resumeFinished, null));
                 } finally {
                     // value-conditional: never evict a newer execution's registration
                     inFlightConversations.remove(conversationId, memory);

@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +59,8 @@ class ApiCallExecutorBranchCoverageTest {
     @Mock
     private CallerIdentityResolver callerIdentityResolver;
     @Mock
+    private CallerIdentityContext callerIdentityContext;
+    @Mock
     private IConversationMemory memory;
     @Mock
     private IWritableConversationStep currentStep;
@@ -73,8 +76,9 @@ class ApiCallExecutorBranchCoverageTest {
         openMocks(this);
         // Pass-through: this suite exercises no ${caller:...} references.
         lenient().when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime,
-                prePostUtils, globalVariableResolver, secretResolver, callerIdentityResolver, false);
+                prePostUtils, globalVariableResolver, secretResolver, callerIdentityResolver, callerIdentityContext, false);
 
         when(memory.getCurrentStep()).thenReturn(currentStep);
         when(mockRequest.toMap()).thenReturn(new HashMap<>());

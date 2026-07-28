@@ -186,4 +186,40 @@ class CallerIdentityResolverTest {
     void allowsUserIdInQueryParameter() {
         resolver.rejectTokenReference("${caller:userId}", "a query parameter");
     }
+
+    // ==================== Redaction before persistence ====================
+
+    @Test
+    @DisplayName("the token is redacted out of an unconventionally named header")
+    void redactsTokenByValue() {
+        // Header-name matching misses this one, so value matching has to catch it.
+        withCaller(new CallerIdentity("jwt-abc", "alice", SELF));
+        assertEquals("Bearer <REDACTED>", resolver.redactCallerToken("Bearer jwt-abc", "<REDACTED>"));
+    }
+
+    @Test
+    void redactsEveryOccurrence() {
+        withCaller(new CallerIdentity("jwt-abc", "alice", SELF));
+        assertEquals("x=* y=*", resolver.redactCallerToken("x=jwt-abc y=jwt-abc", "*"));
+    }
+
+    @Test
+    @DisplayName("a value that does not contain the token is left alone")
+    void leavesUnrelatedValuesUnredacted() {
+        withCaller(new CallerIdentity("jwt-abc", "alice", SELF));
+        assertEquals("application/json", resolver.redactCallerToken("application/json", "<REDACTED>"));
+    }
+
+    @Test
+    void redactionIsANoOpWithoutACaller() {
+        withCaller(null);
+        assertEquals("Bearer jwt-abc", resolver.redactCallerToken("Bearer jwt-abc", "<REDACTED>"));
+    }
+
+    @Test
+    void redactionHandlesNullAndEmpty() {
+        withCaller(new CallerIdentity("jwt-abc", "alice", SELF));
+        assertNull(resolver.redactCallerToken(null, "<REDACTED>"));
+        assertEquals("", resolver.redactCallerToken("", "<REDACTED>"));
+    }
 }

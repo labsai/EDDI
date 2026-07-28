@@ -9,12 +9,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -88,6 +90,47 @@ class CallerIdentityContextTest {
         var resolver = new CallerIdentityResolver(context, true);
         assertThrows(CallerIdentityResolver.CallerIdentityException.class,
                 () -> resolver.resolveValue("Bearer ${caller:token}", URI.create("https://eddi.example/x")));
+    }
+
+    @Test
+    @DisplayName("propagate() carries the caller across a thread hop")
+    void propagateCarriesIdentityToAnotherThread() throws Exception {
+        var identity = new CallerIdentity("alice-token", "alice", "https://eddi.example:443");
+        context.bind(identity);
+
+        var work = context.propagate(context::current);
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            // Without propagation this would be null — the failure mode that makes
+            // a fire-and-forget batch fail closed for no visible reason.
+            assertEquals(identity, executor.submit(work).get());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("propagate() clears the borrowed thread afterwards")
+    void propagateClearsAfterRunning() throws Exception {
+        context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+        var work = context.propagate(() -> "done");
+
+        var leaked = new AtomicReference<CallerIdentity>();
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            executor.submit(work).get();
+            executor.submit(() -> leaked.set(context.current())).get();
+        } finally {
+            executor.shutdownNow();
+        }
+        assertNull(leaked.get(), "the pooled thread must not keep the caller's token");
+    }
+
+    @Test
+    @DisplayName("propagate() returns the work untouched when nothing is bound")
+    void propagateIsPassThroughWithoutIdentity() throws Exception {
+        Callable<String> work = () -> "done";
+        assertSame(work, context.propagate(work));
     }
 
     @Test

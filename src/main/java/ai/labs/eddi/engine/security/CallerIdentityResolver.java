@@ -133,6 +133,26 @@ public class CallerIdentityResolver {
         }
     }
 
+    /**
+     * Redact the caller's token wherever it appears in an already-resolved value.
+     *
+     * The header-name patterns used elsewhere only catch conventional names, so a
+     * token placed in an arbitrarily named header would otherwise be persisted to
+     * conversation memory. This closes that gap by matching on the token itself.
+     *
+     * @return the value with any occurrence of the caller's token replaced
+     */
+    public String redactCallerToken(String value, String redaction) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        var identity = callerIdentityContext.current();
+        if (identity == null || !identity.hasToken()) {
+            return value;
+        }
+        return value.contains(identity.token()) ? value.replace(identity.token(), redaction) : value;
+    }
+
     private String resolveToken(CallerIdentity identity, URI target) {
         if (!identity.hasToken()) {
             throw new CallerIdentityException(

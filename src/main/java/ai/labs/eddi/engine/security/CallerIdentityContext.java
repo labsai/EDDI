@@ -11,6 +11,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.concurrent.Callable;
+
 /**
  * Carries the authenticated caller from the request thread to the pipeline
  * worker thread that runs their conversation turn.
@@ -115,5 +117,28 @@ public class CallerIdentityContext {
     /** The identity bound to this thread, or {@code null}. */
     public CallerIdentity current() {
         return CURRENT.get();
+    }
+
+    /**
+     * Wrap work that will run on another thread so it keeps the current caller.
+     * <p>
+     * Used where the pipeline hands work to a further executor — a fire-and-forget
+     * batch, for instance — which would otherwise lose the binding and make a
+     * {@code ${caller:token}} reference fail closed for no reason the config author
+     * could see.
+     */
+    public <T> Callable<T> propagate(Callable<T> work) {
+        final CallerIdentity captured = current();
+        if (captured == null) {
+            return work;
+        }
+        return () -> {
+            bind(captured);
+            try {
+                return work.call();
+            } finally {
+                clear();
+            }
+        };
     }
 }
