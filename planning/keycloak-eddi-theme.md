@@ -20,15 +20,14 @@ When a user is redirected from the EDDI Manager or Workforce UI to Keycloak, the
 a dark, amber-on-near-black interface to stock Keycloak blue-on-white. The login page should read as
 part of EDDI.
 
-**Non-goal:** a general-purpose Keycloak theming framework. This is one login theme, dark-only,
-matching one palette.
+**Non-goal:** a general-purpose Keycloak theming framework. This is one login theme matching one
+palette. It follows the system colour scheme by default, with an explicit override in the header.
 
 ---
 
 ## 2. Approach in one paragraph
 
-Ship a `login` theme named `eddi` that inherits from `keycloak.v2` and consists of **three text/asset
-files and no FreeMarker**. It works in three layers:
+Ship a `login` theme named `eddi` that inherits from `keycloak.v2` and carries **no FreeMarker overrides**. It works in three layers:
 
 1. **`kcHtmlClass=login-pf pf-v5-theme-dark`** in `theme.properties` puts PatternFly 5's built-in dark
    theme class on `<html>`. That single line flips every PF5 component the login pages use — inputs,
@@ -72,7 +71,7 @@ re-check them if the Keycloak image tag moves off `26.0`.
 | F12 | The dark theme remaps `--pf-v5-global--BackgroundColor--light-100` to `#1b1d21` | Matters because the login card uses `--pf-v5-c-login__main--BackgroundColor: var(--pf-v5-global--BackgroundColor--light-100)`, i.e. the *light* token. Without the remap the card would stay white | — |
 | F13 | `kcHtmlClass` is **not** set in `keycloak.v2`; it is inherited from the v1 `keycloak` theme as `login-pf`. `kcBodyClass` is undefined | (a) `.login-pf body` selectors are valid here. (b) Overriding `kcHtmlClass` **must keep `login-pf`** or the background rule stops matching | `curl` the v1 `theme.properties` |
 | F14 | Primary buttons resolve `--pf-v5-c-button--m-primary--Color` from `--pf-v5-global--Color--light-100`, which the dark theme sets to `#e0e0e0` | Light text on amber `#f59e0b` is ≈2.1:1 — a WCAG failure. The button text colour must be overridden explicitly to near-black | — |
-| F15 | The EDDI palette below is real, not invented: `#f59e0b` (100×), `#fafaf9` (17×), `#27272a` (9×), `#18181b` (8×), `#a1a1aa` (3×), `#0c0a09` (3×) all appear in the built Manager assets under `src/main/resources/META-INF/resources/` | The CI tokens are correct | `grep -roh "#0c0a09\|#f59e0b" src/main/resources/META-INF/resources/ \| sort \| uniq -c` |
+| F15 | The EDDI palette below is real, not invented: `#f59e0b` (100×), `#fafaf9` (17×), `#27272a` (9×), `#18181b` (8×), `#a1a1aa` (3×), `#0c0a09` (3×) all appear in the built Manager assets under `src/main/resources/META-INF/resources/` | The CI tokens are correct — but **counting occurrences does not tell you a token's role**, and that caused a real bug: `#0c0a09` is the Manager's `--color-primary-foreground` (the label on an amber fill), not its background. The dark background is `#09090b`. Read the Manager's `.dark{…}` block, do not infer from frequency | `grep -roh -- "--color-[a-z-]*:#0c0a09" src/main/resources/META-INF/resources/assets/*.css \| sort -u` |
 | F16 | `logo_eddi.png` is **500×159** (ratio 3.14) and is a **white** wordmark on transparency | Sizes correctly on a dark background; the box must respect ~3.14:1 or use `background-size: contain` with height-only sizing | — |
 | **F17** | **`:where()` specificity 0 does NOT mean `:root` always wins.** PF's dark theme also sets *component* variables on *component elements*: `:where(.pf-v5-theme-dark) .pf-v5-c-login { --pf-v5-c-login__main--BackgroundColor: … }`. Custom-property resolution takes the value from the **nearest element** that declares it, so a declaration on `.pf-v5-c-login` beats one on `:root` no matter the specificity | This is why token overrides alone are not automatically sufficient. The fix is to override the *global* the component rule points at, not to fight it with component rules | `tr '}' '\n' < pf.css \| grep ':where(.pf-v5-theme-dark) .pf-v5-c-'` |
 | **F18** | Under `.pf-v5-theme-dark` the login components read a **different tier of globals**: primary button background ← `primary-color--300` (not `--100`); primary button label ← `primary-color--400`; login card ← `BackgroundColor--300` (not `--light-100`); form control ← `BackgroundColor--400` (not `--100`); form-control underline ← `BorderColor--400`; field-level error text ← `danger-color--200` | The `--300` / `--400` tiers are not spares — they are the live tokens. All are set in `eddi-login.css` | Same command as F17, then read the declarations |
@@ -115,6 +114,14 @@ keycloak/
             ├── theme.properties                     # NEW
             └── resources/
                 ├── css/eddi-login.css               # NEW
+                ├── js/
+                │   ├── eddi-a11y.js                 # NEW (ARIA wiring)
+                │   └── eddi-theme.js                # NEW (colour-scheme control)
+                ├── fonts/
+                │   ├── noto-sans-latin-variable.woff2      # NEW (copy)
+                │   ├── noto-sans-latin-ext-variable.woff2  # NEW (copy)
+                │   ├── noto-sans-cyrillic-variable.woff2   # NEW (copy)
+                │   └── noto-sans-greek-variable.woff2      # NEW (copy)
                 └── img/
                     ├── logo_eddi.png                # NEW (copy)
                     └── favicon.ico                  # NEW (copy)
@@ -157,213 +164,35 @@ kcHtmlClass=login-pf pf-v5-theme-dark
 
 ### 4.2 `keycloak/themes/eddi/login/resources/css/eddi-login.css` — NEW
 
-Write this file verbatim. The comments explain *why* each block exists; keep them.
+> **This section deliberately does not reproduce the stylesheet.** It used to, and the copy drifted
+> from the shipped file within a day — the plan's snippet still mapped `--BackgroundColor--300` to the
+> border colour and had no `--400` tier at all, which is exactly the bug F18 describes. A second copy
+> of 700 lines of CSS is a liability, not documentation. **Read the file itself**; it is heavily
+> commented, and every non-obvious decision carries its reasoning inline.
 
-```css
-/* ============================================================================
- * EDDI login theme
- *
- * Loaded after PatternFly (stylesCommon) and after keycloak.v2's css/styles.css.
- * Layering:
- *   1. theme.properties adds .pf-v5-theme-dark to <html>  -> PF5 dark defaults
- *   2. this file's :root block recolours those defaults   -> EDDI palette
- *   3. the targeted rules below cover what tokens cannot express
- *
- * PF5 declares its dark theme as :where(.pf-v5-theme-dark){...} — specificity 0 —
- * so these :root overrides always win.
- *
- * See planning/keycloak-eddi-theme.md
- * ========================================================================== */
+What the file is responsible for, in order:
 
-/* --- EDDI palette (mirrors the Manager's Tailwind tokens) ----------------- */
-:root {
-    --eddi-bg:            #0c0a09; /* stone-950  page background            */
-    --eddi-surface:       #18181b; /* zinc-900   login card, inputs         */
-    --eddi-surface-alt:   #1f1f23; /*            hover / raised surfaces    */
-    --eddi-border:        #27272a; /* zinc-800   card + input borders       */
-    --eddi-border-strong: #3f3f46; /* zinc-700                              */
-    --eddi-primary:       #f59e0b; /* amber-500  buttons, focus, accents    */
-    --eddi-primary-hover: #d97706; /* amber-600                             */
-    --eddi-link:          #fbbf24; /* amber-400  links                      */
-    --eddi-fg:            #fafaf9; /* stone-50   primary text               */
-    --eddi-muted:         #a1a1aa; /* zinc-400   labels, secondary text     */
-    --eddi-error:         #ef4444; /* red-500                               */
-    --eddi-success:       #22c55e; /* green-500                             */
+1. **`@font-face`** — four Noto Sans variable subsets (Latin, Latin-ext, Cyrillic, Greek), split by
+   `unicode-range`. See the comment above them for the measured download cost.
+2. **The EDDI palette** as `--eddi-*` tokens, taken from the Manager's own token block.
+3. **The PatternFly token map** — `--pf-v5-global--*` reassigned to those tokens. This is where F18
+   matters: both the `--100` and the `--300`/`--400` tiers must be set, because the dark theme
+   re-points components at the higher tier.
+4. **Light mode** — the same palette in the Manager's light values, applied by two selectors: a
+   `prefers-color-scheme` media query for the default, and `[data-eddi-theme="light"]` for an explicit
+   choice from the header control.
+5. **Targeted rules** for what tokens cannot express: the logo, the page background and bloom, the
+   card and its light-line signature, the merged password field, the locale picker, the colour-scheme
+   toggle, and typography.
 
-    /* Native form controls, scrollbars and autofill follow this. PF5's dark
-       theme sets it too; repeated here so the page degrades sanely if the
-       .pf-v5-theme-dark class is ever dropped. */
-    color-scheme: dark;
-}
+The three rules that are easiest to get wrong, and why:
 
-/* --- PatternFly 5 global tokens ------------------------------------------
- * Recolouring these propagates to every PF component, because component-level
- * variables are declared as var(--pf-v5-global--...). The `light-*` / `dark-*`
- * variants are NOT light/dark-mode switches — they are "for use on light /
- * dark surfaces" — and PF's dark theme remaps both, so both must be set.
- * ------------------------------------------------------------------------ */
-:root {
-    /* Surfaces. --BackgroundColor--light-100 drives the login card
-       (--pf-v5-c-login__main--BackgroundColor). --100 drives inputs. */
-    --pf-v5-global--BackgroundColor--100:       var(--eddi-surface);
-    --pf-v5-global--BackgroundColor--light-100: var(--eddi-surface);
-    --pf-v5-global--BackgroundColor--150:       var(--eddi-surface-alt);
-    --pf-v5-global--BackgroundColor--200:       var(--eddi-bg);
-    --pf-v5-global--BackgroundColor--300:       var(--eddi-border);
-    --pf-v5-global--BackgroundColor--dark-100:  var(--eddi-surface);
-    --pf-v5-global--BackgroundColor--dark-200:  var(--eddi-bg);
+| Rule | Why it is not obvious |
+|---|---|
+| `#kc-header-wrapper` gets the logo | `div.kc-logo-text` is dead CSS in `keycloak.v2` (F5) |
+| `.pf-v5-c-button.pf-m-primary` sets its label colour explicitly | Token inheritance gives light-on-amber at ~2.1:1 (F14) |
+| `.pf-v5-c-login__main-header { column-gap: 0 }` | Track sizing does not fix the picker's alignment — `minmax(0, 1fr)` and `min-width: 0` were both tried live and neither moved it |
 
-    /* Text */
-    --pf-v5-global--Color--100:       var(--eddi-fg);
-    --pf-v5-global--Color--200:       var(--eddi-muted);
-    --pf-v5-global--Color--light-100: var(--eddi-fg);
-    --pf-v5-global--Color--light-200: var(--eddi-muted);
-    --pf-v5-global--Color--dark-100:  var(--eddi-fg);
-    --pf-v5-global--Color--dark-200:  var(--eddi-muted);
-
-    /* Borders */
-    --pf-v5-global--BorderColor--100:       var(--eddi-border);
-    --pf-v5-global--BorderColor--200:       var(--eddi-border);
-    --pf-v5-global--BorderColor--300:       var(--eddi-border-strong);
-    --pf-v5-global--BorderColor--light-100: var(--eddi-border);
-    --pf-v5-global--BorderColor--dark-100:  var(--eddi-border);
-
-    /* Accent. Drives the primary button, input focus underline, active states. */
-    --pf-v5-global--primary-color--100:       var(--eddi-primary);
-    --pf-v5-global--primary-color--200:       var(--eddi-primary-hover);
-    --pf-v5-global--primary-color--light-100: var(--eddi-primary);
-    --pf-v5-global--primary-color--dark-100:  var(--eddi-primary);
-    --pf-v5-global--active-color--100:        var(--eddi-primary);
-
-    /* Links */
-    --pf-v5-global--link--Color:              var(--eddi-link);
-    --pf-v5-global--link--Color--hover:       var(--eddi-primary);
-    --pf-v5-global--link--Color--light:       var(--eddi-link);
-    --pf-v5-global--link--Color--light--hover:var(--eddi-primary);
-    --pf-v5-global--link--Color--dark:        var(--eddi-link);
-    --pf-v5-global--link--Color--dark--hover: var(--eddi-primary);
-    --pf-v5-global--link--Color--visited:     var(--eddi-link);
-
-    /* Status */
-    --pf-v5-global--danger-color--100:  var(--eddi-error);
-    --pf-v5-global--danger-color--200:  #b91c1c;
-    --pf-v5-global--success-color--100: var(--eddi-success);
-    --pf-v5-global--warning-color--100: var(--eddi-primary);
-
-    /* Icons, disabled states, elevation */
-    --pf-v5-global--icon--Color--light:   var(--eddi-muted);
-    --pf-v5-global--icon--Color--dark:    var(--eddi-muted);
-    --pf-v5-global--disabled-color--100:  #71717a;
-    --pf-v5-global--disabled-color--200:  #52525b;
-    --pf-v5-global--disabled-color--300:  var(--eddi-border);
-    --pf-v5-global--BoxShadow--lg: 0 8px 24px rgba(0, 0, 0, .55);
-    --pf-v5-global--BoxShadow--xl: 0 16px 40px rgba(0, 0, 0, .65);
-}
-
-/* --- Page background -----------------------------------------------------
- * keycloak.v2's styles.css sets `.login-pf body { background: url(keycloak-bg.png)
- * no-repeat center center fixed; background-size: cover; }`. Same selector, same
- * specificity, loaded later — and the shorthand resets background-image, so the
- * PNG is never fetched.
- * ------------------------------------------------------------------------ */
-.login-pf body {
-    background: var(--eddi-bg);
-}
-
-/* --- Logo ----------------------------------------------------------------
- * #kc-header-wrapper renders realm.displayNameHtml as 29px uppercase text.
- * We replace it with the EDDI wordmark using the classic accessible
- * image-replacement technique: the text stays in the accessibility tree
- * (screen readers still announce "EDDI") but is pushed off-screen.
- *
- * Do NOT target div.kc-logo-text — that rule exists in the parent stylesheet
- * but the element does not exist in keycloak.v2's template. See F5.
- * ------------------------------------------------------------------------ */
-#kc-header-wrapper {
-    height: 56px;
-    width: 100%;
-    background-image: url(../img/logo_eddi.png); /* 500x159, white wordmark */
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: contain;
-
-    text-indent: -9999px;
-    overflow: hidden;
-    white-space: nowrap;
-}
-
-/* --- Login card ----------------------------------------------------------
- * PF's login card is borderless; the Manager's panels use a 1px zinc-800 hairline.
- * ------------------------------------------------------------------------ */
-.pf-v5-c-login__main {
-    border: 1px solid var(--eddi-border);
-    border-radius: 8px;
-}
-
-.pf-v5-c-login__main-footer-band {
-    border-top: 1px solid var(--eddi-border);
-    background-color: var(--eddi-bg);
-}
-
-/* --- Primary button ------------------------------------------------------
- * Token overrides give the amber background, but the label colour resolves from
- * --pf-v5-global--Color--light-100 (#fafaf9), which on #f59e0b is ~2.1:1 — a
- * WCAG AA failure. Force near-black text: ~10:1. See F14.
- * ------------------------------------------------------------------------ */
-.pf-v5-c-button.pf-m-primary {
-    --pf-v5-c-button--m-primary--Color:         var(--eddi-bg);
-    --pf-v5-c-button--m-primary--hover--Color:  var(--eddi-bg);
-    --pf-v5-c-button--m-primary--focus--Color:  var(--eddi-bg);
-    --pf-v5-c-button--m-primary--active--Color: var(--eddi-bg);
-    font-weight: 600;
-}
-
-/* --- Inputs --------------------------------------------------------------
- * PF5 form controls are bottom-bordered. Add a full hairline so fields read as
- * discrete surfaces against the card, matching the Manager.
- * ------------------------------------------------------------------------ */
-.pf-v5-c-form-control {
-    border: 1px solid var(--eddi-border);
-    border-radius: 4px;
-}
-
-.pf-v5-c-form-control:focus-within {
-    border-color: var(--eddi-primary);
-}
-
-/* Chrome/Edge force a hard-coded pale autofill background that ignores
-   background-color. The inset box-shadow trick is the only reliable override. */
-.pf-v5-c-form-control > input:-webkit-autofill,
-.pf-v5-c-form-control > input:-webkit-autofill:hover,
-.pf-v5-c-form-control > input:-webkit-autofill:focus {
-    -webkit-box-shadow: inset 0 0 0 1000px var(--eddi-surface);
-    -webkit-text-fill-color: var(--eddi-fg);
-    caret-color: var(--eddi-fg);
-    transition: background-color 5000s ease-in-out 0s;
-}
-
-/* --- Labels and secondary text ------------------------------------------ */
-.pf-v5-c-form__label-text,
-.pf-v5-c-login__main-header-desc {
-    color: var(--eddi-muted);
-}
-
-/* --- Focus visibility ----------------------------------------------------
- * A 2px amber ring on the near-black background; PF's default is a thin blue
- * outline that all but disappears here.
- * ------------------------------------------------------------------------ */
-:focus-visible {
-    outline: 2px solid var(--eddi-primary);
-    outline-offset: 2px;
-}
-```
-
-> **Implementer note.** This file is expected to need one round of tuning against the running
-> container. The blocks above are the load-bearing ones. If a surface still renders light, find the
-> component variable in `pf5.css` (see the F11 command) and add a token override to the `:root` block
-> rather than a new component rule — component rules are what rot on upgrade.
-
----
 
 ### 4.3 Image assets — NEW (copies)
 
@@ -432,7 +261,7 @@ Two things worth knowing and **not** worth changing:
   directory. Keycloak's directory import only consumes `*.json` at the top level of that directory,
   so a `themes/` subdirectory is inert. Confirm once via the log check in §6 rather than assuming.
 - `start-dev` disables theme and template caching, so CSS edits are picked up on browser reload with
-  no container restart. This is dev-only behaviour — see [§8](#8-known-gaps) for production.
+  no container restart. This is dev-only behaviour — see [§8](#8-known-gaps-and-risks) for production.
 
 ---
 

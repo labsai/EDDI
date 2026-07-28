@@ -59,8 +59,12 @@ services:
       - keycloak-data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro
       # Custom login theme (activated via "loginTheme" in eddi-realm.json).
-      # Mount the single theme directory, not ./keycloak/themes as
-      # /opt/keycloak/themes — the latter would shadow the custom-theme root.
+      # Mount the one theme directory, not ./keycloak/themes over
+      # /opt/keycloak/themes. The built-in themes are NOT on that path — they
+      # ship inside org.keycloak.keycloak-themes-<version>.jar, so parent theme
+      # resolution is unaffected either way — but /opt/keycloak/themes is the
+      # custom-theme root and also holds Keycloak's README; mounting over it
+      # hides anything the image places there now or later.
       - ./keycloak/themes/eddi:/opt/keycloak/themes/eddi:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && timeout 2 cat <&3 | grep -q '200'"]

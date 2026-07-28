@@ -659,6 +659,13 @@ resolve_compose_files() {
       "keycloak/themes/eddi/login/resources/js/eddi-a11y.js"
       "keycloak/themes/eddi/login/resources/js/eddi-theme.js"
     )
+    # The theme is all-or-nothing. A *missing* theme directory is safe —
+    # Keycloak logs "Failed to find LOGIN theme" and serves the built-in one
+    # (verified: HTTP 200) — but a *partial* one is not: theme.properties would
+    # still resolve, and Keycloak would render the eddi theme with its
+    # stylesheet, fonts or scripts 404ing. So any cosmetic failure discards the
+    # whole theme rather than leaving a half-built one mounted.
+    local theme_incomplete=false
     for kf in "${kc_files[@]}"; do
       local kf_target="$EDDI_DIR/$kf"
       local kf_dir
@@ -676,14 +683,17 @@ resolve_compose_files() {
         elif [[ "$kf" == "keycloak/eddi-realm.json" ]]; then
           fail "Failed to download ${kf} (required for Keycloak).\n     URL: ${kf_url}"
         else
-          # Cosmetic asset — don't abort the install, but don't leave a
-          # truncated file behind either.
-          rm -f "$kf_target"
-          echo ""
-          warn "Failed to download ${kf} — login page will use the default Keycloak theme"
+          rm -f "$kf_target"   # don't leave a truncated file behind
+          theme_incomplete=true
+          echo -e "${YELLOW}⚠️${RESET}"
         fi
       fi
     done
+
+    if [[ "$theme_incomplete" == "true" ]]; then
+      rm -rf "$EDDI_DIR/keycloak/themes/eddi"
+      warn "Could not download the complete EDDI login theme — falling back to the default Keycloak login page"
+    fi
   fi
 
   # Save config for eddi CLI wrapper (no secrets — vault key stays in .env only)

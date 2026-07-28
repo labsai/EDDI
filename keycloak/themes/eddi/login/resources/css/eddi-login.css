@@ -7,11 +7,18 @@
  *   2. this file's :root block recolours those defaults   -> EDDI palette
  *   3. the targeted rules below cover what tokens cannot express
  *
- * PF5 declares its dark theme as :where(.pf-v5-theme-dark){...} — specificity 0 —
- * so these :root overrides always win.
+ * PF5 declares its dark theme's ROOT tokens as :where(.pf-v5-theme-dark){...} —
+ * specificity 0 — so the :root overrides below beat those. They do NOT beat
+ * everything: the dark theme also sets component variables on component
+ * elements (`:where(.pf-v5-theme-dark) .pf-v5-c-login { ... }`), and a custom
+ * property resolves from the nearest declaring element regardless of
+ * specificity. That is why the token block sets both the --100 and the
+ * --300/--400 tiers; see the note above the PatternFly token block.
  *
- * Note for production deployments: url.resourcesPath embeds the Keycloak version,
- * so outside `start-dev` browsers cache this file until that version changes.
+ * Note on caching: url.resourcesPath embeds the Keycloak version, so editing
+ * this file does NOT change its URL — verified, the path survived a container
+ * restart. Responses carry `Cache-Control: no-cache`, so browsers revalidate
+ * rather than serve blind, but do not expect a theme edit to bust caches.
  *
  * See planning/keycloak-eddi-theme.md
  * ========================================================================== */
@@ -21,19 +28,18 @@
  * Noto Sans, so without this the login page is the one EDDI surface in a
  * different typeface.
  *
- * This is the same variable font the Manager loads (weights 100-900 in one
- * file), but only the **latin** unicode-range subset — 35 KB, versus 168 KB
- * for latin-ext or ~550 KB for the static weights. Glyphs outside that range
- * fall through the stack below to the system font, which is the right trade
- * for a page that renders a few dozen words. If the realm ever enables
- * internationalisation for a non-latin locale, add the matching subset here.
+ * These are the same variable font files the Manager loads (weights 100-900 in
+ * one file each), split by script. The Latin face is below; the Latin-ext,
+ * Cyrillic and Greek faces that follow it exist because the realm offers all 30
+ * locales — see the note above them for why they are bundled and what they
+ * cost. Scripts we do not ship fall through the stack to the system font.
  * ------------------------------------------------------------------------ */
 @font-face {
     font-family: "Noto Sans Variable";
     font-style: normal;
     font-weight: 100 900;
     font-display: swap;
-    src: url(../fonts/noto-sans-latin-variable.woff2) format("woff2-variations");
+    src: url(../fonts/noto-sans-latin-variable.woff2) format("woff2");
     unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
                    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
                    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
@@ -61,7 +67,7 @@
     font-style: normal;
     font-weight: 100 900;
     font-display: swap;
-    src: url(../fonts/noto-sans-latin-ext-variable.woff2) format("woff2-variations");
+    src: url(../fonts/noto-sans-latin-ext-variable.woff2) format("woff2");
     unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
                    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF,
                    U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
@@ -72,7 +78,7 @@
     font-style: normal;
     font-weight: 100 900;
     font-display: swap;
-    src: url(../fonts/noto-sans-cyrillic-variable.woff2) format("woff2-variations");
+    src: url(../fonts/noto-sans-cyrillic-variable.woff2) format("woff2");
     unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -81,7 +87,7 @@
     font-style: normal;
     font-weight: 100 900;
     font-display: swap;
-    src: url(../fonts/noto-sans-greek-variable.woff2) format("woff2-variations");
+    src: url(../fonts/noto-sans-greek-variable.woff2) format("woff2");
     unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1,
                    U+03A3-03FF;
 }
@@ -143,10 +149,10 @@
 /* --- Light mode -----------------------------------------------------------
  * The Manager ships a theme toggle whose default is `system`, so a user on a
  * light OS already gets a light Manager. Following prefers-color-scheme here
- * matches that default. There is deliberately NO switcher on this page: the
- * Manager owns the explicit choice, its localStorage is cross-origin from
- * Keycloak so we could not read it anyway, and a second control would compete
- * with the design.
+ * matches that default, and is what the "system" state of the toggle in the
+ * card header resolves to. The toggle cannot read the Manager's own choice —
+ * Keycloak is a different origin, so that localStorage is unreachable — which
+ * is why the OS preference, not the Manager's setting, is the default.
  *
  * Values come from the Manager's own light token block, not from taste.
  *
@@ -233,6 +239,7 @@
     --eddi-bloom-mid:     rgba(245, 158, 11, .04);
     --eddi-bloom-far:     transparent;
     --eddi-vignette:      rgba(120, 113, 108, .10);
+
     color-scheme: light;
 }
 
@@ -382,7 +389,6 @@
     background-position: center;
     background-size: contain;
     filter: var(--eddi-logo-filter); /* inverted to black in light mode */
-
     text-indent: -9999px;
     overflow: hidden;
     white-space: nowrap;
@@ -450,6 +456,7 @@
     --pf-v5-c-button--m-primary--hover--Color:  var(--eddi-on-primary);
     --pf-v5-c-button--m-primary--focus--Color:  var(--eddi-on-primary);
     --pf-v5-c-button--m-primary--active--Color: var(--eddi-on-primary);
+
     font-weight: 600;
     letter-spacing: .01em;
     padding-block: 10px;
@@ -486,6 +493,7 @@
 .pf-v5-c-form-control,
 .pf-v5-c-input-group {
     --pf-v5-c-form-control--BackgroundColor: transparent;
+
     background-color: var(--eddi-recess);
     border: 1px solid var(--eddi-border);
     border-radius: var(--eddi-radius);
@@ -651,6 +659,7 @@
     /* Set through the component token: `.pf-v5-c-title.pf-m-3xl` carries the
        weight at two-class specificity, so a plain `font-weight` here loses. */
     --pf-v5-c-title--m-3xl--FontWeight: 300;
+
     letter-spacing: .012em;
 }
 
