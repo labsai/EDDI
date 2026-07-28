@@ -60,6 +60,16 @@ Two contrast defects that only light mode exposed: amber-400 links and an amber-
 
 Fonts gained the Latin-ext, Cyrillic and Greek subsets, because Latin-only would put fallback glyphs *inside* otherwise-branded words for Czech, Polish and Turkish. Measured rather than assumed: `unicode-range` normally defers those files, but the switcher lists all 30 languages under native names, so every range is in the DOM and all four are fetched (~245 KB). Accepted — `font-display: swap` keeps it off the paint path, it caches for the session, and the page already loads a ~1.5 MB PatternFly stylesheet.
 
+**Locale sets aligned with the Manager, and the picker restored on the admin console.**
+
+The admin console had no language picker because I had given `master` a single locale — a deliberate trade to get `lang` on `<html>` without adding a switcher, but the wrong one once the console is EDDI-branded. Both realms now offer the same languages, and both show the picker.
+
+The set is taken from the Manager rather than chosen: its bundle declares `supportedLngs` as `["cs","de","es","fr","it","ja","ko","pl","pt-br","ru","tr","zh-cn","zh-tw"]` with `fallbackLng: "en"` — **14 languages**, every one of which exists among the 30 Keycloak ships. So login and the app it leads to now speak the same set, and a user who picks a language at the login screen lands somewhere that speaks it.
+
+**The trade-off, stated plainly:** the EDDI realm drops from 30 locales to 14. Sixteen free Keycloak translations (ar, ca, da, el, fa, fi, hu, lt, lv, nl, no, pt, sk, sv, th, uk) are no longer offered. A speaker of one of those now gets an English login *and* an English Manager — consistent, but less helpful at the login step than a localised page would have been. Offering the superset instead is a one-line change if that trade is judged the wrong way round.
+
+A consequence worth noting: dropping `el` removed the only reason to bundle the Greek font subset, so that file and its `@font-face` are gone — 21 KB, and one less asset to ship. The principle is to bundle only the scripts the realm actually offers.
+
 **Admin console follow-ups — a logo collision, a missing toggle, and a shipped bug.**
 
 - **Two logos on top of each other.** Keycloak's `master` realm ships `displayNameHtml` as `<div class="kc-logo-text"><span>Keycloak</span></div>`, and that markup lands inside `#kc-header-wrapper` where we paint the EDDI wordmark — with `keycloak.v2`'s stylesheet still carrying the rule that gives that div the Keycloak logo. **This corrects F5 in the plan:** `div.kc-logo-text` is not dead CSS in general, only for realms whose `displayNameHtml` does not contain that markup. Fixed both ways — the theme now suppresses any logo box inside the header, and `install.sh` sets master's `displayNameHtml` to plain `EDDI` so the header also has a correct accessible name. `displayName` is deliberately left as "Keycloak", because it labels the realm in the admin console's realm selector.

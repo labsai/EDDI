@@ -6,9 +6,20 @@
   "loginTheme": "eddi",
   "internationalizationEnabled": true,
   "supportedLocales": [
-    "ar", "ca", "cs", "da", "de", "el", "en", "es", "fa", "fi",
-    "fr", "hu", "it", "ja", "ko", "lt", "lv", "nl", "no", "pl",
-    "pt", "pt-BR", "ru", "sk", "sv", "th", "tr", "uk", "zh-CN", "zh-TW"
+    "cs",
+    "de",
+    "en",
+    "es",
+    "fr",
+    "it",
+    "ja",
+    "ko",
+    "pl",
+    "pt-BR",
+    "ru",
+    "tr",
+    "zh-CN",
+    "zh-TW"
   ],
   "defaultLocale": "en",
   "sslRequired": "none",
@@ -23,7 +34,11 @@
     "description": "Default roles assigned to every new user on registration",
     "composite": true,
     "composites": {
-      "realm": ["eddi-admin", "eddi-editor", "eddi-user"]
+      "realm": [
+        "eddi-admin",
+        "eddi-editor",
+        "eddi-user"
+      ]
     },
     "clientRole": false
   },
@@ -50,7 +65,11 @@
         "description": "Default roles assigned to every new user on registration",
         "composite": true,
         "composites": {
-          "realm": ["eddi-admin", "eddi-editor", "eddi-user"]
+          "realm": [
+            "eddi-admin",
+            "eddi-editor",
+            "eddi-user"
+          ]
         },
         "clientRole": false
       }
