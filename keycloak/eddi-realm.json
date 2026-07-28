@@ -47,12 +47,10 @@
   "bruteForceProtected": true,
   "defaultRole": {
     "name": "default-roles-eddi",
-    "description": "Default roles assigned to every new user on registration",
+    "description": "Default role for every new user — least privilege. Elevated roles (eddi-admin, eddi-editor) are granted explicitly.",
     "composite": true,
     "composites": {
       "realm": [
-        "eddi-admin",
-        "eddi-editor",
         "eddi-user"
       ]
     },
@@ -78,12 +76,10 @@
       },
       {
         "name": "default-roles-eddi",
-        "description": "Default roles assigned to every new user on registration",
+        "description": "Default role for every new user — least privilege. Elevated roles (eddi-admin, eddi-editor) are granted explicitly.",
         "composite": true,
         "composites": {
           "realm": [
-            "eddi-admin",
-            "eddi-editor",
             "eddi-user"
           ]
         },
