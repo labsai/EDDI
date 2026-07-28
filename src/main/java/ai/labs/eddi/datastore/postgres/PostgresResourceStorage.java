@@ -308,7 +308,10 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
             }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    byId.put(rs.getString("id"), new Resource(rs.getString("id"), rs.getInt("version"), rs.getString("data")));
+                    // Read each column exactly once per row — the id is needed both as the
+                    // map key and inside the Resource, and fetching it twice is wasted work.
+                    String rowId = rs.getString("id");
+                    byId.put(rowId, new Resource(rowId, rs.getInt("version"), rs.getString("data")));
                 }
             }
         } catch (SQLException e) {
