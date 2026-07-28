@@ -80,10 +80,10 @@ export function OperatorPage() {
             chat.reset();
             if (outcome.canary.ok) {
               setCanaryWarning(null);
-              toast.success(t("operator.toast.activated"));
+              toast.success(t("operator.toast.activated", "Platform Operator activated"));
             } else {
-              setCanaryWarning(outcome.canary.error ?? t("operator.canary.genericFailure"));
-              toast.warning(t("operator.toast.activatedButUnreachable"));
+              setCanaryWarning(outcome.canary.error ?? t("operator.canary.genericFailure", "The connection check did not succeed."));
+              toast.warning(t("operator.toast.activatedButUnreachable", "Operator deployed, but it could not read your platform"));
             }
           },
           onError: (err) => {
@@ -100,7 +100,7 @@ export function OperatorPage() {
   const handleReactivate = useCallback(() => {
     if (!config) return;
     reactivate.mutate(config, {
-      onSuccess: () => toast.success(t("operator.toast.activated")),
+      onSuccess: () => toast.success(t("operator.toast.activated", "Platform Operator activated")),
       onError: (err) => toast.error(getErrorMessage(err)),
     });
   }, [config, reactivate, t]);
@@ -111,9 +111,9 @@ export function OperatorPage() {
       onSuccess: (result) => {
         if (result.ok) {
           setCanaryWarning(null);
-          toast.success(t("operator.canary.passed"));
+          toast.success(t("operator.canary.passed", "The operator can reach your platform."));
         } else {
-          setCanaryWarning(result.error ?? t("operator.canary.genericFailure"));
+          setCanaryWarning(result.error ?? t("operator.canary.genericFailure", "The connection check did not succeed."));
         }
       },
       onError: (err) => setCanaryWarning(getErrorMessage(err)),
@@ -126,7 +126,7 @@ export function OperatorPage() {
       onSuccess: () => {
         chat.reset();
         setCanaryWarning(null);
-        toast.success(t("operator.toast.deactivated"));
+        toast.success(t("operator.toast.deactivated", "Platform Operator deactivated"));
       },
       onError: (err) => toast.error(getErrorMessage(err)),
     });
@@ -141,7 +141,7 @@ export function OperatorPage() {
         chat.reset();
         setCanaryWarning(null);
         setShowActivation(false);
-        toast.success(t("operator.toast.reset"));
+        toast.success(t("operator.toast.reset", "Platform Operator deleted"));
       },
       onError: (err) => toast.error(getErrorMessage(err)),
     });
@@ -153,7 +153,7 @@ export function OperatorPage() {
       <div
         className="flex items-center justify-center py-24 text-muted-foreground"
         role="status"
-        aria-label={t("common.loading")}
+        aria-label={t("common.loading", "Loading...")}
       >
         <Loader2 className="h-6 w-6 animate-spin" />
       </div>
@@ -167,10 +167,10 @@ export function OperatorPage() {
     return (
       <div className="mx-auto max-w-lg space-y-4 py-16 text-center">
         <AlertTriangle className="mx-auto h-10 w-10 text-destructive" />
-        <p className="font-medium">{t("operator.configError")}</p>
+        <p className="font-medium">{t("operator.configError", "Couldn't load the operator configuration")}</p>
         <p className="text-sm text-muted-foreground">{getErrorMessage(configError)}</p>
         <Button onClick={() => refetch()} data-testid="operator-config-retry">
-          {t("common.retry")}
+          {t("common.retry", "Retry")}
         </Button>
       </div>
     );
@@ -202,8 +202,8 @@ export function OperatorPage() {
     return (
       <div className="mx-auto max-w-lg space-y-4 py-16 text-center">
         <PauseCircle className="mx-auto h-10 w-10 text-muted-foreground/60" />
-        <p className="text-lg font-medium">{t("operator.paused.title")}</p>
-        <p className="text-sm text-muted-foreground">{t("operator.paused.description")}</p>
+        <p className="text-lg font-medium">{t("operator.paused.title", "The Platform Operator is paused")}</p>
+        <p className="text-sm text-muted-foreground">{t("operator.paused.description", "It is still configured — turning it back on redeploys the same agent. Nothing has been deleted.")}</p>
         <div className="flex justify-center gap-2 pt-2">
           <Button
             onClick={handleReactivate}
@@ -211,10 +211,10 @@ export function OperatorPage() {
             data-testid="operator-reactivate"
           >
             {reactivate.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
-            {t("operator.paused.action")}
+            {t("operator.paused.action", "Turn back on")}
           </Button>
           <Button variant="outline" onClick={() => setShowActivation(true)}>
-            {t("operator.status.reconfigure")}
+            {t("operator.status.reconfigure", "Reconfigure")}
           </Button>
           <Button
             variant="ghost"
@@ -222,17 +222,17 @@ export function OperatorPage() {
             disabled={reset.isPending}
             data-testid="operator-reset"
           >
-            {t("operator.status.reset")}
+            {t("operator.status.reset", "Delete operator")}
           </Button>
         </div>
 
         <AlertDialog
           open={confirmPausedReset}
           onOpenChange={setConfirmPausedReset}
-          title={t("operator.status.resetConfirmTitle")}
-          description={t("operator.status.resetConfirmBody")}
-          confirmLabel={t("operator.status.reset")}
-          cancelLabel={t("common.cancel")}
+          title={t("operator.status.resetConfirmTitle", "Delete the Platform Operator?")}
+          description={t("operator.status.resetConfirmBody", "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone.")}
+          confirmLabel={t("operator.status.reset", "Delete operator")}
+          cancelLabel={t("common.cancel", "Cancel")}
           variant="destructive"
           onConfirm={() => {
             setConfirmPausedReset(false);
@@ -248,9 +248,9 @@ export function OperatorPage() {
       <div className="py-8">
         <EmptyState
           icon={Sparkles}
-          title={t("operator.empty.title")}
-          description={t("operator.empty.description")}
-          actionLabel={t("operator.empty.action")}
+          title={t("operator.empty.title", "The Platform Operator is off")}
+          description={t("operator.empty.description", "Turn it on to chat with an agent that can inspect your agents, workflows, conversations, deployments and logs — and explain what it finds. It is read-only and cannot change anything.")}
+          actionLabel={t("operator.empty.action", "Activate the Platform Operator")}
           onAction={() => setShowActivation(true)}
         />
       </div>
@@ -262,8 +262,8 @@ export function OperatorPage() {
       <header className="flex items-center gap-3">
         <Sparkles className="h-6 w-6 text-primary" />
         <div>
-          <h1 className="text-xl font-semibold">{t("operator.title")}</h1>
-          <p className="text-sm text-muted-foreground">{t("operator.subtitle")}</p>
+          <h1 className="text-xl font-semibold">{t("operator.title", "Platform Operator")}</h1>
+          <p className="text-sm text-muted-foreground">{t("operator.subtitle", "Ask about this EDDI deployment — it looks things up for you.")}</p>
         </div>
       </header>
 
@@ -277,7 +277,7 @@ export function OperatorPage() {
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span className="flex-1">
-            <strong className="font-medium">{t("operator.canary.title")}</strong>{" "}
+            <strong className="font-medium">{t("operator.canary.title", "The operator deployed, but could not read your platform.")}</strong>{" "}
             {canaryWarning}
           </span>
           <Button
@@ -292,7 +292,7 @@ export function OperatorPage() {
             ) : (
               <RefreshCw className="me-2 h-3 w-3" />
             )}
-            {t("operator.canary.recheck")}
+            {t("operator.canary.recheck", "Check again")}
           </Button>
         </div>
       )}

@@ -53,12 +53,12 @@ export function OperatorChat({
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
-        aria-label={t("operator.chat.transcript")}
+        aria-label={t("operator.chat.transcript", "Operator conversation")}
       >
         {messages.length === 0 && (
           <div className="space-y-3 py-8 text-center">
             <Bot className="mx-auto h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">{t("operator.chat.empty")}</p>
+            <p className="text-sm text-muted-foreground">{t("operator.chat.empty", "Ask about your deployment. The operator looks things up and shows you every call it makes.")}</p>
             <div className="mx-auto flex max-w-xl flex-wrap justify-center gap-2">
               {OPERATOR_STARTER_PROMPTS.map((key) => (
                 <button
@@ -139,13 +139,13 @@ export function OperatorChat({
               submit(input);
             }
           }}
-          placeholder={t("operator.chat.placeholder")}
-          aria-label={t("operator.chat.placeholder")}
+          placeholder={t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")}
+          aria-label={t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")}
           className="h-10 flex-1 rounded-md border border-input bg-background px-3 text-sm"
           data-testid="operator-input"
         />
         {isStreaming ? (
-          <Button variant="outline" size="icon" onClick={onStop} title={t("operator.chat.stop")} aria-label={t("operator.chat.stop")}>
+          <Button variant="outline" size="icon" onClick={onStop} title={t("operator.chat.stop", "Stop")} aria-label={t("operator.chat.stop", "Stop")}>
             <Square className="h-4 w-4" />
           </Button>
         ) : (
@@ -153,8 +153,8 @@ export function OperatorChat({
             size="icon"
             onClick={() => submit(input)}
             disabled={!input.trim()}
-            title={t("operator.chat.send")}
-            aria-label={t("operator.chat.send")}
+            title={t("operator.chat.send", "Send")}
+            aria-label={t("operator.chat.send", "Send")}
             data-testid="operator-send"
           >
             <Send className="h-4 w-4" />
@@ -164,8 +164,8 @@ export function OperatorChat({
           variant="ghost"
           size="icon"
           onClick={onReset}
-          title={t("operator.chat.newConversation")}
-          aria-label={t("operator.chat.newConversation")}
+          title={t("operator.chat.newConversation", "Start a new conversation")}
+          aria-label={t("operator.chat.newConversation", "Start a new conversation")}
         >
           <RotateCcw className="h-4 w-4" />
         </Button>

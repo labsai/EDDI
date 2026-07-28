@@ -184,7 +184,7 @@ describe("provisionOperator", () => {
 
   beforeEach(() => {
     captured = undefined;
-    vi.stubGlobal("window", { ...globalThis.window, location: { origin: "https://eddi.example" } });
+    vi.stubGlobal("location", { ...globalThis.location, origin: "https://eddi.example" });
     server.use(
       http.get("*/openapi", () => HttpResponse.json(specBody)),
       http.post("*/administration/agents/setup-api", async ({ request }) => {
@@ -276,14 +276,14 @@ describe("provisionOperator", () => {
       baseUrl: "http://localhost:11434",
       spec: fetchedSpec(),
     });
-    expect(captured?.baseUrl).toBe("http://localhost:11434");
+    expect(captured?.llmBaseUrl).toBe("http://localhost:11434");
     expect(captured?.apiBaseUrl).toBe("https://eddi.example");
   });
 
   it("always targets this deployment, whatever the provider", async () => {
     await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
     expect(captured?.apiBaseUrl).toBe("https://eddi.example");
-    expect(captured?.baseUrl).toBeUndefined();
+    expect(captured?.llmBaseUrl).toBeUndefined();
   });
 });
 

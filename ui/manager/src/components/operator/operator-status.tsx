@@ -51,7 +51,7 @@ export function OperatorStatusPanel({
   return (
     <Card className="h-fit">
       <CardHeader>
-        <CardTitle className="text-base">{t("operator.status.title")}</CardTitle>
+        <CardTitle className="text-base">{t("operator.status.title", "Operator")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
@@ -61,19 +61,19 @@ export function OperatorStatusPanel({
           </Badge>
           <Badge variant="success" className="gap-1">
             <Lock className="h-3 w-3" />
-            {t("operator.readOnlyChip")}
+            {t("operator.readOnlyChip", "Read-only")}
           </Badge>
         </div>
 
         <div className="space-y-1 text-sm">
-          <Row label={t("operator.status.provider")} value={config.provider} />
-          <Row label={t("operator.status.environment")} value={config.environment} />
+          <Row label={t("operator.status.provider", "Provider")} value={config.provider} />
+          <Row label={t("operator.status.environment", "Environment")} value={config.environment} />
           <Row
-            label={t("operator.status.authMode")}
+            label={t("operator.status.authMode", "Authenticates as")}
             value={t(`operator.authMode.${config.authMode}.label`)}
           />
           {config.version != null && (
-            <Row label={t("operator.status.version")} value={String(config.version)} />
+            <Row label={t("operator.status.version", "Version")} value={String(config.version)} />
           )}
         </div>
 
@@ -85,7 +85,7 @@ export function OperatorStatusPanel({
             data-testid="operator-deployment-error"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{t("operator.status.errorHelp")}</span>
+            <span>{t("operator.status.errorHelp", "The operator agent failed to deploy. Reconfigure it to try again, or check the platform logs for the underlying error.")}</span>
           </div>
         )}
 
@@ -102,7 +102,7 @@ export function OperatorStatusPanel({
             ) : (
               <PlugZap className="h-4 w-4" />
             )}
-            {t("operator.status.connectionCheck")}
+            {t("operator.status.connectionCheck", "Check connection")}
           </Button>
           <Button
             variant="outline"
@@ -111,7 +111,7 @@ export function OperatorStatusPanel({
             disabled={busy}
           >
             <RefreshCw className="h-4 w-4" />
-            {t("operator.status.reconfigure")}
+            {t("operator.status.reconfigure", "Reconfigure")}
           </Button>
           <Button
             variant="destructive"
@@ -121,7 +121,7 @@ export function OperatorStatusPanel({
             data-testid="operator-kill-switch"
           >
             <Power className="h-4 w-4" />
-            {t("operator.status.deactivate")}
+            {t("operator.status.deactivate", "Deactivate")}
           </Button>
           <Button
             variant="ghost"
@@ -131,7 +131,7 @@ export function OperatorStatusPanel({
             data-testid="operator-reset"
           >
             <Trash2 className="h-4 w-4" />
-            {t("operator.status.reset")}
+            {t("operator.status.reset", "Delete operator")}
           </Button>
         </div>
       </CardContent>
@@ -139,10 +139,10 @@ export function OperatorStatusPanel({
       <AlertDialog
         open={confirmDeactivate}
         onOpenChange={setConfirmDeactivate}
-        title={t("operator.status.deactivateConfirmTitle")}
-        description={t("operator.status.deactivateConfirmBody")}
-        confirmLabel={t("operator.status.deactivate")}
-        cancelLabel={t("common.cancel")}
+        title={t("operator.status.deactivateConfirmTitle", "Deactivate the Platform Operator?")}
+        description={t("operator.status.deactivateConfirmBody", "The operator is undeployed and stops responding. Its configuration is kept, so you can turn it back on later.")}
+        confirmLabel={t("operator.status.deactivate", "Deactivate")}
+        cancelLabel={t("common.cancel", "Cancel")}
         variant="destructive"
         onConfirm={() => {
           setConfirmDeactivate(false);
@@ -152,10 +152,10 @@ export function OperatorStatusPanel({
       <AlertDialog
         open={confirmReset}
         onOpenChange={setConfirmReset}
-        title={t("operator.status.resetConfirmTitle")}
-        description={t("operator.status.resetConfirmBody")}
-        confirmLabel={t("operator.status.reset")}
-        cancelLabel={t("common.cancel")}
+        title={t("operator.status.resetConfirmTitle", "Delete the Platform Operator?")}
+        description={t("operator.status.resetConfirmBody", "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone.")}
+        confirmLabel={t("operator.status.reset", "Delete operator")}
+        cancelLabel={t("common.cancel", "Cancel")}
         variant="destructive"
         onConfirm={() => {
           setConfirmReset(false);
@@ -187,7 +187,7 @@ function DeploymentBadge({
     return (
       <Badge variant="secondary" className="gap-1">
         <Loader2 className="h-3 w-3 animate-spin" />
-        {t("operator.status.checking")}
+        {t("operator.status.checking", "Checking…")}
       </Badge>
     );
   }
@@ -196,27 +196,27 @@ function DeploymentBadge({
       return (
         <Badge variant="success" className="gap-1" data-testid="operator-status-ready">
           <CheckCircle2 className="h-3 w-3" />
-          {t("operator.status.ready")}
+          {t("operator.status.ready", "Deployed")}
         </Badge>
       );
     case "IN_PROGRESS":
       return (
         <Badge variant="warning" className="gap-1">
           <Loader2 className="h-3 w-3 animate-spin" />
-          {t("operator.status.inProgress")}
+          {t("operator.status.inProgress", "Deploying…")}
         </Badge>
       );
     case "ERROR":
       return (
         <Badge variant="destructive" className="gap-1">
           <AlertTriangle className="h-3 w-3" />
-          {t("operator.status.error")}
+          {t("operator.status.error", "Deployment error")}
         </Badge>
       );
     default:
       return (
         <Badge variant="outline" className="gap-1">
-          {t("operator.status.notFound")}
+          {t("operator.status.notFound", "Not deployed")}
         </Badge>
       );
   }

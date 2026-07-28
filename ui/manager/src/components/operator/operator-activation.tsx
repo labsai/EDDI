@@ -107,24 +107,24 @@ export function OperatorActivation({
       <header className="space-y-2">
         <div className="flex items-center gap-3">
           <Sparkles className="h-6 w-6 text-primary" />
-          <h1 className="text-2xl font-semibold">{t("operator.activation.title")}</h1>
+          <h1 className="text-2xl font-semibold">{t("operator.activation.title", "Activate the Platform Operator")}</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          {t("operator.activation.subtitle")}
+          {t("operator.activation.subtitle", "Choose the model that will run the operator, review its instructions, and deploy.")}
         </p>
         <Badge variant="success" className="gap-1">
           <Lock className="h-3 w-3" />
-          {t("operator.readOnlyChip")}
+          {t("operator.readOnlyChip", "Read-only")}
         </Badge>
       </header>
 
       {step === "model" ? (
         <Card>
           <CardHeader>
-            <CardTitle>{t("operator.activation.modelStep")}</CardTitle>
+            <CardTitle>{t("operator.activation.modelStep", "Model")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            <Field label={t("operator.activation.provider")} htmlFor="operator-provider">
+            <Field label={t("operator.activation.provider", "Provider")} htmlFor="operator-provider">
               <select
                 value={provider}
                 onChange={(e) => handleProviderChange(e.target.value)}
@@ -140,7 +140,7 @@ export function OperatorActivation({
               </select>
             </Field>
 
-            <Field label={t("operator.activation.model")} htmlFor="operator-model">
+            <Field label={t("operator.activation.model", "Model")} htmlFor="operator-model">
               <input
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
@@ -157,7 +157,7 @@ export function OperatorActivation({
             </Field>
 
             {baseUrlRequired && (
-              <Field label={t("operator.activation.baseUrl")} htmlFor="operator-base-url">
+              <Field label={t("operator.activation.baseUrl", "Base URL")} htmlFor="operator-base-url">
                 <input
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
@@ -171,27 +171,27 @@ export function OperatorActivation({
 
             {needsKey && (
               <Field
-                label={t("operator.activation.apiKey")}
-                hint={t("operator.activation.apiKeyHint")}
+                label={t("operator.activation.apiKey", "Model API key")}
+                hint={t("operator.activation.apiKeyHint", "The key for your LLM provider. This is not an EDDI credential.")}
                 asGroup
               >
                 {vaultDown && (
                   <Notice tone="warning" icon={AlertTriangle}>
-                    {t("operator.activation.vaultDown")}
+                    {t("operator.activation.vaultDown", "The secrets vault is unavailable, so keys cannot be stored in it right now. A key entered here is passed through to the backend, which vaults it if it can.")}
                   </Notice>
                 )}
                 <SecretKeyPicker
                   value={apiKey}
                   onChange={setApiKey}
-                  placeholder={t("operator.activation.apiKeyPlaceholder")}
+                  placeholder={t("operator.activation.apiKeyPlaceholder", "Paste your API key, or pick a vault key")}
                   testId="operator-api-key"
                 />
               </Field>
             )}
 
             <Field
-              label={t("operator.activation.environment")}
-              hint={t("operator.activation.environmentHint")}
+              label={t("operator.activation.environment", "Environment")}
+              hint={t("operator.activation.environmentHint", "Where the operator agent itself runs. It can still read any environment.")}
               htmlFor="operator-environment"
             >
               <select
@@ -212,7 +212,7 @@ export function OperatorActivation({
             <div className="flex justify-end gap-2 pt-2">
               {onCancel && (
                 <Button variant="ghost" onClick={onCancel}>
-                  {t("common.cancel")}
+                  {t("common.cancel", "Cancel")}
                 </Button>
               )}
               <Button
@@ -220,7 +220,7 @@ export function OperatorActivation({
                 disabled={!modelStepValid}
                 data-testid="operator-next"
               >
-                {t("common.next")}
+                {t("common.next", "Next")}
               </Button>
             </div>
           </CardContent>
@@ -228,22 +228,22 @@ export function OperatorActivation({
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>{t("operator.activation.reviewStep")}</CardTitle>
+            <CardTitle>{t("operator.activation.reviewStep", "Prompt & review")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <dl className="grid grid-cols-2 gap-3 text-sm">
-              <Summary label={t("operator.activation.provider")} value={providerConfig?.name ?? provider} />
-              <Summary label={t("operator.activation.model")} value={model} />
-              <Summary label={t("operator.activation.environment")} value={environment} />
+              <Summary label={t("operator.activation.provider", "Provider")} value={providerConfig?.name ?? provider} />
+              <Summary label={t("operator.activation.model", "Model")} value={model} />
+              <Summary label={t("operator.activation.environment", "Environment")} value={environment} />
               <Summary
-                label={t("operator.activation.authMode")}
+                label={t("operator.activation.authMode", "How the operator authenticates")}
                 value={t(`operator.authMode.${authMode}.label`)}
               />
             </dl>
 
             <Field
-              label={t("operator.activation.safetyPreamble")}
-              hint={t("operator.activation.safetyPreambleHint")}
+              label={t("operator.activation.safetyPreamble", "Safety rules (not editable)")}
+              hint={t("operator.activation.safetyPreambleHint", "Always prepended. It tells the operator to treat everything its tools return as untrusted data.")}
             >
               <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs whitespace-pre-wrap text-muted-foreground">
                 {OPERATOR_SAFETY_PREAMBLE}
@@ -251,8 +251,8 @@ export function OperatorActivation({
             </Field>
 
             <Field
-              label={t("operator.activation.promptBody")}
-              hint={t("operator.activation.promptBodyHint")}
+              label={t("operator.activation.promptBody", "Operator instructions")}
+              hint={t("operator.activation.promptBodyHint", "Edit how the operator introduces itself and how it works.")}
               htmlFor="operator-prompt-body"
             >
               <textarea
@@ -275,7 +275,7 @@ export function OperatorActivation({
 
             {initial.agentId && (
               <Notice tone="warning" icon={AlertTriangle} testId="operator-rebuild-warning">
-                {t("operator.activation.rebuildWarning")}
+                {t("operator.activation.rebuildWarning", "Saving builds a new operator agent and removes the current one. Your existing operator conversation will not carry over.")}
               </Notice>
             )}
 
@@ -299,14 +299,14 @@ export function OperatorActivation({
 
             <div className="flex justify-between gap-2 pt-2">
               <Button variant="ghost" onClick={() => setStep("model")} disabled={busy}>
-                {t("common.back")}
+                {t("common.back", "Back")}
               </Button>
               <Button
                 onClick={handleActivate}
                 disabled={!canActivate}
                 data-testid="operator-activate"
               >
-                {t("operator.activation.activate")}
+                {t("operator.activation.activate", "Activate & deploy")}
               </Button>
             </div>
           </CardContent>
@@ -330,8 +330,8 @@ function AuthModeField({ authMode, onChange, oidcEnabled }: AuthModeFieldProps) 
 
   return (
     <Field
-      label={t("operator.activation.authMode")}
-      hint={t("operator.activation.authModeHint")}
+      label={t("operator.activation.authMode", "How the operator authenticates")}
+      hint={t("operator.activation.authModeHint", "The operator calls your EDDI admin API. This decides what credentials those calls carry.")}
       asGroup
       groupRole="radiogroup"
     >
@@ -365,13 +365,13 @@ function AuthModeField({ authMode, onChange, oidcEnabled }: AuthModeFieldProps) 
 
       {oidcEnabled && authMode === "none" && (
         <Notice tone="error" icon={AlertTriangle} testId="operator-auth-blocked">
-          {t("operator.activation.authNoneBlocked")}
+          {t("operator.activation.authNoneBlocked", "This deployment has authentication enabled, so unauthenticated tool calls would be rejected. The operator would deploy successfully and then fail every lookup. Choose \"Your identity\" instead.")}
         </Notice>
       )}
 
       {authMode === "caller-identity" && (
         <Notice tone="info" icon={ShieldCheck}>
-          {t("operator.activation.callerIdentityNote")}
+          {t("operator.activation.callerIdentityNote", "EDDI substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.")}
         </Notice>
       )}
     </Field>

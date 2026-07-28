@@ -236,7 +236,7 @@ export async function provisionOperator(
     // Always this deployment: the generated tools call the EDDI instance the
     // manager is talking to. Never the LLM's base URL.
     apiBaseUrl: currentOrigin(),
-    baseUrl: baseUrl || undefined,
+    llmBaseUrl: baseUrl || undefined,
     apiAuth: apiAuthForMode(config.authMode),
     endpoints: buildEndpointFilter(config.scope),
     deploy: true,
