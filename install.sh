@@ -994,6 +994,81 @@ print(json.dumps(d))" 2>/dev/null) || updated_realm=""
   else
     echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${theme_status} — login page will use the default theme)${RESET}"
   fi
+
+  # ── Admin console login ─────────────────────────────────
+  # The admin console authenticates against the `master` realm, which is
+  # Keycloak's own and is not part of eddi-realm.json — so without this it keeps
+  # the stock Keycloak page while the EDDI realm is branded. Only applied when
+  # master has no login theme of its own: on a Keycloak shared with other
+  # products, an operator's existing admin branding wins.
+  echo -ne "  Theming admin console login  "
+
+  local master_config master_theme updated_master=""
+  master_config=$(curl -sf \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${kc_base}/admin/realms/master" 2>/dev/null) || master_config=""
+
+  if [[ -z "$master_config" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not read master realm — left unthemed)${RESET}"
+    return 0
+  fi
+
+  if [[ "$json_tool" == "jq" ]]; then
+    master_theme=$(echo "$master_config" | jq -r '.loginTheme // ""' 2>/dev/null)
+  else
+    master_theme=$(echo "$master_config" | python3 -c "
+import sys, json
+print(json.load(sys.stdin).get('loginTheme') or '')" 2>/dev/null)
+  fi
+
+  if [[ -n "$master_theme" ]]; then
+    echo -e "${GREEN}✅${RESET}  ${DIM}(kept existing theme '${master_theme}')${RESET}"
+    return 0
+  fi
+
+  if [[ "$json_tool" == "jq" ]]; then
+    # Also enable internationalisation. master ships with it off, which means
+    # no lang/dir on <html> (WCAG 3.1.1) on a page we now brand. A single
+    # supported locale adds the attributes without adding a locale switcher,
+    # and loses nothing: with i18n off the page was English-only anyway.
+    updated_master=$(echo "$master_config" | jq \n      '.loginTheme = "eddi"
+       | if (.internationalizationEnabled // false) then .
+         else .internationalizationEnabled = true
+              | .supportedLocales = ["en"]
+              | .defaultLocale = "en" end' 2>/dev/null) || updated_master=""
+  else
+    updated_master=$(echo "$master_config" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+d['loginTheme'] = 'eddi'
+# master ships with i18n off, so <html> gets no lang/dir (WCAG 3.1.1) on a page
+# we now brand. One supported locale adds them without adding a switcher, and
+# loses nothing: with i18n off the page was English-only anyway.
+if not d.get('internationalizationEnabled'):
+    d['internationalizationEnabled'] = True
+    d['supportedLocales'] = ['en']
+    d['defaultLocale'] = 'en'
+print(json.dumps(d))" 2>/dev/null) || updated_master=""
+  fi
+
+  if [[ -z "$updated_master" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not patch master realm — left unthemed)${RESET}"
+    return 0
+  fi
+
+  local master_status
+  master_status=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+    -H "Authorization: Bearer ${admin_token}" \
+    -H "Content-Type: application/json" \
+    "${kc_base}/admin/realms/master" \
+    -d "$updated_master" \
+    2>/dev/null) || master_status="000"
+
+  if [[ "$master_status" == "204" ]]; then
+    echo -e "${GREEN}✅${RESET}"
+  else
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${master_status} — admin console keeps the default theme)${RESET}"
+  fi
 }
 
 # ── Import initial agents ──────────────────────────────────

@@ -142,6 +142,7 @@
     --eddi-card-edge:     inset 0 1px 0 0 rgba(255, 255, 255, .05);
     --eddi-card-shadow:   0 24px 64px -16px rgba(0, 0, 0, .85);
     --eddi-logo-filter:   none;
+    --eddi-chevron:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%23a1a1aa' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
     --eddi-bloom-near:    rgba(245, 158, 11, .14);
     --eddi-bloom-mid:     rgba(245, 158, 11, .07);
     --eddi-bloom-far:     rgba(245, 158, 11, .025);
@@ -204,6 +205,8 @@
            black on the same transparency — invert() leaves the alpha channel
            alone — which is why no second asset is needed. */
         --eddi-logo-filter:   invert(1);
+    --eddi-chevron:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%2378716c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+        --eddi-chevron:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%2378716c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
 
         /* PF's elevation tokens are tuned for near-black and read as smears on
            stone-50. */
@@ -614,10 +617,36 @@
     border-color: var(--eddi-border);
 }
 
+/* PatternFly draws the field underline with ::after. The picker is a header
+   utility, not a field, so that line has to go with the rest of the chrome —
+   otherwise it hangs under the label with no box around it. */
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control::after {
+    border-bottom: 0;
+}
+
+/* PatternFly's caret is not part of the select — it is a 32px sibling grid item
+   overlaying the field. The select's width is decided by the wrapper's grid and
+   does not grow for a longer label, so the text ran straight under that caret
+   ("Deutsch" overlapped it by 17px). Padding cannot fix it, because the caret is
+   not in the select's box.
+   Hiding PF's caret and drawing our own as a background inside the select's own
+   padding puts both under the same box: overflowing text now clips at the
+   content edge instead of painting over the chevron. */
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control__utilities {
+    display: none;
+}
+
 .pf-v5-c-login__main-header-utilities select {
     color: var(--eddi-muted);
     font-size: 13px;
     cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    padding: 4px 24px 4px 8px;
+    background-image: var(--eddi-chevron);
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 10px 6px;
 }
 
 .pf-v5-c-login__main-header-utilities .pf-v5-c-form-control:hover select,

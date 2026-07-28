@@ -539,7 +539,7 @@ Mobile at 375×812: no horizontal overflow, logo visible, controls 309px wide.
 | Registration | n/a | `registrationAllowed: false` |
 | Browser tab title & favicon | ✅ | Via `displayName` + `resources/img/favicon.ico` |
 | **Account console** (`/realms/eddi/account`) | ❌ | Separate theme *type*; still stock Keycloak |
-| **Admin console** (`:8180/admin`) | ❌ | Separate theme type, and a different realm |
+| **Admin console** (`:8180/admin`) | ✅ | Authenticates against the `master` realm, so it needs `loginTheme` set there through the Admin API — `install.sh` does it, but only when master has no theme of its own |
 | **Email templates** | ❌ | Separate theme type; password-reset mails stay unbranded |
 | **Welcome page** (`:8180/`) | ❌ | Server-level, not realm-level |
 | Other realms (incl. `master`) | ❌ | `loginTheme` is scoped to the `eddi` realm — deliberate |
