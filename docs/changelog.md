@@ -5,6 +5,40 @@
 
 ---
 
+## 🧵 fix(security): carry caller identity across the cascade and group dispatches (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+The caller binding is a `ThreadLocal`, and three more dispatch sites hand a turn to a fresh virtual
+thread without carrying it. A `${caller:token}` apicall reached from any of them failed closed with
+"the conversation turn has no authenticated caller" — safe, but invisible to the agent designer and
+dependent on unrelated configuration.
+
+- `CascadingModelExecutor:577` — every cascade step runs on `TIMEOUT_EXECUTOR`. The same agent config
+  worked or failed purely on whether `modelCascade` was set.
+- `GroupConversationService:282` — the whole discussion is dispatched to a virtual thread, so *no*
+  member agent had a caller.
+- `GroupConversationService:2366` — parallel-phase speakers fan out to further threads.
+- `GroupConversationService:3772` — the HITL resume path.
+
+`CallerIdentityContext` gains `withIdentity` for `Runnable`/`Callable`, `withIdentitySupplying` for
+`Supplier` (needed by `CompletableFuture.supplyAsync`), and `captureOrCurrent()`, which prefers the
+active request and falls back to the thread's binding — the group discussion is dispatched from the
+REST thread, the cascade from mid-pipeline.
+
+**Design note.** The `Supplier` variant is named apart from the `withIdentity` overloads on purpose:
+a value-returning lambda satisfies both `Callable` and `Supplier`, so same-named overloads are
+ambiguous at every call site.
+
+**Note on scope.** A group member agent now acts as the person who started the discussion. That
+follows the feature's model — the operator acts as the chatting user — but it is worth stating,
+because a member agent's reads are now attributed to that user in the audit trail.
+
+1204 tests pass across the affected suites. Neutering the `Runnable` wrapper fails the propagation
+test, so the binding is pinned rather than assumed.
+
+---
+
 ## 🔓 fix(security): ${caller:token} never reached its resolver (2026-07-28)
 
 **Repo:** EDDI (`feat/caller-identity-passthrough`)

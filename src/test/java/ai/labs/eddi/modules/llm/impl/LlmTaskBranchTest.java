@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -106,7 +107,7 @@ class LlmTaskBranchTest {
                 mock(RagContextProvider.class), new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 mockSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
     }
 
     private IConversationMemory setupMemory(List<String> actions) {

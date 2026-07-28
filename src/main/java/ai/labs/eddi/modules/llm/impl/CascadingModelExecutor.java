@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -78,15 +79,18 @@ class CascadingModelExecutor {
     private final LegacyChatExecutor legacyChatExecutor;
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final MeterRegistry meterRegistry;
+    private final CallerIdentityContext callerIdentityContext;
 
     CascadingModelExecutor(ChatModelRegistry registry, GlobalVariableResolver globalVariableResolver, ITemplatingEngine templatingEngine,
-            LegacyChatExecutor legacyChatExecutor, StreamingLegacyChatExecutor streamingLegacyChatExecutor, MeterRegistry meterRegistry) {
+            LegacyChatExecutor legacyChatExecutor, StreamingLegacyChatExecutor streamingLegacyChatExecutor, MeterRegistry meterRegistry,
+            CallerIdentityContext callerIdentityContext) {
         this.registry = registry;
         this.globalVariableResolver = globalVariableResolver;
         this.templatingEngine = templatingEngine;
         this.legacyChatExecutor = legacyChatExecutor;
         this.streamingLegacyChatExecutor = streamingLegacyChatExecutor;
         this.meterRegistry = meterRegistry;
+        this.callerIdentityContext = callerIdentityContext;
     }
 
     /**
@@ -574,7 +578,11 @@ class CascadingModelExecutor {
                                               ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws Exception {
 
-        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(() -> {
+        // A cascade step runs on a virtual thread, so the caller binding on the
+        // pipeline thread does not reach the tools this step invokes — an apicall
+        // tool using ${caller:token} would fail closed for no reason the agent
+        // designer could see, and only when a cascade is configured.
+        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(callerIdentityContext.propagate(() -> {
             if (useAgentMode) {
                 return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
                         heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
@@ -582,7 +590,7 @@ class CascadingModelExecutor {
                 return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
                         heuristicConfig, jsonPolicy);
             }
-        });
+        }));
 
         try {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);

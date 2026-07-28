@@ -12,6 +12,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 
 /**
  * Carries the authenticated caller from the request thread to the pipeline
@@ -128,14 +129,72 @@ public class CallerIdentityContext {
      * could see.
      */
     public <T> Callable<T> propagate(Callable<T> work) {
-        final CallerIdentity captured = current();
-        if (captured == null) {
+        return withIdentity(current(), work);
+    }
+
+    /** {@link #propagate(Callable)} for work dispatched as a {@link Runnable}. */
+    public Runnable propagate(Runnable work) {
+        return withIdentity(current(), work);
+    }
+
+    /**
+     * The caller for work about to be dispatched, wherever we happen to be.
+     * <p>
+     * Prefers the active request (the dispatch happens on the REST thread, as when
+     * a group discussion is kicked off) and falls back to the binding already on
+     * this thread (the dispatch happens mid-pipeline, as in a model cascade).
+     */
+    public CallerIdentity captureOrCurrent() {
+        var captured = capture();
+        return captured != null ? captured : current();
+    }
+
+    /** Bind an explicit identity around work that will run on another thread. */
+    public <T> Callable<T> withIdentity(CallerIdentity identity, Callable<T> work) {
+        if (identity == null) {
             return work;
         }
         return () -> {
-            bind(captured);
+            bind(identity);
             try {
                 return work.call();
+            } finally {
+                clear();
+            }
+        };
+    }
+
+    /** {@link #withIdentity(CallerIdentity, Callable)} for a {@link Runnable}. */
+    public Runnable withIdentity(CallerIdentity identity, Runnable work) {
+        if (identity == null) {
+            return work;
+        }
+        return () -> {
+            bind(identity);
+            try {
+                work.run();
+            } finally {
+                clear();
+            }
+        };
+    }
+
+    /**
+     * {@link #withIdentity(CallerIdentity, Callable)} for a {@link Supplier}, as
+     * used by {@code CompletableFuture.supplyAsync}.
+     * <p>
+     * Named apart from the {@code withIdentity} overloads deliberately: a
+     * value-returning lambda satisfies both {@link Callable} and {@link Supplier},
+     * so same-named overloads are ambiguous at every call site.
+     */
+    public <T> Supplier<T> withIdentitySupplying(CallerIdentity identity, Supplier<T> work) {
+        if (identity == null) {
+            return work;
+        }
+        return () -> {
+            bind(identity);
+            try {
+                return work.get();
             } finally {
                 clear();
             }

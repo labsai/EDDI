@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -131,6 +132,54 @@ class CallerIdentityContextTest {
     void propagateIsPassThroughWithoutIdentity() throws Exception {
         Callable<String> work = () -> "done";
         assertSame(work, context.propagate(work));
+    }
+
+    @Test
+    @DisplayName("a Runnable dispatch keeps the caller — the group-discussion shape")
+    void withIdentityCarriesRunnableAcrossThreads() throws Exception {
+        var identity = new CallerIdentity("alice-token", "alice", "https://eddi.example:443");
+        var seen = new AtomicReference<CallerIdentity>();
+        var leaked = new AtomicReference<CallerIdentity>();
+
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            executor.submit(context.withIdentity(identity, () -> seen.set(context.current()))).get();
+            executor.submit(() -> leaked.set(context.current())).get();
+        } finally {
+            executor.shutdownNow();
+        }
+        assertEquals(identity, seen.get());
+        assertNull(leaked.get(), "the pooled thread must not keep the caller's token");
+    }
+
+    @Test
+    @DisplayName("a Supplier dispatch keeps the caller — the parallel-phase shape")
+    void withIdentitySupplyingCarriesAcrossThreads() throws Exception {
+        var identity = new CallerIdentity("alice-token", "alice", "https://eddi.example:443");
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var result = CompletableFuture
+                    .supplyAsync(context.withIdentitySupplying(identity, () -> context.current()), executor).get();
+            assertEquals(identity, result);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertNull(context.current(), "the dispatching thread must be unaffected");
+    }
+
+    @Test
+    @DisplayName("captureOrCurrent() falls back to the thread binding off-request")
+    void captureOrCurrentFallsBackToBinding() {
+        // A group discussion dispatched mid-pipeline has no request context, but the
+        // pipeline thread is bound — that binding is what must travel.
+        var identity = new CallerIdentity("alice-token", "alice", "https://eddi.example:443");
+        context.bind(identity);
+        assertEquals(identity, context.captureOrCurrent());
+    }
+
+    @Test
+    void captureOrCurrentIsNullWhenNeitherIsAvailable() {
+        assertNull(context.captureOrCurrent());
     }
 
     @Test
