@@ -783,7 +783,7 @@ class McpSetupToolsTest {
         when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
         String result = tools.createApIAgent("API Agent", "You are an API assistant", SIMPLE_SPEC, "anthropic", "claude-sonnet-4-6", "sk-test", null,
-                "Bearer api-key", null, null, null, true, null);
+                "Bearer api-key", null, null, null, true, null, null);
 
         assertNotNull(result);
 
@@ -806,14 +806,14 @@ class McpSetupToolsTest {
 
     @Test
     void createApiAgent_missingSpec_returnsError() {
-        String result = tools.createApIAgent("Agent", "prompt", null, null, null, "key", null, null, null, null, null, null, null);
+        String result = tools.createApIAgent("Agent", "prompt", null, null, null, "key", null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("OpenAPI spec is required"));
     }
 
     @Test
     void createApiAgent_missingApiKey_returnsError() {
-        String result = tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, null, null, null, null, null, null, null, null);
+        String result = tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("API key is required"));
     }
@@ -827,7 +827,7 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, "key", null, null, null, null, null, false, null);
+        tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, "key", null, null, null, null, null, false, null, null);
 
         var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         verify(WorkflowStore).createWorkflow(packageCaptor.capture());

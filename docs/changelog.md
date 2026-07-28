@@ -5,6 +5,52 @@
 
 ---
 
+## 🔓 fix(security): ${caller:token} never reached its resolver (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+A critical review of the caller-identity PR found the feature was **dead on arrival**, and the same
+defect silently disables two older documented features.
+
+`ApiCallExecutor.buildRequest` runs every header value through `prePostUtils.templateValues`
+*before* the caller-identity, global-variable and vault resolvers. `TemplatingEngine`'s trigger
+regex `\{[a-zA-Z#/!]` matches `{c`, so `Bearer ${caller:token}` is handed to Qute, which parses
+`{caller:token}` as a namespaced expression. An unresolvable namespace is a hard failure regardless
+of `strictRendering`, and no `caller` resolver existed. Proven against the project's own build:
+
+```
+Bearer ${caller:token} -> THREW: No namespace resolver found for [caller]
+Bearer ${vault:my-key} -> THREW: No namespace resolver found for [vault]
+${vars:default-model}  -> THREW: No namespace resolver found for [vars]
+```
+
+So `${vault:...}` and `${vars:...}` in apicall headers have never worked either.
+
+**Fix.** `CallerNamespaceResolver` returns the `caller` placeholder verbatim so it round-trips
+through templating to the real resolver. It resolves nothing itself.
+
+**Deliberately `caller` only.** `vault`/`eddivault` keep failing loudly in templated positions.
+Letting them through would widen where a secret is substituted, and the resolved request *body* is
+written to conversation memory unscrubbed — a vault reference in a body template would put a
+plaintext API key into MongoDB. Docs claiming vault works in apicall headers were the bug, not the
+behaviour.
+
+**Why no test caught it:** all three `ApiCallExecutor` suites stub templating as a pass-through, and
+`CallerIdentityResolverTest` calls the resolver directly. Nothing exercised header -> Qute ->
+resolver. `CallerNamespaceResolverTest` now does, including a guard-rail test that fails without the
+resolver and one asserting vault still refuses.
+
+**Also fixed**
+- `setup-api` hardcoded `null` for the LLM base URL while the manager sent Ollama's URL as
+  `apiBaseUrl` — the *tool target* — pointing every generated tool at the model server.
+  `CreateApiAgentRequest` gains a `baseUrl` field, passed to `createLlmConfig`.
+- The by-value token redaction added last round was untested through `ApiCallExecutor`; deleting the
+  call kept every test green. Now covered with a real resolver and mutation-checked.
+- Docs overclaimed: `${caller:userId}` is resolved in headers and query parameters, not "anywhere";
+  `rejectTokenReference`'s Javadoc claimed request bodies are checked.
+
+---
+
 ## 🔐 feat(security): forward the caller's identity to apicall headers (2026-07-28)
 
 **Repo:** EDDI (`feat/caller-identity-passthrough`)
@@ -39,7 +85,7 @@ An agent could only call an API with a *static* credential baked into its apical
 
 **Tests.** `CallerIdentityResolverTest` (24) and `CallerIdentityContextTest` (10) — same-origin refusals (host, port, scheme downgrade), fail-closed paths, regex-escaping of tokens containing `$`/`\`, thread isolation, and clearing on pooled threads. Disabling the same-origin guard fails 4 tests (mutation-checked). All 227 `ConversationService*Test` tests still pass.
 
-**Note for the manager:** the operator's `caller-context` auth mode should now provision `apiAuth` as `Bearer ${caller:token}` and stop putting the token in conversation context — which removes the token-at-rest warning from the activation flow.
+**Note for the manager:** the operator ships this as its `caller-identity` auth mode, provisioning `apiAuth` as `Bearer ${caller:token}`; the conversation-context workaround and its token-at-rest warning are gone.
 
 ---
 

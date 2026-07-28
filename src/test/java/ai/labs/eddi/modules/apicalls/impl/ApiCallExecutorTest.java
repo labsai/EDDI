@@ -15,10 +15,12 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -303,6 +305,45 @@ class ApiCallExecutorTest {
     }
 
     // ==================== Header Scrubbing Tests ====================
+
+    @Test
+    @DisplayName("a caller token in an unconventionally named header is still redacted before persistence")
+    void execute_callerTokenInUnconventionalHeader_isRedacted() throws Exception {
+        // The header-name patterns cannot catch this one; only value matching can.
+        // With the resolver mocked as a pass-through this assertion is vacuous, so
+        // a real resolver with a real bound identity is used here.
+        var realContext = new CallerIdentityContext(null, null);
+        realContext.bind(new CallerIdentity("caller-jwt-value", "alice", "https://eddi.example:443"));
+        var realResolver = new CallerIdentityResolver(realContext, true);
+        var executorWithRealResolver = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
+                secretResolver, realResolver, realContext, false);
+        try {
+            ApiCall call = createSimpleApiCall("redact-call", false);
+
+            Map<String, Object> requestMap = new HashMap<>();
+            Map<String, Object> headers = new LinkedHashMap<>();
+            headers.put("X-Trace-Context", "id=1; tok=caller-jwt-value");
+            requestMap.put("headers", headers);
+            when(mockRequest.toMap()).thenReturn(requestMap);
+            setupSuccessResponse(200, "ok", "text/plain");
+
+            executorWithRealResolver.execute(call, memory, new HashMap<>(), "http://example.com");
+
+            var captor = ArgumentCaptor.forClass(Object.class);
+            verify(prePostUtils, atLeastOnce()).createMemoryEntry(
+                    eq(currentStep), captor.capture(), contains("Request"), eq("httpCalls"));
+            @SuppressWarnings("unchecked")
+            var capturedMap = (Map<String, Object>) captor.getValue();
+            @SuppressWarnings("unchecked")
+            var scrubbedHeaders = (Map<String, Object>) capturedMap.get("headers");
+            String persisted = String.valueOf(scrubbedHeaders.get("X-Trace-Context"));
+            assertFalse(persisted.contains("caller-jwt-value"),
+                    "the caller's token must not reach conversation memory, whatever the header is called");
+            assertTrue(persisted.contains("<REDACTED>"), persisted);
+        } finally {
+            realContext.clear();
+        }
+    }
 
     @Test
     void execute_sensitiveHeaders_areScrubbed() throws Exception {

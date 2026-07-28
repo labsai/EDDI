@@ -15,5 +15,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  */
 public record CreateApiAgentRequest(@JsonProperty(required = true) String agentName, @JsonProperty(required = true) String systemPrompt,
         @JsonProperty(required = true) String openApiSpec, String provider, String model, String apiKey, String apiBaseUrl, String apiAuth,
-        String endpoints, Boolean enableQuickReplies, Boolean enableSentimentAnalysis, Boolean deploy, String environment) {
+        String endpoints, Boolean enableQuickReplies, Boolean enableSentimentAnalysis, Boolean deploy, String environment,
+        /*
+         * Base URL of the LLM provider (Ollama, Jlama). Distinct from apiBaseUrl, which
+         * is the target server of the *generated tools*. Appended last so the
+         * positional constructor used by McpSetupTools stays unambiguous.
+         */
+        String baseUrl) {
 }

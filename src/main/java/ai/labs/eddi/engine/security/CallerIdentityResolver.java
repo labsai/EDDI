@@ -119,8 +119,9 @@ public class CallerIdentityResolver {
     /**
      * Reject a {@code ${caller:token}} reference anywhere a token must not go.
      * <p>
-     * Called for query parameters and request bodies, which are logged, cached and
-     * proxied far more freely than headers.
+     * Called for query parameters, which are logged, cached and proxied far more
+     * freely than headers. Request bodies are not checked: a caller reference there
+     * is never substituted, so it cannot leak a token.
      *
      * @param location
      *            human-readable place the reference was found, for the message

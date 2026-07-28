@@ -295,8 +295,11 @@ public class AgentSetupService {
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
             // Auto-vault the API key before storing in LLM config
             String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName());
-            var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null, null,
-                    promptResponseJson, quickReplies, sentiment, httpCallsLocations);
+            // 7th slot is the LLM's own base URL — not apiBaseUrl, which is the target
+            // server of the generated tools. Passing null here left local providers
+            // (Ollama, Jlama) with no endpoint to reach.
+            var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null,
+                    request.baseUrl(), promptResponseJson, quickReplies, sentiment, httpCallsLocations);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);

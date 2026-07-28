@@ -835,7 +835,7 @@ Resolution is narrow and fails loudly rather than degrading quietly:
   caller addressed (read from the inbound request, not config), so a config
   naming a third-party host cannot exfiltrate the token.
 - **Headers only** — `${caller:token}` in a query parameter is rejected.
-  `${caller:userId}` is allowed anywhere.
+  `${caller:userId}` is allowed in headers and query parameters.
 - **Authenticated turns only** — scheduled jobs and triggers cannot satisfy it.
 - **Fails closed** — an unsatisfiable reference errors instead of sending
   `Bearer `.

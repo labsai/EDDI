@@ -145,7 +145,7 @@ fails the call loudly rather than degrading quietly:
 | Control | Behaviour |
 | ------- | --------- |
 | **Same-origin only** | The token is released only when the outbound call targets the exact `scheme://host:port` the caller addressed. That origin comes from the inbound request, never from configuration — so an agent config naming a third-party host cannot exfiltrate the token, and no allow-list is required for this to hold by default. |
-| **Headers only** | `${caller:token}` in a query parameter is rejected. Tokens in URLs leak through access logs, proxies and browser history. `${caller:userId}` is not a secret and is permitted anywhere. |
+| **Headers only** | `${caller:token}` in a query parameter is rejected. Tokens in URLs leak through access logs, proxies and browser history. `${caller:userId}` is not a secret and is also resolved in query parameters. |
 | **Authenticated turns only** | The identity is captured from the request driving the turn. Scheduled jobs and triggers have no caller and cannot satisfy the reference. |
 | **Fails closed** | An unsatisfiable reference throws rather than resolving to an empty string, which would send `Bearer ` and surface downstream as a confusing `401`. |
 | **Never persisted** | Resolution happens while building the request; `scrubSensitiveHeaders` strips authorization headers before the request is written to conversation memory. |
