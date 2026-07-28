@@ -309,6 +309,27 @@ class AgentModelResolverTest {
     }
 
     @Test
+    void slugify_trimsRunsOfDashesAtBothEnds() {
+        // The dash trim used to be the regex (^-+|-+$). It is now a character
+        // walk, so these pin the behaviour that replaced it rather than the
+        // implementation that produced it.
+        assertEquals("support", AgentModelResolver.slugify("---Support---"));
+        assertEquals("support", AgentModelResolver.slugify("!!!Support!!!"));
+        assertEquals("a-b", AgentModelResolver.slugify("-a - b-"));
+        assertEquals("agent", AgentModelResolver.slugify("-----"),
+                "an all-dash name has nothing left after trimming and must fall back");
+    }
+
+    @Test
+    void slugify_survivesLongRunsOfSeparators() {
+        // slugify runs on the caller-supplied model name, so it must stay correct
+        // on degenerate input. Deliberately NOT a timing assertion: the regex this
+        // replaced was measured at 3ms for this input, so a "is it fast enough"
+        // check would pass either way and prove nothing.
+        assertEquals("x", AgentModelResolver.slugify("-".repeat(200_000) + "x" + "-".repeat(200_000)));
+    }
+
+    @Test
     void resolve_duplicateName_stillResolvesByCanonicalId() throws Exception {
         givenAgent(AGENT_ID_SUPPORT, "Support");
         givenAgent(AGENT_ID_SALES, "Support");

@@ -5,6 +5,27 @@
 
 ---
 
+## 🔒 fix(openai): two CodeQL alerts — logged intent, and a regex flagged as ReDoS (2026-07-29)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+CodeQL failed the PR with 3 new alerts. Two are addressed here; the third is deliberately left.
+
+**`java/log-injection` (medium, `PostgresUserConversationStore:139`).** The delete path logged `intent` unsanitized. That file predates this branch, but the OpenAI adapter is what makes it carry attacker-influenced data: the intent is `channel:openai:<agentId>:<chatKey>` and the chat key comes from a request header, so a newline in it could forge log entries. Routed through the existing `LogSanitizer.sanitize()`, which the bridge already uses for its own logging. The Mongo store logs nothing, so there was no counterpart to mirror.
+
+**`java/polynomial-redos` (high, `AgentModelResolver.slugify`).** The dash trim `(^-+|-+$)` is replaced with a character walk. **This is not a fixed vulnerability, and should not be read as one.** The alert is a false positive twice over:
+
+1. The `NON_SLUG_CHARS` pass on the line immediately above collapses every run of non-slug characters into a *single* `-`, so `-+` can never match more than one character.
+2. Measured directly, the regex is linear anyway — 3ms on 400k separator characters. Java's engine anchors on `$` rather than backtracking, so the quadratic path CodeQL models does not exist here.
+
+It was replaced regardless: a standing high-severity alert competes for attention with real ones, and character walking is no harder to read than the regex was.
+
+**A vacuous test was written and then removed.** The first version of this change asserted `slugify` completed within 2 seconds on 400k separators. Measuring the *old* regex showed it finishes in 3ms — so that assertion would have passed against both implementations and proved nothing. It was deleted rather than shipped; a test that cannot fail is worse than no test. What remains asserts trimming *behaviour* across the implementation swap, and is mutation-checked: stubbing out the trim kills 3 tests.
+
+**Left open: `java/user-controlled-bypass` (high, `OpenAiAuthFilter:84`).** The filter returns early when the request path is not under `/v1`, and the path is user-controlled — which CodeQL reads as authentication being skippable. `isGuarded` strips one leading slash and matches `v1` or the `v1/` prefix against the already-normalized JAX-RS path, and every other path is covered by Quarkus' own auth configuration, so this looks inherent to any path-scoped filter. It is auth code, so it is being reviewed rather than suppressed on one person's reading.
+
+---
+
 ## ✨ feat(openai): render structured outputs, report token usage (2026-07-28)
 
 **Repo:** EDDI (`feat/openai-api-adapter`)

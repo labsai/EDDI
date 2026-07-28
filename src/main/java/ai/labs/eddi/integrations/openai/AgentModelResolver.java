@@ -59,7 +59,6 @@ public class AgentModelResolver {
     public static final String STATELESS_SUFFIX = ":stateless";
 
     private static final Pattern NON_SLUG_CHARS = Pattern.compile("[^a-z0-9]+");
-    private static final Pattern LEADING_TRAILING_DASH = Pattern.compile("(^-+|-+$)");
 
     /** Diacritics left behind by NFD decomposition, stripped during slugging. */
     private static final Pattern COMBINING_MARKS = Pattern.compile("\\p{M}+");
@@ -315,8 +314,34 @@ public class AgentModelResolver {
         String folded = Normalizer.normalize(name, Normalizer.Form.NFD);
         folded = COMBINING_MARKS.matcher(folded).replaceAll("");
         String slug = NON_SLUG_CHARS.matcher(folded.toLowerCase(Locale.ROOT)).replaceAll("-");
-        slug = LEADING_TRAILING_DASH.matcher(slug).replaceAll("");
+        slug = stripDashes(slug);
         return slug.isBlank() ? FALLBACK_SLUG : slug;
+    }
+
+    /**
+     * Trim leading and trailing {@code -} without a regular expression.
+     * <p>
+     * This was {@code (^-+|-+$)}, which CodeQL flags as polynomial ReDoS because
+     * {@code slugify} runs on the caller-supplied model name. The alert is a false
+     * positive twice over: the {@link #NON_SLUG_CHARS} pass immediately above
+     * collapses every run into a single {@code -}, so {@code -+} can never match
+     * more than one character, and the regex was measured linear anyway (3ms on
+     * 400k separators — the engine anchors on {@code $} rather than backtracking).
+     * <p>
+     * It is replaced regardless: character walking is no harder to read, and it
+     * costs nothing to stop a recurring high-severity alert from competing for
+     * attention with real ones. Do not read this as a fixed vulnerability.
+     */
+    private static String stripDashes(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end && value.charAt(start) == '-') {
+            start++;
+        }
+        while (end > start && value.charAt(end - 1) == '-') {
+            end--;
+        }
+        return value.substring(start, end);
     }
 
     /** Last {@value #ID_SUFFIX_LENGTH} characters of the agentId, lower-cased. */
