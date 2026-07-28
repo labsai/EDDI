@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
@@ -133,10 +134,70 @@ class CallerIdentityContextTest {
     }
 
     @Test
-    @DisplayName("propagate() returns the work untouched when nothing is bound")
-    void propagateIsPassThroughWithoutIdentity() throws Exception {
-        Callable<String> work = () -> "done";
-        assertSame(work, context.propagate(work));
+    @DisplayName("propagate() with nothing bound still wraps, so the work sees no caller")
+    void propagateWithoutIdentityMasksRatherThanPassingThrough() throws Exception {
+        // It would be cheaper to return the work unwrapped, but then it would
+        // inherit whatever caller the destination thread happens to carry.
+        Callable<CallerIdentity> work = context::current;
+        var wrapped = context.propagate(work);
+        assertNotSame(work, wrapped);
+
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            executor.submit(context.withIdentity(new CallerIdentity("stale", "mallory", "https://eddi.example:443"),
+                    (Runnable) () -> {
+                        /* leaves the thread carrying mallory if not restored */ }))
+                    .get();
+            assertNull(executor.submit(wrapped).get(), "must not pick up the previous occupant's caller");
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    // ==================== Nesting and the null identity ====================
+
+    @Test
+    @DisplayName("a null identity masks an existing binding rather than inheriting it")
+    void nullIdentityMasksWhateverThePooledThreadCarried() throws Exception {
+        // The thread already carries alice — the state a pooled thread is in after
+        // serving her turn. Work explicitly dispatched without a caller must not be
+        // able to read her token.
+        context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+
+        var seen = new AtomicReference<CallerIdentity>();
+        context.withIdentity(null, (Runnable) () -> seen.set(context.current())).run();
+
+        assertNull(seen.get(), "unauthenticated work must not observe the previous caller");
+    }
+
+    @Test
+    @DisplayName("a nested wrapper restores the outer caller instead of clearing it")
+    void nestedWrapperRestoresTheOuterBinding() throws Exception {
+        var outer = new CallerIdentity("outer-token", "outer", "https://eddi.example:443");
+        var inner = new CallerIdentity("inner-token", "inner", "https://eddi.example:443");
+
+        context.withIdentity(outer, (Runnable) () -> {
+            assertEquals(outer, context.current());
+            context.withIdentity(inner, (Runnable) () -> assertEquals(inner, context.current())).run();
+            // Clearing here instead of restoring would strand the rest of the outer
+            // turn with no caller, and ${caller:token} would start failing mid-turn.
+            assertEquals(outer, context.current(), "the outer caller must survive the inner wrapper");
+        }).run();
+
+        assertNull(context.current(), "and the thread is left as it was found");
+    }
+
+    @Test
+    @DisplayName("the Supplier variant nests the same way")
+    void nestedSupplierRestoresTheOuterBinding() {
+        var outer = new CallerIdentity("outer-token", "outer", "https://eddi.example:443");
+        var inner = new CallerIdentity("inner-token", "inner", "https://eddi.example:443");
+
+        context.withIdentity(outer, (Runnable) () -> {
+            context.withIdentitySupplying(inner, () -> context.current()).get();
+            assertEquals(outer, context.current());
+        }).run();
+        assertNull(context.current());
     }
 
     @Test

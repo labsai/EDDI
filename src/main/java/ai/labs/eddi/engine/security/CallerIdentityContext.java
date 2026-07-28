@@ -157,32 +157,35 @@ public class CallerIdentityContext {
         return captured != null ? captured : current();
     }
 
-    /** Bind an explicit identity around work that will run on another thread. */
+    /**
+     * Bind an explicit identity around work that will run on another thread.
+     * <p>
+     * A {@code null} identity is <em>not</em> a no-op: it binds null, so work that
+     * is deliberately unauthenticated cannot observe a caller left on a pooled
+     * thread by whatever ran there before. The previous binding is restored rather
+     * than cleared, so a nested wrapper does not wipe the outer one.
+     */
     public <T> Callable<T> withIdentity(CallerIdentity identity, Callable<T> work) {
-        if (identity == null) {
-            return work;
-        }
         return () -> {
+            final CallerIdentity previous = current();
             bind(identity);
             try {
                 return work.call();
             } finally {
-                clear();
+                bind(previous);
             }
         };
     }
 
     /** {@link #withIdentity(CallerIdentity, Callable)} for a {@link Runnable}. */
     public Runnable withIdentity(CallerIdentity identity, Runnable work) {
-        if (identity == null) {
-            return work;
-        }
         return () -> {
+            final CallerIdentity previous = current();
             bind(identity);
             try {
                 work.run();
             } finally {
-                clear();
+                bind(previous);
             }
         };
     }
@@ -196,15 +199,13 @@ public class CallerIdentityContext {
      * so same-named overloads are ambiguous at every call site.
      */
     public <T> Supplier<T> withIdentitySupplying(CallerIdentity identity, Supplier<T> work) {
-        if (identity == null) {
-            return work;
-        }
         return () -> {
+            final CallerIdentity previous = current();
             bind(identity);
             try {
                 return work.get();
             } finally {
-                clear();
+                bind(previous);
             }
         };
     }

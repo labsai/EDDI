@@ -9,7 +9,7 @@
 
 **Repo:** EDDI (`feat/caller-identity-passthrough`)
 
-The caller binding is a `ThreadLocal`, and three more dispatch sites hand a turn to a fresh virtual
+The caller binding is a `ThreadLocal`, and four more dispatch sites hand a turn to a fresh virtual
 thread without carrying it. A `${caller:token}` apicall reached from any of them failed closed with
 "the conversation turn has no authenticated caller" — safe, but invisible to the agent designer and
 dependent on unrelated configuration.
@@ -29,6 +29,18 @@ REST thread, the cascade from mid-pipeline.
 **Design note.** The `Supplier` variant is named apart from the `withIdentity` overloads on purpose:
 a value-returning lambda satisfies both `Callable` and `Supplier`, so same-named overloads are
 ambiguous at every call site.
+
+**Review round two** found a fifth site and two flaws in the wrapper itself:
+
+- `GroupConversationService:1788` — the task-force EXECUTE phase fans out again through
+  `CompletableFuture.runAsync`, so every task wave lost the caller. Missed first time because the
+  search pattern covered `submit` and `supplyAsync` but not `runAsync`.
+- The parallel-phase fan-out captured with `current()`, which is null when `discuss()` is called
+  synchronously on the REST thread — only `captureOrCurrent()` sees the request there.
+- **A null identity was a no-op**, so work dispatched *without* a caller inherited whatever binding
+  the pooled thread still carried from the turn before. It now binds null, masking it.
+- **Nested wrappers cleared instead of restoring**, so an inner wrapper wiped the outer caller and
+  the rest of that turn ran unauthenticated. The previous binding is now saved and restored.
 
 **Note on scope.** A group member agent now acts as the person who started the discussion. That
 follows the feature's model — the operator acts as the chatting user — but it is worth stating,

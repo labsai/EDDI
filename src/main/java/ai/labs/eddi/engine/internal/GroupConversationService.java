@@ -1774,6 +1774,9 @@ public class GroupConversationService implements IGroupConversationService {
 
             // Execute agents in parallel, tasks per agent sequentially
             List<CompletableFuture<Void>> futures = new ArrayList<>();
+            // Task workers are a further fan-out of their own; without this every
+            // task wave loses ${caller:...}.
+            final var waveCaller = callerIdentityContext.captureOrCurrent();
 
             for (Map.Entry<String, List<TaskItem>> agentEntry : tasksByAgent.entrySet()) {
                 String agentId = agentEntry.getKey();
@@ -1785,7 +1788,7 @@ public class GroupConversationService implements IGroupConversationService {
                     continue;
                 }
 
-                CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                CompletableFuture<Void> future = CompletableFuture.runAsync(callerIdentityContext.withIdentity(waveCaller, () -> {
                     for (TaskItem task : agentTasks) {
                         if (turnCounter.get() >= maxTurns) {
                             break;
@@ -1839,7 +1842,7 @@ public class GroupConversationService implements IGroupConversationService {
                                     new GroupDiscussionException(e.getMessage(), e));
                         }
                     }
-                }, executorService);
+                }), executorService);
                 futures.add(future);
             }
 
@@ -2371,8 +2374,10 @@ public class GroupConversationService implements IGroupConversationService {
         }
 
         // Each speaker fans out to a further virtual thread; a ThreadLocal does not
-        // follow, so carry the caller explicitly.
-        final var phaseCaller = callerIdentityContext.current();
+        // follow, so carry the caller explicitly. captureOrCurrent, not current: a
+        // synchronous discuss() runs on the REST thread, where nothing has bound a
+        // caller yet and only the request can supply one.
+        final var phaseCaller = callerIdentityContext.captureOrCurrent();
         List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream()
                 .map(speaker -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(phaseCaller, () -> {
                     try {
