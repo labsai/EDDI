@@ -91,6 +91,28 @@ describe("OperatorActivation", () => {
       );
     });
 
+    it("warns that saving replaces the existing agent", async () => {
+      renderActivation({
+        initial: {
+          ...defaultOperatorConfig("Body text."),
+          agentId: "op-1",
+          version: 1,
+          credentialKey: "operator-llm-key",
+        },
+      });
+      await userEvent.click(await screen.findByTestId("operator-next"));
+      // setup-api only creates, so reconfiguring is not an in-place edit.
+      expect(await screen.findByTestId("operator-rebuild-warning")).toBeInTheDocument();
+    });
+
+    it("does not warn about a rebuild on first activation", async () => {
+      renderActivation();
+      await userEvent.type(screen.getByTestId("operator-api-key-input"), "sk-test-key");
+      await userEvent.click(screen.getByTestId("operator-next"));
+      await screen.findByTestId("operator-activate");
+      expect(screen.queryByTestId("operator-rebuild-warning")).not.toBeInTheDocument();
+    });
+
     it("clears the key when the provider changes, since keys are provider-specific", async () => {
       renderActivation({
         initial: {

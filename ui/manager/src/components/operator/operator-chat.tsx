@@ -11,6 +11,8 @@ import { cn } from "@/lib/utils";
 interface OperatorChatProps {
   messages: ChatMessage[];
   events: PipelineEvent[];
+  /** Completed turns' traces, keyed by the agent message they belong to. */
+  tracesByMessageId: Record<string, PipelineEvent[]>;
   isStreaming: boolean;
   error: string | null;
   onSend: (input: string) => void;
@@ -21,6 +23,7 @@ interface OperatorChatProps {
 export function OperatorChat({
   messages,
   events,
+  tracesByMessageId,
   isStreaming,
   error,
   onSend,
@@ -72,8 +75,8 @@ export function OperatorChat({
         )}
 
         {messages.map((message) => (
+          <div key={message.id} className="space-y-2">
           <div
-            key={message.id}
             className={cn(
               "flex gap-3",
               message.role === "user" ? "justify-end" : "justify-start",
@@ -99,13 +102,18 @@ export function OperatorChat({
               <User className="mt-1 h-5 w-5 shrink-0 text-muted-foreground" />
             )}
           </div>
-        ))}
 
-        {/* The operator's value is largely in showing which platform reads it
-            made — so the trace renders inline, not behind a debug drawer. */}
-        {events.length > 0 && (
-          <ChatActivity events={events} isLive={isStreaming} showInternalSteps={false} />
-        )}
+          {/* An answer is only as trustworthy as the reads behind it, so each
+              turn keeps its own trace instead of the newest one replacing it. */}
+          {message.role === "agent" && (message.isStreaming ? events : tracesByMessageId[message.id])?.length ? (
+            <ChatActivity
+              events={message.isStreaming ? events : tracesByMessageId[message.id]!}
+              isLive={Boolean(message.isStreaming) && isStreaming}
+              showInternalSteps={false}
+            />
+          ) : null}
+          </div>
+        ))}
 
         {error && (
           <div

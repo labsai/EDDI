@@ -281,6 +281,7 @@ export function OperatorPage() {
         <OperatorChat
           messages={chat.messages}
           events={chat.events}
+          tracesByMessageId={chat.tracesByMessageId}
           isStreaming={chat.isStreaming}
           error={chat.error}
           onSend={chat.send}

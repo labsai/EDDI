@@ -191,7 +191,11 @@ export function OperatorActivation({
               </Field>
             )}
 
-            <Field label={t("operator.activation.environment")} htmlFor="operator-environment">
+            <Field
+              label={t("operator.activation.environment")}
+              hint={t("operator.activation.environmentHint")}
+              htmlFor="operator-environment"
+            >
               <select
                 value={environment}
                 onChange={(e) => setEnvironment(e.target.value)}
@@ -270,6 +274,12 @@ export function OperatorActivation({
                 ))}
               </ul>
             </Field>
+
+            {initial.agentId && (
+              <Notice tone="warning" icon={AlertTriangle} testId="operator-rebuild-warning">
+                {t("operator.activation.rebuildWarning")}
+              </Notice>
+            )}
 
             {error && (
               <Notice tone="error" icon={AlertTriangle} testId="operator-activation-error">

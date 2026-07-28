@@ -3112,7 +3112,9 @@
       "promptBodyHint": "Edit how the operator introduces itself and how it works.",
       "tools": "Tools it will be given ({{toolCount}})",
       "activate": "Activate & deploy",
-      "callerIdentityNote": "EDDI substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment."
+      "callerIdentityNote": "EDDI substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.",
+      "rebuildWarning": "Saving builds a new operator agent and removes the current one. Your existing operator conversation will not carry over.",
+      "environmentHint": "Where the operator agent itself runs. It can still read any environment."
     },
     "authMode": {
       "none": {
@@ -3184,6 +3186,8 @@
       "title": "The Platform Operator is paused",
       "description": "It is still configured — turning it back on redeploys the same agent. Nothing has been deleted.",
       "action": "Turn back on"
-    }
+    },
+    "managedAgentBadge": "Operator",
+    "managedAgentHint": "Provisioned and managed by the Platform Operator screen. Editing or deleting it here will break that screen."
   }
 }

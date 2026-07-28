@@ -3085,7 +3085,9 @@
       "promptBodyHint": "Edite como o operador se apresenta e como trabalha.",
       "tools": "Ferramentas que receberá ({{toolCount}})",
       "activate": "Ativar e implantar",
-      "callerIdentityNote": "O EDDI insere o seu token no momento da chamada. Nunca é guardado na conversa e só é enviado de volta para esta instalação."
+      "callerIdentityNote": "O EDDI insere o seu token no momento da chamada. Nunca é guardado na conversa e só é enviado de volta para esta instalação.",
+      "rebuildWarning": "Ao guardar, é criado um novo agente operador e o atual é removido. A sua conversa de operador existente não será mantida.",
+      "environmentHint": "Onde o próprio agente operador é executado. Continua a poder ler qualquer ambiente."
     },
     "authMode": {
       "none": {
@@ -3157,6 +3159,8 @@
       "title": "O operador da plataforma está em pausa",
       "description": "Continua configurado — ao voltar a ligá-lo, o mesmo agente é implantado de novo. Nada foi eliminado.",
       "action": "Voltar a ligar"
-    }
+    },
+    "managedAgentBadge": "Operador",
+    "managedAgentHint": "Aprovisionado e gerido pelo ecrã do operador da plataforma. Editá-lo ou eliminá-lo aqui irá quebrar esse ecrã."
   }
 }

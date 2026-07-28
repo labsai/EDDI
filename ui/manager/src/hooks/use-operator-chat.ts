@@ -22,9 +22,48 @@ export interface OperatorChatState {
   messages: ChatMessage[];
   /** Pipeline events for the turn in flight, fed straight to `ChatActivity`. */
   events: PipelineEvent[];
+  /**
+   * Completed turns' traces, keyed by the agent message they belong to.
+   *
+   * An operator answer is only as trustworthy as the reads behind it, so the
+   * trace has to stay attached to its answer rather than being replaced by the
+   * next turn's.
+   */
+  tracesByMessageId: Record<string, PipelineEvent[]>;
   isStreaming: boolean;
   error: string | null;
   conversationId: string | null;
+}
+
+/**
+ * Where the active operator conversation id is remembered.
+ *
+ * sessionStorage, not localStorage: an operator investigation belongs to the
+ * tab you are working in, and should not resurface weeks later in an unrelated
+ * session.
+ */
+const CONVERSATION_STORAGE_KEY = "eddi.operator.conversationId";
+
+function readStoredConversationId(): string | null {
+  try {
+    return sessionStorage.getItem(CONVERSATION_STORAGE_KEY);
+  } catch {
+    // Storage can be unavailable (private mode, blocked cookies). Losing
+    // resumption is a downgrade, not a failure.
+    return null;
+  }
+}
+
+function storeConversationId(conversationId: string | null): void {
+  try {
+    if (conversationId) {
+      sessionStorage.setItem(CONVERSATION_STORAGE_KEY, conversationId);
+    } else {
+      sessionStorage.removeItem(CONVERSATION_STORAGE_KEY);
+    }
+  } catch {
+    // Ignored — see readStoredConversationId.
+  }
 }
 
 let messageSeq = 0;
@@ -81,21 +120,26 @@ function toPipelineEvent(event: SSEEvent): PipelineEvent | null {
 }
 
 export function useOperatorChat(config: OperatorConfig | null | undefined) {
-  const [state, setState] = useState<OperatorChatState>({
+  const [state, setState] = useState<OperatorChatState>(() => ({
     messages: [],
     events: [],
+    tracesByMessageId: {},
     isStreaming: false,
     error: null,
-    conversationId: null,
-  });
+    // Resume the tab's conversation so navigating away mid-investigation and
+    // back does not silently start a new one.
+    conversationId: readStoredConversationId(),
+  }));
   const abortRef = useRef<AbortController | null>(null);
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    storeConversationId(null);
     setState({
       messages: [],
       events: [],
+      tracesByMessageId: {},
       isStreaming: false,
       error: null,
       conversationId: null,
@@ -133,7 +177,6 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
             isStreaming: true,
           },
         ],
-        // Activity is per-turn; the previous turn's trace is replaced.
         events: [],
         isStreaming: true,
         error: null,
@@ -146,6 +189,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
         let conversationId = state.conversationId;
         if (!conversationId) {
           conversationId = await startConversation(config.environment, config.agentId);
+          storeConversationId(conversationId);
           setState((s) => ({ ...s, conversationId }));
         }
 
@@ -187,6 +231,11 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
         setState((s) => ({
           ...s,
           isStreaming: false,
+          events: [],
+          tracesByMessageId:
+            s.events.length > 0
+              ? { ...s.tracesByMessageId, [agentId]: s.events }
+              : s.tracesByMessageId,
           messages: s.messages.map((m) =>
             m.id === agentId ? { ...m, isStreaming: false } : m,
           ),

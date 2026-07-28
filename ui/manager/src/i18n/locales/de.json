@@ -3085,7 +3085,9 @@
       "promptBodyHint": "Passen Sie an, wie sich der Operator vorstellt und wie er arbeitet.",
       "tools": "Tools, die er erhält ({{toolCount}})",
       "activate": "Aktivieren & deployen",
-      "callerIdentityNote": "EDDI setzt Ihr Token erst beim Aufruf ein. Es wird nie in der Konversation gespeichert und ausschließlich an diese Installation zurückgesendet."
+      "callerIdentityNote": "EDDI setzt Ihr Token erst beim Aufruf ein. Es wird nie in der Konversation gespeichert und ausschließlich an diese Installation zurückgesendet.",
+      "rebuildWarning": "Beim Speichern wird ein neuer Operator-Agent erstellt und der aktuelle entfernt. Ihre bestehende Operator-Konversation wird nicht übernommen.",
+      "environmentHint": "Wo der Operator-Agent selbst läuft. Er kann weiterhin jede Umgebung auslesen."
     },
     "authMode": {
       "none": {
@@ -3157,6 +3159,8 @@
       "title": "Der Plattform-Operator ist pausiert",
       "description": "Er ist weiterhin konfiguriert — beim Wiedereinschalten wird derselbe Agent erneut deployt. Es wurde nichts gelöscht.",
       "action": "Wieder einschalten"
-    }
+    },
+    "managedAgentBadge": "Operator",
+    "managedAgentHint": "Wird vom Plattform-Operator-Bildschirm bereitgestellt und verwaltet. Bearbeiten oder Löschen an dieser Stelle macht diesen Bildschirm unbrauchbar."
   }
 }

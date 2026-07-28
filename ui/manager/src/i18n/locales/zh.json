@@ -3085,7 +3085,9 @@
       "promptBodyHint": "编辑操作员如何自我介绍以及如何工作。",
       "tools": "将授予它的工具（{{toolCount}} 个）",
       "activate": "启用并部署",
-      "callerIdentityNote": "EDDI 在发起调用时才代入你的令牌。它不会存入会话，也只会发回本部署。"
+      "callerIdentityNote": "EDDI 在发起调用时才代入你的令牌。它不会存入会话，也只会发回本部署。",
+      "rebuildWarning": "保存会新建一个操作员智能体并移除当前的。你现有的操作员会话不会保留。",
+      "environmentHint": "操作员智能体自身运行的位置。它仍可读取任意环境。"
     },
     "authMode": {
       "none": {
@@ -3157,6 +3159,8 @@
       "title": "平台操作员已暂停",
       "description": "配置仍然保留——重新开启会再次部署同一个智能体。没有删除任何内容。",
       "action": "重新开启"
-    }
+    },
+    "managedAgentBadge": "操作员",
+    "managedAgentHint": "由平台操作员页面创建并管理。在此编辑或删除会导致该页面失效。"
   }
 }

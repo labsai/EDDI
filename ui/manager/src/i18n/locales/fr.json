@@ -3085,7 +3085,9 @@
       "promptBodyHint": "Modifiez la façon dont l'opérateur se présente et travaille.",
       "tools": "Outils qui lui seront confiés ({{toolCount}})",
       "activate": "Activer et déployer",
-      "callerIdentityNote": "EDDI insère votre jeton au moment de l'appel. Il n'est jamais enregistré dans la conversation et n'est renvoyé qu'à ce déploiement."
+      "callerIdentityNote": "EDDI insère votre jeton au moment de l'appel. Il n'est jamais enregistré dans la conversation et n'est renvoyé qu'à ce déploiement.",
+      "rebuildWarning": "L'enregistrement crée un nouvel agent opérateur et supprime l'actuel. Votre conversation d'opérateur existante ne sera pas conservée.",
+      "environmentHint": "Où s'exécute l'agent opérateur lui-même. Il peut toujours lire n'importe quel environnement."
     },
     "authMode": {
       "none": {
@@ -3157,6 +3159,8 @@
       "title": "L'opérateur de plateforme est en pause",
       "description": "Il reste configuré — le réactiver redéploie le même agent. Rien n'a été supprimé.",
       "action": "Réactiver"
-    }
+    },
+    "managedAgentBadge": "Opérateur",
+    "managedAgentHint": "Provisionné et géré par l'écran Opérateur de plateforme. Le modifier ou le supprimer ici cassera cet écran."
   }
 }
