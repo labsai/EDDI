@@ -35,7 +35,8 @@
 # commits that introduced them. The examples themselves have since been changed
 # to use $EDDI_API_KEY / os.environ so no future commit re-triggers the rule.
 #
-# docs/open-webui-integration.md: `curl -H "Authorization: Bearer sk-eddi-change-me"`
+# docs/open-webui-integration.md: two curl examples that passed a placeholder
+# bearer token inline. (Not quoted here -- the rule matches this file too.)
 3b384d99d6c6a5ef652a4294618fa9df16b753df:docs/open-webui-integration.md:curl-auth-header:56
 3b384d99d6c6a5ef652a4294618fa9df16b753df:docs/open-webui-integration.md:curl-auth-header:60
 # planning/openai-api-adapter-plan.md: the same two curl examples, plus a
@@ -44,3 +45,7 @@
 5283853e511b20937a13ab8a9dc13698d3ef6496:planning/openai-api-adapter-plan.md:generic-api-key:138
 5283853e511b20937a13ab8a9dc13698d3ef6496:planning/openai-api-adapter-plan.md:curl-auth-header:791
 5283853e511b20937a13ab8a9dc13698d3ef6496:planning/openai-api-adapter-plan.md:curl-auth-header:795
+# The justification comment above originally quoted the offending example
+# verbatim, so the rule matched this file too. The quote is gone now, but the
+# commit that carried it stays in history and still needs an entry.
+36e741846f2fcf3e25aa3bcb6efca0feeba69dd0:.gitleaksignore:curl-auth-header:38
