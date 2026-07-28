@@ -110,8 +110,15 @@
     --eddi-bg:            #09090b; /* zinc-950   page background            */
     --eddi-surface:       #18181b; /* zinc-900   login card                 */
     --eddi-surface-alt:   #1f1f23; /*            hover / raised surfaces    */
-    --eddi-border:        #27272a; /* zinc-800   card + input borders       */
+    --eddi-border:        #27272a; /* zinc-800   card + decorative borders  */
     --eddi-border-strong: #3f3f46; /* zinc-700                              */
+
+    /* Interactive controls need a heavier border than decorative ones.
+       WCAG 2.2 SC 1.4.11 wants 3:1 against the adjacent colour for the visual
+       information that identifies a control, and #27272a on the #18181b card is
+       1.19:1. Zinc-500 measures 3.5:1 there. The card keeps --eddi-border,
+       because a panel edge is decoration and 1.4.11 does not apply to it. */
+    --eddi-field-border:  #71717a; /* zinc-500   inputs, 3.5:1 on the card  */
     --eddi-primary:       #f59e0b; /* amber-500  buttons, focus, accents    */
     --eddi-primary-hover: #d97706; /* amber-600                             */
     --eddi-on-primary:    #0c0a09; /* label on an amber fill                */
@@ -176,6 +183,7 @@
         --eddi-surface-alt:   #f5f5f4; /* stone-100                         */
         --eddi-border:        #e7e5e4; /* stone-200                         */
         --eddi-border-strong: #d6d3d1; /* stone-300                         */
+        --eddi-field-border:  #78716c; /* stone-500 — 4.8:1 on the white card */
         --eddi-fg:            #1c1917; /* stone-900  primary text           */
         --eddi-muted:         #78716c; /* stone-500  labels                 */
         --eddi-error:         #dc2626; /* the Manager's destructive         */
@@ -222,6 +230,7 @@
     --eddi-surface-alt:   #f5f5f4;
     --eddi-border:        #e7e5e4;
     --eddi-border-strong: #d6d3d1;
+    --eddi-field-border:  #78716c;
     --eddi-fg:            #1c1917;
     --eddi-muted:         #78716c;
     --eddi-error:         #dc2626;
@@ -481,21 +490,20 @@
  *    should read as cut into the card, not laid on top of it.
  * 2. A full hairline and the shared control radius.
  *
- * KNOWN GAP — WCAG 1.4.11 (non-text contrast, 3:1 for UI component boundaries).
- * The resting border (#27272a on #18181b) is 1.19:1 and the fill difference
- * (~#101012 on #18181b) is ~1.11:1, so neither boundary meets 3:1 on its own; a
- * field is identified by its label, fill, inset shadow and border together.
- * Reaching 3:1 would need roughly zinc-500 (#71717a), which is a visible
- * departure from the #27272a border the Manager uses everywhere — a CI
- * decision, not a CSS one, so it is left as-is and recorded here. The focus
- * state is unaffected and clears the bar comfortably (amber, 8.25:1).
+ * WCAG 1.4.11 (non-text contrast) is met by the border, via --eddi-field-border.
+ * It is deliberately a different token from --eddi-border: the recess alone is
+ * only ~1.11:1 against the card and the Manager's #27272a border only 1.19:1, so
+ * a field's boundary needed its own, heavier value while the card's decorative
+ * edge kept the CI one. The visible consequence is that fields read more
+ * strongly than the Manager's do — that is the cost of the criterion, not an
+ * oversight.
  * ------------------------------------------------------------------------ */
 .pf-v5-c-form-control,
 .pf-v5-c-input-group {
     --pf-v5-c-form-control--BackgroundColor: transparent;
 
     background-color: var(--eddi-recess);
-    border: 1px solid var(--eddi-border);
+    border: 1px solid var(--eddi-field-border);
     border-radius: var(--eddi-radius);
     box-shadow: var(--eddi-inset-shadow);
 }

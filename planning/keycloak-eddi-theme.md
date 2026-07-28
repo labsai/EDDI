@@ -290,19 +290,18 @@ no other structural change is needed. But **downgrade the failure mode for the t
 loop currently calls `fail` (aborts the install) on any download error. A missing realm JSON is fatal;
 a missing PNG is cosmetic, and these URLs will 404 on `${EDDI_BRANCH}` until this work merges.
 
-```diff
-         if curl -fsSL "${kf_url}" -o "$kf_target"; then
-           echo -e "${GREEN}✅${RESET}"
-         else
--          fail "Failed to download ${kf} (required for Keycloak).\n     URL: ${kf_url}"
-+          if [[ "$kf" == "keycloak/eddi-realm.json" ]]; then
-+            fail "Failed to download ${kf} (required for Keycloak).\n     URL: ${kf_url}"
-+          else
-+            rm -f "$kf_target"   # don't leave a truncated/empty asset behind
-+            warn "Failed to download ${kf} — login page will use the default Keycloak theme"
-+          fi
-         fi
-```
+> **Read `resolve_compose_files()` in `install.sh` rather than a snippet here** — an earlier copy of
+> this loop drifted from the shipped code within a day. The semantics that matter:
+>
+> - **`keycloak/eddi-realm.json` is fatal.** Without it there is no realm.
+> - **Every theme resource is non-fatal but all-or-nothing.** A failed download removes that file and
+>   marks the theme incomplete; after the loop, an incomplete theme deletes the whole
+>   `keycloak/themes/eddi` directory. This matters: a *missing* theme is safe (Keycloak logs "Failed
+>   to find LOGIN theme" and serves the built-in one, HTTP 200 — verified), but a *partial* one is
+>   not, because `theme.properties` would still resolve and the page would render with its stylesheet
+>   or fonts 404ing.
+> - **No temp-file staging is used.** `curl -f` can leave a partial file, which is why the failed
+>   target is removed — and the whole-directory discard above makes per-file atomicity moot.
 
 #### 4.6.2 Apply `loginTheme` to already-provisioned realms (blocker if skipped)
 

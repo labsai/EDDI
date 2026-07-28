@@ -947,9 +947,15 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
 
   # GET-modify-PUT the full representation, same as the client update above.
   if [[ "$json_tool" == "jq" ]]; then
+    # Branding is forced; locale settings are only seeded when the operator has
+    # not enabled internationalisation themselves. Overwriting them on every run
+    # would clobber a deliberately curated locale list.
     updated_realm=$(echo "$realm_config" | jq \
       '.loginTheme = "eddi" | .displayName = "EDDI" | .displayNameHtml = "EDDI"
-       | .internationalizationEnabled = true | .supportedLocales = ["ar","ca","cs","da","de","el","en","es","fa","fi","fr","hu","it","ja","ko","lt","lv","nl","no","pl","pt","pt-BR","ru","sk","sv","th","tr","uk","zh-CN","zh-TW"] | .defaultLocale = "en"' \
+       | if (.internationalizationEnabled // false) then .
+         else .internationalizationEnabled = true
+              | .supportedLocales = ["ar","ca","cs","da","de","el","en","es","fa","fi","fr","hu","it","ja","ko","lt","lv","nl","no","pl","pt","pt-BR","ru","sk","sv","th","tr","uk","zh-CN","zh-TW"]
+              | .defaultLocale = "en" end' \
       2>/dev/null) || updated_realm=""
   else
     updated_realm=$(echo "$realm_config" | python3 -c "
@@ -958,10 +964,13 @@ d = json.load(sys.stdin)
 d['loginTheme'] = 'eddi'
 d['displayName'] = 'EDDI'
 d['displayNameHtml'] = 'EDDI'
-# Emits lang/dir on <html> (WCAG 3.1.1). One locale means no locale switcher.
-d['internationalizationEnabled'] = True
-d['supportedLocales'] = ['ar','ca','cs','da','de','el','en','es','fa','fi','fr','hu','it','ja','ko','lt','lv','nl','no','pl','pt','pt-BR','ru','sk','sv','th','tr','uk','zh-CN','zh-TW']
-d['defaultLocale'] = 'en'
+# Branding is forced; locale settings are only seeded when the operator has not
+# enabled internationalisation themselves, so a curated list survives. Enabling
+# it is also what puts lang/dir on <html> (WCAG 3.1.1).
+if not d.get('internationalizationEnabled'):
+    d['internationalizationEnabled'] = True
+    d['supportedLocales'] = ['ar','ca','cs','da','de','el','en','es','fa','fi','fr','hu','it','ja','ko','lt','lv','nl','no','pl','pt','pt-BR','ru','sk','sv','th','tr','uk','zh-CN','zh-TW']
+    d['defaultLocale'] = 'en'
 print(json.dumps(d))" 2>/dev/null) || updated_realm=""
   fi
 
@@ -971,7 +980,9 @@ print(json.dumps(d))" 2>/dev/null) || updated_realm=""
   fi
 
   local theme_status
-  theme_status=$(curl -sf -o /dev/null -w "%{http_code}" -X PUT \
+  # No -f here: with it curl exits non-zero on 4xx/5xx and the real status is
+  # lost to the || fallback, so every failure would report HTTP 000.
+  theme_status=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
     -H "Authorization: Bearer ${admin_token}" \
     -H "Content-Type: application/json" \
     "${kc_base}/admin/realms/eddi" \
