@@ -191,6 +191,40 @@ class CallerIdentityResolverTest {
     }
 
     @Test
+    @DisplayName("a request body rejects userId too, not just token")
+    void rejectsAnyReferenceInABody() {
+        // Bodies are not caller-resolved at all, so userId there is exactly as
+        // broken as a token — it ships as a literal placeholder.
+        var e = assertThrows(CallerIdentityException.class, () -> resolver.rejectAnyReference("{\"u\":\"${caller:userId}\"}", "a request body"));
+        assertTrue(e.getMessage().contains("${caller:userId}"), e.getMessage());
+        assertThrows(CallerIdentityException.class, () -> resolver.rejectAnyReference("${caller:token}", "a request body"));
+    }
+
+    @Test
+    void aBodyWithNoReferencePassesThrough() {
+        resolver.rejectAnyReference("{\"plain\":\"json\"}", "a request body");
+        resolver.rejectAnyReference(null, "a request body");
+    }
+
+    @Test
+    @DisplayName("a typo'd reference fails loudly instead of shipping as a placeholder")
+    void rejectsUnsupportedReference() {
+        // Qute leaves the whole caller namespace alone, so nothing else would catch
+        // this and the API would receive the literal text.
+        var e = assertThrows(CallerIdentityException.class,
+                () -> resolver.resolveValue("Bearer ${caller:tokn}", URI.create("https://eddi.example/x")));
+        assertTrue(e.getMessage().contains("${caller:tokn}"), e.getMessage());
+        assertTrue(e.getMessage().contains("not a supported caller reference"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("an unsupported reference is caught even next to a valid one")
+    void rejectsUnsupportedReferenceAlongsideAValidOne() {
+        assertThrows(CallerIdentityException.class,
+                () -> resolver.resolveValue("${caller:userId}/${caller:nope}", URI.create("https://eddi.example/x")));
+    }
+
+    @Test
     @DisplayName("userId in a query parameter is fine")
     void allowsUserIdInQueryParameter() {
         resolver.rejectTokenReference("${caller:userId}", "a query parameter");

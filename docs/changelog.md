@@ -89,7 +89,7 @@ resolver and one asserting vault still refuses.
 **Also fixed**
 - `setup-api` hardcoded `null` for the LLM base URL while the manager sent Ollama's URL as
   `apiBaseUrl` — the *tool target* — pointing every generated tool at the model server.
-  `CreateApiAgentRequest` gains a `baseUrl` field, passed to `createLlmConfig`.
+  `CreateApiAgentRequest` gains an `llmBaseUrl` field, passed to `createLlmConfig`.
 - The by-value token redaction added last round was untested through `ApiCallExecutor`; deleting the
   call kept every test green. Now covered with a real resolver and mutation-checked.
 - Docs overclaimed: `${caller:userId}` is resolved in headers and query parameters, not "anywhere";

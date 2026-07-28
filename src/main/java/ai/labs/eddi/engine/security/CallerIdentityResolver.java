@@ -58,6 +58,16 @@ public class CallerIdentityResolver {
     /** Matches {@code ${caller:token}} and {@code ${caller:userId}}. */
     static final Pattern CALLER_PATTERN = Pattern.compile("\\$\\{caller:(token|userId)\\}");
 
+    /**
+     * Matches any {@code ${caller:...}} reference, including ones we do not
+     * support. {@code CallerNamespaceResolver} deliberately lets every reference in
+     * this namespace survive Qute, so a typo reaches the API as a literal
+     * placeholder unless something catches it.
+     */
+    private static final Pattern ANY_CALLER_PATTERN = Pattern.compile("\\$\\{caller:[^}]*\\}");
+
+    private static final String SUPPORTED_REFERENCES = "${caller:token} (headers only) and ${caller:userId}";
+
     private static final String REF_TOKEN = "token";
 
     private final CallerIdentityContext callerIdentityContext;
@@ -90,6 +100,7 @@ public class CallerIdentityResolver {
      *             feature is disabled, or the target is a different origin
      */
     public String resolveValue(String value, URI target) {
+        rejectUnsupportedReference(value);
         if (!containsReference(value)) {
             return value;
         }
@@ -117,11 +128,55 @@ public class CallerIdentityResolver {
     }
 
     /**
-     * Reject a {@code ${caller:token}} reference anywhere a token must not go.
+     * Reject a {@code ${caller:...}} reference that this resolver does not support.
      * <p>
-     * Called for query parameters and request bodies — the two places a reference
-     * would otherwise travel to the API as a literal placeholder, since
-     * substitution happens for headers only.
+     * Without this a typo such as {@code ${caller:tokn}} is not an error anywhere:
+     * Qute leaves the whole namespace alone, {@link #CALLER_PATTERN} does not match
+     * it, and the placeholder is sent to the API verbatim. The config author then
+     * debugs a puzzling downstream failure rather than reading a message naming
+     * their typo.
+     */
+    public void rejectUnsupportedReference(String value) {
+        if (value == null) {
+            return;
+        }
+        Matcher any = ANY_CALLER_PATTERN.matcher(value);
+        while (any.find()) {
+            String reference = any.group();
+            if (!CALLER_PATTERN.matcher(reference).matches()) {
+                throw new CallerIdentityException(
+                        reference + " is not a supported caller reference. Supported: " + SUPPORTED_REFERENCES + ".");
+            }
+        }
+    }
+
+    /**
+     * Reject <em>any</em> caller reference, for places where none is ever
+     * substituted.
+     * <p>
+     * Stricter than {@link #rejectTokenReference} on purpose: a request body is not
+     * caller-resolved at all, so {@code ${caller:userId}} there is just as broken
+     * as a token reference — it would be shipped as a literal placeholder.
+     */
+    public void rejectAnyReference(String value, String location) {
+        if (value == null) {
+            return;
+        }
+        Matcher any = ANY_CALLER_PATTERN.matcher(value);
+        if (any.find()) {
+            throw new CallerIdentityException(any.group() + " was found in " + location
+                    + ", which is never caller-resolved — it would be sent to the API as a literal placeholder. "
+                    + "Caller references are substituted into headers only.");
+        }
+    }
+
+    /**
+     * Reject a {@code ${caller:token}} reference where a token must not go, while
+     * still allowing {@code ${caller:userId}}.
+     * <p>
+     * Called for query parameters, which are logged, cached and proxied far more
+     * freely than headers. Request bodies use {@link #rejectAnyReference} instead,
+     * since nothing is substituted there at all.
      *
      * @param location
      *            human-readable place the reference was found, for the message

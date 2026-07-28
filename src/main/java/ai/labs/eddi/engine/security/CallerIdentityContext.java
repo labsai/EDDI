@@ -51,9 +51,14 @@ public class CallerIdentityContext {
      * Read the caller from the active request.
      * <p>
      * Must be called on the request thread. Returns {@code null} when there is no
-     * active request (scheduled jobs, triggers, tests) or when the request carried
-     * no bearer token — both are normal, and simply mean a {@code ${caller:token}}
-     * reference cannot be satisfied for this turn.
+     * active request (scheduled jobs, triggers, tests) or when the caller is
+     * anonymous — normal, and simply means a {@code ${caller:...}} reference cannot
+     * be satisfied for this turn.
+     * <p>
+     * A token is not required: an authenticated request with a principal but no
+     * bearer credential yields an identity whose {@link CallerIdentity#hasToken()}
+     * is false, so {@code ${caller:userId}} resolves while {@code ${caller:token}}
+     * still fails closed.
      *
      * @return the captured identity, or {@code null}
      */

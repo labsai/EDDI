@@ -387,9 +387,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
             request.setBodyEntity(requestBody, UTF_8, !isNullOrEmpty(contentType) ? contentType : TEXT_PLAIN);
         }
 
-        // The body is never caller-resolved, so a reference there would be sent as a
-        // literal placeholder — reject it instead of shipping nonsense to the API.
-        callerIdentityResolver.rejectTokenReference(requestBody, "a request body");
+        // The body is never caller-resolved, so ANY reference there would be sent as
+        // a literal placeholder — not just a token one. Reject the lot instead of
+        // shipping nonsense to the API.
+        callerIdentityResolver.rejectAnyReference(requestBody, "a request body");
 
         Map<String, String> headers = requestConfig.getHeaders();
         for (String headerName : headers.keySet()) {
