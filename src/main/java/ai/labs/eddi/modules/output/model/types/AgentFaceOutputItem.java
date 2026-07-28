@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.output.model.types;
 import ai.labs.eddi.modules.output.model.OutputItem;
 
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 public class AgentFaceOutputItem extends OutputItem {
     private String uri;
@@ -27,6 +28,11 @@ public class AgentFaceOutputItem extends OutputItem {
     @Override
     protected void initType() {
         super.type = "agentFace";
+    }
+
+    @Override
+    protected OutputItem templatedCopy(UnaryOperator<String> templating) {
+        return new AgentFaceOutputItem(templating.apply(uri), templating.apply(alt), delay);
     }
 
     @Override

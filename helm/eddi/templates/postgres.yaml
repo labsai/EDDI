@@ -8,11 +8,17 @@ metadata:
     app.kubernetes.io/component: database
 type: Opaque
 stringData:
+  # POSTGRES_* are consumed by the postgres container itself, which only reads
+  # its bootstrap configuration from environment variables.
   POSTGRES_DB: {{ .Values.postgres.database | quote }}
   POSTGRES_USER: {{ .Values.postgres.username | quote }}
-  POSTGRES_PASSWORD: {{ .Values.postgres.password | quote }}
-  QUARKUS_DATASOURCE_USERNAME: {{ .Values.postgres.username | quote }}
-  QUARKUS_DATASOURCE_PASSWORD: {{ .Values.postgres.password | quote }}
+  {{- $pgPassword := required "postgres.password is required when postgres.enabled=true — the chart no longer ships a default. Generate one: openssl rand -base64 24" .Values.postgres.password }}
+  POSTGRES_PASSWORD: {{ $pgPassword | quote }}
+  # Consumed by EDDI as a mounted config FILE (see the projected volume in
+  # deployment.yaml), not as environment variables.
+  postgres-secrets.properties: |
+    quarkus.datasource.username={{ .Values.postgres.username }}
+    quarkus.datasource.password={{ $pgPassword }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet

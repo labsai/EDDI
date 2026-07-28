@@ -55,12 +55,14 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
         checkIfFoundAndLatest(id, version, resource);
 
         var history = resourceStorage.newHistoryResourceFor(resource, false);
-        resourceStorage.store(history);
 
         try {
             Integer newVersion = resource.getVersion() + 1;
             var newResource = resourceStorage.newResource(resource.getId(), newVersion, content);
-            resourceStorage.storeIfCurrentVersion(newResource, version);
+            // One unit of work: archiving the predecessor and storing the successor
+            // must not be separable by a crash. Backends without transactions fall
+            // back to history-first sequencing (see IResourceStorage).
+            resourceStorage.storeHistoryAndUpdate(history, newResource, version);
             return newVersion;
         } catch (IOException e) {
             throw new ResourceStoreException(e.getLocalizedMessage(), e);
@@ -92,9 +94,9 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
         checkIfFoundAndLatest(id, version, resource);
 
         var historyResource = resourceStorage.newHistoryResourceFor(resource, true);
-        resourceStorage.store(historyResource);
-
-        resourceStorage.remove(id);
+        // One unit of work — otherwise a crash in between leaves the resource
+        // archived as deleted while the live row is still there.
+        resourceStorage.storeHistoryAndRemove(historyResource, id);
     }
 
     private void checkIfFoundAndLatest(String id, Integer version, IResourceStorage.IResource<?> resource)

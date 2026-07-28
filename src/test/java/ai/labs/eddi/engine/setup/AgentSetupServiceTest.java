@@ -401,6 +401,40 @@ class AgentSetupServiceTest {
             assertTrue(task.getParameters().get("systemMessage").contains("You are helpful"));
         }
 
+        /**
+         * The wizard used to hardcode {@code logRequests="true"} and
+         * {@code logResponses="true"}, which makes {@code ObservableChatModel} write
+         * every prompt, the whole conversation history and the model's output to the
+         * application log — for every agent it has ever created, with no opt-out.
+         * Content logging is a debugging choice, so it is configuration
+         * ({@code eddi.setup.llm.log-conversation-content}) that defaults to off.
+         */
+        @Test
+        @DisplayName("does not log prompt or completion content by default")
+        void loggingOfConversationContentIsOffByDefault() {
+            LlmConfiguration config = service.createLlmConfig(
+                    "openai", "gpt-4o", "sk-key", "prompt", false, null, null, null, false, false, null);
+            var params = config.tasks().getFirst().getParameters();
+
+            assertEquals("false", params.get("logRequests"),
+                    "a wizard-created agent must not log prompt content by default");
+            assertEquals("false", params.get("logResponses"),
+                    "a wizard-created agent must not log completion content by default");
+        }
+
+        @Test
+        @DisplayName("emits the noisy variant when the operator opts in")
+        void loggingOfConversationContentIsConfigurable() {
+            service.logConversationContent = true;
+
+            LlmConfiguration config = service.createLlmConfig(
+                    "openai", "gpt-4o", "sk-key", "prompt", false, null, null, null, false, false, null);
+            var params = config.tasks().getFirst().getParameters();
+
+            assertEquals("true", params.get("logRequests"));
+            assertEquals("true", params.get("logResponses"));
+        }
+
         @Test
         @DisplayName("sets model name for openai provider")
         void openaiModel() {

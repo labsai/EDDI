@@ -10,6 +10,12 @@ import java.util.List;
 public class RetryApiCallInstruction {
     private Integer maxRetries = 3;
     private Integer exponentialBackoffDelayInMillis = 1000;
+    /**
+     * Upper bound for a single backoff delay in milliseconds. A retry waits on the
+     * conversation thread, so the engine additionally clamps this to its own hard
+     * ceiling — configuring a larger value has no effect.
+     */
+    private Integer maxBackoffDelayInMillis;
     private List<Integer> retryOnHttpCodes = Arrays.asList(502, 503);
     private List<MatchingInfo> responseValuePathMatchers;
 
@@ -77,6 +83,14 @@ public class RetryApiCallInstruction {
 
     public void setExponentialBackoffDelayInMillis(Integer exponentialBackoffDelayInMillis) {
         this.exponentialBackoffDelayInMillis = exponentialBackoffDelayInMillis;
+    }
+
+    public Integer getMaxBackoffDelayInMillis() {
+        return maxBackoffDelayInMillis;
+    }
+
+    public void setMaxBackoffDelayInMillis(Integer maxBackoffDelayInMillis) {
+        this.maxBackoffDelayInMillis = maxBackoffDelayInMillis;
     }
 
     public List<Integer> getRetryOnHttpCodes() {

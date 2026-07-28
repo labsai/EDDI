@@ -71,6 +71,26 @@ public class AgentSetupService {
     private final ISecretProvider secretProvider;
     private final String ollamaDefaultBaseUrl;
 
+    /**
+     * Whether a wizard-created agent should log full LLM prompts and completions.
+     * <p>
+     * Defaults to {@code false}: {@code logRequests}/{@code logResponses} make
+     * {@code ObservableChatModel} write conversation content — user input, system
+     * prompt, model output — to the application log, and hardcoding them to
+     * {@code true} gave every agent this wizard has ever created that behaviour
+     * with no opt-out. Content logging is a debugging choice, not a default, so it
+     * belongs in configuration: flip
+     * {@code eddi.setup.llm.log-conversation-content=true} to have the wizard emit
+     * the noisy variant, or edit the two parameters on the generated LLM config in
+     * the Manager at any time.
+     * <p>
+     * Field-injected rather than a constructor parameter so that a directly
+     * constructed instance (tests, non-CDI callers) gets the safe default.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.setup.llm.log-conversation-content", defaultValue = "false")
+    boolean logConversationContent;
+
     @Inject
     public AgentSetupService(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin,
             ISecretProvider secretProvider,
@@ -406,8 +426,11 @@ public class AgentSetupService {
         params.put("addToOutput", promptResponseJson == null ? "true" : "false");
         params.put("timeout", "60000");
         params.put("temperature", "0.3");
-        params.put("logRequests", "true");
-        params.put("logResponses", "true");
+        // Written explicitly (rather than omitted) so the setting is visible and
+        // flippable on the generated config in the Manager. See
+        // #logConversationContent for why the default is off.
+        params.put("logRequests", String.valueOf(logConversationContent));
+        params.put("logResponses", String.valueOf(logConversationContent));
 
         if (promptResponseJson != null) {
             params.put("convertToObject", "true");

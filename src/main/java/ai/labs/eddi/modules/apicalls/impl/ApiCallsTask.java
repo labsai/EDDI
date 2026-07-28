@@ -23,6 +23,8 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -36,6 +38,13 @@ public class ApiCallsTask implements ILifecycleTask {
     public static final TaskId TASK_ID = new TaskId(ID);
 
     private static final String KEY_HTTP_CALLS = "httpCalls";
+
+    /**
+     * Action value that makes an api call match every action of a conversation
+     * step.
+     */
+    static final String WILDCARD_ACTION = "*";
+
     private final IResourceClientLibrary resourceClientLibrary;
     private final IMemoryItemConverter memoryItemConverter;
     private final IApiCallExecutor httpCallExecutor;
@@ -72,22 +81,49 @@ public class ApiCallsTask implements ILifecycleTask {
         Map<String, Object> templateDataObjects = memoryItemConverter.convert(memory);
         List<String> actions = latestData.getResult();
 
-        for (String action : actions) {
-            List<ApiCall> filteredApiCalls = httpCallsConfig.getHttpCalls().stream().filter(httpCall -> {
-                List<String> httpCallActions = httpCall.getActions();
-                return httpCallActions.contains(action) || httpCallActions.contains("*");
-            }).distinct().toList();
+        for (var call : collectMatchingApiCalls(httpCallsConfig.getHttpCalls(), actions)) {
+            var httpCallResult = httpCallExecutor.execute(call, memory, templateDataObjects, httpCallsConfig.getTargetServerUrl());
+            // ApiCallExecutor stores response in conversation memory via prePostUtils.
+            // We also merge into templateDataObjects so subsequent calls in this loop can
+            // reference previous results.
+            if (httpCallResult != null && !httpCallResult.isEmpty()) {
+                templateDataObjects.putAll(httpCallResult);
+            }
+        }
+    }
 
-            for (var call : filteredApiCalls) {
-                var httpCallResult = httpCallExecutor.execute(call, memory, templateDataObjects, httpCallsConfig.getTargetServerUrl());
-                // ApiCallExecutor stores response in conversation memory via prePostUtils.
-                // We also merge into templateDataObjects so subsequent calls in this loop can
-                // reference previous results.
-                if (httpCallResult != null && !httpCallResult.isEmpty()) {
-                    templateDataObjects.putAll(httpCallResult);
+    /**
+     * Collect every configured api call that matches at least one action of the
+     * current conversation step.
+     * <p>
+     * The result is the <b>union</b> across all actions, deduplicated: a call that
+     * matches several actions — in particular a {@value #WILDCARD_ACTION} call,
+     * which matches all of them — is executed exactly <b>once per conversation
+     * step</b>. Executing it once per action would repeat non-idempotent requests
+     * (POSTs) as often as the step happens to carry actions.
+     * <p>
+     * Order follows the actions of the step and, within one action, the
+     * configuration order — the order in which the calls would first have been
+     * triggered.
+     */
+    // Package-private for unit testing.
+    static Collection<ApiCall> collectMatchingApiCalls(List<ApiCall> httpCalls, List<String> actions) {
+        if (isNullOrEmpty(httpCalls) || isNullOrEmpty(actions)) {
+            return List.of();
+        }
+
+        // Insertion-ordered and identity-based (ApiCall does not override equals).
+        Collection<ApiCall> matchingCalls = new LinkedHashSet<>();
+        for (String action : actions) {
+            for (ApiCall httpCall : httpCalls) {
+                List<String> httpCallActions = httpCall.getActions();
+                if (httpCallActions != null && (httpCallActions.contains(action) || httpCallActions.contains(WILDCARD_ACTION))) {
+                    matchingCalls.add(httpCall);
                 }
             }
         }
+
+        return matchingCalls;
     }
 
     @Override

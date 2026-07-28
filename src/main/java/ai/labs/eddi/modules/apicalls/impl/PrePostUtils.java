@@ -19,6 +19,8 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.output.model.OutputValue;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import ai.labs.eddi.utils.PathNavigator;
@@ -26,12 +28,27 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class PrePostUtils {
+    private static final String KEY_TYPE = "type";
+    private static final String KEY_TEXT = "text";
+    private static final String KEY_VALUE_ALTERNATIVES = "valueAlternatives";
+    private static final String KEY_VALUE = "value";
+    private static final String KEY_EXPRESSIONS = "expressions";
+
+    /**
+     * Used to assemble output items / quick replies as a JSON object tree. Building
+     * them by string concatenation is unsafe: the values are rendered from upstream
+     * API responses, and a double quote in such a value would escape its JSON
+     * string and inject arbitrary items into the agent's reply.
+     */
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private final IJsonSerialization jsonSerialization;
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
@@ -174,7 +191,7 @@ public class PrePostUtils {
     }
 
     private void buildOutput(IConversationMemory memory, Map<String, Object> templateDataObjects, int httpCode, PostResponse postResponse)
-            throws IOException, ITemplatingEngine.TemplateEngineException {
+            throws ITemplatingEngine.TemplateEngineException {
 
         var outputBuildInstructions = postResponse.getOutputBuildInstructions();
         if (outputBuildInstructions != null) {
@@ -195,7 +212,7 @@ public class PrePostUtils {
     }
 
     private void buildQuickReplies(IConversationMemory memory, Map<String, Object> templateDataObjects, int httpCode, PostResponse postResponse)
-            throws IOException, ITemplatingEngine.TemplateEngineException {
+            throws ITemplatingEngine.TemplateEngineException {
 
         var qrBuildInstructions = postResponse.getQrBuildInstructions();
         if (qrBuildInstructions != null) {
@@ -217,13 +234,16 @@ public class PrePostUtils {
 
     private List<Object> buildOutput(String iterationObjectName, String pathToTargetArray, String templateFilterExpression, String outputType,
                                      String outputValue, Map<String, Object> templateDataObjects)
-            throws IOException, ITemplatingEngine.TemplateEngineException {
+            throws ITemplatingEngine.TemplateEngineException {
 
         if (!isNullOrEmpty(pathToTargetArray)) {
-
-            final String outputTemplate = "    {" + "        \"type\":\"" + outputType + "\"," + "        \"valueAlternatives\":[{"
-                    + "               \"type\":\"" + outputType + "\"," + "               \"text\":\"" + outputValue + "\"" + "        }]" + "    }";
-            return buildListFromJson(iterationObjectName, pathToTargetArray, templateFilterExpression, outputTemplate, templateDataObjects);
+            List<Object> output = new LinkedList<>();
+            var renderedRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
+                    List.of(nullToEmpty(outputValue)), templateDataObjects);
+            for (var renderedRow : renderedRows) {
+                output.add(createOutputItem(outputType, renderedRow.getFirst()));
+            }
+            return output;
 
         } else {
             var outputText = templatingEngine.processTemplate(outputValue, templateDataObjects);
@@ -233,49 +253,123 @@ public class PrePostUtils {
 
     private List<Object> buildQuickReplies(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
                                            String quickReplyValue, String quickReplyExpressions, Map<String, Object> templateDataObjects)
-            throws IOException, ITemplatingEngine.TemplateEngineException {
+            throws ITemplatingEngine.TemplateEngineException {
 
-        final String quickReplyTemplate = "    {" + "        \"value\":\"" + quickReplyValue + "\"," + "        \"expressions\":\""
-                + quickReplyExpressions + "\"" + "    }";
-
-        return buildListFromJson(iterationObjectName, pathToTargetArray, templateFilterExpression, quickReplyTemplate, templateDataObjects);
+        List<Object> quickReplies = new LinkedList<>();
+        var renderedRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
+                List.of(nullToEmpty(quickReplyValue), nullToEmpty(quickReplyExpressions)), templateDataObjects);
+        for (var renderedRow : renderedRows) {
+            quickReplies.add(createQuickReply(renderedRow.get(0), renderedRow.get(1)));
+        }
+        return quickReplies;
     }
 
-    public List<Object> buildListFromJson(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
-                                          String iterationValue, Map<String, Object> templateDataObjects)
-            throws ITemplatingEngine.TemplateEngineException, IOException {
+    /**
+     * Render each element of {@code pathToTargetArray} into a plain string,
+     * honouring the optional filter expression. Used to expand batch requests.
+     */
+    public List<Object> buildIterationValues(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
+                                             Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException {
 
-        // Build Qute template: [{#for obj in list}{#if filter}value{#if
-        // obj_hasNext},{/if}{/if}{/for}]
-        var sb = new StringBuilder("[");
-        sb.append("{#for ").append(iterationObjectName).append(" in ").append(pathToTargetArray).append("}");
+        List<Object> values = new LinkedList<>();
+        var valueTemplate = "{" + iterationObjectName + "}";
+        var renderedRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression, List.of(valueTemplate),
+                templateDataObjects);
+        for (var renderedRow : renderedRows) {
+            values.add(renderedRow.getFirst());
+        }
+        return values;
+    }
 
-        if (!isNullOrEmpty(templateFilterExpression)) {
-            sb.append("{#if ").append(templateFilterExpression).append("}");
+    /**
+     * Render {@code valueTemplates} once per element of {@code pathToTargetArray}.
+     * <p>
+     * Iteration and the optional filter expression are still evaluated by a single
+     * Qute template, so their semantics are unchanged — but the rendered values are
+     * separated by delimiters carrying a per-invocation random nonce instead of
+     * being rendered into a hand-concatenated JSON document. Upstream content
+     * cannot forge such a delimiter, so no value can break out of its field.
+     *
+     * @return one list of rendered values per iterated element, each with the same
+     *         size and order as {@code valueTemplates}
+     */
+    private List<List<String>> renderPerIteration(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
+                                                  List<String> valueTemplates, Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException {
+
+        var nonce = UUID.randomUUID().toString().replace("-", "");
+        var fieldDelimiter = "eddiField" + nonce;
+        var rowDelimiter = "eddiRow" + nonce;
+
+        var template = new StringBuilder();
+        template.append("{#for ").append(iterationObjectName).append(" in ").append(pathToTargetArray).append("}");
+
+        boolean filtered = !isNullOrEmpty(templateFilterExpression);
+        if (filtered) {
+            template.append("{#if ").append(templateFilterExpression).append("}");
         }
 
-        if (isNullOrEmpty(iterationValue)) {
-            sb.append("\"{").append(iterationObjectName).append("}\"");
-        } else {
-            sb.append(iterationValue);
+        for (int i = 0; i < valueTemplates.size(); i++) {
+            if (i > 0) {
+                template.append(fieldDelimiter);
+            }
+            template.append(valueTemplates.get(i));
+        }
+        template.append(rowDelimiter);
+
+        if (filtered) {
+            template.append("{/if}");
+        }
+        template.append("{/for}");
+
+        var rendered = templatingEngine.processTemplate(template.toString(), templateDataObjects);
+        if (isNullOrEmpty(rendered)) {
+            return List.of();
         }
 
-        // Use Qute iteration metadata to avoid trailing comma
-        sb.append("{#if ").append(iterationObjectName).append("_hasNext},{/if}");
-
-        if (!isNullOrEmpty(templateFilterExpression)) {
-            sb.append("{/if}");
+        List<List<String>> rows = new LinkedList<>();
+        var renderedRows = rendered.split(Pattern.quote(rowDelimiter), -1);
+        // Every rendered row is terminated by the row delimiter, so the trailing chunk
+        // is the (empty) remainder and never a row of its own.
+        for (int i = 0; i < renderedRows.length - 1; i++) {
+            var renderedFields = renderedRows[i].split(Pattern.quote(fieldDelimiter), -1);
+            List<String> fields = new ArrayList<>(valueTemplates.size());
+            for (int field = 0; field < valueTemplates.size(); field++) {
+                fields.add(field < renderedFields.length ? renderedFields[field] : "");
+            }
+            rows.add(fields);
         }
 
-        sb.append("{/for}]");
+        return rows;
+    }
 
-        String templateCode = sb.toString();
-        String jsonList = templatingEngine.processTemplate(templateCode, templateDataObjects);
+    private static Map<String, Object> createOutputItem(String outputType, String text) {
+        ObjectNode valueAlternative = OBJECT_MAPPER.createObjectNode();
+        valueAlternative.put(KEY_TYPE, outputType);
+        valueAlternative.put(KEY_TEXT, text);
 
-        jsonList = jsonList.replace("\n", "\\\\n");
+        ObjectNode outputItem = OBJECT_MAPPER.createObjectNode();
+        outputItem.put(KEY_TYPE, outputType);
+        outputItem.set(KEY_VALUE_ALTERNATIVES, OBJECT_MAPPER.createArrayNode().add(valueAlternative));
 
-        @SuppressWarnings("unchecked")
-        List<Object> result = jsonSerialization.deserialize(jsonList, List.class);
-        return result;
+        return toMap(outputItem);
+    }
+
+    private static Map<String, Object> createQuickReply(String value, String expressions) {
+        ObjectNode quickReply = OBJECT_MAPPER.createObjectNode();
+        quickReply.put(KEY_VALUE, value);
+        quickReply.put(KEY_EXPRESSIONS, expressions);
+
+        return toMap(quickReply);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> toMap(ObjectNode objectNode) {
+        return OBJECT_MAPPER.convertValue(objectNode, Map.class);
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 }

@@ -8,6 +8,9 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.RemovalCause;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import jakarta.annotation.PostConstruct;
@@ -18,20 +21,31 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Manages ChatModel creation, caching, and lookup by type and parameters.
  * <p>
  * Models are cached by (type, parameters) tuple so that identical configs reuse
- * the same model instance. Thread-safe via ConcurrentHashMap.
+ * the same model instance. Thread-safe: both caches are Caffeine caches used
+ * through their {@code ConcurrentMap} view.
  * <p>
  * Supports both synchronous ({@link ChatModel}) and streaming
  * ({@link StreamingChatModel}) models with separate caches.
+ * <p>
+ * <b>Both caches are bounded</b> (see {@link #MAX_CACHED_MODELS} /
+ * {@link #IDLE_TTL}), like the sibling {@code EmbeddingModelFactory} and
+ * {@code EmbeddingStoreFactory}. They must be: the parameter map is the cache
+ * key, and {@code LlmTask} has already resolved its Qute templates by the time
+ * it gets here, so a task configured with {@code "modelName":
+ * "{properties.preferredModel}"} mints one entry — one {@code ChatModel} and
+ * its HTTP client — per distinct conversation-derived value. On plain
+ * {@code ConcurrentHashMap}s that grew without limit for the lifetime of the
+ * process. Eviction only costs a rebuild.
  */
 @ApplicationScoped
 public class ChatModelRegistry {
@@ -47,11 +61,58 @@ public class ChatModelRegistry {
 
     private static final Logger LOGGER = Logger.getLogger(ChatModelRegistry.class);
 
+    /**
+     * Per-cache entry ceiling. Higher than the 50 the two sibling factories use
+     * because their key is a knowledge base and this one is an LLM <em>task</em> —
+     * a deployment has many more of those — while an entry here is a thin client
+     * object rather than a database connection.
+     */
+    static final int MAX_CACHED_MODELS = 200;
+
+    /** Idle time after which a cached model is dropped and rebuilt on next use. */
+    static final Duration IDLE_TTL = Duration.ofMinutes(30);
+
     private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders;
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
-    private final Map<ModelCacheKey, ChatModel> modelCache = new ConcurrentHashMap<>(1);
-    private final Map<ModelCacheKey, StreamingChatModel> streamingModelCache = new ConcurrentHashMap<>(1);
+    private final Cache<ModelCacheKey, ChatModel> modelCacheStore = newModelCache();
+    private final Cache<ModelCacheKey, StreamingChatModel> streamingModelCacheStore = newModelCache();
+    /**
+     * The {@code ConcurrentMap} views of the two caches above. Everything below
+     * reads and writes through these — the view honours the size bound, the TTL and
+     * the removal listener, and keeps {@code keySet().iterator().remove()}
+     * available for the targeted secret eviction in {@link #evictMatching}.
+     */
+    private final Map<ModelCacheKey, ChatModel> modelCache = modelCacheStore.asMap();
+    private final Map<ModelCacheKey, StreamingChatModel> streamingModelCache = streamingModelCacheStore.asMap();
+
+    private static <T> Cache<ModelCacheKey, T> newModelCache() {
+        return Caffeine.newBuilder()
+                .maximumSize(MAX_CACHED_MODELS)
+                .expireAfterAccess(IDLE_TTL)
+                .<ModelCacheKey, T>removalListener((key, value, cause) -> closeIfCloseable(value, cause))
+                .build();
+    }
+
+    /**
+     * Release provider resources held by a model that has just left a cache.
+     * <p>
+     * No langchain4j chat model implements {@link AutoCloseable} today, so this is
+     * inert — but a bounded cache that drops a model holding an HTTP connection
+     * pool would leak it, and this is the one place that knows the model is gone.
+     * {@link RemovalCause#REPLACED} is deliberately excluded: the caller that
+     * received the superseded instance may still be mid-turn with it.
+     */
+    private static void closeIfCloseable(Object value, RemovalCause cause) {
+        if (cause == RemovalCause.REPLACED || !(value instanceof AutoCloseable closeable)) {
+            return;
+        }
+        try {
+            closeable.close();
+        } catch (Exception e) {
+            LOGGER.debugf("Failed to close evicted model (%s): %s", cause, e.getMessage());
+        }
+    }
 
     /**
      * Bumped by every cache invalidation — secret rotation, targeted secret
@@ -155,7 +216,9 @@ public class ChatModelRegistry {
         // after Qute, before builder.build())
         var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
         resolvedParams = secretResolver.resolveSecrets(resolvedParams);
-        var rawModel = languageModelApiConnectorBuilders.get(type).get().build(resolvedParams);
+        var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
+        modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
+        var rawModel = modelBuilder.build(resolvedParams);
         var model = ObservableChatModel.wrapIfNeeded(rawModel, type, timeoutMs, logReq, logResp);
         publishIfCurrent(modelCache, cacheKey, model, generationAtBuildStart);
 
@@ -205,7 +268,9 @@ public class ChatModelRegistry {
             // after Qute, before builder.build())
             var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
             resolvedParams = secretResolver.resolveSecrets(resolvedParams);
-            var rawModel = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);
+            var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
+            modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
+            var rawModel = modelBuilder.buildStreaming(resolvedParams);
             var model = ObservableStreamingChatModel.wrapIfNeeded(rawModel, type, logReq, logResp);
             publishIfCurrent(streamingModelCache, cacheKey, model, generationAtBuildStart);
             return model;
@@ -428,6 +493,17 @@ public class ChatModelRegistry {
             }
         }
         return false;
+    }
+
+    /**
+     * Test hook: run Caffeine's pending maintenance (eviction is amortised onto
+     * later operations, so a freshly over-filled cache reports its pre-eviction
+     * size until this happens) and report the resulting entry counts.
+     */
+    int[] cachedModelCounts() {
+        modelCacheStore.cleanUp();
+        streamingModelCacheStore.cleanUp();
+        return new int[]{modelCache.size(), streamingModelCache.size()};
     }
 
     /**

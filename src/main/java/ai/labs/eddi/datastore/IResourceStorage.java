@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -50,6 +51,33 @@ public interface IResourceStorage<T> {
     void createNew(IResource<T> resource);
 
     IResource<T> read(String id, Integer version);
+
+    /**
+     * Batch counterpart of {@link #read(String, Integer)}.
+     * <p>
+     * Exists so listing code does not have to issue one round trip per id. The
+     * default implementation is the naive N+1 loop and is only there so backends
+     * that cannot batch keep working; every backend that can express an
+     * {@code IN (...)} should override it.
+     * <p>
+     * Contract: the returned list is in the <b>same order</b> as {@code ids}, and
+     * entries that no longer exist (or whose version no longer matches) are
+     * silently skipped — so the result may be shorter than the input.
+     *
+     * @param ids
+     *            the resource ids (with versions) to read
+     * @return the resources, in request order, missing ones omitted
+     */
+    default List<IResource<T>> readMany(List<IResourceStore.IResourceId> ids) {
+        List<IResource<T>> resources = new ArrayList<>(ids.size());
+        for (IResourceStore.IResourceId id : ids) {
+            IResource<T> resource = read(id.getId(), id.getVersion());
+            if (resource != null) {
+                resources.add(resource);
+            }
+        }
+        return resources;
+    }
 
     void remove(String id);
 
@@ -112,13 +140,67 @@ public interface IResourceStorage<T> {
     }
 
     /**
+     * Archive {@code history} and apply the version-checked update as ONE unit of
+     * work.
+     * <p>
+     * {@link ai.labs.eddi.datastore.HistorizedResourceStore#update} previously
+     * issued the two writes back to back: a crash in between left the old version
+     * archived twice-over or the new version stored without its predecessor
+     * archived. Backends that have transactions must override this and run both
+     * statements inside one.
+     * <p>
+     * The default is the historical sequential behaviour — history FIRST, so a
+     * failure of the second write can never lose the archived predecessor.
+     *
+     * @param history
+     *            the archived predecessor
+     * @param newResource
+     *            the new version to store
+     * @param expectedCurrentVersion
+     *            the version the caller believes is currently stored
+     * @throws IResourceStore.ResourceModifiedException
+     *             if the current version no longer matches (concurrent edit)
+     */
+    default void storeHistoryAndUpdate(IHistoryResource<T> history, IResource<T> newResource, int expectedCurrentVersion)
+            throws IResourceStore.ResourceModifiedException {
+        store(history);
+        storeIfCurrentVersion(newResource, expectedCurrentVersion);
+    }
+
+    /**
+     * Archive {@code history} (flagged deleted) and remove the current row as ONE
+     * unit of work.
+     * <p>
+     * Non-atomically, a crash between the two writes leaves an archived-as-deleted
+     * row while the live row is still present — the resource looks deleted in
+     * history and alive in the current collection at the same time. Backends that
+     * have transactions must override this.
+     *
+     * @param history
+     *            the archived, deleted-flagged version
+     * @param id
+     *            the resource id to remove from the current collection
+     */
+    default void storeHistoryAndRemove(IHistoryResource<T> history, String id) {
+        store(history);
+        remove(id);
+    }
+
+    /**
      * Find resource IDs where the JSON data contains the given value at the given
      * path. Used by AgentStore/WorkflowStore for "find configs containing resource"
      * queries.
+     * <p>
+     * {@code jsonPath} is a dot-separated path and every backend MUST traverse it,
+     * descending into arrays along the way: {@code workflowSteps.config.uri}
+     * matches a document whose {@code workflowSteps} array holds an element with
+     * {@code config.uri == value}. A backend that treats the dotted string as a
+     * single literal key silently returns nothing forever, which is worse than
+     * failing.
      *
      * @param jsonPath
-     *            the JSON field/array path (e.g. "packages",
-     *            "WorkflowSteps.config.uri")
+     *            the JSON field/array path (e.g. "workflows",
+     *            "workflowSteps.config.uri")
      * @param value
      *            the value to search for within the field
      * @return list of matching resource IDs with their current versions

@@ -291,6 +291,118 @@ public class ContextMatcherTest {
         Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
+    // --- runtime context type vs. configured context type ---
+
+    private void mockContext(Context.ContextType runtimeType, Object value) {
+        when(currentStep.getAllData(eq("context"))).then(invocation -> {
+            LinkedList<IData<Context>> ret = new LinkedList<>();
+            ret.add(new MockData<>("context:someContextKey", new Context(runtimeType, value)));
+            return ret;
+        });
+    }
+
+    @Test
+    public void executeConfiguredForExpressionsWithStringContext_returnsFail() {
+        // setup
+        setupValuesWithExpressions();
+        mockContext(Context.ContextType.string, "someString");
+
+        // test
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+
+        // assert
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
+    }
+
+    @Test
+    public void executeConfiguredForObjectWithStringContext_returnsFail() {
+        // setup
+        setupValuesWithObject(true);
+        mockContext(Context.ContextType.string, "someString");
+
+        // test
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+
+        // assert
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
+    }
+
+    @Test
+    public void executeConfiguredForStringWithExpressionsContext_returnsFail() {
+        // setup
+        setupValuesWithString();
+        mockContext(Context.ContextType.expressions, "expression(test)");
+
+        // test
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+
+        // assert
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
+    }
+
+    @Test
+    public void executeWithArrayContext_returnsFail() {
+        // Context.ContextType has an 'array' value that contextmatcher cannot handle
+        setupValuesWithString();
+        mockContext(Context.ContextType.array, List.of("a", "b"));
+
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
+    }
+
+    @Test
+    public void executeWithNullContextValue_returnsFail() {
+        setupValuesWithString();
+        mockContext(Context.ContextType.string, null);
+
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
+    }
+
+    // --- configuration validation ---
+
+    @Test
+    public void setConfigs_unknownContextType_isRejected() {
+        Map<String, String> values = new HashMap<>();
+        values.put("contextKey", "someContextKey");
+        values.put("contextType", "expression");
+
+        IllegalArgumentException exception = Assertions.assertThrows(IllegalArgumentException.class, () -> contextMatcher.setConfigs(values));
+
+        Assertions.assertTrue(exception.getMessage().contains("expression"), exception.getMessage());
+        Assertions.assertTrue(exception.getMessage().contains("expressions"), exception.getMessage());
+        Assertions.assertTrue(exception.getMessage().contains("object"), exception.getMessage());
+        Assertions.assertTrue(exception.getMessage().contains("string"), exception.getMessage());
+    }
+
+    @Test
+    public void validateConfiguration_missingContextKey_isRejected() {
+        Map<String, String> values = new HashMap<>();
+        values.put("contextType", "string");
+        values.put("string", "someString");
+        contextMatcher.setConfigs(values);
+
+        Assertions.assertThrows(IllegalArgumentException.class, () -> contextMatcher.validateConfiguration());
+    }
+
+    @Test
+    public void validateConfiguration_missingTypeSpecificValue_isRejected() {
+        Map<String, String> values = new HashMap<>();
+        values.put("contextKey", "someContextKey");
+        values.put("contextType", "string");
+        contextMatcher.setConfigs(values);
+
+        Assertions.assertThrows(IllegalArgumentException.class, () -> contextMatcher.validateConfiguration());
+    }
+
+    @Test
+    public void validateConfiguration_completeStringConfig_passes() {
+        setupValuesWithString();
+        contextMatcher.validateConfiguration();
+    }
+
     private static class MockData<T> implements IData<T> {
         private final String key;
         private T result;

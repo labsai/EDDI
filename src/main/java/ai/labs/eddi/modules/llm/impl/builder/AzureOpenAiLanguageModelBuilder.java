@@ -12,6 +12,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
@@ -46,6 +47,12 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_MAX_TOKENS = "maxTokens";
     private static final String KEY_TIMEOUT = "timeout";
     private static final String KEY_LOG_REQUESTS_AND_RESPONSES = "logRequestsAndResponses";
+
+    @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_API_KEY, KEY_NON_AZURE_API_KEY, KEY_ENDPOINT, KEY_DEPLOYMENT_NAME, KEY_TEMPERATURE,
+                KEY_MAX_TOKENS, KEY_TIMEOUT, KEY_LOG_REQUESTS_AND_RESPONSES);
+    }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {

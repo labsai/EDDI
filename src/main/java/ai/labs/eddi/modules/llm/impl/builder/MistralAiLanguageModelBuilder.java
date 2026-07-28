@@ -13,6 +13,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
@@ -28,6 +29,11 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_TIMEOUT = "timeout";
     private static final String KEY_LOG_REQUESTS = "logRequests";
     private static final String KEY_LOG_RESPONSES = "logResponses";
+
+    @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_API_KEY, KEY_MODEL_NAME, KEY_TEMPERATURE, KEY_MAX_TOKENS, KEY_TIMEOUT, KEY_LOG_REQUESTS, KEY_LOG_RESPONSES);
+    }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {

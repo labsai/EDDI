@@ -135,6 +135,101 @@ An agent could only call an API with a *static* credential baked into its apical
 
 ---
 
+## 🐞 fix(engine): code-review findings wave 1 — parser, rules, templating, apicalls, datastore, LLM infra, deployment (2026-07-28)
+
+**Repo:** EDDI (`fix/code-review-findings`)
+
+First of four waves applying a 124-finding external code review. Wave 1 covers the findings whose file sets are disjoint, so they could be worked in parallel without conflicting. **53 findings: 50 fixed, 3 partial.** Every finding was verified against source before being acted on — none turned out to be a false positive.
+
+### Crash / correctness
+
+- **B1** `readActions(..., limit)` did `actions.subList(0, limit)` with every caller defaulting `limit=20`, so any config with fewer than 20 actions threw `IndexOutOfBoundsException` → 500. Fixed in `OutputStore`, `RuleSetStore`, `ApiCallsStore` with `Math.min(limit, actions.size())`. Invisible to tests because they all mock the store.
+- **B4** `Permutation` accumulated `n!` into an `int`. From n=13 the product wraps; at n=17 it goes negative, so the iterator yielded a single permutation and parse quality silently got *worse* on longer sentences. The counter was redundant — `calculateNext()` already terminates — so it was deleted, with an explicit `length < 2` guard replacing the one case it was load-bearing for.
+- **B5** `containsPunctuation` asked whether a string contains its own characters — always true. Now consults the configured `punctuationRegexPattern` (not the `PUNCTUATION` constant, which is only the default and would disagree with the replacement regex on a customised deployment).
+- **B6** `isOrdinalNumber` returned `String` from an `is*` predicate; `indexOf("")` is always 0, so `"5."` returned `""` and the three callers disagreed on what that meant. Renamed to `extractOrdinalValue` → `Optional<Integer>`.
+- **B7** `KEY_MODEL_ID = "modelID"` (capital D) blanked the model name for Vertex Gemini, losing capability lookup, token estimation and audit model naming.
+- **B8** The Ollama builder — the default local provider — silently dropped `temperature`, `maxTokens`, `topP`/`topK`. Added, plus a shared unrecognised-key warning across all 11 builders.
+- **B9** `ModelCapabilityService` was the inverse of its own javadoc: unknown models resolved to *supported*, so images were forwarded and 400'd at the provider. Now fails closed, with a per-task override so an unlisted-but-capable model can still be asserted.
+
+### Behaviour-rule engine (E1–E5, E11)
+
+The systemic defect was **silent acceptance of invalid config** — for a config-driven engine, the worst failure mode, because the agent designer gets no feedback and the agent looks healthy.
+
+- **E1** `NOT_EXECUTED` was folded into `SUCCESS`, so every path yielding it made a guard rule fire unconditionally. Now treated as `FAIL` — this is the amplifier that made E2–E5 dangerous rather than merely wrong.
+- **E2** Multi-child negation (the form the docs demonstrate) was ignored; now AND-combines children.
+- **E3** Empty/misspelled matcher configs matched everything via `indexOfSubList(x, [])  == 0`; now rejected at `configure()`.
+- **E4** A typo'd `occurrence` silently became `currentStep`, converting the exact guard AGENTS.md §5.3 mandates into the globally-firing rule it warns against. Now throws, naming the bad value and the legal set.
+- **E5** `sizematcher` could never match a collection (`parseInt("[a, b]")`); the documented example was unreachable.
+- **E11** `ContextMatcher` NPE'd on a runtime/config context-type mismatch, killing the turn.
+
+### Templating & output (E7–E9, E13)
+
+- **E7** `strict-rendering` differed between dev (`false`) and prod (`true`), so a missing property rendered empty in dev and in prod shipped the **raw template literal to the end user**, while quick replies put `null` in the list. Aligned on one lenient, safe behaviour across profiles.
+- **E8** Templates were re-parsed on every output, httpcall body/header and property instruction, every turn. Now a bounded Caffeine cache.
+- **E9** `TemplateMode` was accepted and ignored (no escaping), and the HTML branch was unreachable because `"output:html".startsWith("output")` is always true.
+- **E13** Only 3 of 8 output types were templated — `inputField`, `button`, `applicationLink`, `agentFace`, `other` shipped `{properties.x}` raw. Now an abstract `templatedCopy` on `OutputItem`, so a new type *cannot* silently miss templating.
+
+### Parser (E14–E18)
+
+- **E14** `appendExpressions=false` disabled the whole parser rather than just the merge — the entire storage block sat inside the flag, so no expressions and no intents reached any rule. Store/merge decisions are now separate.
+- **E15** Dictionary `lang` was dead: no implementation overrode `getLanguageCode()`, so an agent with `en` and `de` dictionaries matched both against every turn.
+- **E16** `PhoneticCorrection` kept only the last word per phonetic code — and the codes are lossy by construction, so night/knight/nite collapsed to one entry.
+- **E17** No caps on solution enumeration (13.8s at 15 tokens with a dense dictionary). Added config-driven `maxInputTokens`/`maxSuggestions`/`maxSolutions`, a `HashSet` for the O(k²) scan, and cached `values()`.
+- **E18** Damerau-Levenshtein returned the *entire* dictionary as candidates and computed `accuracy = 1.0 - distance`, yielding 0.0 and −1.0 against a documented 0..1 contract.
+
+### API calls (E10, E19, E20)
+
+- **E10** A `"*"` httpcall fired once **per action**, duplicating non-idempotent POSTs on a multi-action turn.
+- **E19** Output JSON was built by string concatenation from upstream API response bodies — a `"` broke the JSON and a crafted value injected arbitrary output items into the agent's reply. Now built with Jackson.
+- **E20** httpcalls had no timeout and no response-size cap; success bodies landed unbounded in conversation memory against Mongo's 16MB limit. Added per-call `timeoutInMillis` / `maxResponseSizeInBytes` with defaults.
+
+### Datastore (D1–D3, D5–D10)
+
+The two backends had silently diverged, because nothing tests them against each other.
+
+- **D1** Postgres `data->'a.b.c'` looks up a *literal* key of that name — it does not traverse. Dotted paths returned zero rows forever while Mongo traversed correctly. Now a real JSONB path, keeping the existing injection-safety.
+- **D2** The Postgres factory accepted an `indexes` argument and dropped it; real callers passed real hints and got sequential scans.
+- **D3** Mongo used `$set` (merge), Postgres used `EXCLUDED.data` (replace) — so clearing a config field was a no-op on one backend and took effect on the other, both returning 200. Unified on full-document replace.
+- **D5** The cascade-delete reference guard never worked: the query said `WorkflowSteps...` (capital W) against a field persisted as `workflowSteps`, and Mongo paths are case-sensitive — so shared configs were cascade-deleted while other workflows still referenced them. The guard now also fails *closed* on a query error.
+- **D6** `PRIMARY KEY (id, collection_name)` put `id` first, so `WHERE collection_name = ?` could not use it, and nothing indexed `data` — every listing was a sequential scan over the single shared table. Reordered for new tables; existing tables get the equivalent index (column order can't be changed by `CREATE TABLE IF NOT EXISTS`).
+- **D7** *(partial)* Restored the seven index declarations lost when the DB-agnostic `DescriptorStore` replaced the legacy one, and made `originId` a real indexed constant. **Not done:** splitting config descriptors from per-conversation descriptors into separate collections — that needs a data migration and two callers outside this workstream.
+- **D8** Descriptor listings did one `read()` per id after fetching up to 10,000 ids. Added `readMany`.
+- **D9** *(partial)* Fixed the `int` overflow in `ResultManipulator.limitEntities` (`index * limit` wrapped negative on deep pages). **Not done:** keyset pagination — it changes the `index`/`limit` paging contract across every REST store and the Manager UI. Deep offsets are at least index-served now.
+- **D10** History and current-row writes were non-atomic; a crash between them left an archived-as-deleted row with the live row still present. Added `storeHistoryAndUpdate`/`storeHistoryAndRemove`.
+
+### LLM infrastructure (F1–F5, F20)
+
+- **F1** Rate limiting was a single **global** bucket per tool name, so one conversation starved every other user of that tool. Now keyed on `(conversationId, toolName)`, with an optional global bucket for provider-quota protection, and the gauge is finally tagged.
+- **F2** `ChatModelRegistry` caches were unbounded *and* keyed on Qute-resolved parameters — so `"modelName": "{properties.preferredModel}"` minted a retained `ChatModel` + HTTP client per conversation-derived value. Now bounded, matching the sibling factories.
+- **F3** Embedding model/store caches never evicted on credential rotation and used `expireAfterAccess`, which resets on read.
+- **F4** `mongoClientCache` was unbounded, keyed on a raw connection string (a credential), and leaked `MongoClient`s on eviction.
+- **F5** Cost-budget eviction claimed "oldest" but iterated `ConcurrentHashMap.keySet()` — arbitrary order — so an in-flight conversation's spend could be dropped, resetting its budget to $0.
+- **F11 (part)** `ObservableChatModel` leaked a platform thread per timeout from an unbounded cached pool.
+- **F20** Every wizard-created agent hardcoded `logRequests`/`logResponses` to `true`, writing all conversation content to application logs with no opt-out — a Pillar 1 violation. Now config, defaulting to `false`.
+
+### Deployment & CI (H1–H3, H5–H10, H12–H15)
+
+- **H1** Both k8s and Helm scaled to 2–10 replicas against a coordinator whose per-conversation serialisation is a **JVM-local** `synchronized(queue)` — so two turns of one conversation ran concurrently on different pods, both replaced the whole document, and one was silently lost. Pinned to 1 with the reasoning inline; autoscaling is now gated behind a genuinely distributed coordinator.
+- **H2** *(CI half)* `always()` cancelled the implicit needs-gate and the tag branch short-circuited it, so a tag push published, signed and attested **regardless of test result**. Also added `integration-test` to `docker`'s needs, since it is the only job running the JaCoCo gate.
+- **H3** The image scan ran with `exit-code: 0`, so no vulnerability could block a release.
+- **H5** No container-level `securityContext` in any manifest — both deployments were rejected by a restricted Pod Security Standards namespace.
+- **H6** *(partial)* Replaced mutable tag `labsai/eddi:6` with an immutable patch tag and added a digest value + `cosign verify` guidance. Pinning the literal digest remains a release-time step — inventing one would break every `kubectl apply`.
+- **H7** `networkPolicy.enabled` was a dead Helm value with no template behind it; added one, plus link-local to the egress deny list so the network layer mirrors the app's own SSRF protections.
+- **H8** Secrets were injected as env vars (readable via `/proc/<pid>/environ`, leaks into crash dumps). Verified Quarkus can read them from files, then switched to a mounted projected volume.
+- **H9** The quick-start compose file hardcoded auth off with no override.
+- **H10** Helm shipped default PostgreSQL/Keycloak credentials and rendered an empty vault key without failing; now `required`.
+- **H12** The production image copied the entire docs tree — changelog, incident-response playbook, internal review standards — and served it to MCP clients.
+- **H13** ZAP ran after publish, against an instance with auth deliberately disabled, passive-only, unable to fail. Dropped rather than cited as coverage it never provided.
+- **H14** Fuzzing targeted vendored *copies* of the security-critical parsers with no drift check, so PRs touching the real sources fuzzed a stale duplicate.
+
+### Verification
+
+`./mvnw clean test-compile` green from scratch (deliberately clean, not incremental — several signature changes crossed workstream boundaries, and incremental builds reuse stale `.class` files for unedited callers). 158 targeted tests pass. E1's fix was mutation-checked: reverting it fails 2 tests in `RuleTest`.
+
+**Deliberately deferred to later waves:** E6 (write-time config validation), E12, D4/J3 (cross-backend conformance suite — needs Testcontainers), the `pom.xml` batch (H4/H11/H15 + J1/J8/J9), and the doc corrections these fixes imply (I7, I8, I12, `semantic-parser.md`, `httpcalls.md`).
+
+---
+
 ## 🎨 Keycloak login theme matching the EDDI corporate identity (2026-07-27)
 
 **Repo:** EDDI (`feat/keycloak-eddi-theme`)

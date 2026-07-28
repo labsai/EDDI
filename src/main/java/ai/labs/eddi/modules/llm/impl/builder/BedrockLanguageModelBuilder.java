@@ -14,6 +14,7 @@ import software.amazon.awssdk.regions.Region;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
@@ -45,6 +46,11 @@ public class BedrockLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_MAX_TOKENS = "maxTokens";
     private static final String KEY_TIMEOUT = "timeout";
+
+    @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_MODEL_ID, KEY_REGION, KEY_TEMPERATURE, KEY_MAX_TOKENS, KEY_TIMEOUT);
+    }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {

@@ -12,10 +12,8 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
+import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.modules.output.model.QuickReply;
-import ai.labs.eddi.modules.output.model.types.ImageOutputItem;
-import ai.labs.eddi.modules.output.model.types.QuickReplyOutputItem;
-import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +22,7 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.*;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -42,6 +41,17 @@ public class OutputTemplateTask implements ILifecycleTask {
     private static final String POST_TEMPLATED = "postTemplated";
     private static final String KEY_OUTPUT = "output";
     private static final String KEY_QUICK_REPLIES = "quickReplies";
+
+    /**
+     * The single, profile-independent failure behaviour for a template that cannot
+     * be rendered: the affected value collapses to an empty string. That is exactly
+     * what a missing variable renders to under Qute's non-strict rendering (see
+     * {@code quarkus.qute.strict-rendering}, off in every profile), so dev and prod
+     * fail identically. Crucially it never ships raw "{properties.x}" template
+     * syntax to the end user and never puts a {@code null} into an output or
+     * quick-reply list.
+     */
+    private static final String FAILED_TEMPLATE_SUBSTITUTE = "";
     private final ITemplatingEngine templatingEngine;
     private final IMemoryItemConverter memoryItemConverter;
     private final IDataFactory dataFactory;
@@ -83,73 +93,67 @@ public class OutputTemplateTask implements ILifecycleTask {
     private void templateOutputTexts(IWritableConversationStep currentStep, List<IData<Object>> outputDataList, Map<String, Object> contextMap) {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
-            TemplateMode templateMode = outputKey.startsWith(KEY_OUTPUT) ? TemplateMode.TEXT : null;
+            TemplateMode templateMode = resolveTemplateMode(outputKey);
             if (templateMode == null) {
-                templateMode = outputKey.startsWith(OUTPUT_HTML) ? TemplateMode.HTML : null;
+                return;
             }
 
-            if (templateMode != null) {
-                try {
-                    final var preTemplated = output.getResult();
-                    Object postTemplated = null;
+            var templating = templatingFunction(contextMap, templateMode, outputKey);
+            final var preTemplated = output.getResult();
+            Object postTemplated = null;
 
-                    if (preTemplated instanceof TextOutputItem textOutput) {
-                        var textProperty = textOutput.getText();
-                        textOutput = new TextOutputItem(textProperty, textOutput.getDelay());
-                        if (!isNullOrEmpty(textProperty)) {
-                            textOutput.setText(templatingEngine.processTemplate(textProperty, contextMap, templateMode));
-                        }
-                        postTemplated = textOutput;
-                    } else if (preTemplated instanceof ImageOutputItem imageOutput) {
-                        var uriProperty = imageOutput.getUri();
-                        var altProperty = imageOutput.getAlt();
-                        imageOutput = new ImageOutputItem(uriProperty, altProperty);
-                        if (!isNullOrEmpty(uriProperty)) {
-                            imageOutput.setUri(templatingEngine.processTemplate(uriProperty, contextMap, templateMode));
-                        }
-                        if (!isNullOrEmpty(altProperty)) {
-                            imageOutput.setAlt(templatingEngine.processTemplate(altProperty, contextMap, templateMode));
-                        }
-                        postTemplated = imageOutput;
-                    } else if (preTemplated instanceof QuickReplyOutputItem qrOutput) {
-                        var valueProperty = qrOutput.getValue();
-                        var expressionsProperty = qrOutput.getExpressions();
-                        qrOutput = new QuickReplyOutputItem(valueProperty, expressionsProperty, qrOutput.getIsDefault());
-                        if (!isNullOrEmpty(valueProperty)) {
-                            qrOutput.setValue(templatingEngine.processTemplate(valueProperty, contextMap, templateMode));
-                        }
-                        if (!isNullOrEmpty(expressionsProperty)) {
-                            qrOutput.setExpressions(templatingEngine.processTemplate(expressionsProperty, contextMap, templateMode));
-                        }
-                        postTemplated = qrOutput;
-                    } else if (preTemplated instanceof Map) {
-                        var tmpMap = new LinkedHashMap<>(convertObjectToMap(preTemplated));
+            if (preTemplated instanceof OutputItem outputItem) {
+                // Every OutputItem subtype has to implement templatedCopy(), so no
+                // output type can silently skip templating (OutputItem#applyTemplating).
+                postTemplated = outputItem.applyTemplating(templating);
+            } else if (preTemplated instanceof Map) {
+                var tmpMap = new LinkedHashMap<String, Object>(convertObjectToMap(preTemplated));
+                tmpMap.replaceAll((key, valueObj) -> valueObj instanceof String valueAsString ? templating.apply(valueAsString) : valueObj);
+                postTemplated = tmpMap;
+            }
 
-                        for (String key : tmpMap.keySet()) {
-                            Object valueObj = tmpMap.get(key);
-                            if (valueObj instanceof String) {
-                                String post = null;
-                                var valueAsString = valueObj.toString();
-                                if (!isNullOrEmpty(valueAsString)) {
-                                    post = templatingEngine.processTemplate(valueAsString, contextMap, templateMode);
-                                }
-                                tmpMap.put(key, post);
-                            }
-                        }
-
-                        postTemplated = tmpMap;
-                    }
-
-                    if (postTemplated != null) {
-                        output.setResult(postTemplated);
-                        templateData(currentStep, output, outputKey, preTemplated, postTemplated);
-                        currentStep.replaceConversationOutputObject(KEY_OUTPUT, preTemplated, postTemplated);
-                    }
-                } catch (ITemplatingEngine.TemplateEngineException e) {
-                    log.errorf(e, "Template processing failed for output '%s': %s", outputKey, e.getLocalizedMessage());
-                }
+            if (postTemplated != null) {
+                output.setResult(postTemplated);
+                templateData(currentStep, output, outputKey, preTemplated, postTemplated);
+                currentStep.replaceConversationOutputObject(KEY_OUTPUT, preTemplated, postTemplated);
             }
         });
+    }
+
+    /**
+     * The HTML check has to come first: "output:html:..." also starts with
+     * "output", so testing the generic prefix first made every output TEXT mode and
+     * left the HTML branch unreachable.
+     */
+    private TemplateMode resolveTemplateMode(String outputKey) {
+        if (outputKey.startsWith(OUTPUT_HTML)) {
+            return TemplateMode.HTML;
+        }
+        if (outputKey.startsWith(KEY_OUTPUT)) {
+            return TemplateMode.TEXT;
+        }
+        return null;
+    }
+
+    /**
+     * Wraps the templating engine into the one failure behaviour shared by every
+     * output type and by quick replies: log the failure with context, then
+     * substitute an empty string. Never throws, never returns {@code null} for a
+     * non-null input.
+     */
+    private UnaryOperator<String> templatingFunction(Map<String, Object> contextMap, TemplateMode templateMode, String dataKey) {
+        return value -> {
+            if (isNullOrEmpty(value)) {
+                return value;
+            }
+            try {
+                return templatingEngine.processTemplate(value, contextMap, templateMode);
+            } catch (ITemplatingEngine.TemplateEngineException e) {
+                log.errorf(e, "Template processing failed for '%s' (mode %s), substituting an empty string. Template was: %s", dataKey,
+                        templateMode, value);
+                return FAILED_TEMPLATE_SUBSTITUTE;
+            }
+        };
     }
 
     private Map<String, Object> convertObjectToMap(Object preTemplated) {
@@ -161,21 +165,13 @@ public class OutputTemplateTask implements ILifecycleTask {
                                         Map<String, Object> contextMap) {
         quickReplyDataList.forEach(quickReplyData -> {
             var preTemplating = quickReplyData.getResult();
+            var templating = templatingFunction(contextMap, TemplateMode.TEXT, quickReplyData.getKey());
             var postTemplating = copyQuickReplies(preTemplating).stream().map(quickReply -> {
-                try {
-                    String preTemplatedValue = quickReply.getValue();
-                    String postTemplatedValue = templatingEngine.processTemplate(preTemplatedValue, contextMap);
-                    quickReply.setValue(postTemplatedValue);
-
-                    String preTemplatedExpressions = quickReply.getExpressions();
-                    String postTemplatedExpressions = templatingEngine.processTemplate(preTemplatedExpressions, contextMap);
-                    quickReply.setExpressions(postTemplatedExpressions);
-                    return quickReply;
-                } catch (ITemplatingEngine.TemplateEngineException e) {
-                    log.errorf(e, "Template processing failed for quick reply '%s': %s",
-                            quickReply.getValue(), e.getLocalizedMessage());
-                    return null;
-                }
+                // Same failure behaviour as the output path — a failed template can no
+                // longer turn a quick reply into a null entry in the list.
+                quickReply.setValue(templating.apply(quickReply.getValue()));
+                quickReply.setExpressions(templating.apply(quickReply.getExpressions()));
+                return quickReply;
             }).collect(Collectors.toList());
 
             templateData(currentStep, quickReplyData, quickReplyData.getKey(), preTemplating, postTemplating);

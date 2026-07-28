@@ -186,6 +186,12 @@ public class RulesEvaluationTask implements ILifecycleTask {
             String message = "Error while configuring RuleLifecycleTask!";
             log.debug(message, e);
             throw new WorkflowConfigurationException(message, e);
+        } catch (IllegalArgumentException e) {
+            // an invalid behavior rule condition — surface the offending rule instead of
+            // letting the workflow start with a condition that can never evaluate itself
+            String message = "Invalid behavior rules configuration!\n" + e.getMessage();
+            log.debug(message, e);
+            throw new WorkflowConfigurationException(message, e);
         } catch (ServiceException e) {
             String message = "Error while fetching RuleConfigurationSet!\n" + e.getLocalizedMessage();
             log.debug(message, e);

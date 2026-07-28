@@ -7,17 +7,21 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.openMocks;
 
@@ -69,6 +73,49 @@ class EmbeddingModelFactoryTest {
         EmbeddingModel after = factory.getOrCreate(config);
 
         assertNotSame(before, after, "After clearing cache, a new instance should be created");
+    }
+
+    /**
+     * The cache had no invalidation hook at all. {@code expireAfterAccess} resets
+     * on every read, so a model that is actually serving traffic never reaches its
+     * TTL, and {@code clearCache()} had no production caller — rotating an
+     * embedding provider's API key kept authenticating with the old one for the
+     * lifetime of the process.
+     */
+    @Nested
+    @DisplayName("credential rotation evicts cached models")
+    class InvalidationTests {
+
+        @Test
+        void rotatingASecretEvictsTheCachedModel() {
+            var secretListener = ArgumentCaptor.forClass(Consumer.class);
+            factory.registerInvalidation();
+            verify(secretResolver).registerInvalidationListener(secretListener.capture());
+
+            var config = createConfig("openai", Map.of("apiKey", "${vault:openai-key}"));
+            EmbeddingModel before = factory.getOrCreate(config);
+
+            @SuppressWarnings("unchecked")
+            Consumer<SecretReference> listener = secretListener.getValue();
+            listener.accept(new SecretReference("default", "openai-key"));
+
+            assertNotSame(before, factory.getOrCreate(config),
+                    "after the key rotated the model must be rebuilt, not served from the cache");
+        }
+
+        @Test
+        void editingAGlobalVariableEvictsTheCachedModel() {
+            var variableListener = ArgumentCaptor.forClass(Runnable.class);
+            factory.registerInvalidation();
+            verify(globalVariableResolver).registerInvalidationListener(variableListener.capture());
+
+            var config = createConfig("openai", Map.of("apiKey", "test-key"));
+            EmbeddingModel before = factory.getOrCreate(config);
+
+            variableListener.getValue().run();
+
+            assertNotSame(before, factory.getOrCreate(config));
+        }
     }
 
     @Test

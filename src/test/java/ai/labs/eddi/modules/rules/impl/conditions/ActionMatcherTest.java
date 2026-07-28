@@ -36,6 +36,35 @@ public class ActionMatcherTest extends BaseMatcherTest {
         matcher = new ActionMatcher();
     }
 
+    /**
+     * An explicit JSON null ("actions": null) still satisfies containsKey, so
+     * reading the key rather than the value used to hand null straight to the
+     * splitter and throw an opaque NullPointerException — losing the E3 message
+     * that names the offending rule. A null or blank value must reach
+     * validateConfiguration() instead, which is the whole point of rejecting empty
+     * matchers at save time.
+     */
+    @Test
+    public void nullActionsValueIsRejectedWithTheRuleNamingMessage() {
+        Map<String, String> values = new HashMap<>();
+        values.put(KEY_ACTIONS, null);
+
+        matcher.setConfigs(values);
+
+        var thrown = Assertions.assertThrows(IllegalArgumentException.class, () -> matcher.validateConfiguration());
+        Assertions.assertTrue(thrown.getMessage().contains(KEY_ACTIONS), thrown.getMessage());
+    }
+
+    @Test
+    public void blankActionsValueIsRejectedWithTheRuleNamingMessage() {
+        Map<String, String> values = new HashMap<>();
+        values.put(KEY_ACTIONS, "   ");
+
+        matcher.setConfigs(values);
+
+        Assertions.assertThrows(IllegalArgumentException.class, () -> matcher.validateConfiguration());
+    }
+
     @Test
     public void setValues_actions() {
         // setup

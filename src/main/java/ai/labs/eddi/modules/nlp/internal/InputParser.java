@@ -14,6 +14,7 @@ import ai.labs.eddi.modules.nlp.internal.matches.Suggestion;
 import ai.labs.eddi.modules.nlp.model.FoundPhrase;
 import ai.labs.eddi.modules.nlp.model.FoundUnknown;
 import ai.labs.eddi.modules.nlp.model.Unknown;
+import org.jboss.logging.Logger;
 
 import java.util.*;
 import java.util.regex.Pattern;
@@ -28,11 +29,14 @@ public class InputParser implements IInputParser {
     private static final String BLANK_CHAR = " ";
     private static final String DEFAULT_USER_LANGUAGE = "en";
 
+    private static final Logger log = Logger.getLogger(InputParser.class);
+
     private final List<INormalizer> normalizers;
     private final List<IDictionary> dictionaries;
     private final List<ICorrection> corrections;
     private final Map<IDictionary.IWord, List<IDictionary.IPhrase>> phrasesMap;
     private final Config config;
+    private final Limits limits;
 
     public InputParser(List<IDictionary> dictionaries) {
         this(dictionaries, Collections.emptyList());
@@ -43,11 +47,21 @@ public class InputParser implements IInputParser {
     }
 
     public InputParser(List<INormalizer> normalizers, List<IDictionary> dictionaries, List<ICorrection> corrections, Config config) {
+        this(normalizers, dictionaries, corrections, config, Limits.DEFAULT);
+    }
+
+    public InputParser(List<INormalizer> normalizers, List<IDictionary> dictionaries, List<ICorrection> corrections, Config config,
+            Limits limits) {
         this.normalizers = normalizers;
         this.dictionaries = dictionaries;
         this.corrections = corrections;
         this.config = config;
+        this.limits = limits == null ? Limits.DEFAULT : limits;
         phrasesMap = preparePhrases(dictionaries);
+    }
+
+    public Limits getLimits() {
+        return limits;
     }
 
     @Override
@@ -74,7 +88,7 @@ public class InputParser implements IInputParser {
         userLanguage = getLanguageOrDefault(userLanguage);
 
         InputHolder holder = new InputHolder();
-        holder.input = sentence.split(" ");
+        holder.input = limitTokens(sentence.split(" "));
 
         for (; holder.index < holder.input.length; holder.index++) {
             final String currentInputPart = holder.input[holder.index];
@@ -91,6 +105,22 @@ public class InputParser implements IInputParser {
         }
 
         return lookupPhrases(holder, preparePhrases(temporaryDictionaries));
+    }
+
+    /**
+     * The parser enumerates the cartesian product of all dictionary matches per
+     * token, so the number of tokens is what drives the combinatorial blow-up.
+     * Anything beyond the configured limit is dropped rather than parsed.
+     */
+    private String[] limitTokens(String[] tokens) {
+        if (tokens.length <= limits.maxInputTokens()) {
+            return tokens;
+        }
+
+        log.warnf("Input has %s tokens which exceeds the configured parser limit of %s. Parsing the first %s tokens only.", tokens.length,
+                limits.maxInputTokens(), limits.maxInputTokens());
+
+        return Arrays.copyOf(tokens, limits.maxInputTokens());
     }
 
     private String iterateNormalizers(String sentence, String userLanguage) throws InterruptedException {
@@ -163,8 +193,18 @@ public class InputParser implements IInputParser {
         List<RawSolution> possibleSolutions = new LinkedList<>();
         Iterator<Suggestion> suggestionIterator = holder.createSolutionIterator();
 
+        int evaluatedSuggestions = 0;
         while (suggestionIterator.hasNext()) {
             throwExceptionIfInterrupted("phrases");
+
+            // Hard cap: the number of match combinations grows exponentially with the
+            // number of tokens once dictionaries yield more than one match per token.
+            if (evaluatedSuggestions >= limits.maxSuggestions()) {
+                log.debugf("Stopped evaluating suggestions after reaching the configured limit of %s.", limits.maxSuggestions());
+                break;
+            }
+            evaluatedSuggestions++;
+
             Suggestion suggestion = suggestionIterator.next();
             List<IDictionary.IFoundWord> foundWords = suggestion.build();
             List<IDictionary.IPhrase> phrasesContainingFoundWords = getPhrasesContainingFoundWords(foundWords,
@@ -260,6 +300,12 @@ public class InputParser implements IInputParser {
                         }
                     }
                 }
+            }
+
+            // Hard cap: keeps memory bounded when many distinct partial solutions match.
+            if (possibleSolutions.size() >= limits.maxSolutions()) {
+                log.debugf("Stopped collecting solutions after reaching the configured limit of %s.", limits.maxSolutions());
+                break;
             }
         }
 

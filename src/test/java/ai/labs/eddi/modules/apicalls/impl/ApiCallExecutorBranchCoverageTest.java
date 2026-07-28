@@ -78,7 +78,7 @@ class ApiCallExecutorBranchCoverageTest {
         lenient().when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime,
-                prePostUtils, globalVariableResolver, secretResolver, callerIdentityResolver, callerIdentityContext, false);
+                prePostUtils, globalVariableResolver, secretResolver, callerIdentityResolver, callerIdentityContext, false, 30_000L, 2_000_000);
 
         when(memory.getCurrentStep()).thenReturn(currentStep);
         when(mockRequest.toMap()).thenReturn(new HashMap<>());
