@@ -59,25 +59,23 @@ public class Permutation implements Iterable<Integer[]> {
         }
 
         private Integer[] calculateNext() {
-            // Fewer than two elements cannot be reordered, so there is no successor
-            // permutation. Guarding here also keeps the index arithmetic below in range.
-            if (values.length < 2) {
-                return null;
-            }
-
             int firstNonDecreasingIndex = -1;
             int swapPoint = -1;
 
+            // from the end, find the first index where values[i - 1] < values[i]
             for (int i = values.length - 1; i > 0; i--) {
                 if (values[i - 1].compareTo(values[i]) < 0) {
                     firstNonDecreasingIndex = i - 1;
                     break;
-                } else if (i == 1) {
-                    // the sequence is fully descending, i.e. the last permutation
-                    return null;
                 }
-            } // from the end, find first index that
-              // arrayToPermute[index]<arrayToPermute[index+1]
+            }
+
+            // No pivot: the sequence is fully descending (the last permutation), or it is
+            // too short to reorder at all. Either way there is no successor permutation.
+            // Returning here also keeps the index arithmetic below in range.
+            if (firstNonDecreasingIndex < 0) {
+                return null;
+            }
 
             for (int i = values.length - 1; i > firstNonDecreasingIndex; i--) {
                 if (values[firstNonDecreasingIndex].compareTo(values[i]) < 0) {
