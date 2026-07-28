@@ -170,37 +170,30 @@ describe("OperatorActivation", () => {
       expect(await screen.findByTestId("operator-activate")).toBeDisabled();
     });
 
-    it("unblocks once caller-context is chosen and the token risk is acknowledged", async () => {
+    it("unblocks once caller-identity is chosen", async () => {
       authState.method = "keycloak";
       const { onActivate } = renderActivation();
       await userEvent.type(screen.getByTestId("operator-api-key-input"), "sk-test-key");
-      await userEvent.click(screen.getByTestId("operator-auth-caller-context"));
+      await userEvent.click(screen.getByTestId("operator-auth-caller-identity"));
 
-      // The token-at-rest trade-off must be acknowledged, not just displayed.
+      // No acknowledgement to click: EDDI resolves ${caller:token} server-side,
+      // so nothing about the token is persisted for the admin to accept.
       await userEvent.click(screen.getByTestId("operator-next"));
-      expect(await screen.findByTestId("operator-activate")).toBeDisabled();
-
-      await userEvent.click(screen.getByRole("button", { name: /back/i }));
-      await userEvent.click(screen.getByTestId("operator-accept-token-risk"));
-      await userEvent.click(screen.getByTestId("operator-next"));
-
       const activate = await screen.findByTestId("operator-activate");
       expect(activate).not.toBeDisabled();
 
       await userEvent.click(activate);
       expect(onActivate).toHaveBeenCalledTimes(1);
       expect(onActivate.mock.calls[0]![0]).toMatchObject({
-        authMode: "caller-context",
+        authMode: "caller-identity",
         scope: "read_only",
       });
     });
 
-    it("shows the token-at-rest warning whenever caller-context is selected", async () => {
+    it("explains what caller-identity does when it is selected", async () => {
       renderActivation();
-      await userEvent.click(screen.getByTestId("operator-auth-caller-context"));
-      expect(
-        await screen.findByText(/stored in the conversation record/i),
-      ).toBeInTheDocument();
+      await userEvent.click(screen.getByTestId("operator-auth-caller-identity"));
+      expect(await screen.findByText(/never stored/i)).toBeInTheDocument();
     });
   });
 

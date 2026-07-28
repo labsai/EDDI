@@ -3078,22 +3078,21 @@
       "environment": "Entorno",
       "authMode": "Cómo se autentica el operador",
       "authModeHint": "El operador llama a tu API de administración de EDDI. Esto determina qué credenciales llevan esas llamadas.",
-      "authNoneBlocked": "Esta instalación tiene la autenticación activada, por lo que las llamadas de herramientas sin autenticar serían rechazadas. El operador se desplegaría correctamente y luego fallaría en cada consulta. Elige en su lugar el modo con tu identidad.",
-      "tokenAtRestWarning": "Tu token de sesión se envía con cada mensaje para que las llamadas del operador se ejecuten en tu nombre. Se almacena en el registro de la conversación en la base de datos y es visible allí donde se muestre el detalle de la conversación.",
-      "tokenAtRestAck": "Entiendo que mi token de acceso se almacenará en el historial de conversaciones.",
+      "authNoneBlocked": "Esta instalación tiene la autenticación activada, por lo que las llamadas de herramientas sin autenticar serían rechazadas. El operador se desplegaría correctamente y luego fallaría en cada consulta. Elige «Tu identidad» en su lugar.",
       "safetyPreamble": "Reglas de seguridad (no editables)",
       "safetyPreambleHint": "Se anteponen siempre. Indican al operador que trate todo lo que devuelvan sus herramientas como datos no fiables.",
       "promptBody": "Instrucciones del operador",
       "promptBodyHint": "Edita cómo se presenta el operador y cómo trabaja.",
       "tools": "Herramientas que recibirá ({{toolCount}})",
-      "activate": "Activar y desplegar"
+      "activate": "Activar y desplegar",
+      "callerIdentityNote": "EDDI inserta tu token en el momento de la llamada. Nunca se almacena en la conversación y solo se envía de vuelta a esta instalación."
     },
     "authMode": {
       "none": {
         "label": "Sin credenciales",
         "description": "Las llamadas de herramientas no llevan cabecera Authorization. Solo funciona si esta instalación de EDDI tiene la autenticación desactivada."
       },
-      "caller-context": {
+      "caller-identity": {
         "label": "Tu identidad",
         "description": "Las llamadas de herramientas se ejecutan como el usuario que ha iniciado sesión, con sus permisos y su rastro de auditoría. Necesario cuando la autenticación está activada."
       }

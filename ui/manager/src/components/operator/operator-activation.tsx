@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Loader2, Sparkles, KeyRound, Lock } from "lucide-react";
+import { AlertTriangle, Loader2, Sparkles, ShieldCheck, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,7 +53,6 @@ export function OperatorActivation({
   const [environment, setEnvironment] = useState(initial.environment);
   const [promptBody, setPromptBody] = useState(initial.promptBody || OPERATOR_PROMPT_BODY);
   const [authMode, setAuthMode] = useState<OperatorAuthMode>(initial.authMode);
-  const [tokenRiskAccepted, setTokenRiskAccepted] = useState(false);
 
   const providerConfig = getProviderConfig(provider);
   const needsKey = providerConfig?.needsKey ?? true;
@@ -69,15 +68,13 @@ export function OperatorActivation({
    * Blocking here is the difference between an honest error and a silent dud.
    */
   const authModeUnusable = oidcEnabled && authMode === "none";
-  const needsTokenAck = authMode === "caller-context" && !tokenRiskAccepted;
 
   const modelStepValid =
     Boolean(model.trim()) &&
     (!needsKey || Boolean(apiKey.trim())) &&
     (!baseUrlRequired || Boolean(baseUrl.trim()));
 
-  const canActivate =
-    modelStepValid && !authModeUnusable && !needsTokenAck && !busy;
+  const canActivate = modelStepValid && !authModeUnusable && !busy;
 
   function handleProviderChange(next: string) {
     setProvider(next);
@@ -208,16 +205,7 @@ export function OperatorActivation({
               </select>
             </Field>
 
-            <AuthModeField
-              authMode={authMode}
-              onChange={(next) => {
-                setAuthMode(next);
-                setTokenRiskAccepted(false);
-              }}
-              oidcEnabled={oidcEnabled}
-              tokenRiskAccepted={tokenRiskAccepted}
-              onAcceptTokenRisk={setTokenRiskAccepted}
-            />
+            <AuthModeField authMode={authMode} onChange={setAuthMode} oidcEnabled={oidcEnabled} />
 
             <div className="flex justify-end gap-2 pt-2">
               {onCancel && (
@@ -326,19 +314,11 @@ interface AuthModeFieldProps {
   authMode: OperatorAuthMode;
   onChange: (mode: OperatorAuthMode) => void;
   oidcEnabled: boolean;
-  tokenRiskAccepted: boolean;
-  onAcceptTokenRisk: (accepted: boolean) => void;
 }
 
-function AuthModeField({
-  authMode,
-  onChange,
-  oidcEnabled,
-  tokenRiskAccepted,
-  onAcceptTokenRisk,
-}: AuthModeFieldProps) {
+function AuthModeField({ authMode, onChange, oidcEnabled }: AuthModeFieldProps) {
   const { t } = useTranslation();
-  const modes: OperatorAuthMode[] = ["none", "caller-context"];
+  const modes: OperatorAuthMode[] = ["none", "caller-identity"];
 
   return (
     <Field
@@ -381,22 +361,10 @@ function AuthModeField({
         </Notice>
       )}
 
-      {authMode === "caller-context" && (
-        <div className="space-y-2">
-          <Notice tone="warning" icon={KeyRound}>
-            {t("operator.activation.tokenAtRestWarning")}
-          </Notice>
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={tokenRiskAccepted}
-              onChange={(e) => onAcceptTokenRisk(e.target.checked)}
-              className="mt-1"
-              data-testid="operator-accept-token-risk"
-            />
-            {t("operator.activation.tokenAtRestAck")}
-          </label>
-        </div>
+      {authMode === "caller-identity" && (
+        <Notice tone="info" icon={ShieldCheck}>
+          {t("operator.activation.callerIdentityNote")}
+        </Notice>
       )}
     </Field>
   );
@@ -467,7 +435,7 @@ function Notice({
   children,
   testId,
 }: {
-  tone: "warning" | "error";
+  tone: "warning" | "error" | "info";
   icon: typeof AlertTriangle;
   children: React.ReactNode;
   testId?: string;
@@ -480,7 +448,9 @@ function Notice({
         "flex items-start gap-2 rounded-md border p-3 text-sm",
         tone === "error"
           ? "border-destructive/40 bg-destructive/10 text-destructive"
-          : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+          : tone === "info"
+            ? "border-primary/40 bg-primary/5 text-foreground"
+            : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
       )}
     >
       <Icon className="mt-0.5 h-4 w-4 shrink-0" />

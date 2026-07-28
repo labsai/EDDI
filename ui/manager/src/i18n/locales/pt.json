@@ -3078,22 +3078,21 @@
       "environment": "Ambiente",
       "authMode": "Como o operador se autentica",
       "authModeHint": "O operador chama a sua API de administração do EDDI. Isto define que credenciais essas chamadas transportam.",
-      "authNoneBlocked": "Esta instalação tem a autenticação ativada, pelo que chamadas de ferramentas não autenticadas seriam rejeitadas. O operador seria implantado com sucesso e depois falharia em todas as consultas. Escolha antes o modo com a sua identidade.",
-      "tokenAtRestWarning": "O seu token de sessão é enviado com cada mensagem para que as chamadas do operador sejam executadas em seu nome. Fica guardado no registo da conversa na base de dados e é visível onde quer que os detalhes da conversa sejam apresentados.",
-      "tokenAtRestAck": "Compreendo que o meu token de acesso será guardado no histórico de conversas.",
+      "authNoneBlocked": "Esta instalação tem a autenticação ativada, pelo que chamadas de ferramentas não autenticadas seriam rejeitadas. O operador seria implantado com sucesso e depois falharia em todas as consultas. Escolha antes «A sua identidade».",
       "safetyPreamble": "Regras de segurança (não editáveis)",
       "safetyPreambleHint": "São sempre antepostas. Instruem o operador a tratar tudo o que as suas ferramentas devolvem como dados não fiáveis.",
       "promptBody": "Instruções do operador",
       "promptBodyHint": "Edite como o operador se apresenta e como trabalha.",
       "tools": "Ferramentas que receberá ({{toolCount}})",
-      "activate": "Ativar e implantar"
+      "activate": "Ativar e implantar",
+      "callerIdentityNote": "O EDDI insere o seu token no momento da chamada. Nunca é guardado na conversa e só é enviado de volta para esta instalação."
     },
     "authMode": {
       "none": {
         "label": "Sem credenciais",
         "description": "As chamadas de ferramentas não transportam cabeçalho Authorization. Só funciona quando esta instalação do EDDI tem a autenticação desativada."
       },
-      "caller-context": {
+      "caller-identity": {
         "label": "A sua identidade",
         "description": "As chamadas de ferramentas são executadas como o utilizador autenticado, com as permissões e o rasto de auditoria desse utilizador. Necessário quando a autenticação está ativada."
       }

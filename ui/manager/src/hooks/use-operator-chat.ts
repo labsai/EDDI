@@ -6,7 +6,7 @@ import {
   type SSEEvent,
 } from "@/lib/api/chat";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
-import { buildCallerContext, type OperatorConfig } from "@/lib/api/operator";
+import type { OperatorConfig } from "@/lib/api/operator";
 import { getErrorMessage } from "@/lib/api-client";
 
 /**
@@ -153,7 +153,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
           config.environment,
           config.agentId,
           conversationId,
-          { input, context: buildCallerContext(config) },
+          { input },
           controller.signal,
         );
 

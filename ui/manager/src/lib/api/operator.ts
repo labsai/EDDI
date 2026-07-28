@@ -25,29 +25,29 @@ import { buildOperatorSystemPrompt } from "@/lib/operator/system-prompt";
 /**
  * How the operator authenticates its tool calls back to EDDI's admin API.
  *
- * `none` — no `Authorization` header is set on the generated tools. This is what
- * the backend does today when `apiAuth` is empty. It works on deployments with
- * OIDC disabled; on a Keycloak-protected deployment every tool call returns 401.
+ * `none` — no `Authorization` header is set on the generated tools. Works only
+ * where OIDC is disabled; on a Keycloak-protected deployment every tool call
+ * returns 401.
  *
- * `caller-context` — the operator's tools send `Bearer {context.eddiAuthToken}`.
- * `McpApiToolBuilder` writes `apiAuth` verbatim into the `Authorization` header,
- * and `ApiCallExecutor` runs header values through the template engine at call
- * time, so the placeholder resolves from the per-turn conversation context. The
- * operator chat hook puts the signed-in user's live bearer there on every
- * message, which makes tool calls run with the caller's real permissions and
- * audit identity.
+ * `caller-identity` — the tools send a `${caller:token}` reference, which
+ * EDDI's CallerIdentityResolver replaces at call time with the bearer of
+ * whoever is chatting. Tool calls run with the caller's real permissions and
+ * audit identity, and the token never reaches conversation memory: the backend
+ * releases it only for a same-origin call, only into a header, and scrubs
+ * authorization headers before persisting the request.
  *
- * The trade-off for `caller-context` is real and must be surfaced to the admin:
- * per-turn context is written into conversation memory, so the token is stored
- * in MongoDB and is visible wherever conversation detail is rendered.
+ * Requires EDDI 6.2.0+. An older backend has no `${caller:...}` resolver and
+ * would send the placeholder verbatim.
  */
-export type OperatorAuthMode = "none" | "caller-context";
+export type OperatorAuthMode = "none" | "caller-identity";
 
-/** Context key carrying the caller's bearer when `authMode` is `caller-context`. */
-export const CALLER_TOKEN_CONTEXT_KEY = "eddiAuthToken";
-
-/** The `apiAuth` value that resolves to the caller's token at call time. */
-export const CALLER_TOKEN_API_AUTH = `Bearer {context.${CALLER_TOKEN_CONTEXT_KEY}}`;
+/**
+ * The `apiAuth` value EDDI resolves per call.
+ *
+ * `McpApiToolBuilder` writes it verbatim into the generated tools'
+ * `Authorization` header; `CallerIdentityResolver` substitutes the real token.
+ */
+export const CALLER_TOKEN_API_AUTH = "Bearer ${caller:token}";
 
 export interface OperatorConfig {
   enabled: boolean;
@@ -251,7 +251,7 @@ export function assertProvisioned(result: SetupResult): void {
 
 /** The `apiAuth` value for an auth mode. `none` sends no header at all. */
 export function apiAuthForMode(mode: OperatorAuthMode): string | undefined {
-  return mode === "caller-context" ? CALLER_TOKEN_API_AUTH : undefined;
+  return mode === "caller-identity" ? CALLER_TOKEN_API_AUTH : undefined;
 }
 
 function currentOrigin(): string {
@@ -333,7 +333,7 @@ export async function runOperatorCanary(
       config.environment,
       config.agentId,
       conversationId,
-      { input: CANARY_PROMPT, context: buildCallerContext(config) },
+      { input: CANARY_PROMPT },
       signal,
     );
 
@@ -384,21 +384,6 @@ export async function runOperatorCanary(
 function looksLikeAuthFailure(result: string | undefined): boolean {
   if (!result) return false;
   return /\b(401|403)\b|unauthorized|forbidden/i.test(result);
-}
-
-/**
- * Per-turn context carrying the caller's bearer under `caller-context` auth.
- *
- * Shared by the canary and the operator chat so a probe exercises exactly the
- * same credentials a real turn would.
- */
-export function buildCallerContext(
-  config: OperatorConfig,
-): Record<string, unknown> | undefined {
-  if (config.authMode !== "caller-context") return undefined;
-  const header = api.getAuthHeader().Authorization;
-  if (!header) return undefined;
-  return { [CALLER_TOKEN_CONTEXT_KEY]: header.replace(/^Bearer\s+/i, "") };
 }
 
 /* ─── Lifecycle ─── */

@@ -3078,22 +3078,21 @@
       "environment": "Environnement",
       "authMode": "Authentification de l'opérateur",
       "authModeHint": "L'opérateur appelle votre API d'administration EDDI. Ce réglage détermine les identifiants portés par ces appels.",
-      "authNoneBlocked": "L'authentification est activée sur ce déploiement : les appels d'outils non authentifiés seraient rejetés. L'opérateur se déploierait correctement puis échouerait à chaque recherche. Choisissez plutôt le mode utilisant votre identité.",
-      "tokenAtRestWarning": "Votre jeton de connexion est envoyé avec chaque message afin que les appels de l'opérateur s'exécutent en votre nom. Il est enregistré dans la conversation en base de données et visible partout où le détail des conversations est affiché.",
-      "tokenAtRestAck": "Je comprends que mon jeton d'accès sera stocké dans l'historique des conversations.",
+      "authNoneBlocked": "L'authentification est activée sur ce déploiement : les appels d'outils non authentifiés seraient rejetés. L'opérateur se déploierait correctement puis échouerait à chaque recherche. Choisissez plutôt « Votre identité ».",
       "safetyPreamble": "Règles de sécurité (non modifiables)",
       "safetyPreambleHint": "Toujours ajoutées en tête. Elles indiquent à l'opérateur de traiter tout ce que renvoient ses outils comme des données non fiables.",
       "promptBody": "Instructions de l'opérateur",
       "promptBodyHint": "Modifiez la façon dont l'opérateur se présente et travaille.",
       "tools": "Outils qui lui seront confiés ({{toolCount}})",
-      "activate": "Activer et déployer"
+      "activate": "Activer et déployer",
+      "callerIdentityNote": "EDDI insère votre jeton au moment de l'appel. Il n'est jamais enregistré dans la conversation et n'est renvoyé qu'à ce déploiement."
     },
     "authMode": {
       "none": {
         "label": "Aucun identifiant",
         "description": "Les appels d'outils ne portent aucun en-tête Authorization. Ne fonctionne que si l'authentification est désactivée sur ce déploiement EDDI."
       },
-      "caller-context": {
+      "caller-identity": {
         "label": "Votre identité",
         "description": "Les appels d'outils s'exécutent en tant qu'utilisateur connecté, avec ses permissions et sa piste d'audit. Requis lorsque l'authentification est activée."
       }

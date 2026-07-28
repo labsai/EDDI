@@ -3078,22 +3078,21 @@
       "environment": "环境",
       "authMode": "操作员的身份验证方式",
       "authModeHint": "操作员会调用你的 EDDI 管理 API。此设置决定这些调用携带何种凭据。",
-      "authNoneBlocked": "本部署已启用身份验证，未经身份验证的工具调用会被拒绝。操作员虽能成功部署，但随后每次查询都会失败。请改用「你的身份」模式。",
-      "tokenAtRestWarning": "你的登录令牌会随每条消息一起发送，使操作员的调用以你的身份执行。该令牌会存入数据库中的会话记录，并在任何显示会话详情的位置可见。",
-      "tokenAtRestAck": "我了解我的访问令牌将被存储在会话历史中。",
+      "authNoneBlocked": "本部署已启用身份验证，未经身份验证的工具调用会被拒绝。操作员虽能成功部署，但随后每次查询都会失败。请改选「你的身份」。",
       "safetyPreamble": "安全规则（不可编辑）",
       "safetyPreambleHint": "始终置于最前。它要求操作员将工具返回的一切内容视为不可信数据。",
       "promptBody": "操作员指令",
       "promptBodyHint": "编辑操作员如何自我介绍以及如何工作。",
       "tools": "将授予它的工具（{{toolCount}} 个）",
-      "activate": "启用并部署"
+      "activate": "启用并部署",
+      "callerIdentityNote": "EDDI 在发起调用时才代入你的令牌。它不会存入会话，也只会发回本部署。"
     },
     "authMode": {
       "none": {
         "label": "不带凭据",
         "description": "工具调用不携带 Authorization 头。仅当本 EDDI 部署关闭了身份验证时才可用。"
       },
-      "caller-context": {
+      "caller-identity": {
         "label": "你的身份",
         "description": "工具调用以当前登录用户的身份执行，使用该用户的权限并记入其审计轨迹。启用身份验证时必须选择此项。"
       }

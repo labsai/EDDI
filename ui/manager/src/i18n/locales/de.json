@@ -3078,22 +3078,21 @@
       "environment": "Umgebung",
       "authMode": "Authentifizierung des Operators",
       "authModeHint": "Der Operator ruft Ihre EDDI-Admin-API auf. Diese Einstellung legt fest, welche Zugangsdaten diese Aufrufe mitführen.",
-      "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen den Modus mit Ihrer Identität.",
-      "tokenAtRestWarning": "Ihr Anmelde-Token wird mit jeder Nachricht gesendet, damit die Aufrufe des Operators unter Ihrer Identität laufen. Es wird im Konversationsdatensatz in der Datenbank gespeichert und ist überall dort sichtbar, wo Konversationsdetails angezeigt werden.",
-      "tokenAtRestAck": "Mir ist bewusst, dass mein Zugriffstoken im Konversationsverlauf gespeichert wird.",
+      "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen „Ihre Identität\".",
       "safetyPreamble": "Sicherheitsregeln (nicht bearbeitbar)",
       "safetyPreambleHint": "Wird immer vorangestellt. Sie weist den Operator an, alles von seinen Tools Zurückgelieferte als nicht vertrauenswürdige Daten zu behandeln.",
       "promptBody": "Anweisungen für den Operator",
       "promptBodyHint": "Passen Sie an, wie sich der Operator vorstellt und wie er arbeitet.",
       "tools": "Tools, die er erhält ({{toolCount}})",
-      "activate": "Aktivieren & deployen"
+      "activate": "Aktivieren & deployen",
+      "callerIdentityNote": "EDDI setzt Ihr Token erst beim Aufruf ein. Es wird nie in der Konversation gespeichert und ausschließlich an diese Installation zurückgesendet."
     },
     "authMode": {
       "none": {
         "label": "Keine Zugangsdaten",
         "description": "Tool-Aufrufe enthalten keinen Authorization-Header. Funktioniert nur, wenn für diese EDDI-Installation die Authentifizierung deaktiviert ist."
       },
-      "caller-context": {
+      "caller-identity": {
         "label": "Ihre Identität",
         "description": "Tool-Aufrufe laufen unter dem angemeldeten Benutzer, mit dessen Berechtigungen und Audit-Spur. Erforderlich, wenn die Authentifizierung aktiviert ist."
       }

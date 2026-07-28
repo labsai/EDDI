@@ -169,9 +169,11 @@ describe("auth mode", () => {
     expect(apiAuthForMode("none")).toBeUndefined();
   });
 
-  it("uses a template placeholder resolved per turn in caller-context mode", () => {
-    expect(apiAuthForMode("caller-context")).toBe(CALLER_TOKEN_API_AUTH);
-    expect(apiAuthForMode("caller-context")).toContain("{context.");
+  it("uses the backend's caller reference, resolved per call", () => {
+    // EDDI's CallerIdentityResolver substitutes this while building the
+    // request, so the token never travels through conversation context.
+    expect(apiAuthForMode("caller-identity")).toBe(CALLER_TOKEN_API_AUTH);
+    expect(apiAuthForMode("caller-identity")).toBe("Bearer ${caller:token}");
   });
 });
 
@@ -251,7 +253,7 @@ describe("provisionOperator", () => {
   it("uses the caller-token placeholder in caller-context mode", async () => {
     await provisionOperator({
       agentName: "Op",
-      config: config({ authMode: "caller-context" }),
+      config: config({ authMode: "caller-identity" }),
       apiKey: "sk-test",
       spec: fetchedSpec(),
     });

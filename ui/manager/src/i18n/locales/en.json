@@ -3105,22 +3105,21 @@
       "environment": "Environment",
       "authMode": "How the operator authenticates",
       "authModeHint": "The operator calls your EDDI admin API. This decides what credentials those calls carry.",
-      "authNoneBlocked": "This deployment has authentication enabled, so unauthenticated tool calls would be rejected. The operator would deploy successfully and then fail every lookup. Choose the caller identity mode instead.",
-      "tokenAtRestWarning": "Your sign-in token is sent with every message so the operator's calls run as you. It is stored in the conversation record in the database and is visible wherever conversation detail is shown.",
-      "tokenAtRestAck": "I understand my access token will be stored in conversation history.",
+      "authNoneBlocked": "This deployment has authentication enabled, so unauthenticated tool calls would be rejected. The operator would deploy successfully and then fail every lookup. Choose \"Your identity\" instead.",
       "safetyPreamble": "Safety rules (not editable)",
       "safetyPreambleHint": "Always prepended. It tells the operator to treat everything its tools return as untrusted data.",
       "promptBody": "Operator instructions",
       "promptBodyHint": "Edit how the operator introduces itself and how it works.",
       "tools": "Tools it will be given ({{toolCount}})",
-      "activate": "Activate & deploy"
+      "activate": "Activate & deploy",
+      "callerIdentityNote": "EDDI substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment."
     },
     "authMode": {
       "none": {
         "label": "No credentials",
         "description": "Tool calls carry no Authorization header. Works only when this EDDI deployment has authentication disabled."
       },
-      "caller-context": {
+      "caller-identity": {
         "label": "Your identity",
         "description": "Tool calls run as the signed-in user, with that user's permissions and audit trail. Required when authentication is enabled."
       }
