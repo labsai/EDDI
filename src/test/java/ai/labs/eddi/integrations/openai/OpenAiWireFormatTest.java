@@ -4,9 +4,11 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.integrations.openai.model.ChatCompletionChunk;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionResponse;
 import ai.labs.eddi.integrations.openai.model.ChatMessage;
 import ai.labs.eddi.integrations.openai.model.Choice;
+import ai.labs.eddi.integrations.openai.model.ChunkChoice;
 import ai.labs.eddi.integrations.openai.model.ModelObject;
 import ai.labs.eddi.integrations.openai.model.ModelsResponse;
 import ai.labs.eddi.integrations.openai.model.OpenAiErrorResponse;
@@ -14,7 +16,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -51,6 +55,46 @@ class OpenAiWireFormatTest {
         assertEquals(0, json.at("/choices/0/index").asInt());
         assertEquals("assistant", json.at("/choices/0/message/role").asText());
         assertEquals("Hello there", json.at("/choices/0/message/content").asText());
+    }
+
+    @Test
+    void responseCarriesNoFieldsOutsideTheOpenAiSchema() throws Exception {
+        // Asserting only that expected fields are PRESENT let a stray one ship:
+        // Jackson treats ChatMessage.isPlainText() as a bean property, so every
+        // assistant message went out with a "plainText" field. Harmless to
+        // clients, wrong on the wire, and invisible to a presence-only check.
+        var response = ChatCompletionResponse.of("id", "m", 1L,
+                new Choice(0, ChatMessage.assistant("hi", objectMapper), Choice.FINISH_STOP));
+
+        JsonNode json = serialize(response);
+
+        assertEquals(Set.of("id", "object", "created", "model", "choices"), fieldNames(json));
+        assertEquals(Set.of("index", "message", "finish_reason"), fieldNames(json.at("/choices/0")));
+        assertEquals(Set.of("role", "content"), fieldNames(json.at("/choices/0/message")));
+    }
+
+    @Test
+    void streamingChunkCarriesNoExtraFields() throws Exception {
+        JsonNode content = serialize(ChatCompletionChunk.of("id", "m", 1L, ChunkChoice.content("hi")));
+
+        assertEquals(Set.of("id", "object", "created", "model", "choices"), fieldNames(content));
+        assertEquals(Set.of("index", "delta"), fieldNames(content.at("/choices/0")));
+        // A content frame carries content alone — role is null and so omitted,
+        // which is what keeps the incremental deltas minimal.
+        assertEquals(Set.of("content"), fieldNames(content.at("/choices/0/delta")));
+
+        JsonNode opening = serialize(ChatCompletionChunk.of("id", "m", 1L, ChunkChoice.role()));
+        assertEquals(Set.of("role"), fieldNames(opening.at("/choices/0/delta")));
+
+        JsonNode terminal = serialize(ChatCompletionChunk.of("id", "m", 1L, ChunkChoice.finish("stop")));
+        assertEquals(Set.of("index", "delta", "finish_reason"), fieldNames(terminal.at("/choices/0")));
+        assertTrue(terminal.at("/choices/0/delta").isEmpty(), "the terminal delta must serialize as {}");
+    }
+
+    private static Set<String> fieldNames(JsonNode node) {
+        Set<String> names = new HashSet<>();
+        node.fieldNames().forEachRemaining(names::add);
+        return names;
     }
 
     @Test

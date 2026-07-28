@@ -206,21 +206,29 @@ public class OpenAiConversationBridge {
         try {
             userConversationStore.createUserConversation(new UserConversation(
                     intent, userId, model.environment(), model.agentId(), conversationId));
-        } catch (IResourceStore.ResourceAlreadyExistsException e) {
-            // Two first messages raced. (intent, userId) is uniquely indexed, so
-            // exactly one won; adopt the winner and end the conversation we just
-            // created so it is not orphaned.
+        } catch (Exception e) {
+            // Two requests for the same chat raced. This is routine rather than
+            // exceptional: Open WebUI issues the completion and its title/tag
+            // request concurrently, both with the same chat id, so both find no
+            // mapping and both insert.
+            //
+            // Caught broadly on purpose. (intent, userId) is uniquely indexed,
+            // but the stores do not agree on how they report the collision —
+            // MongoDB surfaces a raw MongoWriteException (E11000) rather than
+            // ResourceAlreadyExistsException, and the Postgres store differs
+            // again. Catching a specific type here was dead code against the
+            // real store, which is how this reached a live UI as a bare 500.
+            // Re-reading the mapping is the datastore-agnostic test of what
+            // actually happened.
             UserConversation winner = readMapping(intent, userId);
             endQuietly(conversationId);
             if (winner != null) {
                 return winner.getConversationId();
             }
+            LOGGER.errorf("Could not persist the conversation mapping for %s: %s",
+                    sanitize(intent), e.getMessage());
             throw OpenAiApiException.serverError(null,
                     "Could not establish a conversation for this chat. Please retry.");
-        } catch (IResourceStore.ResourceStoreException e) {
-            endQuietly(conversationId);
-            throw OpenAiApiException.serverError(null,
-                    "Could not persist the conversation mapping: " + e.getMessage());
         }
         return conversationId;
     }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,7 +34,14 @@ public record ChatMessage(String role, JsonNode content) {
         return new ChatMessage("assistant", mapper.getNodeFactory().textNode(text == null ? "" : text));
     }
 
-    /** Whether {@code content} is the simple string form. */
+    /**
+     * Whether {@code content} is the simple string form.
+     * <p>
+     * {@code @JsonIgnore} is load-bearing: Jackson treats an {@code isX()} method
+     * on a record as a bean property, so without it every assistant message goes
+     * out carrying a {@code "plainText"} field that is not in the OpenAI schema.
+     */
+    @JsonIgnore
     public boolean isPlainText() {
         return content != null && content.isTextual();
     }

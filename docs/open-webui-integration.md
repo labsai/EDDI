@@ -24,6 +24,23 @@ The adapter lives at `/v1` and is **disabled by default**.
 
 ## 1. Quick start
 
+### Runnable demo (one command)
+
+```bash
+docker compose -f docker-compose.openwebui.yml up --build
+```
+
+Brings up MongoDB, EDDI, Open WebUI on <http://localhost:3000>, and a one-shot seeder that creates and deploys a small rule-based demo agent so the model dropdown is not empty. Pick `eddi-demo-agent-…` and start typing.
+
+Two things worth knowing about it:
+
+- **EDDI is built from the working tree**, not pulled from Docker Hub — the adapter is not in any published image yet, so `labsai/eddi:latest` would start fine and then 404 on `/v1`. The build happens inside the container, so no local JDK or Maven is needed. The first build takes a few minutes; later ones are cached.
+- **The demo agent has no LLM**, so it needs no provider credentials and its replies are deterministic. It echoes your input back, which is enough to show the round trip, the per-chat conversation isolation and streaming.
+
+It is **not a production configuration** — `WEBUI_AUTH=false` and `allow-anonymous=true` are set so the UI is usable immediately. Both are called out inline in the compose file, and §4 has the real security model.
+
+### Production-shaped compose
+
 ```yaml
 services:
   eddi:

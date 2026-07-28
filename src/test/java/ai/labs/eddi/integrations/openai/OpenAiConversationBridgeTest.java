@@ -274,6 +274,41 @@ class OpenAiConversationBridgeTest {
         verify(conversationService).endConversation(CONVERSATION_ID);
     }
 
+    @Test
+    void createRace_adoptsTheWinner_whateverTheStoreThrows() throws Exception {
+        // The Mongo store does not raise ResourceAlreadyExistsException on a
+        // duplicate key — it lets a raw MongoWriteException (E11000) out. Catching
+        // only the declared type was dead code against the real store, and Open
+        // WebUI hits this on every new chat because it fires the completion and
+        // its title request concurrently with the same chat id.
+        when(userConversationStore.readUserConversation(any(), any()))
+                .thenReturn(null)
+                .thenReturn(new UserConversation("channel:openai:x", USER_ID, Environment.production,
+                        AGENT_ID_SUPPORT, OTHER_CONVERSATION_ID));
+        doAnswer(invocation -> {
+            throw new RuntimeException("E11000 duplicate key error collection: eddi.userconversations");
+        }).when(userConversationStore).createUserConversation(any());
+
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        assertEquals(OTHER_CONVERSATION_ID, turn.conversationId());
+        verify(conversationService).endConversation(CONVERSATION_ID);
+    }
+
+    @Test
+    void createFailure_withNoWinner_isAServerErrorNotALeakedStackTrace() throws Exception {
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        doAnswer(invocation -> {
+            throw new RuntimeException("datastore unreachable");
+        }).when(userConversationStore).createUserConversation(any());
+
+        var exception = assertThrows(OpenAiApiException.class,
+                () -> bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID));
+
+        assertEquals(500, exception.getStatus());
+        verify(conversationService).endConversation(CONVERSATION_ID);
+    }
+
     // ─── stateless variant ───
 
     @Test
