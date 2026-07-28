@@ -208,7 +208,6 @@
            black on the same transparency — invert() leaves the alpha channel
            alone — which is why no second asset is needed. */
         --eddi-logo-filter:   invert(1);
-    --eddi-chevron:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%2378716c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
         --eddi-chevron:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%2378716c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
 
         /* PF's elevation tokens are tuned for near-black and read as smears on
@@ -248,6 +247,7 @@
     --eddi-card-edge:     inset 0 1px 0 0 rgba(255, 255, 255, .9);
     --eddi-card-shadow:   0 10px 30px -12px rgba(28, 25, 23, .18);
     --eddi-logo-filter:   invert(1);
+    --eddi-chevron:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%2378716c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
     --pf-v5-global--BoxShadow--lg: 0 6px 18px rgba(28, 25, 23, .10);
     --pf-v5-global--BoxShadow--xl: 0 12px 32px rgba(28, 25, 23, .14);
     --eddi-bloom-near:    rgba(245, 158, 11, .10);
