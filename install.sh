@@ -643,7 +643,29 @@ resolve_compose_files() {
 
   # Download Keycloak realm if auth enabled
   if [[ "$WITH_AUTH" == "true" ]]; then
-    local kc_files=("keycloak/eddi-realm.json")
+    # The realm JSON is required; the login-theme files are cosmetic. Both are
+    # bind-mounted by docker-compose.auth.yml, and a missing theme directory
+    # would leave Docker to create an empty one — so they must be fetched here.
+    local kc_files=(
+      "keycloak/eddi-realm.json"
+      "keycloak/themes/eddi/login/theme.properties"
+      "keycloak/themes/eddi/login/resources/css/eddi-login.css"
+      "keycloak/themes/eddi/login/resources/img/logo_eddi.png"
+      "keycloak/themes/eddi/login/resources/img/favicon.ico"
+      "keycloak/themes/eddi/login/resources/fonts/noto-sans-latin-variable.woff2"
+      "keycloak/themes/eddi/login/resources/fonts/noto-sans-latin-ext-variable.woff2"
+      "keycloak/themes/eddi/login/resources/fonts/noto-sans-cyrillic-variable.woff2"
+      "keycloak/themes/eddi/login/resources/fonts/noto-sans-greek-variable.woff2"
+      "keycloak/themes/eddi/login/resources/js/eddi-a11y.js"
+      "keycloak/themes/eddi/login/resources/js/eddi-theme.js"
+    )
+    # The theme is all-or-nothing. A *missing* theme directory is safe —
+    # Keycloak logs "Failed to find LOGIN theme" and serves the built-in one
+    # (verified: HTTP 200) — but a *partial* one is not: theme.properties would
+    # still resolve, and Keycloak would render the eddi theme with its
+    # stylesheet, fonts or scripts 404ing. So any cosmetic failure discards the
+    # whole theme rather than leaving a half-built one mounted.
+    local theme_incomplete=false
     for kf in "${kc_files[@]}"; do
       local kf_target="$EDDI_DIR/$kf"
       local kf_dir
@@ -658,11 +680,20 @@ resolve_compose_files() {
         echo -ne "  Downloading ${kf}... "
         if curl -fsSL "${kf_url}" -o "$kf_target"; then
           echo -e "${GREEN}✅${RESET}"
-        else
+        elif [[ "$kf" == "keycloak/eddi-realm.json" ]]; then
           fail "Failed to download ${kf} (required for Keycloak).\n     URL: ${kf_url}"
+        else
+          rm -f "$kf_target"   # don't leave a truncated file behind
+          theme_incomplete=true
+          echo -e "${YELLOW}⚠️${RESET}"
         fi
       fi
     done
+
+    if [[ "$theme_incomplete" == "true" ]]; then
+      rm -rf "$EDDI_DIR/keycloak/themes/eddi"
+      warn "Could not download the complete EDDI login theme — falling back to the default Keycloak login page"
+    fi
   fi
 
   # Save config for eddi CLI wrapper (no secrets — vault key stays in .env only)
@@ -896,6 +927,191 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
     echo -e "${GREEN}✅${RESET}"
   else
     echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${update_status} — CORS may not work for port ${EDDI_PORT})${RESET}"
+  fi
+
+  # ── EDDI login theme ────────────────────────────────────
+  # Realm import is one-shot: Keycloak skips realms that already exist, so a
+  # change to eddi-realm.json never reaches an existing installation. Set the
+  # theme through the Admin API so upgrades pick it up too. Idempotent.
+  echo -ne "  Applying EDDI login theme  "
+
+  local realm_config updated_realm=""
+  realm_config=$(curl -sf \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${kc_base}/admin/realms/eddi" 2>/dev/null) || true
+
+  if [[ -z "$realm_config" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not read realm config — theme not applied)${RESET}"
+    return 0
+  fi
+
+  # GET-modify-PUT the full representation, same as the client update above.
+  if [[ "$json_tool" == "jq" ]]; then
+    # Branding is forced; locale settings are only seeded when the operator has
+    # not enabled internationalisation themselves. Overwriting them on every run
+    # would clobber a deliberately curated locale list.
+    updated_realm=$(echo "$realm_config" | jq \
+      '.loginTheme = "eddi" | .displayName = "EDDI" | .displayNameHtml = "EDDI"
+       | if (.internationalizationEnabled // false) then .
+         else .internationalizationEnabled = true
+              | .supportedLocales = ["ar","ca","cs","da","de","el","en","es","fa","fi","fr","hu","it","ja","ko","lt","lv","nl","no","pl","pt","pt-BR","ru","sk","sv","th","tr","uk","zh-CN","zh-TW"]
+              | .defaultLocale = "en" end' \
+      2>/dev/null) || updated_realm=""
+  else
+    updated_realm=$(echo "$realm_config" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+d['loginTheme'] = 'eddi'
+d['displayName'] = 'EDDI'
+d['displayNameHtml'] = 'EDDI'
+# Branding is forced; locale settings are only seeded when the operator has not
+# enabled internationalisation themselves, so a curated list survives. Enabling
+# it is also what puts lang/dir on <html> (WCAG 3.1.1).
+if not d.get('internationalizationEnabled'):
+    d['internationalizationEnabled'] = True
+    d['supportedLocales'] = ['ar','ca','cs','da','de','el','en','es','fa','fi','fr','hu','it','ja','ko','lt','lv','nl','no','pl','pt','pt-BR','ru','sk','sv','th','tr','uk','zh-CN','zh-TW']
+    d['defaultLocale'] = 'en'
+print(json.dumps(d))" 2>/dev/null) || updated_realm=""
+  fi
+
+  if [[ -z "$updated_realm" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not patch realm config — theme not applied)${RESET}"
+    return 0
+  fi
+
+  local theme_status
+  # No -f here: with it curl exits non-zero on 4xx/5xx and the real status is
+  # lost to the || fallback, so every failure would report HTTP 000.
+  theme_status=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+    -H "Authorization: Bearer ${admin_token}" \
+    -H "Content-Type: application/json" \
+    "${kc_base}/admin/realms/eddi" \
+    -d "$updated_realm" \
+    2>/dev/null) || theme_status="000"
+
+  if [[ "$theme_status" == "204" ]]; then
+    echo -e "${GREEN}✅${RESET}"
+  else
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${theme_status} — login page will use the default theme)${RESET}"
+  fi
+
+  # ── Admin console login ─────────────────────────────────
+  # The admin console authenticates against the `master` realm, which is
+  # Keycloak's own and is not part of eddi-realm.json — so without this it keeps
+  # the stock Keycloak page while the EDDI realm is branded. Only applied when
+  # master has no login theme of its own: on a Keycloak shared with other
+  # products, an operator's existing admin branding wins.
+  echo -ne "  Theming admin console login  "
+
+  local master_config master_theme updated_master=""
+  master_config=$(curl -sf \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${kc_base}/admin/realms/master" 2>/dev/null) || master_config=""
+
+  if [[ -z "$master_config" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not read master realm — left unthemed)${RESET}"
+    return 0
+  fi
+
+  if [[ "$json_tool" == "jq" ]]; then
+    master_theme=$(echo "$master_config" | jq -r '.loginTheme // ""' 2>/dev/null)
+  else
+    master_theme=$(echo "$master_config" | python3 -c "
+import sys, json
+print(json.load(sys.stdin).get('loginTheme') or '')" 2>/dev/null)
+  fi
+
+  if [[ -n "$master_theme" ]]; then
+    echo -e "${GREEN}✅${RESET}  ${DIM}(kept existing theme '${master_theme}')${RESET}"
+    return 0
+  fi
+
+  if [[ "$json_tool" == "jq" ]]; then
+    # Also enable internationalisation. master ships with it off, which means
+    # no lang/dir on <html> (WCAG 3.1.1) on a page we now brand. A single
+    # supported locale adds the attributes without adding a locale switcher,
+    # and loses nothing: with i18n off the page was English-only anyway.
+    updated_master=$(echo "$master_config" | jq \
+      '.loginTheme = "eddi"
+       | .displayNameHtml = "EDDI"
+       | if (.internationalizationEnabled // false) then .
+         else .internationalizationEnabled = true
+              | .supportedLocales = ["ar","ca","cs","da","de","el","en","es","fa","fi","fr","hu","it","ja","ko","lt","lv","nl","no","pl","pt","pt-BR","ru","sk","sv","th","tr","uk","zh-CN","zh-TW"]
+              | .defaultLocale = "en" end' 2>/dev/null) || updated_master=""
+  else
+    updated_master=$(echo "$master_config" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+d['loginTheme'] = 'eddi'
+# master's displayNameHtml ships as a div.kc-logo-text, which keycloak.v2 still
+# styles with the Keycloak logo — it renders on top of ours. Plain text also
+# gives the header a correct accessible name. displayName is left alone: it
+# labels the realm in the admin console's realm selector.
+d['displayNameHtml'] = 'EDDI'
+# master ships with i18n off, so <html> gets no lang/dir (WCAG 3.1.1) on a page
+# we now brand. One supported locale adds them without adding a switcher, and
+# loses nothing: with i18n off the page was English-only anyway.
+if not d.get('internationalizationEnabled'):
+    d['internationalizationEnabled'] = True
+    d['supportedLocales'] = ['ar','ca','cs','da','de','el','en','es','fa','fi','fr','hu','it','ja','ko','lt','lv','nl','no','pl','pt','pt-BR','ru','sk','sv','th','tr','uk','zh-CN','zh-TW']
+    d['defaultLocale'] = 'en'
+print(json.dumps(d))" 2>/dev/null) || updated_master=""
+  fi
+
+  if [[ -z "$updated_master" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not patch master realm — left unthemed)${RESET}"
+    return 0
+  fi
+
+  local master_status
+  master_status=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+    -H "Authorization: Bearer ${admin_token}" \
+    -H "Content-Type: application/json" \
+    "${kc_base}/admin/realms/master" \
+    -d "$updated_master" \
+    2>/dev/null) || master_status="000"
+
+  if [[ "$master_status" == "204" ]]; then
+    echo -e "${GREEN}✅${RESET}"
+  else
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${master_status} — admin console keeps the default theme)${RESET}"
+  fi
+
+  # -- Default-role safety check ---------------------------
+  # Realms created before this was fixed composite default-roles-eddi to
+  # eddi-admin/eddi-editor, so any user created without explicit roles - which
+  # is what self-registration produces - becomes an admin. Realm import is
+  # one-shot and will not correct it.
+  #
+  # This only WARNS. Unlike the branding fields, changing it is an authorization
+  # decision: an operator may have granted elevated defaults deliberately, and
+  # silently stripping them during an upgrade would be worse than leaving them.
+  # Fresh installs get the safe value from eddi-realm.json.
+  local default_composites elevated=""
+  default_composites=$(curl -sf \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${kc_base}/admin/realms/eddi/roles/default-roles-eddi/composites" 2>/dev/null) || default_composites=""
+
+  if [[ -n "$default_composites" ]]; then
+    if [[ "$json_tool" == "jq" ]]; then
+      elevated=$(echo "$default_composites" \
+        | jq -r '[.[].name] | map(select(. == "eddi-admin" or . == "eddi-editor")) | join(", ")' 2>/dev/null)
+    else
+      elevated=$(echo "$default_composites" | python3 -c "
+import sys, json
+names = [r.get('name') for r in json.load(sys.stdin)]
+print(', '.join(n for n in names if n in ('eddi-admin', 'eddi-editor')))" 2>/dev/null)
+    fi
+
+    if [[ -n "$elevated" ]]; then
+      echo ""
+      warn "This realm grants ${elevated} to every new user by default."
+      echo -e "     ${DIM}Harmless while self-registration is off, but enabling it would${RESET}"
+      echo -e "     ${DIM}make everyone who signs up an admin. New installs no longer do this.${RESET}"
+      echo -e "     ${DIM}To fix: Admin console -> Realm roles -> default-roles-eddi ->${RESET}"
+      echo -e "     ${DIM}Associated roles -> remove ${elevated}.${RESET}"
+      echo -e "     ${DIM}Left unchanged on purpose: it may be deliberate here.${RESET}"
+    fi
   fi
 }
 
