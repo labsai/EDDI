@@ -31,42 +31,114 @@ if curl -sf -H "Authorization: Bearer ${EDDI_API_KEY:-}" "$EDDI/v1/models" | gre
     exit 0
 fi
 
+# A three-turn flow rather than an echo. An echo proves the transport works but
+# nothing about EDDI; this shows the thing the adapter exists to bridge —
+# conversation state surviving across turns of a stateless HTTP protocol. Open a
+# second chat and it asks your name again, which is the per-chat isolation.
 echo "[seed] Creating behaviour rules…"
 RULES=$(create /rulestore/rulesets '{
   "behaviorGroups": [{
     "name": "Demo",
-    "behaviorRules": [{
-      "name": "Greet",
-      "actions": ["greet"],
-      "conditions": [{
-        "type": "inputmatcher",
-        "configs": { "expressions": "*", "occurrence": "currentStep" },
-        "conditions": []
-      }]
+    "behaviorRules": [
+      {
+        "name": "Ask for name",
+        "actions": ["ask_name"],
+        "conditions": [{
+          "type": "actionmatcher",
+          "configs": { "actions": "CONVERSATION_START", "occurrence": "lastStep" },
+          "conditions": []
+        }]
+      },
+      {
+        "name": "Capture name and greet",
+        "actions": ["capture_name", "greet_by_name", "conversing"],
+        "conditions": [
+          {
+            "type": "actionmatcher",
+            "configs": { "actions": "ask_name", "occurrence": "lastStep" },
+            "conditions": []
+          },
+          {
+            "type": "inputmatcher",
+            "configs": { "expressions": "*", "occurrence": "currentStep" },
+            "conditions": []
+          }
+        ]
+      },
+      {
+        "name": "Keep chatting",
+        "actions": ["chat", "conversing"],
+        "conditions": [{
+          "type": "actionmatcher",
+          "configs": { "actions": "conversing", "occurrence": "lastStep" },
+          "conditions": []
+        }]
+      }
+    ]
+  }]
+}')
+
+# Slot-filling: this is what makes the name outlive the turn it arrived on.
+echo "[seed] Creating property setter…"
+PROPERTY=$(create /propertysetterstore/propertysetters '{
+  "setOnActions": [{
+    "actions": ["capture_name"],
+    "setProperties": [{
+      "name": "userName",
+      "valueString": "{memory.current.input}",
+      "scope": "conversation",
+      "override": true
     }]
   }]
 }')
 
 echo "[seed] Creating output…"
 OUTPUT=$(create /outputstore/outputsets '{
-  "outputSet": [{
-    "action": "greet",
-    "timesOccurred": 0,
-    "outputs": [{
-      "type": "text",
-      "valueAlternatives": [{
+  "outputSet": [
+    {
+      "action": "ask_name",
+      "timesOccurred": 0,
+      "outputs": [{
         "type": "text",
-        "text": "Hello from EDDI, over the OpenAI-compatible API. You said: {memory.current.input}"
+        "valueAlternatives": [{
+          "type": "text",
+          "text": "Hello! I am an EDDI demo agent, reached over the OpenAI-compatible API. What is your name?"
+        }]
       }]
-    }]
-  }]
+    },
+    {
+      "action": "greet_by_name",
+      "timesOccurred": 0,
+      "outputs": [{
+        "type": "text",
+        "valueAlternatives": [{
+          "type": "text",
+          "text": "Nice to meet you, {properties.userName}! I will remember that for the rest of this chat. Try asking me something, then open a new chat and watch me forget."
+        }]
+      }]
+    },
+    {
+      "action": "chat",
+      "timesOccurred": 0,
+      "outputs": [{
+        "type": "text",
+        "valueAlternatives": [{
+          "type": "text",
+          "text": "You said: \"{memory.current.input}\" — and I still know you are {properties.userName}. That state lives in EDDI, not in the request."
+        }]
+      }]
+    }
+  ]
 }')
 
+# The templating step must come last: it resolves the {properties.x} and
+# {memory.x} placeholders in the outputs above.
 echo "[seed] Creating workflow…"
 WORKFLOW=$(create /workflowstore/workflows "{
   \"workflowSteps\": [
     { \"type\": \"eddi://ai.labs.parser\", \"config\": {}, \"extensions\": { \"dictionaries\": [], \"corrections\": [] } },
     { \"type\": \"eddi://ai.labs.behavior\", \"config\": { \"uri\": \"$RULES\" }, \"extensions\": {} },
+    { \"type\": \"eddi://ai.labs.property\", \"config\": { \"uri\": \"$PROPERTY\" }, \"extensions\": {} },
     { \"type\": \"eddi://ai.labs.output\", \"config\": { \"uri\": \"$OUTPUT\" }, \"extensions\": {} },
     { \"type\": \"eddi://ai.labs.templating\", \"config\": {}, \"extensions\": {} }
   ]

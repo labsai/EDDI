@@ -35,7 +35,8 @@ Brings up MongoDB, EDDI, Open WebUI on <http://localhost:3000>, and a one-shot s
 Two things worth knowing about it:
 
 - **EDDI is built from the working tree**, not pulled from Docker Hub — the adapter is not in any published image yet, so `labsai/eddi:latest` would start fine and then 404 on `/v1`. The build happens inside the container, so no local JDK or Maven is needed. The first build takes a few minutes; later ones are cached.
-- **The demo agent has no LLM**, so it needs no provider credentials and its replies are deterministic. It echoes your input back, which is enough to show the round trip, the per-chat conversation isolation and streaming.
+- **The demo agent has no LLM**, so it needs no provider credentials and its replies are deterministic. It runs a short three-turn flow — it asks your name, remembers it, and refers back to it — because that is the thing this adapter exists to bridge: conversation state surviving a stateless HTTP protocol. Open a second chat and it asks again, which is the per-chat isolation.
+- **Open WebUI's auxiliary generation is turned off** in the demo (titles, tags, follow-ups, search queries). Left on, those extra LLM calls go to the selected model, so utility prompts land in your real conversation and advance its behaviour rules — and the unparseable replies surface as bogus follow-up suggestions. In a real deployment point them at a separate connection or an `…:stateless` model instead of disabling them (§5).
 
 It is **not a production configuration** — `WEBUI_AUTH=false` and `allow-anonymous=true` are set so the UI is usable immediately. Both are called out inline in the compose file, and §4 has the real security model.
 

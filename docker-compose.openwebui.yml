@@ -98,6 +98,22 @@ services:
       - "ENABLE_FORWARD_USER_INFO_HEADERS=true"
       # DEMO ONLY: skips account creation so the UI is usable immediately.
       - "WEBUI_AUTH=false"
+      # Open WebUI drives several auxiliary LLM calls of its own — chat titles,
+      # tags, follow-up suggestions, search queries — and by default they all go
+      # to the selected model. Against an EDDI agent that means utility prompts
+      # land in the user's real conversation and advance its behaviour rules,
+      # and the parsed-out junk shows up in the UI as bogus follow-ups. Turned
+      # off here so the demo shows the agent and nothing else.
+      #
+      # In a real deployment, point these at a separate connection or at an
+      # "<agent>:stateless" model instead of disabling them — see
+      # docs/open-webui-integration.md §5.
+      - "ENABLE_TITLE_GENERATION=false"
+      - "ENABLE_FOLLOW_UP_GENERATION=false"
+      - "ENABLE_TAGS_GENERATION=false"
+      - "ENABLE_AUTOCOMPLETE_GENERATION=false"
+      - "ENABLE_SEARCH_QUERY_GENERATION=false"
+      - "ENABLE_RETRIEVAL_QUERY_GENERATION=false"
     volumes:
       - openwebui-demo-data:/app/backend/data
     depends_on:
