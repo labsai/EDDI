@@ -62,12 +62,20 @@ public class CallerIdentityContext {
             if (securityIdentity == null || securityIdentity.isAnonymous()) {
                 return null;
             }
+            // Token and principal are captured independently: an authenticated
+            // request without a bearer credential still has a usable userId, and
+            // requiring both would make ${caller:userId} unavailable there for no
+            // reason. ${caller:token} still fails closed via hasToken().
             var credential = securityIdentity.getCredential(TokenCredential.class);
-            if (credential == null || credential.getToken() == null || credential.getToken().isBlank()) {
+            String token = credential != null && credential.getToken() != null && !credential.getToken().isBlank()
+                    ? credential.getToken()
+                    : null;
+            var principal = securityIdentity.getPrincipal();
+            String userId = principal != null ? principal.getName() : null;
+            if (token == null && (userId == null || userId.isBlank())) {
                 return null;
             }
-            var principal = securityIdentity.getPrincipal();
-            return new CallerIdentity(credential.getToken(), principal != null ? principal.getName() : null, currentRequestOrigin());
+            return new CallerIdentity(token, userId, currentRequestOrigin());
         } catch (Exception e) {
             // No active request context — nothing to capture. Not an error.
             LOGGER.debugf("No caller identity to capture: %s", e.getMessage());

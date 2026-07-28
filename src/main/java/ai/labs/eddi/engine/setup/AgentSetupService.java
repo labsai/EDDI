@@ -246,8 +246,8 @@ public class AgentSetupService {
         // Scheme-level check only. Full SSRF validation would reject loopback and
         // private addresses, which is precisely where a local LLM provider lives —
         // the reason this field exists.
-        if (request.baseUrl() != null && !request.baseUrl().isBlank() && !UrlValidationUtils.isValidHttpUrl(request.baseUrl())) {
-            throw new AgentSetupException("baseUrl must be a valid http(s) URL");
+        if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank() && !UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
+            throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
         }
 
         var params = resolveParams(request.provider(), request.model(), request.deploy(), request.environment());
@@ -306,7 +306,7 @@ public class AgentSetupService {
             // server of the generated tools. Passing null here left local providers
             // (Ollama, Jlama) with no endpoint to reach.
             var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null,
-                    request.baseUrl(), promptResponseJson, quickReplies, sentiment, httpCallsLocations);
+                    request.llmBaseUrl(), promptResponseJson, quickReplies, sentiment, httpCallsLocations);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);

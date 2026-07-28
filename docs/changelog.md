@@ -110,7 +110,7 @@ An agent could only call an API with a *static* credential baked into its apical
 
 **Design decisions**
 1. **Same-origin only.** The token is released only when the outbound call targets the exact `scheme://host:port` the caller addressed, taken from the inbound request rather than configuration. An agent config naming a third-party host therefore cannot exfiltrate a user's token, and the feature needs no allow-list to be safe out of the box.
-2. **Headers only.** `${caller:token}` in a query parameter is rejected — tokens in URLs leak through access logs, proxies and browser history. `${caller:userId}` is allowed anywhere.
+2. **Headers only.** `${caller:token}` in a query parameter or request body is rejected — tokens in URLs leak through access logs, proxies and browser history, and outside a header the reference is never substituted. `${caller:userId}` is resolved in headers and query parameters.
 3. **Fails closed.** An unsatisfiable reference throws rather than resolving to `""`, which would silently send `Bearer ` and surface far away as a puzzling 401.
 4. **Never stored.** Resolution happens while building the request, and `scrubSensitiveHeaders` redacts it before the request is written to conversation memory. Header-*name* matching alone was not enough — a token placed in an unconventionally named header would have slipped through — so the resolved token is additionally matched by value.
 5. **Opt-out.** `eddi.caller-identity.enabled` (default `true`) forbids the feature outright.

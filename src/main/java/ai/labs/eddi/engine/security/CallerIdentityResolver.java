@@ -119,18 +119,18 @@ public class CallerIdentityResolver {
     /**
      * Reject a {@code ${caller:token}} reference anywhere a token must not go.
      * <p>
-     * Called for query parameters, which are logged, cached and proxied far more
-     * freely than headers. Request bodies are not checked: a caller reference there
-     * is never substituted, so it cannot leak a token.
+     * Called for query parameters and request bodies — the two places a reference
+     * would otherwise travel to the API as a literal placeholder, since
+     * substitution happens for headers only.
      *
      * @param location
      *            human-readable place the reference was found, for the message
      */
     public void rejectTokenReference(String value, String location) {
         if (value != null && value.contains("${caller:token}")) {
-            throw new CallerIdentityException(
-                    "${caller:token} may only be used in a request header, but was found in " + location + ". "
-                            + "Tokens in URLs leak through access logs and proxies.");
+            throw new CallerIdentityException("${caller:token} may only be used in a request header, but was found in " + location
+                    + ". Outside a header it is never substituted, and a token in a URL additionally leaks through "
+                    + "access logs and proxies.");
         }
     }
 
