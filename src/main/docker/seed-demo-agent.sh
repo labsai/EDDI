@@ -173,16 +173,35 @@ curl -sfS -X POST \
 # The adapter caches its model catalogue (eddi.openai-compat.model-cache-seconds,
 # 30s by default), so a deployment made a moment ago is not visible yet. Poll
 # rather than print an empty list and leave the reader thinking it failed.
-# ── Optional second agent: a real LLM ──
+# ── Optional second agent: a real LLM, with its key in the vault ──
 # The rule-based agent above proves the transport and the state bridge, but it
-# has no model, so it cannot answer questions ABOUT anything — including an
-# uploaded PDF. Set EDDI_DEMO_LLM_API_KEY (and optionally EDDI_DEMO_LLM_MODEL /
-# _TYPE) and a second agent is created that actually thinks.
+# has no model, so it cannot answer questions ABOUT anything — an uploaded PDF
+# included. Set EDDI_DEMO_LLM_API_KEY and a second agent is created that can.
+#
+# The key goes into EDDI's Secrets Vault and the agent config references it as
+# ${vault:...}, rather than the key being written into the config. That is not
+# ceremony: an agent config is exported, diffed, shown in the Manager UI and
+# logged, and a literal key would travel with all of it. The vault keeps the
+# plaintext in one encrypted place and hands the config a reference, which
+# SecretRedactionFilter then redacts wherever it is printed.
 if [ -n "${EDDI_DEMO_LLM_API_KEY:-}" ]; then
     LLM_TYPE="${EDDI_DEMO_LLM_TYPE:-openai}"
     LLM_MODEL="${EDDI_DEMO_LLM_MODEL:-gpt-4o-mini}"
-    echo "[seed] EDDI_DEMO_LLM_API_KEY is set — adding an LLM agent ($LLM_TYPE/$LLM_MODEL)…"
+    VAULT_KEY_NAME="demo-llm-api-key"
 
+    echo "[seed] Checking the vault is enabled…"
+    if ! curl -sf "$EDDI/secretstore/secrets/health" >/dev/null 2>&1; then
+        echo "[seed] ERROR: the Secrets Vault is not reachable." >&2
+        echo "[seed] EDDI_VAULT_MASTER_KEY must be set on the eddi service." >&2
+        exit 1
+    fi
+
+    echo "[seed] Storing the provider key in the vault as '$VAULT_KEY_NAME'…"
+    # Fail hard rather than fall back to embedding the key: a silent downgrade
+    # to a plaintext credential is the wrong way to be helpful.
+    curl -sfS -X PUT "$EDDI/secretstore/secrets/default/$VAULT_KEY_NAME"         -H 'Content-Type: application/json'         -d "{\"value\": \"$EDDI_DEMO_LLM_API_KEY\", \"description\": \"Demo LLM provider key (seeded by seed-demo-agent.sh)\"}"         -o /dev/null
+
+    echo "[seed] Adding an LLM agent ($LLM_TYPE/$LLM_MODEL)…"
     LLM_RULES=$(create /rulestore/rulesets '{
       "behaviorGroups": [{
         "name": "LLM",
@@ -198,6 +217,9 @@ if [ -n "${EDDI_DEMO_LLM_API_KEY:-}" ]; then
       }]
     }')
 
+    # apiKey is a vault REFERENCE, not the key. The \$ escapes keep the shell
+    # from trying to expand ${vault:...} itself.
+    #
     # {context.openai_system_message} is where the adapter puts a client-supplied
     # system message — which, with RAG_SYSTEM_CONTEXT=true, is where Open WebUI's
     # retrieved document chunks arrive. Referencing it is what lets this agent
@@ -209,7 +231,7 @@ if [ -n "${EDDI_DEMO_LLM_API_KEY:-}" ]; then
         \"type\": \"$LLM_TYPE\",
         \"description\": \"Demo LLM agent\",
         \"parameters\": {
-          \"apiKey\": \"$EDDI_DEMO_LLM_API_KEY\",
+          \"apiKey\": \"\${vault:$VAULT_KEY_NAME}\",
           \"modelName\": \"$LLM_MODEL\",
           \"systemMessage\": \"You are a helpful assistant reached through EDDI's OpenAI-compatible API. If the following context is non-empty, answer using it and say which document it came from.\n\nContext:\n{context.openai_system_message}\",
           \"logSizeLimit\": \"-1\",
@@ -222,7 +244,7 @@ if [ -n "${EDDI_DEMO_LLM_API_KEY:-}" ]; then
       \"workflowSteps\": [
         { \"type\": \"eddi://ai.labs.parser\", \"config\": {}, \"extensions\": { \"dictionaries\": [], \"corrections\": [] } },
         { \"type\": \"eddi://ai.labs.behavior\", \"config\": { \"uri\": \"$LLM_RULES\" }, \"extensions\": {} },
-        { \"type\": \"eddi://ai.labs.langchain\", \"config\": { \"uri\": \"$LLM_CONFIG\" }, \"extensions\": {} }
+        { \"type\": \"eddi://ai.labs.llm\", \"config\": { \"uri\": \"$LLM_CONFIG\" }, \"extensions\": {} }
       ]
     }")
 
@@ -230,10 +252,10 @@ if [ -n "${EDDI_DEMO_LLM_API_KEY:-}" ]; then
     LLM_AGENT_ID=$(echo "$LLM_AGENT" | sed -e 's#.*/agents/##' -e 's#?.*##')
     LLM_AGENT_VERSION=$(echo "$LLM_AGENT" | sed -e 's#.*version=##')
 
-    curl -sf -X PATCH         "$EDDI/descriptorstore/descriptors/$LLM_AGENT_ID?version=$LLM_AGENT_VERSION"         -H 'Content-Type: application/json'         -d '{ "operation": "SET", "document": { "name": "EDDI LLM Demo", "description": "LLM-backed demo agent" } }'         -o /dev/null || echo "[seed] Could not name the LLM descriptor — continuing."
+    curl -sf -X PATCH         "$EDDI/descriptorstore/descriptors/$LLM_AGENT_ID?version=$LLM_AGENT_VERSION"         -H 'Content-Type: application/json'         -d '{ "operation": "SET", "document": { "name": "EDDI LLM Demo", "description": "LLM-backed demo agent; provider key held in the vault" } }'         -o /dev/null || echo "[seed] Could not name the LLM descriptor — continuing."
 
     curl -sfS -X POST         "$EDDI/administration/production/deploy/$LLM_AGENT_ID?version=$LLM_AGENT_VERSION&waitForCompletion=true"         -o /dev/null
-    echo "[seed] LLM agent deployed."
+    echo "[seed] LLM agent deployed. Its config holds \${vault:$VAULT_KEY_NAME}, not the key."
 fi
 
 echo "[seed] Waiting for the model to appear on /v1/models…"

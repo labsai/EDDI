@@ -38,6 +38,14 @@ services:
       # deployment leave this false — every anonymous caller would otherwise
       # share one conversation, and its memory.
       - "EDDI_OPENAI_COMPAT_ALLOW_ANONYMOUS=true"
+
+      # Secrets Vault — required for the optional LLM agent, whose provider key
+      # is stored here and referenced from the agent config as ${vault:...}
+      # rather than written into it.
+      #
+      # DEMO ONLY, obviously: a master key committed to a compose file protects
+      # nothing. Generate a real one per deployment:  openssl rand -base64 32
+      - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-demo-only-vault-master-key-not-for-production-use}"
     ports:
       - "${EDDI_PORT:-7070}:7070"
     depends_on:

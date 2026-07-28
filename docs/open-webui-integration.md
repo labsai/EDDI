@@ -42,6 +42,8 @@ Two things worth knowing about it:
   ```
 
   `EDDI_DEMO_LLM_TYPE` (default `openai`) and `EDDI_DEMO_LLM_MODEL` (default `gpt-4o-mini`) select the provider and model — see [`langchain.md`](langchain.md) for the supported types. Its system prompt references `{context.openai_system_message}`, so with `RAG_SYSTEM_CONTEXT=true` it can answer about files you upload.
+
+  **The key goes into EDDI's Secrets Vault, not into the agent config.** The seeder stores it via `PUT /secretstore/secrets/default/demo-llm-api-key` and the config holds `${vault:demo-llm-api-key}`. That is the point of the vault: an agent config gets exported, diffed, rendered in the Manager UI and logged, and a literal key would travel with all of it. Verified on a clean run — the plaintext key appears in no MongoDB collection, and `GET /secretstore/secrets/default` returns metadata and a checksum, never the value.
 - **The rule-based agent** runs a short three-turn flow — it asks your name, remembers it, and refers back to it — because that is the thing this adapter exists to bridge: conversation state surviving a stateless HTTP protocol. Open a second chat and it asks again, which is the per-chat isolation.
 - **Open WebUI's auxiliary generation is turned off** in the demo (titles, tags, follow-ups, search queries). Left on, those extra LLM calls go to the selected model, so utility prompts land in your real conversation and advance its behaviour rules — and the unparseable replies surface as bogus follow-up suggestions. In a real deployment point them at a separate connection or an `…:stateless` model instead of disabling them (§5).
 

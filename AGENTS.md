@@ -888,7 +888,7 @@ Always use v6 canonical URIs in new configs:
 | `eddi://ai.labs.property`  | `eddi://ai.labs.property/...` | Optional — slot-filling     |
 | `eddi://ai.labs.httpcalls` | `eddi://ai.labs.apicalls/...` | Optional — API calls        |
 | `eddi://ai.labs.output`    | `eddi://ai.labs.output/...`   | Usually yes — user messages |
-| `eddi://ai.labs.langchain` | `eddi://ai.labs.llm/...`      | Optional — LLM interaction  |
+| `eddi://ai.labs.llm`       | `eddi://ai.labs.llm/...`      | Optional — LLM interaction  |
 
 ### 5.6 Reference Implementation
 
