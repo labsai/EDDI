@@ -77,6 +77,10 @@ Also verified and documented: **`AIOHTTP_CLIENT_STREAM_IDLE_TIMEOUT`** (new in v
 
 The demo agent's prompt was also reworded. A property setter bound to `{memory.current.input}` stores the *whole* turn, so answering "Gregor. What are you capable of?" stored all of it as the name and looked like a parsing bug. It now says it stores the next message verbatim — which is what a naive slot-filler does, and a fair thing for a demo to teach.
 
+**A second injection path, and an LLM-backed demo agent.** Setting `RAG_SYSTEM_CONTEXT=true` moved the retrieved chunks to the system message as intended, but an attachment-carrying turn still arrived polluted — this time with an `<attached_files>` block. Different mechanism: Open WebUI's built-in Files tool, gated by `use_builtin_tools`, which depends on a per-model `builtin_tools` capability with **no environment override**. On an EDDI model that capability is pure cost — the adapter never returns `tool_calls`, so the tools can never fire, yet enabling them rewrites the user's message. Documented as a per-model toggle in the model editor, and added to the must-configure table alongside `RAG_SYSTEM_CONTEXT`.
+
+The demo also gained an **optional LLM agent**. The rule-based one demonstrates the transport and the state bridge without credentials, but it has no model, so it cannot answer questions *about* anything — which made "what is this pdf about?" look like an adapter failure when it was simply an agent with nothing to think with. Set `EDDI_DEMO_LLM_API_KEY` (plus optional `_TYPE`/`_MODEL`) and a second agent is deployed whose system prompt references `{context.openai_system_message}`, so it can answer about uploaded files. **Not verified end to end** — the config shapes follow `docs/langchain.md` and the script passes `sh -n`, but no run with a real key has been made.
+
 **Not implemented (v1):** `/v1/embeddings`, `tool_calls` passthrough (would cause double-execution — EDDI's tools do not exist in Open WebUI), `n > 1`, `logprobs`. Quick replies and `inputField` outputs are dropped; only text reaches OpenAI clients.
 
 ---

@@ -79,6 +79,14 @@ services:
     environment:
       - "EDDI_URL=http://eddi:7070"
       - "EDDI_API_KEY=${EDDI_OPENAI_COMPAT_API_KEY:-sk-eddi-demo}"
+      # Optional. The rule-based agent proves the transport and the state
+      # bridge, but it has no model, so it cannot answer questions ABOUT
+      # anything — an uploaded PDF included. Set this and a second, LLM-backed
+      # agent is deployed alongside it:
+      #   EDDI_DEMO_LLM_API_KEY=sk-... docker compose -f docker-compose.openwebui.yml up
+      - "EDDI_DEMO_LLM_API_KEY=${EDDI_DEMO_LLM_API_KEY:-}"
+      - "EDDI_DEMO_LLM_TYPE=${EDDI_DEMO_LLM_TYPE:-openai}"
+      - "EDDI_DEMO_LLM_MODEL=${EDDI_DEMO_LLM_MODEL:-gpt-4o-mini}"
     volumes:
       - ./src/main/docker/seed-demo-agent.sh:/seed.sh:ro
     entrypoint: ["/bin/sh", "/seed.sh"]

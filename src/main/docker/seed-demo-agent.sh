@@ -173,6 +173,69 @@ curl -sfS -X POST \
 # The adapter caches its model catalogue (eddi.openai-compat.model-cache-seconds,
 # 30s by default), so a deployment made a moment ago is not visible yet. Poll
 # rather than print an empty list and leave the reader thinking it failed.
+# ── Optional second agent: a real LLM ──
+# The rule-based agent above proves the transport and the state bridge, but it
+# has no model, so it cannot answer questions ABOUT anything — including an
+# uploaded PDF. Set EDDI_DEMO_LLM_API_KEY (and optionally EDDI_DEMO_LLM_MODEL /
+# _TYPE) and a second agent is created that actually thinks.
+if [ -n "${EDDI_DEMO_LLM_API_KEY:-}" ]; then
+    LLM_TYPE="${EDDI_DEMO_LLM_TYPE:-openai}"
+    LLM_MODEL="${EDDI_DEMO_LLM_MODEL:-gpt-4o-mini}"
+    echo "[seed] EDDI_DEMO_LLM_API_KEY is set — adding an LLM agent ($LLM_TYPE/$LLM_MODEL)…"
+
+    LLM_RULES=$(create /rulestore/rulesets '{
+      "behaviorGroups": [{
+        "name": "LLM",
+        "behaviorRules": [{
+          "name": "Answer",
+          "actions": ["send_message"],
+          "conditions": [{
+            "type": "inputmatcher",
+            "configs": { "expressions": "*", "occurrence": "currentStep" },
+            "conditions": []
+          }]
+        }]
+      }]
+    }')
+
+    # {context.openai_system_message} is where the adapter puts a client-supplied
+    # system message — which, with RAG_SYSTEM_CONTEXT=true, is where Open WebUI's
+    # retrieved document chunks arrive. Referencing it is what lets this agent
+    # answer questions about an uploaded file.
+    LLM_CONFIG=$(create /llmstore/llms "{
+      \"tasks\": [{
+        \"actions\": [\"send_message\"],
+        \"id\": \"demoChat\",
+        \"type\": \"$LLM_TYPE\",
+        \"description\": \"Demo LLM agent\",
+        \"parameters\": {
+          \"apiKey\": \"$EDDI_DEMO_LLM_API_KEY\",
+          \"modelName\": \"$LLM_MODEL\",
+          \"systemMessage\": \"You are a helpful assistant reached through EDDI's OpenAI-compatible API. If the following context is non-empty, answer using it and say which document it came from.\n\nContext:\n{context.openai_system_message}\",
+          \"logSizeLimit\": \"-1\",
+          \"addToOutput\": \"true\"
+        }
+      }]
+    }")
+
+    LLM_WORKFLOW=$(create /workflowstore/workflows "{
+      \"workflowSteps\": [
+        { \"type\": \"eddi://ai.labs.parser\", \"config\": {}, \"extensions\": { \"dictionaries\": [], \"corrections\": [] } },
+        { \"type\": \"eddi://ai.labs.behavior\", \"config\": { \"uri\": \"$LLM_RULES\" }, \"extensions\": {} },
+        { \"type\": \"eddi://ai.labs.langchain\", \"config\": { \"uri\": \"$LLM_CONFIG\" }, \"extensions\": {} }
+      ]
+    }")
+
+    LLM_AGENT=$(create /agentstore/agents "{ \"workflows\": [\"$LLM_WORKFLOW\"], \"channels\": [] }")
+    LLM_AGENT_ID=$(echo "$LLM_AGENT" | sed -e 's#.*/agents/##' -e 's#?.*##')
+    LLM_AGENT_VERSION=$(echo "$LLM_AGENT" | sed -e 's#.*version=##')
+
+    curl -sf -X PATCH         "$EDDI/descriptorstore/descriptors/$LLM_AGENT_ID?version=$LLM_AGENT_VERSION"         -H 'Content-Type: application/json'         -d '{ "operation": "SET", "document": { "name": "EDDI LLM Demo", "description": "LLM-backed demo agent" } }'         -o /dev/null || echo "[seed] Could not name the LLM descriptor — continuing."
+
+    curl -sfS -X POST         "$EDDI/administration/production/deploy/$LLM_AGENT_ID?version=$LLM_AGENT_VERSION&waitForCompletion=true"         -o /dev/null
+    echo "[seed] LLM agent deployed."
+fi
+
 echo "[seed] Waiting for the model to appear on /v1/models…"
 i=0
 while [ "$i" -lt 24 ]; do

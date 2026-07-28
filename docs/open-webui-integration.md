@@ -35,7 +35,14 @@ Brings up MongoDB, EDDI, Open WebUI on <http://localhost:3000>, and a one-shot s
 Two things worth knowing about it:
 
 - **EDDI is built from the working tree**, not pulled from Docker Hub — the adapter is not in any published image yet, so `labsai/eddi:latest` would start fine and then 404 on `/v1`. The build happens inside the container, so no local JDK or Maven is needed. The first build takes a few minutes; later ones are cached.
-- **The demo agent has no LLM**, so it needs no provider credentials and its replies are deterministic. It runs a short three-turn flow — it asks your name, remembers it, and refers back to it — because that is the thing this adapter exists to bridge: conversation state surviving a stateless HTTP protocol. Open a second chat and it asks again, which is the per-chat isolation.
+- **The demo agent has no LLM.** It needs no provider credentials and its replies are deterministic — but it also *cannot answer questions about anything*, including an uploaded PDF. To get an agent that actually thinks, set `EDDI_DEMO_LLM_API_KEY` and a second LLM-backed agent is deployed alongside it:
+
+  ```bash
+  EDDI_DEMO_LLM_API_KEY=sk-... docker compose -f docker-compose.openwebui.yml up --build
+  ```
+
+  `EDDI_DEMO_LLM_TYPE` (default `openai`) and `EDDI_DEMO_LLM_MODEL` (default `gpt-4o-mini`) select the provider and model — see [`langchain.md`](langchain.md) for the supported types. Its system prompt references `{context.openai_system_message}`, so with `RAG_SYSTEM_CONTEXT=true` it can answer about files you upload.
+- **The rule-based agent** runs a short three-turn flow — it asks your name, remembers it, and refers back to it — because that is the thing this adapter exists to bridge: conversation state surviving a stateless HTTP protocol. Open a second chat and it asks again, which is the per-chat isolation.
 - **Open WebUI's auxiliary generation is turned off** in the demo (titles, tags, follow-ups, search queries). Left on, those extra LLM calls go to the selected model, so utility prompts land in your real conversation and advance its behaviour rules — and the unparseable replies surface as bogus follow-up suggestions. In a real deployment point them at a separate connection or an `…:stateless` model instead of disabling them (§5).
 
 It is **not a production configuration** — `WEBUI_AUTH=false` and `allow-anonymous=true` are set so the UI is usable immediately. Both are called out inline in the compose file, and §4 has the real security model.
@@ -253,6 +260,7 @@ EDDI **refuses to start** when the adapter is enabled, `http-policy=permit`, no 
 | System Prompt (per model) | *leave empty* | The agent owns its prompt. A value here arrives as `openai_system_message` context and is ignored unless the agent references it. |
 | Tools / Functions (per model) | *assign none* | EDDI executes tools inside its own pipeline; the adapter never returns `tool_calls`. |
 | `RAG_SYSTEM_CONTEXT` | `true` | **Set this.** Default `false` puts Open WebUI's retrieved chunks and instruction template into the *user* message, so your agent reads that instead of what the user typed. See below. |
+| Built-in tools capability (per model) | *off* | Also set this. It cannot be invoked — EDDI never returns `tool_calls` — but leaving it on prepends an `<attached_files>` block to the user's message. No env var; it is a toggle in the model editor. See below. |
 
 ### Title generation
 
@@ -287,6 +295,36 @@ So instead of `what is this pdf about?`, your agent receives `{memory.current.in
 With it set, the context lands in the system message, the adapter maps it to the `openai_system_message` context entry, and the agent decides whether to use it — `{context.openai_system_message}` — or ignore it. The user's actual text stays the user's actual text.
 
 If you are using EDDI's own RAG pipeline instead, this still matters: without it, Open WebUI's retrieval output pollutes the input regardless.
+
+### Turn off the `builtin_tools` capability on EDDI models
+
+Open WebUI's built-in tools (the Files capability that lets a model list and search chat attachments) are **dead weight against an EDDI model** — the adapter never returns `tool_calls`, so they can never be invoked. They are not harmless, though: enabling them prepends an `<attached_files>` block to the user's message.
+
+```python
+# open_webui/utils/middleware.py
+use_builtin_tools = (...) or (
+    bool(metadata.get('session_id'))
+    and metadata.get('params', {}).get('function_calling') != 'legacy'
+    and (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get('builtin_tools', True)
+)
+...
+if use_builtin_tools:
+    form_data['messages'] = await add_file_context(...)   # prepends <attached_files>
+```
+
+So with a file attached, an agent that expected `what is this pdf about?` receives:
+
+```
+<attached_files>
+<file type="file" id="e097e541-…" content_type="application/pdf" name="Report.pdf"/>
+</attached_files>
+
+what is this pdf about?
+```
+
+There is **no environment variable** for this — it is a per-model toggle. Open **Workspace → Models → edit the EDDI model → Capabilities** and turn the built-in tools capability off. (Setting the model's `function_calling` parameter to `legacy` has the same effect, as the condition above shows.)
+
+Note this is separate from `RAG_SYSTEM_CONTEXT`: that one controls where the *retrieved chunks* go, this one controls the *file announcement*. Both must be dealt with for an attachment-carrying turn to reach your agent clean.
 
 ### Streaming: watch `AIOHTTP_CLIENT_STREAM_IDLE_TIMEOUT`
 
