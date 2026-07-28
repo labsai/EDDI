@@ -3,9 +3,16 @@
 #
 # Usage: docker compose -f docker-compose.yml -f docker-compose.auth.yml up -d
 #
-# Pre-configured test users (password change required on first login):
-#   eddi  / eddi   (admin)
-#   viewer / viewer (read-only)
+# Pre-configured test users, seeded by keycloak/eddi-realm.json — DEV ONLY:
+#   eddi   / eddi    (eddi-admin + eddi-editor)
+#   viewer / viewer  (eddi-viewer — read-only)
+#   user   / user    (eddi-user — end-user access)
+#
+# These log straight in; there is no forced password change. The credentials
+# are marked "temporary": true in the realm JSON, but Keycloak 26 does not
+# turn that into an UPDATE_PASSWORD required action on realm import — after
+# import the users' requiredActions are empty. Change them through the admin
+# console if you need the prompt.
 
 services:
   eddi:
