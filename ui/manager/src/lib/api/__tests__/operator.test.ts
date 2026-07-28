@@ -11,6 +11,9 @@ import {
   apiAuthForMode,
   defaultOperatorConfig,
   deactivateOperator,
+  reactivateOperator,
+  assertProvisioned,
+  runOperatorCanary,
   OPERATOR_VARIABLE_KEY,
   CALLER_TOKEN_API_AUTH,
   type OperatorConfig,
@@ -174,6 +177,7 @@ describe("auth mode", () => {
 
 describe("provisionOperator", () => {
   const specBody = { openapi: "3.1.0", paths: { "/administration/logs": { get: {} } } };
+  const fetchedSpec = (): FetchedSpec => ({ raw: specBody, paths: specBody.paths });
   let captured: Record<string, unknown> | undefined;
 
   beforeEach(() => {
@@ -207,6 +211,7 @@ describe("provisionOperator", () => {
       agentName: "EDDI Platform Operator",
       config: config(),
       apiKey: "sk-test",
+      spec: fetchedSpec(),
     });
     expect(captured?.agentName).toBe("EDDI Platform Operator");
     expect(captured).not.toHaveProperty("name");
@@ -217,6 +222,7 @@ describe("provisionOperator", () => {
       agentName: "Op",
       config: config({ promptBody: "Custom body." }),
       apiKey: "sk-test",
+      spec: fetchedSpec(),
     });
     const prompt = String(captured?.systemPrompt);
     expect(prompt.startsWith(OPERATOR_SAFETY_PREAMBLE)).toBe(true);
@@ -224,12 +230,12 @@ describe("provisionOperator", () => {
   });
 
   it("sends the full spec untrimmed", async () => {
-    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test" });
+    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
     expect(JSON.parse(String(captured?.openApiSpec))).toEqual(specBody);
   });
 
   it("scopes tools to the read allow-list", async () => {
-    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test" });
+    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
     const endpoints = String(captured?.endpoints);
     for (const entry of READ_ENDPOINTS) {
       expect(endpoints).toContain(entry);
@@ -238,7 +244,7 @@ describe("provisionOperator", () => {
   });
 
   it("bakes no credential into the tools in 'none' mode", async () => {
-    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test" });
+    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
     expect(captured?.apiAuth).toBeUndefined();
   });
 
@@ -247,12 +253,13 @@ describe("provisionOperator", () => {
       agentName: "Op",
       config: config({ authMode: "caller-context" }),
       apiKey: "sk-test",
+      spec: fetchedSpec(),
     });
     expect(captured?.apiAuth).toBe(CALLER_TOKEN_API_AUTH);
   });
 
   it("targets the current origin and deploys", async () => {
-    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test" });
+    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
     expect(captured?.apiBaseUrl).toBe("https://eddi.example");
     expect(captured?.deploy).toBe(true);
   });
@@ -263,6 +270,7 @@ describe("provisionOperator", () => {
       config: config({ provider: "ollama" }),
       apiKey: "",
       baseUrl: "http://localhost:11434",
+      spec: fetchedSpec(),
     });
     expect(captured?.apiBaseUrl).toBe("http://localhost:11434");
   });
@@ -303,5 +311,165 @@ describe("deactivateOperator", () => {
     );
     const result = await deactivateOperator(config({ enabled: true }));
     expect(result.enabled).toBe(false);
+  });
+});
+
+describe("assertProvisioned", () => {
+  const base = {
+    action: "api_agent_created",
+    agentId: "op-1",
+    agentName: "Op",
+    provider: "anthropic",
+    model: "m",
+  };
+
+  it("accepts a deployed agent with a real id", () => {
+    expect(() => assertProvisioned({ ...base, deployed: true })).not.toThrow();
+  });
+
+  // setup-api falls back to the literal string "unknown" when it cannot read
+  // the created agent's location; storing that would break status and undeploy.
+  it("rejects the placeholder id", () => {
+    expect(() => assertProvisioned({ ...base, agentId: "unknown" })).toThrow(/agent id/i);
+  });
+
+  it("rejects an empty id", () => {
+    expect(() => assertProvisioned({ ...base, agentId: "" })).toThrow(/agent id/i);
+  });
+
+  // 201 is returned even when the deploy step failed.
+  it("rejects a created-but-undeployed agent", () => {
+    expect(() => assertProvisioned({ ...base, deployed: false })).toThrow(/deploy/i);
+  });
+
+  it("rejects an ERROR deployment status", () => {
+    expect(() =>
+      assertProvisioned({ ...base, deployed: true, deploymentStatus: "ERROR" }),
+    ).toThrow(/ERROR/);
+  });
+
+  it("accepts a result that simply omits the deploy fields", () => {
+    expect(() => assertProvisioned(base)).not.toThrow();
+  });
+});
+
+describe("runOperatorCanary", () => {
+  const cfg = () => config({ enabled: true, agentId: "op-1", version: 1 });
+
+  /** Serve a start + a stream made of the given SSE frames. */
+  function serveTurn(frames: string[]) {
+    server.use(
+      http.post("*/agents/:agentId/start", () =>
+        HttpResponse.json(
+          { location: "/agents/conv-1" },
+          { status: 201, headers: { Location: "/agents/conv-1" } },
+        ),
+      ),
+      http.post("*/agents/:conversationId/stream", () =>
+        new HttpResponse(frames.join(""), {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+      ),
+    );
+  }
+
+  const taskComplete = (trace: unknown) =>
+    `event: task_complete\ndata: ${JSON.stringify({ taskId: "t", taskType: "ai.labs.llm", index: 0, toolTrace: trace })}\n\n`;
+
+  it("passes when the operator actually called a tool", async () => {
+    serveTurn([
+      taskComplete([
+        { type: "tool_call", tool: "getAgents" },
+        { type: "tool_result", tool: "getAgents", result: '[{"id":"a1"}]' },
+      ]),
+      "event: done\ndata: \n\n",
+    ]);
+    const result = await runOperatorCanary(cfg());
+    expect(result.ok).toBe(true);
+    expect(result.toolCalls).toBe(1);
+  });
+
+  // The whole point of the probe: a model that answers from thin air looks
+  // identical to a working operator unless tool calls are counted.
+  it("fails when the operator answered without calling any tool", async () => {
+    serveTurn([
+      "event: token\ndata: You have three agents.\n\n",
+      "event: done\ndata: \n\n",
+    ]);
+    const result = await runOperatorCanary(cfg());
+    expect(result.ok).toBe(false);
+    expect(result.toolCalls).toBe(0);
+    expect(result.error).toMatch(/without calling any tool/i);
+  });
+
+  // This is the exact shape a wrong authMode produces: deployed, responsive,
+  // tools invoked, every one of them rejected.
+  it("fails when the tools were rejected as unauthorized", async () => {
+    serveTurn([
+      taskComplete([
+        { type: "tool_call", tool: "getAgents" },
+        { type: "tool_result", tool: "getAgents", result: "HTTP 401 Unauthorized" },
+      ]),
+      "event: done\ndata: \n\n",
+    ]);
+    const result = await runOperatorCanary(cfg());
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/unauthorized/i);
+  });
+
+  it("reports an in-band stream error", async () => {
+    serveTurn(["event: error\ndata: model provider rejected the key\n\n"]);
+    const result = await runOperatorCanary(cfg());
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/model provider/i);
+  });
+
+  it("reports a transport failure instead of throwing", async () => {
+    server.use(
+      http.post("*/agents/:agentId/start", () =>
+        HttpResponse.json({ message: "boom" }, { status: 500 }),
+      ),
+    );
+    const result = await runOperatorCanary(cfg());
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+
+  it("fails cleanly when no agent is configured", async () => {
+    const result = await runOperatorCanary(config());
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/no operator agent/i);
+  });
+});
+
+describe("reactivateOperator", () => {
+  it("redeploys the existing agent and re-enables the config", async () => {
+    let deployUrl = "";
+    let saved: OperatorConfig | undefined;
+    server.use(
+      http.post("*/administration/:env/deploy/:agentId", ({ request }) => {
+        deployUrl = request.url;
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.put(`${BASE}/${OPERATOR_VARIABLE_KEY}`, async ({ request }) => {
+        const body = (await request.json()) as { value: string };
+        saved = JSON.parse(body.value);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const result = await reactivateOperator(
+      config({ enabled: false, agentId: "op-1", version: 3, environment: "test" }),
+    );
+
+    expect(deployUrl).toContain("/administration/test/deploy/op-1");
+    expect(deployUrl).toContain("version=3");
+    expect(result.enabled).toBe(true);
+    expect(saved?.agentId).toBe("op-1");
+  });
+
+  it("refuses when there is no provisioned agent to redeploy", async () => {
+    await expect(reactivateOperator(config())).rejects.toThrow(/no provisioned agent/i);
   });
 });

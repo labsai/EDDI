@@ -120,11 +120,12 @@ export function OperatorActivation({
             <CardTitle>{t("operator.activation.modelStep")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            <Field label={t("operator.activation.provider")}>
+            <Field label={t("operator.activation.provider")} htmlFor="operator-provider">
               <select
                 value={provider}
                 onChange={(e) => handleProviderChange(e.target.value)}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                id="operator-provider"
                 data-testid="operator-provider"
               >
                 {LLM_PROVIDERS.map((p) => (
@@ -135,12 +136,13 @@ export function OperatorActivation({
               </select>
             </Field>
 
-            <Field label={t("operator.activation.model")}>
+            <Field label={t("operator.activation.model")} htmlFor="operator-model">
               <input
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 list="operator-model-suggestions"
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                id="operator-model"
                 data-testid="operator-model"
               />
               <datalist id="operator-model-suggestions">
@@ -151,12 +153,13 @@ export function OperatorActivation({
             </Field>
 
             {baseUrlRequired && (
-              <Field label={t("operator.activation.baseUrl")}>
+              <Field label={t("operator.activation.baseUrl")} htmlFor="operator-base-url">
                 <input
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
                   placeholder="http://localhost:11434"
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  id="operator-base-url"
                   data-testid="operator-base-url"
                 />
               </Field>
@@ -166,6 +169,7 @@ export function OperatorActivation({
               <Field
                 label={t("operator.activation.apiKey")}
                 hint={t("operator.activation.apiKeyHint")}
+                asGroup
               >
                 {vaultDown && (
                   <Notice tone="warning" icon={AlertTriangle}>
@@ -181,11 +185,12 @@ export function OperatorActivation({
               </Field>
             )}
 
-            <Field label={t("operator.activation.environment")}>
+            <Field label={t("operator.activation.environment")} htmlFor="operator-environment">
               <select
                 value={environment}
                 onChange={(e) => setEnvironment(e.target.value)}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                id="operator-environment"
                 data-testid="operator-environment"
               >
                 <option value="production">production</option>
@@ -249,17 +254,19 @@ export function OperatorActivation({
             <Field
               label={t("operator.activation.promptBody")}
               hint={t("operator.activation.promptBodyHint")}
+              htmlFor="operator-prompt-body"
             >
               <textarea
                 value={promptBody}
                 onChange={(e) => setPromptBody(e.target.value)}
                 rows={10}
                 className="w-full rounded-md border border-input bg-background p-3 font-mono text-xs"
+                id="operator-prompt-body"
                 data-testid="operator-prompt-body"
               />
             </Field>
 
-            <Field label={t("operator.activation.tools", { count: READ_ENDPOINTS.length })}>
+            <Field label={t("operator.activation.tools", { toolCount: READ_ENDPOINTS.length })}>
               <ul className="max-h-32 space-y-1 overflow-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs text-muted-foreground">
                 {READ_ENDPOINTS.map((e) => (
                   <li key={e}>{e}</li>
@@ -277,6 +284,8 @@ export function OperatorActivation({
               <div
                 className="flex items-center gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm"
                 data-testid="operator-activation-stage"
+                role="status"
+                aria-live="polite"
               >
                 <Loader2 className="h-4 w-4 animate-spin text-primary" />
                 {t(`operator.stage.${stage}`)}
@@ -326,6 +335,8 @@ function AuthModeField({
     <Field
       label={t("operator.activation.authMode")}
       hint={t("operator.activation.authModeHint")}
+      asGroup
+      groupRole="radiogroup"
     >
       <div className="space-y-2">
         {modes.map((mode) => (
@@ -384,22 +395,50 @@ function AuthModeField({
 
 /* ─── Small presentational helpers ─── */
 
+/**
+ * A labelled form row.
+ *
+ * `htmlFor` binds the label to a single native control, which is what gives
+ * that control its accessible name. Composite children (the secret picker, the
+ * radio group) have no single element to point at, so they pass `asGroup` and
+ * are wrapped in a named group instead — either way the control is never left
+ * anonymous to a screen reader.
+ */
 function Field({
   label,
   hint,
+  htmlFor,
+  asGroup,
+  groupRole = "group",
   children,
 }: {
   label: string;
   hint?: string;
+  htmlFor?: string;
+  asGroup?: boolean;
+  groupRole?: "group" | "radiogroup";
   children: React.ReactNode;
 }) {
+  const hintId = hint && htmlFor ? `${htmlFor}-hint` : undefined;
   return (
     <div className="space-y-2">
       <div>
-        <label className="text-sm font-medium">{label}</label>
-        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+        <label className="text-sm font-medium" htmlFor={htmlFor} id={`${htmlFor ?? label}-label`}>
+          {label}
+        </label>
+        {hint && (
+          <p className="text-xs text-muted-foreground" id={hintId}>
+            {hint}
+          </p>
+        )}
       </div>
-      {children}
+      {asGroup ? (
+        <div role={groupRole} aria-label={label} className="space-y-2">
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 }
@@ -427,6 +466,7 @@ function Notice({
   return (
     <div
       data-testid={testId}
+      role={tone === "error" ? "alert" : "status"}
       className={cn(
         "flex items-start gap-2 rounded-md border p-3 text-sm",
         tone === "error"

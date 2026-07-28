@@ -3085,7 +3085,7 @@
       "safetyPreambleHint": "Wird immer vorangestellt. Sie weist den Operator an, alles von seinen Tools Zurückgelieferte als nicht vertrauenswürdige Daten zu behandeln.",
       "promptBody": "Anweisungen für den Operator",
       "promptBodyHint": "Passen Sie an, wie sich der Operator vorstellt und wie er arbeitet.",
-      "tools": "Tools, die er erhält ({{count}})",
+      "tools": "Tools, die er erhält ({{toolCount}})",
       "activate": "Aktivieren & deployen"
     },
     "authMode": {
@@ -3104,7 +3104,8 @@
       "provisioning": "Operator-Agent wird erstellt …",
       "resolving-version": "Agent-Version wird ermittelt …",
       "saving": "Konfiguration wird gespeichert …",
-      "done": "Fertig"
+      "done": "Fertig",
+      "canary": "Es wird geprüft, ob der Operator Ihre Plattform erreicht …"
     },
     "status": {
       "title": "Operator",
@@ -3124,14 +3125,16 @@
       "deactivateConfirmTitle": "Plattform-Operator deaktivieren?",
       "deactivateConfirmBody": "Der Operator wird undeployt und antwortet nicht mehr. Seine Konfiguration bleibt erhalten, sodass Sie ihn später wieder aktivieren können.",
       "resetConfirmTitle": "Plattform-Operator löschen?",
-      "resetConfirmBody": "Der Operator-Agent und alle für ihn erstellten Ressourcen werden dauerhaft gelöscht, ebenso seine gespeicherte Konfiguration. Dies kann nicht rückgängig gemacht werden."
+      "resetConfirmBody": "Der Operator-Agent und alle für ihn erstellten Ressourcen werden dauerhaft gelöscht, ebenso seine gespeicherte Konfiguration. Dies kann nicht rückgängig gemacht werden.",
+      "connectionCheck": "Verbindung prüfen"
     },
     "chat": {
       "empty": "Fragen Sie nach Ihrer Installation. Der Operator schlägt nach und zeigt Ihnen jeden Aufruf, den er macht.",
       "placeholder": "Fragen Sie nach Agenten, Konversationen, Deployments, Logs …",
       "send": "Senden",
       "stop": "Stoppen",
-      "newConversation": "Neue Konversation beginnen"
+      "newConversation": "Neue Konversation beginnen",
+      "transcript": "Operator-Konversation"
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",
@@ -3142,7 +3145,19 @@
     "toast": {
       "activated": "Plattform-Operator aktiviert",
       "deactivated": "Plattform-Operator deaktiviert",
-      "reset": "Plattform-Operator gelöscht"
+      "reset": "Plattform-Operator gelöscht",
+      "activatedButUnreachable": "Operator deployt, konnte Ihre Plattform aber nicht lesen"
+    },
+    "canary": {
+      "genericFailure": "Die Verbindungsprüfung war nicht erfolgreich.",
+      "passed": "Der Operator erreicht Ihre Plattform.",
+      "recheck": "Erneut prüfen",
+      "title": "Der Operator wurde deployt, konnte Ihre Plattform aber nicht lesen."
+    },
+    "paused": {
+      "title": "Der Plattform-Operator ist pausiert",
+      "description": "Er ist weiterhin konfiguriert — beim Wiedereinschalten wird derselbe Agent erneut deployt. Es wurde nichts gelöscht.",
+      "action": "Wieder einschalten"
     }
   }
 }

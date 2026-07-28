@@ -6,8 +6,18 @@ import {
   deleteVariable,
   type GlobalVariable,
 } from "./variables";
-import { deleteAgent, undeployAgent, getDeploymentStatus } from "./agents";
-import { buildEndpointFilter, type OperatorScope } from "@/lib/operator/tool-scopes";
+import {
+  deleteAgent,
+  undeployAgent,
+  deployAgent,
+  getDeploymentStatus,
+} from "./agents";
+import { startConversation, sendMessageStreaming } from "./chat";
+import {
+  buildEndpointFilter,
+  parseEndpoint,
+  type OperatorScope,
+} from "@/lib/operator/tool-scopes";
 import { buildOperatorSystemPrompt } from "@/lib/operator/system-prompt";
 
 /* ─── Config model ─── */
@@ -167,11 +177,10 @@ export function findMissingEndpoints(
   endpoints: readonly string[],
 ): string[] {
   return endpoints.filter((entry) => {
-    const match = /^([A-Z]+)\s+(\/\S*)$/.exec(entry.trim());
-    if (!match) return true;
-    const [, method, path] = match;
-    const pathItem = spec.paths[path!];
-    return !pathItem || !(method!.toLowerCase() in pathItem);
+    const parsed = parseEndpoint(entry);
+    if (!parsed) return true;
+    const pathItem = spec.paths[parsed.path];
+    return !pathItem || !(parsed.method.toLowerCase() in pathItem);
   });
 }
 
@@ -184,6 +193,13 @@ export interface ProvisionOperatorParams {
   apiKey: string;
   /** Optional base URL for local providers (Ollama, Jlama). */
   baseUrl?: string;
+  /**
+   * The spec to send, already fetched by the caller.
+   *
+   * Required rather than fetched here so activation validates and sends the
+   * *same* document — and so the 400+ KB spec is pulled once, not twice.
+   */
+  spec: FetchedSpec;
 }
 
 /**
@@ -195,8 +211,7 @@ export interface ProvisionOperatorParams {
 export async function provisionOperator(
   params: ProvisionOperatorParams,
 ): Promise<SetupResult> {
-  const { agentName, config, apiKey, baseUrl } = params;
-  const spec = await fetchOpenApiSpec();
+  const { agentName, config, apiKey, baseUrl, spec } = params;
 
   return createApiAgent({
     agentName,
@@ -211,6 +226,27 @@ export async function provisionOperator(
     deploy: true,
     environment: config.environment,
   });
+}
+
+/**
+ * Reject a provisioning result that did not actually produce a live operator.
+ *
+ * `setup-api` answers 201 even when the deploy step failed, and falls back to
+ * the literal id `"unknown"` when it cannot read the created agent's location.
+ * Persisting either as `enabled: true` would leave the UI claiming a running
+ * operator whose status and undeploy calls address a nonexistent agent.
+ */
+export function assertProvisioned(result: SetupResult): void {
+  if (!result.agentId || result.agentId === "unknown") {
+    throw new Error(
+      "EDDI created the operator but did not return its agent id, so it cannot be managed. Check the platform logs and try again.",
+    );
+  }
+  if (result.deployed === false || result.deploymentStatus === "ERROR") {
+    throw new Error(
+      `The operator agent was created but failed to deploy (status: ${result.deploymentStatus ?? "unknown"}).`,
+    );
+  }
 }
 
 /** The `apiAuth` value for an auth mode. `none` sends no header at all. */
@@ -251,12 +287,146 @@ export function parseVersionFromLocation(location: string): number | null {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
+/* ─── Canary ─── */
+
+/** Outcome of a single probe turn run through the deployed operator. */
+export interface CanaryResult {
+  ok: boolean;
+  /** How many tools the operator actually invoked. */
+  toolCalls: number;
+  /** Populated when the probe failed; safe to show to an admin. */
+  error?: string;
+}
+
+/** The probe message. Phrased to force exactly one cheap read. */
+export const CANARY_PROMPT =
+  "List the agents on this platform. Use your tools; do not guess.";
+
+/**
+ * Run one read through the operator and report whether it could reach the
+ * platform.
+ *
+ * A `READY` deployment badge only means the agent config loaded — it says
+ * nothing about whether the generated tools can authenticate. Since EDDI does
+ * not forward the caller's identity on its own, a misconfigured `authMode`
+ * produces exactly that shape of failure: deployed, responsive, and unable to
+ * read anything. This probe is the only thing that distinguishes the two.
+ *
+ * A tool call that runs and errors still counts as a failure, because the
+ * model will happily narrate an apology instead of surfacing the 401.
+ */
+export async function runOperatorCanary(
+  config: OperatorConfig,
+  signal?: AbortSignal,
+): Promise<CanaryResult> {
+  if (!config.agentId) {
+    return { ok: false, toolCalls: 0, error: "No operator agent is configured." };
+  }
+
+  try {
+    const conversationId = await startConversation(config.environment, config.agentId);
+    let toolCalls = 0;
+    let toolError: string | undefined;
+    let streamError: string | undefined;
+
+    const stream = sendMessageStreaming(
+      config.environment,
+      config.agentId,
+      conversationId,
+      { input: CANARY_PROMPT, context: buildCallerContext(config) },
+      signal,
+    );
+
+    for await (const event of stream) {
+      if (event.type === "error") {
+        streamError = event.data || "The operator returned an error.";
+        continue;
+      }
+      if (event.type === "done") break;
+      if (event.type !== "task_complete") continue;
+
+      try {
+        const parsed = JSON.parse(event.data) as {
+          toolTrace?: { type: string; result?: string }[];
+        };
+        for (const entry of parsed.toolTrace ?? []) {
+          if (entry.type === "tool_call") toolCalls += 1;
+          if (entry.type === "tool_result" && looksLikeAuthFailure(entry.result)) {
+            toolError =
+              "The operator's tools were rejected by EDDI (unauthorized). Its authentication mode cannot reach this deployment.";
+          }
+        }
+      } catch {
+        // Non-JSON task payload — no trace to inspect.
+      }
+    }
+
+    if (streamError) return { ok: false, toolCalls, error: streamError };
+    if (toolError) return { ok: false, toolCalls, error: toolError };
+    if (toolCalls === 0) {
+      return {
+        ok: false,
+        toolCalls: 0,
+        error:
+          "The operator answered without calling any tool, so it could not actually read this platform.",
+      };
+    }
+    return { ok: true, toolCalls };
+  } catch (error) {
+    return {
+      ok: false,
+      toolCalls: 0,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function looksLikeAuthFailure(result: string | undefined): boolean {
+  if (!result) return false;
+  return /\b(401|403)\b|unauthorized|forbidden/i.test(result);
+}
+
+/**
+ * Per-turn context carrying the caller's bearer under `caller-context` auth.
+ *
+ * Shared by the canary and the operator chat so a probe exercises exactly the
+ * same credentials a real turn would.
+ */
+export function buildCallerContext(
+  config: OperatorConfig,
+): Record<string, unknown> | undefined {
+  if (config.authMode !== "caller-context") return undefined;
+  const header = api.getAuthHeader().Authorization;
+  if (!header) return undefined;
+  return { [CALLER_TOKEN_CONTEXT_KEY]: header.replace(/^Bearer\s+/i, "") };
+}
+
 /* ─── Lifecycle ─── */
 
 /** Deployment status for the configured operator agent. */
 export async function readOperatorStatus(config: OperatorConfig) {
   if (!config.agentId || config.version == null) return null;
   return getDeploymentStatus(config.environment, config.agentId, config.version);
+}
+
+/**
+ * Turn a previously-configured operator back on without rebuilding it.
+ *
+ * Deactivation only undeploys, so the agent and every resource behind it still
+ * exist. Re-running the full provisioning flow here would create a second agent
+ * and delete the first for no reason — and would force the admin to re-enter a
+ * model key the vault already holds.
+ */
+export async function reactivateOperator(
+  config: OperatorConfig,
+): Promise<OperatorConfig> {
+  if (!config.agentId || config.version == null) {
+    throw new Error("The operator has no provisioned agent to re-enable.");
+  }
+  await deployAgent(config.environment, config.agentId, config.version);
+  const next: OperatorConfig = { ...config, enabled: true };
+  await writeOperatorConfig(next);
+  return next;
 }
 
 /** Kill switch — undeploy the agent and mark the config disabled. */

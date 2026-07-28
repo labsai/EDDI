@@ -185,14 +185,45 @@ describe("OperatorPage", () => {
     });
   });
 
-  describe("when the operator is configured but disabled", () => {
-    it("shows the empty state, not a broken chat", async () => {
+  describe("when the operator is configured but merely switched off", () => {
+    it("offers to turn it back on instead of rebuilding it", async () => {
       serveConfig(activeConfig({ enabled: false }));
+      renderWithProviders(<OperatorPage />);
+      expect(await screen.findByTestId("operator-reactivate")).toBeInTheDocument();
+      expect(screen.queryByTestId("operator-input")).not.toBeInTheDocument();
+    });
+
+    it("redeploys the existing agent rather than provisioning a new one", async () => {
+      serveConfig(activeConfig({ enabled: false, version: 2, environment: "production" }));
+      let deployUrl = "";
+      let setupApiCalled = false;
+      server.use(
+        http.post("*/administration/:env/deploy/:agentId", ({ request }) => {
+          deployUrl = request.url;
+          return new HttpResponse(null, { status: 200 });
+        }),
+        http.post("*/administration/agents/setup-api", () => {
+          setupApiCalled = true;
+          return HttpResponse.json({}, { status: 201 });
+        }),
+        http.put(VAR_URL, () => new HttpResponse(null, { status: 204 })),
+      );
+
+      renderWithProviders(<OperatorPage />);
+      await userEvent.click(await screen.findByTestId("operator-reactivate"));
+
+      await waitFor(() => expect(deployUrl).toContain("/deploy/op-1"));
+      expect(deployUrl).toContain("version=2");
+      // Rebuilding would orphan resources and force re-entering the model key.
+      expect(setupApiCalled).toBe(false);
+    });
+
+    it("shows the never-activated empty state when there is no agent at all", async () => {
+      serveConfig(null);
       renderWithProviders(<OperatorPage />);
       expect(
         await screen.findByText(/the platform operator is off/i),
       ).toBeInTheDocument();
-      expect(screen.queryByTestId("operator-input")).not.toBeInTheDocument();
     });
   });
 });

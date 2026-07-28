@@ -9,6 +9,7 @@ import {
   Loader2,
   RefreshCw,
   Trash2,
+  PlugZap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,9 @@ interface OperatorStatusPanelProps {
   onReconfigure: () => void;
   onDeactivate: () => void;
   onReset: () => void;
+  /** Re-run the probe read that proves the operator can reach the platform. */
+  onRecheck: () => void;
+  recheckPending?: boolean;
   busy?: boolean;
 }
 
@@ -34,6 +38,8 @@ export function OperatorStatusPanel({
   onReconfigure,
   onDeactivate,
   onReset,
+  onRecheck,
+  recheckPending = false,
   busy = false,
 }: OperatorStatusPanelProps) {
   const { t } = useTranslation();
@@ -84,6 +90,20 @@ export function OperatorStatusPanel({
         )}
 
         <div className="space-y-2 pt-2">
+          <Button
+            variant="outline"
+            className="w-full gap-2"
+            onClick={onRecheck}
+            disabled={busy || recheckPending}
+            data-testid="operator-connection-check"
+          >
+            {recheckPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <PlugZap className="h-4 w-4" />
+            )}
+            {t("operator.status.connectionCheck")}
+          </Button>
           <Button
             variant="outline"
             className="w-full gap-2"

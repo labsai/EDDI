@@ -44,7 +44,14 @@ export function OperatorChat({
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded-xl border border-border">
-      <div className="flex-1 space-y-4 overflow-y-auto p-4" data-testid="operator-messages">
+      <div
+        className="flex-1 space-y-4 overflow-y-auto p-4"
+        data-testid="operator-messages"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+        aria-label={t("operator.chat.transcript")}
+      >
         {messages.length === 0 && (
           <div className="space-y-3 py-8 text-center">
             <Bot className="mx-auto h-10 w-10 text-muted-foreground/40" />
@@ -104,6 +111,7 @@ export function OperatorChat({
           <div
             className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
             data-testid="operator-chat-error"
+            role="alert"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{error}</span>
@@ -124,11 +132,12 @@ export function OperatorChat({
             }
           }}
           placeholder={t("operator.chat.placeholder")}
+          aria-label={t("operator.chat.placeholder")}
           className="h-10 flex-1 rounded-md border border-input bg-background px-3 text-sm"
           data-testid="operator-input"
         />
         {isStreaming ? (
-          <Button variant="outline" size="icon" onClick={onStop} title={t("operator.chat.stop")}>
+          <Button variant="outline" size="icon" onClick={onStop} title={t("operator.chat.stop")} aria-label={t("operator.chat.stop")}>
             <Square className="h-4 w-4" />
           </Button>
         ) : (
@@ -137,6 +146,7 @@ export function OperatorChat({
             onClick={() => submit(input)}
             disabled={!input.trim()}
             title={t("operator.chat.send")}
+            aria-label={t("operator.chat.send")}
             data-testid="operator-send"
           >
             <Send className="h-4 w-4" />
@@ -147,6 +157,7 @@ export function OperatorChat({
           size="icon"
           onClick={onReset}
           title={t("operator.chat.newConversation")}
+          aria-label={t("operator.chat.newConversation")}
         >
           <RotateCcw className="h-4 w-4" />
         </Button>

@@ -47,6 +47,35 @@ describe("OperatorActivation", () => {
     );
   });
 
+  // Regression guard: every control was previously anonymous to assistive
+  // tech — a bare <label> with no htmlFor next to an id-less control.
+  describe("accessibility", () => {
+    it("gives every native control an accessible name", () => {
+      renderActivation();
+      expect(screen.getByLabelText(/^provider$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^model$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^environment$/i)).toBeInTheDocument();
+    });
+
+    it("names the composite credential and auth-mode controls", () => {
+      renderActivation();
+      expect(
+        screen.getByRole("group", { name: /model api key/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("radiogroup", { name: /how the operator authenticates/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("announces activation progress", async () => {
+      renderActivation({ stage: "provisioning" });
+      await userEvent.type(screen.getByTestId("operator-api-key-input"), "sk-test-key");
+      await userEvent.click(screen.getByTestId("operator-next"));
+      const stage = await screen.findByTestId("operator-activation-stage");
+      expect(stage).toHaveAttribute("aria-live", "polite");
+    });
+  });
+
   it("states plainly that the operator is read-only", () => {
     renderActivation();
     expect(screen.getAllByText(/read-only/i).length).toBeGreaterThan(0);

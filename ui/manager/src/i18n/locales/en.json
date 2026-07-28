@@ -3112,7 +3112,7 @@
       "safetyPreambleHint": "Always prepended. It tells the operator to treat everything its tools return as untrusted data.",
       "promptBody": "Operator instructions",
       "promptBodyHint": "Edit how the operator introduces itself and how it works.",
-      "tools": "Tools it will be given ({{count}})",
+      "tools": "Tools it will be given ({{toolCount}})",
       "activate": "Activate & deploy"
     },
     "authMode": {
@@ -3131,7 +3131,8 @@
       "provisioning": "Creating the operator agent…",
       "resolving-version": "Resolving the agent version…",
       "saving": "Saving configuration…",
-      "done": "Done"
+      "done": "Done",
+      "canary": "Checking the operator can reach your platform…"
     },
     "status": {
       "title": "Operator",
@@ -3151,14 +3152,16 @@
       "deactivateConfirmTitle": "Deactivate the Platform Operator?",
       "deactivateConfirmBody": "The operator is undeployed and stops responding. Its configuration is kept, so you can turn it back on later.",
       "resetConfirmTitle": "Delete the Platform Operator?",
-      "resetConfirmBody": "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone."
+      "resetConfirmBody": "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone.",
+      "connectionCheck": "Check connection"
     },
     "chat": {
       "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",
       "placeholder": "Ask about agents, conversations, deployments, logs…",
       "send": "Send",
       "stop": "Stop",
-      "newConversation": "Start a new conversation"
+      "newConversation": "Start a new conversation",
+      "transcript": "Operator conversation"
     },
     "starters": {
       "whatsDeployed": "What's deployed right now?",
@@ -3169,7 +3172,19 @@
     "toast": {
       "activated": "Platform Operator activated",
       "deactivated": "Platform Operator deactivated",
-      "reset": "Platform Operator deleted"
+      "reset": "Platform Operator deleted",
+      "activatedButUnreachable": "Operator deployed, but it could not read your platform"
+    },
+    "canary": {
+      "genericFailure": "The connection check did not succeed.",
+      "passed": "The operator can reach your platform.",
+      "recheck": "Check again",
+      "title": "The operator deployed, but could not read your platform."
+    },
+    "paused": {
+      "title": "The Platform Operator is paused",
+      "description": "It is still configured — turning it back on redeploys the same agent. Nothing has been deleted.",
+      "action": "Turn back on"
     }
   }
 }

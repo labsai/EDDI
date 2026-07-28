@@ -3085,7 +3085,7 @@
       "safetyPreambleHint": "始终置于最前。它要求操作员将工具返回的一切内容视为不可信数据。",
       "promptBody": "操作员指令",
       "promptBodyHint": "编辑操作员如何自我介绍以及如何工作。",
-      "tools": "将授予它的工具（{{count}} 个）",
+      "tools": "将授予它的工具（{{toolCount}} 个）",
       "activate": "启用并部署"
     },
     "authMode": {
@@ -3104,7 +3104,8 @@
       "provisioning": "正在创建操作员智能体……",
       "resolving-version": "正在解析智能体版本……",
       "saving": "正在保存配置……",
-      "done": "完成"
+      "done": "完成",
+      "canary": "正在检查操作员能否访问你的平台……"
     },
     "status": {
       "title": "操作员",
@@ -3124,14 +3125,16 @@
       "deactivateConfirmTitle": "停用平台操作员？",
       "deactivateConfirmBody": "操作员将被取消部署并停止响应。其配置会保留，你可以稍后重新启用。",
       "resetConfirmTitle": "删除平台操作员？",
-      "resetConfirmBody": "操作员智能体及为其创建的所有资源，连同已保存的配置，都会被永久删除。此操作无法撤销。"
+      "resetConfirmBody": "操作员智能体及为其创建的所有资源，连同已保存的配置，都会被永久删除。此操作无法撤销。",
+      "connectionCheck": "检查连接"
     },
     "chat": {
       "empty": "来问问你的部署。操作员会去查，并向你展示它发出的每一次调用。",
       "placeholder": "询问智能体、会话、部署、日志……",
       "send": "发送",
       "stop": "停止",
-      "newConversation": "开始新会话"
+      "newConversation": "开始新会话",
+      "transcript": "操作员对话"
     },
     "starters": {
       "whatsDeployed": "现在部署了哪些内容？",
@@ -3142,7 +3145,19 @@
     "toast": {
       "activated": "平台操作员已启用",
       "deactivated": "平台操作员已停用",
-      "reset": "平台操作员已删除"
+      "reset": "平台操作员已删除",
+      "activatedButUnreachable": "操作员已部署，但无法读取你的平台"
+    },
+    "canary": {
+      "genericFailure": "连接检查未通过。",
+      "passed": "操作员可以访问你的平台。",
+      "recheck": "重新检查",
+      "title": "操作员已部署，但无法读取你的平台。"
+    },
+    "paused": {
+      "title": "平台操作员已暂停",
+      "description": "配置仍然保留——重新开启会再次部署同一个智能体。没有删除任何内容。",
+      "action": "重新开启"
     }
   }
 }

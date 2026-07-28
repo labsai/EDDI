@@ -1,6 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   readOperatorConfig,
+  assertProvisioned,
+  runOperatorCanary,
+  reactivateOperator,
+  type CanaryResult,
   writeOperatorConfig,
   readOperatorStatus,
   deactivateOperator,
@@ -64,7 +68,14 @@ export type ActivationStage =
   | "provisioning"
   | "resolving-version"
   | "saving"
+  | "canary"
   | "done";
+
+/** What activation returns: the saved config plus the probe outcome. */
+export interface ActivationOutcome {
+  config: OperatorConfig;
+  canary: CanaryResult;
+}
 
 export interface ActivateParams {
   agentName: string;
@@ -75,12 +86,16 @@ export interface ActivateParams {
 }
 
 /**
- * Provision (or re-provision) the operator and persist the config.
+ * Provision the operator from scratch and persist the config.
  *
- * Idempotency: when a previous agent exists, `setup-api` creates a fresh one, so
- * the old one is removed afterwards rather than left orphaned. The config is
- * written only after the version resolves, so a half-provisioned operator never
- * ends up marked enabled.
+ * `setup-api` always builds a new agent, so a re-provision retires the one it
+ * replaced instead of leaving it deployed. Merely re-enabling a disabled
+ * operator should go through `useReactivateOperator`, which redeploys the
+ * existing agent rather than rebuilding it.
+ *
+ * Ordering matters: the config is written only once the agent is confirmed
+ * deployed and its version resolved, so a half-provisioned operator is never
+ * recorded as enabled.
  */
 export function useActivateOperator() {
   const qc = useQueryClient();
@@ -101,7 +116,9 @@ export function useActivateOperator() {
       }
 
       onStage?.("provisioning");
-      const result = await provisionOperator({ agentName, config, apiKey, baseUrl });
+      const result = await provisionOperator({ agentName, config, apiKey, baseUrl, spec });
+      // 201 does not mean deployed, and the id can come back as "unknown".
+      assertProvisioned(result);
 
       onStage?.("resolving-version");
       const version = await resolveAgentVersion(result);
@@ -125,8 +142,13 @@ export function useActivateOperator() {
         }
       }
 
+      // A READY badge only proves the config loaded. Run one real read so a
+      // deployed-but-unreachable operator is reported as such, not as success.
+      onStage?.("canary");
+      const canary = await runOperatorCanary(next);
+
       onStage?.("done");
-      return next;
+      return { config: next, canary };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: operatorKeys.all });
@@ -148,6 +170,24 @@ async function removeSupersededAgent(config: OperatorConfig): Promise<void> {
   await deleteAgent(config.agentId, config.version, {
     cascade: true,
     permanent: true,
+  });
+}
+
+/** Re-enable a configured-but-disabled operator by redeploying its agent. */
+export function useReactivateOperator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (config: OperatorConfig) => reactivateOperator(config),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: operatorKeys.all });
+    },
+  });
+}
+
+/** Re-run the probe read on demand, from the operator screen. */
+export function useOperatorCanary() {
+  return useMutation({
+    mutationFn: (config: OperatorConfig) => runOperatorCanary(config),
   });
 }
 

@@ -121,13 +121,14 @@
 
 ### Test Counts
 - 281 test files passing (EDDI-Manager)
-- 4100 Tests passing (`npm run test`)
+- 4119 Tests passing (`npm run test`)
 - 112 Backend tenancy tests passing (`mvn test`)
 
 ### Last Commit Focus
 - Frontend: `feat(operator): add the Platform Operator agent (P1, read-only)` on `feat/platform-operator-agent`
   - Opt-in, admin-activated agent that inspects this EDDI deployment through its own REST API, exposed as tools via `setup-api`. Read-only allow-list (`src/lib/operator/tool-scopes.ts`), non-editable safety preamble, single-blob `platform.operator` config, activation flow with a post-provision spec check, operator screen with a live tool-activity trace, dashboard discovery card, kill switch, `operator.*` i18n across 11 locales.
   - **Design correction:** the design assumed EDDI forwards the caller's token to an API agent's tool calls. It does not — `ApiCallExecutor` builds headers only from the ApiCall config, and `userInfo` exposes only `userId`. Auth is therefore an explicit `authMode` on the config: `none` (no header; blocked at activation when OIDC is on, since every tool call would 401) or `caller-context` (`Bearer {context.eddiAuthToken}` resolved per turn from the conversation context, behind an acknowledged token-at-rest warning).
+  - **Review pass:** added the post-deploy canary the design asked for (one probe read; it counts tool calls and detects 401s, since a READY badge proves nothing about whether the generated tools can authenticate), made activation honour setup-api's `deployed`/`deploymentStatus` and reject the `"unknown"` agent-id fallback, added a redeploy-in-place path so re-enabling a paused operator no longer rebuilds it, fixed the activation form's accessibility (not one control had an accessible name), and stopped `{{count}}` triggering i18next pluralization.
   - **Contract bug fixed:** `createApiAgent` sent `name`; the backend requires `agentName` and rejects a blank one, so the wizard's API-agent path was broken. Fixed in the type, the wizard, the MSW mock (now rejects blank, as the backend does) and three tests that had been passing vacuously.
 - Previous frontend: `feat: fix live logs — REST seeding, SSE resilience, better empty states` on `fix/group-chat-defensive-rendering` (`e5303c5e`)
   - REST API seeding on first SSE connect (session-log-store.ts), BearerEventSource \r\n handling + 45s inactivity timeout, `seeded` state exposed through use-logs hook, 3-state empty view (loading/no-activity/connecting), 3 new i18n keys across 11 locales, 3 new tests

@@ -3085,7 +3085,7 @@
       "safetyPreambleHint": "항상 앞에 추가되며, 도구가 반환하는 모든 것을 신뢰할 수 없는 데이터로 다루도록 오퍼레이터에게 지시합니다.",
       "promptBody": "오퍼레이터 지침",
       "promptBodyHint": "오퍼레이터가 자신을 소개하는 방식과 일하는 방식을 수정하세요.",
-      "tools": "부여될 도구 ({{count}}개)",
+      "tools": "부여될 도구 ({{toolCount}}개)",
       "activate": "활성화 및 배포"
     },
     "authMode": {
@@ -3104,7 +3104,8 @@
       "provisioning": "오퍼레이터 에이전트를 만드는 중…",
       "resolving-version": "에이전트 버전을 확인하는 중…",
       "saving": "설정을 저장하는 중…",
-      "done": "완료"
+      "done": "완료",
+      "canary": "오퍼레이터가 플랫폼에 접근할 수 있는지 확인하는 중…"
     },
     "status": {
       "title": "오퍼레이터",
@@ -3124,14 +3125,16 @@
       "deactivateConfirmTitle": "플랫폼 오퍼레이터를 비활성화할까요?",
       "deactivateConfirmBody": "오퍼레이터의 배포가 해제되고 응답을 멈춥니다. 설정은 유지되므로 나중에 다시 켤 수 있습니다.",
       "resetConfirmTitle": "플랫폼 오퍼레이터를 삭제할까요?",
-      "resetConfirmBody": "오퍼레이터 에이전트와 이를 위해 생성된 모든 리소스가 저장된 설정과 함께 영구히 삭제됩니다. 되돌릴 수 없습니다."
+      "resetConfirmBody": "오퍼레이터 에이전트와 이를 위해 생성된 모든 리소스가 저장된 설정과 함께 영구히 삭제됩니다. 되돌릴 수 없습니다.",
+      "connectionCheck": "연결 확인"
     },
     "chat": {
       "empty": "배포에 대해 물어보세요. 오퍼레이터가 찾아보고, 수행한 모든 호출을 보여줍니다.",
       "placeholder": "에이전트, 대화, 배포, 로그에 대해 물어보세요…",
       "send": "보내기",
       "stop": "중지",
-      "newConversation": "새 대화 시작"
+      "newConversation": "새 대화 시작",
+      "transcript": "오퍼레이터 대화"
     },
     "starters": {
       "whatsDeployed": "지금 무엇이 배포되어 있나요?",
@@ -3142,7 +3145,19 @@
     "toast": {
       "activated": "플랫폼 오퍼레이터를 활성화했습니다",
       "deactivated": "플랫폼 오퍼레이터를 비활성화했습니다",
-      "reset": "플랫폼 오퍼레이터를 삭제했습니다"
+      "reset": "플랫폼 오퍼레이터를 삭제했습니다",
+      "activatedButUnreachable": "오퍼레이터를 배포했지만 플랫폼을 읽지 못했습니다"
+    },
+    "canary": {
+      "genericFailure": "연결 확인에 실패했습니다.",
+      "passed": "오퍼레이터가 플랫폼에 접근할 수 있습니다.",
+      "recheck": "다시 확인",
+      "title": "오퍼레이터는 배포되었지만 플랫폼을 읽지 못했습니다."
+    },
+    "paused": {
+      "title": "플랫폼 오퍼레이터가 일시 중지됨",
+      "description": "설정은 그대로입니다. 다시 켜면 같은 에이전트가 재배포됩니다. 삭제된 것은 없습니다.",
+      "action": "다시 켜기"
     }
   }
 }

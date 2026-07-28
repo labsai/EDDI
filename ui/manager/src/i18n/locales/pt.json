@@ -3085,7 +3085,7 @@
       "safetyPreambleHint": "São sempre antepostas. Instruem o operador a tratar tudo o que as suas ferramentas devolvem como dados não fiáveis.",
       "promptBody": "Instruções do operador",
       "promptBodyHint": "Edite como o operador se apresenta e como trabalha.",
-      "tools": "Ferramentas que receberá ({{count}})",
+      "tools": "Ferramentas que receberá ({{toolCount}})",
       "activate": "Ativar e implantar"
     },
     "authMode": {
@@ -3104,7 +3104,8 @@
       "provisioning": "A criar o agente operador…",
       "resolving-version": "A determinar a versão do agente…",
       "saving": "A guardar a configuração…",
-      "done": "Concluído"
+      "done": "Concluído",
+      "canary": "A verificar se o operador consegue aceder à sua plataforma…"
     },
     "status": {
       "title": "Operador",
@@ -3124,14 +3125,16 @@
       "deactivateConfirmTitle": "Desativar o operador da plataforma?",
       "deactivateConfirmBody": "O operador é retirado da implantação e deixa de responder. A sua configuração é mantida, para que o possa reativar mais tarde.",
       "resetConfirmTitle": "Eliminar o operador da plataforma?",
-      "resetConfirmBody": "O agente operador e todos os recursos criados para ele são eliminados permanentemente, juntamente com a sua configuração guardada. Esta ação não pode ser anulada."
+      "resetConfirmBody": "O agente operador e todos os recursos criados para ele são eliminados permanentemente, juntamente com a sua configuração guardada. Esta ação não pode ser anulada.",
+      "connectionCheck": "Verificar ligação"
     },
     "chat": {
       "empty": "Pergunte sobre a sua instalação. O operador consulta e mostra-lhe cada chamada que faz.",
       "placeholder": "Pergunte sobre agentes, conversas, implantações, registos…",
       "send": "Enviar",
       "stop": "Parar",
-      "newConversation": "Iniciar uma nova conversa"
+      "newConversation": "Iniciar uma nova conversa",
+      "transcript": "Conversa com o operador"
     },
     "starters": {
       "whatsDeployed": "O que está implantado neste momento?",
@@ -3142,7 +3145,19 @@
     "toast": {
       "activated": "Operador da plataforma ativado",
       "deactivated": "Operador da plataforma desativado",
-      "reset": "Operador da plataforma eliminado"
+      "reset": "Operador da plataforma eliminado",
+      "activatedButUnreachable": "Operador implantado, mas não conseguiu ler a sua plataforma"
+    },
+    "canary": {
+      "genericFailure": "A verificação de ligação não foi bem-sucedida.",
+      "passed": "O operador consegue aceder à sua plataforma.",
+      "recheck": "Verificar novamente",
+      "title": "O operador foi implantado, mas não conseguiu ler a sua plataforma."
+    },
+    "paused": {
+      "title": "O operador da plataforma está em pausa",
+      "description": "Continua configurado — ao voltar a ligá-lo, o mesmo agente é implantado de novo. Nada foi eliminado.",
+      "action": "Voltar a ligar"
     }
   }
 }

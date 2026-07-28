@@ -3085,7 +3085,7 @@
       "safetyPreambleHint": "Toujours ajoutées en tête. Elles indiquent à l'opérateur de traiter tout ce que renvoient ses outils comme des données non fiables.",
       "promptBody": "Instructions de l'opérateur",
       "promptBodyHint": "Modifiez la façon dont l'opérateur se présente et travaille.",
-      "tools": "Outils qui lui seront confiés ({{count}})",
+      "tools": "Outils qui lui seront confiés ({{toolCount}})",
       "activate": "Activer et déployer"
     },
     "authMode": {
@@ -3104,7 +3104,8 @@
       "provisioning": "Création de l'agent opérateur…",
       "resolving-version": "Résolution de la version de l'agent…",
       "saving": "Enregistrement de la configuration…",
-      "done": "Terminé"
+      "done": "Terminé",
+      "canary": "Vérification que l'opérateur atteint votre plateforme…"
     },
     "status": {
       "title": "Opérateur",
@@ -3124,14 +3125,16 @@
       "deactivateConfirmTitle": "Désactiver l'opérateur de plateforme ?",
       "deactivateConfirmBody": "L'opérateur est retiré du déploiement et cesse de répondre. Sa configuration est conservée, vous pourrez le réactiver plus tard.",
       "resetConfirmTitle": "Supprimer l'opérateur de plateforme ?",
-      "resetConfirmBody": "L'agent opérateur et toutes les ressources créées pour lui sont définitivement supprimés, ainsi que sa configuration enregistrée. Cette action est irréversible."
+      "resetConfirmBody": "L'agent opérateur et toutes les ressources créées pour lui sont définitivement supprimés, ainsi que sa configuration enregistrée. Cette action est irréversible.",
+      "connectionCheck": "Vérifier la connexion"
     },
     "chat": {
       "empty": "Interrogez votre déploiement. L'opérateur fait les recherches et vous montre chaque appel qu'il effectue.",
       "placeholder": "Agents, conversations, déploiements, journaux…",
       "send": "Envoyer",
       "stop": "Arrêter",
-      "newConversation": "Démarrer une nouvelle conversation"
+      "newConversation": "Démarrer une nouvelle conversation",
+      "transcript": "Conversation avec l'opérateur"
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",
@@ -3142,7 +3145,19 @@
     "toast": {
       "activated": "Opérateur de plateforme activé",
       "deactivated": "Opérateur de plateforme désactivé",
-      "reset": "Opérateur de plateforme supprimé"
+      "reset": "Opérateur de plateforme supprimé",
+      "activatedButUnreachable": "Opérateur déployé, mais il n'a pas pu lire votre plateforme"
+    },
+    "canary": {
+      "genericFailure": "La vérification de connexion a échoué.",
+      "passed": "L'opérateur atteint bien votre plateforme.",
+      "recheck": "Vérifier à nouveau",
+      "title": "L'opérateur est déployé, mais n'a pas pu lire votre plateforme."
+    },
+    "paused": {
+      "title": "L'opérateur de plateforme est en pause",
+      "description": "Il reste configuré — le réactiver redéploie le même agent. Rien n'a été supprimé.",
+      "action": "Réactiver"
     }
   }
 }

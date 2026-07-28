@@ -6,11 +6,8 @@ import {
   type SSEEvent,
 } from "@/lib/api/chat";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
-import {
-  CALLER_TOKEN_CONTEXT_KEY,
-  type OperatorConfig,
-} from "@/lib/api/operator";
-import { api, getErrorMessage } from "@/lib/api-client";
+import { buildCallerContext, type OperatorConfig } from "@/lib/api/operator";
+import { getErrorMessage } from "@/lib/api-client";
 
 /**
  * Chat state for the Platform Operator.
@@ -156,7 +153,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
           config.environment,
           config.agentId,
           conversationId,
-          { input, context: buildContext(config) },
+          { input, context: buildCallerContext(config) },
           controller.signal,
         );
 
@@ -200,24 +197,4 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
   );
 
   return { ...state, send, stop, reset };
-}
-
-/**
- * Per-turn conversation context.
- *
- * Under `caller-context` auth the operator's generated tools carry
- * `Authorization: Bearer {context.eddiAuthToken}`, which the template engine
- * resolves at call time — so the signed-in user's live bearer has to ride along
- * with every message for tool calls to authenticate as that user.
- *
- * Note this writes the token into conversation memory. The activation flow makes
- * the admin acknowledge that before this mode can be selected.
- */
-export function buildContext(
-  config: OperatorConfig,
-): Record<string, unknown> | undefined {
-  if (config.authMode !== "caller-context") return undefined;
-  const header = api.getAuthHeader().Authorization;
-  if (!header) return undefined;
-  return { [CALLER_TOKEN_CONTEXT_KEY]: header.replace(/^Bearer\s+/i, "") };
 }
