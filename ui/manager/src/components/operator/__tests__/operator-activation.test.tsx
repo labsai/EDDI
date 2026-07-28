@@ -76,6 +76,36 @@ describe("OperatorActivation", () => {
     });
   });
 
+  describe("reconfiguring an existing operator", () => {
+    it("pre-fills the stored vault key so the credential need not be re-entered", async () => {
+      renderActivation({
+        initial: {
+          ...defaultOperatorConfig("Body text."),
+          provider: "anthropic",
+          credentialKey: "operator-llm-key",
+        },
+      });
+      // Ready to continue without touching the key field.
+      await waitFor(() =>
+        expect(screen.getByTestId("operator-next")).not.toBeDisabled(),
+      );
+    });
+
+    it("clears the key when the provider changes, since keys are provider-specific", async () => {
+      renderActivation({
+        initial: {
+          ...defaultOperatorConfig("Body text."),
+          provider: "anthropic",
+          credentialKey: "operator-llm-key",
+        },
+      });
+      await userEvent.selectOptions(screen.getByTestId("operator-provider"), "openai");
+      await waitFor(() =>
+        expect(screen.getByTestId("operator-next")).toBeDisabled(),
+      );
+    });
+  });
+
   it("states plainly that the operator is read-only", () => {
     renderActivation();
     expect(screen.getAllByText(/read-only/i).length).toBeGreaterThan(0);

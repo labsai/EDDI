@@ -43,7 +43,12 @@ export function OperatorActivation({
   const [step, setStep] = useState<Step>("model");
   const [provider, setProvider] = useState(initial.provider);
   const [model, setModel] = useState(initial.model);
-  const [apiKey, setApiKey] = useState("");
+  // Seeded from the stored vault key *name* so reconfiguring (e.g. switching
+  // model) does not demand a credential the vault already holds. Plain-text
+  // keys are not stored, so those still have to be re-entered.
+  const [apiKey, setApiKey] = useState(
+    initial.credentialKey ? `vault:${initial.credentialKey}` : "",
+  );
   const [baseUrl, setBaseUrl] = useState("");
   const [environment, setEnvironment] = useState(initial.environment);
   const [promptBody, setPromptBody] = useState(initial.promptBody || OPERATOR_PROMPT_BODY);
@@ -78,7 +83,11 @@ export function OperatorActivation({
     setProvider(next);
     const cfg = getProviderConfig(next);
     if (cfg) setModel(cfg.defaultModel);
-    setApiKey("");
+    // A key is provider-specific, so carrying it across a provider switch would
+    // silently send the wrong credential.
+    setApiKey(next === initial.provider && initial.credentialKey
+      ? `vault:${initial.credentialKey}`
+      : "");
   }
 
   function handleActivate() {
