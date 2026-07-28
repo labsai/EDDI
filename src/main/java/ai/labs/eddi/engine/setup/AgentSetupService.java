@@ -36,6 +36,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -241,6 +242,12 @@ public class AgentSetupService {
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         if (!isLocalLLM && (request.apiKey() == null || request.apiKey().isBlank())) {
             throw new AgentSetupException("API key is required for cloud LLM providers");
+        }
+        // Scheme-level check only. Full SSRF validation would reject loopback and
+        // private addresses, which is precisely where a local LLM provider lives —
+        // the reason this field exists.
+        if (request.baseUrl() != null && !request.baseUrl().isBlank() && !UrlValidationUtils.isValidHttpUrl(request.baseUrl())) {
+            throw new AgentSetupException("baseUrl must be a valid http(s) URL");
         }
 
         var params = resolveParams(request.provider(), request.model(), request.deploy(), request.environment());

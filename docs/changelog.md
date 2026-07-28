@@ -18,7 +18,7 @@ regex `\{[a-zA-Z#/!]` matches `{c`, so `Bearer ${caller:token}` is handed to Qut
 `{caller:token}` as a namespaced expression. An unresolvable namespace is a hard failure regardless
 of `strictRendering`, and no `caller` resolver existed. Proven against the project's own build:
 
-```
+```text
 Bearer ${caller:token} -> THREW: No namespace resolver found for [caller]
 Bearer ${vault:my-key} -> THREW: No namespace resolver found for [vault]
 ${vars:default-model}  -> THREW: No namespace resolver found for [vars]

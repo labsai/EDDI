@@ -90,10 +90,19 @@ class CallerIdentityResolverTest {
     }
 
     @Test
-    @DisplayName("an anonymous caller yields an empty userId rather than failing")
-    void resolvesMissingUserIdToEmpty() {
+    @DisplayName("a caller with no principal name fails closed, like the token does")
+    void refusesUserIdWithoutPrincipal() {
+        // Emitting "" would send a header the receiving API cannot attribute, and
+        // the failure would surface far from its cause.
         withCaller(new CallerIdentity("jwt-abc", null, SELF));
-        assertEquals("", resolver.resolveValue("${caller:userId}", SELF_TARGET));
+        var e = assertThrows(CallerIdentityException.class, () -> resolver.resolveValue("${caller:userId}", SELF_TARGET));
+        assertTrue(e.getMessage().contains("no principal name"));
+    }
+
+    @Test
+    void refusesBlankUserId() {
+        withCaller(new CallerIdentity("jwt-abc", "   ", SELF));
+        assertThrows(CallerIdentityException.class, () -> resolver.resolveValue("${caller:userId}", SELF_TARGET));
     }
 
     @Test

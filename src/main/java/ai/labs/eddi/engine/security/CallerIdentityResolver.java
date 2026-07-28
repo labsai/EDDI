@@ -109,7 +109,7 @@ public class CallerIdentityResolver {
         StringBuilder resolved = new StringBuilder();
         while (matcher.find()) {
             String reference = matcher.group(1);
-            String replacement = REF_TOKEN.equals(reference) ? resolveToken(identity, target) : nullToEmpty(identity.userId());
+            String replacement = REF_TOKEN.equals(reference) ? resolveToken(identity, target) : resolveUserId(identity);
             matcher.appendReplacement(resolved, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(resolved);
@@ -169,8 +169,19 @@ public class CallerIdentityResolver {
         return identity.token();
     }
 
-    private static String nullToEmpty(String value) {
-        return value != null ? value : "";
+    /**
+     * The caller's principal name.
+     * <p>
+     * Fails closed like the token does: emitting an empty string would send a
+     * header the receiving API cannot attribute, and the failure would surface far
+     * from its cause.
+     */
+    private static String resolveUserId(CallerIdentity identity) {
+        if (identity.userId() == null || identity.userId().isBlank()) {
+            throw new CallerIdentityException(
+                    "This API call references ${caller:userId}, but the authenticated caller has no principal name.");
+        }
+        return identity.userId();
     }
 
     /** Raised when a {@code ${caller:...}} reference cannot be safely resolved. */
