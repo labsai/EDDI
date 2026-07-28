@@ -1076,6 +1076,43 @@ print(json.dumps(d))" 2>/dev/null) || updated_master=""
   else
     echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${master_status} — admin console keeps the default theme)${RESET}"
   fi
+
+  # -- Default-role safety check ---------------------------
+  # Realms created before this was fixed composite default-roles-eddi to
+  # eddi-admin/eddi-editor, so any user created without explicit roles - which
+  # is what self-registration produces - becomes an admin. Realm import is
+  # one-shot and will not correct it.
+  #
+  # This only WARNS. Unlike the branding fields, changing it is an authorization
+  # decision: an operator may have granted elevated defaults deliberately, and
+  # silently stripping them during an upgrade would be worse than leaving them.
+  # Fresh installs get the safe value from eddi-realm.json.
+  local default_composites elevated=""
+  default_composites=$(curl -sf \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${kc_base}/admin/realms/eddi/roles/default-roles-eddi/composites" 2>/dev/null) || default_composites=""
+
+  if [[ -n "$default_composites" ]]; then
+    if [[ "$json_tool" == "jq" ]]; then
+      elevated=$(echo "$default_composites" \
+        | jq -r '[.[].name] | map(select(. == "eddi-admin" or . == "eddi-editor")) | join(", ")' 2>/dev/null)
+    else
+      elevated=$(echo "$default_composites" | python3 -c "
+import sys, json
+names = [r.get('name') for r in json.load(sys.stdin)]
+print(', '.join(n for n in names if n in ('eddi-admin', 'eddi-editor')))" 2>/dev/null)
+    fi
+
+    if [[ -n "$elevated" ]]; then
+      echo ""
+      warn "This realm grants ${elevated} to every new user by default."
+      echo -e "     ${DIM}Harmless while self-registration is off, but enabling it would${RESET}"
+      echo -e "     ${DIM}make everyone who signs up an admin. New installs no longer do this.${RESET}"
+      echo -e "     ${DIM}To fix: Admin console -> Realm roles -> default-roles-eddi ->${RESET}"
+      echo -e "     ${DIM}Associated roles -> remove ${elevated}.${RESET}"
+      echo -e "     ${DIM}Left unchanged on purpose: it may be deliberate here.${RESET}"
+    fi
+  fi
 }
 
 # ── Import initial agents ──────────────────────────────────
