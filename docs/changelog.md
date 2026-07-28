@@ -5,6 +5,42 @@
 
 ---
 
+## 🔐 feat(security): forward the caller's identity to apicall headers (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+An agent could only call an API with a *static* credential baked into its apicall config. That is the wrong shape whenever the API being called is EDDI's own: an OIDC token expires within the hour, cannot be least-privilege, and collapses every action to one synthetic principal in the audit trail. The EDDI-Manager "Platform Operator" needs exactly this — an agent that reads the platform on behalf of whoever is chatting with it — and could only be built by smuggling the user's bearer through the per-turn conversation `context`, which persists the token to MongoDB.
+
+**What changed.** Apicall *headers* may now reference the authenticated caller:
+
+- `${caller:token}` — the caller's raw bearer token
+- `${caller:userId}` — the caller's principal name (not a secret)
+
+`ApiCallExecutor` resolves these last in the header chain (after global variables and vault refs), because resolution needs the target URI.
+
+**Files**
+- `engine/security/CallerIdentity.java` — record (token, userId, origin); deliberately not part of `IConversationMemory`.
+- `engine/security/CallerIdentityContext.java` — captures the identity on the REST request thread and binds it to whichever pool thread runs the turn.
+- `engine/security/CallerIdentityResolver.java` — the `${caller:...}` resolver, mirroring `SecretResolver` / `GlobalVariableResolver`.
+- `engine/security/OriginMatcher.java` — scheme/host/port comparison with default-port normalization.
+- `engine/internal/ConversationService.java` — captures in `processConversationStep` and decorates the callable.
+- `modules/apicalls/impl/ApiCallExecutor.java` — resolves in headers; rejects a token reference in a query parameter.
+
+**Threading — the non-obvious part.** A turn is built on the request thread but executed twice removed from it: `submitInOrder` hands it to a coordinator thread, which hands the pipeline to *another* thread via `runtime.submitCallable`. Request-scoped beans (`SecurityIdentity`) resolve at none of those points. So the identity is captured while the request context is still live and travels **with the callable** (`withCallerIdentity`), not with a thread. Binding the coordinator thread would have missed the pipeline entirely — an easy and silent mistake.
+
+**Design decisions**
+1. **Same-origin only.** The token is released only when the outbound call targets the exact `scheme://host:port` the caller addressed, taken from the inbound request rather than configuration. An agent config naming a third-party host therefore cannot exfiltrate a user's token, and the feature needs no allow-list to be safe out of the box.
+2. **Headers only.** `${caller:token}` in a query parameter is rejected — tokens in URLs leak through access logs, proxies and browser history. `${caller:userId}` is allowed anywhere.
+3. **Fails closed.** An unsatisfiable reference throws rather than resolving to `""`, which would silently send `Bearer ` and surface far away as a puzzling 401.
+4. **Never stored.** Resolution happens while building the request; `scrubSensitiveHeaders` already strips authorization headers before the request is written to conversation memory.
+5. **Opt-out.** `eddi.caller-identity.enabled` (default `true`) forbids the feature outright.
+
+**Tests.** `CallerIdentityResolverTest` (19) and `CallerIdentityContextTest` (7) — same-origin refusals (host, port, scheme downgrade), fail-closed paths, regex-escaping of tokens containing `$`/`\`, thread isolation, and clearing on pooled threads. Disabling the same-origin guard fails 4 tests (mutation-checked). All 227 `ConversationService*Test` tests still pass.
+
+**Note for the manager:** the operator's `caller-context` auth mode should now provision `apiAuth` as `Bearer ${caller:token}` and stop putting the token in conversation context — which removes the token-at-rest warning from the activation flow.
+
+---
+
 ## 🔒 fix(ci): remove accidentally-committed langchain4j-mcp decompiled sources (2026-07-27)
 
 **Repo:** EDDI (`feat/v6.2.0-prep`)

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
@@ -63,11 +64,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final PrePostUtils prePostUtils;
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
+    private final CallerIdentityResolver callerIdentityResolver;
     private final boolean ssrfProtectionEnabled;
 
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
-            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
+            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
@@ -75,6 +77,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.prePostUtils = prePostUtils;
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
+        this.callerIdentityResolver = callerIdentityResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
     }
 
@@ -386,6 +389,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Resolve global variable references, then vault references in headers
             headerValue = globalVariableResolver.resolveValue(headerValue);
             headerValue = secretResolver.resolveValue(headerValue);
+            // Caller identity resolves last and needs the target URI: the token is
+            // only released when the call goes back to the caller's own origin.
+            headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
             request.setHttpHeader(headerName, headerValue);
         }
 
@@ -395,6 +401,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Resolve global variable references, then vault references in query params
             qpValue = globalVariableResolver.resolveValue(qpValue);
             qpValue = secretResolver.resolveValue(qpValue);
+            // A token in a query string leaks via access logs and proxies.
+            callerIdentityResolver.rejectTokenReference(qpValue, "a query parameter");
+            qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
             request.setQueryParam(queryParam, qpValue);
         }
         return request;

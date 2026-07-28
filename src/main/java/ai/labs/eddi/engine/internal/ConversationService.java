@@ -46,6 +46,8 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -96,6 +98,7 @@ public class ConversationService implements IConversationService {
     private final IConversationCoordinator conversationCoordinator;
     private final IRuntime runtime;
     private final IContextLogger contextLogger;
+    private final CallerIdentityContext callerIdentityContext;
     private final AuditLedgerService auditLedgerService;
     private final GdprComplianceService gdprComplianceService;
     private final TenantQuotaService tenantQuotaService;
@@ -161,7 +164,7 @@ public class ConversationService implements IConversationService {
             IContextLogger contextLogger, AuditLedgerService auditLedgerService, GdprComplianceService gdprComplianceService,
             TenantQuotaService tenantQuotaService, IScheduleStore scheduleStore, IAgentStore agentStore,
             IJsonSerialization jsonSerialization,
-            MeterRegistry meterRegistry, Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent,
+            MeterRegistry meterRegistry, Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent, CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.agentFactory = agentFactory;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -175,6 +178,7 @@ public class ConversationService implements IConversationService {
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
+        this.callerIdentityContext = callerIdentityContext;
         this.auditLedgerService = auditLedgerService;
         this.gdprComplianceService = gdprComplianceService;
         this.tenantQuotaService = tenantQuotaService;
@@ -915,6 +919,12 @@ public class ConversationService implements IConversationService {
     private Callable<Void> processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                    Map<String, String> loggingContext, Callable<Void> executeConversation,
                                                    Consumer<IConversationMemory> skipNotifier) {
+        // Captured here because this method still runs on the REST request
+        // thread, where SecurityIdentity resolves. Everything downstream runs on
+        // pool threads with no request context, so the identity travels with the
+        // callable rather than with the thread.
+        final Callable<Void> identityBoundExecution = withCallerIdentity(executeConversation, callerIdentityContext.capture());
+
         return () -> {
             // Queued-say guard: this memory copy was loaded at REST-request time;
             // a previously queued turn may have committed a pause (or a resume may
@@ -967,7 +977,7 @@ public class ConversationService implements IConversationService {
             populateToolApprovalsConfig(conversationMemory);
             try {
                 runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
-                        executeConversation, memoryStateAtSubmit, persistedState);
+                        identityBoundExecution, memoryStateAtSubmit, persistedState);
             } finally {
                 // value-conditional: only the leg that registered this memory may
                 // unregister — a plain remove(key) could evict a NEWER execution's
@@ -975,6 +985,28 @@ public class ConversationService implements IConversationService {
                 inFlightConversations.remove(conversationId, conversationMemory);
             }
             return null;
+        };
+    }
+
+    /**
+     * Bind the captured caller to whichever pool thread ends up running the turn,
+     * so {@code ${caller:token}} in an API call resolves to the person who sent the
+     * message.
+     * <p>
+     * The binding is cleared in a {@code finally}: these threads are pooled and
+     * serve other users' conversations next.
+     */
+    private Callable<Void> withCallerIdentity(Callable<Void> execution, CallerIdentity callerIdentity) {
+        if (callerIdentity == null) {
+            return execution;
+        }
+        return () -> {
+            callerIdentityContext.bind(callerIdentity);
+            try {
+                return execution.call();
+            } finally {
+                callerIdentityContext.clear();
+            }
         };
     }
 

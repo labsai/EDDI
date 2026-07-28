@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,7 @@ class ApiCallExecutorTest {
     private IRequest mockRequest;
     private IResponse mockResponse;
     private SecretResolver secretResolver;
+    private CallerIdentityResolver callerIdentityResolver;
     private GlobalVariableResolver globalVariableResolver;
 
     @BeforeEach
@@ -53,11 +55,15 @@ class ApiCallExecutorTest {
         runtime = mock(IRuntime.class);
         prePostUtils = mock(PrePostUtils.class);
         secretResolver = mock(SecretResolver.class);
+        callerIdentityResolver = mock(CallerIdentityResolver.class);
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        // Pass-through: these tests exercise no ${caller:...} references.
+        when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
-        executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver, false);
+        executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver,
+                callerIdentityResolver, false);
 
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);
@@ -473,7 +479,7 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_blocksInternalUrl() {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, true);
+                secretResolver, callerIdentityResolver, true);
         ApiCall call = createSimpleApiCall("ssrf-call", false);
         // 169.254.169.254 is a literal IP (no DNS) blocked by UrlValidationUtils.
         assertThrows(LifecycleException.class, () -> protectedExecutor.execute(call, memory, new HashMap<>(), "http://169.254.169.254"));
@@ -482,7 +488,7 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_disablesRedirectsOnPublicUrl() throws Exception {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, true);
+                secretResolver, callerIdentityResolver, true);
         ApiCall call = createSimpleApiCall("redir-call", false);
         setupSuccessResponse(200, "ok", "text/plain");
         // 1.1.1.1 is a public literal IP — passes validation without a DNS lookup.

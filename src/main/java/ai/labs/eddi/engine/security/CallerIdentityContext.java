@@ -1,0 +1,119 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.security;
+
+import io.quarkus.security.credential.TokenCredential;
+import io.quarkus.security.identity.SecurityIdentity;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
+
+/**
+ * Carries the authenticated caller from the request thread to the pipeline
+ * worker thread that runs their conversation turn.
+ * <p>
+ * A conversation turn is built on the request thread but executed later on a
+ * pool thread (see {@code IConversationCoordinator#submitInOrder}), where
+ * request-scoped beans such as {@link SecurityIdentity} are no longer
+ * resolvable. {@link #capture()} therefore reads the identity while the request
+ * context is still active, and {@link #bind(CallerIdentity)} re-establishes it
+ * around the execution.
+ * <p>
+ * The binding is a {@link ThreadLocal}, so it must always be cleared in a
+ * {@code finally} block — pool threads are reused across conversations and a
+ * leaked token would be readable by the next caller's turn.
+ *
+ * @author ginccc
+ */
+@ApplicationScoped
+public class CallerIdentityContext {
+
+    private static final Logger LOGGER = Logger.getLogger(CallerIdentityContext.class);
+
+    private static final ThreadLocal<CallerIdentity> CURRENT = new ThreadLocal<>();
+
+    private final SecurityIdentity securityIdentity;
+    private final CurrentVertxRequest currentVertxRequest;
+
+    @Inject
+    public CallerIdentityContext(SecurityIdentity securityIdentity, CurrentVertxRequest currentVertxRequest) {
+        this.securityIdentity = securityIdentity;
+        this.currentVertxRequest = currentVertxRequest;
+    }
+
+    /**
+     * Read the caller from the active request.
+     * <p>
+     * Must be called on the request thread. Returns {@code null} when there is no
+     * active request (scheduled jobs, triggers, tests) or when the request carried
+     * no bearer token — both are normal, and simply mean a {@code ${caller:token}}
+     * reference cannot be satisfied for this turn.
+     *
+     * @return the captured identity, or {@code null}
+     */
+    public CallerIdentity capture() {
+        try {
+            if (securityIdentity == null || securityIdentity.isAnonymous()) {
+                return null;
+            }
+            var credential = securityIdentity.getCredential(TokenCredential.class);
+            if (credential == null || credential.getToken() == null || credential.getToken().isBlank()) {
+                return null;
+            }
+            var principal = securityIdentity.getPrincipal();
+            return new CallerIdentity(credential.getToken(), principal != null ? principal.getName() : null, currentRequestOrigin());
+        } catch (Exception e) {
+            // No active request context — nothing to capture. Not an error.
+            LOGGER.debugf("No caller identity to capture: %s", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * The {@code scheme://host[:port]} the caller addressed.
+     * <p>
+     * Taken from the inbound request rather than configuration so the token is only
+     * ever sent back to the exact origin the caller already trusted it to.
+     */
+    private String currentRequestOrigin() {
+        try {
+            var current = currentVertxRequest.getCurrent();
+            if (current == null) {
+                return null;
+            }
+            var request = current.request();
+            return OriginMatcher.normalize(request.scheme(), request.authority() != null ? request.authority().host() : null,
+                    request.authority() != null ? request.authority().port() : -1);
+        } catch (Exception e) {
+            LOGGER.debugf("Could not determine request origin: %s", e.getMessage());
+            return null;
+        }
+    }
+
+    /** Bind an identity to the current thread for the duration of a turn. */
+    public void bind(CallerIdentity identity) {
+        if (identity == null) {
+            CURRENT.remove();
+        } else {
+            CURRENT.set(identity);
+        }
+    }
+
+    /**
+     * Clear the binding.
+     * <p>
+     * Always call this in a {@code finally} — the thread goes back to a pool that
+     * serves other users.
+     */
+    public void clear() {
+        CURRENT.remove();
+    }
+
+    /** The identity bound to this thread, or {@code null}. */
+    public CallerIdentity current() {
+        return CURRENT.get();
+    }
+}

@@ -33,6 +33,57 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 - **Property extraction**: Extract specific values from responses and save them to conversation memory
 - **Batch requests**: Make multiple API calls by iterating over an array
 - **Fire and forget**: Optional asynchronous calls that don't wait for a response
+- **Caller identity**: Call an API *as the signed-in user* with `${caller:token}` — see [Calling as the signed-in user](#calling-as-the-signed-in-user)
+
+## Calling as the signed-in user
+
+*Since 6.2.0.*
+
+A header can reference the authenticated caller, so the agent calls an API with
+**that user's** credentials rather than one static credential baked into the
+config:
+
+| Reference | Resolves to |
+| --------- | ----------- |
+| `${caller:token}` | The caller's raw bearer token |
+| `${caller:userId}` | The caller's principal name (not a secret) |
+
+```json
+"headers": {
+  "Authorization": "Bearer ${caller:token}"
+}
+```
+
+This matters most when the API being called is **EDDI's own**. A static
+credential is the wrong shape there: an OIDC token expires within the hour,
+cannot be least-privilege, and collapses every action to a single synthetic
+principal in the audit trail. With `${caller:token}`, authorization stays EDDI's
+normal per-endpoint enforcement and the audit trail names a real person. This is
+what the EDDI-Manager Platform Operator uses.
+
+### Rules
+
+Resolution is deliberately narrow, and each rule fails the call loudly rather
+than degrading quietly:
+
+- **Same origin only.** The token is released only when the call targets the
+  exact `scheme://host:port` the caller addressed. That origin is read from the
+  inbound request, not from configuration, so a config naming a third-party host
+  cannot exfiltrate a user's token — and no allow-list is needed for this to be
+  safe by default.
+- **Headers only.** `${caller:token}` in a query parameter is rejected; tokens
+  in URLs leak through access logs, proxies and browser history.
+  `${caller:userId}` may be used anywhere.
+- **Authenticated turns only.** The identity comes from the request that drove
+  the turn, so scheduled jobs and triggers cannot satisfy `${caller:token}`.
+- **Fails closed.** An unsatisfiable reference raises an error instead of
+  resolving to an empty string, which would send `Bearer ` and surface later as
+  a confusing `401`.
+
+The resolved token is never written to conversation memory: authorization
+headers are scrubbed before the request is recorded.
+
+Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
 ## HttpCalls Configuration
 
