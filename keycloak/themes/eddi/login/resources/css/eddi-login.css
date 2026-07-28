@@ -185,8 +185,16 @@
  * ------------------------------------------------------------------------ */
 .login-pf body {
     background:
-        radial-gradient(60% 38% at 50% 16%, rgba(245, 158, 11, .10), transparent 72%),
-        radial-gradient(90% 55% at 50% 104%, rgba(39, 39, 42, .55), transparent 70%),
+        /* Centred on the wordmark (its optical centre is ~29% down the
+           viewport), tight, and with intermediate stops — a wide gradient at
+           low alpha over near-black bands visibly, which read as a smudge
+           rather than as light. */
+        radial-gradient(34% 24% at 50% 29%,
+            rgba(245, 158, 11, .14),
+            rgba(245, 158, 11, .07) 38%,
+            rgba(245, 158, 11, .025) 62%,
+            transparent 80%),
+        radial-gradient(78% 48% at 50% 108%, rgba(39, 39, 42, .45), transparent 72%),
         var(--eddi-bg);
     background-attachment: fixed;
 }
@@ -356,6 +364,14 @@
 .pf-v5-c-button.pf-m-control:focus {
     background-color: transparent;
     color: var(--eddi-fg);
+}
+
+/* The group clips to its radius, and the toggle sits flush against that edge —
+   a focus ring drawn outside the button (the default `outline-offset: 2px`)
+   would be cut off, leaving a keyboard user with a partially invisible focus
+   indicator. Draw it inside instead. */
+.pf-v5-c-input-group :focus-visible {
+    outline-offset: -2px;
 }
 
 /* Chrome/Edge force a hard-coded pale autofill background that ignores

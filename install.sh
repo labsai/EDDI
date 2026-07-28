@@ -653,6 +653,7 @@ resolve_compose_files() {
       "keycloak/themes/eddi/login/resources/img/logo_eddi.png"
       "keycloak/themes/eddi/login/resources/img/favicon.ico"
       "keycloak/themes/eddi/login/resources/fonts/noto-sans-latin-variable.woff2"
+      "keycloak/themes/eddi/login/resources/js/eddi-a11y.js"
     )
     for kf in "${kc_files[@]}"; do
       local kf_target="$EDDI_DIR/$kf"
@@ -933,7 +934,8 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
   # GET-modify-PUT the full representation, same as the client update above.
   if [[ "$json_tool" == "jq" ]]; then
     updated_realm=$(echo "$realm_config" | jq \
-      '.loginTheme = "eddi" | .displayName = "EDDI" | .displayNameHtml = "EDDI"' \
+      '.loginTheme = "eddi" | .displayName = "EDDI" | .displayNameHtml = "EDDI"
+       | .internationalizationEnabled = true | .supportedLocales = ["en"] | .defaultLocale = "en"' \
       2>/dev/null) || updated_realm=""
   else
     updated_realm=$(echo "$realm_config" | python3 -c "
@@ -942,6 +944,10 @@ d = json.load(sys.stdin)
 d['loginTheme'] = 'eddi'
 d['displayName'] = 'EDDI'
 d['displayNameHtml'] = 'EDDI'
+# Emits lang/dir on <html> (WCAG 3.1.1). One locale means no locale switcher.
+d['internationalizationEnabled'] = True
+d['supportedLocales'] = ['en']
+d['defaultLocale'] = 'en'
 print(json.dumps(d))" 2>/dev/null) || updated_realm=""
   fi
 
