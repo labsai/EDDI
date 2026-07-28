@@ -326,6 +326,14 @@ what is this pdf about?
 
 There is **no environment variable** for this — it is a per-model toggle. Open **Workspace → Models → edit the EDDI model → Capabilities** and turn the built-in tools capability off. (Setting the model's `function_calling` parameter to `legacy` has the same effect, as the condition above shows.)
 
+**What you give up, precisely.** Less than it sounds. Open WebUI's built-in tools let the model *search* chat attachments on demand; turning them off does not stop it reading uploaded files. With `RAG_SYSTEM_CONTEXT=true` the retrieved chunks still arrive in the system message and an agent that references `{context.openai_system_message}` answers from them. You lose the on-demand search variant, not the capability.
+
+**Why they cannot work today.** OpenAI tool calling is a multi-turn round trip — the assistant returns `finish_reason: "tool_calls"`, the client executes and sends back a `role: "tool"` message, the assistant continues from the result. This adapter is single-turn: it sends only the last user message and returns final text, and a `role: "tool"` message is dropped. That rule is what keeps EDDI's own memory from being doubled by the client's replayed history (§2), so client-side tools are the one place it would need a deliberate exception.
+
+Supporting them means accepting `tools[]` from the request, plumbing them into `LlmTask` alongside EDDI's own, returning `tool_calls` **only** for client-side tools — EDDI's own MCP, HTTP-call and built-in tools must keep executing server-side, or you get the double-execution this adapter exists to avoid — and reading `role: "tool"` messages back. A real feature, tracked for v2; see [§10](#10-known-gaps).
+
+This is not specific to EDDI. Open WebUI's built-in tools go dark against any OpenAI-compatible backend that does not implement tool calling.
+
 Note this is separate from `RAG_SYSTEM_CONTEXT`: that one controls where the *retrieved chunks* go, this one controls the *file announcement*. Both must be dealt with for an attachment-carrying turn to reach your agent clean.
 
 ### Streaming: watch `AIOHTTP_CLIENT_STREAM_IDLE_TIMEOUT`
@@ -483,6 +491,7 @@ Every failure uses the OpenAI envelope:
 5. **One worker thread per in-flight completion**, bounded by `max-concurrent-requests`.
 6. **`http-policy=authenticated` is impractical with Open WebUI**, which cannot mint per-user upstream OIDC tokens.
 7. **`tool_calls` are never returned.** EDDI runs tools inside its pipeline; echoing them would make Open WebUI try to execute EDDI's HTTP/MCP/memory tools locally, where they do not exist. Tool activity remains visible in the audit ledger and `toolTrace`.
+8. **Client-side tools cannot be used** — Open WebUI's built-in Files/knowledge tools, or any `tools[]` the client sends. Uploaded files are still readable through Open WebUI's RAG (§5); what is missing is the model invoking a client tool mid-answer. Doing this properly needs the multi-turn `tool_calls` → `role: "tool"` round trip, which the single-turn message mapping deliberately does not support, plus a way to distinguish client tools from EDDI's own so only the former are echoed. The clearest v2 candidate in this list.
 
 ---
 
