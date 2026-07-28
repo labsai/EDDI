@@ -23,4 +23,19 @@ public class RagStore extends AbstractResourceStore<RagConfiguration> implements
     public RagStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
         super(storageFactory, "rags", documentBuilder, RagConfiguration.class);
     }
+
+    /**
+     * Finding I3: {@code chunkStrategy} has no reader — ingestion always builds a
+     * {@code DocumentSplitters.recursive} splitter — so any other value was
+     * accepted and then silently ignored. {@link RagConfiguration#validate()}
+     * already knows which strategies exist but only ran at retrieval time, long
+     * after the author had been told the save succeeded. Running it here rejects
+     * the unimplemented value at save time and names the supported ones.
+     */
+    @Override
+    protected void validate(RagConfiguration content) {
+        if (content != null) {
+            content.validate();
+        }
+    }
 }

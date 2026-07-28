@@ -66,6 +66,15 @@ public class SerializationCustomizer implements ObjectMapperCustomizer {
         objectMapper.setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL);
         objectMapper.configure(INDENT_OUTPUT, prettyPrint);
         objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+        // MUST stay false, and there is no REST-only place to flip it:
+        // this static is the shared recipe behind the CDI mapper, the
+        // @PersistenceMapper mapper and the Postgres JSONB mapper, and customize()
+        // below is applied by PersistenceModule to the MongoDB BSON mapper as well.
+        // Enabling it anywhere in this class makes stored documents fail to LOAD the
+        // moment a field is removed — LlmConfigurationRagLegacyFieldsTest and
+        // LlmConfigurationParallelExecutionLegacyFieldsTest are the tripwires.
+        // Write-time strictness for inbound configuration bodies lives instead in
+        // StrictConfigurationBodyInterceptor, which is scoped to the HTTP boundary.
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         // java.time support (Instant etc.) — the JSONB-backed Postgres resource
         // storage serializes snapshots through this mapper, and HITL bookmarks carry

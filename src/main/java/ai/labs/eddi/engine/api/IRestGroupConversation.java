@@ -6,7 +6,12 @@ package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
+import ai.labs.eddi.engine.memory.model.validation.MaxInlineAttachmentSize;
 import jakarta.annotation.security.RolesAllowed;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
@@ -34,14 +39,58 @@ import java.util.List;
 @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestGroupConversation {
 
+    /**
+     * Hard ceiling, in characters, on the free-text {@code question} of a group
+     * discussion. Not an arbitrary number: it is the same 50 000 characters
+     * ({@code ~12k} tokens) the engine already treats as "one document's worth of
+     * text into a prompt" — {@code eddi.attachments.extraction.max-chars} and
+     * {@code LlmConfiguration.ToolResponseLimits#defaultMaxChars}. A group question
+     * is fanned out to every member agent in every phase, so it has no business
+     * being more permissive than a whole extracted attachment. This is a DoS/abuse
+     * ceiling, not a tuning knob: real questions are three orders of magnitude
+     * smaller.
+     */
+    int MAX_QUESTION_CHARS = 50_000;
+
+    /**
+     * Ceiling on caller-supplied identity/reference strings ({@code userId},
+     * {@code targetAgentId}). Both are persisted on the transcript and used in
+     * lookups; a 24-character hex id, an OIDC {@code sub} or an email all fit
+     * comfortably in 256 characters.
+     */
+    int MAX_IDENTIFIER_CHARS = 256;
+
+    /**
+     * Ceiling on the number of attachments a single discussion request may carry.
+     * Matches {@code eddi.attachments.max-per-conversation} (default 50), the
+     * storage quota a conversation's blob store enforces anyway — beyond it the
+     * attachments could not be materialized. Note only
+     * {@code eddi.attachments.max-per-turn} (default 5) of them ever reach the LLM.
+     */
+    int MAX_ATTACHMENTS_PER_REQUEST = 50;
+
+    /**
+     * Ceiling on a MIME type string: RFC 6838 caps {@code type} and {@code subtype}
+     * at 127 characters each.
+     */
+    int MAX_MIME_TYPE_CHARS = 255;
+
+    /** Ceiling on a file name — the POSIX/NTFS single-component limit. */
+    int MAX_FILE_NAME_CHARS = 255;
+
+    /** Ceiling on a hosted attachment URL — the de facto maximum URL length. */
+    int MAX_URL_CHARS = 2048;
+
     @POST
     @Path("/{groupId}/conversations")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Start a group discussion", description = "Starts a new multi-agent group discussion with the given question.")
     @APIResponse(responseCode = "200", description = "Discussion result with transcript.")
+    @APIResponse(responseCode = "400", description = "Missing/blank or oversized 'question', or an oversized attachment.")
     @APIResponse(responseCode = "404", description = "Group not found.")
-    Response discuss(@PathParam("groupId") String groupId, DiscussRequest request);
+    Response discuss(@PathParam("groupId") String groupId, @NotNull
+    @Valid DiscussRequest request);
 
     @POST
     @Path("/{groupId}/conversations/stream")
@@ -53,8 +102,11 @@ public interface IRestGroupConversation {
                        + "phase_complete, synthesis_start, group_complete, group_error) "
                        + "via Server-Sent Events.")
     @APIResponse(responseCode = "200", description = "SSE event stream of discussion progress.")
+    @APIResponse(responseCode = "400", description = "Missing/blank or oversized 'question', or an oversized attachment.")
     @APIResponse(responseCode = "404", description = "Group not found.")
-    void discussStreaming(@PathParam("groupId") String groupId, DiscussRequest request, @Context SseEventSink eventSink, @Context Sse sse);
+    void discussStreaming(@PathParam("groupId") String groupId, @NotNull
+    @Valid DiscussRequest request,
+                          @Context SseEventSink eventSink, @Context Sse sse);
 
     @GET
     @Path("/{groupId}/conversations/{groupConversationId}")
@@ -100,7 +152,8 @@ public interface IRestGroupConversation {
     @APIResponse(responseCode = "504", description = "The member agent did not respond within the timeout.")
     Response followUpWithMember(@PathParam("groupId") String groupId,
                                 @PathParam("groupConversationId") String gcId,
-                                FollowUpRequest request);
+                                @NotNull
+                                @Valid FollowUpRequest request);
 
     @POST
     @Path("/{groupId}/conversations/{groupConversationId}/continue")
@@ -119,7 +172,8 @@ public interface IRestGroupConversation {
     @APIResponse(responseCode = "504", description = "A member agent did not respond within the timeout.")
     Response continueDiscussion(@PathParam("groupId") String groupId,
                                 @PathParam("groupConversationId") String gcId,
-                                DiscussRequest request);
+                                @NotNull
+                                @Valid DiscussRequest request);
 
     @POST
     @Path("/{groupId}/conversations/{groupConversationId}/continue/stream")
@@ -137,7 +191,8 @@ public interface IRestGroupConversation {
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     void continueDiscussionStreaming(@PathParam("groupId") String groupId,
                                      @PathParam("groupConversationId") String gcId,
-                                     DiscussRequest request,
+                                     @NotNull
+                                     @Valid DiscussRequest request,
                                      @Context SseEventSink eventSink, @Context Sse sse);
 
     @POST
@@ -216,7 +271,17 @@ public interface IRestGroupConversation {
      * each member is granted access; {@code url} references are forwarded as-is.
      * Old two-argument clients remain compatible.
      */
-    record DiscussRequest(String question, String userId, List<AttachmentRef> attachments) {
+    record DiscussRequest(
+            @NotBlank(message = "'question' must not be blank")
+            @Size(max = MAX_QUESTION_CHARS,
+                  message = "'question' must be at most {max} characters") String question,
+
+            @Size(max = MAX_IDENTIFIER_CHARS,
+                  message = "'userId' must be at most {max} characters") String userId,
+
+            @Size(max = MAX_ATTACHMENTS_PER_REQUEST,
+                  message = "'attachments' must contain at most {max} entries")
+            @Valid List<AttachmentRef> attachments) {
         public DiscussRequest(String question, String userId) {
             this(question, userId, null);
         }
@@ -226,14 +291,38 @@ public interface IRestGroupConversation {
      * Request body for following up with a specific group member.
      * {@code targetAgentId} accepts either a raw agent ID or a display name.
      */
-    record FollowUpRequest(String question, String targetAgentId, String userId) {
+    record FollowUpRequest(
+            @NotBlank(message = "'question' must not be blank")
+            @Size(max = MAX_QUESTION_CHARS,
+                  message = "'question' must be at most {max} characters") String question,
+
+            @NotBlank(message = "'targetAgentId' must not be blank")
+            @Size(max = MAX_IDENTIFIER_CHARS,
+                  message = "'targetAgentId' must be at most {max} characters") String targetAgentId,
+
+            @Size(max = MAX_IDENTIFIER_CHARS,
+                  message = "'userId' must be at most {max} characters") String userId) {
     }
 
     /**
      * A single attachment reference on a group discussion request. Provide either
      * inline base64 {@code data} (+ {@code mimeType}) or a hosted {@code url}.
+     * <p>
+     * {@code data} is bounded by {@link MaxInlineAttachmentSize}, which derives its
+     * ceiling from {@code eddi.attachments.max-size-bytes} rather than hardcoding
+     * one — an operator who raises the attachment cap raises this with it.
      */
-    record AttachmentRef(String mimeType, String data, String url, String fileName) {
+    record AttachmentRef(
+            @Size(max = MAX_MIME_TYPE_CHARS,
+                  message = "'mimeType' must be at most {max} characters") String mimeType,
+
+            @MaxInlineAttachmentSize String data,
+
+            @Size(max = MAX_URL_CHARS,
+                  message = "'url' must be at most {max} characters") String url,
+
+            @Size(max = MAX_FILE_NAME_CHARS,
+                  message = "'fileName' must be at most {max} characters") String fileName) {
     }
 
     /**

@@ -5,6 +5,47 @@
 
 ---
 
+## ✅ fix(configs): code-review findings wave 4a — write-time config validation (E6) and request-body validation (A11) (2026-07-29)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+E6 is the highest-leverage item in the whole review: it converts most of workstream E from *silently wrong* into *loudly wrong at save time*. For a config-driven engine, silent acceptance of invalid config is the worst available failure mode — the agent author gets no feedback and the agent looks healthy while behaving wrongly.
+
+### E6 — the prescribed fix was unsafe, and was not applied as written
+
+The review said: "enable `FAIL_ON_UNKNOWN_PROPERTIES` on the REST mapper only (never the persistence mapper — it needs schema-evolution tolerance)". That instruction assumes a REST-only surface exists. **It does not.**
+
+`SerializationCustomizer.configureObjectMapper` is the shared recipe behind the CDI mapper, the `@PersistenceMapper` mapper *and* the Postgres JSONB mapper. `customize()` is not REST-only either — `PersistenceModule.buildMongoClientOptions` calls `new SerializationCustomizer(false).customize(objectMapper)` on the **MongoDB BSON mapper**, so flipping the flag there would have made **Mongo document reads strict** and broken loading of any stored document written by a newer version. The CDI mapper is also injected into the MicroProfile REST client and ~15 services that parse *third-party* JSON (Slack, web search, Dream, rule deserialization), none of which control their input's shape.
+
+So instead of the flag flip, this adds `StrictConfigurationBodyInterceptor` — a JAX-RS `ReaderInterceptor` scoped to inbound JSON bodies whose target type is a first-party configuration model. It re-parses with a strict *copy* of the REST mapper and translates only `UnrecognizedPropertyException` into a 400 naming the field, its JSON path and the known fields. Every other parse failure falls through unchanged, and an empty body keeps its original stream.
+
+A comment in `SerializationCustomizer` now records why that flag must stay `false`, so the next person doesn't "fix" it.
+
+### E6 — the validation hook
+
+`AbstractResourceStore` gained `protected void validate(T)`, defaulting to a no-op and invoked from `create()`/`update()` before anything reaches storage. Read paths deliberately do **not** call it, so stored documents keep loading.
+
+`RuleSetStore.validate` hoists the wave-1 condition checks to save time **without duplicating them**: it serializes and runs the result through the very same `IRuleDeserialization` the deploy path uses. That covers empty action/input matchers, unknown `occurrence` values, context-type mismatches, empty negations and unknown condition types — each naming the offending rule. Previously all of these surfaced only at agent-deploy time, with a message naming neither rule nor group.
+
+`RagStore.validate` closes the I3 leftover: `RagConfiguration.validate()` already rejected unimplemented `chunkStrategy` values, but its only caller ran at *retrieval* time, so a POST with `"paragraph"` returned 201 and the field was silently ignored.
+
+### A11 — request-body validation
+
+There was **zero** `jakarta.validation` usage in the repo and no validator in `pom.xml`. Added `quarkus-hibernate-validator` (unpinned, via the BOM) and constrained the bodies that actually matter: `DiscussRequest.question` (unbounded free text passed straight to an LLM) and `AttachmentRef.data` (unbounded inline base64, now bounded by a validator deriving its ceiling from configuration rather than a hardcoded magic number).
+
+### Verification
+
+Clean `test-compile` green first attempt. Full suite: 12,688 tests, **0 real failures** — every one of the 308 failures/errors was classified programmatically from the surefire XML against the known environmental markers (this machine cannot bind loopback sockets), not eyeballed. **All six mutation checks bite.**
+
+Because E6 makes previously-accepted input fail, the upgrade path was verified beyond the suite: the bundled `initial-agents` Agent Father config passes the new save-time validation (22 actionmatchers, 23 inputmatchers, 2 negations, all occurrences legal), and the import/export round-trip still works — `RestImportService` writes rulesets through the same store path the new hook guards.
+
+### Known limits, stated plainly
+
+- The interceptor's **JAX-RS provider registration** cannot be verified locally (no loopback sockets); its logic is fully unit-tested but CI is the gate for the wiring.
+- `McpCallsConfiguration.validate()` and `LlmConfiguration.validate()` still run at conversation/execution time rather than save time — the same defect class, now trivially fixable via the new hook. Left for a follow-up rather than widened into this change.
+
+---
+
 ## ⚙️ fix(runtime): code-review findings wave 3 — concurrency, lifecycle, cancellation, graceful shutdown, Dream wiring (2026-07-28)
 
 **Repo:** EDDI (`fix/code-review-concurrency`)
