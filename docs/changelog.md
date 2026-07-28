@@ -60,6 +60,12 @@ Two contrast defects that only light mode exposed: amber-400 links and an amber-
 
 Fonts gained the Latin-ext, Cyrillic and Greek subsets, because Latin-only would put fallback glyphs *inside* otherwise-branded words for Czech, Polish and Turkish. Measured rather than assumed: `unicode-range` normally defers those files, but the switcher lists all 30 languages under native names, so every range is in the DOM and all four are fetched (~245 KB). Accepted — `font-display: swap` keeps it off the paint path, it caches for the session, and the page already loads a ~1.5 MB PatternFly stylesheet.
 
+**The header utilities looked accidental on narrow screens.** Below PatternFly's header breakpoint the grid collapses to a single column and the utilities wrap onto their own row — which is fine — but the locale picker stretched to fill it: **268px at a 560px viewport against 82px on desktop**, so the same control looked like two different things depending on width.
+
+The fix is to keep both utilities content-sized. Worth recording *why* it needed a newer property: `width: auto` does not size a `<select>` to its selected option (it fills), and `max-content` sizes it to the **widest option in the list** — which here is a 30-language menu, so that is worse. `field-sizing: content` is the one that does the right thing. It is Chrome/Edge-only at present, so a `max-width` cap is the fallback: capped rather than full-bleed everywhere else.
+
+Measured at 375, 560 and 1280: the picker is **76px at every width**, the row stays right-aligned with the form fields, no horizontal overflow, and no dead selectors.
+
 **Locale picker restored on the admin console; both realms offer the full set.**
 
 The admin console had no language picker because I had given `master` a single locale — a deliberate trade to get `lang` on `<html>` without adding a switcher, but the wrong one once that console is EDDI-branded. Both realms now show the picker.

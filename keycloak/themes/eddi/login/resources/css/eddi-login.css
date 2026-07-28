@@ -653,12 +653,34 @@
     display: none;
 }
 
+/* Below PatternFly's header breakpoint the grid collapses to one column and the
+   utilities wrap onto their own row. The picker stretched to fill it — 268px at
+   a 560px viewport, against 82px on desktop — which is what made the stacked
+   layout look accidental. Keep both utilities content-sized so the row reads the
+   same at every width.
+
+   `field-sizing: content` is what actually sizes a <select> to its *selected*
+   option; `width: auto` does not, and `max-content` would size it to the widest
+   option in the list (which here is a 30-language menu). It is Chrome/Edge-only
+   at present, so the max-width is the fallback everywhere else — capped rather
+   than full-bleed. */
+.pf-v5-c-login__main-header-utilities {
+    flex: 0 0 auto;
+}
+
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control {
+    width: auto;
+}
+
 .pf-v5-c-login__main-header-utilities select {
     color: var(--eddi-muted);
     font-size: 13px;
     cursor: pointer;
     appearance: none;
     -webkit-appearance: none;
+    width: auto;
+    max-width: 11rem;
+    field-sizing: content;
     padding: 4px 24px 4px 8px;
     background-image: var(--eddi-chevron);
     background-repeat: no-repeat;
