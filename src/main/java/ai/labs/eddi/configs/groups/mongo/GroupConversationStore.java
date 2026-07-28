@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
@@ -174,6 +175,79 @@ public class GroupConversationStore implements IGroupConversationStore {
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed conditional update: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Delete every group-conversation transcript belonging to {@code userId} (GDPR
+     * Art. 17 erasure).
+     * <p>
+     * A {@link GroupConversation} stores the user's id alongside the verbatim
+     * transcript of the discussion — the original question and every agent turn —
+     * so a cascade that skipped this store left the user's own words behind after
+     * an erasure that reported success.
+     * <p>
+     * Candidates are fetched with an anchored, escaped regex and then
+     * <em>re-checked in Java</em> with an exact string comparison before deletion.
+     * The storage layer turns a String filter into a regex on both backends (Mongo
+     * {@code $regex}, Postgres {@code ~}) whose metacharacter handling is not
+     * identical, and an over-broad match here would delete another user's
+     * transcripts. The regex therefore only narrows the scan; the equality check
+     * decides.
+     *
+     * @param userId
+     *            the user whose transcripts to erase
+     * @return number of transcripts deleted
+     */
+    public long deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException {
+        if (userId == null || userId.isBlank()) {
+            return 0;
+        }
+
+        long deleted = 0;
+        try {
+            var filter = new IResourceFilter.QueryFilters(
+                    List.of(new IResourceFilter.QueryFilter("userId", "^" + escapeRegex(userId) + "$")));
+            var resourceIds = storage.findResources(
+                    new IResourceFilter.QueryFilters[]{filter}, "lastModified", 0, 0);
+
+            for (var resourceId : resourceIds) {
+                try {
+                    var resource = storage.read(resourceId.getId(), SINGLE_VERSION);
+                    if (resource == null) {
+                        continue;
+                    }
+                    if (!userId.equals(resource.getData().getUserId())) {
+                        // regex matched more than it should have — never delete on it
+                        LOGGER.warnf("Skipping group conversation %s during erasure: userId is not an exact match", resourceId.getId());
+                        continue;
+                    }
+                    storage.removeAllPermanently(resourceId.getId());
+                    deleted++;
+                } catch (IOException e) {
+                    LOGGER.warnf("Failed to erase group conversation %s: %s", resourceId.getId(), e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete group conversations for user: " + e.getMessage(), e);
+        }
+        return deleted;
+    }
+
+    /**
+     * Backslash-escape the regex metacharacters shared by both backends' engines.
+     * Deliberately not {@link Pattern#quote}: its {@code \Q...\E} form is
+     * Java-specific and PostgreSQL rejects it.
+     */
+    private static String escapeRegex(String value) {
+        StringBuilder sb = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if ("\\^$.|?*+()[]{}".indexOf(c) >= 0) {
+                sb.append('\\');
+            }
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     @Override

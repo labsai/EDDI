@@ -19,6 +19,7 @@ import jakarta.inject.Inject;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
+import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -39,6 +40,7 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 @ApplicationScoped
 @DefaultBean
 public class ConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
+    private static final Logger LOGGER = Logger.getLogger(ConversationMemoryStore.class);
     private static final String CONVERSATION_COLLECTION = "conversationmemories";
     private static final String OBJECT_ID = "_id";
     private static final String KEY_CONTEXT = "context";
@@ -62,10 +64,19 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
+    public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
         String conversationId = snapshot.getConversationId();
         if (conversationId != null) {
-            conversationCollectionObject.replaceOne(new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot);
+            var result = conversationCollectionObject.replaceOne(new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot);
+            // No upsert on purpose: a missing document means the conversation was
+            // deleted while the turn was running (GDPR erasure, retention sweep).
+            // Ignoring matchedCount discarded the turn's memory silently and still
+            // returned a normal response to the caller — surface the conflict instead.
+            if (result.getMatchedCount() == 0) {
+                throw new IResourceStore.ResourceStoreException(
+                        "Conversation '" + conversationId + "' no longer exists — the turn was NOT persisted. "
+                                + "The conversation document was deleted concurrently (e.g. erasure or retention cleanup).");
+            }
         } else {
             snapshot.setId(new ObjectId().toString());
             conversationCollectionObject.insertOne(snapshot);
@@ -111,8 +122,22 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                         if (result instanceof LinkedHashMap<?, ?>) {
                             @SuppressWarnings("unchecked")
                             var map = (LinkedHashMap<String, Object>) result;
-                            var context = new Context(valueOf(map.get(KEY_TYPE).toString()), map.get(KEY_VALUE));
-                            lifecycleTask.setResult(context);
+                            // Degrade per entry: a context entry written without a "type",
+                            // or with a ContextType a NEWER version knows and this one does
+                            // not, must not fail the load of the WHOLE conversation. Leave
+                            // the raw map in place and warn.
+                            Object rawType = map.get(KEY_TYPE);
+                            if (rawType == null) {
+                                LOGGER.warnf("Conversation '%s': context entry '%s' has no '%s' field — left unconverted.", conversationId,
+                                        lifecycleTask.getKey(), KEY_TYPE);
+                                continue;
+                            }
+                            try {
+                                lifecycleTask.setResult(new Context(valueOf(rawType.toString()), map.get(KEY_VALUE)));
+                            } catch (IllegalArgumentException e) {
+                                LOGGER.warnf("Conversation '%s': context entry '%s' has unknown %s '%s' — left unconverted.", conversationId,
+                                        lifecycleTask.getKey(), KEY_TYPE, rawType);
+                            }
                         }
                     }
                 }
@@ -301,7 +326,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public IResourceStore.IResourceId create(ConversationMemorySnapshot content) {
+    public IResourceStore.IResourceId create(ConversationMemorySnapshot content) throws IResourceStore.ResourceStoreException {
         final String conversationId = storeConversationMemorySnapshot(content);
 
         return new IResourceStore.IResourceId() {
@@ -323,7 +348,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public Integer update(String id, Integer version, ConversationMemorySnapshot content) {
+    public Integer update(String id, Integer version, ConversationMemorySnapshot content) throws IResourceStore.ResourceStoreException {
         storeConversationMemorySnapshot(content);
         return 0;
     }

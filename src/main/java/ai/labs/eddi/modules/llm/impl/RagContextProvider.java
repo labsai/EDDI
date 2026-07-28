@@ -111,6 +111,20 @@ public class RagContextProvider {
             RagConfiguration ragConfig = step.config();
             String kbName = ragConfig.getName();
 
+            // Finding I3: chunkStrategy was accepted and never read — ingestion always
+            // splits recursively. Surface an unimplemented value as a clear, traced
+            // error instead of quietly doing something else.
+            try {
+                ragConfig.validate();
+            } catch (IllegalArgumentException e) {
+                LOGGER.errorf("Knowledge base '%s' has an unusable configuration: %s", kbName, e.getMessage());
+                Map<String, Object> invalidTrace = new HashMap<>();
+                invalidTrace.put("kb", kbName);
+                invalidTrace.put("error", e.getMessage());
+                traceEntries.add(invalidTrace);
+                continue;
+            }
+
             // Determine retrieval params
             int maxResults;
             double minScore;
@@ -178,8 +192,12 @@ public class RagContextProvider {
             return null;
         }
 
-        // Step 7: Format context
-        String formattedContext = formatRagContext(allResults);
+        // Step 7: Format context, bounded by the task's maxRagContextChars.
+        // Finding F7: without this, every chunk from every matched knowledge base was
+        // concatenated verbatim into the system prompt, which maxContextTokens
+        // explicitly does not cover — with enableWorkflowRag across N knowledge bases
+        // the prompt grew until the provider rejected the request.
+        String formattedContext = formatRagContext(allResults, resolveMaxChars(task));
 
         // Store formatted context in memory for audit
         var ragContextData = dataFactory.createData("rag:context:" + taskId, formattedContext);
@@ -189,23 +207,53 @@ public class RagContextProvider {
     }
 
     /**
-     * Formats retrieval results into a structured context string for the LLM.
+     * Resolve the character cap for the assembled RAG block. {@code null},
+     * {@code -1} or {@code 0} mean "unbounded" (the pre-F7 behavior).
      */
-    private String formatRagContext(List<RetrievalResult> results) {
+    static int resolveMaxChars(LlmConfiguration.Task task) {
+        Integer configured = task != null ? task.getMaxRagContextChars() : null;
+        return configured != null && configured > 0 ? configured : -1;
+    }
+
+    /**
+     * Formats retrieval results into a structured context string for the LLM,
+     * stopping once {@code maxChars} is reached.
+     *
+     * @param maxChars
+     *            character ceiling for the whole block; {@code -1} = unbounded
+     */
+    static String formatRagContext(List<RetrievalResult> results, int maxChars) {
         StringBuilder sb = new StringBuilder();
         String currentKb = null;
+        int omitted = 0;
 
         for (RetrievalResult result : results) {
+            var chunk = new StringBuilder();
             if (!result.kbName().equals(currentKb)) {
                 if (currentKb != null) {
-                    sb.append("\n");
+                    chunk.append("\n");
                 }
-                sb.append("### Source: ").append(result.kbName()).append("\n\n");
-                currentKb = result.kbName();
+                chunk.append("### Source: ").append(result.kbName()).append("\n\n");
             }
-            sb.append(result.content().textSegment() != null && result.content().textSegment().text() != null
+            chunk.append(result.content().textSegment() != null && result.content().textSegment().text() != null
                     ? result.content().textSegment().text()
                     : "").append("\n\n");
+
+            if (maxChars > 0 && sb.length() + chunk.length() > maxChars) {
+                omitted++;
+                continue;
+            }
+            if (!result.kbName().equals(currentKb)) {
+                currentKb = result.kbName();
+            }
+            sb.append(chunk);
+        }
+
+        if (omitted > 0) {
+            LOGGER.warnf("RAG context capped at %d chars — %d retrieved chunk(s) omitted. "
+                    + "Raise maxRagContextChars or lower maxResults/knowledge base count.", maxChars, omitted);
+            sb.append("\n[... ").append(omitted).append(" further retrieved passage(s) omitted: RAG context limit (")
+                    .append(maxChars).append(" chars) reached ...]");
         }
 
         return sb.toString().trim();

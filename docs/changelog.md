@@ -5,6 +5,98 @@
 
 ---
 
+## 🧠 fix(llm): code-review findings wave 2b — LLM core, persistent memory, migration, import/export (2026-07-28)
+
+**Repo:** EDDI (`fix/code-review-llm-memory`)
+
+Second half of wave 2, stacked on the access-control PR. Covers the LLM tool pipeline, the persistent-memory subsystem, the v5→v6 migrations, and import/export.
+
+### The tool pipeline had a second door
+
+- **F14** — `executeToolWrapped` is genuinely well-built and has one production call site, so every one of the seven tool sources routes through it. Except **`McpCallsTask` doesn't** — a behaviour-rule-triggered lifecycle task invoking the *same* external MCP tools, which resolved a `ToolExecutor` and called it directly. It also bypassed `ToolApprovalGate`, so **`hitlConfig.toolApprovals` gated LLM-initiated calls and not rule-initiated ones** — a human-approval gate with a hole in it.
+- **F18** — `converse_with_agent` had **no guardrails at all**: it never consulted `DynamicAgentConfig`, and `allowDelegation` was never checked anywhere. Agent A could call B, which calls A — and with no `conversationId` a *fresh* conversation starts, so the busy-guard never breaks the cycle. Prompt injection in a user message was sufficient to start it. Now enforces `allowDelegation`, a target allowlist, and a delegation-depth counter propagated through conversation context (reusing the mechanism groups already use for `groupDepth`).
+- **F17** — `maxCreatedAgentsPerDiscussion` was enforced **per turn, not per discussion**, because `sharedCreatedIds` was created fresh in every `buildToolList` call. A 5-member × 3-phase discussion with the default cap of 5 permitted **up to 75 agents deployed to production**.
+- **F15/F16** — Remote MCP tools silently **shadowed built-in tools** (specs accumulated in a `List`, executors in a `Map`, so duplicates reached the model and last-write-won), and their **descriptions entered the prompt verbatim** with no length cap or sanitisation — whitelisting operates on names, so a whitelisted tool whose description changes was ungoverned.
+- **A10** — The MCP client did **no URL validation at all**, unlike its A2A sibling, while a discovery endpoint echoed the response body — a full SSRF read primitive.
+
+### Two real bugs found by the tests, not by the review
+
+The review's F12 fix (cache the workflow traversal that runs 3–4× per LLM task per turn) introduced two defects that only surfaced when `WorkflowTraversalTest` started returning 0 instead of 1:
+
+1. **The cache memoized failure-derived results.** A traversal whose workflow read threw still cached its empty result for the full TTL, and replayed it to the other traversals of the same turn — an agent silently losing its httpcalls/mcpcalls/RAG configuration with nothing in the logs but one WARN. Now only complete traversals are cached.
+2. **The cache key omitted the target class** while the value was cast with an unchecked `(List<StepConfig<T>>)`. Justified by a comment asserting a 1:1 mapping that nothing enforces — any future caller asking for the same step type with a different class would get another caller's entry and a `ClassCastException` from a cache hit with no connection to the calling code.
+
+This is why the triage pass asked "stale test, bad fixture, or **real bug**?" for every failure rather than adjusting tests until green.
+
+### F13 was fixed but unreachable
+
+The wave-2 agent added `inheritedParameters` overloads to `SummarizationService` and tested them directly — but **no caller in `src/main` passed them**. `ConversationSummarizer` still called the 4-arg overload, so the rolling summary still could not authenticate and still silently never materialised. Threading the parent task's resolved parameters through `LlmTask → ConversationSummarizer → SummarizationService` is what actually closes it; both hops now have tests that fail if the parameters are dropped.
+
+`DreamService` remains on the un-inherited path — it is a background job with no parent task, so it needs a credential source of its own. That is part of wiring Dream up (finding I1), scheduled for wave 3.
+
+### Memory & properties
+
+- **G2** — `scope: "secret"` **failed open to plaintext**. On vault failure the method returned the plaintext *before* the scrub block, persisting the secret twice: as a conversation property *and* as raw `input:initial` data. Vault-disabled is the **default** (`eddi.vault.master-key` ships empty), so this was the common path. Now fails closed, scrubbing first.
+- **G1** — User-memory search and delete **crossed agent boundaries**: `getVisibleEntries` builds a proper self/group/global filter, but `filterEntries` and `getByKey` filter on `userId` alone — and the tool path used that unscoped pair.
+- **G13** — Token-aware windowing could emit a prompt with **no user message at all**: the backward fill breaks on the first message that doesn't fit, and if the anchors alone exceed the budget the code only warned. The model then answered with no idea what was asked. The final user message is now reserved first; anchors get trimmed instead.
+- **G12** — A turn could be **silently lost**: `replaceOne` with no upsert whose `UpdateResult` was discarded, so a conversation deleted mid-turn by erasure or a retention sweep discarded the turn while the caller got a normal response.
+- **G5/G6/G7** — `most_accessed` recall did an N+1 write *inside* an open read cursor and was self-reinforcing (only already-top-N entries got incremented, so a new entry could never climb in); `storePropertiesPermanently` refreshed `updatedAt` on every longTerm property every turn, so `most_recent` degenerated to "everything is recent" and `deleteOlderThan` never expired anything for an active user; and re-upserting a recalled entry **silently flipped its owner** to the reading agent.
+- **G9/G10/G11** — `ConversationProperties` broke the `Map` contract (`clear()`/`remove()` left the template map stale, so a checkpoint rollback left post-checkpoint properties visible); `scope: "step"` was persisted despite the docs; one malformed field failed the entire conversation load.
+
+### Migration & import/export
+
+- **B12** — Migration **irrecoverably erased typed BSON values**: it deleted the legacy `value` field unconditionally but only wrote a replacement for String/Map/Integer/Float, dropping doubles, longs, booleans and arrays with no error.
+- **B13** — The template migrator rewrote **any** `{...+...}` sequence, corrupting JSON bodies and arithmetic that merely sat in a document containing Thymeleaf syntax.
+- **B14** — The rename migration **skipped when the v6 collection already existed** and still marked itself complete, abandoning the v5 data.
+- **D11/D12** — Import had no rollback (any failure mid-way left every already-created resource orphaned), and neither import nor export ever deleted their temp directories — `ZipResourceSource` is `AutoCloseable` and its `close()` does the cleanup, but two call sites constructed it outside try-with-resources.
+
+### Verification
+
+Full unit suite: 12,384 tests, **0 non-environmental failures**. G2 and G12 mutation-checked, plus a second sharper mutation for G2 that removes only the input-scrub call — both halves are independently covered. F13's new wiring is mutation-checked at the `LlmTask` hop.
+
+---
+
+## 🔐 fix(security): code-review findings wave 2a — access control, A2A ownership, GDPR & audit ledger (2026-07-28)
+
+**Repo:** EDDI (`fix/code-review-access-control`)
+
+Second wave of the 124-finding external code review, split into two PRs so each stays under CodeRabbit's 100-file review limit (wave 1 at 151 files was skipped by it entirely). This half is the access-control and compliance surface.
+
+### The guard triad existed — it just wasn't called everywhere
+
+EDDI already has `OwnershipValidator`, `ConversationAccessGuard` and `HitlAccessGuard`, used correctly in `engine/internal`, `engine/hitl` and the MCP surface. Every finding here is a place that never called them.
+
+- **A1 (critical)** — The **SSE turn endpoint had no ownership check** while its non-streaming twin did. The turn then executed under the *target* conversation's `userId`, loading that user's long-term memories into the prompt and running tool calls in their context. Fixed in two layers: the guard moved **down into `ConversationService.say`/`sayStreaming`** so no future REST adapter can omit it, *before* the memory snapshot loads — plus a REST-layer check so denial is a plain 403 rather than an error event on an already-200 SSE stream.
+- **A2 (critical)** — Attachment endpoints **authorised the path parameter, not the caller**. `IAttachmentStore.load(ref, requestingConversationId)` checks that the *named* conversation owns the blob — and the caller supplies that name, so the check was self-satisfying. All five methods now require caller ownership, checked on the request thread *before* the async hop (`SecurityIdentity` is request-scoped).
+- **A3** — `?deleteOlderThanDays=0` permanently deleted **every ended conversation in the deployment**, from an endpoint with no role at all. Now admin-only with a minimum of 1 day.
+- **A4** — The tool control plane was unroled: rate-limiter reset, cost-budget reset, and a history endpoint dumping **raw tool arguments and results** for any conversation.
+- **A5** — `/propertiesstore/properties/{userId}` had neither role nor ownership check over the same `IUserMemoryStore` that `RestUserMemoryStore` guards on all nine of its methods. Writes there land in the victim's next system prompt.
+- **A6** — A **conversation-id oracle**: it returned another user's live `conversationId`, which is the discovery half of A1 and A3.
+- **A7** — Template preview read **any** conversation's memory and returned a flattened dump of properties/context/memory — and since the caller supplies the template, it was effectively a query language over someone else's conversation.
+- **A8** — Config stores with full CRUD and no role. The review named one; **the actual inventory was six**, including two it missed (`IRestCapabilityRegistry`, `IRestWorkflowStepStore`). `IRestVersionInfo` was deliberately left alone — it has no `@Path` and is a mixin, reasoning recorded in the code.
+- **A9** — A2A sat entirely outside the ownership model: caches keyed on a caller-supplied id, `contextId` as an unauthenticated read+write conversation handle, conversations created with `userId = null` (which `OwnershipValidator` treats as "legacy — allow", so permanently unowned), and raw `e.getMessage()` returned to arbitrary peers.
+- **A12** — The global exception mapper returned the **raw driver message** as the 500 body — collection names, hostnames, replica-set topology. Now logged at ERROR with a correlation id.
+
+### GDPR & audit (G14–G20)
+
+- **G14** — Erasure was **served stale indefinitely** from a Caffeine cache with no TTL that erasure never invalidated.
+- **G15** — The erasure cascade missed three stores while `docs/gdpr-compliance.md` asserted it "covers all data stores": conversation **checkpoints** (which carry `propertiesCopy` including PII, behind a javadoc claiming it was "used during GDPR erasure" when its only caller was unreachable), **group transcripts**, and **schedules** that kept firing under an erased user's id.
+- **G16** — `AuditHmac.verifyHmac` had **zero production callers**; the docs told operators to "recompute the HMAC and compare it" and the product shipped no way to do so. Added admin verification endpoints.
+- **G17** — GDPR pseudonymisation did `updateMany($set userId)` with no HMAC recompute, and `userId` is a *signed* field — so **every routine erasure produced rows cryptographically indistinguishable from tampered ones**. The class javadoc claiming a write-once contract was literally true and substantively false.
+- **G18** — No hash chain: entries were independently signed, so **deletion and reordering were undetectable**. Added a per-conversation sequence inside the signed payload (chosen over a global chain, which would serialise all audit writes).
+- **G19** — `eddi.vault.master-key` ships empty, so entries were written **unsigned by default** while the docs present the ledger as evidence-grade. `ComplianceStartupChecks` had zero references to vault/HMAC/audit.
+- **G20** — Unbounded audit queue that **re-offered failed batches into itself** — an OOM loop under a slow store.
+
+### Documentation corrected (I7–I13)
+
+Several docs described behaviour that did not exist. `docs/semantic-parser.md` documented a **stemming extension that does not exist**, four times, including inside the flagship copy-paste config — copying it throws `UnrecognizedExtensionException` and the agent will not start. The same doc's expression table claimed `number(42)` and `time(15:00)` where the code emits `integer(42)` and epoch millis, so rules written from it never fired. `docs/conversation-memory.md` and `docs/properties.md` both contradicted AGENTS.md §5.1 on the template model (`{properties.X.valueString}` fails at runtime — `MemoryItemConverter` puts raw values).
+
+### Verification
+
+Full unit suite: 12,384 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature — this machine cannot bind sockets; CI is the gate for those). Five high-stakes fixes were **mutation-checked** — revert the fix, confirm a test actually fails, restore: G2, G12, A1, A2 and F18 all bite, verified against whole test classes (a `-Dtest=Class#method` filter silently runs 0 tests and exits 0 when the method is in a `@Nested` class, which reads exactly like a pass).
+
+---
+
 ## 🐞 fix(engine): code-review findings wave 1 — parser, rules, templating, apicalls, datastore, LLM infra, deployment (2026-07-28)
 
 **Repo:** EDDI (`fix/code-review-findings`)

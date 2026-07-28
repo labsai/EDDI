@@ -237,7 +237,7 @@ class MongoUserMemoryStoreTest {
     }
 
     @Test
-    @DisplayName("getVisibleEntries — most_accessed ordering increments access count")
+    @DisplayName("getVisibleEntries — most_accessed ordering increments access count in ONE batched write")
     void getVisibleEntriesMostAccessed() throws Exception {
         Instant now = Instant.parse("2024-01-01T00:00:00Z");
         Document doc = createMemoryDoc(TEST_OID, "key1", "val1", Visibility.self, now);
@@ -250,11 +250,12 @@ class MongoUserMemoryStoreTest {
         doReturn(cursor).when(iterable).iterator();
         when(cursor.hasNext()).thenReturn(true, false);
         when(cursor.next()).thenReturn(doc);
-        when(collection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
+        when(collection.updateMany(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
 
         List<UserMemoryEntry> result = store.getVisibleEntries(TEST_USER, TEST_AGENT, null, "most_accessed", 10);
         assertEquals(1, result.size());
-        verify(collection).updateOne(any(Bson.class), any(Bson.class));
+        verify(collection).updateMany(any(Bson.class), any(Bson.class));
+        verify(collection, never()).updateOne(any(Bson.class), any(Bson.class));
     }
 
     // ==================== filterEntries ====================

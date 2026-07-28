@@ -4,10 +4,12 @@
  */
 package ai.labs.eddi.modules.mcpcalls.impl;
 
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.mcpcalls.model.McpCall;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
@@ -22,12 +24,14 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
+import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
@@ -72,20 +76,44 @@ public class McpCallsTask implements ILifecycleTask {
 
     private static final Logger LOGGER = Logger.getLogger(McpCallsTask.class);
 
+    /**
+     * Provenance tag used when matching {@code hitlConfig.toolApprovals} patterns —
+     * the same {@code "mcp"} source {@code AgentOrchestrator} reports for remote
+     * MCP tools, so one pattern governs both doors.
+     */
+    private static final String TOOL_SOURCE_MCP = "mcp";
+
     private final IResourceClientLibrary resourceClientLibrary;
     private final IMemoryItemConverter memoryItemConverter;
     private final IJsonSerialization jsonSerialization;
     private final McpToolProviderManager mcpToolProviderManager;
     private final PrePostUtils prePostUtils;
+    private final ToolExecutionService toolExecutionService;
+    private final ToolApprovalGate toolApprovalGate = new ToolApprovalGate();
+
+    /**
+     * Cluster-wide kill switch for the tool-approval gate, mirroring
+     * {@code LlmTask.toolHitlEnabled} so an operator can disable both doors
+     * together during a rolling upgrade.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.hitl.tool.enabled", defaultValue = "true")
+    boolean toolHitlEnabled;
+
+    /** Rate limit (calls/minute) applied to rule-triggered MCP tool calls. */
+    @Inject
+    @ConfigProperty(name = "eddi.mcpcalls.default-rate-limit", defaultValue = "100")
+    int defaultRateLimit;
 
     @Inject
     public McpCallsTask(IResourceClientLibrary resourceClientLibrary, IMemoryItemConverter memoryItemConverter, IJsonSerialization jsonSerialization,
-            McpToolProviderManager mcpToolProviderManager, PrePostUtils prePostUtils) {
+            McpToolProviderManager mcpToolProviderManager, PrePostUtils prePostUtils, ToolExecutionService toolExecutionService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.memoryItemConverter = memoryItemConverter;
         this.jsonSerialization = jsonSerialization;
         this.mcpToolProviderManager = mcpToolProviderManager;
         this.prePostUtils = prePostUtils;
+        this.toolExecutionService = toolExecutionService;
     }
 
     @Override
@@ -190,8 +218,28 @@ public class McpCallsTask implements ILifecycleTask {
             // 5. Execute the tool
             ToolExecutionRequest toolRequest = ToolExecutionRequest.builder().name(toolName).arguments(argumentsJson).build();
 
+            // Finding F14: this behavior-rule-triggered door reaches the SAME remote MCP
+            // tools the LLM loop reaches, so it must honour the SAME human-approval
+            // gate. Without this, hitlConfig.toolApprovals gated LLM-initiated calls and
+            // silently let rule-initiated ones through.
+            if (isApprovalGated(memory, toolRequest)) {
+                LOGGER.warnf("MCP call '%s' → tool '%s' matches hitlConfig.toolApprovals.requireApproval and was NOT executed: "
+                        + "rule-triggered MCP calls cannot be human-approved. Remove the tool from requireApproval or "
+                        + "drive it through an LLM task instead.", callName, toolName);
+                String deniedObjName = (mcpCall.getResponseObjectName() != null
+                        ? mcpCall.getResponseObjectName()
+                        : callName + "Response") + "Error";
+                prePostUtils.createMemoryEntry(currentStep, "DENIED: tool '" + toolName + "' requires human approval", deniedObjName, KEY_MCP_CALLS);
+                return;
+            }
+
+            // Finding F14: route through the same metering pipeline the LLM tool loop
+            // uses — rate limiting, caching and cost tracking. Calling the executor
+            // directly bypassed all three.
+            String conversationId = memory.getConversationId();
             String toolResult = RetryConfiguration.executeWithRetry(
-                    () -> executor.execute(toolRequest, null),
+                    () -> toolExecutionService.executeToolWrapped(toolName, toolRequest.arguments(), null, conversationId,
+                            () -> executor.execute(toolRequest, null), true, false, true, defaultRateLimit),
                     mcpCall.getRetry(),
                     "MCP call '" + callName + "'");
             LOGGER.infof("MCP call '%s' result: %d chars", callName, toolResult != null ? toolResult.length() : 0);
@@ -250,6 +298,28 @@ public class McpCallsTask implements ILifecycleTask {
     }
 
     /**
+     * Finding F14: decide whether this rule-triggered MCP tool call is covered by
+     * the agent's {@code hitlConfig.toolApprovals.requireApproval} patterns.
+     * <p>
+     * A rule-triggered call has no LLM tool loop to pause and resume into, so the
+     * gate is enforced <em>fail-closed</em>: a gated call is refused rather than
+     * executed. That keeps the human-approval guarantee intact — the alternative
+     * (executing it because no resume path exists) is exactly the hole this finding
+     * describes.
+     */
+    boolean isApprovalGated(IConversationMemory memory, ToolExecutionRequest toolRequest) {
+        if (!toolHitlEnabled) {
+            return false;
+        }
+        ToolApprovalsConfig approvals = memory.getAgentToolApprovalsConfig();
+        if (approvals == null || toolRequest.name() == null) {
+            return false;
+        }
+        var gateResult = toolApprovalGate.classify(List.of(toolRequest), Map.of(toolRequest.name(), TOOL_SOURCE_MCP), approvals, Set.of());
+        return !gateResult.gated().isEmpty();
+    }
+
+    /**
      * Filter tool names based on whitelist and blacklist.
      */
     private Set<String> filterToolNames(List<ToolSpecification> allSpecs, McpCallsConfiguration config) {
@@ -298,9 +368,18 @@ public class McpCallsTask implements ILifecycleTask {
         }
         URI uri = URI.create(uriObj.toString());
         try {
-            return resourceClientLibrary.getResource(uri, McpCallsConfiguration.class);
+            McpCallsConfiguration config = resourceClientLibrary.getResource(uri, McpCallsConfiguration.class);
+            // Finding I3/A10: reject settings the engine cannot honour (unimplemented
+            // transport, non-http URL) at deploy time rather than accepting them and
+            // silently doing something else.
+            if (config != null) {
+                config.validate();
+            }
+            return config;
         } catch (ServiceException e) {
             throw new WorkflowConfigurationException(e.getLocalizedMessage(), e);
+        } catch (IllegalArgumentException e) {
+            throw new WorkflowConfigurationException("Invalid MCP calls configuration at " + uri + ": " + e.getMessage(), e);
         }
     }
 

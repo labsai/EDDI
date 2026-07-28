@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ConversationSummaryConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -115,13 +116,14 @@ class ConversationSummarizerTest {
         var memory = createMockMemory(7);
         var config = createConfig(5);
 
-        when(summarizationService.summarize(anyString(), anyString(), eq("anthropic"), eq("claude-sonnet-4-6"))).thenReturn("Summary of turns 1-2");
+        when(summarizationService.summarize(anyString(), anyString(), eq("anthropic"), eq("claude-sonnet-4-6"), any()))
+                .thenReturn("Summary of turns 1-2");
 
         // When
         summarizer.updateIfNeeded(memory, config, null);
 
         // Then
-        verify(summarizationService).summarize(anyString(), anyString(), eq("anthropic"), eq("claude-sonnet-4-6"));
+        verify(summarizationService).summarize(anyString(), anyString(), eq("anthropic"), eq("claude-sonnet-4-6"), any());
         assertEquals("Summary of turns 1-2", ConversationSummarizer.readSummary(memory));
         assertEquals(2, ConversationSummarizer.readSummaryThroughStep(memory));
     }
@@ -139,16 +141,45 @@ class ConversationSummarizerTest {
         props.put(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP,
                 new Property(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP, 2, Scope.conversation));
 
-        when(summarizationService.summarize(contains("Previous summary"), anyString(), anyString(), anyString()))
+        when(summarizationService.summarize(contains("Previous summary"), anyString(), anyString(), anyString(), any()))
                 .thenReturn("Updated summary of turns 1-3");
 
         // When: 8 turns - 5 recent = summarize through step 3
         summarizer.updateIfNeeded(memory, config, null);
 
         // Then
-        verify(summarizationService).summarize(contains("Previous summary"), anyString(), anyString(), anyString());
+        verify(summarizationService).summarize(contains("Previous summary"), anyString(), anyString(), anyString(), any());
         assertEquals("Updated summary of turns 1-3", ConversationSummarizer.readSummary(memory));
         assertEquals(3, ConversationSummarizer.readSummaryThroughStep(memory));
+    }
+
+    /**
+     * Finding F13: the summarizer could never authenticate, because the parameter
+     * map reaching {@link SummarizationService} carried only {@code modelName} — no
+     * {@code apiKey}, no {@code baseUrl}. The call then threw, the exception was
+     * swallowed as a WARN, and the rolling summary silently never materialised.
+     * <p>
+     * Resolving the provider and model is only half the fix; the parent task's
+     * resolved parameters have to survive the hop through this class. Pin that,
+     * because a summarizer that quietly produces nothing looks identical to one
+     * that is simply not enabled.
+     */
+    @Test
+    void updateIfNeeded_passesTheParentTasksCredentialsThrough() {
+        var memory = createMockMemory(7);
+        var config = createConfig(5);
+        var inherited = Map.of("apiKey", "parent-key", "baseUrl", "https://parent.example/v1");
+
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn("Summary of turns 1-2");
+
+        summarizer.updateIfNeeded(memory, config, null, inherited);
+
+        var captured = ArgumentCaptor.forClass(Map.class);
+        verify(summarizationService).summarize(anyString(), anyString(), anyString(), anyString(), captured.capture());
+        assertNotNull(captured.getValue(), "inherited parameters must not be dropped on the way to the service");
+        assertEquals("parent-key", captured.getValue().get("apiKey"));
+        assertEquals("https://parent.example/v1", captured.getValue().get("baseUrl"));
     }
 
     @Test
@@ -176,7 +207,7 @@ class ConversationSummarizerTest {
         var memory = createMockMemory(7);
         var config = createConfig(5);
 
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString())).thenReturn("");
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("");
 
         // When
         summarizer.updateIfNeeded(memory, config, null);
@@ -192,14 +223,14 @@ class ConversationSummarizerTest {
         var config = createConfig(5);
         config.setExcludePropertiesFromSummary(true);
 
-        when(summarizationService.summarize(anyString(), contains("ALREADY stored"), anyString(), anyString()))
+        when(summarizationService.summarize(anyString(), contains("ALREADY stored"), anyString(), anyString(), any()))
                 .thenReturn("Summary without properties");
 
         // When
         summarizer.updateIfNeeded(memory, config, "name = John\nlanguage = English");
 
         // Then
-        verify(summarizationService).summarize(anyString(), contains("ALREADY stored"), anyString(), anyString());
+        verify(summarizationService).summarize(anyString(), contains("ALREADY stored"), anyString(), anyString(), any());
     }
 
     @Test
@@ -261,7 +292,7 @@ class ConversationSummarizerTest {
         var memory = createMockMemory(7);
         var config = createConfig(5);
 
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString())).thenReturn("Summary text");
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("Summary text");
 
         // When: call twice
         summarizer.updateIfNeeded(memory, config, null);
@@ -269,6 +300,6 @@ class ConversationSummarizerTest {
 
         // Then: summarization service called only once (second call skips because
         // already summarized)
-        verify(summarizationService, times(1)).summarize(anyString(), anyString(), anyString(), anyString());
+        verify(summarizationService, times(1)).summarize(anyString(), anyString(), anyString(), anyString(), any());
     }
 }

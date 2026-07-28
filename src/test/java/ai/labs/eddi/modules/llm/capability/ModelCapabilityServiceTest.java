@@ -122,7 +122,10 @@ class ModelCapabilityServiceTest {
                 "openai,gpt-4",
                 "azure-openai,my-custom-deployment",
                 "anthropic,claude-2.1",
-                "anthropic,not-a-claude-at-all",
+                // deliberately shares no family token with any table entry — a name like
+                // "not-a-claude-at-all" would MATCH, because family detection is a
+                // substring test ("anthropic.claude-3-sonnet" on Bedrock, and similar)
+                "anthropic,mystery-model-v9",
                 "gemini,palm-2",
                 "gemini-vertex,text-bison",
                 "mistral,mistral-large-latest",
@@ -141,8 +144,19 @@ class ModelCapabilityServiceTest {
 
         @Test
         void unknownModelHasNoNativeDocuments() {
-            assertFalse(service.supportsDocuments("anthropic", "not-a-claude-at-all"));
+            assertFalse(service.supportsDocuments("anthropic", "mystery-model-v9"));
             assertFalse(service.supportsDocuments("gemini", "palm-2"));
+        }
+
+        /**
+         * Family detection is a deliberate substring test, so a name that embeds a
+         * known token IS recognised even if it reads like a non-match to a human.
+         * Pinned so the substring semantics are a stated contract rather than a
+         * surprise the next time someone writes a fixture called "not-a-claude".
+         */
+        @Test
+        void aNameEmbeddingAKnownFamilyTokenIsTreatedAsThatFamily() {
+            assertTrue(service.supportsVision("anthropic", "not-a-claude-at-all"));
         }
 
         @Test

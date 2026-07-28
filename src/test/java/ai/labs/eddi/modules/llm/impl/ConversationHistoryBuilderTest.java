@@ -469,7 +469,7 @@ class ConversationHistoryBuilderTest {
         }
 
         @Test
-        @DisplayName("anchored tokens exceed budget — graceful degradation, only anchored returned")
+        @DisplayName("G13: anchored tokens exceed budget — anchors are trimmed, the current turn survives")
         void anchoredTokensExceedBudget() {
             IConversationMemory memory = mock(IConversationMemory.class);
 
@@ -490,12 +490,20 @@ class ConversationHistoryBuilderTest {
 
             List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, null, null, 50, 2, true, estimator);
 
-            // 2 anchored UserMessages + 1 gap marker SystemMessage (omitted turns exist
-            // after anchor)
-            assertEquals(3, messages.size(), "Should contain 2 anchored messages + gap marker");
-            // Verify gap marker is present
+            // Finding G13: the oversized anchors used to consume the whole budget, so
+            // the backward fill produced nothing and the model received anchors + an
+            // omission marker WITHOUT the question it was supposed to answer. Anchors
+            // are now trimmed instead, and the current turn is always present.
+            ChatMessage last = messages.getLast();
+            assertInstanceOf(UserMessage.class, last, "The current turn must be the final message");
+            assertTrue(((UserMessage) last).singleText().contains("Short msg 9"),
+                    "The current user question must survive the window: " + ((UserMessage) last).singleText());
+            // The 500-char anchors cannot fit alongside it and must have been dropped
+            assertTrue(messages.stream().filter(m -> m instanceof UserMessage).noneMatch(m -> ((UserMessage) m).singleText().startsWith("AAAA")),
+                    "Oversized anchors should be trimmed, not the current turn");
+            // Gap marker still reports the omitted middle section
             assertTrue(messages.stream().filter(m -> m instanceof SystemMessage).anyMatch(m -> ((SystemMessage) m).text().contains("omitted")),
-                    "Gap marker should be present for omitted recent messages");
+                    "Gap marker should be present for omitted messages");
         }
 
         @Test
@@ -535,7 +543,7 @@ class ConversationHistoryBuilderTest {
         }
 
         @Test
-        @DisplayName("budget too small for any message — returns only anchored (empty recent)")
+        @DisplayName("G13: budget too small for any message — the current turn is still included")
         void budgetTooSmallForRecent() {
             IConversationMemory memory = mock(IConversationMemory.class);
 
@@ -553,11 +561,15 @@ class ConversationHistoryBuilderTest {
 
             List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, null, null, 1, 1, true, estimator);
 
-            // 1 anchored UserMessage + 1 gap marker SystemMessage (remaining messages can't
-            // fit)
-            assertEquals(2, messages.size(), "Anchored message + gap marker when budget exhausted");
-            assertInstanceOf(UserMessage.class, messages.getFirst());
-            assertInstanceOf(SystemMessage.class, messages.getLast());
+            // Finding G13: with a 1-token budget the anchor used to consume everything
+            // and the model received only the anchor plus an omission marker — no user
+            // question at all. The anchor is now surrendered instead, so the prompt is
+            // the gap marker plus the turn that actually has to be answered.
+            assertEquals(2, messages.size(), "Gap marker + the current turn");
+            assertInstanceOf(SystemMessage.class, messages.getFirst(), "the omission marker precedes the surviving turn");
+            assertInstanceOf(UserMessage.class, messages.getLast(), "the current question must never be dropped");
+            assertTrue(((UserMessage) messages.getLast()).singleText().contains("number 9"),
+                    "the SURVIVING message must be the latest turn: " + ((UserMessage) messages.getLast()).singleText());
         }
     }
 

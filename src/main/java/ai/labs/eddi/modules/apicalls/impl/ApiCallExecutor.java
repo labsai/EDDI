@@ -116,100 +116,99 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 IResponse response = null;
                 boolean retryCall = false;
                 int amountOfExecutions = 0;
-                boolean validationError = false;
                 Map<String, Object> result = new HashMap<>();
 
-                try {
-                    do {
-                        request = buildRequest(targetServerUrl, call, templateDataObjects);
-                        var objectName = call.getName() + "Request";
-                        var requestMap = request.toMap();
-                        // Scrub resolved secrets from request map before persisting to conversation
-                        // memory.
-                        // The actual request (with secrets) was already built — this only affects the
-                        // debug record.
-                        scrubSensitiveHeaders(requestMap);
-                        prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
-                        response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
+                do {
+                    request = buildRequest(targetServerUrl, call, templateDataObjects);
+                    var objectName = call.getName() + "Request";
+                    var requestMap = request.toMap();
+                    // Scrub resolved secrets from request map before persisting to conversation
+                    // memory.
+                    // The actual request (with secrets) was already built — this only affects the
+                    // debug record.
+                    scrubSensitiveHeaders(requestMap);
+                    prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
+                    response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
-                        var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
-                        if (!isResponseSuccessful) {
-                            String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
-                            LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
-                            LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
+                    var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
+                    if (!isResponseSuccessful) {
+                        String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
+                        LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
+                        LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
 
-                            // Store error body in memory so downstream templates / rules can inspect it
-                            if (call.getSaveResponse()) {
-                                String errorBody = response.getContentAsString();
-                                String errorObjectName = call.getResponseObjectName() + "Error";
-                                if (errorBody != null && !errorBody.isBlank()) {
-                                    String truncatedError = errorBody.length() > 2000
-                                            ? errorBody.substring(0, 2000)
-                                            : errorBody;
-                                    prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
-                                    templateDataObjects.put(errorObjectName, truncatedError);
-                                }
-                                prePostUtils.createMemoryEntry(currentStep, response.getHttpCode(),
-                                        call.getResponseObjectName() + "HttpCode", KEY_HTTP_CALLS);
-                                templateDataObjects.put(call.getResponseObjectName() + "HttpCode", response.getHttpCode());
+                        // Store error body in memory so downstream templates / rules can inspect it
+                        if (call.getSaveResponse()) {
+                            String errorBody = response.getContentAsString();
+                            String errorObjectName = call.getResponseObjectName() + "Error";
+                            if (errorBody != null && !errorBody.isBlank()) {
+                                String truncatedError = errorBody.length() > 2000
+                                        ? errorBody.substring(0, 2000)
+                                        : errorBody;
+                                prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
+                                templateDataObjects.put(errorObjectName, truncatedError);
                             }
+                            prePostUtils.createMemoryEntry(currentStep, response.getHttpCode(),
+                                    call.getResponseObjectName() + "HttpCode", KEY_HTTP_CALLS);
+                            templateDataObjects.put(call.getResponseObjectName() + "HttpCode", response.getHttpCode());
+                        }
+                    }
+
+                    var responseHeaderObjectName = call.getResponseHeaderObjectName();
+                    if (!isNullOrEmpty(responseHeaderObjectName)) {
+                        var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
+                        templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
+                        prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
+                        result.put("headers", responseObjectHeader);
+                    }
+
+                    if (isResponseSuccessful && call.getSaveResponse()) {
+                        // Success bodies land in conversation memory, which is persisted as a
+                        // single document — cap them just like the error bodies above.
+                        final String responseBody = truncateResponseBody(response.getContentAsString(), resolveMaxResponseSize(call),
+                                call.getName());
+                        String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
+                        if (actualContentType != null) {
+                            actualContentType = actualContentType.split(";")[0];
+                        } else {
+                            actualContentType = "<not-present>";
                         }
 
-                        var responseHeaderObjectName = call.getResponseHeaderObjectName();
-                        if (!isNullOrEmpty(responseHeaderObjectName)) {
-                            var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
-                            templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
-                            prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
-                            result.put("headers", responseObjectHeader);
-                        }
-
-                        if (isResponseSuccessful && call.getSaveResponse()) {
-                            // Success bodies land in conversation memory, which is persisted as a
-                            // single document — cap them just like the error bodies above.
-                            final String responseBody = truncateResponseBody(response.getContentAsString(), resolveMaxResponseSize(call),
-                                    call.getName());
-                            String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
-                            if (actualContentType != null) {
-                                actualContentType = actualContentType.split(";")[0];
-                            } else {
-                                actualContentType = "<not-present>";
-                            }
-
-                            Object responseObject;
-                            if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
-                                try {
-                                    responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-                                } catch (java.io.IOException jsonEx) {
-                                    LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s",
-                                            call.getName(), jsonEx.getMessage());
-                                    responseObject = responseBody;
-                                }
-                            } else {
-                                if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
-                                    var message = "ApiCall (%s) didn't return application/json, text/plain nor text/html "
-                                            + "as content-type, instead was (%s)";
-                                    LOGGER.warn(format(message, call.getName(), actualContentType));
-                                }
+                        Object responseObject;
+                        if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
+                            try {
+                                responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                            } catch (java.io.IOException jsonEx) {
+                                LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s",
+                                        call.getName(), jsonEx.getMessage());
                                 responseObject = responseBody;
                             }
-
-                            var responseObjectName = call.getResponseObjectName();
-                            templateDataObjects.put(responseObjectName, responseObject);
-                            prePostUtils.createMemoryEntry(currentStep, responseObject, responseObjectName, KEY_HTTP_CALLS);
-                            result.put("body", responseObject);
-                            result.put("httpCode", response.getHttpCode());
+                        } else {
+                            if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
+                                var message = "ApiCall (%s) didn't return application/json, text/plain nor text/html "
+                                        + "as content-type, instead was (%s)";
+                                LOGGER.warn(format(message, call.getName(), actualContentType));
+                            }
+                            responseObject = responseBody;
                         }
 
-                        amountOfExecutions++;
-                        retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions, response.getHttpCode(),
-                                response.getContentAsString());
-                    } while (retryCall);
-                } catch (ApiCallsValidationException e) {
-                    validationError = true;
-                }
+                        var responseObjectName = call.getResponseObjectName();
+                        templateDataObjects.put(responseObjectName, responseObject);
+                        prePostUtils.createMemoryEntry(currentStep, responseObject, responseObjectName, KEY_HTTP_CALLS);
+                        result.put("body", responseObject);
+                        result.put("httpCode", response.getHttpCode());
+                    }
 
+                    amountOfExecutions++;
+                    retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions, response.getHttpCode(),
+                            response.getContentAsString());
+                } while (retryCall);
+
+                // This executor has no response-validation stage, so a post-response
+                // property instruction never sees a validation error. Passing the flag
+                // explicitly keeps the (unused) `runOnValidationError` semantics visible
+                // should validation ever be added.
                 prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, response != null ? response.getHttpCode() : 500,
-                        validationError);
+                        false);
 
                 return result;
             }
@@ -373,8 +372,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     private boolean retryCall(HttpPostResponse postResponse, Map<String, Object> conversationValues, int amountOfExecutions, int httpCode,
-                              String contentAsString)
-            throws ApiCallsValidationException {
+                              String contentAsString) {
 
         if (isNullOrEmpty(postResponse)) {
             return false;
@@ -493,8 +491,5 @@ public class ApiCallExecutor implements IApiCallExecutor {
             }
             requestMap.put("headers", scrubbed);
         }
-    }
-
-    private static class ApiCallsValidationException extends Exception {
     }
 }

@@ -45,6 +45,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.MessageFormat;
@@ -195,20 +196,6 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 collectSelectedConfigs(allExtensionConfigs, httpCallsConfigs, selectedIds);
                 collectSelectedConfigs(allExtensionConfigs, propertyConfigs, selectedIds);
                 collectSelectedConfigs(allExtensionConfigs, outputConfigs, selectedIds);
-
-                Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), agentId, "unused")).normalize();
-
-                writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN),
-                        DICTIONARY_EXT);
-                writeAllVersionsOfUris(unusedPath, behaviorStore, extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
-                writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
-                writeAllVersionsOfUris(unusedPath, llmStore, extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN), LLM_EXT);
-                writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN),
-                        PROPERTY_EXT);
-                writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
-                writeAllVersionsOfUris(unusedPath, mcpCallsStore, extractResourcesUris(workflowConfigString, MCPCALLS_URI_PATTERN), MCPCALLS_EXT);
-                writeAllVersionsOfUris(unusedPath, ragStore, extractResourcesUris(workflowConfigString, RAG_URI_PATTERN), RAG_EXT);
-
             }
 
             // Export only snippets actually referenced by the exported configs
@@ -226,6 +213,48 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             throw sneakyThrow(e);
         } catch (IResourceStore.ResourceStoreException | IOException | CallbackMatcher.CallbackMatcherException e) {
             throw sneakyThrow(e);
+        } finally {
+            // The ZIP is built at this point, so the loose files it was built from
+            // are no longer needed. Without this every export permanently adds a
+            // tmp/<agentId>/ tree.
+            deleteExportScratchTree(agentId);
+        }
+    }
+
+    /**
+     * Removes the scratch tree an export wrote under {@code tmp/<agentId>/}.
+     * Failures are logged, never thrown — cleanup must not turn a successful export
+     * into an error response.
+     */
+    private void deleteExportScratchTree(String agentId) {
+        if (isNullOrEmpty(agentId)) {
+            return;
+        }
+
+        Path tmpDir = tmpPath.toAbsolutePath().normalize();
+        Path scratchDir;
+        try {
+            scratchDir = Paths.get(tmpPath.toString(), agentId).toAbsolutePath().normalize();
+        } catch (InvalidPathException e) {
+            return;
+        }
+
+        // agentId is validated by sanitizePathComponent before any path is built —
+        // this re-check keeps the delete inside tmp/ even if that ever changes.
+        if (!scratchDir.startsWith(tmpDir) || scratchDir.equals(tmpDir) || !Files.exists(scratchDir)) {
+            return;
+        }
+
+        try (var paths = Files.walk(scratchDir)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException e) {
+                    LOGGER.debugf("Could not delete export temp file %s: %s", path, e.getMessage());
+                }
+            });
+        } catch (IOException e) {
+            LOGGER.warnf("Could not clean up export temp directory %s: %s", scratchDir, e.getMessage());
         }
     }
 
@@ -336,45 +365,6 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
     }
 
-    private <T> void writeAllVersionsOfUris(Path unusedPath, IResourceStore<T> store, List<URI> dictionaryUris, String ext) {
-        for (URI dictionaryUri : dictionaryUris) {
-            Integer versionToExport = 1;
-            IResourceId resourceIdUnused = RestUtilities.extractResourceId(dictionaryUri);
-            final String strResId = resourceIdUnused.getId();
-            Map<IResourceId, T> toStore = new LinkedHashMap<>();
-            T config = null;
-            try {
-                config = store.readIncludingDeleted(resourceIdUnused.getId(), versionToExport);
-            } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-                LOGGER.error(e.getLocalizedMessage(), e);
-            }
-            while (versionToExport < 10000) {
-                try {
-                    toStore.put(resourceIdUnused, config);
-                    final Integer currentVersion = versionToExport;
-                    resourceIdUnused = new IResourceId() {
-
-                        @Override
-                        public String getId() {
-                            return strResId;
-                        }
-
-                        @Override
-                        public Integer getVersion() {
-                            return currentVersion;
-                        }
-                    };
-                    config = store.readIncludingDeleted(resourceIdUnused.getId(), versionToExport);
-                } catch (IResourceStore.ResourceNotFoundException | IRuleSetStore.ResourceStoreException ex) {
-                    break;
-                }
-                versionToExport++;
-            }
-            writeUnusedConfigs(unusedPath, convertConfigsToString(toStore), ext);
-        }
-
-    }
-
     private String prepareZipFilename(DocumentDescriptor agentDocumentDescriptor, String agentId, Integer agentVersion)
             throws UnsupportedEncodingException {
         String zipFilename = "";
@@ -458,22 +448,6 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-    }
-
-    private void writeUnusedConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
-        configs.forEach((resourceId, value) -> {
-            String filename = MessageFormat.format("{0}.{1}.{2}.json", resourceId.getId(), resourceId.getVersion(), fileExtension);
-            Path filePath = Paths.get(path.toString(), filename);
-            try {
-                deleteFileIfExists(filePath);
-                try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
-                    writer.write(value);
-                    writeDocumentDescriptor(path, resourceId.getId(), resourceId.getVersion());
-                }
-            } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-                LOGGER.error(e.getLocalizedMessage(), e);
-            }
-        });
     }
 
     private Path writeDirAndDocument(String documentId, Integer documentVersion, String configurationString, Path tmpPath, String fileExtension)

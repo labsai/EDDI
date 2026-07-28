@@ -227,6 +227,10 @@ public class PropertySetterTask implements ILifecycleTask {
                                 templateDataObjects.put(PROPERTIES_IDENTIFIER, conversationProperties.toMap());
                             }
                         }
+                    } catch (LifecycleException e) {
+                        // Already a lifecycle-level failure (e.g. a fail-closed secret
+                        // vaulting error) — keep its message and cause intact.
+                        throw e;
                     } catch (Exception e) {
                         throw new LifecycleException(e.getLocalizedMessage(), e);
                     }
@@ -405,8 +409,15 @@ public class PropertySetterTask implements ILifecycleTask {
      * @param plaintext
      *            the secret value to store
      * @return the vault reference string, e.g. {@code ${vault:69c687.userApiKey}}
+     * @throws LifecycleException
+     *             when the vault is unavailable or disabled. This method fails
+     *             CLOSED: the raw input is scrubbed first and the plaintext is
+     *             never stored as a conversation property, so a
+     *             {@code scope: "secret"} property can never silently degrade to a
+     *             plaintext secret persisted twice (property +
+     *             {@code input:initial} ) in the conversation document.
      */
-    private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) {
+    private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) throws LifecycleException {
         // Determine tenantId — use conversation property if set, else "default"
         var conversationProperties = memory.getConversationProperties();
         String tenantId = "default";
@@ -426,14 +437,29 @@ public class PropertySetterTask implements ILifecycleTask {
         try {
             secretProvider.store(ref, plaintext, "Auto-vaulted from conversation", List.of(agentId));
         } catch (ISecretProvider.SecretProviderException e) {
-            // If vault storage fails, log and return the plaintext as-is (degraded mode).
-            // This prevents the PropertySetter from breaking the workflow.
-            LOGGER.error("Failed to store secret in vault for key '" + keyName + "': " + e.getMessage());
-            return plaintext;
+            // Fail CLOSED. The previous behaviour returned the plaintext, which was then
+            // persisted TWICE — as a conversation property and (because the scrub below
+            // was skipped) as the raw input:initial data. A disabled vault is the default
+            // (eddi.vault.master-key ships empty), so that was the common path.
+            // Scrub the raw input BEFORE aborting so the plaintext cannot survive in the
+            // conversation document that is persisted for the failed turn either.
+            scrubSecretInput(memory, plaintext);
+            LOGGER.errorf("Failed to store secret in vault for property '%s': %s", keyName, e.getMessage());
+            throw new LifecycleException("Cannot store property '" + keyName + "' with scope 'secret': the secrets vault is unavailable or "
+                    + "disabled (set EDDI_VAULT_MASTER_KEY). Refusing to persist the value in plaintext.", e);
         }
 
-        // Scrub the raw user input from conversation memory so the plaintext
-        // doesn't persist in the DB as part of the conversation history.
+        scrubSecretInput(memory, plaintext);
+
+        // Return the vault reference to be stored in properties instead of plaintext
+        return ref.toReferenceString();
+    }
+
+    /**
+     * Scrubs the raw user input from conversation memory so the plaintext does not
+     * persist in the DB as part of the conversation history.
+     */
+    private void scrubSecretInput(IConversationMemory memory, String plaintext) {
         var currentStep = memory.getCurrentStep();
         IData<String> inputData = currentStep.getLatestData(INPUT_INITIAL_IDENTIFIER);
         if (inputData != null && plaintext.equals(inputData.getResult())) {
@@ -441,8 +467,5 @@ public class PropertySetterTask implements ILifecycleTask {
             currentStep.resetConversationOutput("input");
             currentStep.addConversationOutputString("input", SECRET_INPUT_PLACEHOLDER);
         }
-
-        // Return the vault reference to be stored in properties instead of plaintext
-        return ref.toReferenceString();
     }
 }

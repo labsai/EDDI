@@ -10,12 +10,17 @@ import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 
+import java.util.Map;
+
 /**
  * Shared utility methods for MCP tool implementations.
  *
  * @author ginccc
  */
 final class McpToolUtils {
+
+    /** The environment names an MCP caller may pass, for error messages. */
+    static final String VALID_ENVIRONMENTS = "production, test";
 
     private McpToolUtils() {
         // utility class
@@ -65,17 +70,50 @@ final class McpToolUtils {
     }
 
     /**
-     * Parse an environment string to the corresponding enum value. Defaults to
-     * {@link Environment#production} if null, blank, or unrecognized.
+     * Parse an environment string to the corresponding enum value. Only an absent
+     * (null/blank) environment defaults to {@link Environment#production} — an
+     * environment the platform does not know is rejected with an
+     * {@link UnknownEnvironmentException} rather than silently resolving to
+     * production. A typo such as {@code "staging"} must never deploy to, undeploy
+     * from, or talk to production.
+     *
+     * @throws UnknownEnvironmentException
+     *             if {@code environment} is neither blank nor a known environment
      */
     static Environment parseEnvironment(String environment) {
         if (environment == null || environment.isBlank()) {
             return Environment.production;
         }
-        try {
-            return Environment.valueOf(environment.trim().toLowerCase());
-        } catch (IllegalArgumentException e) {
-            return Environment.production;
+        return switch (environment.trim().toLowerCase()) {
+            // "unrestricted"/"restricted" are the v5 names, both folded into production
+            case "production", "unrestricted", "restricted" -> Environment.production;
+            case "test" -> Environment.test;
+            default -> throw new UnknownEnvironmentException(environment);
+        };
+    }
+
+    /**
+     * An MCP caller passed an environment EDDI does not know. Carries a ready-made
+     * structured error body naming the valid values, so a tool can hand the caller
+     * something it can self-correct from instead of a generic failure.
+     */
+    static final class UnknownEnvironmentException extends IllegalArgumentException {
+
+        private final String structuredError;
+
+        UnknownEnvironmentException(String environment) {
+            super(buildMessage(environment));
+            this.structuredError = errorJson(buildMessage(environment), "BAD_REQUEST",
+                    Map.of("environment", environment, "validValues", VALID_ENVIRONMENTS));
+        }
+
+        private static String buildMessage(String environment) {
+            return "Unknown environment '" + environment + "'. Valid values: " + VALID_ENVIRONMENTS;
+        }
+
+        /** The 400-shaped error body for this failure. */
+        String structuredError() {
+            return structuredError;
         }
     }
 
@@ -118,7 +156,7 @@ final class McpToolUtils {
      * the error path. {@code errorCode} and {@code details} may be null/blank/empty
      * (omitted when so).
      */
-    static String errorJson(String message, String errorCode, java.util.Map<String, String> details) {
+    static String errorJson(String message, String errorCode, Map<String, String> details) {
         var sb = new StringBuilder();
         sb.append("{\"error\":\"").append(escapeJsonString(message)).append("\"");
         if (errorCode != null && !errorCode.isBlank()) {

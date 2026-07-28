@@ -16,6 +16,7 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Rolling conversation summary engine.
@@ -95,6 +96,27 @@ public class ConversationSummarizer {
      *            exclusion is disabled
      */
     public void updateIfNeeded(IConversationMemory memory, ConversationSummaryConfig config, String propertiesContext) {
+        updateIfNeeded(memory, config, propertiesContext, null);
+    }
+
+    /**
+     * As
+     * {@link #updateIfNeeded(IConversationMemory, ConversationSummaryConfig, String)},
+     * but inheriting the calling task's resolved model parameters.
+     * <p>
+     * Finding F13: resolving the summarizer's provider and model is not enough on
+     * its own — without the parent task's {@code apiKey} and {@code baseUrl} the
+     * summarizer cannot authenticate, the failure is swallowed as a WARN, and the
+     * rolling summary silently never materialises. The inherited parameters must
+     * travel all the way from {@code LlmTask} to {@link SummarizationService}, so
+     * this overload exists purely to carry them across that gap.
+     *
+     * @param inheritedParameters
+     *            the parent task's resolved parameters (apiKey, baseUrl, …); may be
+     *            null, in which case only the model name reaches the registry
+     */
+    public void updateIfNeeded(IConversationMemory memory, ConversationSummaryConfig config, String propertiesContext,
+                               Map<String, String> inheritedParameters) {
         config.validate();
         int totalSteps = memory.getConversationOutputs().size();
         int recentWindow = config.getRecentWindowSteps();
@@ -134,7 +156,8 @@ public class ConversationSummarizer {
         }
 
         String instructions = buildPrompt(config, propertiesContext);
-        String summary = summarizationService.summarize(contentToSummarize, instructions, config.getLlmProvider(), config.getLlmModel());
+        String summary = summarizationService.summarize(contentToSummarize, instructions, config.getLlmProvider(), config.getLlmModel(),
+                inheritedParameters);
 
         if (summary.isEmpty()) {
             LOGGER.warnf("[SUMMARY] Summarization returned empty for conversation='%s'. Will retry next turn.", sanitize(memory.getConversationId()));

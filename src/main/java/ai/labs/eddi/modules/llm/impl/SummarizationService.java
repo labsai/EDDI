@@ -95,8 +95,29 @@ public class SummarizationService {
      * @return the generated summary text, or empty string on failure
      */
     public String summarize(String content, String instructions, String llmProvider, String llmModel) {
+        return summarize(content, instructions, llmProvider, llmModel, null);
+    }
+
+    /**
+     * Summarize content, inheriting the calling task's model parameters.
+     * <p>
+     * Finding F13: this service used to build the parameter map with
+     * {@code modelName} and nothing else — no {@code apiKey}, no {@code baseUrl}.
+     * Enabling {@code conversationSummary} without global-variable-backed
+     * credentials therefore threw, the exception was swallowed as a WARN, and the
+     * rolling summary silently never materialised. Pass the parent task's resolved
+     * parameters here and only {@code modelName} is overridden — the same
+     * inheritance {@link ToolResponseTruncator} already performs for its
+     * summarizer.
+     *
+     * @param inheritedParameters
+     *            the parent task's resolved parameters (apiKey, baseUrl, …); may be
+     *            null, in which case only the model name is passed
+     */
+    public String summarize(String content, String instructions, String llmProvider, String llmModel,
+                            Map<String, String> inheritedParameters) {
         try {
-            return summarizeWithUsage(content, instructions, llmProvider, llmModel).summary();
+            return summarizeWithUsage(content, instructions, llmProvider, llmModel, inheritedParameters).summary();
         } catch (Exception e) {
             return "";
         }
@@ -114,10 +135,27 @@ public class SummarizationService {
      */
     public SummarizationResult summarizeWithUsage(String content, String instructions,
                                                   String llmProvider, String llmModel) {
+        return summarizeWithUsage(content, instructions, llmProvider, llmModel, null);
+    }
+
+    /**
+     * As {@link #summarizeWithUsage(String, String, String, String)}, but
+     * inheriting the calling task's model parameters so the summarizer can actually
+     * authenticate (finding F13).
+     *
+     * @param inheritedParameters
+     *            the parent task's resolved parameters; {@code modelName} is
+     *            overridden with {@code llmModel} and {@code responseFormat} is
+     *            stripped (a summary is plain text, never JSON)
+     */
+    public SummarizationResult summarizeWithUsage(String content, String instructions,
+                                                  String llmProvider, String llmModel,
+                                                  Map<String, String> inheritedParameters) {
         long start = System.nanoTime();
         try {
-            Map<String, String> params = new HashMap<>();
+            Map<String, String> params = inheritedParameters != null ? new HashMap<>(inheritedParameters) : new HashMap<>();
             params.put("modelName", llmModel);
+            params.remove("responseFormat");
 
             var model = chatModelRegistry.getOrCreate(llmProvider, params);
 

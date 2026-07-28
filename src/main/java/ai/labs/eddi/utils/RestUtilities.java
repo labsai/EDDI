@@ -43,6 +43,19 @@ public class RestUtilities {
         return URI.create(sb.toString());
     }
 
+    /**
+     * Extracts the resource id and version from a resource URI, e.g.
+     * {@code eddi://ai.labs.agent/agentstore/agents/{id}?version=1} or its relative
+     * form {@code /agentstore/agents/{id}?version=1}.
+     * <p>
+     * Malformed input is reported through the return value, never through an
+     * exception: {@code null} is returned for a null URI, and a URI that carries no
+     * usable resource id — no path at all (e.g. {@code eddi://ai.labs.agent}), too
+     * few path segments, or a last segment that is not a valid hex id — yields an
+     * {@link IResourceStore.IResourceId} whose {@code getId()} is {@code null}. The
+     * single exception is a {@code ?version=} query param that is present but not
+     * an integer, which is rejected with an {@link IllegalArgumentException}.
+     */
     public static IResourceStore.IResourceId extractResourceId(URI uri) {
         if (isNullOrEmpty(uri)) {
             return null;
@@ -53,7 +66,10 @@ public class RestUtilities {
         String relativeUriString;
         if (uriString.contains("://")) {
             uriString = uriString.substring(uriString.indexOf("://") + 3);
-            relativeUriString = uriString.substring(uriString.indexOf("/"));
+            int pathStartIndex = uriString.indexOf("/");
+            // an authority-only URI such as "eddi://ai.labs.agent" has no path segment
+            // to extract an id from — treat it as an empty path rather than blowing up
+            relativeUriString = pathStartIndex >= 0 ? uriString.substring(pathStartIndex) : "";
         } else {
             relativeUriString = uriString;
         }

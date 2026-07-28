@@ -10,6 +10,8 @@ import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -41,10 +43,27 @@ class McpToolUtilsTest {
         assertEquals(Environment.production, McpToolUtils.parseEnvironment("   "));
     }
 
+    /**
+     * B11 — an unrecognised environment must never silently resolve to production:
+     * a typo in deploy_agent / undeploy_agent / chat_managed would otherwise hit
+     * the live environment. The parse fails, so the deploy call is never reached.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"staging", "stage", "prod", "PRODUCTIN", "dev", "invalid"})
+    void parseEnvironment_unknown_throwsInsteadOfDeployingToProduction(String environment) {
+        assertThrows(McpToolUtils.UnknownEnvironmentException.class,
+                () -> McpToolUtils.parseEnvironment(environment));
+    }
+
     @Test
-    void parseEnvironment_invalid_defaultsToProduction() {
-        assertEquals(Environment.production, McpToolUtils.parseEnvironment("invalid"));
-        assertEquals(Environment.production, McpToolUtils.parseEnvironment("production"));
+    void parseEnvironment_unknown_carriesBadRequestErrorNamingValidValues() {
+        var exception = assertThrows(McpToolUtils.UnknownEnvironmentException.class,
+                () -> McpToolUtils.parseEnvironment("staging"));
+
+        String structuredError = exception.structuredError();
+        assertTrue(structuredError.contains("\"errorCode\":\"BAD_REQUEST\""), structuredError);
+        assertTrue(structuredError.contains("staging"), structuredError);
+        assertTrue(structuredError.contains("production, test"), structuredError);
     }
 
     // --- parseIntOrDefault ---

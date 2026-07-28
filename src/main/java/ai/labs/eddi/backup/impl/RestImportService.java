@@ -58,6 +58,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.spi.CDI;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
@@ -176,8 +177,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return previewUpgrade(zippedAgentConfigFiles, targetAgentId);
         }
         // Legacy merge preview path
+        File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
         try {
-            File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
             this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
             var targetDirPath = targetDir.getPath();
 
@@ -228,6 +229,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Preview failed: " + e.getMessage(), e);
+        } finally {
+            deleteTempDirectoryQuietly(targetDir.toPath());
         }
     }
 
@@ -394,8 +397,32 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return selectedSet == null || selectedSet.contains(originId);
     }
 
+    /**
+     * Unzips and imports an agent, then guarantees two things the import itself
+     * cannot: that a partial import leaves no orphaned resources behind, and that
+     * the unzipped scratch directory is removed either way.
+     * <p>
+     * Every resource lands through its own store call, so a failure at, say, the
+     * agent — the very last write — would otherwise leave all its workflows and
+     * extensions permanently in the database.
+     */
     private Response importAgentZipFile(InputStream zippedAgentConfigFiles, File targetDir, boolean isMerge,
                                         Set<String> selectedSet)
+            throws IOException {
+
+        var transaction = new ImportTransaction();
+        try {
+            return unpackAndImportAgent(zippedAgentConfigFiles, targetDir, isMerge, selectedSet, transaction);
+        } catch (Throwable failure) {
+            rollbackCreatedResources(transaction);
+            throw failure;
+        } finally {
+            deleteTempDirectoryQuietly(targetDir.toPath());
+        }
+    }
+
+    private Response unpackAndImportAgent(InputStream zippedAgentConfigFiles, File targetDir, boolean isMerge,
+                                          Set<String> selectedSet, ImportTransaction transaction)
             throws IOException {
 
         this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
@@ -425,13 +452,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     ai.labs.eddi.configs.hitl.HitlConfigValidation.validate(agentConfig.getHitlConfig());
 
                     agentConfig.getWorkflows()
-                            .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet));
+                            .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet, transaction));
 
                     URI newAgentUri;
                     if (isMerge && isSelected(selectedSet, agentOriginId)) {
-                        newAgentUri = createOrUpdateAgent(agentConfig, agentOriginId);
+                        newAgentUri = createOrUpdateAgent(agentConfig, agentOriginId, transaction);
                     } else {
-                        newAgentUri = createNewAgent(agentConfig);
+                        newAgentUri = createNewAgent(agentConfig, transaction);
                     }
 
                     updateDocumentDescriptor(Paths.get(targetDirPath), buildOldAgentUri(agentFilePath), newAgentUri);
@@ -466,7 +493,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private void parseWorkflow(String targetDirPath, URI workflowUri, AgentConfiguration agentConfig, boolean isMerge,
-                               Set<String> selectedSet) {
+                               Set<String> selectedSet, ImportTransaction transaction) {
         try {
             IResourceId workflowResourceId = RestUtilities.extractResourceId(workflowUri);
             if (workflowResourceId == null) {
@@ -495,7 +522,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> dictionaryUris = extractResourcesUris(workflowFileString, DICTIONARY_URI_PATTERN);
                         List<URI> newDictionaryUris = createOrUpdateResources(
                                 readResources(dictionaryUris, workflowPath, DICTIONARY_EXT, DictionaryConfiguration.class), dictionaryUris, isMerge,
-                                selectedSet, this::createNewDictionaries, this::updateDictionary);
+                                selectedSet, this::createNewDictionaries, this::updateDictionary, transaction);
 
                         updateDocumentDescriptor(workflowPath, dictionaryUris, newDictionaryUris);
                         workflowFileString = replaceURIs(workflowFileString, dictionaryUris, newDictionaryUris);
@@ -504,7 +531,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> behaviorUris = extractResourcesUris(workflowFileString, BEHAVIOR_URI_PATTERN);
                         List<URI> newBehaviorUris = createOrUpdateResources(
                                 readResources(behaviorUris, workflowPath, BEHAVIOR_EXT, RuleSetConfiguration.class), behaviorUris, isMerge,
-                                selectedSet, this::createNewBehaviors, this::updateBehavior);
+                                selectedSet, this::createNewBehaviors, this::updateBehavior, transaction);
 
                         updateDocumentDescriptor(workflowPath, behaviorUris, newBehaviorUris);
                         workflowFileString = replaceURIs(workflowFileString, behaviorUris, newBehaviorUris);
@@ -513,7 +540,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> httpCallsUris = extractResourcesUris(workflowFileString, HTTPCALLS_URI_PATTERN);
                         List<URI> newApiCallsUris = createOrUpdateResources(
                                 readResources(httpCallsUris, workflowPath, HTTPCALLS_EXT, ApiCallsConfiguration.class), httpCallsUris, isMerge,
-                                selectedSet, this::createNewApiCalls, this::updateApiCalls);
+                                selectedSet, this::createNewApiCalls, this::updateApiCalls, transaction);
 
                         updateDocumentDescriptor(workflowPath, httpCallsUris, newApiCallsUris);
                         workflowFileString = replaceURIs(workflowFileString, httpCallsUris, newApiCallsUris);
@@ -522,7 +549,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> langchainUris = extractResourcesUris(workflowFileString, LANGCHAIN_URI_PATTERN);
                         List<URI> newLangchainUris = createOrUpdateResources(
                                 readResources(langchainUris, workflowPath, LLM_EXT, LlmConfiguration.class), langchainUris, isMerge, selectedSet,
-                                this::createNewLlm, this::updateLangchain);
+                                this::createNewLlm, this::updateLangchain, transaction);
 
                         updateDocumentDescriptor(workflowPath, langchainUris, newLangchainUris);
                         workflowFileString = replaceURIs(workflowFileString, langchainUris, newLangchainUris);
@@ -531,7 +558,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> propertyUris = extractResourcesUris(workflowFileString, PROPERTY_URI_PATTERN);
                         List<URI> newPropertyUris = createOrUpdateResources(
                                 readResources(propertyUris, workflowPath, PROPERTY_EXT, PropertySetterConfiguration.class), propertyUris, isMerge,
-                                selectedSet, this::createNewProperties, this::updateProperty);
+                                selectedSet, this::createNewProperties, this::updateProperty, transaction);
 
                         updateDocumentDescriptor(workflowPath, propertyUris, newPropertyUris);
                         workflowFileString = replaceURIs(workflowFileString, propertyUris, newPropertyUris);
@@ -540,7 +567,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> outputUris = extractResourcesUris(workflowFileString, OUTPUT_URI_PATTERN);
                         List<URI> newOutputUris = createOrUpdateResources(
                                 readResources(outputUris, workflowPath, OUTPUT_EXT, OutputConfigurationSet.class), outputUris, isMerge, selectedSet,
-                                this::createNewOutputs, this::updateOutput);
+                                this::createNewOutputs, this::updateOutput, transaction);
 
                         updateDocumentDescriptor(workflowPath, outputUris, newOutputUris);
                         workflowFileString = replaceURIs(workflowFileString, outputUris, newOutputUris);
@@ -549,7 +576,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> mcpCallsUris = extractResourcesUris(workflowFileString, MCPCALLS_URI_PATTERN);
                         List<URI> newMcpCallsUris = createOrUpdateResources(
                                 readResources(mcpCallsUris, workflowPath, MCPCALLS_EXT, McpCallsConfiguration.class), mcpCallsUris, isMerge,
-                                selectedSet, this::createNewMcpCalls, this::updateMcpCalls);
+                                selectedSet, this::createNewMcpCalls, this::updateMcpCalls, transaction);
 
                         updateDocumentDescriptor(workflowPath, mcpCallsUris, newMcpCallsUris);
                         workflowFileString = replaceURIs(workflowFileString, mcpCallsUris, newMcpCallsUris);
@@ -558,7 +585,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> ragUris = extractResourcesUris(workflowFileString, RAG_URI_PATTERN);
                         List<URI> newRagUris = createOrUpdateResources(
                                 readResources(ragUris, workflowPath, RAG_EXT, RagConfiguration.class), ragUris, isMerge, selectedSet,
-                                this::createNewRags, this::updateRag);
+                                this::createNewRags, this::updateRag, transaction);
 
                         updateDocumentDescriptor(workflowPath, ragUris, newRagUris);
                         workflowFileString = replaceURIs(workflowFileString, ragUris, newRagUris);
@@ -566,9 +593,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // creating updated workflow and replacing references in Agent config
                         URI newWorkflowUri;
                         if (isMerge && isSelected(selectedSet, workflowId)) {
-                            newWorkflowUri = createOrUpdateWorkflow(workflowFileString, workflowId);
+                            newWorkflowUri = createOrUpdateWorkflow(workflowFileString, workflowId, transaction);
                         } else {
-                            newWorkflowUri = createNewWorkflow(workflowFileString);
+                            newWorkflowUri = createNewWorkflow(workflowFileString, transaction);
                         }
 
                         // Set originId on the workflow's descriptor
@@ -596,21 +623,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     @FunctionalInterface
     private interface ResourceCreator<T> {
-        List<URI> create(List<T> configs) throws RestInterfaceFactory.RestInterfaceFactoryException;
+        List<URI> create(List<T> configs, ImportTransaction transaction) throws RestInterfaceFactory.RestInterfaceFactoryException;
     }
 
     @FunctionalInterface
     private interface ResourceUpdater<T> {
-        URI update(T config, String localId, Integer localVersion) throws RestInterfaceFactory.RestInterfaceFactoryException;
+        URI update(T config, String localId, Integer localVersion, ImportTransaction transaction)
+                throws RestInterfaceFactory.RestInterfaceFactoryException;
     }
 
     private <T> List<URI> createOrUpdateResources(List<T> configs, List<URI> originUris, boolean isMerge, Set<String> selectedSet,
-                                                  ResourceCreator<T> creator, ResourceUpdater<T> updater)
+                                                  ResourceCreator<T> creator, ResourceUpdater<T> updater, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
 
         if (!isMerge) {
             // Original behavior: create everything new
-            List<URI> newUris = creator.create(configs);
+            List<URI> newUris = creator.create(configs, transaction);
             // Set originId on each newly created resource
             for (int i = 0; i < originUris.size() && i < newUris.size(); i++) {
                 IResourceId origId = RestUtilities.extractResourceId(originUris.get(i));
@@ -645,7 +673,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // Update existing
                 IResourceId localResId = RestUtilities.extractResourceId(existingUri);
                 if (localResId != null) {
-                    URI updatedUri = updater.update(config, localResId.getId(), localResId.getVersion());
+                    URI updatedUri = updater.update(config, localResId.getId(), localResId.getVersion(), transaction);
                     setOriginIdOnDescriptor(updatedUri, originId);
                     resultUris.add(updatedUri);
                     continue;
@@ -653,7 +681,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             }
 
             // No existing resource found — create new
-            List<URI> created = creator.create(List.of(config));
+            List<URI> created = creator.create(List.of(config), transaction);
             if (!created.isEmpty()) {
                 setOriginIdOnDescriptor(created.getFirst(), originId);
                 resultUris.add(created.getFirst());
@@ -689,7 +717,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return null;
     }
 
-    private URI createOrUpdateAgent(AgentConfiguration agentConfiguration, String agentOriginId)
+    private URI createOrUpdateAgent(AgentConfiguration agentConfiguration, String agentOriginId, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         URI existingUri = findLocalUriByOriginId(agentOriginId);
         if (existingUri != null) {
@@ -704,10 +732,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
         }
-        return createNewAgent(agentConfiguration);
+        return createNewAgent(agentConfiguration, transaction);
     }
 
-    private URI createOrUpdateWorkflow(String workflowFileString, String workflowOriginId)
+    private URI createOrUpdateWorkflow(String workflowFileString, String workflowOriginId, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
         URI existingUri = findLocalUriByOriginId(workflowOriginId);
         if (existingUri != null) {
@@ -722,7 +750,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
         }
-        return createNewWorkflow(workflowFileString);
+        return createNewWorkflow(workflowFileString, transaction);
     }
 
     private void setOriginIdOnDescriptor(URI resourceUri, String originId) {
@@ -760,12 +788,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     /**
      * Creates a resource directly via CDI store lookup, bypassing the REST layer
      * entirely. Returns the constructed URI for the new resource.
+     * <p>
+     * Every creation is recorded on the {@link ImportTransaction} so a later
+     * failure can delete it again.
      */
-    @SuppressWarnings("unchecked")
-    private <T> URI createResourceDirect(Class<?> storeClass, T document, String resourceUri) {
+    private <T> URI createResourceDirect(Class<?> storeClass, T document, String resourceUri, ImportTransaction transaction) {
         try {
-            IResourceStore<T> store = (IResourceStore<T>) jakarta.enterprise.inject.spi.CDI.current().select(storeClass).get();
+            IResourceStore<T> store = resolveStore(storeClass);
             IResourceId resourceId = store.create(document);
+            transaction.recordCreated(storeClass, resourceId);
             URI createdUri = RestUtilities.createURI(resourceUri, resourceId.getId(), IRestVersionInfo.versionQueryParam, resourceId.getVersion());
 
             // Create the DocumentDescriptor that the DocumentDescriptorFilter would
@@ -780,127 +811,134 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
-    private URI createNewAgent(AgentConfiguration agentConfiguration) {
-        return createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI);
+    /** Looks up a resource store bean by its interface class. */
+    @SuppressWarnings("unchecked")
+    private <T> IResourceStore<T> resolveStore(Class<?> storeClass) {
+        return (IResourceStore<T>) CDI.current().select(storeClass).get();
     }
 
-    private URI createNewWorkflow(String workflowFileString) throws IOException {
+    private URI createNewAgent(AgentConfiguration agentConfiguration, ImportTransaction transaction) {
+        return createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI, transaction);
+    }
+
+    private URI createNewWorkflow(String workflowFileString, ImportTransaction transaction) throws IOException {
         WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(workflowFileString, WorkflowConfiguration.class);
-        return createResourceDirect(IWorkflowStore.class, workflowConfig, IRestWorkflowStore.resourceURI);
+        return createResourceDirect(IWorkflowStore.class, workflowConfig, IRestWorkflowStore.resourceURI, transaction);
     }
 
-    private List<URI> createNewDictionaries(List<DictionaryConfiguration> configs) {
-        return configs.stream().map(c -> createResourceDirect(IDictionaryStore.class, c, IRestDictionaryStore.resourceURI)).toList();
+    private List<URI> createNewDictionaries(List<DictionaryConfiguration> configs, ImportTransaction transaction) {
+        return configs.stream().map(c -> createResourceDirect(IDictionaryStore.class, c, IRestDictionaryStore.resourceURI, transaction)).toList();
     }
 
-    private List<URI> createNewBehaviors(List<RuleSetConfiguration> configs) {
-        return configs.stream().map(c -> createResourceDirect(IRuleSetStore.class, c, IRestRuleSetStore.resourceURI)).toList();
+    private List<URI> createNewBehaviors(List<RuleSetConfiguration> configs, ImportTransaction transaction) {
+        return configs.stream().map(c -> createResourceDirect(IRuleSetStore.class, c, IRestRuleSetStore.resourceURI, transaction)).toList();
     }
 
-    private List<URI> createNewApiCalls(List<ApiCallsConfiguration> configs) {
-        return configs.stream().map(c -> createResourceDirect(IApiCallsStore.class, c, IRestApiCallsStore.resourceURI)).toList();
+    private List<URI> createNewApiCalls(List<ApiCallsConfiguration> configs, ImportTransaction transaction) {
+        return configs.stream().map(c -> createResourceDirect(IApiCallsStore.class, c, IRestApiCallsStore.resourceURI, transaction)).toList();
     }
 
-    private List<URI> createNewLlm(List<LlmConfiguration> configs) {
-        return configs.stream().map(c -> createResourceDirect(ILlmStore.class, c, IRestLlmStore.resourceURI)).toList();
+    private List<URI> createNewLlm(List<LlmConfiguration> configs, ImportTransaction transaction) {
+        return configs.stream().map(c -> createResourceDirect(ILlmStore.class, c, IRestLlmStore.resourceURI, transaction)).toList();
     }
 
-    private List<URI> createNewProperties(List<PropertySetterConfiguration> configs) {
-        return configs.stream().map(c -> createResourceDirect(IPropertySetterStore.class, c, IRestPropertySetterStore.resourceURI)).toList();
+    private List<URI> createNewProperties(List<PropertySetterConfiguration> configs, ImportTransaction transaction) {
+        return configs.stream()
+                .map(c -> createResourceDirect(IPropertySetterStore.class, c, IRestPropertySetterStore.resourceURI, transaction)).toList();
     }
 
-    private List<URI> createNewOutputs(List<OutputConfigurationSet> configs) {
-        return configs.stream().map(c -> createResourceDirect(IOutputStore.class, c, IRestOutputStore.resourceURI)).toList();
+    private List<URI> createNewOutputs(List<OutputConfigurationSet> configs, ImportTransaction transaction) {
+        return configs.stream().map(c -> createResourceDirect(IOutputStore.class, c, IRestOutputStore.resourceURI, transaction)).toList();
     }
 
     // ==================== Resource Update (merge logic) ====================
 
-    private URI updateDictionary(DictionaryConfiguration config, String localId, Integer localVersion)
+    private URI updateDictionary(DictionaryConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestDictionaryStore store = getRestResourceStore(IRestDictionaryStore.class);
         Response response = store.updateRegularDictionary(localId, localVersion, config);
         if (response.getStatus() == 200) {
             return URI.create(IRestDictionaryStore.resourceURI + localId + IRestDictionaryStore.versionQueryParam + (localVersion + 1));
         }
-        return createResourceDirect(IDictionaryStore.class, config, IRestDictionaryStore.resourceURI);
+        return createResourceDirect(IDictionaryStore.class, config, IRestDictionaryStore.resourceURI, transaction);
     }
 
-    private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion)
+    private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestRuleSetStore store = getRestResourceStore(IRestRuleSetStore.class);
         Response response = store.updateRuleSet(localId, localVersion, config);
         if (response.getStatus() == 200) {
             return URI.create(IRestRuleSetStore.resourceURI + localId + IRestRuleSetStore.versionQueryParam + (localVersion + 1));
         }
-        return createResourceDirect(IRuleSetStore.class, config, IRestRuleSetStore.resourceURI);
+        return createResourceDirect(IRuleSetStore.class, config, IRestRuleSetStore.resourceURI, transaction);
     }
 
-    private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion)
+    private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestApiCallsStore store = getRestResourceStore(IRestApiCallsStore.class);
         Response response = store.updateApiCalls(localId, localVersion, config);
         if (response.getStatus() == 200) {
             return URI.create(IRestApiCallsStore.resourceURI + localId + IRestApiCallsStore.versionQueryParam + (localVersion + 1));
         }
-        return createResourceDirect(IApiCallsStore.class, config, IRestApiCallsStore.resourceURI);
+        return createResourceDirect(IApiCallsStore.class, config, IRestApiCallsStore.resourceURI, transaction);
     }
 
-    private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion)
+    private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestLlmStore store = getRestResourceStore(IRestLlmStore.class);
         Response response = store.updateLlm(localId, localVersion, config);
         if (response.getStatus() == 200) {
             return URI.create(IRestLlmStore.resourceURI + localId + IRestLlmStore.versionQueryParam + (localVersion + 1));
         }
-        return createResourceDirect(ILlmStore.class, config, IRestLlmStore.resourceURI);
+        return createResourceDirect(ILlmStore.class, config, IRestLlmStore.resourceURI, transaction);
     }
 
-    private URI updateProperty(PropertySetterConfiguration config, String localId, Integer localVersion)
+    private URI updateProperty(PropertySetterConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestPropertySetterStore store = getRestResourceStore(IRestPropertySetterStore.class);
         Response response = store.updatePropertySetter(localId, localVersion, config);
         if (response.getStatus() == 200) {
             return URI.create(IRestPropertySetterStore.resourceURI + localId + IRestPropertySetterStore.versionQueryParam + (localVersion + 1));
         }
-        return createResourceDirect(IPropertySetterStore.class, config, IRestPropertySetterStore.resourceURI);
+        return createResourceDirect(IPropertySetterStore.class, config, IRestPropertySetterStore.resourceURI, transaction);
     }
 
-    private URI updateOutput(OutputConfigurationSet config, String localId, Integer localVersion)
+    private URI updateOutput(OutputConfigurationSet config, String localId, Integer localVersion, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestOutputStore store = getRestResourceStore(IRestOutputStore.class);
         Response response = store.updateOutputSet(localId, localVersion, config);
         if (response.getStatus() == 200) {
             return URI.create(IRestOutputStore.resourceURI + localId + IRestOutputStore.versionQueryParam + (localVersion + 1));
         }
-        return createResourceDirect(IOutputStore.class, config, IRestOutputStore.resourceURI);
+        return createResourceDirect(IOutputStore.class, config, IRestOutputStore.resourceURI, transaction);
     }
 
-    private List<URI> createNewMcpCalls(List<McpCallsConfiguration> configs) {
-        return configs.stream().map(c -> createResourceDirect(IMcpCallsStore.class, c, IRestMcpCallsStore.resourceURI)).toList();
+    private List<URI> createNewMcpCalls(List<McpCallsConfiguration> configs, ImportTransaction transaction) {
+        return configs.stream().map(c -> createResourceDirect(IMcpCallsStore.class, c, IRestMcpCallsStore.resourceURI, transaction)).toList();
     }
 
-    private URI updateMcpCalls(McpCallsConfiguration config, String localId, Integer localVersion)
+    private URI updateMcpCalls(McpCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestMcpCallsStore store = getRestResourceStore(IRestMcpCallsStore.class);
         Response response = store.updateMcpCalls(localId, localVersion, config);
         if (response.getStatus() == 200) {
             return URI.create(IRestMcpCallsStore.resourceURI + localId + IRestMcpCallsStore.versionQueryParam + (localVersion + 1));
         }
-        return createResourceDirect(IMcpCallsStore.class, config, IRestMcpCallsStore.resourceURI);
+        return createResourceDirect(IMcpCallsStore.class, config, IRestMcpCallsStore.resourceURI, transaction);
     }
 
-    private List<URI> createNewRags(List<RagConfiguration> configs) {
-        return configs.stream().map(c -> createResourceDirect(IRagStore.class, c, IRestRagStore.resourceURI)).toList();
+    private List<URI> createNewRags(List<RagConfiguration> configs, ImportTransaction transaction) {
+        return configs.stream().map(c -> createResourceDirect(IRagStore.class, c, IRestRagStore.resourceURI, transaction)).toList();
     }
 
-    private URI updateRag(RagConfiguration config, String localId, Integer localVersion)
+    private URI updateRag(RagConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestRagStore store = getRestResourceStore(IRestRagStore.class);
         Response response = store.updateRag(localId, localVersion, config);
         if (response.getStatus() == 200) {
             return URI.create(IRestRagStore.resourceURI + localId + IRestRagStore.versionQueryParam + (localVersion + 1));
         }
-        return createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI);
+        return createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
     }
 
     // ==================== Snippet Import ====================
@@ -1042,6 +1080,96 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             LOGGER.debug("Error searching for snippets directory: " + e.getMessage());
         }
         return null;
+    }
+
+    // ==================== Rollback of a partial import ====================
+
+    /**
+     * Records the resources one import run created, so a failure part-way through
+     * can be compensated with deletes.
+     * <p>
+     * An instance belongs to exactly one import run and never escapes it, which
+     * keeps the service itself stateless — state lives in the call, not in the
+     * singleton.
+     */
+    private static final class ImportTransaction {
+
+        /** A resource this import created, and the store that owns it. */
+        private record CreatedResource(Class<?> storeClass, String id, Integer version) {
+        }
+
+        private final List<CreatedResource> created = new ArrayList<>();
+
+        void recordCreated(Class<?> storeClass, IResourceId resourceId) {
+            if (storeClass == null || resourceId == null || resourceId.getId() == null) {
+                return;
+            }
+            created.add(new CreatedResource(storeClass, resourceId.getId(), resourceId.getVersion()));
+        }
+
+        /** Newest first — compensating deletes undo creations in reverse order. */
+        List<CreatedResource> createdNewestFirst() {
+            List<CreatedResource> reversed = new ArrayList<>(created);
+            Collections.reverse(reversed);
+            return reversed;
+        }
+    }
+
+    /**
+     * Deletes everything the failed import created, newest first, so a ZIP that
+     * blows up on its last resource leaves no orphans behind.
+     * <p>
+     * Resources that already existed and were merely <em>updated</em> during a
+     * merge are deliberately left alone: they are not orphans, and their previous
+     * versions remain in the store's history.
+     * <p>
+     * Every step is guarded — a rollback failure is logged, never thrown, so it can
+     * never mask the original error.
+     */
+    private void rollbackCreatedResources(ImportTransaction transaction) {
+        List<ImportTransaction.CreatedResource> created = transaction.createdNewestFirst();
+        if (created.isEmpty()) {
+            return;
+        }
+
+        LOGGER.warnf("Import failed — rolling back %d resource(s) created so far", created.size());
+        for (ImportTransaction.CreatedResource resource : created) {
+            try {
+                resolveStore(resource.storeClass()).deleteAllPermanently(resource.id());
+                LOGGER.debugf("Rollback deleted %s '%s' (v%s)",
+                        resource.storeClass().getSimpleName(), resource.id(), resource.version());
+            } catch (Exception e) {
+                LOGGER.warnf("Rollback could not delete %s '%s': %s",
+                        resource.storeClass().getSimpleName(), resource.id(), e.getMessage());
+            }
+            try {
+                documentDescriptorStore.deleteAllDescriptor(resource.id());
+            } catch (Exception e) {
+                LOGGER.warnf("Rollback could not delete descriptor of '%s': %s", resource.id(), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Removes a directory an import unzipped into. Import unpacks every ZIP into
+     * {@code tmp/import/<uuid>/}; without this the tree survives every request and
+     * the directory grows without bound.
+     */
+    private static void deleteTempDirectoryQuietly(Path directory) {
+        if (directory == null || !Files.exists(directory)) {
+            return;
+        }
+        try (var paths = Files.walk(directory)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException e) {
+                    LOGGER.debugf("Could not delete temp file %s: %s", path, e.getMessage());
+                }
+            });
+        } catch (IOException e) {
+            LOGGER.warnf("Could not clean up temp import directory %s: %s", directory, e.getMessage());
+        }
     }
 
     // ==================== Shared helpers ====================
@@ -1228,8 +1356,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
             this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
 
-            ZipResourceSource source = new ZipResourceSource(targetDir.toPath(), jsonSerialization);
-            return structuralMatcher.buildPreview(source, targetAgentId, true);
+            // try-with-resources: ZipResourceSource.close() removes the unzipped tree
+            try (var source = new ZipResourceSource(targetDir.toPath(), jsonSerialization)) {
+                return structuralMatcher.buildPreview(source, targetAgentId, true);
+            }
         } catch (Exception e) {
             LOGGER.error("Upgrade preview failed: " + e.getMessage(), e);
             throw new InternalServerErrorException("Upgrade preview failed: " + e.getMessage(), e);
@@ -1242,13 +1372,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
             this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
 
-            ZipResourceSource source = new ZipResourceSource(targetDir.toPath(), jsonSerialization);
-            Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
-            List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
+            // try-with-resources: ZipResourceSource.close() removes the unzipped tree
+            try (var source = new ZipResourceSource(targetDir.toPath(), jsonSerialization)) {
+                Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
+                List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
 
-            URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder);
-            return Response.status(Response.Status.CREATED)
-                    .header("Location", resultUri.toString()).build();
+                URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder);
+                return Response.status(Response.Status.CREATED)
+                        .header("Location", resultUri.toString()).build();
+            }
         } catch (Exception e) {
             LOGGER.error("Upgrade from ZIP failed: " + e.getMessage(), e);
             throw new InternalServerErrorException("Upgrade failed: " + e.getMessage(), e);

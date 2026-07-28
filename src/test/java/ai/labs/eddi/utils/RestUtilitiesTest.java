@@ -6,6 +6,8 @@ package ai.labs.eddi.utils;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.net.URI;
 
@@ -88,6 +90,21 @@ class RestUtilitiesTest {
     void extractResourceId_withInvalidVersion_throwsIllegalArgument() {
         URI uri = URI.create("eddi://ai.labs.agents/agentsstore/agents/5262b802dc6c4008b54c7c0b58100f97?version=abc");
         assertThrows(IllegalArgumentException.class, () -> RestUtilities.extractResourceId(uri));
+    }
+
+    /**
+     * B10 — a malformed URI must be reported through the return value (id == null),
+     * never by throwing. An authority-only URI such as "eddi://ai.labs.agent" has
+     * no '/' after the scheme at all.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"eddi://ai.labs.agent", "eddi://host", "eddi://ai.labs.agent?version=1", "eddi://ai.labs.agent#fragment",
+            "eddi://ai.labs.agent/", "agents", "/agents", ""})
+    void extractResourceId_withMalformedUri_returnsNullIdWithoutThrowing(String malformedUri) {
+        IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(malformedUri));
+
+        assertNotNull(resourceId, "a non-null URI must still yield a resource id object");
+        assertNull(resourceId.getId(), "no usable id can be extracted from " + malformedUri);
     }
 
     @Test

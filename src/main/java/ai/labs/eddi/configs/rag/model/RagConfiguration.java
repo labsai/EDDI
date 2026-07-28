@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.configs.rag.model;
 
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * First-class versioned knowledge base configuration — analogous to
@@ -98,7 +100,15 @@ public class RagConfiguration {
 
     // --- Chunking (for ingestion) ---
 
-    /** Chunking strategy: "recursive" (default), "paragraph", "sentence" */
+    /**
+     * Chunking strategy for ingestion. Only {@code "recursive"} is implemented —
+     * ingestion builds a {@code DocumentSplitters.recursive} splitter
+     * unconditionally.
+     * <p>
+     * Finding I3: {@code "paragraph"} and {@code "sentence"} were documented and
+     * accepted but had zero readers, so they silently produced recursive chunking.
+     * They are now rejected by {@link #validate()} rather than ignored.
+     */
     private String chunkStrategy = "recursive";
 
     /** Chunk size in characters (default: 512) */
@@ -114,6 +124,28 @@ public class RagConfiguration {
 
     /** Default minimum similarity score (0.0–1.0) */
     private Double minScore = 0.6;
+
+    /**
+     * Chunking strategies the ingestion pipeline actually implements. Anything else
+     * is rejected by {@link #validate()} instead of being silently downgraded to
+     * recursive splitting (finding I3).
+     */
+    public static final Set<String> SUPPORTED_CHUNK_STRATEGIES = Set.of("recursive");
+
+    /**
+     * Validate settings that the engine cannot honour as written.
+     *
+     * @throws IllegalArgumentException
+     *             with an actionable message when {@code chunkStrategy} names a
+     *             strategy that is not implemented
+     */
+    public void validate() {
+        if (chunkStrategy != null && !chunkStrategy.isBlank()
+                && !SUPPORTED_CHUNK_STRATEGIES.contains(chunkStrategy.trim().toLowerCase(Locale.ROOT))) {
+            throw new IllegalArgumentException("Unsupported chunkStrategy '" + chunkStrategy + "' for knowledge base '" + name
+                    + "'. Only recursive splitting is implemented (supported: " + SUPPORTED_CHUNK_STRATEGIES + ").");
+        }
+    }
 
     // --- Getters and Setters ---
 

@@ -32,7 +32,14 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class MemorySnapshotService {
 
     private static final Logger LOGGER = Logger.getLogger(MemorySnapshotService.class);
-    private static final int DEFAULT_MAX_CHECKPOINTS = 10;
+
+    /**
+     * Retention used when the caller does not supply one. Mirrors the default of
+     * {@code AgentConfiguration.SessionManagement#maxCheckpointsPerConversation};
+     * callers that have the agent configuration at hand should pass it explicitly
+     * via {@link #createCheckpoint(IConversationMemory, String, String, int)}.
+     */
+    static final int DEFAULT_MAX_CHECKPOINTS = 10;
 
     @Inject
     IConversationCheckpointStore checkpointStore;
@@ -41,7 +48,8 @@ public class MemorySnapshotService {
     MeterRegistry meterRegistry;
 
     /**
-     * Create a checkpoint of the current conversation state.
+     * Create a checkpoint of the current conversation state, retaining
+     * {@link #DEFAULT_MAX_CHECKPOINTS} checkpoints per conversation.
      *
      * @param memory
      *            the live conversation memory
@@ -52,6 +60,22 @@ public class MemorySnapshotService {
      * @return the created checkpoint
      */
     public MemoryCheckpoint createCheckpoint(IConversationMemory memory, String triggeredBy, String triggeredByClass) {
+        return createCheckpoint(memory, triggeredBy, triggeredByClass, DEFAULT_MAX_CHECKPOINTS);
+    }
+
+    /**
+     * Create a checkpoint of the current conversation state with an explicit
+     * retention.
+     *
+     * @param maxCheckpoints
+     *            how many checkpoints to retain for this conversation — pass
+     *            {@code AgentConfiguration.SessionManagement#getMaxCheckpointsPerConversation()}
+     *            so the agent-level setting is honoured. Values {@code <= 0} fall
+     *            back to {@link #DEFAULT_MAX_CHECKPOINTS} rather than pruning
+     *            everything.
+     * @return the created checkpoint
+     */
+    public MemoryCheckpoint createCheckpoint(IConversationMemory memory, String triggeredBy, String triggeredByClass, int maxCheckpoints) {
         String conversationId = memory.getConversationId();
         int stepIndex = memory.size() - 1; // 0-based step index
         Map<String, Property> properties = extractProperties(memory);
@@ -62,7 +86,7 @@ public class MemorySnapshotService {
         checkpointStore.create(checkpoint);
 
         // Auto-prune if we have too many checkpoints
-        checkpointStore.pruneOldest(conversationId, DEFAULT_MAX_CHECKPOINTS);
+        checkpointStore.pruneOldest(conversationId, effectiveRetention(maxCheckpoints));
 
         incrementCounter("create");
         LOGGER.debugf("Created checkpoint '%s' for conversation '%s' at step %d (triggeredBy=%s)",
@@ -74,10 +98,18 @@ public class MemorySnapshotService {
     /**
      * Restore the conversation memory to a specific checkpoint.
      * <p>
-     * <strong>Important:</strong> This restores only the conversation properties
-     * captured in the checkpoint. It does not restore the step index or any
-     * execution/step-stack state. External side-effects (API calls, tool results
-     * already sent) are NOT reversed.
+     * <strong>Important — this is NOT a session-fork / time-travel
+     * primitive.</strong> It restores <em>only</em> the conversation properties
+     * captured in the checkpoint. It does NOT restore:
+     * <ul>
+     * <li>conversation steps or their step data,</li>
+     * <li>conversation outputs (what the user was shown),</li>
+     * <li>the step index or any execution/step-stack state,</li>
+     * <li>external side-effects — API calls made and tool results already sent are
+     * NOT reversed.</li>
+     * </ul>
+     * Callers that need a true fork must snapshot the full
+     * {@code ConversationMemorySnapshot}, not a {@link MemoryCheckpoint}.
      *
      * @param memory
      *            the live conversation memory to restore
@@ -112,10 +144,24 @@ public class MemorySnapshotService {
     }
 
     /**
-     * Get all checkpoints for a conversation (newest first).
+     * Get the retained checkpoints for a conversation (newest first), bounded by
+     * {@link #DEFAULT_MAX_CHECKPOINTS}.
      */
     public List<MemoryCheckpoint> getCheckpoints(String conversationId) {
-        return checkpointStore.findByConversationId(conversationId, DEFAULT_MAX_CHECKPOINTS);
+        return getCheckpoints(conversationId, DEFAULT_MAX_CHECKPOINTS);
+    }
+
+    /**
+     * Get the retained checkpoints for a conversation (newest first), bounded by an
+     * explicit limit. Values {@code <= 0} fall back to
+     * {@link #DEFAULT_MAX_CHECKPOINTS}.
+     */
+    public List<MemoryCheckpoint> getCheckpoints(String conversationId, int maxCheckpoints) {
+        return checkpointStore.findByConversationId(conversationId, effectiveRetention(maxCheckpoints));
+    }
+
+    private static int effectiveRetention(int maxCheckpoints) {
+        return maxCheckpoints > 0 ? maxCheckpoints : DEFAULT_MAX_CHECKPOINTS;
     }
 
     /**

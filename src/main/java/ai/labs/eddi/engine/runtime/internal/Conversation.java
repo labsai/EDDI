@@ -27,7 +27,6 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
 import static ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -58,12 +57,43 @@ public class Conversation implements IConversation {
     private final IPropertiesHandler propertiesHandler;
     private final IConversation.IConversationOutputRenderer outputProvider;
 
+    /**
+     * The longTerm properties as they stood when this turn started — the baseline
+     * {@link #storePropertiesPermanently()} diffs against so untouched memories are
+     * not rewritten on every turn. A new {@code Conversation} is built per turn
+     * ({@code Agent#continueConversation}), so the constructor snapshot is exactly
+     * "state at the start of this turn"; {@code init()} re-captures after the store
+     * load.
+     */
+    private final Map<String, Property> longTermBaseline = new HashMap<>();
+
     Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
         this.executableWorkflows = executableWorkflows;
         this.conversationMemory = conversationMemory;
         this.propertiesHandler = propertiesHandler;
         this.outputProvider = outputProvider;
+        captureLongTermBaseline();
+    }
+
+    /**
+     * Records the current longTerm properties as the persisted baseline for this
+     * turn.
+     */
+    private void captureLongTermBaseline() {
+        longTermBaseline.clear();
+        if (conversationMemory == null) {
+            return;
+        }
+        IConversationProperties properties = conversationMemory.getConversationProperties();
+        if (properties == null) {
+            return;
+        }
+        properties.forEach((key, property) -> {
+            if (property != null && property.getScope() == Scope.longTerm) {
+                longTermBaseline.put(key, property);
+            }
+        });
     }
 
     @Override
@@ -158,6 +188,10 @@ public class Conversation implements IConversation {
             if (!entries.isEmpty()) {
                 LOGGER.debugf("[MEMORY] Loaded %d user properties for user='%s', agent='%s'", entries.size(), userId, agentId);
             }
+
+            // Everything just loaded came FROM the store — it is by definition already
+            // persisted and must not be re-upserted at the end of this turn.
+            captureLongTermBaseline();
         } catch (IResourceStore.ResourceStoreException e) {
             throw new LifecycleException("Failed to load user properties: " + e.getLocalizedMessage(), e);
         }
@@ -380,17 +414,24 @@ public class Conversation implements IConversation {
         }
     }
 
+    /**
+     * Drops the {@code step}-scoped properties at the end of a turn.
+     * <p>
+     * Removes in place rather than {@code clear()} + {@code putAll(surviving)}: the
+     * re-put mirrored every surviving property into the step data and conversation
+     * output AGAIN, once per turn, which is the quadratic term in a long
+     * conversation's document growth. In-place removal is only safe because
+     * {@code ConversationProperties#toMap()} is derived from the map instead of
+     * being maintained as a parallel structure.
+     */
     private void removeOldInvalidProperties() {
         IConversationProperties conversationProperties = conversationMemory.getConversationProperties();
-        Map<String, Property> filteredConversationProperties = conversationProperties.entrySet().stream()
-                .filter(property -> property.getValue().getScope() != Scope.step).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-
-        conversationProperties.clear();
-        conversationProperties.putAll(filteredConversationProperties);
+        conversationProperties.entrySet().removeIf(property -> property.getValue() == null || property.getValue().getScope() == Scope.step);
     }
 
     /**
-     * Persists all longTerm properties to the {@code usermemories} collection.
+     * Persists the longTerm properties that actually CHANGED during this turn to
+     * the {@code usermemories} collection.
      * <p>
      * Visibility is applied at the persistence boundary:
      * <ul>
@@ -398,6 +439,18 @@ public class Conversation implements IConversation {
      * <li>If the property has no visibility (null) → default to {@code global}
      * (matches legacy flat properties behavior)</li>
      * </ul>
+     * <p>
+     * <strong>Why the diff matters:</strong> every entry recalled at conversation
+     * init is tagged {@code longTerm}, so upserting all of them each turn refreshed
+     * {@code updatedAt} on memories nobody touched. That degenerated
+     * {@code recallOrder: "most_recent"} into "everything is recent" and made
+     * {@code deleteOlderThan} retention unable to ever expire anything for an
+     * active user. Only differing values are written now.
+     * <p>
+     * A property set during a turn that FAILS before the post-conversation tasks
+     * run is not persisted — the same deliberate choice the resume path already
+     * makes (it skips this method on ERROR so a failed turn cannot upsert partial
+     * state).
      */
     private void storePropertiesPermanently() throws IResourceStore.ResourceStoreException {
         IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
@@ -420,14 +473,24 @@ public class Conversation implements IConversation {
             }
         }
 
-        for (Property property : conversationMemory.getConversationProperties().values()) {
-            if (property.getScope() == Scope.longTerm) {
-                // Apply visibility at persistence boundary only
-                Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
-                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis);
-                store.upsert(entry);
+        for (Map.Entry<String, Property> propertyEntry : conversationMemory.getConversationProperties().entrySet()) {
+            Property property = propertyEntry.getValue();
+            if (property == null || property.getScope() != Scope.longTerm) {
+                continue;
             }
+            if (property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
+                // Unchanged since the turn started — already persisted, skip the write.
+                continue;
+            }
+            // Apply visibility at persistence boundary only
+            Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
+            UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis);
+            store.upsert(entry);
         }
+
+        // The turn's writes are now the new baseline — a resume that persists twice
+        // within the same Conversation must not rewrite them a second time.
+        captureLongTermBaseline();
     }
 
     /**

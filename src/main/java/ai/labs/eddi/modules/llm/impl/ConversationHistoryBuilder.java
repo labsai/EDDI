@@ -235,12 +235,33 @@ class ConversationHistoryBuilder {
             anchoredMessages.add(msg);
         }
 
-        // Warn if anchored messages alone exceed the token budget
-        if (anchoredTokens > maxContextTokens) {
+        // Step 1b: the CURRENT turn is non-negotiable (finding G13).
+        //
+        // The backward fill below breaks on the first message that does not fit. When
+        // the anchored messages alone already consume the budget, remainingBudget
+        // clamps to 0 and the fill produces nothing — the model then received
+        // system + anchors + an omission marker and had to answer a question it was
+        // never shown. Reserve the final message first and, if it does not fit
+        // alongside the anchors, drop ANCHORS (the newest anchor first, so the very
+        // opening of the conversation is the last thing surrendered) rather than the
+        // question being asked right now.
+        int lastIndex = allMessages.size() - 1;
+        boolean lastIsAnchored = lastIndex < effectiveAnchor;
+        int currentTurnTokens = lastIsAnchored ? 0 : estimator.estimateTokenCountInMessage(allMessages.get(lastIndex));
+
+        while (!lastIsAnchored && !anchoredMessages.isEmpty() && anchoredTokens + currentTurnTokens > maxContextTokens) {
+            ChatMessage dropped = anchoredMessages.removeLast();
+            anchoredTokens -= estimator.estimateTokenCountInMessage(dropped);
+            effectiveAnchor--;
+        }
+        anchoredTokens = Math.max(0, anchoredTokens);
+
+        // Warn if what remains still exceeds the token budget
+        if (anchoredTokens + currentTurnTokens > maxContextTokens) {
             LOGGER.warnf(
-                    "Anchored steps (%d) consume %d tokens, exceeding maxContextTokens=%d. "
-                            + "Consider reducing anchorFirstSteps or increasing maxContextTokens.",
-                    effectiveAnchor, anchoredTokens, maxContextTokens);
+                    "Anchored steps (%d) plus the current turn consume %d tokens, exceeding maxContextTokens=%d. "
+                            + "The current turn is included regardless — consider reducing anchorFirstSteps or increasing maxContextTokens.",
+                    effectiveAnchor, anchoredTokens + currentTurnTokens, maxContextTokens);
         }
 
         // Step 2: Fill remaining budget from most recent steps backward
@@ -249,7 +270,15 @@ class ConversationHistoryBuilder {
         int recentTokens = 0;
         int recentStartIndex = allMessages.size(); // exclusive — will be decremented
 
-        for (int i = allMessages.size() - 1; i >= effectiveAnchor; i--) {
+        // The final message is force-included: it is the question this turn must
+        // answer, so it is never subject to the budget break below.
+        if (!lastIsAnchored) {
+            recentTokens = currentTurnTokens;
+            recentMessages.addFirst(allMessages.get(lastIndex));
+            recentStartIndex = lastIndex;
+        }
+
+        for (int i = recentStartIndex - 1; i >= effectiveAnchor; i--) {
             ChatMessage msg = allMessages.get(i);
             int msgTokens = estimator.estimateTokenCountInMessage(msg);
             if (recentTokens + msgTokens > remainingBudget) {
