@@ -37,10 +37,12 @@ import java.util.Map;
  * <code>{context.openai_system_message}</code>. Open WebUI's RAG chunks arrive
  * through this same path.
  * <p>
- * Images are mapped to {@code attachment_N} context entries, which
- * {@link AttachmentContextExtractor} already understands — so they flow through
- * the existing forwarder with its vision-capability gating, byte caps and
- * SSRF-guarded fetching. No adapter-side image handling is required.
+ * Binary content parts — {@code image_url}, {@code input_audio} and
+ * {@code file} — are mapped to {@code attachment_N} context entries, which
+ * {@link AttachmentContextExtractor} already understands. From there the
+ * existing forwarder applies capability gating (vision, audio, native document
+ * support), byte caps, PDF text extraction and SSRF-guarded fetching, so the
+ * adapter itself handles no media at all.
  *
  * @since 6.1.0
  */
@@ -68,14 +70,40 @@ public class OpenAiMessageMapper {
      */
     private static final String DEFAULT_IMAGE_MIME = "image/jpeg";
 
-    private static final Map<String, String> MIME_BY_EXTENSION = Map.of(
-            "png", "image/png",
-            "jpg", "image/jpeg",
-            "jpeg", "image/jpeg",
-            "gif", "image/gif",
-            "webp", "image/webp",
-            "bmp", "image/bmp",
-            "svg", "image/svg+xml");
+    /** Fallback for a file part whose type cannot be determined at all. */
+    private static final String DEFAULT_FILE_MIME = "application/octet-stream";
+
+    private static final Map<String, String> MIME_BY_EXTENSION = Map.ofEntries(
+            Map.entry("png", "image/png"),
+            Map.entry("jpg", "image/jpeg"),
+            Map.entry("jpeg", "image/jpeg"),
+            Map.entry("gif", "image/gif"),
+            Map.entry("webp", "image/webp"),
+            Map.entry("bmp", "image/bmp"),
+            Map.entry("svg", "image/svg+xml"),
+            Map.entry("pdf", "application/pdf"),
+            Map.entry("txt", "text/plain"),
+            Map.entry("md", "text/markdown"),
+            Map.entry("csv", "text/csv"),
+            Map.entry("json", "application/json"),
+            Map.entry("xml", "application/xml"),
+            Map.entry("html", "text/html"),
+            Map.entry("wav", "audio/wav"),
+            Map.entry("mp3", "audio/mpeg"));
+
+    /**
+     * {@code input_audio.format} → MIME. The protocol carries a bare format name
+     * rather than a media type, and {@code mp3} maps to {@code audio/mpeg} rather
+     * than the {@code audio/mp3} a naive concatenation would produce.
+     */
+    private static final Map<String, String> AUDIO_MIME_BY_FORMAT = Map.of(
+            "wav", "audio/wav",
+            "mp3", "audio/mpeg",
+            "mpeg", "audio/mpeg",
+            "ogg", "audio/ogg",
+            "flac", "audio/flac",
+            "m4a", "audio/mp4",
+            "webm", "audio/webm");
 
     private final ObjectMapper objectMapper;
     private final int maxAttachmentsPerTurn;
@@ -142,15 +170,15 @@ public class OpenAiMessageMapper {
                 }
                 continue;
             }
-            if (!part.isImageUrl()) {
-                continue; // input_audio, file, … — not supported on this path yet
+            if (!part.isImageUrl() && !part.isInputAudio() && !part.isFile()) {
+                continue; // an unknown part type — ignore rather than fail the turn
             }
             if (maxAttachmentsPerTurn > 0 && index >= maxAttachmentsPerTurn) {
                 skipped++;
                 continue;
             }
 
-            Map<String, Object> attachment = toAttachment(part.imageUrl().url(), index);
+            Map<String, Object> attachment = toAttachment(part, index);
             if (attachment == null) {
                 continue;
             }
@@ -160,38 +188,115 @@ public class OpenAiMessageMapper {
         }
 
         if (skipped > 0) {
-            LOGGER.warnf("Dropped %d image(s) beyond the per-turn cap of %d", skipped, maxAttachmentsPerTurn);
+            LOGGER.warnf("Dropped %d attachment(s) beyond the per-turn cap of %d", skipped, maxAttachmentsPerTurn);
         }
         return String.join("\n", texts);
     }
 
     /**
      * Build one attachment map in the shape {@link AttachmentContextExtractor}
-     * expects, or {@code null} when the URL is unusable.
+     * expects, or {@code null} when the part carries nothing usable.
      */
-    private Map<String, Object> toAttachment(String url, int index) {
-        Map<String, Object> attachment = new LinkedHashMap<>();
-        attachment.put("fileName", "openai-attachment-" + index);
-
-        if (url.regionMatches(true, 0, DATA_URI_PREFIX, 0, DATA_URI_PREFIX.length())) {
-            int comma = url.indexOf(',');
-            if (comma < 0) {
-                // "data:image/png;base64" with no payload separator. Parsing the
-                // metadata by scanning to ';' would throw here on a malformed but
-                // reachable input, so bail out instead.
-                LOGGER.warnf("Skipping malformed data URI at attachment index %d (no ',' separator)", index);
-                return null;
-            }
-            String metadata = url.substring(DATA_URI_PREFIX.length(), comma);
-            int semicolon = metadata.indexOf(';');
-            String mime = (semicolon >= 0 ? metadata.substring(0, semicolon) : metadata).trim();
-            attachment.put("mimeType", mime.isEmpty() ? DEFAULT_IMAGE_MIME : mime.toLowerCase(Locale.ROOT));
-            attachment.put(AttachmentContextExtractor.FIELD_DATA, url.substring(comma + 1));
-            return attachment;
+    private Map<String, Object> toAttachment(ContentPart part, int index) {
+        if (part.isImageUrl()) {
+            return fromImageUrl(part.imageUrl().url(), index);
         }
+        if (part.isInputAudio()) {
+            return fromInputAudio(part.inputAudio(), index);
+        }
+        return fromFile(part.file(), index);
+    }
 
+    private Map<String, Object> fromImageUrl(String url, int index) {
+        if (url.regionMatches(true, 0, DATA_URI_PREFIX, 0, DATA_URI_PREFIX.length())) {
+            return fromDataUri(url, DEFAULT_IMAGE_MIME, "openai-attachment-" + index, index);
+        }
+        Map<String, Object> attachment = newAttachment("openai-attachment-" + index);
         attachment.put("mimeType", mimeFromUrl(url));
         attachment.put("url", url);
+        return attachment;
+    }
+
+    /**
+     * Audio is the one payload the protocol sends as <b>raw base64</b> rather than
+     * a {@code data:} URI, with the type in a separate {@code format} field.
+     */
+    private Map<String, Object> fromInputAudio(ContentPart.InputAudio audio, int index) {
+        String format = audio.format() == null ? "" : audio.format().trim().toLowerCase(Locale.ROOT);
+        String mime = AUDIO_MIME_BY_FORMAT.get(format);
+        if (mime == null) {
+            // An unrecognised format is still probably audio; guessing
+            // "audio/<format>" beats dropping the payload, and the forwarder's
+            // capability gate has the final say.
+            mime = format.isEmpty() ? "audio/wav" : "audio/" + format;
+            LOGGER.debugf("Unrecognised input_audio format '%s' at index %d, using %s",
+                    audio.format(), index, mime);
+        }
+        Map<String, Object> attachment = newAttachment(
+                "openai-attachment-" + index + (format.isEmpty() ? "" : "." + format));
+        attachment.put("mimeType", mime);
+        attachment.put(AttachmentContextExtractor.FIELD_DATA, audio.data());
+        return attachment;
+    }
+
+    /**
+     * File parts carry a full {@code data:} URI in {@code file_data}. A part that
+     * only references {@code file_id} cannot be resolved — that is the OpenAI Files
+     * API, which EDDI does not implement — so it is skipped with a warning rather
+     * than silently producing an empty attachment.
+     */
+    private Map<String, Object> fromFile(ContentPart.FilePart file, int index) {
+        String fileName = file.filename() != null && !file.filename().isBlank()
+                ? file.filename().trim()
+                : "openai-attachment-" + index;
+
+        if (file.fileData() == null || file.fileData().isBlank()) {
+            if (file.fileId() != null && !file.fileId().isBlank()) {
+                LOGGER.warnf("Skipping file part '%s' at index %d: it references file_id '%s', "
+                        + "and EDDI does not implement the OpenAI Files API. Send file_data inline instead.",
+                        fileName, index, file.fileId());
+            } else {
+                LOGGER.warnf("Skipping file part '%s' at index %d: no file_data.", fileName, index);
+            }
+            return null;
+        }
+
+        // The declared filename is the better MIME hint here: a generic
+        // "application/octet-stream" data URI plus "report.pdf" should still
+        // reach the PDF path.
+        String fallbackMime = mimeFromFileName(fileName, DEFAULT_FILE_MIME);
+        return fromDataUri(file.fileData(), fallbackMime, fileName, index);
+    }
+
+    /**
+     * Parse {@code data:<mime>[;base64],<payload>} into an attachment map. Returns
+     * {@code null} when the URI has no payload separator.
+     */
+    private Map<String, Object> fromDataUri(String uri, String fallbackMime, String fileName, int index) {
+        int comma = uri.indexOf(',');
+        if (comma < 0) {
+            // "data:application/pdf;base64" with no payload separator. Deriving the
+            // MIME by scanning to ';' would throw on this malformed but reachable
+            // input, so bail out instead.
+            LOGGER.warnf("Skipping malformed data URI at attachment index %d (no ',' separator)", index);
+            return null;
+        }
+        String metadata = uri.substring(DATA_URI_PREFIX.length(), comma);
+        int semicolon = metadata.indexOf(';');
+        String mime = (semicolon >= 0 ? metadata.substring(0, semicolon) : metadata).trim();
+
+        Map<String, Object> attachment = newAttachment(fileName);
+        // A declared but useless type loses to the filename-derived one.
+        attachment.put("mimeType", mime.isEmpty() || DEFAULT_FILE_MIME.equalsIgnoreCase(mime)
+                ? fallbackMime
+                : mime.toLowerCase(Locale.ROOT));
+        attachment.put(AttachmentContextExtractor.FIELD_DATA, uri.substring(comma + 1));
+        return attachment;
+    }
+
+    private static Map<String, Object> newAttachment(String fileName) {
+        Map<String, Object> attachment = new LinkedHashMap<>();
+        attachment.put("fileName", fileName);
         return attachment;
     }
 
@@ -212,12 +317,19 @@ public class OpenAiMessageMapper {
         if (cut >= 0) {
             path = path.substring(0, cut);
         }
-        int dot = path.lastIndexOf('.');
-        if (dot < 0 || dot == path.length() - 1) {
-            return DEFAULT_IMAGE_MIME;
+        return mimeFromFileName(path, DEFAULT_IMAGE_MIME);
+    }
+
+    /** Extension-derived MIME, or {@code fallback} when unrecognised. */
+    static String mimeFromFileName(String name, String fallback) {
+        if (name == null) {
+            return fallback;
         }
-        String extension = path.substring(dot + 1).toLowerCase(Locale.ROOT);
-        return MIME_BY_EXTENSION.getOrDefault(extension, DEFAULT_IMAGE_MIME);
+        int dot = name.lastIndexOf('.');
+        if (dot < 0 || dot == name.length() - 1) {
+            return fallback;
+        }
+        return MIME_BY_EXTENSION.getOrDefault(name.substring(dot + 1).toLowerCase(Locale.ROOT), fallback);
     }
 
     /** The text of a message in either content form, or {@code null}. */

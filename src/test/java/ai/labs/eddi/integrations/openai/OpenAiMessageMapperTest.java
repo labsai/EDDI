@@ -251,16 +251,182 @@ class OpenAiMessageMapperTest {
     }
 
     @Test
-    void unsupportedContentPartTypes_areIgnored() throws Exception {
+    void unknownContentPartTypes_areIgnored() throws Exception {
         var request = parse("""
                 {"model":"m","messages":[{"role":"user","content":[
                   {"type":"text","text":"hi"},
-                  {"type":"input_audio","input_audio":{"data":"xx","format":"wav"}}]}]}""");
+                  {"type":"video_url","video_url":{"url":"http://x/v.mp4"}}]}]}""");
 
         InputData input = mapper.toInputData(request);
 
         assertEquals("hi", input.getInput());
         assertFalse(input.getContext().containsKey("attachment_0"));
+    }
+
+    // ─── file parts (PDFs and documents) ───
+
+    @Test
+    void filePart_becomesAnAttachmentWithItsDeclaredNameAndType() throws Exception {
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"text","text":"summarise this"},
+                  {"type":"file","file":{"filename":"report.pdf",
+                   "file_data":"data:application/pdf;base64,JVBERi0x"}}]}]}""");
+
+        InputData input = mapper.toInputData(request);
+        Map<String, Object> attachment = attachment(input, 0);
+
+        assertEquals("summarise this", input.getInput());
+        assertEquals("application/pdf", attachment.get("mimeType"));
+        assertEquals("JVBERi0x", attachment.get("data"));
+        assertEquals("report.pdf", attachment.get("fileName"),
+                "the declared filename is what the agent and any text extractor see");
+    }
+
+    @Test
+    void filePart_acceptsFileNameAlias() throws Exception {
+        // "file_name" appears in the wild alongside the spec's "filename".
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"file","file":{"file_name":"notes.txt",
+                   "file_data":"data:text/plain;base64,aGk="}}]}]}""");
+
+        assertEquals("notes.txt", attachment(mapper.toInputData(request), 0).get("fileName"));
+    }
+
+    @Test
+    void filePart_derivesMimeFromFilename_whenDataUriIsGeneric() throws Exception {
+        // Clients that base64 a file without knowing its type send
+        // application/octet-stream; the filename is the better hint.
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"file","file":{"filename":"contract.pdf",
+                   "file_data":"data:application/octet-stream;base64,JVBERi0x"}}]}]}""");
+
+        assertEquals("application/pdf", attachment(mapper.toInputData(request), 0).get("mimeType"));
+    }
+
+    @Test
+    void filePart_withOnlyFileId_isSkipped() throws Exception {
+        // file_id refers to the OpenAI Files API, which EDDI does not implement.
+        // An empty attachment would be worse than none.
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"text","text":"read it"},
+                  {"type":"file","file":{"file_id":"file-abc123"}}]}]}""");
+
+        InputData input = mapper.toInputData(request);
+
+        assertEquals("read it", input.getInput());
+        assertFalse(input.getContext().containsKey("attachment_0"));
+    }
+
+    @Test
+    void filePart_withoutDataOrId_isSkipped() throws Exception {
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"file","file":{"filename":"empty.pdf"}}]}]}""");
+
+        assertFalse(mapper.toInputData(request).getContext().containsKey("attachment_0"));
+    }
+
+    @Test
+    void filePart_unnamed_stillGetsAnAttachment() throws Exception {
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"file","file":{"file_data":"data:application/pdf;base64,JVBERi0x"}}]}]}""");
+
+        Map<String, Object> attachment = attachment(mapper.toInputData(request), 0);
+
+        assertEquals("application/pdf", attachment.get("mimeType"));
+        assertEquals("openai-attachment-0", attachment.get("fileName"));
+    }
+
+    // ─── audio parts ───
+
+    @Test
+    void inputAudio_becomesAnAudioAttachment() throws Exception {
+        // Note the asymmetry: input_audio.data is RAW base64, with no data: URI
+        // wrapper, unlike every other binary payload in this protocol.
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"text","text":"transcribe"},
+                  {"type":"input_audio","input_audio":{"data":"UklGRg==","format":"wav"}}]}]}""");
+
+        InputData input = mapper.toInputData(request);
+        Map<String, Object> attachment = attachment(input, 0);
+
+        assertEquals("transcribe", input.getInput());
+        assertEquals("audio/wav", attachment.get("mimeType"));
+        assertEquals("UklGRg==", attachment.get("data"));
+    }
+
+    @Test
+    void inputAudio_mp3MapsToAudioMpeg_notAudioMp3() throws Exception {
+        // Naive "audio/" + format would produce audio/mp3, which is not a real
+        // media type and which providers reject.
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"input_audio","input_audio":{"data":"SUQz","format":"mp3"}}]}]}""");
+
+        assertEquals("audio/mpeg", attachment(mapper.toInputData(request), 0).get("mimeType"));
+    }
+
+    @Test
+    void inputAudio_unknownFormat_stillForwardedAsAudio() throws Exception {
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"input_audio","input_audio":{"data":"AAAA","format":"opus"}}]}]}""");
+
+        assertEquals("audio/opus", attachment(mapper.toInputData(request), 0).get("mimeType"));
+    }
+
+    @Test
+    void inputAudio_withoutData_isSkipped() throws Exception {
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"input_audio","input_audio":{"format":"wav"}}]}]}""");
+
+        assertFalse(mapper.toInputData(request).getContext().containsKey("attachment_0"));
+    }
+
+    @Test
+    void mixedAttachmentTypes_shareOneIndexSequence() throws Exception {
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"image_url","image_url":{"url":"data:image/png;base64,a"}},
+                  {"type":"file","file":{"filename":"d.pdf","file_data":"data:application/pdf;base64,b"}},
+                  {"type":"input_audio","input_audio":{"data":"c","format":"wav"}}]}]}""");
+
+        InputData input = mapper.toInputData(request);
+
+        assertEquals("image/png", attachment(input, 0).get("mimeType"));
+        assertEquals("application/pdf", attachment(input, 1).get("mimeType"));
+        assertEquals("audio/wav", attachment(input, 2).get("mimeType"));
+    }
+
+    @Test
+    void perTurnCapCountsAllAttachmentTypes() throws Exception {
+        var cappedMapper = new OpenAiMessageMapper(objectMapper, 2);
+        var request = parse("""
+                {"model":"m","messages":[{"role":"user","content":[
+                  {"type":"image_url","image_url":{"url":"data:image/png;base64,a"}},
+                  {"type":"file","file":{"filename":"d.pdf","file_data":"data:application/pdf;base64,b"}},
+                  {"type":"input_audio","input_audio":{"data":"c","format":"wav"}}]}]}""");
+
+        InputData input = cappedMapper.toInputData(request);
+
+        assertTrue(input.getContext().containsKey("attachment_1"));
+        assertFalse(input.getContext().containsKey("attachment_2"));
+    }
+
+    @Test
+    void mimeFromFileName_fallsBackWhenUnrecognised() {
+        assertEquals("application/pdf", OpenAiMessageMapper.mimeFromFileName("a.PDF", "x/y"));
+        assertEquals("text/csv", OpenAiMessageMapper.mimeFromFileName("data.csv", "x/y"));
+        assertEquals("x/y", OpenAiMessageMapper.mimeFromFileName("archive.xyz", "x/y"));
+        assertEquals("x/y", OpenAiMessageMapper.mimeFromFileName("noextension", "x/y"));
+        assertEquals("x/y", OpenAiMessageMapper.mimeFromFileName(null, "x/y"));
     }
 
     // ─── request-level wire tolerance ───

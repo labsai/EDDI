@@ -43,7 +43,12 @@ Also verified rather than assumed: `quarkus.rest.jackson.optimization.enable-ref
 
 Corrected a documentation claim rather than the code: unimplemented `/v1` paths (`/v1/embeddings` etc.) return Quarkus' plain 404, not an OpenAI error envelope. A catch-all route would risk shadowing the real endpoints for a cosmetic gain.
 
-**Tests:** 119 unit tests, all green. Mutation-checked — reverting the model-ambiguity guard, the identity refusal, and the HITL sentinel distinction each makes the relevant tests fail. `RestOpenAiAdapterTest` (`@QuarkusTest`, binds a socket) is deferred to CI per the local-environment constraint.
+**Tests:** 132 unit tests, all green. Mutation-checked — reverting the model-ambiguity guard, the identity refusal, and the HITL sentinel distinction each makes the relevant tests fail. `RestOpenAiAdapterTest` (`@QuarkusTest`, binds a socket) is deferred to CI per the local-environment constraint.
+
+**Attachment support** covers all three binary content-part types: `image_url`, `file` (inline PDFs and documents) and `input_audio`. All map to `attachment_N` context entries, so EDDI's existing forwarder does the real work — capability gating, byte caps, PDF text extraction, SSRF-guarded fetching. Three details the wire formats make easy to get wrong, each pinned by a test:
+- `input_audio.data` is **raw base64 with no `data:` prefix**, unlike every other binary payload in the protocol, with the type in a separate `format` field. `mp3` maps to `audio/mpeg` — `"audio/" + format` would produce `audio/mp3`, which is not a real media type.
+- `file.file_data` **is** a full data URI, and the declared `filename` beats a generic `application/octet-stream` type, since clients that base64 a file without sniffing it send exactly that.
+- `file.file_id` references the OpenAI Files API, which EDDI does not implement; those parts are skipped with an actionable warning rather than becoming empty attachments.
 
 **Not implemented (v1):** `/v1/embeddings`, `tool_calls` passthrough (would cause double-execution — EDDI's tools do not exist in Open WebUI), `n > 1`, `logprobs`. Quick replies and `inputField` outputs are dropped; only text reaches OpenAI clients.
 

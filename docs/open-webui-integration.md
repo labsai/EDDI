@@ -249,14 +249,30 @@ This is safe because the adapter has no message-count heuristic — truncating h
 | `messages[]` | Only the last `role:"user"` entry is sent. |
 | `role:"system"` | Last one becomes `openai_system_message` context — never overrides the agent's prompt. |
 | `content` as string | Plain text. |
-| `content` as array | Text extracted; `image_url` parts mapped to attachments. |
+| `content` as array | Text extracted; `image_url`, `file` and `input_audio` parts mapped to attachments. |
 | `stream` | Selects JSON vs SSE. The only dispatch signal. |
 | `user` | Fallback chat key when `X-OpenWebUI-Chat-Id` is absent. Accepts both the string form and Open WebUI's object form. |
 | `temperature`, `max_tokens`, `top_p`, `stream_options`, `tools`, `tool_choice`, `metadata`, `files`, … | **Accepted and ignored.** Model parameters belong to the agent's `langchain.json`. |
 
-### Images
+### Attachments — images, documents, audio
 
-Images pasted or dropped into Open WebUI arrive as `image_url` content parts and are mapped to EDDI's `attachment_N` context entries. From there they flow through the normal attachment pipeline: vision-capability gating per provider and model, byte caps, and SSRF-guarded fetching for remote URLs. Both `data:` URIs and remote URLs work. No configuration needed.
+Three OpenAI content-part types are mapped to EDDI `attachment_N` context entries, which then flow through the normal attachment pipeline — capability gating per provider and model, per-turn and byte caps, PDF text extraction, and SSRF-guarded fetching for remote URLs.
+
+| Content part | Wire shape | Downstream |
+|---|---|---|
+| `image_url` | `{"url":"data:image/png;base64,…"}` or a remote URL | `ImageContent` when the model has vision; otherwise a note explaining why it was dropped |
+| `file` | `{"filename":"report.pdf","file_data":"data:application/pdf;base64,…"}` | `PdfFileContent` when the model has native document support; otherwise text-extracted and inlined |
+| `input_audio` | `{"data":"<raw base64>","format":"wav"\|"mp3"}` | `AudioContent` when the model supports audio |
+
+Notes worth knowing:
+
+- **`input_audio.data` is raw base64 with no `data:` prefix**, unlike every other binary payload in the protocol. `format` carries the type separately, and `mp3` maps to `audio/mpeg` (not `audio/mp3`, which is not a real media type).
+- **`file.file_id` is not supported.** It references a file uploaded through the OpenAI Files API, which EDDI does not implement. Such parts are skipped with a warning — send `file_data` inline instead.
+- **The declared `filename` wins over a generic data-URI type.** A `data:application/octet-stream` payload named `contract.pdf` is still treated as a PDF, because clients that base64 a file without sniffing it send the generic type.
+- **The per-turn cap (`eddi.attachments.max-per-turn`, default 5) counts all three types together.** Excess attachments are dropped with a warning rather than failing the turn.
+- Beyond PDFs, any type EDDI's text extractor handles (`.txt`, `.md`, `.csv`, `.json`, `.xml`, `.html`) is inlined as text.
+
+> **Open WebUI specifically** sends images as `image_url` and does *not* send documents as `file` parts — it runs its own RAG over uploads and injects the retrieved text into the system message instead (see the table in §7). The `file` path is for the OpenAI SDK and other clients that send PDFs inline.
 
 ### HITL
 
