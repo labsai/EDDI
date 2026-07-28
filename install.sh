@@ -655,6 +655,7 @@ resolve_compose_files() {
       "keycloak/themes/eddi/login/resources/fonts/noto-sans-latin-variable.woff2"
       "keycloak/themes/eddi/login/resources/fonts/noto-sans-latin-ext-variable.woff2"
       "keycloak/themes/eddi/login/resources/fonts/noto-sans-cyrillic-variable.woff2"
+      "keycloak/themes/eddi/login/resources/fonts/noto-sans-greek-variable.woff2"
       "keycloak/themes/eddi/login/resources/js/eddi-a11y.js"
       "keycloak/themes/eddi/login/resources/js/eddi-theme.js"
     )
@@ -953,7 +954,7 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
       '.loginTheme = "eddi" | .displayName = "EDDI" | .displayNameHtml = "EDDI"
        | if (.internationalizationEnabled // false) then .
          else .internationalizationEnabled = true
-              | .supportedLocales = ["cs","de","en","es","fr","it","ja","ko","pl","pt-BR","ru","tr","zh-CN","zh-TW"]
+              | .supportedLocales = ["ar","ca","cs","da","de","el","en","es","fa","fi","fr","hu","it","ja","ko","lt","lv","nl","no","pl","pt","pt-BR","ru","sk","sv","th","tr","uk","zh-CN","zh-TW"]
               | .defaultLocale = "en" end' \
       2>/dev/null) || updated_realm=""
   else
@@ -968,7 +969,7 @@ d['displayNameHtml'] = 'EDDI'
 # it is also what puts lang/dir on <html> (WCAG 3.1.1).
 if not d.get('internationalizationEnabled'):
     d['internationalizationEnabled'] = True
-    d['supportedLocales'] = ['cs','de','en','es','fr','it','ja','ko','pl','pt-BR','ru','tr','zh-CN','zh-TW']
+    d['supportedLocales'] = ['ar','ca','cs','da','de','el','en','es','fa','fi','fr','hu','it','ja','ko','lt','lv','nl','no','pl','pt','pt-BR','ru','sk','sv','th','tr','uk','zh-CN','zh-TW']
     d['defaultLocale'] = 'en'
 print(json.dumps(d))" 2>/dev/null) || updated_realm=""
   fi
@@ -1035,7 +1036,7 @@ print(json.load(sys.stdin).get('loginTheme') or '')" 2>/dev/null)
        | .displayNameHtml = "EDDI"
        | if (.internationalizationEnabled // false) then .
          else .internationalizationEnabled = true
-              | .supportedLocales = ["cs","de","en","es","fr","it","ja","ko","pl","pt-BR","ru","tr","zh-CN","zh-TW"]
+              | .supportedLocales = ["ar","ca","cs","da","de","el","en","es","fa","fi","fr","hu","it","ja","ko","lt","lv","nl","no","pl","pt","pt-BR","ru","sk","sv","th","tr","uk","zh-CN","zh-TW"]
               | .defaultLocale = "en" end' 2>/dev/null) || updated_master=""
   else
     updated_master=$(echo "$master_config" | python3 -c "
@@ -1052,7 +1053,7 @@ d['displayNameHtml'] = 'EDDI'
 # loses nothing: with i18n off the page was English-only anyway.
 if not d.get('internationalizationEnabled'):
     d['internationalizationEnabled'] = True
-    d['supportedLocales'] = ['cs','de','en','es','fr','it','ja','ko','pl','pt-BR','ru','tr','zh-CN','zh-TW']
+    d['supportedLocales'] = ['ar','ca','cs','da','de','el','en','es','fa','fi','fr','hu','it','ja','ko','lt','lv','nl','no','pl','pt','pt-BR','ru','sk','sv','th','tr','uk','zh-CN','zh-TW']
     d['defaultLocale'] = 'en'
 print(json.dumps(d))" 2>/dev/null) || updated_master=""
   fi

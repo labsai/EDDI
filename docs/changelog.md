@@ -60,15 +60,15 @@ Two contrast defects that only light mode exposed: amber-400 links and an amber-
 
 Fonts gained the Latin-ext, Cyrillic and Greek subsets, because Latin-only would put fallback glyphs *inside* otherwise-branded words for Czech, Polish and Turkish. Measured rather than assumed: `unicode-range` normally defers those files, but the switcher lists all 30 languages under native names, so every range is in the DOM and all four are fetched (~245 KB). Accepted — `font-display: swap` keeps it off the paint path, it caches for the session, and the page already loads a ~1.5 MB PatternFly stylesheet.
 
-**Locale sets aligned with the Manager, and the picker restored on the admin console.**
+**Locale picker restored on the admin console; both realms offer the full set.**
 
-The admin console had no language picker because I had given `master` a single locale — a deliberate trade to get `lang` on `<html>` without adding a switcher, but the wrong one once the console is EDDI-branded. Both realms now offer the same languages, and both show the picker.
+The admin console had no language picker because I had given `master` a single locale — a deliberate trade to get `lang` on `<html>` without adding a switcher, but the wrong one once that console is EDDI-branded. Both realms now show the picker.
 
-The set is taken from the Manager rather than chosen: its bundle declares `supportedLngs` as `["cs","de","es","fr","it","ja","ko","pl","pt-br","ru","tr","zh-cn","zh-tw"]` with `fallbackLng: "en"` — **14 languages**, every one of which exists among the 30 Keycloak ships. So login and the app it leads to now speak the same set, and a user who picks a language at the login screen lands somewhere that speaks it.
+On which languages: they were briefly narrowed to the Manager's 14 (its bundle declares `supportedLngs` as `cs, de, es, fr, it, ja, ko, pl, pt-br, ru, tr, zh-cn, zh-tw` with `fallbackLng: "en"`), on a parity argument — a user who picks a language at login lands somewhere that speaks it. That was reverted on review: **both realms offer all 30 locales Keycloak ships**, deliberately a superset. The reasoning that won is that a localised login page is worth having even when the app behind it falls back to English; the alternative denied 16 free translations to speakers of ar, ca, da, el, fa, fi, hu, lt, lv, nl, no, pt, sk, sv, th and uk in order to avoid an inconsistency they would only notice *after* signing in.
 
-**The trade-off, stated plainly:** the EDDI realm drops from 30 locales to 14. Sixteen free Keycloak translations (ar, ca, da, el, fa, fi, hu, lt, lv, nl, no, pt, sk, sv, th, uk) are no longer offered. A speaker of one of those now gets an English login *and* an English Manager — consistent, but less helpful at the login step than a localised page would have been. Offering the superset instead is a one-line change if that trade is judged the wrong way round.
+All four font subsets are therefore shipped (~245 KB), Greek included.
 
-A consequence worth noting: dropping `el` removed the only reason to bundle the Greek font subset, so that file and its `@font-face` are gone — 21 KB, and one less asset to ship. The principle is to bundle only the scripts the realm actually offers.
+**RTL now verified, having previously only been assumed.** The superset makes Arabic and Farsi reachable, and the wordmark uses `text-indent: -9999px`, which in a right-to-left document pushes text the *other* way. Checked in Arabic: `<html lang="ar" dir="rtl">`, **no horizontal overflow** — `overflow: hidden` on the header contains it — with the logo, the 30-option picker and the theme toggle all intact.
 
 **Admin console follow-ups — a logo collision, a missing toggle, and a shipped bug.**
 
