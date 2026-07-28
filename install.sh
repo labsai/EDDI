@@ -652,6 +652,7 @@ resolve_compose_files() {
       "keycloak/themes/eddi/login/resources/css/eddi-login.css"
       "keycloak/themes/eddi/login/resources/img/logo_eddi.png"
       "keycloak/themes/eddi/login/resources/img/favicon.ico"
+      "keycloak/themes/eddi/login/resources/fonts/noto-sans-latin-variable.woff2"
     )
     for kf in "${kc_files[@]}"; do
       local kf_target="$EDDI_DIR/$kf"

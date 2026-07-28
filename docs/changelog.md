@@ -42,6 +42,14 @@ Users redirected from the Manager or Workforce UI to Keycloak went from EDDI's a
 
 **Incidental finding, not fixed here.** `"temporary": true` on an imported credential does **not** create an `UPDATE_PASSWORD` required action in Keycloak 26 — the seeded users log straight through (`requiredActions` is empty after import). That makes the comment at the top of `docker-compose.auth.yml` ("password change required on first login") inaccurate. Left untouched as out of scope; recorded as F19 in the plan.
 
+**Design pass — the page was correct but not designed.** Three fixes after looking at what the measurements implied rather than only whether they matched the palette:
+
+- **Typography.** The page rendered in PatternFly's Red Hat Text/Display — the one EDDI surface in a different typeface, and matching neither the Manager (Noto Sans) nor this plan's own stated `system-ui` intent, because no `font-family` was ever set. Now ships the **same variable font the Manager loads**, latin subset only: 35 KB for weights 100–900, versus 168 KB for latin-ext or ~550 KB for static weights. Glyphs outside latin fall through to the system stack. Overriding `--pf-v5-global--FontFamily--text` alone is not enough — PF re-declares it as `var(--…--text--vf)` when variable fonts are present, so the `--vf` pair must be set too.
+- **Inputs were invisible as inputs.** Fixing the card background had left fields at the card's own `#18181b`, separated from their container by a 1px hairline alone. Fields are now recessed to the page colour (`#0c0a09`), so they read as cut into the card rather than laid on it; the password-visibility toggle follows so the input group stays one control.
+- **Three corner radii on one card** (8px card, 4px input, 3px button). Replaced with a deliberate two-step scale — 6px controls, 12px card — driven through `--pf-v5-global--BorderRadius--sm` so every PF control inherits it.
+
+**Known gap, recorded not fixed:** WCAG 1.4.11 wants 3:1 for UI component boundaries. The resting input border (`#27272a` on `#18181b`) is 1.19:1 and the fill difference ~1.35:1. Reaching 3:1 needs roughly zinc-500, a visible departure from the border colour the Manager uses throughout — a CI decision rather than a CSS one. Focus state is unaffected and clears the bar at 8.25:1.
+
 **Review pass — four things the first commit had not established.**
 
 1. **Graceful degradation confirmed.** Emptying the theme directory while `loginTheme: eddi` stays set — exactly what a failed `install.sh` asset download produces — yields **HTTP 200 with the built-in theme** and `ERROR ... Failed to find LOGIN theme eddi, using built-in themes` in the log. So the decision to make theme downloads non-fatal is safe: a cosmetic failure cannot take authentication down.
