@@ -11,9 +11,10 @@ import java.util.List;
 /**
  * A non-streaming {@code chat.completion} response.
  * <p>
- * {@code usage} is deliberately absent: EDDI does not surface per-request token
- * counts to this layer, and emitting zeros would render as a factual "0 tokens"
- * in clients. Omission is the honest encoding; clients tolerate it.
+ * {@code usage} is populated from the turn's {@code audit:token_usage} entry
+ * when the agent called a model, and omitted entirely when it did not — a
+ * rule-based agent spends no tokens, and reporting zeros would read in a client
+ * as a measurement rather than as an absence.
  *
  * @since 6.1.0
  */
@@ -22,11 +23,13 @@ public record ChatCompletionResponse(String id,
         String object,
         long created,
         String model,
-        List<Choice> choices) {
+        List<Choice> choices,
+        TokenUsage usage) {
 
     public static final String OBJECT_TYPE = "chat.completion";
 
-    public static ChatCompletionResponse of(String id, String model, long createdEpochSeconds, Choice choice) {
-        return new ChatCompletionResponse(id, OBJECT_TYPE, createdEpochSeconds, model, List.of(choice));
+    public static ChatCompletionResponse of(String id, String model, long createdEpochSeconds, Choice choice,
+                                            TokenUsage usage) {
+        return new ChatCompletionResponse(id, OBJECT_TYPE, createdEpochSeconds, model, List.of(choice), usage);
     }
 }

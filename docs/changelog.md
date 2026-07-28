@@ -5,6 +5,32 @@
 
 ---
 
+## ✨ feat(openai): render structured outputs, report token usage (2026-07-28)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+Two gaps closed in the `/v1` adapter, both from the honest support assessment of the previous session. Files: new `OpenAiOutputRenderer`, new `TokenUsage` + `StreamOptions` DTOs, changes to `OpenAiConversationBridge`, `OpenAiSseWriter`, `RestOpenAiAdapter`, `ChatCompletionResponse`, `ChatCompletionChunk`, `ChatCompletionRequest`. Docs: [`docs/open-webui-integration.md`](open-webui-integration.md) §7.1, §7.2, §10.
+
+**Structured outputs are no longer dropped.** An EDDI turn carries eight output types; the OpenAI protocol carries one string, and the shared `ConversationOutputExtractor` keeps only the text. Through that lens a wizard agent whose whole turn is *"Which provider?"* plus five quick replies arrived as a question with no visible answers — indistinguishable from a broken agent. `OpenAiOutputRenderer` now takes the shared extractor's text **verbatim** (a reply's wording must not depend on which channel it left through) and appends a Markdown rendering of the rest: quick replies as backticked values, images as `![alt](uri)`, application links as Markdown links, buttons as their label, input fields as a described prompt. `agentFace` and `other` are dropped deliberately — an avatar has no text equivalent, and captioning it would add a line the agent author never wrote.
+
+- **The shared extractor is untouched.** Its other callers (`GroupConversationService`, `CreateSubAgentTool`, `ConverseWithAgentTool`) feed agent-to-agent prompts, where interaction affordances are noise. The renderer is adapter-local.
+- **Quick replies render as literal values, not a numbered list.** A numbered list invites `2` as an answer, which no input matcher recognises. The `value` is what a chat UI puts on a button and therefore what a user would retype; `expressions` stays internal (asserted by test — it is an internal identifier that must not be shown).
+- **Both POJO and Map item shapes are handled** — a turn that just ran yields typed items, a rehydrated conversation yields Maps.
+- **Streaming needed a split.** When the model streamed the prose token by token, re-rendering the full text at `onComplete` would have sent the whole reply twice, so `renderExtras()` emits the affordances alone.
+
+**`usage` is now reported — the previous entry's claim that EDDI does not surface token counts was wrong.** `LlmTask` writes `audit:token_usage` (`inputTokens`/`outputTokens`/`totalTokens`) into the current step, accumulated across every model call the turn made — cascade steps and tool round-trips included.
+
+- **This required `returnDetailed=true` on both `say` and `sayStreaming`.** The filtered snapshot keeps only `input:initial`, `actions`, `output*` and `quickReplies*`, dropping every audit key — which is why the counts looked unavailable. The snapshot is read in-process and never serialized to the client, so the cost is one extra step's worth of references. This flag is load-bearing and otherwise invisible, so a test pins it: flipping it back would silently remove `usage` from every response with nothing else failing.
+- **Absent, not zero, for rule-based agents.** They call no model; `0 tokens` reads in a client as a measurement rather than an absence.
+- **`totalTokens` is derived when a provider omits it** but reports both parts — a usage block whose parts do not add up is worse than one that computes the sum.
+- **Streaming usage is opt-in via `stream_options.include_usage`**, emitted as a trailing empty-`choices` frame after `finish_reason` and before `[DONE]`, per spec. An unrequested empty-choices frame is a protocol deviation some clients reject.
+
+**Testing:** 183 adapter tests (up from 151) — new `OpenAiOutputRendererTest` (21) plus usage coverage in the bridge, SSE writer and wire-format suites. Two mutation checks were run rather than trusting green: stubbing `renderQuickReplies` to `null` killed 7 tests, and reverting `returnDetailed` to `false` killed the 2 flag-pinning tests.
+
+**Not done: exposing agent groups as models.** Assessed rather than assumed — every piece exists (groups list via `readDescriptors("ai.labs.group", …)`, `discuss()` returns a `synthesizedAnswer`, `continueDiscussion()` gives multi-turn, `GroupDiscussionEventListener` gives streaming), but it needs a second bridge with its own conversation mapping, streaming path and approval surface. That is a feature-sized change, not an addition to this one, so it is recorded as gap #1 in §10 instead of half-landed here.
+
+---
+
 ## ✨ feat(openai): OpenAI-compatible API adapter for Open WebUI (2026-07-27)
 
 **Repo:** EDDI (`feat/openai-api-adapter`)
@@ -27,7 +53,7 @@ New `/v1` surface presenting deployed agents as OpenAI "models", so Open WebUI, 
 - Model ids are `<slug>-<last 6 of agentId>`. Agent names are not unique, so a bare slug would be non-deterministic with two agents called "Support". Name and slug lookups are accepted but only when unique; an ambiguous match returns 400 listing candidates rather than guessing.
 - Slugging folds accents via NFD rather than dropping them — `Übersicht` was slugging to `bersicht`, mangling every non-ASCII agent name. Caught by its own test.
 - Images map to `attachment_N` context entries, so they flow through the existing `AttachmentForwarder` with its vision gating, byte caps and SSRF-guarded fetching. Zero core changes. Two parsing fixes: `data:image/png,payload` is legal and has no `;` (scanning to `;` threw), and remote URLs get a concrete MIME from the extension — `image/*` passes the forwarder's `startsWith("image/")` gate but is rejected by providers when handed to `ImageContent.from`.
-- `usage` is omitted rather than zero-filled: EDDI does not surface per-request token counts here, and zeros would render as a factual "0 tokens".
+- `usage` is omitted rather than zero-filled when the agent called no model. (This originally read "EDDI does not surface per-request token counts here" — that was wrong, and is corrected in the 2026-07-28 entry below.)
 - In-flight completions are semaphore-bounded — each holds a worker thread, since the bridge blocks on the turn as the Slack handler does.
 - **Reused, not duplicated:** `ConversationOutputExtractor.extractResponse()` already existed in `engine/memory` (added upstream) and handles more output formats than the Slack-local copy the plan proposed extracting. Phase 2 of the plan became unnecessary. Noted separately: `SlackHitlSupport.extractSlackResponseText` still duplicates it and should delegate.
 

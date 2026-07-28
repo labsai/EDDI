@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.integrations.openai.model.TokenUsage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,7 +44,7 @@ class OpenAiSseWriterTest {
     }
 
     private OpenAiSseWriter writer() {
-        return new OpenAiSseWriter(out, objectMapper, ID, MODEL, CREATED);
+        return new OpenAiSseWriter(out, objectMapper, ID, MODEL, CREATED, false);
     }
 
     private String body() {
@@ -185,7 +186,7 @@ class OpenAiSseWriterTest {
     @Test
     void writesAreFlushedPerFrame() {
         var counting = new CountingOutputStream();
-        var writer = new OpenAiSseWriter(counting, objectMapper, ID, MODEL, CREATED);
+        var writer = new OpenAiSseWriter(counting, objectMapper, ID, MODEL, CREATED, false);
 
         writer.content("a");
         writer.content("b");
@@ -208,7 +209,7 @@ class OpenAiSseWriterTest {
                 throw new IOException("client went away");
             }
         };
-        var writer = new OpenAiSseWriter(broken, objectMapper, ID, MODEL, CREATED);
+        var writer = new OpenAiSseWriter(broken, objectMapper, ID, MODEL, CREATED, false);
 
         assertDoesNotThrow(() -> {
             writer.content("a");
@@ -236,6 +237,53 @@ class OpenAiSseWriterTest {
             index = haystack.indexOf(needle, index + needle.length());
         }
         return count;
+    }
+
+    // ─── usage ───
+
+    @Test
+    void usageChunkIsEmittedAfterTheTerminator_whenRequested() throws Exception {
+        var writer = new OpenAiSseWriter(out, objectMapper, ID, MODEL, CREATED, true);
+        writer.content("Hi");
+        writer.usage(new TokenUsage(10L, 20L, 30L));
+        writer.finish("stop");
+
+        List<JsonNode> frames = frames();
+        JsonNode last = frames.get(frames.size() - 1);
+        JsonNode terminal = frames.get(frames.size() - 2);
+
+        assertEquals("stop", terminal.at("/choices/0/finish_reason").asText(),
+                "usage must follow the finish_reason frame, not replace it");
+        assertTrue(last.get("choices").isEmpty(), "the usage frame carries no choices");
+        assertEquals(30L, last.at("/usage/total_tokens").asLong());
+        assertTrue(body().endsWith("data: [DONE]\n\n"), "[DONE] must still be last");
+    }
+
+    @Test
+    void usageIsWithheldWhenTheClientDidNotAskForIt() throws Exception {
+        var writer = writer();
+        writer.content("Hi");
+        writer.usage(new TokenUsage(10L, 20L, 30L));
+        writer.finish("stop");
+
+        for (JsonNode frame : frames()) {
+            assertTrue(frame.at("/usage").isMissingNode(),
+                    "an unrequested usage frame is a protocol deviation: " + frame);
+        }
+    }
+
+    @Test
+    void noUsageChunkWhenTheAgentReportedNone() throws Exception {
+        // A rule-based agent calls no model. Asking for usage must not conjure an
+        // empty-choices frame with nothing in it.
+        var writer = new OpenAiSseWriter(out, objectMapper, ID, MODEL, CREATED, true);
+        writer.content("Hi");
+        writer.finish("stop");
+
+        for (JsonNode frame : frames()) {
+            assertTrue(frame.at("/usage").isMissingNode(), frame.toString());
+            assertTrue(!frame.get("choices").isEmpty(), "no empty-choices frame should be emitted");
+        }
     }
 
     /** Counts flushes so per-frame flushing can be asserted. */

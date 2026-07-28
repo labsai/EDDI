@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.openai.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.List;
@@ -13,11 +14,11 @@ import java.util.List;
  * An OpenAI {@code POST /v1/chat/completions} request body.
  * <p>
  * Only the fields EDDI acts on are modelled. Everything else a client may send
- * ({@code temperature}, {@code max_tokens}, {@code top_p},
- * {@code stream_options}, {@code tools}, {@code tool_choice}, {@code metadata},
- * {@code files}, …) is deliberately ignored rather than rejected — model
- * parameters and tools belong to the agent's {@code langchain.json}, and a 400
- * on an unknown field would break clients that always send them.
+ * ({@code temperature}, {@code max_tokens}, {@code top_p}, {@code tools},
+ * {@code tool_choice}, {@code metadata}, {@code files}, …) is deliberately
+ * ignored rather than rejected — model parameters and tools belong to the
+ * agent's {@code langchain.json}, and a 400 on an unknown field would break
+ * clients that always send them.
  * <p>
  * {@code user} is typed as {@link JsonNode} on purpose: the OpenAI spec says it
  * is a string, but Open WebUI sends an <em>object</em>
@@ -30,12 +31,22 @@ import java.util.List;
 public record ChatCompletionRequest(String model,
         List<ChatMessage> messages,
         Boolean stream,
+        @JsonProperty("stream_options") StreamOptions streamOptions,
         Boolean stateless,
         JsonNode user) {
 
     /** Whether the client asked for an SSE stream. {@code stream} is nullable. */
     public boolean isStreaming() {
         return Boolean.TRUE.equals(stream);
+    }
+
+    /**
+     * Whether the client asked for a trailing usage chunk via
+     * {@code stream_options.include_usage}. Absent from most requests, so usage is
+     * off by default on the streaming path — as the specification requires.
+     */
+    public boolean includeUsage() {
+        return streamOptions != null && Boolean.TRUE.equals(streamOptions.includeUsage());
     }
 
     /**

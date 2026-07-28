@@ -153,12 +153,13 @@ public class RestOpenAiAdapter {
             long created = Instant.now().getEpochSecond();
 
             if (request.isStreaming()) {
-                return streamingResponse(turn, completionId, request.model(), created);
+                return streamingResponse(turn, completionId, request.model(), created, request.includeUsage());
             }
 
             var outcome = bridge.say(turn, model, userId, headers, request);
             var response = ChatCompletionResponse.of(completionId, request.model(), created,
-                    new Choice(0, ChatMessage.assistant(outcome.text(), objectMapper), Choice.FINISH_STOP));
+                    new Choice(0, ChatMessage.assistant(outcome.text(), objectMapper), Choice.FINISH_STOP),
+                    outcome.usage());
             return Response.ok(response)
                     .type(MediaType.APPLICATION_JSON)
                     .header(HEADER_CONVERSATION_ID, turn.conversationId())
@@ -186,9 +187,9 @@ public class RestOpenAiAdapter {
      * the 200 status has already been committed.
      */
     private Response streamingResponse(OpenAiConversationBridge.PreparedTurn turn,
-                                       String completionId, String model, long created) {
+                                       String completionId, String model, long created, boolean includeUsage) {
         StreamingOutput body = out -> {
-            var writer = new OpenAiSseWriter(out, objectMapper, completionId, model, created);
+            var writer = new OpenAiSseWriter(out, objectMapper, completionId, model, created, includeUsage);
             if (!inFlight.tryAcquire()) {
                 writer.content("⚠️ Too many concurrent requests. Please retry shortly.");
                 writer.finish(Choice.FINISH_STOP);

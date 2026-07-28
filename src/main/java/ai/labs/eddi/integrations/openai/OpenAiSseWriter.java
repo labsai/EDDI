@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.integrations.openai.model.ChatCompletionChunk;
 import ai.labs.eddi.integrations.openai.model.ChunkChoice;
+import ai.labs.eddi.integrations.openai.model.TokenUsage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
@@ -39,18 +40,21 @@ public class OpenAiSseWriter {
     private final String id;
     private final String model;
     private final long created;
+    private final boolean includeUsage;
 
     private boolean roleSent;
     private boolean finished;
     private boolean broken;
+    private TokenUsage usage;
 
     public OpenAiSseWriter(OutputStream out, ObjectMapper objectMapper,
-            String id, String model, long createdEpochSeconds) {
+            String id, String model, long createdEpochSeconds, boolean includeUsage) {
         this.out = out;
         this.objectMapper = objectMapper;
         this.id = id;
         this.model = model;
         this.created = createdEpochSeconds;
+        this.includeUsage = includeUsage;
     }
 
     /**
@@ -77,9 +81,23 @@ public class OpenAiSseWriter {
     }
 
     /**
-     * Emit the terminal chunk and the {@code [DONE]} sentinel. Idempotent: the
-     * streaming handler terminates from several paths (complete, error, skipped)
-     * and a double terminator would confuse strict clients.
+     * Record the turn's token usage, to be emitted with the terminator.
+     * <p>
+     * Deferred rather than written immediately because usage is only known once the
+     * turn completes, and OpenAI places it after the {@code finish_reason} chunk.
+     * Ignored when the caller did not ask for it — an unrequested usage chunk is a
+     * protocol deviation, and some clients treat the empty {@code choices} array as
+     * malformed.
+     */
+    public void usage(TokenUsage tokenUsage) {
+        this.usage = tokenUsage;
+    }
+
+    /**
+     * Emit the terminal chunk, the optional usage chunk and the {@code [DONE]}
+     * sentinel. Idempotent: the streaming handler terminates from several paths
+     * (complete, error, skipped) and a double terminator would confuse strict
+     * clients.
      */
     public void finish(String finishReason) {
         if (finished) {
@@ -88,6 +106,9 @@ public class OpenAiSseWriter {
         finished = true;
         role();
         emit(ChunkChoice.finish(finishReason));
+        if (includeUsage && usage != null) {
+            emitChunk(ChatCompletionChunk.usageOnly(id, model, created, usage));
+        }
         write(DONE_FRAME);
     }
 
@@ -101,12 +122,15 @@ public class OpenAiSseWriter {
     }
 
     private void emit(ChunkChoice choice) {
+        emitChunk(ChatCompletionChunk.of(id, model, created, choice));
+    }
+
+    private void emitChunk(ChatCompletionChunk chunk) {
         if (broken) {
             return;
         }
         try {
-            byte[] json = objectMapper.writeValueAsBytes(
-                    ChatCompletionChunk.of(id, model, created, choice));
+            byte[] json = objectMapper.writeValueAsBytes(chunk);
             write(DATA_PREFIX);
             write(json);
             write(FRAME_SUFFIX);

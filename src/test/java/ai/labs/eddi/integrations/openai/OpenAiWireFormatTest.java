@@ -12,6 +12,7 @@ import ai.labs.eddi.integrations.openai.model.ChunkChoice;
 import ai.labs.eddi.integrations.openai.model.ModelObject;
 import ai.labs.eddi.integrations.openai.model.ModelsResponse;
 import ai.labs.eddi.integrations.openai.model.OpenAiErrorResponse;
+import ai.labs.eddi.integrations.openai.model.TokenUsage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,7 @@ class OpenAiWireFormatTest {
     @Test
     void chatCompletionResponse_matchesTheOpenAiShape() throws Exception {
         var response = ChatCompletionResponse.of("chatcmpl-eddi-1", "support-a3f9c1", 1_753_500_000L,
-                new Choice(0, ChatMessage.assistant("Hello there", objectMapper), Choice.FINISH_STOP));
+                new Choice(0, ChatMessage.assistant("Hello there", objectMapper), Choice.FINISH_STOP), null);
 
         JsonNode json = serialize(response);
 
@@ -64,7 +65,7 @@ class OpenAiWireFormatTest {
         // assistant message went out with a "plainText" field. Harmless to
         // clients, wrong on the wire, and invisible to a presence-only check.
         var response = ChatCompletionResponse.of("id", "m", 1L,
-                new Choice(0, ChatMessage.assistant("hi", objectMapper), Choice.FINISH_STOP));
+                new Choice(0, ChatMessage.assistant("hi", objectMapper), Choice.FINISH_STOP), null);
 
         JsonNode json = serialize(response);
 
@@ -100,7 +101,7 @@ class OpenAiWireFormatTest {
     @Test
     void finishReasonIsSnakeCased() throws Exception {
         var response = ChatCompletionResponse.of("id", "m", 1L,
-                new Choice(0, ChatMessage.assistant("hi", objectMapper), Choice.FINISH_STOP));
+                new Choice(0, ChatMessage.assistant("hi", objectMapper), Choice.FINISH_STOP), null);
 
         JsonNode json = serialize(response);
 
@@ -110,19 +111,51 @@ class OpenAiWireFormatTest {
     }
 
     @Test
-    void usageIsOmitted_notZeroFilled() throws Exception {
+    void usageIsOmittedWhenTheAgentCalledNoModel() throws Exception {
         JsonNode json = serialize(ChatCompletionResponse.of("id", "m", 1L,
-                new Choice(0, ChatMessage.assistant("hi", objectMapper), Choice.FINISH_STOP)));
+                new Choice(0, ChatMessage.assistant("hi", objectMapper), Choice.FINISH_STOP), null));
 
         assertFalse(json.has("usage"),
-                "zeros would render in clients as a factual '0 tokens'; absence is the honest encoding");
+                "a rule-based agent spends no tokens; zeros would render as a factual '0 tokens'");
+    }
+
+    @Test
+    void usageIsSnakeCasedWhenPresent() throws Exception {
+        JsonNode json = serialize(ChatCompletionResponse.of("id", "m", 1L,
+                new Choice(0, ChatMessage.assistant("hi", objectMapper), Choice.FINISH_STOP),
+                new TokenUsage(12L, 34L, 46L)));
+
+        assertEquals(Set.of("prompt_tokens", "completion_tokens", "total_tokens"), fieldNames(json.get("usage")));
+        assertEquals(12L, json.at("/usage/prompt_tokens").asLong());
+        assertEquals(34L, json.at("/usage/completion_tokens").asLong());
+        assertEquals(46L, json.at("/usage/total_tokens").asLong());
+    }
+
+    @Test
+    void usageOnlyChunkCarriesEmptyChoices() throws Exception {
+        // OpenAI's trailing usage frame has choices: [] — a client iterating deltas
+        // must be able to skip it without special-casing, so it must carry no
+        // content, and the empty array must survive NON_NULL serialization.
+        JsonNode json = serialize(ChatCompletionChunk.usageOnly("id", "m", 1L, new TokenUsage(1L, 2L, 3L)));
+
+        assertEquals(Set.of("id", "object", "created", "model", "choices", "usage"), fieldNames(json));
+        assertTrue(json.get("choices").isArray() && json.get("choices").isEmpty(),
+                "the usage frame must carry an empty choices array, not a delta");
+        assertEquals(3L, json.at("/usage/total_tokens").asLong());
+    }
+
+    @Test
+    void ordinaryChunksCarryNoUsageField() throws Exception {
+        JsonNode json = serialize(ChatCompletionChunk.of("id", "m", 1L, ChunkChoice.content("hi")));
+
+        assertFalse(json.has("usage"), "usage belongs only on the trailing frame");
     }
 
     @Test
     void assistantMessageSurvivesMultilineAndUnicodeText() throws Exception {
         String text = "line1\nline2 \"q\" \\ Grüße 👋";
         JsonNode json = serialize(ChatCompletionResponse.of("id", "m", 1L,
-                new Choice(0, ChatMessage.assistant(text, objectMapper), Choice.FINISH_STOP)));
+                new Choice(0, ChatMessage.assistant(text, objectMapper), Choice.FINISH_STOP), null));
 
         assertEquals(text, json.at("/choices/0/message/content").asText());
     }
@@ -130,7 +163,7 @@ class OpenAiWireFormatTest {
     @Test
     void nullAssistantTextBecomesEmptyString_notNull() throws Exception {
         JsonNode json = serialize(ChatCompletionResponse.of("id", "m", 1L,
-                new Choice(0, ChatMessage.assistant(null, objectMapper), Choice.FINISH_STOP)));
+                new Choice(0, ChatMessage.assistant(null, objectMapper), Choice.FINISH_STOP), null));
 
         assertEquals("", json.at("/choices/0/message/content").asText());
     }

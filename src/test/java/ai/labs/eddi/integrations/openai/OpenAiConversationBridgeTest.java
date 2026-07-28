@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -13,6 +14,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionRequest;
+import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +31,8 @@ import static ai.labs.eddi.integrations.openai.OpenAiTestFixtures.AGENT_ID_SUPPO
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -401,7 +406,105 @@ class OpenAiConversationBridgeTest {
         assertTrue(outcome.text().startsWith(OpenAiConversationBridge.PAUSE_NOTICE_PREFIX));
     }
 
+    // ─── token usage ───
+
+    /** A snapshot whose current step carries the turn's audit token usage. */
+    private SimpleConversationMemorySnapshot snapshotWithTokenUsage(Map<String, Object> tokenUsage) {
+        var snapshot = snapshotWithText("Hello there", ConversationState.READY);
+        var step = new SimpleConversationMemorySnapshot.SimpleConversationStep();
+        step.getConversationStep().add(new SimpleConversationMemorySnapshot.ConversationStepData(
+                MemoryKeys.AUDIT_TOKEN_USAGE, tokenUsage, new Date(), null));
+        snapshot.setConversationSteps(List.of(step));
+        return snapshot;
+    }
+
+    @Test
+    void detailedSnapshotsAreRequested_soTheAuditEntrySurvives() throws Exception {
+        // Load-bearing and otherwise invisible: the filtered snapshot keeps only
+        // input, actions, output and quick replies, so returnDetailed=false would
+        // drop audit:token_usage and usage would silently vanish from every
+        // response with nothing failing.
+        givenSayCompletes(snapshotWithText("Hi", ConversationState.READY));
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        bridge.say(turn, statefulModel, USER_ID, headers("chat-a"), simpleRequest());
+
+        verify(conversationService).say(any(), eq(true), eq(true), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void streamingAlsoRequestsDetailedSnapshots() throws Exception {
+        givenStreamingEmits(handler -> handler.onComplete(snapshotWithText("Hi", ConversationState.READY)));
+
+        bridge.stream(statelessTurn(), new OpenAiSseWriter(new java.io.ByteArrayOutputStream(),
+                objectMapper, "id", "m", 1L, false));
+
+        verify(conversationService).sayStreaming(any(), eq(true), eq(true), any(), any(), any());
+    }
+
+    @Test
+    void tokenUsageIsSurfacedFromTheAuditEntry() {
+        var outcome = bridge.render(snapshotWithTokenUsage(
+                Map.of("inputTokens", 120, "outputTokens", 45, "totalTokens", 165)));
+
+        assertNotNull(outcome.usage());
+        assertEquals(120L, outcome.usage().promptTokens());
+        assertEquals(45L, outcome.usage().completionTokens());
+        assertEquals(165L, outcome.usage().totalTokens());
+    }
+
+    @Test
+    void missingTotalIsDerivedFromTheParts() {
+        // Providers are inconsistent about totalTokens; a usage block whose parts
+        // do not add up to its total is worse than one that computes it.
+        var outcome = bridge.render(snapshotWithTokenUsage(Map.of("inputTokens", 7, "outputTokens", 3)));
+
+        assertEquals(10L, outcome.usage().totalTokens());
+    }
+
+    @Test
+    void anAgentThatCalledNoModelReportsNoUsage() {
+        // A rule-based agent writes no audit:token_usage entry at all. Reporting
+        // zeros would read in a client as a measurement rather than an absence.
+        var outcome = bridge.render(snapshotWithText("Hello there", ConversationState.READY));
+
+        assertNull(outcome.usage());
+    }
+
+    @Test
+    void anEmptyOrUnusableAuditEntryYieldsNoUsage() {
+        assertNull(bridge.render(snapshotWithTokenUsage(Map.of())).usage());
+        assertNull(bridge.render(snapshotWithTokenUsage(Map.of("somethingElse", 5))).usage());
+    }
+
+    @Test
+    void skippedTurnsCarryNoUsage() {
+        // The sentinels stand for a turn that never ran, so any count would be a
+        // fabrication.
+        assertNull(bridge.render(OpenAiConversationBridge.SKIPPED_STILL_AWAITING).usage());
+    }
+
     // ─── rendering ───
+
+    @Test
+    void quickRepliesReachTheClient() throws Exception {
+        // The whole point of the adapter-local renderer: the shared text extractor
+        // drops quick replies, which left wizard agents asking questions whose
+        // answers were invisible.
+        var output = new ConversationOutput();
+        output.put("output", List.of("Which provider?"));
+        output.put("quickReplies", List.of(new QuickReply("Anthropic", "provider_anthropic", false)));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationId(CONVERSATION_ID);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationOutputs(List.of(output));
+
+        var outcome = bridge.render(snapshot);
+
+        assertTrue(outcome.text().startsWith("Which provider?"), outcome.text());
+        assertTrue(outcome.text().contains("`Anthropic`"), outcome.text());
+    }
 
     @Test
     void normalCompletion_returnsTheAgentText() throws Exception {
@@ -469,7 +572,7 @@ class OpenAiConversationBridgeTest {
         var turn = statelessTurn();
         var out = new java.io.ByteArrayOutputStream();
 
-        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L));
+        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
         assertTrue(out.toString(java.nio.charset.StandardCharsets.UTF_8).contains("block reply"));
     }
@@ -485,7 +588,7 @@ class OpenAiConversationBridgeTest {
         var turn = statelessTurn();
         var out = new java.io.ByteArrayOutputStream();
 
-        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L));
+        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
         String body = out.toString(java.nio.charset.StandardCharsets.UTF_8);
         assertEquals(1, countOccurrences(body, "\"content\":\"stream\""));
@@ -500,7 +603,7 @@ class OpenAiConversationBridgeTest {
         var turn = statelessTurn();
         var out = new java.io.ByteArrayOutputStream();
 
-        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L));
+        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
         String body = out.toString(java.nio.charset.StandardCharsets.UTF_8);
         assertFalse(body.contains("null"), "got: " + body);
@@ -533,7 +636,7 @@ class OpenAiConversationBridgeTest {
         var turn = statelessTurn();
         var out = new java.io.ByteArrayOutputStream();
 
-        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L));
+        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
         String body = out.toString(java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(body.contains("\"content\":\"late\""),
@@ -550,7 +653,7 @@ class OpenAiConversationBridgeTest {
         var turn = statelessTurn();
         var out = new java.io.ByteArrayOutputStream();
 
-        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L));
+        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
         assertTrue(out.toString(java.nio.charset.StandardCharsets.UTF_8).endsWith("data: [DONE]\n\n"));
     }

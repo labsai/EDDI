@@ -7,7 +7,7 @@ package ai.labs.eddi.integrations.openai;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
-import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionRequest;
 import ai.labs.eddi.integrations.openai.model.Choice;
 import ai.labs.eddi.integrations.openai.model.OpenAiErrorResponse;
+import ai.labs.eddi.integrations.openai.model.TokenUsage;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -32,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * Bridges the stateless OpenAI protocol onto EDDI's stateful conversations.
@@ -130,8 +132,11 @@ public class OpenAiConversationBridge {
      *            whether the conversation is now (or still) awaiting a human
      *            decision — surfaced as chat text, never as an HTTP error, because
      *            a 4xx makes clients discard the user's message
+     * @param usage
+     *            the turn's token counts, or {@code null} when the agent called no
+     *            model
      */
-    public record TurnOutcome(String text, boolean paused) {
+    public record TurnOutcome(String text, boolean paused, TokenUsage usage) {
     }
 
     // ─── session keys ───
@@ -306,7 +311,12 @@ public class OpenAiConversationBridge {
     SimpleConversationMemorySnapshot sendAndWait(String conversationId, InputData inputData) throws Exception {
         var future = new CompletableFuture<SimpleConversationMemorySnapshot>();
 
-        conversationService.say(conversationId, false, true, Collections.emptyList(), inputData, false,
+        // returnDetailed=true: the filtered snapshot keeps only input, actions,
+        // output and quick replies, which drops the audit:token_usage entry the
+        // usage block is built from. Detailed costs one extra step's worth of
+        // references in this process — the snapshot itself is never serialized to
+        // the client, only read here.
+        conversationService.say(conversationId, true, true, Collections.emptyList(), inputData, false,
                 new IConversationService.ConversationResponseHandler() {
                     @Override
                     public void onComplete(SimpleConversationMemorySnapshot snapshot) {
@@ -341,22 +351,51 @@ public class OpenAiConversationBridge {
     /** Render a snapshot (or sentinel) as assistant text. */
     TurnOutcome render(SimpleConversationMemorySnapshot snapshot) {
         if (snapshot == SKIPPED_STILL_AWAITING) {
-            return new TurnOutcome(STILL_AWAITING_NOTICE, true);
+            return new TurnOutcome(STILL_AWAITING_NOTICE, true, null);
         }
         if (snapshot == SKIPPED_NOT_ACTIVE) {
             throw OpenAiApiException.busy(
                     "The conversation is busy with another turn or is no longer active. Please retry.");
         }
 
-        String text = ConversationOutputExtractor.extractResponse(snapshot);
+        String text = OpenAiOutputRenderer.render(snapshot);
+        TokenUsage usage = extractUsage(snapshot);
         boolean paused = snapshot != null
                 && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
 
         if (paused) {
             String notice = PAUSE_NOTICE_PREFIX + " Conversation: " + snapshot.getConversationId();
-            return new TurnOutcome(text == null || text.isBlank() ? notice : text + "\n\n" + notice, true);
+            return new TurnOutcome(text == null || text.isBlank() ? notice : text + "\n\n" + notice, true, usage);
         }
-        return new TurnOutcome(text == null || text.isBlank() ? NO_OUTPUT_NOTICE : text, false);
+        return new TurnOutcome(text == null || text.isBlank() ? NO_OUTPUT_NOTICE : text, false, usage);
+    }
+
+    /**
+     * Pull the turn's token usage out of the snapshot's {@code audit:token_usage}
+     * entry.
+     * <p>
+     * Present only because this adapter asks for <em>detailed</em> snapshots: the
+     * filtered form keeps just input, actions, output and quick replies, and drops
+     * every audit key. Absent for any agent that made no model call.
+     */
+    static TokenUsage extractUsage(SimpleConversationMemorySnapshot snapshot) {
+        if (snapshot == null || isNullOrEmpty(snapshot.getConversationSteps())) {
+            return null;
+        }
+        var steps = snapshot.getConversationSteps();
+        var lastStep = steps.get(steps.size() - 1);
+        if (lastStep == null || isNullOrEmpty(lastStep.getConversationStep())) {
+            return null;
+        }
+        for (var data : lastStep.getConversationStep()) {
+            if (data != null && MemoryKeys.AUDIT_TOKEN_USAGE.equals(data.getKey())
+                    && data.getValue() instanceof Map<?, ?> map) {
+                @SuppressWarnings("unchecked")
+                var tokenUsage = (Map<String, Object>) map;
+                return TokenUsage.from(tokenUsage);
+            }
+        }
+        return null;
     }
 
     /**
@@ -384,7 +423,9 @@ public class OpenAiConversationBridge {
         // whichever terminal callback fires, and awaited before unwinding.
         var finished = new CompletableFuture<Void>();
         try {
-            conversationService.sayStreaming(turn.conversationId(), false, true, Collections.emptyList(),
+            // returnDetailed=true for the same reason as the sync path — see
+            // sendAndWait.
+            conversationService.sayStreaming(turn.conversationId(), true, true, Collections.emptyList(),
                     turn.inputData(), new IConversationService.StreamingResponseHandler() {
                         @Override
                         public void onTaskStart(TaskId taskId, String taskType, int index) {
@@ -405,8 +446,16 @@ public class OpenAiConversationBridge {
 
                         @Override
                         public void onComplete(SimpleConversationMemorySnapshot snapshot) {
-                            if (!anyToken[0]) {
-                                String text = ConversationOutputExtractor.extractResponse(snapshot);
+                            if (anyToken[0]) {
+                                // The model already streamed the prose, so only the
+                                // non-text affordances are still missing — emitting the
+                                // full render here would repeat the whole reply.
+                                String extras = OpenAiOutputRenderer.renderExtras(snapshot);
+                                if (extras != null) {
+                                    writer.content("\n\n" + extras);
+                                }
+                            } else {
+                                String text = OpenAiOutputRenderer.render(snapshot);
                                 writer.content(text == null || text.isBlank() ? NO_OUTPUT_NOTICE : text);
                             }
                             if (snapshot != null
@@ -415,6 +464,7 @@ public class OpenAiConversationBridge {
                                 writer.content("\n\n" + PAUSE_NOTICE_PREFIX
                                         + " Conversation: " + snapshot.getConversationId());
                             }
+                            writer.usage(extractUsage(snapshot));
                             writer.finish(Choice.FINISH_STOP);
                             finished.complete(null);
                         }

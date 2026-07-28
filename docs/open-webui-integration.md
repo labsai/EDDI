@@ -434,8 +434,40 @@ The conversation id is also on every response as `X-EDDI-Conversation-Id`.
 | **Edit and resend** | Same: a new turn, not a rewrite of history. |
 | **Deleting a chat in Open WebUI** | Does not end the EDDI conversation. It is abandoned and reaped by normal conversation lifecycle policy. |
 | **Documents dropped into chat** | Handled entirely by Open WebUI's own RAG (upload → chunk → embed → inject into the prompt). **By default it injects into the *user* message, not the system message** — set `RAG_SYSTEM_CONTEXT=true` (§5) or your agent receives the whole `<source>` blob as its input. For production document RAG, use EDDI's own pipeline. |
-| **Token counts** | Not shown — `usage` is omitted (see §10). |
+| **Token counts** | Reported as `usage` for agents that call a model, summed across cascade steps and tool round-trips. Rule-based agents spend no tokens, so the field is omitted rather than zero-filled. On streams it needs `stream_options.include_usage` (§7.1). |
 | **Two requests in one chat at once** | The second is dropped by `ConversationCoordinator` and returns `429`; clients retry. |
+
+### 7.1 Token usage
+
+`usage` is built from the turn's `audit:token_usage` entry, which `LlmTask` accumulates across **every** model call the turn made — so a turn that escalated through three cascade steps and two tool round-trips reports the sum, not the last leg.
+
+```json
+"usage": {"prompt_tokens": 1204, "completion_tokens": 88, "total_tokens": 1292}
+```
+
+Two things follow from where the number comes from:
+
+- **A rule-based agent reports no `usage` at all.** It called no model, so there is nothing to count. The field is omitted rather than zero-filled, because `0 tokens` reads in a client as a measurement rather than as an absence.
+- **On the streaming path it is opt-in.** Per the OpenAI specification, usage is emitted only when the client sends `stream_options: {"include_usage": true}`, as a trailing frame with an empty `choices` array, after the `finish_reason` frame and before `[DONE]`. Clients that did not ask for it never see it — an unrequested empty-choices frame is a protocol deviation some clients reject.
+
+### 7.2 Structured outputs
+
+An EDDI turn can carry eight output types; the OpenAI protocol carries one string. Rather than drop everything but text, the adapter renders the rest as Markdown and appends it:
+
+| EDDI output item | Rendered as |
+|---|---|
+| `text` | the text itself, unchanged |
+| `quickReply` | `_Suggested replies:_ ` + each value in backticks |
+| `image` | `![alt](uri)` |
+| `applicationLink` | `[label](path)` |
+| `button` | `**[label]**` — the label only; `onPress` is a client-side instruction with no meaning here |
+| `inputField` | `**Label:**`, plus a warning for `password` that this channel cannot mask input |
+| `agentFace` | dropped — an avatar has no text equivalent |
+| `other` | dropped |
+
+Quick replies render as their literal **values**, not as a numbered list: the user types the next message by hand here, and numbering would invite `2` as an answer, which no input matcher recognises. The value is what a chat UI puts on the button, so it is what the user would type; the `expressions` field stays internal.
+
+This rendering is local to the adapter. The shared `ConversationOutputExtractor` is unchanged — its other callers feed agent-to-agent prompts, where interaction affordances would be noise.
 
 ---
 
@@ -484,8 +516,8 @@ Every failure uses the OpenAI envelope:
 
 ## 10. Known gaps
 
-1. **No `usage` / token counts.** EDDI does not surface per-request token counts to this layer. Emitting zeros would render as a factual "0 tokens", so the field is omitted instead.
-2. **Non-text outputs are dropped.** Quick replies and `inputField` items do not reach OpenAI clients — only text. Rule-based agents that lean on quick replies degrade to plain prose.
+1. **Agent groups are not exposed as models.** Only individual agents appear in `/v1/models`; EDDI's multi-agent group discussions are unreachable over this API. Nothing blocks it — groups are listable, `discuss()` returns a `synthesizedAnswer`, `continueDiscussion()` gives multi-turn, and `GroupDiscussionEventListener` gives streaming — but it needs a second bridge with its own conversation mapping, streaming path and approval surface, so it belongs in its own change rather than bolted onto this one.
+2. **Structured outputs are flattened to Markdown, not interactive.** Quick replies, buttons and input fields are rendered as text (§7.2), so the user reads and retypes them rather than clicking. `agentFace` and `other` items are dropped entirely.
 3. **Regenerate is a real new turn**, not an idempotent replay.
 4. **Stream-path errors must return 200** (see §8).
 5. **One worker thread per in-flight completion**, bounded by `max-concurrent-requests`.
