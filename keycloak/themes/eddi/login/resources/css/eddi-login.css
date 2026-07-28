@@ -178,9 +178,17 @@
  * no-repeat center center fixed; background-size: cover; }`. Same selector, same
  * specificity, loaded later — and the shorthand resets background-image, so the
  * PNG is never fetched.
+ *
+ * A flat fill read as dead space. The bloom sits behind the wordmark so the
+ * logo appears to be the light source for the panel below it — the same
+ * gesture as the card's top edge line.
  * ------------------------------------------------------------------------ */
 .login-pf body {
-    background: var(--eddi-bg);
+    background:
+        radial-gradient(60% 38% at 50% 16%, rgba(245, 158, 11, .10), transparent 72%),
+        radial-gradient(90% 55% at 50% 104%, rgba(39, 39, 42, .55), transparent 70%),
+        var(--eddi-bg);
+    background-attachment: fixed;
 }
 
 /* --- Logo ----------------------------------------------------------------
@@ -209,8 +217,46 @@
  * PF's login card is borderless; the Manager's panels use a 1px zinc-800 hairline.
  * ------------------------------------------------------------------------ */
 .pf-v5-c-login__main {
+    position: relative;
     border: 1px solid var(--eddi-border);
     border-radius: var(--eddi-radius-lg);
+
+    /* Light from above: a 1px inset highlight along the top edge and a falloff
+       into the surface, then a real shadow so the panel sits off the page. */
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, .035), transparent 140px);
+    box-shadow:
+        inset 0 1px 0 0 rgba(255, 255, 255, .05),
+        0 24px 64px -16px rgba(0, 0, 0, .85);
+}
+
+/* SIGNATURE — the light source. A hairline amber rule across the top edge,
+   brightest at centre, fading to nothing at both ends; it echoes the hairline
+   strokes of the wordmark above it. This is the one bold element on the page;
+   everything else is deliberately quiet. */
+.pf-v5-c-login__main::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent, rgba(245, 158, 11, .15) 18%,
+        var(--eddi-primary) 50%,
+        rgba(245, 158, 11, .15) 82%, transparent);
+    border-top-left-radius: inherit;
+    border-top-right-radius: inherit;
+    transform: scaleX(1);
+    transform-origin: 50% 50%;
+    animation: eddi-light-on 620ms cubic-bezier(.2, .7, .3, 1) both;
+}
+
+@keyframes eddi-light-on {
+    from { transform: scaleX(.15); opacity: 0; }
+    to   { transform: scaleX(1);   opacity: 1; }
+}
+
+/* One orchestrated moment, and only for those who want it. */
+@media (prefers-reduced-motion: reduce) {
+    .pf-v5-c-login__main::before { animation: none; }
 }
 
 /* The footer band is the "New user? Register" strip emitted by login.ftl. It
@@ -232,6 +278,16 @@
     --pf-v5-c-button--m-primary--focus--Color:  var(--eddi-bg);
     --pf-v5-c-button--m-primary--active--Color: var(--eddi-bg);
     font-weight: 600;
+    letter-spacing: .01em;
+    padding-block: 10px;
+    transition: box-shadow 180ms ease;
+}
+
+/* Deliberately no gradient here. The button is already the heaviest element on
+   the page; the top-edge light line is the signature and this must not compete
+   with it. Hover gets warmth, nothing more. */
+.pf-v5-c-button.pf-m-primary:hover {
+    box-shadow: 0 8px 26px -8px rgba(245, 158, 11, .55);
 }
 
 /* --- Inputs --------------------------------------------------------------
@@ -247,28 +303,59 @@
  *
  * KNOWN GAP — WCAG 1.4.11 (non-text contrast, 3:1 for UI component boundaries).
  * The resting border (#27272a on #18181b) is 1.19:1 and the fill difference
- * (#0c0a09 on #18181b) is ~1.35:1, so neither boundary meets 3:1 on its own; a
- * field is identified by its label, fill and border together. Reaching 3:1
- * would need roughly zinc-500 (#71717a), which is a visible departure from the
- * #27272a border the Manager uses everywhere — a CI decision, not a CSS one, so
- * it is left as-is and recorded here. The focus state is unaffected and clears
- * the bar comfortably (amber, 8.25:1).
+ * (~#101012 on #18181b) is ~1.11:1, so neither boundary meets 3:1 on its own; a
+ * field is identified by its label, fill, inset shadow and border together.
+ * Reaching 3:1 would need roughly zinc-500 (#71717a), which is a visible
+ * departure from the #27272a border the Manager uses everywhere — a CI
+ * decision, not a CSS one, so it is left as-is and recorded here. The focus
+ * state is unaffected and clears the bar comfortably (amber, 8.25:1).
  * ------------------------------------------------------------------------ */
-.pf-v5-c-form-control {
-    --pf-v5-c-form-control--BackgroundColor: var(--eddi-bg);
+.pf-v5-c-form-control,
+.pf-v5-c-input-group {
+    --pf-v5-c-form-control--BackgroundColor: transparent;
+    background-color: rgba(0, 0, 0, .35);
     border: 1px solid var(--eddi-border);
     border-radius: var(--eddi-radius);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .45);
 }
 
-.pf-v5-c-form-control:focus-within {
+.pf-v5-c-form-control:focus-within,
+.pf-v5-c-input-group:focus-within {
     border-color: var(--eddi-primary);
+    box-shadow:
+        inset 0 1px 2px rgba(0, 0, 0, .45),
+        0 0 0 3px rgba(245, 158, 11, .16);
 }
 
-/* The password-visibility toggle sits inside the input group and must share the
-   field's recessed background, or the control reads as two pieces. */
+/* The password field is an input-group: the field and the visibility toggle are
+   siblings, each with their own box. Styled separately they meet in a hard seam
+   with mismatched corners. The group becomes the field, and its children go
+   flat so the pair reads as one control. */
+.pf-v5-c-input-group {
+    overflow: hidden;
+}
+
+/* Verified markup: .pf-v5-c-input-group > .pf-v5-c-input-group__item.pf-m-fill
+   > span.pf-v5-c-form-control > input. The direct-child variant does not occur,
+   so it is not styled here. */
+.pf-v5-c-input-group > .pf-v5-c-input-group__item > .pf-v5-c-form-control {
+    background-color: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
 .pf-v5-c-button.pf-m-control {
-    background-color: var(--eddi-bg);
+    background-color: transparent;
+    border: 0;
     color: var(--eddi-muted);
+    transition: color 150ms ease;
+}
+
+.pf-v5-c-button.pf-m-control:hover,
+.pf-v5-c-button.pf-m-control:focus {
+    background-color: transparent;
+    color: var(--eddi-fg);
 }
 
 /* Chrome/Edge force a hard-coded pale autofill background that ignores
@@ -282,9 +369,26 @@
     transition: background-color 5000s ease-in-out 0s;
 }
 
-/* --- Labels and secondary text ------------------------------------------ */
+/* --- Type treatment ------------------------------------------------------
+ * The wordmark is hairline and widely tracked. PatternFly's defaults — a 400
+ * title with no tracking and 700 labels — pull the opposite way and made the
+ * form read heavier than the brand above it. Lighter title, tracked; labels
+ * become small tracked caps, which suits an operator console and echoes the
+ * spacing of the logo. text-transform leaves the accessible name intact.
+ * ------------------------------------------------------------------------ */
+.pf-v5-c-title {
+    /* Set through the component token: `.pf-v5-c-title.pf-m-3xl` carries the
+       weight at two-class specificity, so a plain `font-weight` here loses. */
+    --pf-v5-c-title--m-3xl--FontWeight: 300;
+    letter-spacing: .012em;
+}
+
 .pf-v5-c-form__label-text {
     color: var(--eddi-muted);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: .085em;
+    text-transform: uppercase;
 }
 
 /* --- Focus visibility ----------------------------------------------------
