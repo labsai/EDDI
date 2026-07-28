@@ -24,12 +24,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.Map;
 
@@ -1661,6 +1665,246 @@ class LifecycleManagerTest {
 
             // New key not in before snapshot → marked uncommitted
             verify(newData).setCommitted(false);
+        }
+    }
+
+    /**
+     * C5 — the component cache is keyed by the task's ABSOLUTE index in the
+     * workflow ({@code WorkflowStoreClientLibrary} writes
+     * {@code createComponentKey(id, version, indexInWorkflow)}), but a selective
+     * execution hands the loop a SUBLIST, so the loop index is sublist-relative.
+     * Building the lookup key from that relative index resolved a key that was
+     * never written, the task ran with {@code component == null} and no-opped —
+     * which is why {@code /rerun} deleted the previous output and regenerated
+     * nothing.
+     * <p>
+     * Every other test in this class stubs the component map EMPTY, which is
+     * exactly why the bug survived: with an empty map both the right and the wrong
+     * key resolve to {@code null}. These cases populate it at ABSOLUTE indices and
+     * assert on the component the task actually receives.
+     */
+    @Nested
+    @DisplayName("C5 — Component Cache Keying (absolute vs. sublist-relative index)")
+    class ComponentCacheKeyingTests {
+
+        private static final String PARSER_COMPONENT = "parser-config";
+        private static final String BEHAVIOR_COMPONENT = "behavior-config";
+        private static final String OUTPUT_COMPONENT = "output-config";
+
+        private ILifecycleTask parser;
+        private ILifecycleTask behavior;
+        private ILifecycleTask output;
+        private IConversationMemory memory;
+
+        /**
+         * parser@0, behavior@1, output@2 — each with its component cached under the
+         * ABSOLUTE workflow-step key, exactly as WorkflowStoreClientLibrary writes it.
+         */
+        @BeforeEach
+        void wireWorkflow() {
+            parser = mock(ILifecycleTask.class);
+            when(parser.getId()).thenReturn(new TaskId("ai.labs.parser"));
+            when(parser.getType()).thenReturn("expressions");
+
+            behavior = mock(ILifecycleTask.class);
+            when(behavior.getId()).thenReturn(new TaskId("ai.labs.behavior"));
+            when(behavior.getType()).thenReturn("behavior_rules");
+
+            output = mock(ILifecycleTask.class);
+            when(output.getId()).thenReturn(new TaskId("ai.labs.output"));
+            when(output.getType()).thenReturn("output");
+
+            lifecycleManager.addLifecycleTask(parser);
+            lifecycleManager.addLifecycleTask(behavior);
+            lifecycleManager.addLifecycleTask(output);
+
+            when(componentCache.getComponentMap("ai.labs.parser"))
+                    .thenReturn(new HashMap<>(Map.of("wf1:1:0", PARSER_COMPONENT)));
+            when(componentCache.getComponentMap("ai.labs.behavior"))
+                    .thenReturn(new HashMap<>(Map.of("wf1:1:1", BEHAVIOR_COMPONENT)));
+            when(componentCache.getComponentMap("ai.labs.output"))
+                    .thenReturn(new HashMap<>(Map.of("wf1:1:2", OUTPUT_COMPONENT)));
+
+            memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+        }
+
+        @Test
+        @DisplayName("full execution resolves each task's component (regression guard)")
+        void fullExecutionResolvesComponents() throws Exception {
+            lifecycleManager.executeLifecycle(memory, null);
+
+            verify(parser).execute(memory, PARSER_COMPONENT);
+            verify(behavior).execute(memory, BEHAVIOR_COMPONENT);
+            verify(output).execute(memory, OUTPUT_COMPONENT);
+        }
+
+        @Test
+        @DisplayName("selective execution (the /rerun path) still resolves the output task's component")
+        void selectiveExecutionResolvesComponentAtAbsoluteIndex() throws Exception {
+            // Exactly what Conversation#rerun does: run the suffix from "output".
+            lifecycleManager.executeLifecycle(memory, List.of("output", "quickReplies"));
+
+            verify(parser, never()).execute(any(), any());
+            verify(behavior, never()).execute(any(), any());
+            // Before the fix the key was "wf1:1:0" (sublist-relative), which is not in
+            // the output task's component map → null → the task no-opped.
+            verify(output).execute(memory, OUTPUT_COMPONENT);
+        }
+
+        @Test
+        @DisplayName("selective execution reports the ABSOLUTE task index on the streaming event")
+        void selectiveExecutionReportsAbsoluteTaskIndex() throws Exception {
+            var eventSink = mock(ConversationEventSink.class);
+            when(memory.getEventSink()).thenReturn(eventSink);
+
+            lifecycleManager.executeLifecycle(memory, List.of("output"));
+
+            verify(eventSink).onTaskStart(new TaskId("ai.labs.output"), "output", 2);
+        }
+
+        @Test
+        @DisplayName("selective execution from the middle resolves BOTH remaining components")
+        void selectiveExecutionResolvesEveryRemainingComponent() throws Exception {
+            lifecycleManager.executeLifecycle(memory, List.of("behavior_rules"));
+
+            verify(parser, never()).execute(any(), any());
+            verify(behavior).execute(memory, BEHAVIOR_COMPONENT);
+            verify(output).execute(memory, OUTPUT_COMPONENT);
+        }
+
+        @Test
+        @DisplayName("HITL resume from an absolute index resolves the component at that index")
+        void resumeFromIndexResolvesComponent() throws Exception {
+            lifecycleManager.executeLifecycleFromIndex(memory, 2);
+
+            verify(parser, never()).execute(any(), any());
+            verify(behavior, never()).execute(any(), any());
+            verify(output).execute(memory, OUTPUT_COMPONENT);
+        }
+    }
+
+    /**
+     * F6 — cancellation was checked at exactly ONE point: the transition INTO a
+     * task. A cancel that landed while the LAST task of a workflow was running was
+     * therefore never observed, and the turn returned as if nothing happened —
+     * letting {@code Conversation} commit the side effects of work the caller had
+     * already been told was cancelled.
+     */
+    @Nested
+    @DisplayName("F6 — Cancellation Checks")
+    class CancellationTests {
+
+        @Test
+        @Timeout(15)
+        @DisplayName("a cancel that lands WHILE the last task runs stops the turn")
+        void cancelDuringLastTaskIsObserved() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("ai.labs.llm"));
+            when(task.getType()).thenReturn("langchain");
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            // Real cancel flag, read exactly as ConversationMemory exposes it.
+            var cancelled = new AtomicBoolean(false);
+            when(memory.isCancelled()).thenAnswer(invocation -> cancelled.get());
+
+            // Force the interleaving: the cancel lands after the task has started and
+            // before it returns — i.e. strictly INSIDE the only task of the pipeline.
+            var taskEntered = new CountDownLatch(1);
+            var cancelApplied = new CountDownLatch(1);
+            doAnswer(invocation -> {
+                taskEntered.countDown();
+                assertTrue(cancelApplied.await(10, TimeUnit.SECONDS), "canceller thread did not run");
+                return null;
+            }).when(task).execute(any(), any());
+
+            var canceller = new Thread(() -> {
+                try {
+                    assertTrue(taskEntered.await(10, TimeUnit.SECONDS), "task never started");
+                    cancelled.set(true);
+                    cancelApplied.countDown();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "cancel-signal");
+            canceller.start();
+
+            try {
+                assertThrows(ConversationStopException.class,
+                        () -> lifecycleManager.executeLifecycle(memory, null));
+            } finally {
+                canceller.join(10_000);
+            }
+
+            // The task did run to completion — this is cooperative cancellation, not
+            // an interrupt — but the pipeline must not report a clean turn.
+            verify(task).execute(any(), any());
+        }
+
+        @Test
+        @Timeout(15)
+        @DisplayName("a cancel between tasks still stops before the next task (unchanged)")
+        void cancelBetweenTasksStopsPipeline() throws Exception {
+            var first = mock(ILifecycleTask.class);
+            when(first.getId()).thenReturn(new TaskId("ai.labs.behavior"));
+            when(first.getType()).thenReturn("behavior_rules");
+            var second = mock(ILifecycleTask.class);
+            when(second.getId()).thenReturn(new TaskId("ai.labs.output"));
+            when(second.getType()).thenReturn("output");
+            lifecycleManager.addLifecycleTask(first);
+            lifecycleManager.addLifecycleTask(second);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            var cancelled = new AtomicBoolean(false);
+            when(memory.isCancelled()).thenAnswer(invocation -> cancelled.get());
+            doAnswer(invocation -> {
+                cancelled.set(true);
+                return null;
+            }).when(first).execute(any(), any());
+
+            assertThrows(ConversationStopException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            verify(first).execute(any(), any());
+            verify(second, never()).execute(any(), any());
+        }
+
+        @Test
+        @Timeout(15)
+        @DisplayName("an uncancelled turn completes normally — the exit check is not a blanket throw")
+        void uncancelledTurnCompletes() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("ai.labs.output"));
+            when(task.getType()).thenReturn("output");
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+            when(memory.isCancelled()).thenReturn(false);
+
+            lifecycleManager.executeLifecycle(memory, null);
+
+            verify(task).execute(any(), any());
         }
     }
 }

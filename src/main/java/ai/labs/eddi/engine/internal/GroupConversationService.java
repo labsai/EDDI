@@ -66,6 +66,8 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -93,6 +95,14 @@ public class GroupConversationService implements IGroupConversationService {
      * timeouts on synthesis with extended thinking.
      */
     private static final int DEFAULT_AGENT_TIMEOUT_SECONDS = 180;
+
+    /**
+     * How long an aborting orchestrator waits for cooperatively cancelled member
+     * turns to unwind before reclaiming their tasks. Cancellation releases the
+     * turns at their await points immediately, so this is only a safety bound for a
+     * turn that is between two await points.
+     */
+    private static final int MEMBER_TURN_CANCEL_DRAIN_SECONDS = 5;
 
     private final IAgentGroupStore groupStore;
     private final IGroupConversationStore conversationStore;
@@ -1138,7 +1148,14 @@ public class GroupConversationService implements IGroupConversationService {
                 InputData inputData = new InputData();
                 inputData.setInput(question);
                 Map<String, Context> context = new LinkedHashMap<>();
-                context.put("groupTranscript", new Context(Context.ContextType.object, gc.getTranscript()));
+                // Snapshot, never the live list: the member conversation serialises this
+                // context on its own thread while this one keeps appending to the
+                // transcript (see the same hand-off in executeAgentTurn).
+                List<TranscriptEntry> followUpTranscript;
+                synchronized (gc.getTranscript()) {
+                    followUpTranscript = List.copyOf(gc.getTranscript());
+                }
+                context.put("groupTranscript", new Context(Context.ContextType.object, followUpTranscript));
                 context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
                 context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
                 inputData.setContext(context);
@@ -1530,6 +1547,98 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     // =================================================================
+    // Cooperative cancellation of in-flight member turns
+    // =================================================================
+
+    /**
+     * Cooperative cancellation handle shared by the member turns of a single
+     * parallel batch (a debate phase batch or a task-execution wave).
+     * <p>
+     * {@link CompletableFuture#cancel(boolean)} does <em>not</em> interrupt the
+     * body of a {@code runAsync}/{@code supplyAsync} task — the JDK documents
+     * {@code mayInterruptIfRunning} as having no effect there. A "cancelled" member
+     * thread would therefore keep running and keep mutating the group document
+     * (transcript, task list, error list) long after the orchestrator gave up on it
+     * and persisted the document. Cancellation must be cooperative instead: the
+     * turn checks this token at its own await points and before every write.
+     * <p>
+     * The lever is the response future the member turn blocks on — completing it
+     * exceptionally releases the turn immediately, without waiting for the agent's
+     * own timeout.
+     */
+    static final class MemberTurnCancellation {
+
+        private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        private final Set<CompletableFuture<?>> awaited = ConcurrentHashMap.newKeySet();
+
+        boolean isCancelled() {
+            return cancelled.get();
+        }
+
+        /**
+         * Register a future a member turn is about to block on. If cancellation already
+         * happened, the future is released right away — closing the race between
+         * {@link #cancel()} and a turn reaching its await point.
+         */
+        void register(CompletableFuture<?> future) {
+            awaited.add(future);
+            if (cancelled.get()) {
+                future.completeExceptionally(new MemberTurnCancelledException());
+            }
+        }
+
+        void unregister(CompletableFuture<?> future) {
+            awaited.remove(future);
+        }
+
+        /** Signal cancellation and release every member turn currently waiting. */
+        void cancel() {
+            cancelled.set(true);
+            for (var future : awaited) {
+                future.completeExceptionally(new MemberTurnCancelledException());
+            }
+        }
+    }
+
+    /**
+     * Thrown out of a member turn that was cooperatively cancelled. It is never
+     * retried and never converted into a transcript entry by the member thread —
+     * the orchestrator owns the group document from the moment it cancels.
+     */
+    static final class MemberTurnCancelledException extends RuntimeException {
+
+        MemberTurnCancelledException() {
+            super("Member turn cancelled by the group orchestrator");
+        }
+    }
+
+    /**
+     * Atomically reserve one turn from the shared budget.
+     * <p>
+     * A check-then-act ({@code turnCounter.get() >= maxTurns} followed by
+     * {@code incrementAndGet()}) lets all N member threads of a parallel wave pass
+     * the check on the last remaining turn and overshoot {@code maxTurns} by up to
+     * N-1 LLM calls. The CAS loop below hands out at most {@code maxTurns} turns in
+     * total, no matter how many threads race for them. The budget test itself is
+     * the one the callers used before ({@code counter >= maxTurns}), just fused
+     * with the increment.
+     *
+     * @return {@code true} if a turn was reserved, {@code false} if the budget is
+     *         exhausted
+     */
+    private static boolean reserveTurn(AtomicInteger turnCounter, int maxTurns) {
+        while (true) {
+            int current = turnCounter.get();
+            if (current >= maxTurns) {
+                return false;
+            }
+            if (turnCounter.compareAndSet(current, current + 1)) {
+                return true;
+            }
+        }
+    }
+
+    // =================================================================
     // Task-oriented phase execution (TASK_FORCE style)
     // =================================================================
 
@@ -1738,6 +1847,7 @@ public class GroupConversationService implements IGroupConversationService {
         List<GroupDiscussionException> errors = Collections.synchronizedList(new ArrayList<>());
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
         int maxWaves = 100; // safety cap to prevent infinite loops
+        final SharedTaskList taskList = gc.getTaskList();
 
         // Wave loop: re-query executable tasks after each wave completes.
         // Tasks that become executable when their dependencies finish are picked up
@@ -1765,6 +1875,11 @@ public class GroupConversationService implements IGroupConversationService {
                     wave + 1, tasksByAgent.size(),
                     tasksByAgent.values().stream().mapToInt(List::size).sum());
 
+            // Cooperative cancellation for this wave's member turns: cancel(true) on
+            // the futures below does NOT interrupt their bodies, so aborting the wave
+            // has to signal through this token instead.
+            var cancellation = new MemberTurnCancellation();
+
             // Execute agents in parallel, tasks per agent sequentially
             List<CompletableFuture<Void>> futures = new ArrayList<>();
 
@@ -1780,12 +1895,19 @@ public class GroupConversationService implements IGroupConversationService {
 
                 CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                     for (TaskItem task : agentTasks) {
-                        if (turnCounter.get() >= maxTurns) {
-                            break;
-                        }
                         try {
-                            turnCounter.incrementAndGet();
-                            gc.getTaskList().startTask(task.id());
+                            // Claim the turn budget and the task itself under the task-list
+                            // monitor, together with the cancellation check. Atomically,
+                            // because (a) N agent threads racing a check-then-act on the
+                            // counter would overshoot maxTurns by up to N-1 LLM calls and
+                            // (b) a task must never flip to IN_PROGRESS after an aborting
+                            // orchestrator swept the list — that would strand it forever.
+                            synchronized (taskList) {
+                                if (cancellation.isCancelled() || !reserveTurn(turnCounter, maxTurns)) {
+                                    break;
+                                }
+                                taskList.startTask(task.id());
+                            }
 
                             if (listener != null) {
                                 listener.onSpeakerStart(new GroupConversationEventSink.SpeakerStartEvent(
@@ -1794,20 +1916,30 @@ public class GroupConversationService implements IGroupConversationService {
 
                             // Build task-specific input
                             String taskInput = buildTaskExecutionInput(task, question, phase, gc);
-                            TranscriptEntry entry = executeAgentTurn(member, gc, taskInput, protocol, phaseIdx, phase, null, listener);
+                            TranscriptEntry entry = executeAgentTurn(member, gc, taskInput, protocol, phaseIdx, phase, null, listener, cancellation);
 
-                            synchronized (gc.getTranscript()) {
-                                gc.getTranscript().add(entry);
-                            }
+                            // The orchestrator owns the group document from the moment it
+                            // cancels this wave: publish the result only if the wave is
+                            // still live, again under the task-list monitor so the reset
+                            // sweep cannot interleave. Lock order is always taskList →
+                            // transcript.
+                            synchronized (taskList) {
+                                if (cancellation.isCancelled()) {
+                                    break;
+                                }
+                                synchronized (gc.getTranscript()) {
+                                    gc.getTranscript().add(entry);
+                                }
 
-                            // HITL TASK-level: submit for approval only when BOTH
-                            // taskLevelHitl AND this phase requires approval. Otherwise
-                            // auto-complete. Without this check, TASK_FORCE phases
-                            // (requiresApproval=false) strand tasks in AWAITING_APPROVAL.
-                            if (taskLevelHitl && phase.requiresApproval()) {
-                                gc.getTaskList().submitForApproval(task.id(), entry.content());
-                            } else {
-                                gc.getTaskList().completeTask(task.id(), entry.content());
+                                // HITL TASK-level: submit for approval only when BOTH
+                                // taskLevelHitl AND this phase requires approval. Otherwise
+                                // auto-complete. Without this check, TASK_FORCE phases
+                                // (requiresApproval=false) strand tasks in AWAITING_APPROVAL.
+                                if (taskLevelHitl && phase.requiresApproval()) {
+                                    taskList.submitForApproval(task.id(), entry.content());
+                                } else {
+                                    taskList.completeTask(task.id(), entry.content());
+                                }
                             }
 
                             if (listener != null) {
@@ -1815,7 +1947,14 @@ public class GroupConversationService implements IGroupConversationService {
                                         member.agentId(), member.displayName(), entry.content(), phaseIdx, phase.name()));
                             }
 
+                        } catch (MemberTurnCancelledException e) {
+                            // Wave aborted while this turn was waiting — leave the group
+                            // document alone; the reset sweep reclaims the task.
+                            break;
                         } catch (GroupDiscussionException e) {
+                            if (cancellation.isCancelled()) {
+                                break; // no writes after the orchestrator gave up on this wave
+                            }
                             // Quota errors are non-retryable — abort all tasks immediately
                             if (e.getCause() instanceof QuotaExceededException) {
                                 errors.add(e);
@@ -1826,6 +1965,9 @@ public class GroupConversationService implements IGroupConversationService {
                                 break;
                             }
                         } catch (IllegalStateException e) {
+                            if (cancellation.isCancelled()) {
+                                break; // see above
+                            }
                             // H5 fix: catch status transition errors (e.g., double completion)
                             LOGGER.warnf("Task state error for '%s': %s", task.subject(), e.getMessage());
                             handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors,
@@ -1855,16 +1997,15 @@ public class GroupConversationService implements IGroupConversationService {
             } catch (TimeoutException e) {
                 LOGGER.warnf("Task execution timed out for group %s (wave %d)",
                         LogSanitizer.sanitize(gc.getGroupId()), wave + 1);
-                futures.forEach(f -> f.cancel(true));
-                resetStrandedInProgressTasks(gc, "wave timeout");
+                abortWave(gc, futures, cancellation, "wave timeout");
                 break;
             } catch (java.util.concurrent.CancellationException e) {
                 // R2: CANCEL_IMMEDIATE fires allOf.cancel(true) → CancellationException.
-                // Forward-cancel all source agent futures (allOf.cancel doesn't propagate).
+                // allOf.cancel does not propagate to the source futures — and cancelling
+                // those would not stop their bodies either — so abort cooperatively.
                 LOGGER.infof("Wave cancelled via CANCEL_IMMEDIATE for group %s (wave %d)",
                         LogSanitizer.sanitize(gc.getGroupId()), wave + 1);
-                futures.forEach(f -> f.cancel(true));
-                resetStrandedInProgressTasks(gc, "wave cancellation");
+                abortWave(gc, futures, cancellation, "wave cancellation");
                 break;
             } catch (ExecutionException | InterruptedException e) {
                 LOGGER.warnf("Task execution error for group %s: %s",
@@ -1872,9 +2013,7 @@ public class GroupConversationService implements IGroupConversationService {
                 if (e instanceof InterruptedException) {
                     Thread.currentThread().interrupt();
                 }
-                // R2: Forward-cancel remaining source futures on any error
-                futures.forEach(f -> f.cancel(true));
-                resetStrandedInProgressTasks(gc, "wave error");
+                abortWave(gc, futures, cancellation, "wave error");
                 break;
             }
 
@@ -1902,25 +2041,61 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     /**
+     * Aborts a wave of member turns and reclaims what they left behind.
+     * <p>
+     * Order matters: signal cooperative cancellation first (the futures' own
+     * {@code cancel(true)} would not stop their bodies), then give the member
+     * threads a bounded moment to unwind, and only then sweep the task list.
+     * Sweeping while a member thread is still running is what strands a task
+     * permanently IN_PROGRESS — the thread flips it after the sweep has passed it.
+     */
+    private void abortWave(GroupConversation gc, List<CompletableFuture<Void>> futures,
+                           MemberTurnCancellation cancellation, String cause) {
+        cancellation.cancel();
+        try {
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
+                    .get(MEMBER_TURN_CANCEL_DRAIN_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (TimeoutException | ExecutionException | CancellationException e) {
+            // A turn that has not reached its next await point yet still cannot write:
+            // every write is gated on the cancellation token under the task-list monitor.
+            LOGGER.debugf("Member turns of group %s did not unwind within %ds after %s",
+                    LogSanitizer.sanitize(gc.getId()), MEMBER_TURN_CANCEL_DRAIN_SECONDS, cause);
+        }
+        resetStrandedInProgressTasks(gc, cause);
+    }
+
+    /**
      * Resets tasks stranded IN_PROGRESS by an aborted wave back to ASSIGNED.
      * Without this, a TASK-level pause committed after the abort persists tasks
      * that {@code findExecutableTasks} can never pick up again — they and their
      * dependents would silently never execute after resume (F11).
+     * <p>
+     * The scan and the resets run under the task list's own monitor (the same one
+     * {@link SharedTaskList}'s synchronized methods use), so the sweep is a
+     * compare-and-set on each task's live state rather than on a stale snapshot: a
+     * member turn can neither start a task in the middle of the sweep nor complete
+     * one between the scan and the reset.
      */
     private void resetStrandedInProgressTasks(GroupConversation gc, String cause) {
-        if (gc.getTaskList() == null) {
+        final SharedTaskList taskList = gc.getTaskList();
+        if (taskList == null) {
             return;
         }
-        gc.getTaskList().all().stream()
-                .filter(t -> t.status() == SharedTaskList.TaskStatus.IN_PROGRESS)
-                .forEach(t -> {
-                    try {
-                        gc.getTaskList().resetToAssigned(t.id());
-                        LOGGER.infof("Reset stranded task '%s' to ASSIGNED after %s", t.id(), cause);
-                    } catch (Exception ex) {
-                        LOGGER.warnf("Failed to reset task '%s': %s", t.id(), ex.getMessage());
-                    }
-                });
+        synchronized (taskList) {
+            for (TaskItem task : taskList.all()) {
+                if (task.status() != SharedTaskList.TaskStatus.IN_PROGRESS) {
+                    continue;
+                }
+                try {
+                    taskList.resetToAssigned(task.id());
+                    LOGGER.infof("Reset stranded task '%s' to ASSIGNED after %s", task.id(), cause);
+                } catch (Exception ex) {
+                    LOGGER.warnf("Failed to reset task '%s': %s", task.id(), ex.getMessage());
+                }
+            }
+        }
     }
 
     /**
@@ -2353,7 +2528,15 @@ public class GroupConversationService implements IGroupConversationService {
                 : speakers;
 
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
-        List<TranscriptEntry> snapshotTranscript = List.copyOf(gc.getTranscript());
+        // Iterating a Collections.synchronizedList requires holding its monitor.
+        List<TranscriptEntry> snapshotTranscript;
+        synchronized (gc.getTranscript()) {
+            snapshotTranscript = List.copyOf(gc.getTranscript());
+        }
+
+        // Cooperative cancellation for this batch — cancel(true) does not stop a
+        // supplyAsync body, so a "cancelled" speaker would otherwise keep running.
+        var cancellation = new MemberTurnCancellation();
 
         // Notify all speakers starting (parallel)
         if (listener != null) {
@@ -2366,7 +2549,11 @@ public class GroupConversationService implements IGroupConversationService {
         List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
             try {
                 String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
-                return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
+                return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
+            } catch (MemberTurnCancelledException e) {
+                // The orchestrator stopped waiting for this batch — surface the
+                // cancellation instead of fabricating a contribution for it.
+                throw new java.util.concurrent.CompletionException(e);
             } catch (GroupDiscussionException e) {
                 if (e.getCause() instanceof QuotaExceededException) {
                     throw new java.util.concurrent.CompletionException(e);
@@ -2380,16 +2567,23 @@ public class GroupConversationService implements IGroupConversationService {
         }, executorService)).toList();
 
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
+        // ONE deadline for the whole batch: these turns run concurrently, so giving
+        // every get() the full budget in turn made the worst case N × timeout
+        // (10 members × 180s = 30 minutes) instead of the configured timeout.
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeout);
         for (int i = 0; i < futures.size(); i++) {
             try {
-                TranscriptEntry entry = futures.get(i).get(timeout, TimeUnit.SECONDS);
+                long remainingNanos = Math.max(0, deadlineNanos - System.nanoTime());
+                TranscriptEntry entry = futures.get(i).get(remainingNanos, TimeUnit.NANOSECONDS);
                 gc.getTranscript().add(entry);
                 if (listener != null) {
                     listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(entry.speakerAgentId(), entry.speakerDisplayName(),
                             entry.content(), phaseIdx, phase.name()));
                 }
             } catch (TimeoutException e) {
-                futures.get(i).cancel(true);
+                // The batch deadline passed — release every speaker still waiting on a
+                // response, not just this one.
+                cancellation.cancel();
                 gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
                         Instant.now(), "Timeout", null));
             } catch (ExecutionException e) {
@@ -2399,12 +2593,17 @@ public class GroupConversationService implements IGroupConversationService {
                 if (cause instanceof java.util.concurrent.CompletionException ce) {
                     cause = ce.getCause();
                 }
+                if (cause instanceof MemberTurnCancelledException) {
+                    // Already released by the batch deadline above — same outcome as a
+                    // speaker whose own get() timed out.
+                    gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                            Instant.now(), "Timeout", null));
+                    continue;
+                }
                 if (cause instanceof GroupDiscussionException gde
                         && gde.getCause() instanceof QuotaExceededException) {
-                    // Cancel remaining futures and propagate
-                    for (int j = i + 1; j < futures.size(); j++) {
-                        futures.get(j).cancel(true);
-                    }
+                    // Release the remaining speakers and propagate
+                    cancellation.cancel();
                     throw gde;
                 }
                 gc.getTranscript().add(errorEntry(null, phaseIdx, phase, e.getMessage()));
@@ -2457,9 +2656,32 @@ public class GroupConversationService implements IGroupConversationService {
     // Agent turn execution
     // =================================================================
 
+    /**
+     * Runs a member turn that cannot be cancelled — sequential phases, where the
+     * orchestrator thread <em>is</em> the member turn.
+     */
     private TranscriptEntry executeAgentTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
                                              DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener)
             throws GroupDiscussionException {
+        return executeAgentTurn(member, gc, input, protocol, phaseIdx, phase, targetAgentId, listener, null);
+    }
+
+    /**
+     * @param cancellation
+     *            cooperative cancellation token for turns that run on a worker
+     *            thread, or {@code null} for turns the orchestrator runs itself.
+     *            When it is signalled the turn is released from its response wait
+     *            and throws {@link MemberTurnCancelledException} instead of
+     *            returning an entry — see {@link MemberTurnCancellation}.
+     */
+    private TranscriptEntry executeAgentTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
+                                             DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener,
+                                             MemberTurnCancellation cancellation)
+            throws GroupDiscussionException {
+
+        if (cancellation != null && cancellation.isCancelled()) {
+            throw new MemberTurnCancelledException();
+        }
 
         TranscriptEntryType entryType = mapPhaseToEntryType(phase.type());
 
@@ -2511,7 +2733,16 @@ public class GroupConversationService implements IGroupConversationService {
         InputData inputData = new InputData();
         inputData.setInput(input);
         Map<String, Context> context = new LinkedHashMap<>();
-        context.put("groupTranscript", new Context(Context.ContextType.object, gc.getTranscript()));
+        // Snapshot instead of handing out the live list: this context is serialised
+        // on the member conversation's own thread while the orchestrator keeps
+        // appending entries. Collections.synchronizedList makes add() safe but NOT
+        // iteration — publishing it by reference produced intermittent
+        // ConcurrentModificationExceptions that failed a member turn at random.
+        List<TranscriptEntry> transcriptSnapshot;
+        synchronized (gc.getTranscript()) {
+            transcriptSnapshot = List.copyOf(gc.getTranscript());
+        }
+        context.put("groupTranscript", new Context(Context.ContextType.object, transcriptSnapshot));
         context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
         context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
         context.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
@@ -2541,6 +2772,9 @@ public class GroupConversationService implements IGroupConversationService {
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
 
         while (true) {
+            if (cancellation != null && cancellation.isCancelled()) {
+                throw new MemberTurnCancelledException();
+            }
             try {
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();
                 final String convId = privateConvId;
@@ -2577,7 +2811,27 @@ public class GroupConversationService implements IGroupConversationService {
                     responseFuture.complete(response);
                 });
 
-                String response = responseFuture.get(timeout, TimeUnit.SECONDS);
+                // The only await point of a member turn — and therefore the lever for
+                // cancelling it. Registering the future means an aborting orchestrator
+                // completes it exceptionally and releases this turn at once, instead of
+                // the turn running to completion and writing into a group document the
+                // orchestrator has already persisted.
+                String response;
+                try {
+                    if (cancellation != null) {
+                        cancellation.register(responseFuture);
+                    }
+                    response = responseFuture.get(timeout, TimeUnit.SECONDS);
+                } catch (ExecutionException ee) {
+                    if (cancellation != null && cancellation.isCancelled()) {
+                        throw new MemberTurnCancelledException();
+                    }
+                    throw ee;
+                } finally {
+                    if (cancellation != null) {
+                        cancellation.unregister(responseFuture);
+                    }
+                }
 
                 // #3 / Task 13: member requested human approval mid-turn. A TOOL_CALL
                 // pause is auto-resolved gracefully — the group rejects the gated
@@ -2688,7 +2942,15 @@ public class GroupConversationService implements IGroupConversationService {
                         signatureNonce, signatureTimestampMs, signatureKeyVersion);
                 return entry;
 
+            } catch (MemberTurnCancelledException e) {
+                // Cooperative cancellation is not a member failure: never retried, never
+                // turned into a transcript entry by this thread.
+                throw e;
+
             } catch (TimeoutException e) {
+                if (cancellation != null && cancellation.isCancelled()) {
+                    throw new MemberTurnCancelledException();
+                }
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
                     retries++;
                     LOGGER.warnf("Agent %s timed out (attempt %d/%d), retrying...", member.agentId(), retries, maxRetries);
@@ -2710,6 +2972,9 @@ public class GroupConversationService implements IGroupConversationService {
                 // convId is try-scoped, so pass the method-level privateConvId (same value).
                 return handleMemberPause(member, gc, privateConvId, phaseIdx, phase, targetAgentId, listener);
             } catch (Exception e) {
+                if (cancellation != null && cancellation.isCancelled()) {
+                    throw new MemberTurnCancelledException();
+                }
                 Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
                 // Quota errors are non-retryable and affect all agents — abort immediately
                 if (cause instanceof QuotaExceededException) {

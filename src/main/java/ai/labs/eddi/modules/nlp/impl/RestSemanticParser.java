@@ -16,6 +16,8 @@ import ai.labs.eddi.modules.nlp.IRestSemanticParser;
 import ai.labs.eddi.modules.nlp.Solution;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,6 +27,7 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.container.AsyncResponse;
 import java.net.URI;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,10 +42,33 @@ import static ai.labs.eddi.modules.nlp.DictionaryUtilities.extractExpressions;
 
 @ApplicationScoped
 public class RestSemanticParser implements IRestSemanticParser {
+
+    /**
+     * Upper bound on the number of distinct parser configurations kept in memory.
+     * The cache key is derived from a caller-supplied config id, so the cache must
+     * be bounded — otherwise a careless or malicious caller could grow it without
+     * limit.
+     */
+    static final int MAX_CACHED_PARSERS = 100;
+
+    /**
+     * Bounds how long an edited parser configuration keeps being served from the
+     * cache. Without a TTL, a config change would only take effect after a restart.
+     */
+    private static final Duration PARSER_CACHE_TTL = Duration.ofMinutes(5);
+
     private final IRuntime runtime;
     private final IResourceClientLibrary resourceClientLibrary;
     private final Provider<ILifecycleTask> parserProvider;
-    private final Map<URI, IInputParser> cache;
+
+    /**
+     * Bounded, thread-safe parser cache. This bean is an {@code @ApplicationScoped}
+     * singleton and parsers are created on runtime pool threads, so the cache is
+     * mutated concurrently. Caffeine applies the loader at most once per key, which
+     * guarantees that concurrent requests for the same, not-yet-cached parser
+     * configuration create exactly one parser instance.
+     */
+    private final Cache<URI, IInputParser> parserCache;
 
     private final Logger log = Logger.getLogger(RestSemanticParser.class);
 
@@ -53,7 +79,10 @@ public class RestSemanticParser implements IRestSemanticParser {
         this.resourceClientLibrary = resourceClientLibrary;
         this.parserProvider = lifecycleTasks.get("ai.labs.parser");
 
-        cache = new HashMap<>();
+        this.parserCache = Caffeine.newBuilder()
+                .maximumSize(MAX_CACHED_PARSERS)
+                .expireAfterWrite(PARSER_CACHE_TTL)
+                .build();
     }
 
     @Override
@@ -79,27 +108,67 @@ public class RestSemanticParser implements IRestSemanticParser {
     }
 
     private IInputParser getParser(URI resourceUri) throws Exception {
-        return createParserIfAbsent(resourceUri);
+        try {
+            return parserCache.get(resourceUri, this::createParser);
+        } catch (ParserCreationException e) {
+            if (e.getCause() instanceof Exception cause) {
+                throw cause;
+            }
+            throw e;
+        }
     }
 
-    private IInputParser createParserIfAbsent(URI resourceUri) throws Exception {
-        if (!cache.containsKey(resourceUri)) {
+    /**
+     * Cache loader. Runs at most once per key, even when several pool threads
+     * request the same parser configuration simultaneously.
+     */
+    private IInputParser createParser(URI resourceUri) {
+        try {
             ILifecycleTask parserTask = parserProvider.get();
             var parserConfiguration = fetchParserConfiguration(resourceUri);
             var config = parserConfiguration.getConfig();
             var extensions = parserConfiguration.getExtensions();
-            var inputParser = (IInputParser) parserTask.configure(config != null ? config : new HashMap<>(),
+            return (IInputParser) parserTask.configure(config != null ? config : new HashMap<>(),
                     extensions != null ? extensions : new HashMap<>());
-
-            cache.put(resourceUri, inputParser);
-            return inputParser;
-        } else {
-            return cache.get(resourceUri);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ParserCreationException(e);
         }
+    }
+
+    /**
+     * Drops all cached parsers so that the next request re-reads the parser
+     * configuration from the store. Intended as the explicit hook for parser
+     * configuration updates; until a store wires it up, the TTL is what bounds
+     * staleness.
+     */
+    public void invalidateCache() {
+        parserCache.invalidateAll();
+    }
+
+    /**
+     * Number of parsers currently cached, after running pending cache maintenance.
+     * Never exceeds {@link #MAX_CACHED_PARSERS}.
+     */
+    long cachedParserCount() {
+        parserCache.cleanUp();
+        return parserCache.estimatedSize();
     }
 
     private ParserConfiguration fetchParserConfiguration(URI resourceUri) throws ServiceException {
         return resourceClientLibrary.getResource(resourceUri, ParserConfiguration.class);
+    }
+
+    /**
+     * Carries a checked exception out of the cache loader, which cannot declare
+     * checked exceptions. Unwrapped again in {@link #getParser(URI)} so callers
+     * keep seeing the original exception type.
+     */
+    private static final class ParserCreationException extends RuntimeException {
+        private ParserCreationException(Exception cause) {
+            super(cause);
+        }
     }
 
     public static class ResponseSolution {

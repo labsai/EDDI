@@ -56,14 +56,23 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@code eddi.coordinator.total_processed}.</li>
  * </ul>
  *
+ * <h3>Failure handling</h3>
+ * <ul>
+ * <li><b>No retry after execution starts</b>: a task that reports failure has
+ * already run — possibly calling an LLM, executing tools and spending money. It
+ * is dead-lettered once, never re-executed.</li>
+ * <li><b>Submission rejection rolls back</b>: if handing the task to the
+ * runtime throws, the task is taken back off the queue (and the map entry
+ * dropped when it was the head), so a rejected submission cannot wedge the
+ * conversation.</li>
+ * </ul>
+ *
  * @author ginccc
  * @see ai.labs.eddi.engine.runtime.IEventBus
  */
 @ApplicationScoped
 @DefaultBean
 public class InMemoryConversationCoordinator implements IConversationCoordinator {
-
-    private static final int MAX_RETRIES = 3;
 
     private final Map<String, BlockingQueue<Callable<Void>>> conversationQueues = new ConcurrentHashMap<>();
     private final ConcurrentLinkedDeque<DeadLetterEntry> deadLetters = new ConcurrentLinkedDeque<>();
@@ -159,14 +168,45 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
                 }
 
                 if (wasEmpty) {
-                    executeWithRetry(conversationId, queue, callable, 0);
+                    try {
+                        execute(conversationId, queue, callable);
+                    } catch (RuntimeException | Error e) {
+                        // C10: the submission failed, so NOTHING is scheduled to run
+                        // the head of this queue — and submitNext() only ever runs
+                        // from a completion callback. Leaving the callable queued
+                        // would wedge this conversation permanently (every later turn
+                        // sees a non-empty queue and just waits) and leak the map
+                        // entry for the JVM's lifetime. Undo the enqueue and drop the
+                        // now-empty queue so the next turn starts a fresh one.
+                        //
+                        // We still hold the queue monitor, so nothing can have been
+                        // offered in between: our callable is the only element.
+                        queue.remove(callable);
+                        if (queue.isEmpty()) {
+                            conversationQueues.remove(conversationId, queue);
+                        }
+                        log.warnf("Submission failed for conversationId=%s — rolled the task back off the queue "
+                                + "so the conversation stays usable", safeConversationId);
+                        throw e;
+                    }
                 }
                 return; // success
             }
         }
     }
 
-    private void executeWithRetry(String conversationId, BlockingQueue<Callable<Void>> queue, Callable<Void> callable, int attempt) {
+    /**
+     * Hands a task to the runtime. Throws (synchronously) if the SUBMISSION itself
+     * is rejected — the only genuinely pre-execution failure mode; callers must
+     * un-queue the task in that case (C10).
+     * <p>
+     * C13: there is deliberately NO retry on {@code onFailure}. That callback is
+     * only ever raised from INSIDE the executor task, i.e. after the turn has
+     * already started running — it may have called an LLM, executed tools, written
+     * memory and spent money. Re-running the very same callable repeats all of it.
+     * A failed turn is dead-lettered once and the queue moves on.
+     */
+    private void execute(String conversationId, BlockingQueue<Callable<Void>> queue, Callable<Void> callable) {
         runtime.submitCallable(callable, new IRuntime.IFinishedExecution<>() {
             @Override
             public void onComplete(Void result) {
@@ -176,18 +216,12 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
 
             @Override
             public void onFailure(Throwable t) {
-                int nextAttempt = attempt + 1;
-                if (nextAttempt < MAX_RETRIES) {
-                    log.warnf(t, "In-memory task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitize(conversationId), nextAttempt,
-                            MAX_RETRIES);
-                    executeWithRetry(conversationId, queue, callable, nextAttempt);
-                } else {
-                    log.errorf(t, "In-memory task exhausted retries (conversationId=%s, attempts=%d), dead-lettering", sanitize(conversationId),
-                            nextAttempt);
-                    routeToDeadLetter(conversationId, t);
-                    totalProcessed.incrementAndGet();
-                    submitNext(conversationId, queue);
-                }
+                log.errorf(t, "In-memory task failed after it had already started (conversationId=%s) — dead-lettering "
+                        + "without retry; re-running it would repeat any side effects it already performed",
+                        sanitize(conversationId));
+                routeToDeadLetter(conversationId, t);
+                totalProcessed.incrementAndGet();
+                submitNext(conversationId, queue);
             }
         }, null);
     }
@@ -220,18 +254,33 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
 
     private void submitNext(String conversationId, BlockingQueue<Callable<Void>> queue) {
         synchronized (queue) {
-            if (!queue.isEmpty()) {
-                queue.remove();
+            if (queue.isEmpty()) {
+                return;
+            }
+            queue.remove(); // drop the task that just finished
 
-                if (!queue.isEmpty()) {
-                    executeWithRetry(conversationId, queue, queue.element(), 0);
-                } else {
-                    // Eager cleanup: remove empty queue to prevent memory leaks.
-                    // Uses remove(key, value) to avoid removing a new queue that was
-                    // just created by a concurrent submitInOrder call.
-                    conversationQueues.remove(conversationId, queue);
+            while (!queue.isEmpty()) {
+                try {
+                    execute(conversationId, queue, queue.element());
+                    return;
+                } catch (RuntimeException | Error e) {
+                    // C10 (submitNext side): there is no caller to propagate to here —
+                    // this runs from a completion callback. Dropping out would leave
+                    // the queue non-empty with nothing scheduled to drain it, wedging
+                    // the conversation forever. Dead-letter the task we could not
+                    // schedule and try the next one.
+                    log.errorf(e, "Failed to schedule the next queued task (conversationId=%s) — dead-lettering it "
+                            + "so the conversation queue keeps draining", sanitize(conversationId));
+                    routeToDeadLetter(conversationId, e);
+                    totalProcessed.incrementAndGet();
+                    queue.remove();
                 }
             }
+
+            // Eager cleanup: remove empty queue to prevent memory leaks.
+            // Uses remove(key, value) to avoid removing a new queue that was
+            // just created by a concurrent submitInOrder call.
+            conversationQueues.remove(conversationId, queue);
         }
     }
 

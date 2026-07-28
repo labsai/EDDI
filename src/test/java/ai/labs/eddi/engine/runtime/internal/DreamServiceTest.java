@@ -4,10 +4,12 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -26,6 +30,7 @@ import static org.mockito.Mockito.*;
 class DreamServiceTest {
 
     private IUserMemoryStore store;
+    private IAgentStore agentStore;
     private SummarizationService summarizationService;
     private DreamService dreamService;
     private AgentConfiguration.DreamConfig dreamConfig;
@@ -33,8 +38,9 @@ class DreamServiceTest {
     @BeforeEach
     void setUp() {
         store = mock(IUserMemoryStore.class);
+        agentStore = mock(IAgentStore.class);
         summarizationService = mock(SummarizationService.class);
-        dreamService = new DreamService(store, summarizationService, new SimpleMeterRegistry(),
+        dreamService = new DreamService(store, agentStore, summarizationService, new SimpleMeterRegistry(),
                 new com.fasterxml.jackson.databind.ObjectMapper());
         dreamService.initMetrics();
 
@@ -221,7 +227,7 @@ class DreamServiceTest {
 
         String llmResponse = "[{\"key\": \"summary-1\", \"value\": \"combined fact 1\"}, " +
                 "{\"key\": \"summary-2\", \"value\": \"combined fact 2\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -237,7 +243,7 @@ class DreamServiceTest {
         enableSummarization();
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(""));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -253,7 +259,7 @@ class DreamServiceTest {
         enableSummarization();
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult("I can't do that, sorry!"));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -270,7 +276,7 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "```json\n[{\"key\": \"s1\", \"value\": \"v1\"}, {\"key\": \"s2\", \"value\": \"v2\"}]\n```";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -290,7 +296,7 @@ class DreamServiceTest {
                 "{\"key\":\"a\",\"value\":\"1\"},{\"key\":\"b\",\"value\":\"2\"}," +
                 "{\"key\":\"c\",\"value\":\"3\"},{\"key\":\"d\",\"value\":\"4\"}," +
                 "{\"key\":\"e\",\"value\":\"5\"},{\"key\":\"f\",\"value\":\"6\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -307,7 +313,7 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
         doThrow(new RuntimeException("DB write failed")).when(store).upsert(any(UserMemoryEntry.class));
 
@@ -318,10 +324,16 @@ class DreamServiceTest {
         verify(store, never()).deleteEntry(anyString()); // originals preserved
     }
 
+    /**
+     * Finding I1: the legacy {@code maxSummarizationCalls} count is no longer a
+     * ceiling — the dollar budget {@code maxCostPerRun} is. A config still setting
+     * the call count must not cap a run that is well inside its budget.
+     */
     @Test
-    void summarize_callLimitReached_stopsEarly() throws Exception {
+    void summarize_legacyCallCount_isNotACeiling() throws Exception {
         enableSummarization();
-        dreamConfig.setMaxSummarizationCalls(1);
+        dreamConfig.setMaxSummarizationCalls(1); // legacy, ignored
+        dreamConfig.setMaxCostPerRun(1.00); // generous dollar budget
         dreamConfig.setSummarizeGroupBy("category");
 
         Instant now = Instant.now();
@@ -338,14 +350,36 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResult(llmResponse));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult(llmResponse, 10, 5)); // ~$0.00015 per call
 
         var result = dreamService.process("user-1", dreamConfig);
 
         assertTrue(result.isSuccess());
-        // Only 1 LLM call should have been made (limit=1)
-        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+        // Both category groups are consolidated despite maxSummarizationCalls=1
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        assertEquals(10, result.entriesSummarized()); // (6-1) + (6-1)
+    }
+
+    /**
+     * Finding I1: Dream has no parent LLM task to inherit credentials from, so the
+     * agent's {@code dream.parameters} block must reach the summarizer — otherwise
+     * it authenticates with nothing and every cycle fails.
+     */
+    @Test
+    void summarize_passesConfiguredModelParametersToSummarizer() throws Exception {
+        enableSummarization();
+        var parameters = Map.of("apiKey", "${vault:dream-key}", "baseUrl", "https://llm.example/v1");
+        dreamConfig.setParameters(parameters);
+
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\": \"s\", \"value\": \"v\"}]"));
+
+        dreamService.process("user-1", dreamConfig);
+
+        verify(summarizationService).summarizeWithUsage(anyString(), anyString(),
+                eq(dreamConfig.getLlmProvider()), eq(dreamConfig.getLlmModel()), eq(parameters));
     }
 
     @Test
@@ -366,7 +400,7 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}, {\"key\": \"s2\", \"value\": \"v2\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -374,7 +408,7 @@ class DreamServiceTest {
         assertTrue(result.isSuccess());
         // All 6 entries in one group → 2 consolidated → 4 reduced
         assertEquals(4, result.entriesSummarized());
-        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
     }
 
     @Test
@@ -398,7 +432,7 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -406,7 +440,7 @@ class DreamServiceTest {
         assertTrue(result.isSuccess());
         // Two separate groups, each 3→1 = 2 reduced per group = 4 total
         assertEquals(4, result.entriesSummarized());
-        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
     }
 
     @Test
@@ -417,12 +451,12 @@ class DreamServiceTest {
 
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(summarizationService.summarizeWithUsage(anyString(), eq(customPrompt), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), eq(customPrompt), anyString(), anyString(), any()))
                 .thenReturn(llmResult("[{\"key\": \"s\", \"value\": \"v\"}]"));
 
         dreamService.process("user-1", dreamConfig);
 
-        verify(summarizationService).summarizeWithUsage(anyString(), eq(customPrompt), anyString(), anyString());
+        verify(summarizationService).summarizeWithUsage(anyString(), eq(customPrompt), anyString(), anyString(), any());
     }
 
     @Test
@@ -443,7 +477,7 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         dreamService.process("user-1", dreamConfig);
@@ -569,7 +603,7 @@ class DreamServiceTest {
         // LLM returns 4 (< 8 originals, but > 2 target) → capped to 2
         String llmResponse = "[{\"key\":\"a\",\"value\":\"1\"},{\"key\":\"b\",\"value\":\"2\"}," +
                 "{\"key\":\"c\",\"value\":\"3\"},{\"key\":\"d\",\"value\":\"4\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -587,7 +621,7 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
         // First 3 deletes succeed, last 3 fail
         doNothing().doNothing().doNothing()
@@ -602,20 +636,57 @@ class DreamServiceTest {
         verify(store, times(6)).deleteEntry(anyString());
     }
 
+    /**
+     * Finding I1: an LLM failure used to be a swallowed WARN, so a Dream cycle that
+     * could never consolidate anything still reported success — the same defect F13
+     * fixed for the conversation summarizer. The failure must now surface on the
+     * result so the schedule fire is marked FAILED (and retries/dead-letters).
+     */
     @Test
-    void summarize_llmThrows_preservesEntriesAndContinues() throws Exception {
+    void summarize_llmThrows_preservesEntriesAndFailsTheCycle() throws Exception {
         enableSummarization();
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
-                .thenThrow(new RuntimeException("LLM provider down"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenThrow(new RuntimeException("401 Unauthorized"));
 
         var result = dreamService.process("user-1", dreamConfig);
 
-        assertTrue(result.isSuccess()); // dream cycle succeeds even though LLM failed
+        assertFalse(result.isSuccess());
+        assertNotNull(result.error());
+        assertTrue(result.error().contains("401 Unauthorized"), "cause must be reported, got: " + result.error());
         assertEquals(0, result.entriesSummarized());
         verify(store, never()).upsert(any(UserMemoryEntry.class));
         verify(store, never()).deleteEntry(anyString());
+    }
+
+    /**
+     * A failing LLM is a configuration fault that would repeat for every remaining
+     * group — the phase aborts rather than burning the budget group by group.
+     */
+    @Test
+    void summarize_llmThrows_abortsRemainingGroups() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeGroupBy("category");
+
+        Instant now = Instant.now();
+        var entries = new java.util.ArrayList<UserMemoryEntry>();
+        for (int i = 0; i < 6; i++) {
+            entries.add(new UserMemoryEntry("f-" + i, "user-1", "fk-" + i, "fv-" + i,
+                    "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, now, now));
+        }
+        for (int i = 0; i < 6; i++) {
+            entries.add(new UserMemoryEntry("p-" + i, "user-1", "pk-" + i, "pv-" + i,
+                    "preference", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, now, now));
+        }
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenThrow(new RuntimeException("connection refused"));
+
+        var result = dreamService.process("user-1", dreamConfig);
+
+        assertFalse(result.isSuccess());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
     }
 
     @Test
@@ -639,7 +710,7 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(initialEntries).thenReturn(afterPruneEntries);
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -717,46 +788,98 @@ class DreamServiceTest {
 
         // Return result with high token usage (1000 tokens → $0.01 > $0.005 ceiling)
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse, 800, 200));
 
         var result = dreamService.process("user-1", dreamConfig);
 
         assertTrue(result.isSuccess());
         // Only 1 LLM call should have been made — cost ceiling stops second group
-        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
     }
 
     // === PR Review Fixes: Copilot + CodeRabbit findings ===
 
+    /**
+     * Finding G8 — privacy boundary. Two agents' {@code self}-scoped memories used
+     * to be merged into ONE entry whose visibility was upgraded to {@code global},
+     * i.e. readable by every agent. Since {@code summarizeGroupBy} defaults to
+     * "category" and {@code preserveAgentProvenance} to false, that was the default
+     * path. Consolidation must now produce one {@code self} entry per contributing
+     * agent, and never a {@code global} one.
+     */
     @Test
-    void summarize_multiAgentSelfScope_upgradesVisibility() throws Exception {
+    void summarize_multiAgentSelfScope_neverWidensVisibility() throws Exception {
         enableSummarization();
         dreamConfig.setPreserveAgentProvenance(false);
-        dreamConfig.setSummarizeMinEntries(4);
+        dreamConfig.setSummarizeGroupBy("category");
+        dreamConfig.setSummarizeMinEntries(2);
 
         Instant now = Instant.now();
         var entries = new java.util.ArrayList<UserMemoryEntry>();
-        for (int i = 0; i < 2; i++) {
-            entries.add(new UserMemoryEntry("a1-" + i, "user-1", "k1-" + i, "v",
+        for (int i = 0; i < 3; i++) {
+            entries.add(new UserMemoryEntry("a1-" + i, "user-1", "k1-" + i, "secret of agent-1",
                     "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, now, now));
         }
-        for (int i = 0; i < 2; i++) {
-            entries.add(new UserMemoryEntry("a2-" + i, "user-1", "k2-" + i, "v",
+        for (int i = 0; i < 3; i++) {
+            entries.add(new UserMemoryEntry("a2-" + i, "user-1", "k2-" + i, "secret of agent-2",
                     "fact", Visibility.self, "agent-2", List.of(), "conv-1", false, 0, now, now));
         }
         when(store.getAllEntries("user-1")).thenReturn(entries);
         when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id-1");
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         dreamService.process("user-1", dreamConfig);
 
+        // One consolidated entry per contributing agent — never a merged one
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store).upsert(captor.capture());
-        assertEquals(Visibility.global, captor.getValue().visibility());
+        verify(store, times(2)).upsert(captor.capture());
+        var written = captor.getAllValues();
+        assertTrue(written.stream().allMatch(e -> e.visibility() == Visibility.self),
+                "self-scoped memories must never be widened, got: "
+                        + written.stream().map(UserMemoryEntry::visibility).toList());
+        assertEquals(List.of("agent-1", "agent-2"),
+                written.stream().map(UserMemoryEntry::sourceAgentId).sorted().toList());
+    }
+
+    /**
+     * Finding G8, mixed case: a group holding one agent's {@code self} memories and
+     * another agent's {@code global} ones must still keep the private half private.
+     */
+    @Test
+    void summarize_selfAndGlobalAcrossAgents_selfHalfStaysSelf() throws Exception {
+        enableSummarization();
+        dreamConfig.setPreserveAgentProvenance(false);
+        dreamConfig.setSummarizeGroupBy("all");
+        dreamConfig.setSummarizeMinEntries(2);
+
+        Instant now = Instant.now();
+        var entries = new java.util.ArrayList<UserMemoryEntry>();
+        for (int i = 0; i < 2; i++) {
+            entries.add(new UserMemoryEntry("priv-" + i, "user-1", "pk-" + i, "private",
+                    "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, now, now));
+        }
+        for (int i = 0; i < 2; i++) {
+            entries.add(new UserMemoryEntry("pub-" + i, "user-1", "gk-" + i, "shared",
+                    "fact", Visibility.global, "agent-2", List.of(), "conv-1", false, 0, now, now));
+        }
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
+
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\": \"s\", \"value\": \"v\"}]"));
+
+        dreamService.process("user-1", dreamConfig);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store, times(2)).upsert(captor.capture());
+        var byAgent = captor.getAllValues().stream()
+                .collect(Collectors.toMap(UserMemoryEntry::sourceAgentId, UserMemoryEntry::visibility));
+        assertEquals(Visibility.self, byAgent.get("agent-1"));
+        assertEquals(Visibility.global, byAgent.get("agent-2"));
     }
 
     @Test
@@ -774,7 +897,7 @@ class DreamServiceTest {
         when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id-1");
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         dreamService.process("user-1", dreamConfig);
@@ -800,13 +923,13 @@ class DreamServiceTest {
         when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
 
         assertTrue(result.isSuccess());
-        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
     }
 
     @Test
@@ -850,7 +973,7 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}, {\"key\": \"s2\", \"value\": \"v2\"}]";
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
 
         // First upsert succeeds, second throws
@@ -880,5 +1003,138 @@ class DreamServiceTest {
         var config = new AgentConfiguration.DreamConfig();
         assertThrows(IllegalArgumentException.class,
                 () -> config.setSummarizeTargetEntries(-1));
+    }
+
+    // === Finding I1: schedule wiring (processScheduledFire) ===
+
+    @Test
+    void isDreamSchedule_recognisesOnlyTheDreamMarker() {
+        assertTrue(DreamService.isDreamSchedule(
+                Map.of(DreamService.METADATA_TYPE_KEY, DreamService.METADATA_TYPE_CONSOLIDATION)));
+        assertFalse(DreamService.isDreamSchedule(null));
+        assertFalse(DreamService.isDreamSchedule(Map.of()));
+        assertFalse(DreamService.isDreamSchedule(Map.of("hitlType", "hitl_timeout")));
+        assertFalse(DreamService.isDreamSchedule(Map.of(DreamService.METADATA_TYPE_KEY, "something_else")));
+    }
+
+    @Test
+    void processScheduledFire_resolvesDreamConfigFromAgentAndRunsCycle() throws Exception {
+        var dream = new AgentConfiguration.DreamConfig();
+        dream.setEnabled(true);
+        dream.setPruneStaleAfterDays(30);
+        dream.setDetectContradictions(false);
+        dream.setSummarizeInteractions(false);
+
+        var memoryConfig = new AgentConfiguration.UserMemoryConfig();
+        memoryConfig.setDream(dream);
+        var agentConfiguration = new AgentConfiguration();
+        agentConfiguration.setUserMemoryConfig(memoryConfig);
+        when(agentStore.read("agent-1", 7)).thenReturn(agentConfiguration);
+
+        Instant stale = Instant.now().minus(Duration.ofDays(60));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(
+                new UserMemoryEntry("1", "user-1", "old", "v", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, stale, stale)))
+                .thenReturn(List.of());
+
+        var result = dreamService.processScheduledFire("agent-1", 7, "user-1");
+
+        assertTrue(result.isSuccess(), "expected success, got: " + result.error());
+        assertEquals(1, result.entriesPruned());
+        verify(store).deleteEntry("1");
+    }
+
+    @Test
+    void processScheduledFire_versionZero_resolvesLatestAgentVersion() throws Exception {
+        var dream = new AgentConfiguration.DreamConfig();
+        dream.setEnabled(true);
+        dream.setPruneStaleAfterDays(0);
+        dream.setDetectContradictions(false);
+        dream.setSummarizeInteractions(false);
+
+        var memoryConfig = new AgentConfiguration.UserMemoryConfig();
+        memoryConfig.setDream(dream);
+        var agentConfiguration = new AgentConfiguration();
+        agentConfiguration.setUserMemoryConfig(memoryConfig);
+
+        when(agentStore.getCurrentResourceId("agent-1")).thenReturn(resourceId("agent-1", 4));
+        when(agentStore.read("agent-1", 4)).thenReturn(agentConfiguration);
+        when(store.getAllEntries("user-1")).thenReturn(List.of());
+
+        var result = dreamService.processScheduledFire("agent-1", 0, "user-1");
+
+        assertTrue(result.isSuccess(), "expected success, got: " + result.error());
+        verify(agentStore).read("agent-1", 4);
+    }
+
+    @Test
+    void processScheduledFire_missingUserId_failsLoudlyWithoutTouchingMemory() throws Exception {
+        var result = dreamService.processScheduledFire("agent-1", 1, null);
+
+        assertFalse(result.isSuccess());
+        assertTrue(result.error().contains("userId"), "error must name the missing field, got: " + result.error());
+        verifyNoInteractions(store);
+        verifyNoInteractions(agentStore);
+    }
+
+    @Test
+    void processScheduledFire_schedulerPlaceholderUserId_failsLoudly() throws Exception {
+        // The schedule REST surface defaults userId to "system:scheduler"; running
+        // Dream under it would consolidate an empty memory set and look successful.
+        var result = dreamService.processScheduledFire("agent-1", 1, "system:scheduler");
+
+        assertFalse(result.isSuccess());
+        assertTrue(result.error().contains("system:scheduler"), "got: " + result.error());
+        // Rejected before any lookup — not merely failing later for another reason
+        verifyNoInteractions(store);
+        verifyNoInteractions(agentStore);
+    }
+
+    @Test
+    void processScheduledFire_dreamDisabledOnAgent_failsLoudly() throws Exception {
+        var memoryConfig = new AgentConfiguration.UserMemoryConfig();
+        memoryConfig.getDream().setEnabled(false);
+        var agentConfiguration = new AgentConfiguration();
+        agentConfiguration.setUserMemoryConfig(memoryConfig);
+        when(agentStore.read("agent-1", 1)).thenReturn(agentConfiguration);
+
+        var result = dreamService.processScheduledFire("agent-1", 1, "user-1");
+
+        assertFalse(result.isSuccess());
+        assertTrue(result.error().contains("dream consolidation disabled"), "got: " + result.error());
+        verifyNoInteractions(store);
+    }
+
+    @Test
+    void processScheduledFire_agentNotFound_failsLoudly() throws Exception {
+        when(agentStore.read("agent-1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("no such agent"));
+
+        var result = dreamService.processScheduledFire("agent-1", 1, "user-1");
+
+        assertFalse(result.isSuccess());
+        assertTrue(result.error().contains("no such agent"), "got: " + result.error());
+        verifyNoInteractions(store);
+    }
+
+    @Test
+    void processScheduledFire_missingAgentId_failsLoudly() throws Exception {
+        var result = dreamService.processScheduledFire("  ", 1, "user-1");
+
+        assertFalse(result.isSuccess());
+        assertTrue(result.error().contains("agentId"), "got: " + result.error());
+        verifyNoInteractions(store);
+    }
+
+    private static IResourceStore.IResourceId resourceId(String id, int version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
     }
 }

@@ -292,6 +292,22 @@ class AgentConfigurationTest {
             assertTrue(dc.isEnabled());
             assertEquals(10.0, dc.getMaxCostPerRun());
         }
+
+        @Test
+        void parametersDefaultToEmptyAndSetterIsNullSafe() {
+            var dc = new AgentConfiguration.DreamConfig();
+            assertNotNull(dc.getParameters());
+            assertTrue(dc.getParameters().isEmpty());
+
+            dc.setParameters(Map.of("apiKey", "${vault:dream-key}"));
+            assertEquals("${vault:dream-key}", dc.getParameters().get("apiKey"));
+
+            // A config that omits the block must never leave a null map behind for
+            // the summarizer to trip over
+            dc.setParameters(null);
+            assertNotNull(dc.getParameters());
+            assertTrue(dc.getParameters().isEmpty());
+        }
     }
 
     @Nested

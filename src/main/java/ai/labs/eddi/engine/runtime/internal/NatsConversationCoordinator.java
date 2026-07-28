@@ -370,7 +370,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 log.info("NATS connection closed");
             } catch (InterruptedException | TimeoutException e) {
                 log.warnf(e, "Error during NATS shutdown");
-                Thread.currentThread().interrupt();
+                // B2: only an actual interrupt may set the flag. A drain TimeoutException
+                // is not an interrupt — flagging the shutdown thread there would abort the
+                // remaining @PreDestroy steps that run after this one.
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
     }

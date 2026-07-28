@@ -5,6 +5,9 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
@@ -16,9 +19,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -265,24 +270,124 @@ class RestAgentEngineStreamingTest {
         }
     }
 
+    /**
+     * F6 — the streaming endpoint receives only {@link SseEventSink}/{@link Sse}
+     * and never signalled cancellation, so closing the tab at token 5 of 4000 still
+     * streamed (and billed) the whole completion, possibly escalating through the
+     * whole model cascade.
+     * <p>
+     * A JAX-RS {@code ConnectionCallback} is not the mechanism here: RESTEasy
+     * Reactive registers connection callbacks into a request property that nothing
+     * ever reads, so one would cancel nothing. The observable signal is
+     * {@code SseEventSink.isClosed()} (backed by
+     * {@code serverResponse().closed()}), which is why the disconnect is detected
+     * on the next outbound frame — i.e. within one token boundary.
+     */
     @Nested
-    @DisplayName("sendEvent helper")
-    class SendEvent {
+    @DisplayName("F6 — client disconnect cancels the in-flight turn")
+    class ClientDisconnect {
+
+        private SseEventSink eventSink;
+
+        /** Starts a stream and returns the handler the endpoint wired up. */
+        private IConversationService.StreamingResponseHandler start(String conversationId) throws Exception {
+            eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var eventBuilder = mock(OutboundSseEvent.Builder.class);
+            var sseEvent = mock(OutboundSseEvent.class);
+            when(sse.newEventBuilder()).thenReturn(eventBuilder);
+            when(eventBuilder.name(anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.data(any(Class.class), anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.build()).thenReturn(sseEvent);
+            when(eventSink.isClosed()).thenReturn(false);
+
+            var inputData = new InputData();
+            inputData.setInput("Hello");
+            streaming.sayStreaming(conversationId, false, false, List.of(), inputData, eventSink, sse);
+
+            var captor = ArgumentCaptor.forClass(IConversationService.StreamingResponseHandler.class);
+            verify(conversationService).sayStreaming(eq(conversationId), any(), any(), any(), any(), captor.capture());
+            return captor.getValue();
+        }
+
+        private SimpleConversationMemorySnapshot readySnapshot() {
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            return snapshot;
+        }
 
         @Test
-        @DisplayName("should skip sending when sink is closed")
-        void skipsClosedSink() throws Exception {
-            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("sendEvent",
-                    SseEventSink.class, Sse.class, String.class, String.class);
-            method.setAccessible(true);
+        @DisplayName("a token emitted after the client vanished cancels the turn, exactly once")
+        void tokenAfterDisconnectCancelsOnce() throws Exception {
+            var handler = start("conv-1");
 
-            var eventSink = mock(SseEventSink.class);
-            var sse = mock(Sse.class);
+            // The client closed the tab: Vert.x closes the response, so the sink
+            // reports closed from the next frame onwards.
             when(eventSink.isClosed()).thenReturn(true);
 
-            method.invoke(streaming, eventSink, sse, "test", "data");
+            handler.onToken("tok-5");
+            handler.onToken("tok-6");
+            handler.onTaskComplete(new TaskId("ai.labs.llm"), "langchain", 5L, Map.of());
 
+            verify(conversationService, times(1)).cancelConversation("conv-1",
+                    ControlSignal.CANCEL_GRACEFUL, RestAgentEngineStreaming.CANCELLED_BY_CLIENT_DISCONNECT);
+            // …and nothing is written to a sink the client is no longer reading.
             verify(eventSink, never()).send(any(OutboundSseEvent.class));
+        }
+
+        @Test
+        @DisplayName("a send that fails because the sink closed mid-write also cancels")
+        void sendFailureOnClosedSinkCancels() throws Exception {
+            var handler = start("conv-4");
+
+            // The sink closes between the isClosed() pre-check and the write, which is
+            // when RESTEasy Reactive throws IllegalStateException("Already closed").
+            when(eventSink.isClosed()).thenReturn(false, true);
+            doThrow(new IllegalStateException("Already closed"))
+                    .when(eventSink).send(any(OutboundSseEvent.class));
+
+            handler.onToken("tok-5");
+
+            verify(conversationService, times(1)).cancelConversation("conv-4",
+                    ControlSignal.CANCEL_GRACEFUL, RestAgentEngineStreaming.CANCELLED_BY_CLIENT_DISCONNECT);
+        }
+
+        @Test
+        @DisplayName("a send failure on a still-open sink is NOT a disconnect and does not cancel")
+        void sendFailureOnOpenSinkDoesNotCancel() throws Exception {
+            var handler = start("conv-5");
+
+            // A payload/serialization fault, not a vanished client.
+            doThrow(new RuntimeException("bad payload"))
+                    .when(eventSink).send(any(OutboundSseEvent.class));
+
+            handler.onToken("tok-5");
+
+            verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("a stream that completes normally is never cancelled")
+        void normalCompletionDoesNotCancel() throws Exception {
+            var handler = start("conv-2");
+
+            handler.onToken("hi");
+            handler.onComplete(readySnapshot());
+
+            verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("a sink already closed when the terminal frame is emitted is not a disconnect")
+        void closedAtTerminalFrameDoesNotCancel() throws Exception {
+            var handler = start("conv-3");
+
+            // Client went away right as the turn finished — the answer is already
+            // produced, so there is nothing left to cancel.
+            when(eventSink.isClosed()).thenReturn(true);
+            handler.onComplete(readySnapshot());
+
+            verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
         }
     }
 }

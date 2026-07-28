@@ -212,10 +212,11 @@ public class LifecycleManager implements ILifecycleManager {
             executeTaskRange(conversationMemory, this.lifecycleTasks, 0, 0);
         } else {
             // Selective execution: run the suffix of the pipeline starting at the
-            // first task whose type matches. The sublist is passed (preserving the
-            // component-cache/telemetry index base), but the absolute offset is
-            // threaded through so a HITL pause records an ABSOLUTE task index that
-            // resume can re-enter against the full task list.
+            // first task whose type matches. A SUBLIST is passed, so the loop index
+            // inside executeTaskRange is sublist-relative; the absolute offset is
+            // threaded through so every index-keyed lookup there (component cache,
+            // telemetry, audit, HITL bookmark) still resolves against the FULL task
+            // list.
             int startAbsolute = getLifecycleStartIndex(lifecycleTaskTypes);
             if (startAbsolute < 0) {
                 return; // no task matches the requested types — nothing to execute
@@ -269,6 +270,15 @@ public class LifecycleManager implements ILifecycleManager {
         for (int index = startIndex; index < tasks.size(); index++) {
             ILifecycleTask task = tasks.get(index);
 
+            // Position of this task in the workflow's FULL task list. On a selective
+            // (sublist) execution the loop index is sublist-relative, but every
+            // index-keyed lookup below is ABSOLUTE: WorkflowStoreClientLibrary caches
+            // each task's component under the workflow-step index, and the HITL
+            // bookmark / telemetry / audit rows are read back against the full list.
+            // Using the relative index made a rerun look up a component key that was
+            // never written, so the task ran with component == null and no-opped.
+            final int absoluteIndex = indexOffset + index;
+
             // Cancel check (Wave 0)
             if (conversationMemory.isCancelled()) {
                 throw new ConversationStopException();
@@ -304,7 +314,7 @@ public class LifecycleManager implements ILifecycleManager {
             Span taskSpan = getTracer().spanBuilder("eddi.pipeline.task")
                     .setAttribute("eddi.task.id", task.getId().name())
                     .setAttribute("eddi.task.type", Objects.requireNonNullElse(task.getType(), "unknown"))
-                    .setAttribute("eddi.task.index", (long) index)
+                    .setAttribute("eddi.task.index", (long) absoluteIndex)
                     .setAttribute("eddi.conversation.id",
                             Objects.requireNonNullElse(conversationMemory.getConversationId(), "unknown"))
                     .setAttribute("eddi.agent.id",
@@ -318,12 +328,12 @@ public class LifecycleManager implements ILifecycleManager {
                 // Component contains task-specific configuration loaded during agent
                 // initialization
                 var components = componentCache.getComponentMap(task.getId().name());
-                var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), index);
+                var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), absoluteIndex);
                 var component = components.getOrDefault(componentKey, null);
 
                 // Emit task_start event if streaming
                 if (eventSink != null) {
-                    eventSink.onTaskStart(task.getId(), task.getType(), index);
+                    eventSink.onTaskStart(task.getId(), task.getType(), absoluteIndex);
                 }
 
                 // Execute the task, transforming the conversation memory
@@ -340,16 +350,16 @@ public class LifecycleManager implements ILifecycleManager {
                 // Emit audit entry if audit collector is set
                 var auditCollector = conversationMemory.getAuditCollector();
                 if (auditCollector != null) {
-                    AuditEntry auditEntry = buildAuditEntry(conversationMemory, task, index, durationMs, summary);
+                    AuditEntry auditEntry = buildAuditEntry(conversationMemory, task, absoluteIndex, durationMs, summary);
                     auditCollector.collect(auditEntry);
                 }
 
                 // Check if task triggered a STOP_CONVERSATION action
                 checkIfStopConversationAction(conversationMemory);
-                // The pause bookmark must be ABSOLUTE (offset + loop index) so resume
-                // re-enters the full task list at the right place, even when this is a
-                // selective (sublist) execution where the loop index is offset-relative.
-                checkIfPauseConversationAction(conversationMemory, indexOffset + index, actionsBefore);
+                // The pause bookmark must be ABSOLUTE so resume re-enters the full task
+                // list at the right place, even when this is a selective (sublist)
+                // execution where the loop index is offset-relative.
+                checkIfPauseConversationAction(conversationMemory, absoluteIndex, actionsBefore);
 
             } catch (LifecycleException | RuntimeException e) {
                 // HITL tool pause: a gated LLM tool call is NOT a task failure. Convert
@@ -359,7 +369,7 @@ public class LifecycleManager implements ILifecycleManager {
                 // snapshot, exactly like the rule-based PAUSE_CONVERSATION path.
                 if (e instanceof ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException tare) {
                     taskSpan.setAttribute("eddi.hitl.pause", "tool_call");
-                    throw new ConversationPauseException(workflowId.getId(), indexOffset + index,
+                    throw new ConversationPauseException(workflowId.getId(), absoluteIndex,
                             tare.getPauseReason(), ConversationPauseException.PauseOrigin.TOOL_CALL);
                 }
 
@@ -418,7 +428,7 @@ public class LifecycleManager implements ILifecycleManager {
                                 UUID.randomUUID().toString(), conversationMemory.getConversationId(),
                                 conversationMemory.getAgentId(), conversationMemory.getAgentVersion(),
                                 conversationMemory.getUserId(), null, conversationMemory.size() - 1,
-                                errTaskId, errTaskType, index, failDurationMs,
+                                errTaskId, errTaskType, absoluteIndex, failDurationMs,
                                 null, failureOutput, null, null, null, 0.0,
                                 Instant.now(), null, null);
                         auditCollector.collect(failureEntry);
@@ -454,6 +464,16 @@ public class LifecycleManager implements ILifecycleManager {
 
                 taskSpan.end();
             }
+        }
+
+        // Exit cancel check. The in-loop check only guards the transition INTO a task,
+        // so a cancel that lands while the LAST task runs was never observed: the loop
+        // simply ran out, the turn returned normally, and Conversation went on to
+        // commit the turn's side effects (long-term property upserts) for work the
+        // caller was already told is cancelled. Re-checking here closes that window
+        // for the last task of every workflow, and for an empty/exhausted range.
+        if (conversationMemory.isCancelled()) {
+            throw new ConversationStopException();
         }
     }
 

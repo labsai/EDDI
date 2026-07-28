@@ -395,7 +395,13 @@ public class Conversation implements IConversation {
                 paused = true;
             }
         }
-        if (!paused) {
+        // A cancelled turn must not commit its side effects. ConversationService
+        // discards the snapshot of a cancelled turn, but storePropertiesPermanently()
+        // writes straight to the user-memory store, so without this guard a turn the
+        // caller was told is CANCELLED still upserts whatever longTerm properties it
+        // managed to set before stopping — the same "a failed turn must not persist
+        // partial state" rule the ERROR path already follows.
+        if (!paused && !conversationMemory.isCancelled()) {
             try {
                 postConversationLifecycleTasks();
             } catch (IResourceStore.ResourceStoreException e) {
@@ -835,11 +841,13 @@ public class Conversation implements IConversation {
                 clearToolPauseState();
             }
             // Persist long-term properties only on a clean outcome. Skip on a
-            // re-pause (AWAITING_HUMAN — the pause is not the end of the turn) and
-            // on ERROR — mirroring the say path (executeConversationStep only runs
-            // post-tasks when execution did not throw), so a failed resume does not
-            // upsert partial/inconsistent property state into the user memory store.
-            if (finalState != ConversationState.AWAITING_HUMAN && finalState != ConversationState.ERROR) {
+            // re-pause (AWAITING_HUMAN — the pause is not the end of the turn), on
+            // ERROR, and on a cancel — mirroring the say path (executeConversationStep
+            // only runs post-tasks when execution did not throw and was not
+            // cancelled), so a failed or cancelled resume does not upsert
+            // partial/inconsistent property state into the user memory store.
+            if (finalState != ConversationState.AWAITING_HUMAN && finalState != ConversationState.ERROR
+                    && !conversationMemory.isCancelled()) {
                 try {
                     postConversationLifecycleTasks();
                 } catch (IResourceStore.ResourceStoreException ex) {

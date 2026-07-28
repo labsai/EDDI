@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
@@ -40,6 +41,8 @@ class DreamServiceExtendedTest {
     @Mock
     private IUserMemoryStore store;
     @Mock
+    private IAgentStore agentStore;
+    @Mock
     private SummarizationService summarizationService;
 
     private DreamService dreamService;
@@ -50,7 +53,7 @@ class DreamServiceExtendedTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         meterRegistry = new SimpleMeterRegistry();
-        dreamService = new DreamService(store, summarizationService, meterRegistry, new ObjectMapper());
+        dreamService = new DreamService(store, agentStore, summarizationService, meterRegistry, new ObjectMapper());
         dreamService.initMetrics();
 
         dreamConfig = new AgentConfiguration.DreamConfig();
@@ -261,7 +264,7 @@ class DreamServiceExtendedTest {
 
             // Return a result with high token count to exceed cost ceiling
             String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 5000, 5000));
 
             var result = dreamService.process("user-1", dreamConfig);
@@ -289,7 +292,7 @@ class DreamServiceExtendedTest {
 
             // LLM returns 3 entries but target is 1 → should cap to 1
             String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}, {\"key\": \"s2\", \"value\": \"v2\"}, {\"key\": \"s3\", \"value\": \"v3\"}]";
-            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 100, 50));
 
             var result = dreamService.process("user-1", dreamConfig);
@@ -318,7 +321,7 @@ class DreamServiceExtendedTest {
 
             // LLM returns 3 entries = same as original → skip
             String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}, {\"key\": \"s2\", \"value\": \"v2\"}, {\"key\": \"s3\", \"value\": \"v3\"}]";
-            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 100, 50));
 
             var result = dreamService.process("user-1", dreamConfig);
@@ -332,36 +335,71 @@ class DreamServiceExtendedTest {
     // ====================
 
     @Nested
-    @DisplayName("process — multi-agent visibility upgrade")
+    @DisplayName("process — multi-agent visibility (finding G8)")
     class MultiAgentVisibilityTests {
 
         @Test
-        @DisplayName("self-scoped entries from multiple agents upgrade to global")
-        void selfUpgradedToGlobal() throws Exception {
+        @DisplayName("self-scoped entries from multiple agents are never merged into a global entry")
+        void selfNeverUpgradedToGlobal() throws Exception {
             dreamConfig.setSummarizeGroupBy("all");
             dreamConfig.setPreserveAgentProvenance(false);
             dreamConfig.setSummarizeMinEntries(2);
 
-            // Entries from 2 different agents, both self-scoped
+            // Two self-scoped entries per agent, from 2 different agents
             var entries = new ArrayList<>(List.of(
                     new UserMemoryEntry("id1", "user-1", "k1", "v1", "fact",
                             Visibility.self, "agent-1", null, "source", false, 0,
                             Instant.now().minusSeconds(100), Instant.now()),
                     new UserMemoryEntry("id2", "user-1", "k2", "v2", "fact",
+                            Visibility.self, "agent-1", null, "source", false, 0,
+                            Instant.now().minusSeconds(90), Instant.now()),
+                    new UserMemoryEntry("id3", "user-1", "k3", "v3", "fact",
                             Visibility.self, "agent-2", null, "source", false, 0,
-                            Instant.now().minusSeconds(50), Instant.now())));
+                            Instant.now().minusSeconds(50), Instant.now()),
+                    new UserMemoryEntry("id4", "user-1", "k4", "v4", "fact",
+                            Visibility.self, "agent-2", null, "source", false, 0,
+                            Instant.now().minusSeconds(40), Instant.now())));
             when(store.getAllEntries("user-1")).thenReturn(entries);
             when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
 
             String llmResponse = "[{\"key\": \"consolidated\", \"value\": \"merged\"}]";
-            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 0, 0));
 
             var result = dreamService.process("user-1", dreamConfig);
             assertTrue(result.isSuccess());
 
-            // Verify upserted entry has global visibility
-            verify(store).upsert(argThat(entry -> entry.visibility() == Visibility.global));
+            // One self-scoped entry per contributing agent; nothing widened
+            verify(store, never()).upsert(argThat(entry -> entry.visibility() != Visibility.self));
+            verify(store).upsert(argThat(entry -> "agent-1".equals(entry.sourceAgentId())));
+            verify(store).upsert(argThat(entry -> "agent-2".equals(entry.sourceAgentId())));
+        }
+
+        @Test
+        @DisplayName("group-scoped entries from multiple agents may still be merged")
+        void groupScopedStillMerged() throws Exception {
+            dreamConfig.setSummarizeGroupBy("all");
+            dreamConfig.setPreserveAgentProvenance(false);
+            dreamConfig.setSummarizeMinEntries(2);
+
+            var entries = new ArrayList<>(List.of(
+                    new UserMemoryEntry("id1", "user-1", "k1", "v1", "fact",
+                            Visibility.group, "agent-1", List.of("team-a"), "source", false, 0,
+                            Instant.now().minusSeconds(100), Instant.now()),
+                    new UserMemoryEntry("id2", "user-1", "k2", "v2", "fact",
+                            Visibility.group, "agent-2", List.of("team-a"), "source", false, 0,
+                            Instant.now().minusSeconds(50), Instant.now())));
+            when(store.getAllEntries("user-1")).thenReturn(entries);
+            when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
+
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                    .thenReturn(new SummarizationResult("[{\"key\": \"c\", \"value\": \"m\"}]", 0, 0));
+
+            var result = dreamService.process("user-1", dreamConfig);
+            assertTrue(result.isSuccess());
+
+            // Already shared → a single merged entry, still group-scoped
+            verify(store, times(1)).upsert(argThat(entry -> entry.visibility() == Visibility.group));
         }
     }
 
@@ -383,14 +421,14 @@ class DreamServiceExtendedTest {
             when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
 
             String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 0, 0));
 
             var result = dreamService.process("user-1", dreamConfig);
             assertTrue(result.isSuccess());
             // One LLM call for the "all" group
             verify(summarizationService, times(1))
-                    .summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+                    .summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
         }
 
         @Test
@@ -417,14 +455,14 @@ class DreamServiceExtendedTest {
             when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
 
             String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 0, 0));
 
             var result = dreamService.process("user-1", dreamConfig);
             assertTrue(result.isSuccess());
             // Two sub-groups: fact:agent-1 and fact:agent-2
             verify(summarizationService, times(2))
-                    .summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+                    .summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
         }
 
         @Test
@@ -445,13 +483,13 @@ class DreamServiceExtendedTest {
             when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
 
             String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 0, 0));
 
             var result = dreamService.process("user-1", dreamConfig);
             assertTrue(result.isSuccess());
             verify(summarizationService, times(1))
-                    .summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+                    .summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
         }
     }
 
@@ -482,14 +520,15 @@ class DreamServiceExtendedTest {
         @Test
         @DisplayName("isSuccess returns true when error is null")
         void isSuccessTrue() {
-            var result = new DreamService.DreamResult("user1", 5, 2, 3, 100L, null);
+            var result = new DreamService.DreamResult("user1", 5, 2, 3, 100L, 0.25, null);
             assertTrue(result.isSuccess());
+            assertEquals(0.25, result.estimatedCostUsd(), 1e-9);
         }
 
         @Test
         @DisplayName("isSuccess returns false when error is present")
         void isSuccessFalse() {
-            var result = new DreamService.DreamResult("user1", 0, 0, 0, 50L, "failed");
+            var result = new DreamService.DreamResult("user1", 0, 0, 0, 50L, 0.0, "failed");
             assertFalse(result.isSuccess());
         }
     }

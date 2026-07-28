@@ -533,8 +533,15 @@ public class AgentConfiguration {
     }
 
     /**
-     * Background Dream consolidation configuration. Uses
-     * {@code ScheduleFireExecutor} with SERVICE trigger type.
+     * Background Dream consolidation configuration.
+     * <p>
+     * Dream runs through the regular cluster-aware schedule machinery: a
+     * {@code ScheduleConfiguration} carrying the metadata marker
+     * {@code {"dreamType": "dream_consolidation"}} plus the target {@code agentId}
+     * and {@code userId} is dispatched by {@code ScheduleFireExecutor} to
+     * {@code DreamService}, which resolves this block off the agent and runs the
+     * cycle. {@link #getSchedule()} is the cron expression such a schedule should
+     * use.
      */
     public static class DreamConfig {
         private boolean enabled = false;
@@ -569,10 +576,38 @@ public class AgentConfiguration {
          * Whether to sub-group by sourceAgentId before consolidating. true = entries
          * from different agents stay separate (preserves provenance). false = entries
          * from all agents consolidated together (better compression).
+         * <p>
+         * <b>Note:</b> this switch never applies to {@code self}-scoped memories. Those
+         * are always sub-grouped by {@code sourceAgentId}, because merging them across
+         * agents would produce a single entry readable by agents that never had access
+         * to the originals.
          */
         private boolean preserveAgentProvenance = false;
 
-        /** Maximum LLM calls per dream cycle per user. Bounds cost. */
+        /**
+         * Model parameters for the consolidation LLM — {@code apiKey}, {@code baseUrl},
+         * {@code temperature}, … — passed through to {@code ChatModelRegistry} exactly
+         * like an LLM task's {@code parameters} block, so {@code ${vault:...}} and
+         * {@code ${vars:...}} references resolve the same way.
+         * <p>
+         * Dream is a background job with no parent LLM task, so unlike the rolling
+         * conversation summary it has nothing to inherit credentials from — they must
+         * be configured here. Example:
+         *
+         * <pre>
+         * "parameters": { "apiKey": "${vault:anthropic-api-key}" }
+         * </pre>
+         */
+        private Map<String, String> parameters = new HashMap<>();
+
+        /**
+         * @deprecated Since 6.1.0. Superseded by {@link #getMaxCostPerRun()} and no
+         *             longer enforced. A call count is a meaningless ceiling because
+         *             different consolidations cost vastly different amounts; Dream is
+         *             bounded by the dollar budget instead. Retained only so existing
+         *             stored/imported configurations keep deserializing.
+         */
+        @Deprecated(since = "6.1.0", forRemoval = true)
         private int maxSummarizationCalls = 10;
 
         /**
@@ -709,10 +744,28 @@ public class AgentConfiguration {
             this.preserveAgentProvenance = preserveAgentProvenance;
         }
 
+        public Map<String, String> getParameters() {
+            return parameters;
+        }
+
+        public void setParameters(Map<String, String> parameters) {
+            this.parameters = parameters != null ? parameters : new HashMap<>();
+        }
+
+        /**
+         * @deprecated Since 6.1.0. No longer enforced — see
+         *             {@link #getMaxCostPerRun()}.
+         */
+        @Deprecated(since = "6.1.0", forRemoval = true)
         public int getMaxSummarizationCalls() {
             return maxSummarizationCalls;
         }
 
+        /**
+         * @deprecated Since 6.1.0. No longer enforced — see
+         *             {@link #setMaxCostPerRun(double)}.
+         */
+        @Deprecated(since = "6.1.0", forRemoval = true)
         public void setMaxSummarizationCalls(int maxSummarizationCalls) {
             this.maxSummarizationCalls = maxSummarizationCalls;
         }

@@ -48,6 +48,7 @@ import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
@@ -66,6 +67,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.*;
@@ -134,6 +137,17 @@ public class ConversationService implements IConversationService {
     ConversationAccessGuard conversationAccessGuard;
 
     /**
+     * Graceful-shutdown gate (B3). New turns are refused once a
+     * {@code ShutdownEvent} has been observed, so a rolling deploy drains what is
+     * already in flight instead of racing fresh work against the JVM exit.
+     * <p>
+     * Field-injected for the same reason as {@link #attachmentStore}: the numerous
+     * direct-construction unit tests need no change.
+     */
+    @Inject
+    GracefulShutdownService gracefulShutdownService;
+
+    /**
      * Fires {@link HitlResumeCompletedEvent} when a resume settles to a non-paused
      * state. Async so a slow channel observer never blocks the engine; observer
      * failures are isolated from the resume. Delivery adapters (Slack, …) observe
@@ -160,7 +174,20 @@ public class ConversationService implements IConversationService {
     // existing).
     private final MeterRegistry meterRegistry;
 
-    private final List<String> processingConversationReferences;
+    /**
+     * Number of turns currently being processed on this pod — the backing value of
+     * the {@code eddi_processing_conversation_count} gauge.
+     * <p>
+     * C11: this used to be a {@code CopyOnWriteArrayList} of
+     * {@code agentId:conversationId} strings, mutated twice per turn purely to feed
+     * the gauge. That reference string is IDENTICAL for two concurrent turns on the
+     * same conversation, so a failing turn deleted a HEALTHY concurrent turn's
+     * entry; and a turn that never reached its completion consumer (watchdog
+     * timeout, inner future cancelled before starting) leaked its entry for the
+     * JVM's lifetime. A counter released exactly once per turn from a
+     * {@code finally} can do neither.
+     */
+    private final AtomicInteger processingConversationCount = new AtomicInteger();
 
     /**
      * Live memories of conversations currently executing on THIS pod, keyed by
@@ -199,7 +226,6 @@ public class ConversationService implements IConversationService {
         this.tenantQuotaService = tenantQuotaService;
         this.agentTimeout = agentTimeout;
         this.hitlResumeCompletedEvent = hitlResumeCompletedEvent;
-        this.processingConversationReferences = new CopyOnWriteArrayList<>();
 
         this.timerConversationStart = meterRegistry.timer("eddi_conversation_start_duration");
         this.timerConversationEnd = meterRegistry.timer("eddi_conversation_end_duration");
@@ -221,7 +247,46 @@ public class ConversationService implements IConversationService {
         // vary per emission: verdict on resume, guard name on guard activation).
         this.meterRegistry = meterRegistry;
 
-        meterRegistry.gaugeCollectionSize("eddi_processing_conversation_count", Tags.empty(), processingConversationReferences);
+        meterRegistry.gauge("eddi_processing_conversation_count", Tags.empty(), processingConversationCount, AtomicInteger::doubleValue);
+    }
+
+    /**
+     * One-shot release token for the in-flight-turn gauge (C11). Created when a
+     * turn is admitted, released exactly once no matter which of the many exit
+     * paths the turn takes — completion, skip, watchdog timeout, pipeline error or
+     * a pre-submission throw. Idempotent, so the turn callable's {@code finally}
+     * can act as a safety net behind the normal completion path.
+     */
+    private static final class ProcessingTurn {
+        private final AtomicInteger counter;
+        private final AtomicBoolean released = new AtomicBoolean(false);
+
+        private ProcessingTurn(AtomicInteger counter) {
+            this.counter = counter;
+            counter.incrementAndGet();
+        }
+
+        private void release() {
+            if (released.compareAndSet(false, true)) {
+                counter.decrementAndGet();
+            }
+        }
+    }
+
+    /**
+     * Rejects new work once {@link GracefulShutdownService} has observed a
+     * {@code ShutdownEvent} (B3). Turns already queued or in flight are drained by
+     * the shutdown observer; admitting new ones during the drain would either be
+     * dropped by the JVM exit or extend the drain indefinitely.
+     * <p>
+     * A {@code null} gate means the bean was constructed outside CDI (only the
+     * direct-construction unit tests do that) and never rejects.
+     */
+    private void rejectIfShuttingDown() {
+        if (gracefulShutdownService != null && gracefulShutdownService.isShuttingDown()) {
+            throw new RejectedExecutionException(
+                    "This node is shutting down and no longer accepts new conversation turns — retry against another node");
+        }
     }
 
     @Override
@@ -231,6 +296,7 @@ public class ConversationService implements IConversationService {
         long startTime = System.nanoTime();
         checkNotNull(environment, "environment");
         checkNotNull(agentId, "agentId");
+        rejectIfShuttingDown();
         if (context == null) {
             context = new LinkedHashMap<>();
         }
@@ -411,6 +477,10 @@ public class ConversationService implements IConversationService {
             throws Exception {
 
         long startTime = System.nanoTime();
+        rejectIfShuttingDown();
+        // Assigned inside the try; the catch blocks need it, and the lambdas below
+        // need an effectively-final alias (processingTurn).
+        ProcessingTurn admittedTurn = null;
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
@@ -458,7 +528,8 @@ public class ConversationService implements IConversationService {
                 throw new QuotaExceededException(quotaCheck.reason());
             }
 
-            processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
+            admittedTurn = new ProcessingTurn(processingConversationCount);
+            final ProcessingTurn processingTurn = admittedTurn;
 
             // Set the audit collector on memory (if auditing is enabled)
             if (auditLedgerService.isEnabled()) {
@@ -474,7 +545,7 @@ public class ConversationService implements IConversationService {
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
                         recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                        processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+                        processingTurn.release();
                         responseHandler.onComplete(memorySnapshot);
                     });
 
@@ -486,7 +557,7 @@ public class ConversationService implements IConversationService {
                         returnDetailed, returnCurrentStepOnly, returningFields);
                 memorySnapshot.setEnvironment(environment);
                 recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+                processingTurn.release();
                 responseHandler.onSkipped(memorySnapshot);
             };
 
@@ -518,18 +589,25 @@ public class ConversationService implements IConversationService {
             }
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    executeConversation, notifySkipped);
+                    executeConversation, notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | QuotaExceededException | ConversationAwaitingApprovalException e) {
-            throw e; // thrown before processingConversationReferences.add()
+            releaseTurn(admittedTurn); // all three are thrown before the turn is admitted
+            throw e;
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
-            processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+            releaseTurn(admittedTurn);
             throw e;
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+            releaseTurn(admittedTurn);
             throw e;
+        }
+    }
+
+    private static void releaseTurn(ProcessingTurn turn) {
+        if (turn != null) {
+            turn.release();
         }
     }
 
@@ -539,6 +617,9 @@ public class ConversationService implements IConversationService {
             throws Exception {
 
         long startTime = System.nanoTime();
+        rejectIfShuttingDown();
+        // See say(): assigned inside the try, aliased for the lambdas below.
+        ProcessingTurn admittedTurn = null;
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
@@ -584,7 +665,8 @@ public class ConversationService implements IConversationService {
                 throw new QuotaExceededException(quotaCheck.reason());
             }
 
-            processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
+            admittedTurn = new ProcessingTurn(processingConversationCount);
+            final ProcessingTurn processingTurn = admittedTurn;
 
             // Create event sink that delegates to the streaming handler
             var eventSink = new ConversationEventSink() {
@@ -647,7 +729,7 @@ public class ConversationService implements IConversationService {
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
                         recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                        processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+                        processingTurn.release();
                         streamingHandler.onComplete(memorySnapshot);
                     });
 
@@ -673,22 +755,23 @@ public class ConversationService implements IConversationService {
                         returnDetailed, returnCurrentStepOnly, returningFields);
                 memorySnapshot.setEnvironment(environment);
                 recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+                processingTurn.release();
                 streamingHandler.onSkipped(memorySnapshot);
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    executeConversation, notifySkipped);
+                    executeConversation, notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | QuotaExceededException | ConversationAwaitingApprovalException e) {
-            throw e; // thrown before processingConversationReferences.add()
+            releaseTurn(admittedTurn); // all three are thrown before the turn is admitted
+            throw e;
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
-            processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+            releaseTurn(admittedTurn);
             throw e;
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+            releaseTurn(admittedTurn);
             throw e;
         }
     }
@@ -963,68 +1046,84 @@ public class ConversationService implements IConversationService {
 
     private Callable<Void> processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                    Map<String, String> loggingContext, Callable<Void> executeConversation,
-                                                   Consumer<IConversationMemory> skipNotifier) {
+                                                   Consumer<IConversationMemory> skipNotifier, ProcessingTurn processingTurn) {
         return () -> {
-            // Queued-say guard: this memory copy was loaded at REST-request time;
-            // a previously queued turn may have committed a pause (or a resume may
-            // be executing), or the conversation may have been terminally resolved
-            // (ENDED via endConversation) in the meantime. Skip the turn entirely —
-            // executing it against the stale snapshot would end with a full-document
-            // store that silently overwrites the pause (destroying the pending
-            // approval and orphaning its timeout schedule) or RESURRECTS a terminated
-            // conversation to READY with post-termination side effects. The skip
-            // notifier completes the caller's response handler with the persisted
-            // state, so the client gets a prompt, honest answer instead of a watchdog
-            // timeout.
-            //
-            // EXECUTION_INTERRUPTED is deliberately NOT skipped: unlike ENDED it is a
-            // RECOVERABLE marker meaning "the previous turn did not finish" (an
-            // agentTimeout watchdog expiry, or HitlCrashRecoveryObserver parking a
-            // stuck IN_PROGRESS conversation with the explicit intent to "unlock
-            // say()"). A fresh say must run a new turn to self-heal the conversation
-            // back to READY — mirroring the pre-HITL behavior where a retry after an
-            // interrupt executed normally. Skipping it would strand the conversation's
-            // input forever, since nothing else transitions EXECUTION_INTERRUPTED back
-            // to READY.
-            ConversationState persistedState = conversationMemoryStore.getConversationState(conversationId);
-            if (persistedState == ConversationState.AWAITING_HUMAN || persistedState == ConversationState.IN_PROGRESS
-                    || persistedState == ConversationState.ENDED) {
-                conversationMemory.setConversationState(persistedState);
-                contextLogger.setLoggingContext(loggingContext);
-                LOGGER.warnf("Skipping queued turn for conversation %s: persisted state is %s (turn arrived before the state change)",
-                        conversationId, persistedState);
-                if (skipNotifier != null) {
-                    skipNotifier.accept(conversationMemory);
-                }
-                return null;
-            }
-
-            // Zombie-pause guard: the state loaded WITH the snapshot at request
-            // time — on a backend whose snapshot state diverged from the CAS'd
-            // state column, this can still claim AWAITING_HUMAN even though the
-            // pause was terminally resolved (persistedState above says otherwise).
-            // Never execute against, persist, or re-arm a pause this turn did not
-            // produce.
-            final ConversationState memoryStateAtSubmit = conversationMemory.getConversationState();
-
-            // #2: register the live memory so cancelConversation can signal the
-            // running pipeline via setCancelled (checked at task boundaries).
-            inFlightConversations.put(conversationId, conversationMemory);
-            // Carry the agent-level tool-approval config onto memory BEFORE the
-            // pipeline (LlmTask) runs, so the tool-approval gate can resolve its
-            // effective config. Transient — never persisted; re-resolved each turn.
-            populateToolApprovalsConfig(conversationMemory);
             try {
-                runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
-                        executeConversation, memoryStateAtSubmit, persistedState);
+                return runConversationStep(environment, conversationMemory, conversationId, loggingContext,
+                        executeConversation, skipNotifier);
             } finally {
-                // value-conditional: only the leg that registered this memory may
-                // unregister — a plain remove(key) could evict a NEWER execution's
-                // entry and defeat its cooperative cancel.
-                inFlightConversations.remove(conversationId, conversationMemory);
+                // C11: the single guaranteed exit point of a turn. The completion
+                // consumer releases first on the happy path, but a watchdog timeout,
+                // a pipeline error or a cancelled inner future never reaches it — and
+                // an entry that is never released leaks into the gauge forever.
+                // release() is one-shot, so releasing twice is a no-op.
+                processingTurn.release();
+            }
+        };
+    }
+
+    private Void runConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
+                                     Map<String, String> loggingContext, Callable<Void> executeConversation,
+                                     Consumer<IConversationMemory> skipNotifier) {
+        // Queued-say guard: this memory copy was loaded at REST-request time;
+        // a previously queued turn may have committed a pause (or a resume may
+        // be executing), or the conversation may have been terminally resolved
+        // (ENDED via endConversation) in the meantime. Skip the turn entirely —
+        // executing it against the stale snapshot would end with a full-document
+        // store that silently overwrites the pause (destroying the pending
+        // approval and orphaning its timeout schedule) or RESURRECTS a terminated
+        // conversation to READY with post-termination side effects. The skip
+        // notifier completes the caller's response handler with the persisted
+        // state, so the client gets a prompt, honest answer instead of a watchdog
+        // timeout.
+        //
+        // EXECUTION_INTERRUPTED is deliberately NOT skipped: unlike ENDED it is a
+        // RECOVERABLE marker meaning "the previous turn did not finish" (an
+        // agentTimeout watchdog expiry, or HitlCrashRecoveryObserver parking a
+        // stuck IN_PROGRESS conversation with the explicit intent to "unlock
+        // say()"). A fresh say must run a new turn to self-heal the conversation
+        // back to READY — mirroring the pre-HITL behavior where a retry after an
+        // interrupt executed normally. Skipping it would strand the conversation's
+        // input forever, since nothing else transitions EXECUTION_INTERRUPTED back
+        // to READY.
+        ConversationState persistedState = conversationMemoryStore.getConversationState(conversationId);
+        if (persistedState == ConversationState.AWAITING_HUMAN || persistedState == ConversationState.IN_PROGRESS
+                || persistedState == ConversationState.ENDED) {
+            conversationMemory.setConversationState(persistedState);
+            contextLogger.setLoggingContext(loggingContext);
+            LOGGER.warnf("Skipping queued turn for conversation %s: persisted state is %s (turn arrived before the state change)",
+                    conversationId, persistedState);
+            if (skipNotifier != null) {
+                skipNotifier.accept(conversationMemory);
             }
             return null;
-        };
+        }
+
+        // Zombie-pause guard: the state loaded WITH the snapshot at request
+        // time — on a backend whose snapshot state diverged from the CAS'd
+        // state column, this can still claim AWAITING_HUMAN even though the
+        // pause was terminally resolved (persistedState above says otherwise).
+        // Never execute against, persist, or re-arm a pause this turn did not
+        // produce.
+        final ConversationState memoryStateAtSubmit = conversationMemory.getConversationState();
+
+        // #2: register the live memory so cancelConversation can signal the
+        // running pipeline via setCancelled (checked at task boundaries).
+        inFlightConversations.put(conversationId, conversationMemory);
+        // Carry the agent-level tool-approval config onto memory BEFORE the
+        // pipeline (LlmTask) runs, so the tool-approval gate can resolve its
+        // effective config. Transient — never persisted; re-resolved each turn.
+        populateToolApprovalsConfig(conversationMemory);
+        try {
+            runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
+                    executeConversation, memoryStateAtSubmit, persistedState);
+        } finally {
+            // value-conditional: only the leg that registered this memory may
+            // unregister — a plain remove(key) could evict a NEWER execution's
+            // entry and defeat its cooperative cancel.
+            inFlightConversations.remove(conversationId, conversationMemory);
+        }
+        return null;
     }
 
     private void runGuardedConversationStep(Map<String, String> loggingContext, String conversationId,
@@ -1151,7 +1250,14 @@ public class ConversationService implements IConversationService {
 
                     @Override
                     public void onFailure(Throwable t) {
-                        if (t instanceof LifecycleException.LifecycleInterruptedException) {
+                        // C3: an abandoned turn that completed anyway is routed here by
+                        // BaseRuntime's abandonment token. It must NOT be flipped to
+                        // ERROR — the watchdog already persisted the accurate
+                        // EXECUTION_INTERRUPTED (or deliberately left an AWAITING_HUMAN
+                        // pause alone), and a late ERROR write from the zombie turn is
+                        // exactly the stale overwrite the token exists to prevent.
+                        // Mirrors the resume path's onFailure.
+                        if (t instanceof InterruptedException || t instanceof LifecycleException.LifecycleInterruptedException) {
                             String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
                             errorMessage = String.format(errorMessage, conversationId);
                             contextLogger.setLoggingContext(loggingContext);
@@ -1172,17 +1278,42 @@ public class ConversationService implements IConversationService {
         try {
             future.get(agentTimeout, TimeUnit.SECONDS);
         } catch (TimeoutException | InterruptedException e) {
-            // Guard: do not overwrite AWAITING_HUMAN with EXECUTION_INTERRUPTED (Invariant
-            // 10)
-            ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
-            if (currentState == ConversationState.AWAITING_HUMAN) {
-                return;
+            // C3: abandon the turn FIRST — before any further store round trip. The
+            // cancel marks BaseRuntime's per-submission abandonment token, which is
+            // what suppresses a late onComplete (and therefore its full-snapshot
+            // persist). The interrupt flag alone is NOT a safe completion guard: the
+            // pipeline consumes it via Thread.interrupted(), which CLEARS it, so a
+            // timed-out turn would still be reported complete and would overwrite a
+            // newer turn's state. Doing this before reading the persisted state keeps
+            // the "already abandoned but not yet flagged" window at ~0 instead of a
+            // full DB round trip.
+            //
+            // Cancelling on the AWAITING_HUMAN path too is deliberate: the watchdog
+            // has expired either way, so this turn's outcome must be discarded. Only
+            // the STATE write below is skipped there, to avoid overwriting a pause
+            // written by another writer with EXECUTION_INTERRUPTED (Invariant 10).
+            //
+            // B2: Future.get CLEARS the interrupt flag when it throws
+            // InterruptedException. The flag is restored in the finally below —
+            // deliberately AFTER the store round trips, not before them: a set flag
+            // makes the sync Mongo driver abort with MongoInterruptedException, which
+            // would skip the very EXECUTION_INTERRUPTED write this branch exists to
+            // perform. The finally also covers the AWAITING_HUMAN early return.
+            try {
+                future.cancel(true);
+                ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
+                if (currentState == ConversationState.AWAITING_HUMAN) {
+                    return;
+                }
+                setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+                String errorMessage = "Execution of Workflows interrupted or timed out.";
+                contextLogger.setLoggingContext(loggingContext);
+                LOGGER.error(errorMessage, e);
+            } finally {
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
             }
-            setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
-            String errorMessage = "Execution of Workflows interrupted or timed out.";
-            contextLogger.setLoggingContext(loggingContext);
-            LOGGER.error(errorMessage, e);
-            future.cancel(true);
         } catch (ExecutionException e) {
             logConversationError(loggingContext, conversationId, e);
         }
@@ -1264,10 +1395,6 @@ public class ConversationService implements IConversationService {
     private void recordMetrics(Timer timer, Counter counter, long startTime) {
         counter.increment();
         timer.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
-    }
-
-    private static String createReferenceForMetrics(String agentId, String conversationId) {
-        return agentId.concat(":").concat(conversationId);
     }
 
     // --- HITL lifecycle ---

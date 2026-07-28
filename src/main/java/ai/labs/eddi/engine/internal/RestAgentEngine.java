@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
@@ -312,8 +313,15 @@ public class RestAgentEngine implements IRestAgentEngine {
         validateConversationOwnership(conversationId, true);
         try {
             String cancelledBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
+            // GRACEFUL is deliberate and is the ONLY mode this endpoint offers: the
+            // REST contract (IRestAgentEngine#cancelConversation) takes no mode
+            // parameter and documents a graceful cancel, so there is no caller
+            // intent to downgrade here. On the regular surface CANCEL_IMMEDIATE has
+            // no implementation at all — ConversationService silently degrades it to
+            // graceful — which is why it is not, and must not be, reachable from
+            // this API until it either does something or is deleted from the enum.
             var outcome = conversationService.cancelConversation(conversationId,
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL, cancelledBy);
+                    ControlSignal.CANCEL_GRACEFUL, cancelledBy);
             // Plain-text, curated bodies: never reflect the raw conversationId (it is
             // a caller-supplied path param — echoing it is a reflected-XSS vector) and
             // never leak internal exception detail to the client.

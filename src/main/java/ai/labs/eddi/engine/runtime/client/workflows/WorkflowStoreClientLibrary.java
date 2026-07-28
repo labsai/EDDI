@@ -79,6 +79,14 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
                         throw new UnrecognizedExtensionException(String.format("Extension '%s' not found", type));
                     }
 
+                    // The component key is the task's ABSOLUTE position in the
+                    // workflow. LifecycleManager rebuilds the identical key when it
+                    // looks the component up, including on a selective (sublist)
+                    // execution, where it must add the sublist offset back on.
+                    // Invariant this relies on: every workflow step uses the `eddi`
+                    // scheme, so indexInWorkflow and the position in the
+                    // lifecycleManager task list stay in lockstep. A non-eddi step
+                    // would be skipped below and desynchronize the two.
                     var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), indexInWorkflow);
                     var lifecycleTask = lifecycleExtensionsProvider.get(type).get();
                     var component = lifecycleTask.configure(workflowStep.getConfig(), workflowStep.getExtensions());

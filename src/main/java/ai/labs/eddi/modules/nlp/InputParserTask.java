@@ -131,6 +131,12 @@ public class InputParserTask implements ILifecycleTask {
             storeNormalizedResultInMemory(memory.getCurrentStep(), normalizedUserInput);
             parsedSolutions = parser.parse(normalizedUserInput, userLanguage, temporaryDictionaries);
         } catch (InterruptedException e) {
+            // B2: the pipeline's graceful-stop signal IS the thread's interrupt flag —
+            // LifecycleManager re-checks Thread.currentThread().isInterrupted() before
+            // every task. Catching the exception consumes the signal, so restore the
+            // flag before returning normally; otherwise the remaining tasks of an
+            // interrupted turn keep running.
+            Thread.currentThread().interrupt();
             log.warn(e.getLocalizedMessage(), e);
             return;
         }

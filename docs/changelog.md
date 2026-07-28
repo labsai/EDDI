@@ -5,6 +5,64 @@
 
 ---
 
+## ⚙️ fix(runtime): code-review findings wave 3 — concurrency, lifecycle, cancellation, graceful shutdown, Dream wiring (2026-07-28)
+
+**Repo:** EDDI (`fix/code-review-concurrency`)
+
+Third wave of the 124-finding external review. **16 fixed, 1 partial.** This is the wave where the findings were hardest to fix correctly, because the bugs are non-deterministic and several of the obvious fixes are wrong.
+
+### Cancellation that cancelled nothing (C1)
+
+`CompletableFuture.cancel(true)` does **not** interrupt a `runAsync`/`supplyAsync` body — the JDK documents `mayInterruptIfRunning` as having no effect there. Five call sites in `GroupConversationService` relied on it, so "cancelled" agent threads **kept mutating `gc.getTaskList()`, `gc.getTranscript()` and the errors list after the orchestrator had already persisted the document**. Replaced with a cooperative `MemberTurnCancellation` token checked at the agent turn's own await points, plus a bounded drain. This is also the root cause of C7 (`resetStrandedInProgressTasks` could strand the very task it exists to rescue, because a falsely-"cancelled" thread flips state between the snapshot and the mutate).
+
+### The ~100-turn scalability cliff (C4)
+
+`ConversationService` submitted the inner pipeline through the **same** bounded pool as the outer coordinator callable and then blocked on `future.get()`. With no `quarkus.thread-pool.*` overrides that is the 200-thread default: at ~100 concurrent turns every thread is a waiter, no inner task can ever be scheduled, and **every turn fails at the 60s watchdog**. A cliff, not a gradual degradation.
+
+Fixed by routing *nested* submissions to a virtual-thread executor via a `ThreadLocal` marker scoped to the callable body. Chosen over `CompletableFuture` composition deliberately: the coordinator's ordering contract is "the callable returns ⇒ the turn is done", so making the outer non-blocking would need an `IEventBus`/`IConversationCoordinator` SPI change **and** would let the next turn of the same conversation start while the previous one still ran. Virtual threads are safe here — there is not a single `@RequestScoped` bean in `src/main`, and three existing callers already drive the pipeline with no request context on virtual-thread executors. The marker is cleared before callbacks run, so `submitNext` still schedules on the managed executor exactly as before; watchdog and timeout semantics are unchanged.
+
+### Re-execution and lost turns (C3, C9, C10, C13)
+
+- **C9** — `onComplete` sat inside the `try` whose `catch (Throwable)` called `onFailure`, so **any unchecked throw on the completion path resubmitted the already-executed callable as a retry** — LLM calls, tool side effects and cost all running twice. Completion dispatch moved outside the guarded region *and* both callbacks gated behind a one-shot `AtomicBoolean`.
+- **C13** — The coordinator retried failed turns 3×. Because `onFailure` can only be raised from inside the executor task, every retry re-ran a turn that may already have called an LLM and spent money. Retry removed entirely; genuinely pre-execution failures surface as a synchronous throw and are handled by C10's rollback.
+- **C3** — A timed-out turn still persisted over a newer one, because the stale-completion guard used the interrupt flag and the pipeline cleared it via `Thread.interrupted()`. Replaced with a per-submission abandonment token set *before* delegating `cancel()`, so nothing the work itself does can clear it.
+- **C10** — A throwing `submit` left the callable queued with nothing scheduled to run it, wedging that conversation **permanently** and leaking the map entry for the JVM's lifetime.
+
+### No graceful shutdown existed at all (B3)
+
+`grep -rn ShutdownEvent src/main` matched nothing. A rolling deploy dropped every queued and in-flight turn with no drain and no readiness flip. Added `GracefulShutdownService` + `ShutdownReadinessHealthCheck`.
+
+### /rerun destroyed output and regenerated nothing (C5)
+
+Selective execution passes a sublist with `startIndex=0`, so the loop index is sublist-relative — but the component-cache **key** was built from that relative index while the cache **stores** under the absolute index. The output task then ran with `component == null` and no-op'd, *after* the prior output had already been deleted. `indexOffset` was already threaded in and used only for HITL bookkeeping.
+
+This one survived because **every existing `LifecycleManagerTest` stubs the component map empty** — the exact condition that hides it. The new test populates it at absolute indices and fails if the offset is removed.
+
+### B2: the finding's premise was inverted
+
+The review claimed "interrupt flags swallowed in 18 of 20 handlers". Auditing all 28 sites individually (27 explicit `catch (InterruptedException)` plus one hiding behind a broad `catch (Exception)`) found the opposite: **14 already restored the flag correctly and 9 rethrew; only 4 genuinely swallowed it.** Fixed those 4, plus:
+
+- **`ScheduleFireExecutor`** — a broad `catch (Exception)` swallowing `InterruptedException` from `latch.await(5, MINUTES)`, so the poller kept firing schedules after being interrupted for shutdown.
+- **`NatsConversationCoordinator`** — the *mirror* bug, not in the finding: it called `interrupt()` **unconditionally** on `catch (InterruptedException | TimeoutException)`, so a drain timeout left the shutdown thread flagged and would abort the `@PreDestroy` steps after it.
+
+One restore is deliberately placed in a `finally` after the store round trips rather than at the top of the catch: the sync Mongo driver aborts with `MongoInterruptedException` when the calling thread is flagged, so an early restore would skip the very `EXECUTION_INTERRUPTED` write that branch exists to perform.
+
+### Dream wired up (I1, G8)
+
+Per the repo owner's decision, `DreamService` is now registered with `ScheduleFireExecutor` rather than deleted, with its ceiling switched from `maxSummarizationCalls` to the dollar-based `maxCostPerRun` the project's own guidance prescribes. `docs/architecture.md`'s claim that it performs scheduled maintenance is now true.
+
+**G8 mattered much more once Dream actually runs**: consolidation upgraded `self` visibility to `global` whenever a group spanned multiple agents — and with `summarizeGroupBy` defaulting to `category` and `preserveAgentProvenance` defaulting to false, cross-agent grouping was the *default* path. Two agents' private memories became one entry every agent could read.
+
+### Partial
+
+**F6** — the REST/pipeline half is done (a `ConnectionCallback` now sets cancelled on client disconnect, and cancellation is checked at more points). The in-`modules/llm` half — cancellation checks inside the tool loop and the cascade — is deferred, since that module is owned by another workstream.
+
+### Verification
+
+Clean compile passed **first attempt**, with no repairs needed despite three cross-workstream signature changes. Full suite: 12,633 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature; this machine cannot bind sockets). All four mutation checks bite — C1, C5, C9 and B2 each fail a test when reverted, verified against whole test classes and with surefire reports checked to confirm the new classes actually executed rather than being silently skipped.
+
+---
+
 ## 🧠 fix(llm): code-review findings wave 2b — LLM core, persistent memory, migration, import/export (2026-07-28)
 
 **Repo:** EDDI (`fix/code-review-llm-memory`)
