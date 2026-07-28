@@ -368,6 +368,13 @@ public class OpenAiConversationBridge {
         long start = System.nanoTime();
         boolean[] anyToken = {false};
         String[] outcomeTag = {"ok"};
+        // sayStreaming hands the turn to the ConversationCoordinator and returns
+        // immediately; every handler callback fires later, on another thread. So
+        // the terminator cannot be written when sayStreaming returns — the caller
+        // would close the response while tokens were still arriving, and the
+        // client would see content after [DONE]. This latch is completed by
+        // whichever terminal callback fires, and awaited before unwinding.
+        var finished = new CompletableFuture<Void>();
         try {
             conversationService.sayStreaming(turn.conversationId(), false, true, Collections.emptyList(),
                     turn.inputData(), new IConversationService.StreamingResponseHandler() {
@@ -401,6 +408,7 @@ public class OpenAiConversationBridge {
                                         + " Conversation: " + snapshot.getConversationId());
                             }
                             writer.finish(Choice.FINISH_STOP);
+                            finished.complete(null);
                         }
 
                         @Override
@@ -413,6 +421,7 @@ public class OpenAiConversationBridge {
                                     : "⚠️ The conversation is busy with another turn or is no longer active. "
                                             + "Please retry.");
                             writer.finish(Choice.FINISH_STOP);
+                            finished.complete(null);
                         }
 
                         @Override
@@ -422,8 +431,21 @@ public class OpenAiConversationBridge {
                             outcomeTag[0] = "error";
                             writer.content("\n\n⚠️ " + describe(error));
                             writer.finish(Choice.FINISH_STOP);
+                            finished.complete(null);
                         }
                     });
+
+            // Block until a terminal callback fires. Returning before that would
+            // let the caller close the response mid-turn.
+            finished.get(config.getRequestTimeoutSeconds(), TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            outcomeTag[0] = "error";
+            writer.content("\n\n⚠️ The agent did not respond within "
+                    + config.getRequestTimeoutSeconds() + " seconds.");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            outcomeTag[0] = "error";
+            writer.content("\n\n⚠️ The request was interrupted before the agent replied.");
         } catch (Exception e) {
             OpenAiApiException apiException = asApiException(e);
             outcomeTag[0] = apiException.getStatus() == 429 ? "busy" : "error";

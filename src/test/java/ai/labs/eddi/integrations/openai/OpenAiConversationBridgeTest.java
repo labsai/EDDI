@@ -75,7 +75,8 @@ class OpenAiConversationBridgeTest {
         when(conversationService.getConversationState(any(String.class))).thenReturn(ConversationState.READY);
 
         bridge = new OpenAiConversationBridge(conversationService, userConversationStore,
-                new OpenAiMessageMapper(objectMapper, 5), OpenAiTestFixtures.enabledConfig(),
+                new OpenAiMessageMapper(objectMapper, 5),
+                OpenAiTestFixtures.config(b -> b.requestTimeoutSeconds = 2),
                 new SimpleMeterRegistry());
         bridge.initMetrics();
     }
@@ -469,6 +470,41 @@ class OpenAiConversationBridgeTest {
         String body = out.toString(java.nio.charset.StandardCharsets.UTF_8);
         assertFalse(body.contains("null"), "got: " + body);
         assertTrue(body.contains("NullPointerException"));
+    }
+
+    @Test
+    void stream_waitsForAnAsynchronousTurnBeforeTerminating() throws Exception {
+        // sayStreaming hands the turn to the ConversationCoordinator and returns
+        // immediately; the callbacks fire later on another thread. Every other
+        // test here drives the handler synchronously, which hid a real defect:
+        // the terminator was written as soon as sayStreaming returned, so the
+        // response closed mid-turn and content arrived after [DONE].
+        doAnswer(invocation -> {
+            IConversationService.StreamingResponseHandler handler = invocation.getArgument(5);
+            Thread worker = new Thread(() -> {
+                try {
+                    Thread.sleep(120);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                handler.onToken("late");
+                handler.onComplete(snapshotWithText("late", ConversationState.READY));
+            });
+            worker.setDaemon(true);
+            worker.start();
+            return null;
+        }).when(conversationService).sayStreaming(any(), anyBoolean(), anyBoolean(), any(), any(), any());
+
+        var turn = statelessTurn();
+        var out = new java.io.ByteArrayOutputStream();
+
+        bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L));
+
+        String body = out.toString(java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(body.contains("\"content\":\"late\""),
+                "the token arrived after sayStreaming returned and must still be sent: " + body);
+        assertTrue(body.trim().endsWith("data: [DONE]"),
+                "nothing may follow the terminator: " + body);
     }
 
     @Test
