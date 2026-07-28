@@ -138,7 +138,7 @@ Fully supported, surfaced as chat text rather than as errors:
 Open WebUI                          EDDI adapter                         EDDI core
     │
     │ POST /v1/chat/completions
-    │   Authorization: Bearer <api-key>
+    │   Authorization: Bearer <token>
     │   X-OpenWebUI-Chat-Id: 4f2b…
     │   X-OpenWebUI-User-Id: u_812
     │   {"model":"support-a3f9c1","messages":[…],"stream":true}
@@ -796,11 +796,11 @@ Branch from `origin/main` per AGENTS.md §2 rule 3, with a `feat/…` name (not 
 ### Manual verification
 
 ```bash
-curl -H "Authorization: Bearer sk-eddi-change-me" http://localhost:7070/v1/models
+curl -H "Authorization: Bearer $EDDI_API_KEY" http://localhost:7070/v1/models
 ```
 
 ```bash
-curl -X POST http://localhost:7070/v1/chat/completions -H "Authorization: Bearer sk-eddi-change-me" -H "Content-Type: application/json" -H "X-OpenWebUI-Chat-Id: chat-1" -H "X-OpenWebUI-User-Id: alice" -d '{"model":"my-agent-a3f9c1","messages":[{"role":"user","content":"Hello"}]}'
+curl -X POST http://localhost:7070/v1/chat/completions -H "Authorization: Bearer $EDDI_API_KEY" -H "Content-Type: application/json" -H "X-OpenWebUI-Chat-Id: chat-1" -H "X-OpenWebUI-User-Id: alice" -d '{"model":"my-agent-a3f9c1","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
 **The critical manual check — the C1 regression.** The Python SDK sends `Accept: application/json` even when `stream=True`; if this prints tokens progressively, body-based dispatch is working:

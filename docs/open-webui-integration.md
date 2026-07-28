@@ -51,22 +51,23 @@ services:
 
 Deploy an agent in EDDI, open <http://localhost:3000>, and it appears in the model dropdown.
 
-Verify from the shell:
+Verify from the shell, with `EDDI_API_KEY` set to the same value as in the compose file:
 
 ```bash
-curl -H "Authorization: Bearer sk-eddi-change-me" http://localhost:7070/v1/models
+curl -H "Authorization: Bearer $EDDI_API_KEY" http://localhost:7070/v1/models
 ```
 
 ```bash
-curl -X POST http://localhost:7070/v1/chat/completions -H "Authorization: Bearer sk-eddi-change-me" -H "Content-Type: application/json" -H "X-OpenWebUI-Chat-Id: chat-1" -H "X-OpenWebUI-User-Id: alice" -d '{"model":"my-agent-a3f9c1","messages":[{"role":"user","content":"Hello"}]}'
+curl -X POST http://localhost:7070/v1/chat/completions -H "Authorization: Bearer $EDDI_API_KEY" -H "Content-Type: application/json" -H "X-OpenWebUI-Chat-Id: chat-1" -H "X-OpenWebUI-User-Id: alice" -d '{"model":"my-agent-a3f9c1","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
 And from Python:
 
 ```python
+import os
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:7070/v1", api_key="sk-eddi-change-me")
+client = OpenAI(base_url="http://localhost:7070/v1", api_key=os.environ["EDDI_API_KEY"])
 print([m.id for m in client.models.list().data])
 
 for chunk in client.chat.completions.create(
@@ -480,9 +481,10 @@ Name the agent descriptor something client-facing — `gpt-4o-gateway` — since
 ### Calling it
 
 ```python
+import os
 from openai import OpenAI
 
-client = OpenAI(base_url="https://eddi.example.com/v1", api_key="sk-eddi-…",
+client = OpenAI(base_url="https://eddi.example.com/v1", api_key=os.environ["EDDI_API_KEY"],
                 default_headers={"X-OpenWebUI-User-Id": "svc-billing"})
 
 client.chat.completions.create(
