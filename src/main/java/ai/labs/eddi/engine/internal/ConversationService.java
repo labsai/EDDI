@@ -923,7 +923,10 @@ public class ConversationService implements IConversationService {
         // thread, where SecurityIdentity resolves. Everything downstream runs on
         // pool threads with no request context, so the identity travels with the
         // callable rather than with the thread.
-        final Callable<Void> identityBoundExecution = withCallerIdentity(executeConversation, callerIdentityContext.capture());
+        // Binding is CallerIdentityContext's job — it owns the clearing semantics
+        // that keep a token off the next caller's turn on a pooled thread.
+        final Callable<Void> identityBoundExecution = callerIdentityContext.withIdentity(callerIdentityContext.capture(),
+                executeConversation);
 
         return () -> {
             // Queued-say guard: this memory copy was loaded at REST-request time;
@@ -985,28 +988,6 @@ public class ConversationService implements IConversationService {
                 inFlightConversations.remove(conversationId, conversationMemory);
             }
             return null;
-        };
-    }
-
-    /**
-     * Bind the captured caller to whichever pool thread ends up running the turn,
-     * so {@code ${caller:token}} in an API call resolves to the person who sent the
-     * message.
-     * <p>
-     * The binding is cleared in a {@code finally}: these threads are pooled and
-     * serve other users' conversations next.
-     */
-    private Callable<Void> withCallerIdentity(Callable<Void> execution, CallerIdentity callerIdentity) {
-        if (callerIdentity == null) {
-            return execution;
-        }
-        return () -> {
-            callerIdentityContext.bind(callerIdentity);
-            try {
-                return execution.call();
-            } finally {
-                callerIdentityContext.clear();
-            }
         };
     }
 
@@ -1593,7 +1574,8 @@ public class ConversationService implements IConversationService {
             Callable<Void> guardedResume = () -> {
                 try {
                     waitForExecutionFinishOrTimeout(loggingContext, conversationId,
-                            runtime.submitCallable(withCallerIdentity(resumeCallable, resumeCallerIdentity), resumeFinished, null));
+                            runtime.submitCallable(callerIdentityContext.withIdentity(resumeCallerIdentity, resumeCallable),
+                                    resumeFinished, null));
                 } finally {
                     // value-conditional: never evict a newer execution's registration
                     inFlightConversations.remove(conversationId, memory);
