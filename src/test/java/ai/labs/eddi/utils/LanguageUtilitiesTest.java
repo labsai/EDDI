@@ -12,6 +12,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Date;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -74,21 +75,28 @@ class LanguageUtilitiesTest {
     }
 
     @Nested
-    @DisplayName("isOrdinalNumber")
+    @DisplayName("extractOrdinalValue")
     class OrdinalNumberTests {
 
         @ParameterizedTest
         @CsvSource({"1st, 1", "2nd, 2", "3rd, 3", "4th, 4", "21st, 21", "100th, 100"})
         @DisplayName("extracts numeric value from ordinals")
-        void validOrdinals(String input, String expected) {
-            assertEquals(expected, LanguageUtilities.isOrdinalNumber(input));
+        void validOrdinals(String input, int expected) {
+            assertEquals(Optional.of(expected), LanguageUtilities.extractOrdinalValue(input));
         }
 
         @ParameterizedTest
-        @ValueSource(strings = {"hello", "abc", "1", "12"})
-        @DisplayName("returns null for non-ordinals")
+        @CsvSource({"1., 1", "12., 12"})
+        @DisplayName("extracts numeric value from dot notation ordinals")
+        void dotNotationOrdinals(String input, int expected) {
+            assertEquals(Optional.of(expected), LanguageUtilities.extractOrdinalValue(input));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"hello", "abc", "1", "12", "."})
+        @DisplayName("returns empty for non-ordinals")
         void nonOrdinals(String input) {
-            assertNull(LanguageUtilities.isOrdinalNumber(input));
+            assertEquals(Optional.empty(), LanguageUtilities.extractOrdinalValue(input));
         }
     }
 }

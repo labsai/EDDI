@@ -114,7 +114,26 @@ COPY --chown=185 target/quarkus-app/*.jar /deployments/
 COPY --chown=185 target/quarkus-app/app/ /deployments/app/
 COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
 COPY --chown=185 licenses/ /licenses/
-COPY --chown=185 docs/ /deployments/docs/
+
+# Documentation served to MCP clients via McpDocResources (eddi://docs/*).
+#
+# Only the TOP-LEVEL *.md pages are ever reachable at runtime: listDocs() calls
+# Files.newDirectoryStream(docsDir, "*.md") — non-recursive — and readDoc()
+# rejects any name containing '/', so nothing under docs/agent-configs/,
+# docs/templates/, docs/your-first-agent/ etc. can be requested. Copying the
+# whole tree (~2.2 MB) shipped those subdirectories as dead weight.
+COPY --chown=185 docs/*.md /deployments/docs/
+
+# Drop the internal-only pages that have no business being served to an MCP
+# client: the 1.1 MB running engineering changelog, the breach-response runbook
+# (detection indicators and escalation contacts), our internal code-review
+# process, and the GitBook table of contents (whose links point at
+# subdirectories that are intentionally not in the image).
+# docs/security-review.md is kept — it is a published OpenSSF Gold artefact.
+RUN rm -f /deployments/docs/changelog.md \
+      /deployments/docs/code-review-standards.md \
+      /deployments/docs/incident-response.md \
+      /deployments/docs/SUMMARY.md
 
 # Run as non-root user (UID 185 = jboss user from UBI base image)
 # This is a security requirement — containers MUST NOT run as root

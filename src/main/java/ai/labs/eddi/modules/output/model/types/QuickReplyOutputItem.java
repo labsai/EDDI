@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.output.model.types;
 import ai.labs.eddi.modules.output.model.OutputItem;
 
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 public class QuickReplyOutputItem extends OutputItem {
     private String value;
@@ -27,6 +28,11 @@ public class QuickReplyOutputItem extends OutputItem {
     @Override
     protected void initType() {
         super.type = "quickReply";
+    }
+
+    @Override
+    protected OutputItem templatedCopy(UnaryOperator<String> templating) {
+        return new QuickReplyOutputItem(templating.apply(value), templating.apply(expressions), isDefault);
     }
 
     @Override

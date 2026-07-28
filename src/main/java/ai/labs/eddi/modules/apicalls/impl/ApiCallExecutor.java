@@ -53,9 +53,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private static final Logger LOGGER = Logger.getLogger(ApiCallExecutor.class);
 
     /**
-     * Ceiling for a single retry backoff delay (5 min) — bounds exponential growth.
+     * Hard ceiling for a single retry backoff delay. A retry sleeps on the
+     * conversation thread, so the delay must stay well inside the turn budget — a
+     * per-call {@code maxBackoffDelayInMillis} may lower this, never raise it.
      */
-    private static final int MAX_BACKOFF_MILLIS = 300_000;
+    static final int MAX_BACKOFF_MILLIS = 30_000;
 
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
@@ -64,11 +66,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
     private final boolean ssrfProtectionEnabled;
+    private final long defaultTimeoutInMillis;
+    private final int defaultMaxResponseSizeInBytes;
 
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
-            @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled) {
+            @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
+            @ConfigProperty(name = "eddi.httpcalls.default-timeout-millis", defaultValue = "30000") long defaultTimeoutInMillis,
+            @ConfigProperty(name = "eddi.httpcalls.default-max-response-size-bytes", defaultValue = "2000000") int defaultMaxResponseSizeInBytes) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.runtime = runtime;
@@ -76,6 +82,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
+        this.defaultTimeoutInMillis = defaultTimeoutInMillis;
+        this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
     }
 
     @Override
@@ -101,7 +109,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
             if (call.getFireAndForget()) {
-                executeFireAndForgetCalls(targetServerUrl, call.getRequest(), preRequest, templateDataObjects, call.getName());
+                executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects);
                 return Collections.emptyMap();
             } else {
                 IRequest request;
@@ -113,7 +121,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
                 try {
                     do {
-                        request = buildRequest(targetServerUrl, call.getRequest(), templateDataObjects);
+                        request = buildRequest(targetServerUrl, call, templateDataObjects);
                         var objectName = call.getName() + "Request";
                         var requestMap = request.toMap();
                         // Scrub resolved secrets from request map before persisting to conversation
@@ -156,7 +164,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         }
 
                         if (isResponseSuccessful && call.getSaveResponse()) {
-                            final String responseBody = response.getContentAsString();
+                            // Success bodies land in conversation memory, which is persisted as a
+                            // single document — cap them just like the error bodies above.
+                            final String responseBody = truncateResponseBody(response.getContentAsString(), resolveMaxResponseSize(call),
+                                    call.getName());
                             String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                             if (actualContentType != null) {
                                 actualContentType = actualContentType.split(";")[0];
@@ -226,9 +237,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return response;
     }
 
-    private void executeFireAndForgetCalls(String targetServerUrl, Request callRequest, HttpPreRequest preRequest,
-                                           Map<String, Object> templateDataObjects, String callName)
+    private void executeFireAndForgetCalls(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
+
+        var preRequest = call.getPreRequest();
+        var callName = call.getName();
 
         if (preRequest != null && preRequest.getBatchRequests() != null) {
             BatchRequestBuildingInstruction batchRequest = preRequest.getBatchRequests();
@@ -237,13 +250,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
             }
 
             runtime.submitCallable(() -> {
-                List<Object> batchIterationList = prePostUtils.buildListFromJson(batchRequest.getIterationObjectName(),
-                        batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), null, templateDataObjects);
+                List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
+                        batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
 
                 IRequest request;
                 for (Object iterationObject : batchIterationList) {
                     templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                    request = buildRequest(targetServerUrl, callRequest, templateDataObjects);
+                    request = buildRequest(targetServerUrl, call, templateDataObjects);
                     if (batchRequest.getExecuteCallsSequentially()) {
                         long executionStart = currentTimeMillis();
                         LOGGER.info(callName + " Batch Request: " + request);
@@ -256,7 +269,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 return null;
             }, null);
         } else {
-            IRequest request = buildRequest(targetServerUrl, callRequest, templateDataObjects);
+            IRequest request = buildRequest(targetServerUrl, call, templateDataObjects);
             executeFireAndForgetCall(request, callName);
         }
     }
@@ -281,13 +294,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
         int delayInMillis = 0;
 
         if (retryCall) {
-            Integer baseDelay = call.getPostResponse().getRetryApiCallInstruction().getExponentialBackoffDelayInMillis();
+            var retryInstruction = call.getPostResponse().getRetryApiCallInstruction();
+            Integer baseDelay = retryInstruction.getExponentialBackoffDelayInMillis();
             if (baseDelay != null && baseDelay > 0) {
                 // True exponential backoff: base * 2^(attempt-1), capped to avoid
                 // overflow and unbounded waits. (Previously linear: base * attempt.)
                 int exponent = Math.max(0, amountOfExecutions - 1);
                 long computed = (long) baseDelay << Math.min(exponent, 20);
-                delayInMillis = (int) Math.min(computed, MAX_BACKOFF_MILLIS);
+                delayInMillis = (int) Math.min(computed, resolveMaxBackoffInMillis(retryInstruction));
             }
         }
 
@@ -297,6 +311,56 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
 
         return delayInMillis;
+    }
+
+    /**
+     * Backoff ceiling for one retry: the configured value if it is lower than
+     * {@link #MAX_BACKOFF_MILLIS}, otherwise the hard ceiling. A configuration can
+     * only shorten the wait, never push it past the turn budget.
+     */
+    private static int resolveMaxBackoffInMillis(RetryApiCallInstruction retryInstruction) {
+        Integer configuredMaxBackoff = retryInstruction.getMaxBackoffDelayInMillis();
+        if (configuredMaxBackoff == null || configuredMaxBackoff <= 0) {
+            return MAX_BACKOFF_MILLIS;
+        }
+
+        return Math.min(configuredMaxBackoff, MAX_BACKOFF_MILLIS);
+    }
+
+    /**
+     * Request timeout for this call: the per-call value if configured, otherwise
+     * the deployment-wide default.
+     */
+    private long resolveTimeout(ApiCall call) {
+        Integer configuredTimeout = call.getTimeoutInMillis();
+        return configuredTimeout != null && configuredTimeout > 0 ? configuredTimeout : defaultTimeoutInMillis;
+    }
+
+    /**
+     * Response-size cap for this call: the per-call value if configured, otherwise
+     * the deployment-wide default.
+     */
+    private int resolveMaxResponseSize(ApiCall call) {
+        Integer configuredMaxResponseSize = call.getMaxResponseSizeInBytes();
+        return configuredMaxResponseSize != null && configuredMaxResponseSize > 0 ? configuredMaxResponseSize : defaultMaxResponseSizeInBytes;
+    }
+
+    /**
+     * Cut an over-long response body down to the configured cap before it is
+     * written to conversation memory. The cap is a byte budget applied to the
+     * character count, which is a conservative approximation for multi-byte
+     * content.
+     */
+    // Package-private for unit testing.
+    static String truncateResponseBody(String responseBody, int maxResponseSize, String callName) {
+        if (responseBody == null || responseBody.length() <= maxResponseSize) {
+            return responseBody;
+        }
+
+        LOGGER.warnf("ApiCall (%s) response of %s chars exceeds the configured maximum of %s — truncating before storing it in memory.", callName,
+                responseBody.length(), maxResponseSize);
+
+        return responseBody.substring(0, maxResponseSize);
     }
 
     private IResponse executeRequest(IRequest request, int delay) throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
@@ -345,9 +409,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return false;
     }
 
-    private IRequest buildRequest(String targetServerUrl, Request requestConfig, Map<String, Object> templateDataObjects)
+    private IRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException {
 
+        Request requestConfig = call.getRequest();
         String path = requestConfig.getPath().trim();
         if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
             path = SLASH_CHAR + path;
@@ -372,6 +437,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase());
         IRequest request = httpClient.newRequest(targetUri, method);
+        // Bound the call in time and in size. Without these an httpcall can occupy the
+        // conversation thread until the client's own fallback expires, and can pull an
+        // arbitrarily large body into conversation memory.
+        request.setTimeout(resolveTimeout(call), TimeUnit.MILLISECONDS);
+        request.setMaxResponseSize(resolveMaxResponseSize(call));
         if (ssrfProtectionEnabled) {
             request.setFollowRedirects(false);
         }

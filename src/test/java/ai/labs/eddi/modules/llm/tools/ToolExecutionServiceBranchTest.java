@@ -71,7 +71,7 @@ class ToolExecutionServiceBranchTest {
         @Test
         @DisplayName("cost tracking enabled with non-null conversationId")
         void costTrackingEnabled() {
-            when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "myTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "myTool", "args")).thenReturn(null);
 
             service.executeToolWrapped("myTool", "args", SCOPE, "conv-1",

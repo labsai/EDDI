@@ -33,6 +33,9 @@ import static org.mockito.Mockito.*;
  */
 class ApiCallExecutorTest {
 
+    private static final long DEFAULT_TIMEOUT_MILLIS = 30_000L;
+    private static final int DEFAULT_MAX_RESPONSE_SIZE = 2_000_000;
+
     private IHttpClient httpClient;
     private IJsonSerialization jsonSerialization;
     private IRuntime runtime;
@@ -57,7 +60,8 @@ class ApiCallExecutorTest {
         globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
-        executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver, false);
+        executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver, false,
+                DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
 
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);
@@ -473,7 +477,7 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_blocksInternalUrl() {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, true);
+                secretResolver, true, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
         ApiCall call = createSimpleApiCall("ssrf-call", false);
         // 169.254.169.254 is a literal IP (no DNS) blocked by UrlValidationUtils.
         assertThrows(LifecycleException.class, () -> protectedExecutor.execute(call, memory, new HashMap<>(), "http://169.254.169.254"));
@@ -482,7 +486,7 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_disablesRedirectsOnPublicUrl() throws Exception {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, true);
+                secretResolver, true, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
         ApiCall call = createSimpleApiCall("redir-call", false);
         setupSuccessResponse(200, "ok", "text/plain");
         // 1.1.1.1 is a public literal IP — passes validation without a DNS lookup.
@@ -513,8 +517,25 @@ class ApiCallExecutorTest {
     @Test
     void getDelayInMillis_cappedAtCeiling() {
         ApiCall call = callWithBackoff(100_000);
-        // 100000 * 2^9 = 51,200,000 — capped to the 5-minute ceiling.
-        assertEquals(300_000, ApiCallExecutor.getDelayInMillis(call, true, 10));
+        // 100000 * 2^9 = 51,200,000 — capped to the hard ceiling, which has to stay
+        // inside the turn budget (a retry sleeps on the conversation thread).
+        assertEquals(30_000, ApiCallExecutor.getDelayInMillis(call, true, 10));
+        assertEquals(30_000, ApiCallExecutor.MAX_BACKOFF_MILLIS);
+    }
+
+    @Test
+    void getDelayInMillis_perCallBackoffCapLowersCeiling() {
+        ApiCall call = callWithBackoff(1_000);
+        call.getPostResponse().getRetryApiCallInstruction().setMaxBackoffDelayInMillis(2_500);
+        // 1000 * 2^4 = 16,000 — lowered to the configured 2.5s cap.
+        assertEquals(2_500, ApiCallExecutor.getDelayInMillis(call, true, 5));
+    }
+
+    @Test
+    void getDelayInMillis_perCallBackoffCapCannotExceedHardCeiling() {
+        ApiCall call = callWithBackoff(100_000);
+        call.getPostResponse().getRetryApiCallInstruction().setMaxBackoffDelayInMillis(600_000);
+        assertEquals(30_000, ApiCallExecutor.getDelayInMillis(call, true, 10));
     }
 
     @Test
@@ -674,6 +695,56 @@ class ApiCallExecutorTest {
     }
 
     // ==================== Exception from request.send() Tests ====================
+
+    // ==================== Timeout / Response Size Cap ====================
+
+    @Test
+    void execute_appliesDefaultTimeoutAndResponseSizeCapToRequest() throws Exception {
+        ApiCall call = createSimpleApiCall("bounded-call", false);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest).setTimeout(DEFAULT_TIMEOUT_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        verify(mockRequest).setMaxResponseSize(DEFAULT_MAX_RESPONSE_SIZE);
+    }
+
+    @Test
+    void execute_perCallTimeoutAndResponseSizeOverrideDefaults() throws Exception {
+        ApiCall call = createSimpleApiCall("tight-call", false);
+        call.setTimeoutInMillis(1_500);
+        call.setMaxResponseSizeInBytes(4_096);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest).setTimeout(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS);
+        verify(mockRequest).setMaxResponseSize(4_096);
+    }
+
+    @Test
+    void execute_oversizedSuccessBody_isTruncatedBeforeBeingStored() throws Exception {
+        ApiCall call = createSimpleApiCall("huge-call", true);
+        call.setMaxResponseSizeInBytes(100);
+        String hugeBody = "x".repeat(100_000);
+        setupSuccessResponse(200, hugeBody, "text/plain");
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals("x".repeat(100), result.get("body"));
+        verify(prePostUtils).createMemoryEntry(eq(currentStep), eq("x".repeat(100)), eq("response"), eq("httpCalls"));
+    }
+
+    @Test
+    void execute_successBodyWithinCap_isStoredUnchanged() throws Exception {
+        ApiCall call = createSimpleApiCall("small-call", true);
+        call.setMaxResponseSizeInBytes(100);
+        setupSuccessResponse(200, "short body", "text/plain");
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals("short body", result.get("body"));
+    }
 
     @Test
     void execute_requestSendThrowsException_wrapsInLifecycleException() throws Exception {

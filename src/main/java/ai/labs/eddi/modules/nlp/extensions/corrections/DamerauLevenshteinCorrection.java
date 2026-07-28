@@ -19,7 +19,16 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 public class DamerauLevenshteinCorrection implements ICorrection {
+    /**
+     * Upper bound on the number of correction candidates handed back for a single
+     * input token. Every candidate becomes an additional branch in the parser's
+     * match matrix, so returning the whole dictionary (which is what an unbounded
+     * result set amounts to) makes solution enumeration explode.
+     */
+    public static final int DEFAULT_MAX_CANDIDATES = 5;
+
     private final int maxDistance;
+    private final int maxCandidates;
     private final IDistanceCalculator distanceCalculator = new DamerauLevenshteinDistance();
     private final boolean lookupIfKnown;
     private List<IDictionary> dictionaries;
@@ -29,8 +38,13 @@ public class DamerauLevenshteinCorrection implements ICorrection {
     }
 
     public DamerauLevenshteinCorrection(int maxDistance, boolean lookupIfKnown) {
+        this(maxDistance, lookupIfKnown, DEFAULT_MAX_CANDIDATES);
+    }
+
+    public DamerauLevenshteinCorrection(int maxDistance, boolean lookupIfKnown, int maxCandidates) {
         this.maxDistance = maxDistance;
         this.lookupIfKnown = lookupIfKnown;
+        this.maxCandidates = maxCandidates < 1 ? DEFAULT_MAX_CANDIDATES : maxCandidates;
     }
 
     @Override
@@ -43,11 +57,23 @@ public class DamerauLevenshteinCorrection implements ICorrection {
         List<WordDistanceWrapper> foundWords = new LinkedList<>();
         var lowerCaseLookup = lookup.toLowerCase();
 
-        List<IDictionary> allDictionaries = new LinkedList<>();
-        allDictionaries.addAll(temporaryDictionaries);
-        allDictionaries.addAll(dictionaries);
+        collectCandidates(lowerCaseLookup, temporaryDictionaries, foundWords);
+        collectCandidates(lowerCaseLookup, dictionaries, foundWords);
 
-        for (IDictionary dictionary : allDictionaries) {
+        // Best (i.e. lowest) distance first, then keep only the top candidates —
+        // everything beyond is noise that would multiply the parser's search space.
+        Collections.sort(foundWords);
+
+        return foundWords.stream().limit(maxCandidates).map(foundWord -> new FoundWord(foundWord.word, true, matchingAccuracy(foundWord.distance)))
+                .collect(Collectors.toList());
+    }
+
+    private void collectCandidates(String lowerCaseLookup, List<IDictionary> dictionariesToScan, List<WordDistanceWrapper> foundWords) {
+        if (dictionariesToScan == null) {
+            return;
+        }
+
+        for (IDictionary dictionary : dictionariesToScan) {
             for (IDictionary.IWord word : dictionary.getWords()) {
                 final int distance = calculateDistance(lowerCaseLookup, word.getValue().toLowerCase());
 
@@ -58,13 +84,17 @@ public class DamerauLevenshteinCorrection implements ICorrection {
                 }
             }
         }
+    }
 
-        Collections.sort(foundWords);
-
-        return foundWords.stream().map(foundWord -> {
-            double matchingAccuracy = 1.0 - foundWord.distance;
-            return new FoundWord(foundWord.word, true, matchingAccuracy);
-        }).collect(Collectors.toList());
+    /**
+     * Maps an edit distance onto the documented 0..1 matching-accuracy scale. The
+     * previous {@code 1.0 - distance} produced 0.0 and even -1.0 for distances of 1
+     * and 2, which is outside the contract of
+     * {@link ai.labs.eddi.modules.nlp.model.FoundDictionaryEntry#getMatchingAccuracy()}.
+     */
+    private double matchingAccuracy(int distance) {
+        int worstAcceptableDistance = Math.max(1, maxDistance + 1);
+        return 1.0 - ((double) distance / worstAcceptableDistance);
     }
 
     @Override

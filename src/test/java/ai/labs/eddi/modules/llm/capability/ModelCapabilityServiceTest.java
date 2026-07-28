@@ -94,10 +94,70 @@ class ModelCapabilityServiceTest {
         }
 
         @Test
-        void blankModelUsesProviderDefault() {
-            assertTrue(service.supportsVision("openai", ""));
-            assertTrue(service.supportsVision("openai", null));
-            assertFalse(service.supportsVision("ollama", "")); // model-dependent → off without a known vision model
+        void blankModelIsUnsupported() {
+            // A blank model name carries no evidence of multimodality, so the table must
+            // fail closed rather than assume the provider's flagship.
+            assertFalse(service.supportsVision("openai", ""));
+            assertFalse(service.supportsVision("openai", null));
+            assertFalse(service.supportsVision("ollama", ""));
+        }
+    }
+
+    /**
+     * The built-in table is an allow-list: a model must be <em>recognised</em> to
+     * be considered capable.
+     * <p>
+     * It used to be a deny-list for the six "vision-first" providers
+     * ({@code !isKnownTextOnlyModel(model)}), which inverted the class contract —
+     * any model name the table did not know (a new release, a fine-tune, a
+     * provider-side alias) was declared multimodal, the attachment was forwarded,
+     * and the provider answered 400. These cases fail if that inversion returns.
+     */
+    @Nested
+    class UnknownModelsFailClosed {
+
+        @ParameterizedTest
+        @CsvSource({
+                "openai,some-brand-new-model",
+                "openai,gpt-4",
+                "azure-openai,my-custom-deployment",
+                "anthropic,claude-2.1",
+                "anthropic,not-a-claude-at-all",
+                "gemini,palm-2",
+                "gemini-vertex,text-bison",
+                "mistral,mistral-large-latest",
+                "ollama,phi4",
+                "bedrock,amazon.titan-text-express-v1"})
+        void unknownModelHasNoVision(String provider, String model) {
+            assertFalse(service.supportsVision(provider, model),
+                    provider + "/" + model + " is not in the capability table and must fail closed");
+        }
+
+        @Test
+        void unknownModelHasNoImageUrl() {
+            assertFalse(service.supportsImageUrl("openai", "some-brand-new-model"));
+            assertFalse(service.supportsImageUrl("azure-openai", "my-custom-deployment"));
+        }
+
+        @Test
+        void unknownModelHasNoNativeDocuments() {
+            assertFalse(service.supportsDocuments("anthropic", "not-a-claude-at-all"));
+            assertFalse(service.supportsDocuments("gemini", "palm-2"));
+        }
+
+        @Test
+        void unknownModelHasNoAudio() {
+            assertFalse(service.supportsAudio("gemini", "palm-2"));
+        }
+
+        @Test
+        void anAgentDesignerCanStillAssertTheCapabilityExplicitly() {
+            // The escape hatch for a working deployment whose model simply is not in the
+            // table yet: per task…
+            assertTrue(service.supportsVision("openai", "some-brand-new-model", Support.ON));
+            // …or per deployment.
+            config.put("eddi.multimodal.openai.vision", "on");
+            assertTrue(service.supportsVision("openai", "some-brand-new-model"));
         }
     }
 

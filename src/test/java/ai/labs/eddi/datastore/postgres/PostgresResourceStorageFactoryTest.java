@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -64,6 +65,33 @@ class PostgresResourceStorageFactoryTest {
 
         assertNotNull(storage);
         assertInstanceOf(PostgresResourceStorage.class, storage);
+    }
+
+    @Test
+    void shouldMaterialiseIndexHintsInsteadOfDiscardingThem() throws Exception {
+        DataSource dataSource = mock(DataSource.class);
+        @SuppressWarnings("unchecked")
+        Instance<DataSource> dataSourceInstance = mock(Instance.class);
+        when(dataSourceInstance.get()).thenReturn(dataSource);
+
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
+        IDocumentBuilder documentBuilder = mock(IDocumentBuilder.class);
+
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(statement);
+
+        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSourceInstance, jsonSerialization);
+        factory.create("descriptors", documentBuilder, String.class, "lastModifiedOn");
+
+        // The factory used to accept `indexes` and silently drop it, so callers
+        // that passed real hints (AgentStore, WorkflowStore, DescriptorStore) got
+        // sequential scans with no way to tell.
+        ArgumentCaptor<String> executed = ArgumentCaptor.forClass(String.class);
+        verify(statement, atLeastOnce()).execute(executed.capture());
+        assertTrue(String.join("\n", executed.getAllValues()).contains("data ->> 'lastModifiedOn'"),
+                "expected an expression index for the declared field, got: " + executed.getAllValues());
     }
 
     @Test

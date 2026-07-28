@@ -116,7 +116,9 @@ public class ToolExecutionService {
      * per-dispatch-name even when the configured limit came from a slug, so
      * {@code {"websearch": 30}} yields three independent 30/min buckets for
      * {@code searchWeb}, {@code searchNews} and {@code searchWikipedia} rather than
-     * one shared allowance.
+     * one shared allowance. Those buckets are additionally scoped to
+     * {@code conversationId}, so the configured limit is per conversation rather
+     * than deployment-wide.
      * </p>
      *
      * @param invocation
@@ -141,8 +143,9 @@ public class ToolExecutionService {
         }
 
         try {
-            // 1. Check rate limit
-            if (enableRateLimiting && !rateLimiter.tryAcquire(toolName, rateLimit)) {
+            // 1. Check rate limit — per conversation, so one conversation exhausting
+            // its allowance cannot starve the same tool for every other user.
+            if (enableRateLimiting && !rateLimiter.tryAcquire(conversationId, toolName, rateLimit)) {
                 meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
                 meterRegistry.counter("eddi.tool.execution.ratelimited", "tool", toolName).increment();
                 return "Error: Rate limit exceeded for tool: " + toolName;

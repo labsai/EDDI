@@ -378,66 +378,74 @@ class PrePostUtilsTest {
         }
     }
 
-    // ==================== buildListFromJson ====================
+    // ==================== buildIterationValues ====================
 
     @Nested
-    @DisplayName("buildListFromJson Tests")
-    class BuildListFromJsonTests {
+    @DisplayName("buildIterationValues Tests")
+    class BuildIterationValuesTests {
 
         @Test
         @DisplayName("builds list with filter expression")
         void withFilter() throws Exception {
-            when(templatingEngine.processTemplate(anyString(), anyMap()))
-                    .thenReturn("[\"item1\",\"item2\"]");
-            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
-                    .thenReturn(List.of("item1", "item2"));
+            stubIterationRender(List.of(List.of("item1"), List.of("item2")));
 
-            List<Object> result = prePostUtils.buildListFromJson(
-                    "item", "items", "item.active", null, new HashMap<>());
+            List<Object> result = prePostUtils.buildIterationValues("item", "items", "item.active", new HashMap<>());
 
-            assertEquals(2, result.size());
+            assertEquals(List.of("item1", "item2"), result);
         }
 
         @Test
         @DisplayName("builds list without filter expression")
         void withoutFilter() throws Exception {
-            when(templatingEngine.processTemplate(anyString(), anyMap()))
-                    .thenReturn("[\"val\"]");
-            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
-                    .thenReturn(List.of("val"));
+            stubIterationRender(List.of(List.of("val")));
 
-            List<Object> result = prePostUtils.buildListFromJson(
-                    "item", "items", null, null, new HashMap<>());
+            List<Object> result = prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
 
-            assertEquals(1, result.size());
+            assertEquals(List.of("val"), result);
         }
 
         @Test
-        @DisplayName("builds list with custom iteration value")
-        void withIterationValue() throws Exception {
-            when(templatingEngine.processTemplate(anyString(), anyMap()))
-                    .thenReturn("[{\"name\":\"test\"}]");
-            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
-                    .thenReturn(List.of(Map.of("name", "test")));
+        @DisplayName("nothing rendered — empty list")
+        void nothingRendered() throws Exception {
+            stubIterationRender(List.of());
 
-            List<Object> result = prePostUtils.buildListFromJson(
-                    "item", "items", null, "{\"name\":\"{item.name}\"}", new HashMap<>());
+            List<Object> result = prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
 
-            assertEquals(1, result.size());
+            assertTrue(result.isEmpty());
         }
 
         @Test
-        @DisplayName("builds list with null iteration value uses default template")
-        void withNullIterationValue() throws Exception {
-            when(templatingEngine.processTemplate(anyString(), anyMap()))
-                    .thenReturn("[\"defaultVal\"]");
-            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
-                    .thenReturn(List.of("defaultVal"));
+        @DisplayName("values containing quotes and newlines survive verbatim")
+        void unsafeValuesSurviveVerbatim() throws Exception {
+            var unsafe = "he said \"hi\"\nback\\slash";
+            stubIterationRender(List.of(List.of(unsafe)));
 
-            List<Object> result = prePostUtils.buildListFromJson(
-                    "obj", "objects", null, "", new HashMap<>());
+            List<Object> result = prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
 
-            assertEquals(1, result.size());
+            assertEquals(List.of(unsafe), result);
         }
+    }
+
+    /**
+     * Stand in for the templating engine: read the per-invocation delimiters back
+     * out of the generated Qute template and emit the given rows with them.
+     */
+    private void stubIterationRender(List<List<String>> renderedRows) throws Exception {
+        when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(invocation -> {
+            String template = invocation.getArgument(0);
+            String rowDelimiter = extractDelimiter(template, "eddiRow");
+            String fieldDelimiter = extractDelimiter(template, "eddiField");
+
+            var rendered = new StringBuilder();
+            for (var row : renderedRows) {
+                rendered.append(String.join(fieldDelimiter, row)).append(rowDelimiter);
+            }
+            return rendered.toString();
+        });
+    }
+
+    private static String extractDelimiter(String template, String prefix) {
+        var matcher = java.util.regex.Pattern.compile(prefix + "[0-9a-f]{32}").matcher(template);
+        return matcher.find() ? matcher.group() : "";
     }
 }

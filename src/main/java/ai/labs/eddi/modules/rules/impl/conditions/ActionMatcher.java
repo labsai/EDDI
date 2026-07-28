@@ -93,8 +93,17 @@ public class ActionMatcher extends BaseMatcher {
         }
     }
 
+    @Override
+    public void validateConfiguration() {
+        if (actions.isEmpty()) {
+            throw new IllegalArgumentException(String.format(
+                    "'%s' requires a non-empty '%s' config value — an empty matcher would match every conversation step.", ID,
+                    actionsQualifier));
+        }
+    }
+
     private List<String> convertToActions(String actions) {
-        return Stream.of(actions.split(",")).map(String::trim).toList();
+        return Stream.of(actions.split(",")).map(String::trim).filter(action -> !action.isEmpty()).toList();
     }
 
     private boolean isActionEmpty(List<String> actions) {

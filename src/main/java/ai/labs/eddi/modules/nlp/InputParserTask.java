@@ -29,6 +29,7 @@ import ai.labs.eddi.modules.nlp.extensions.dictionaries.providers.IDictionaryPro
 import ai.labs.eddi.modules.nlp.extensions.normalizers.INormalizer;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.providers.INormalizerProvider;
 import ai.labs.eddi.modules.nlp.internal.InputParser;
+import ai.labs.eddi.modules.nlp.internal.Limits;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -44,6 +45,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType.BOOLEAN;
+import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType.INT;
 import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
 import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_MATCHES;
 import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
@@ -67,6 +69,9 @@ public class InputParserTask implements ILifecycleTask {
     private static final String CONFIG_APPEND_EXPRESSIONS = "appendExpressions";
     private static final String CONFIG_INCLUDE_UNUSED = "includeUnused";
     private static final String CONFIG_INCLUDE_UNKNOWN = "includeUnknown";
+    private static final String CONFIG_MAX_INPUT_TOKENS = "maxInputTokens";
+    private static final String CONFIG_MAX_SUGGESTIONS = "maxSuggestions";
+    private static final String CONFIG_MAX_SOLUTIONS = "maxSolutions";
     private static final String EXTENSION_NAME_NORMALIZER = "normalizer";
     private static final String EXTENSION_NAME_DICTIONARIES = "dictionaries";
     private static final String EXTENSION_NAME_CORRECTIONS = "corrections";
@@ -177,35 +182,45 @@ public class InputParserTask implements ILifecycleTask {
     }
 
     private void storeResultInMemory(IWritableConversationStep currentStep, List<RawSolution> parsedSolutions, IInputParser.Config parserConfig) {
-        if (!parsedSolutions.isEmpty()) {
-            Solution solution = extractExpressions(parsedSolutions, parserConfig.isIncludeUnused(), parserConfig.isIncludeUnknown()).getFirst();
+        if (parsedSolutions.isEmpty()) {
+            return;
+        }
 
-            Expressions newExpressions = solution.getExpressions();
-            if (parserConfig.isAppendExpressions() && !newExpressions.isEmpty()) {
-                IData<String> latestExpressions = currentStep.getLatestData(EXPRESSIONS_PARSED);
-                if (latestExpressions != null) {
-                    Expressions currentExpressions = expressionProvider.parseExpressions(latestExpressions.getResult());
-                    currentExpressions.addAll(newExpressions);
-                    newExpressions = currentExpressions.stream().distinct().collect(Collectors.toCollection(Expressions::new));
-                }
+        Solution solution = extractExpressions(parsedSolutions, parserConfig.isIncludeUnused(), parserConfig.isIncludeUnknown()).getFirst();
 
-                String expressionString = joinStrings(", ", newExpressions);
-                IData<String> expressionsData = new Data<>(EXPRESSIONS_PARSED.key(), expressionString);
-                currentStep.storeData(expressionsData);
-                currentStep.addConversationOutputString(KEY_EXPRESSIONS, expressionString);
+        Expressions newExpressions = solution.getExpressions();
+        if (newExpressions.isEmpty()) {
+            return;
+        }
 
-                List<String> intents = newExpressions.stream().map(Expression::getExpressionName).distinct().toList();
-
-                Data<List<String>> intentData = new Data<>(INTENTS.key(), intents);
-                currentStep.storeData(intentData);
-                currentStep.addConversationOutputList(INTENTS.key(), intents);
-
-                // Store input→expression matches for debugging/audit
-                List<String> matchDetails = solution.getMatchDetails();
-                if (!matchDetails.isEmpty()) {
-                    currentStep.storeData(new Data<>(EXPRESSIONS_MATCHES.key(), matchDetails));
-                }
+        // 'appendExpressions' only decides whether the freshly parsed expressions are
+        // merged with the ones already present on this step — it must never suppress
+        // storing them, otherwise downstream behaviour rules would see no expressions
+        // and no intents at all.
+        if (parserConfig.isAppendExpressions()) {
+            IData<String> latestExpressions = currentStep.getLatestData(EXPRESSIONS_PARSED);
+            if (latestExpressions != null) {
+                Expressions currentExpressions = expressionProvider.parseExpressions(latestExpressions.getResult());
+                currentExpressions.addAll(newExpressions);
+                newExpressions = currentExpressions.stream().distinct().collect(Collectors.toCollection(Expressions::new));
             }
+        }
+
+        String expressionString = joinStrings(", ", newExpressions);
+        IData<String> expressionsData = new Data<>(EXPRESSIONS_PARSED.key(), expressionString);
+        currentStep.storeData(expressionsData);
+        currentStep.addConversationOutputString(KEY_EXPRESSIONS, expressionString);
+
+        List<String> intents = newExpressions.stream().map(Expression::getExpressionName).distinct().toList();
+
+        Data<List<String>> intentData = new Data<>(INTENTS.key(), intents);
+        currentStep.storeData(intentData);
+        currentStep.addConversationOutputList(INTENTS.key(), intents);
+
+        // Store input→expression matches for debugging/audit
+        List<String> matchDetails = solution.getMatchDetails();
+        if (!matchDetails.isEmpty()) {
+            currentStep.storeData(new Data<>(EXPRESSIONS_MATCHES.key(), matchDetails));
         }
     }
 
@@ -230,6 +245,10 @@ public class InputParserTask implements ILifecycleTask {
             config.setIncludeUnknown(Boolean.parseBoolean(includeUnknown.toString()));
         }
 
+        var limits = new Limits(parsePositiveInt(configuration.get(CONFIG_MAX_INPUT_TOKENS), Limits.DEFAULT.maxInputTokens()),
+                parsePositiveInt(configuration.get(CONFIG_MAX_SUGGESTIONS), Limits.DEFAULT.maxSuggestions()),
+                parsePositiveInt(configuration.get(CONFIG_MAX_SOLUTIONS), Limits.DEFAULT.maxSolutions()));
+
         List<INormalizer> normalizers = new LinkedList<>();
         List<IDictionary> dictionaries = new LinkedList<>();
         List<ICorrection> corrections = new LinkedList<>();
@@ -251,7 +270,31 @@ public class InputParserTask implements ILifecycleTask {
             }
         }
 
-        return new InputParser(normalizers, dictionaries, corrections, config);
+        return new InputParser(normalizers, dictionaries, corrections, config, limits);
+    }
+
+    /**
+     * Reads an optional positive integer from the workflow configuration. Missing,
+     * blank or unparseable values fall back to the given default so that a
+     * malformed config never disables the parser's safety limits.
+     */
+    private static int parsePositiveInt(Object value, int defaultValue) {
+        if (isNullOrEmpty(value)) {
+            return defaultValue;
+        }
+
+        try {
+            int parsed = Integer.parseInt(value.toString().trim());
+            if (parsed < 1) {
+                log.warnf("Parser limit must be greater than 0, but was %s. Falling back to %s.", parsed, defaultValue);
+                return defaultValue;
+            }
+
+            return parsed;
+        } catch (NumberFormatException e) {
+            log.warnf("Parser limit '%s' is not a number. Falling back to %s.", value, defaultValue);
+            return defaultValue;
+        }
     }
 
     private List<Map<String, Object>> convertObjectToListOfMaps(Object extension) {
@@ -295,6 +338,9 @@ public class InputParserTask implements ILifecycleTask {
         extensionConfigs.put(CONFIG_APPEND_EXPRESSIONS, new ConfigValue("Append Expressions", BOOLEAN, true, true));
         extensionConfigs.put(CONFIG_INCLUDE_UNUSED, new ConfigValue("Include Unused Expressions", BOOLEAN, true, true));
         extensionConfigs.put(CONFIG_INCLUDE_UNKNOWN, new ConfigValue("Include Unknown Expressions", BOOLEAN, true, true));
+        extensionConfigs.put(CONFIG_MAX_INPUT_TOKENS, new ConfigValue("Max Input Tokens", INT, true, Limits.DEFAULT.maxInputTokens()));
+        extensionConfigs.put(CONFIG_MAX_SUGGESTIONS, new ConfigValue("Max Suggestions Evaluated", INT, true, Limits.DEFAULT.maxSuggestions()));
+        extensionConfigs.put(CONFIG_MAX_SOLUTIONS, new ConfigValue("Max Solutions Collected", INT, true, Limits.DEFAULT.maxSolutions()));
         extensionDescriptor.setConfigs(extensionConfigs);
 
         return extensionDescriptor;

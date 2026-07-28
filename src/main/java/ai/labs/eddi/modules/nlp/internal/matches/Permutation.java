@@ -26,21 +26,12 @@ public class Permutation implements Iterable<Integer[]> {
     public class PermutationIterator implements Iterator<Integer[]> {
         private Integer[] values;
 
-        private int factorial;
-        private int factorialCounter;
-
         private Integer[] next = null;
 
         PermutationIterator(Integer[] values) {
             this.values = Arrays.copyOf(values, values.length);
 
             Arrays.sort(this.values);
-
-            factorial = 1;
-            for (int i = 0; i < this.values.length; i++) {
-                factorial *= (i + 1);
-            }
-            factorialCounter = 0;
 
             next = this.values;
         }
@@ -68,42 +59,44 @@ public class Permutation implements Iterable<Integer[]> {
         }
 
         private Integer[] calculateNext() {
-            factorialCounter++;
-            if (factorialCounter < factorial) {
-                int firstNonDecreasingIndex = -1;
-                int swapPoint = -1;
-
-                for (int i = values.length - 1; i > 0; i--) {
-                    if (values[i - 1].compareTo(values[i]) < 0) {
-                        firstNonDecreasingIndex = i - 1;
-                        break;
-                    } else if (i == 1) {
-                        return null;
-                    }
-                } // from the end, find first index that
-                  // arrayToPermute[index]<arrayToPermute[index+1]
-
-                for (int i = values.length - 1; i > firstNonDecreasingIndex; i--) {
-                    if (values[firstNonDecreasingIndex].compareTo(values[i]) < 0) {
-                        swapPoint = i;
-                        break;
-                    } // finding the first numthat arrayToPermute[swapPoint]>arrayToPermute[index]
-                }
-                Integer tmp = values[firstNonDecreasingIndex];
-                values[firstNonDecreasingIndex] = values[swapPoint];
-                values[swapPoint] = tmp;// swap arrayToPermute[index], arrayToPermute[swapPoint]
-
-                // swap the index+1...end sequences
-                for (int i = 0; i < (values.length - 1 - firstNonDecreasingIndex) / 2; i++) {
-                    tmp = values[firstNonDecreasingIndex + 1 + i];
-                    values[firstNonDecreasingIndex + 1 + i] = values[values.length - 1 - i];
-                    values[values.length - 1 - i] = tmp;
-                }
-
-                return values;
+            // Fewer than two elements cannot be reordered, so there is no successor
+            // permutation. Guarding here also keeps the index arithmetic below in range.
+            if (values.length < 2) {
+                return null;
             }
 
-            return null;
+            int firstNonDecreasingIndex = -1;
+            int swapPoint = -1;
+
+            for (int i = values.length - 1; i > 0; i--) {
+                if (values[i - 1].compareTo(values[i]) < 0) {
+                    firstNonDecreasingIndex = i - 1;
+                    break;
+                } else if (i == 1) {
+                    // the sequence is fully descending, i.e. the last permutation
+                    return null;
+                }
+            } // from the end, find first index that
+              // arrayToPermute[index]<arrayToPermute[index+1]
+
+            for (int i = values.length - 1; i > firstNonDecreasingIndex; i--) {
+                if (values[firstNonDecreasingIndex].compareTo(values[i]) < 0) {
+                    swapPoint = i;
+                    break;
+                } // finding the first numthat arrayToPermute[swapPoint]>arrayToPermute[index]
+            }
+            Integer tmp = values[firstNonDecreasingIndex];
+            values[firstNonDecreasingIndex] = values[swapPoint];
+            values[swapPoint] = tmp;// swap arrayToPermute[index], arrayToPermute[swapPoint]
+
+            // swap the index+1...end sequences
+            for (int i = 0; i < (values.length - 1 - firstNonDecreasingIndex) / 2; i++) {
+                tmp = values[firstNonDecreasingIndex + 1 + i];
+                values[firstNonDecreasingIndex + 1 + i] = values[values.length - 1 - i];
+                values[values.length - 1 - i] = tmp;
+            }
+
+            return values;
         }
     }
 }

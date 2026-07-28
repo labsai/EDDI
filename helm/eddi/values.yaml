@@ -2,20 +2,41 @@
 # EDDI Helm Chart — Default Values
 # ─────────────────────────────────────────────────────────────
 # Override any value with --set or a custom values.yaml file:
-#   helm install eddi ./helm/eddi --set eddi.replicas=3
+#   helm install eddi ./helm/eddi --set eddi.vaultMasterKey="$(openssl rand -base64 24)"
 #   helm install eddi ./helm/eddi -f my-values.yaml
+#
+# ⚠️  The chart intentionally has NO default credentials. eddi.vaultMasterKey is
+# mandatory, and postgres.password / keycloak.adminPassword are mandatory when
+# those components are enabled — rendering fails with a clear message otherwise.
 
 # ── EDDI Server ────────────────────────────────────────────
 
 eddi:
   image:
     repository: labsai/eddi
-    tag: "6"
+    # Immutable patch version — never the mutable major tag "6", which lets the
+    # running bits drift away from the digest CI signed and attested.
+    tag: "6.2.0"
+    # Strongest form: also pin the digest, so the kubelet verifies exactly what
+    # cosign signed. Resolve it once per release with `crane digest`:
+    #   digest: "sha256:<64 hex chars>"
+    digest: ""
     pullPolicy: IfNotPresent
 
+  # ⚠️  MUST stay 1 — the chart refuses to render anything higher.
+  #
+  # EDDI serialises the turns of a single conversation with a JVM-LOCAL lock
+  # (InMemoryConversationCoordinator: one BlockingQueue per conversation guarded
+  # by synchronized(queue)). The NATS coordinator is not an escape: JetStream is
+  # only an ordering primitive and the Callable still runs in the JVM that
+  # published it. Two replicas without sticky sessions means two turns of one
+  # conversation run concurrently, both replaceOne() the whole conversation
+  # document, and one turn is SILENTLY LOST. Replay-protection nonces are
+  # in-memory too, so a replayed signed envelope that lands on another pod goes
+  # undetected. Scale vertically via eddi.resources instead.
   replicas: 1
 
-  # Vault master key — encrypts API keys and secrets
+  # Vault master key — encrypts API keys and secrets. REQUIRED.
   # ⚠️  If you lose this key, encrypted secrets are UNRECOVERABLE
   # Generate: openssl rand -base64 24
   vaultMasterKey: ""
@@ -80,7 +101,9 @@ postgres:
     tag: "16-alpine"
   database: eddi
   username: eddi
-  password: eddi
+  # REQUIRED when postgres.enabled=true — no default is shipped.
+  # Generate: openssl rand -base64 24
+  password: ""
   storage:
     size: 10Gi
     # storageClassName: standard
@@ -117,7 +140,9 @@ keycloak:
     repository: quay.io/keycloak/keycloak
     tag: "26.0"
   adminUsername: admin
-  adminPassword: admin
+  # REQUIRED when keycloak.enabled=true — no default is shipped.
+  # Generate: openssl rand -base64 24
+  adminPassword: ""
   resources:
     requests:
       cpu: 250m
@@ -159,24 +184,43 @@ ingress:
   #      - eddi.example.com
 
 # ── Autoscaling ────────────────────────────────────────────
+#
+# ⚠️  NOT SUPPORTED. Setting enabled=true makes the chart FAIL to render, with
+# an explanation — see eddi.replicas above for why EDDI cannot run more than one
+# replica today. The knobs stay here so the shape is ready for the distributed
+# conversation coordinator; min/max are pinned to 1 in the meantime.
 
 autoscaling:
   enabled: false
-  minReplicas: 2
-  maxReplicas: 10
+  minReplicas: 1
+  maxReplicas: 1
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 
 # ── Pod Disruption Budget ──────────────────────────────────
+#
+# maxUnavailable, not minAvailable: at exactly 1 replica, `minAvailable: 1`
+# means the eviction API can never succeed and `kubectl drain` hangs forever.
 
 podDisruptionBudget:
   enabled: false
-  minAvailable: 1
+  maxUnavailable: 1
 
 # ── Network Policy ─────────────────────────────────────────
+#
+# Renders templates/networkpolicy.yaml: default-deny for the EDDI pod plus
+# explicit ingress/egress allowances. The egress rule mirrors the application's
+# own SSRF blocklist (link-local / metadata, RFC1918, loopback, CGNAT) at the
+# network layer.
 
 networkPolicy:
   enabled: false
+  # Namespaces allowed to reach EDDI on 7070, by metadata.name. The release
+  # namespace is always allowed. Add your ingress controller's namespace here.
+  allowedIngressNamespaces: []
+  # Extra destination ports opened for egress (DNS/443 and the in-chart
+  # datastores are handled automatically).
+  extraEgressPorts: []
 
 # ── Monitoring ─────────────────────────────────────────────
 

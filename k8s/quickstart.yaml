@@ -5,11 +5,17 @@
 #
 #   kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
 #
-# After deploying, generate the vault master key:
+# After deploying, generate the vault master key. EDDI reads its secrets from a
+# mounted FILE rather than environment variables (env is readable via
+# /proc/<pid>/environ and leaks into crash dumps), so the Secret holds one
+# properties file:
 #
+#   printf 'eddi.vault.master-key=%s\n' "$(openssl rand -base64 24)" \
+#     > /tmp/application-secrets.properties
 #   kubectl create secret generic eddi-secrets \
 #     --namespace=eddi \
-#     --from-literal=EDDI_VAULT_MASTER_KEY="$(openssl rand -base64 24)"
+#     --from-file=/tmp/application-secrets.properties
+#   shred -u /tmp/application-secrets.properties
 #
 # Then restart EDDI to pick up the key:
 #
@@ -58,7 +64,10 @@ metadata:
     app.kubernetes.io/name: eddi
 type: Opaque
 stringData:
-  EDDI_VAULT_MASTER_KEY: ""
+  # One key holding a Quarkus properties file; mounted at
+  # /etc/eddi/secrets and loaded through QUARKUS_CONFIG_LOCATIONS.
+  application-secrets.properties: |
+    eddi.vault.master-key=
 
 ---
 # --- MongoDB Service ---
@@ -173,6 +182,8 @@ metadata:
     app.kubernetes.io/component: server
     app.kubernetes.io/part-of: eddi
 spec:
+  # ⚠️  MUST stay 1 — EDDI serialises conversation turns with a JVM-local lock,
+  # so a second replica silently loses writes. See k8s/base/eddi-deployment.yaml.
   replicas: 1
   strategy:
     type: RollingUpdate
@@ -200,20 +211,62 @@ spec:
         runAsUser: 185
         runAsGroup: 185
         fsGroup: 185
+        seccompProfile:
+          type: RuntimeDefault
       terminationGracePeriodSeconds: 30
+      volumes:
+        - name: eddi-secrets
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: eddi-secrets
+        # Writable scratch required by readOnlyRootFilesystem:
+        #   /tmp             java.io.tmpdir (upload buffer, PDF extraction)
+        #   /deployments/tmp agent export/import scratch
+        #   /opt/eddi/data   audit ledger dead-letter file
+        - name: tmp
+          emptyDir: {}
+        - name: deployments-tmp
+          emptyDir: {}
+        - name: eddi-data
+          emptyDir: {}
       containers:
         - name: eddi
-          image: labsai/eddi:6
+          # Immutable patch tag, not the mutable ":6". Append @sha256:<digest>
+          # after `cosign verify`ing the release to pin exactly what CI signed.
+          image: labsai/eddi:6.2.0
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 185
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: 7070
               name: http
               protocol: TCP
+          env:
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /etc/eddi/secrets/application-secrets.properties
           envFrom:
             - configMapRef:
                 name: eddi-config
-            - secretRef:
-                name: eddi-secrets
+          volumeMounts:
+            - name: eddi-secrets
+              mountPath: /etc/eddi/secrets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: deployments-tmp
+              mountPath: /deployments/tmp
+            - name: eddi-data
+              mountPath: /opt/eddi/data
           startupProbe:
             httpGet:
               path: /q/health/ready

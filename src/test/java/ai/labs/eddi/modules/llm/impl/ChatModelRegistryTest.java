@@ -728,6 +728,51 @@ class ChatModelRegistryTest {
         }
     }
 
+    /**
+     * The parameter map is the cache key and {@code LlmTask} resolves its Qute
+     * templates before calling in here, so a task configured with
+     * {@code "modelName": "{properties.preferredModel}"} produces a distinct key —
+     * and a distinct model plus HTTP client — per conversation-derived value. On
+     * the plain {@code ConcurrentHashMap}s this class used to hold, that grew
+     * without limit for the lifetime of the process.
+     */
+    @Nested
+    @DisplayName("Caches are bounded (F2)")
+    class BoundedCacheTests {
+
+        @Test
+        @DisplayName("many distinct templated model names do not grow the cache without limit")
+        void manyDistinctModelNames_cacheStaysBounded() throws Exception {
+            int distinctValues = ChatModelRegistry.MAX_CACHED_MODELS * 3;
+            for (int i = 0; i < distinctValues; i++) {
+                var params = new HashMap<String, String>();
+                params.put("apiKey", "test");
+                // What a resolved "{properties.preferredModel}" looks like by the time it
+                // reaches the registry: one distinct value per conversation.
+                params.put("modelName", "tuned-model-" + i);
+                uniqueRegistry.getOrCreate("openai", params);
+                uniqueRegistry.getOrCreateStreaming("openai", params);
+            }
+
+            int[] counts = uniqueRegistry.cachedModelCounts();
+            assertTrue(counts[0] <= ChatModelRegistry.MAX_CACHED_MODELS,
+                    "sync cache held " + counts[0] + " entries after " + distinctValues
+                            + " distinct model names; the bound is " + ChatModelRegistry.MAX_CACHED_MODELS);
+            assertTrue(counts[1] <= ChatModelRegistry.MAX_CACHED_MODELS,
+                    "streaming cache held " + counts[1] + " entries after " + distinctValues
+                            + " distinct model names; the bound is " + ChatModelRegistry.MAX_CACHED_MODELS);
+        }
+
+        @Test
+        @DisplayName("bounding does not break plain caching of a repeated config")
+        void repeatedConfigStillHitsTheCache() throws Exception {
+            var params = Map.of("apiKey", "test", "modelName", "gpt-4o");
+            ChatModel first = uniqueRegistry.getOrCreate("openai", params);
+            assertSame(first, uniqueRegistry.getOrCreate("openai", params),
+                    "a bounded cache is still a cache");
+        }
+    }
+
     @Nested
     @DisplayName("Secret invalidation tests")
     class InvalidationTests {

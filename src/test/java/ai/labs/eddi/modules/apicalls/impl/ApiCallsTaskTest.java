@@ -156,6 +156,103 @@ class ApiCallsTaskTest {
         }
 
         @Test
+        @DisplayName("wildcard call fires exactly once for a multi-action turn")
+        @SuppressWarnings("unchecked")
+        void wildcardActionFiresOncePerTurn() throws Exception {
+            IData<List<String>> actionsData = mock(IData.class);
+            when(actionsData.getResult()).thenReturn(List.of("greet", "lookup", "farewell"));
+            when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+
+            ApiCall wildcardCall = new ApiCall();
+            wildcardCall.setActions(List.of("*"));
+
+            ApiCallsConfiguration config = new ApiCallsConfiguration();
+            config.setHttpCalls(List.of(wildcardCall));
+            config.setTargetServerUrl("http://localhost:8080");
+
+            when(httpCallExecutor.execute(any(), any(), any(), any())).thenReturn(null);
+
+            task.execute(memory, config);
+
+            // Once per turn — not once per action, which would repeat a non-idempotent
+            // POST.
+            verify(httpCallExecutor, times(1)).execute(eq(wildcardCall), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("call matching several actions of the same turn fires exactly once")
+        @SuppressWarnings("unchecked")
+        void multiActionCallFiresOncePerTurn() throws Exception {
+            IData<List<String>> actionsData = mock(IData.class);
+            when(actionsData.getResult()).thenReturn(List.of("greet", "lookup"));
+            when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+
+            ApiCall multiActionCall = new ApiCall();
+            multiActionCall.setActions(List.of("greet", "lookup"));
+
+            ApiCallsConfiguration config = new ApiCallsConfiguration();
+            config.setHttpCalls(List.of(multiActionCall));
+            config.setTargetServerUrl("http://localhost:8080");
+
+            when(httpCallExecutor.execute(any(), any(), any(), any())).thenReturn(null);
+
+            task.execute(memory, config);
+
+            verify(httpCallExecutor, times(1)).execute(eq(multiActionCall), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("each matching call still fires, in the order it is first triggered")
+        @SuppressWarnings("unchecked")
+        void unionKeepsTriggerOrder() throws Exception {
+            IData<List<String>> actionsData = mock(IData.class);
+            when(actionsData.getResult()).thenReturn(List.of("greet", "farewell"));
+            when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+
+            ApiCall farewellCall = new ApiCall();
+            farewellCall.setActions(List.of("farewell"));
+            ApiCall greetCall = new ApiCall();
+            greetCall.setActions(List.of("greet"));
+
+            ApiCallsConfiguration config = new ApiCallsConfiguration();
+            config.setHttpCalls(List.of(farewellCall, greetCall));
+            config.setTargetServerUrl("http://localhost:8080");
+
+            when(httpCallExecutor.execute(any(), any(), any(), any())).thenReturn(null);
+
+            task.execute(memory, config);
+
+            var inOrder = inOrder(httpCallExecutor);
+            inOrder.verify(httpCallExecutor).execute(eq(greetCall), any(), any(), any());
+            inOrder.verify(httpCallExecutor).execute(eq(farewellCall), any(), any(), any());
+            verify(httpCallExecutor, times(2)).execute(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("call without actions is skipped instead of exploding")
+        @SuppressWarnings("unchecked")
+        void callWithoutActionsIsSkipped() throws Exception {
+            IData<List<String>> actionsData = mock(IData.class);
+            when(actionsData.getResult()).thenReturn(List.of("greet"));
+            when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+
+            ApiCall toolOnlyCall = new ApiCall();
+            toolOnlyCall.setActions(null);
+
+            ApiCallsConfiguration config = new ApiCallsConfiguration();
+            config.setHttpCalls(List.of(toolOnlyCall));
+            config.setTargetServerUrl("http://localhost:8080");
+
+            task.execute(memory, config);
+
+            verifyNoInteractions(httpCallExecutor);
+        }
+
+        @Test
         @DisplayName("empty actions list — no API calls executed")
         @SuppressWarnings("unchecked")
         void emptyActionsList() throws Exception {

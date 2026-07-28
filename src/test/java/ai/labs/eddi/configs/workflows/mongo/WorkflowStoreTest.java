@@ -11,9 +11,11 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,10 +39,47 @@ class WorkflowStoreTest {
         resourceStorage = mock(IResourceStorage.class);
 
         when(storageFactory.create(eq("workflows"), eq(documentBuilder), eq(WorkflowConfiguration.class),
-                eq("WorkflowSteps.config.uri"), eq("WorkflowSteps.extensions.dictionaries.config.uri")))
+                eq("workflowSteps.config.uri"), eq("workflowSteps.extensions.dictionaries.config.uri")))
                 .thenReturn(resourceStorage);
 
         store = new WorkflowStore(storageFactory, documentBuilder, documentDescriptorStore);
+    }
+
+    // ==================== persisted field paths ====================
+
+    @Test
+    @DisplayName("query paths match the field name WorkflowConfiguration actually serializes")
+    void queryPathsMatchPersistedFieldName() throws Exception {
+        WorkflowConfiguration config = new WorkflowConfiguration();
+        config.getWorkflowSteps().add(new WorkflowConfiguration.WorkflowStep());
+        String persisted = new ObjectMapper().writeValueAsString(config);
+
+        // The paths were spelled "WorkflowSteps" while the document says
+        // "workflowSteps". Both MongoDB paths and PostgreSQL JSON keys are
+        // case-sensitive, so every reverse lookup silently matched nothing — which
+        // is what turned the cascade-delete reference guard into a no-op.
+        assertTrue(persisted.contains("\"workflowSteps\""), "unexpected persisted shape: " + persisted);
+        assertTrue(persisted.contains("\"" + WorkflowStore.WORKFLOW_EXTENSIONS_FIELD + "\""),
+                "WORKFLOW_EXTENSIONS_FIELD does not name a persisted field");
+
+        String root = WorkflowStore.WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD.substring(0,
+                WorkflowStore.WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD.indexOf('.'));
+        assertTrue(persisted.contains("\"" + root + "\""), "config-uri query path does not start at a persisted field: " + root);
+        assertEquals(root, WorkflowStore.WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD.substring(0,
+                WorkflowStore.WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD.indexOf('.')));
+    }
+
+    @Test
+    @DisplayName("getWorkflowDescriptorsContainingResource — queries the persisted, case-correct paths")
+    void queriesPersistedPaths() throws Exception {
+        when(resourceStorage.findResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+        when(resourceStorage.findHistoryResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+
+        store.getWorkflowDescriptorsContainingResource("eddi://ai.labs.output/outputstore/outputsets/out1?version=1", false);
+
+        var pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(resourceStorage, atLeastOnce()).findResourceIdsContaining(pathCaptor.capture(), anyString());
+        assertEquals(List.of("workflowSteps.config.uri", "workflowSteps.extensions.dictionaries.config.uri"), pathCaptor.getAllValues());
     }
 
     // ==================== create ====================

@@ -50,7 +50,7 @@ public class WordSplitter {
             tmp = lookup.substring(lastPos, i);
             if (CharacterUtilities.isStringInteger(tmp))
                 continue;
-            else if (LanguageUtilities.isOrdinalNumber(lookup.substring(lastPos, i + 1)) != null) {
+            else if (LanguageUtilities.extractOrdinalValue(lookup.substring(lastPos, i + 1)).isPresent()) {
                 lookup.insert(i + 1, " ");
                 i++;
                 lastPos = i + 1;

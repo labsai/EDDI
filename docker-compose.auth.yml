@@ -11,6 +11,10 @@ services:
   eddi:
     environment:
       QUARKUS_OIDC_TENANT_ENABLED: "true"
+      # Close the quick-start escape hatch that docker-compose.yml leaves open:
+      # with this overlay every endpoint is behind Keycloak, so AuthStartupGuard
+      # must not be told to tolerate an unauthenticated deployment.
+      EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "false"
       # Backend uses Docker-internal hostname to reach Keycloak container
       QUARKUS_OIDC_AUTH_SERVER_URL: "http://keycloak:8080/realms/eddi"
       QUARKUS_OIDC_CLIENT_ID: "eddi-backend"

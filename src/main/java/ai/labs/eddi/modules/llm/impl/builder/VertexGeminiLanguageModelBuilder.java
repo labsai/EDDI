@@ -9,6 +9,7 @@ import dev.langchain4j.model.vertexai.gemini.VertexAiGeminiChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -16,12 +17,24 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 @ApplicationScoped
 public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_PUBLISHER = "publisher";
-    private static final String KEY_MODEL_ID = "modelID";
+    /**
+     * Spelled exactly {@code modelId} — the same key Bedrock and HuggingFace use
+     * and the one {@code LlmTask.resolveModelName} falls back to. While this
+     * constant read {@code "modelID"} a gemini-vertex task built a model with no
+     * name at all AND resolved a null model name downstream, so capability lookup,
+     * token estimation and audit-ledger model naming all lost the model identity.
+     */
+    private static final String KEY_MODEL_ID = "modelId";
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_PROJECT_ID = "projectId";
     private static final String KEY_LOCATION = "location";
     private static final String KEY_LOG_REQUESTS = "logRequests";
     private static final String KEY_LOG_RESPONSES = "logResponses";
+
+    @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_PUBLISHER, KEY_MODEL_ID, KEY_TEMPERATURE, KEY_PROJECT_ID, KEY_LOCATION, KEY_LOG_REQUESTS, KEY_LOG_RESPONSES);
+    }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {

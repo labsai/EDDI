@@ -41,13 +41,21 @@ public class PostgresResourceStorageFactory implements IResourceStorageFactory {
         this.jsonSerialization = jsonSerialization;
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * {@code documentBuilder} is accepted for interface compatibility but unused:
+     * PostgreSQL storage goes through {@link IJsonSerialization} directly for
+     * JSON↔object conversion.
+     * <p>
+     * {@code indexes} used to be dropped on the floor here. Callers that pass real
+     * hints (AgentStore, WorkflowStore, GroupConversationStore) got sequential
+     * scans and no way to tell — so they are now materialised as expression indexes
+     * by {@link PostgresResourceStorage}.
+     */
     @Override
     public <T> IResourceStorage<T> create(String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType, String... indexes) {
-        // PostgreSQL storage uses IJsonSerialization directly for clean JSON↔object
-        // conversion.
-        // The documentBuilder parameter is accepted for interface compatibility but not
-        // used.
-        return new PostgresResourceStorage<>(dataSourceInstance.get(), collectionName, jsonSerialization, documentType);
+        return new PostgresResourceStorage<>(dataSourceInstance.get(), collectionName, jsonSerialization, documentType, indexes);
     }
 
     /**
