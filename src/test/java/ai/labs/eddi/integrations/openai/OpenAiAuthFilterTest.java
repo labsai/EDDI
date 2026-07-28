@@ -96,6 +96,31 @@ class OpenAiAuthFilterTest {
     }
 
     @Test
+    void quarkusStillGuardsEverythingThisFilterDeclines() throws Exception {
+        // This filter's early return on a non-/v1 path is the basis of a dismissed
+        // CodeQL java/user-controlled-bypass alert (see OpenAiAuthFilter.isGuarded).
+        // The dismissal rests entirely on two lines of application.properties: the
+        // catch-all requires authentication for every path the filter skips, and
+        // only /v1/* is exempted into 'permit' so the adapter can check its own
+        // key. Both are asserted here, so editing either breaks a test rather than
+        // silently invalidating a suppressed security finding.
+        // Read from source, not the classpath: src/test/resources has its own
+        // application.properties, which shadows the production one and declares
+        // none of these keys — a classpath lookup would assert nothing about the
+        // file the justification actually depends on.
+        var productionConfig = java.nio.file.Path.of("src", "main", "resources", "application.properties");
+        var properties = new java.util.Properties();
+        try (var in = java.nio.file.Files.newInputStream(productionConfig)) {
+            properties.load(in);
+        }
+
+        assertEquals("/,/*", properties.getProperty("quarkus.http.auth.permission.authenticated.paths"));
+        assertEquals("authenticated", properties.getProperty("quarkus.http.auth.permission.authenticated.policy"));
+        assertEquals("/v1/*", properties.getProperty("quarkus.http.auth.permission.openai-compat.paths"),
+                "the filter guards exactly the path set that Quarkus exempts from authentication");
+    }
+
+    @Test
     void doesNotAuthenticate_whenAdapterDisabled() {
         // The resource answers with an explicit "disabled" error; an auth failure
         // here would misreport the reason.

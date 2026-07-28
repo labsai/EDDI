@@ -147,6 +147,26 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
 
     /**
      * Path matching, tolerant of the leading slash JAX-RS may or may not include.
+     * <p>
+     * <b>Why returning {@code false} here cannot bypass authentication.</b> CodeQL
+     * reports {@code java/user-controlled-bypass} against the early return in
+     * {@link #filter}, on the grounds that a user-controlled path decides whether
+     * an authentication check runs. It does — but this filter is not the only thing
+     * standing in front of those paths, and it is not the first.
+     * <p>
+     * {@code application.properties} ends with a catch-all,
+     * {@code quarkus.http.auth.permission.authenticated.paths=/,/*} at policy
+     * {@code authenticated}. Quarkus HTTP authorization runs <em>before</em> JAX-RS
+     * request filters, so any path this method declines has already been required
+     * to authenticate. The single exception is {@code /v1/*}, which has its own
+     * permission entry at policy {@code permit} precisely so the shared API key can
+     * be checked <em>here</em> instead of being rejected at the OIDC layer — and
+     * {@code permit} is exactly the set this method returns {@code true} for.
+     * <p>
+     * So the guard does not choose between "authenticated" and "anonymous". It
+     * chooses between "the adapter's key check" and "Quarkus' own check", and
+     * declining is the safe branch. Narrowing it would only mean applying an
+     * OpenAI-specific key check to endpoints that are not the OpenAI adapter.
      */
     private static boolean isGuarded(String path) {
         String normalized = path.startsWith("/") ? path.substring(1) : path;
