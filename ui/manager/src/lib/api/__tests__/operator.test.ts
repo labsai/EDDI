@@ -266,7 +266,9 @@ describe("provisionOperator", () => {
     expect(captured?.deploy).toBe(true);
   });
 
-  it("honours an explicit base URL for local providers", async () => {
+  it("sends a local provider's URL as the LLM base URL, not as the tool target", async () => {
+    // apiBaseUrl is the target server of the generated tools. Sending Ollama's
+    // URL there pointed every operator tool at the local model server.
     await provisionOperator({
       agentName: "Op",
       config: config({ provider: "ollama" }),
@@ -274,7 +276,14 @@ describe("provisionOperator", () => {
       baseUrl: "http://localhost:11434",
       spec: fetchedSpec(),
     });
-    expect(captured?.apiBaseUrl).toBe("http://localhost:11434");
+    expect(captured?.baseUrl).toBe("http://localhost:11434");
+    expect(captured?.apiBaseUrl).toBe("https://eddi.example");
+  });
+
+  it("always targets this deployment, whatever the provider", async () => {
+    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
+    expect(captured?.apiBaseUrl).toBe("https://eddi.example");
+    expect(captured?.baseUrl).toBeUndefined();
   });
 });
 

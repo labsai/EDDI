@@ -14,7 +14,7 @@ import {
   OPERATOR_PROMPT_BODY,
 } from "@/lib/operator/system-prompt";
 import { READ_ENDPOINTS } from "@/lib/operator/tool-scopes";
-import { extractVaultKeyName } from "@/lib/operator/vault-ref";
+import { extractVaultKeyName, toVaultRef } from "@/lib/operator/vault-ref";
 import type { OperatorConfig, OperatorAuthMode } from "@/lib/api/operator";
 import type { ActivationStage } from "@/hooks/use-operator";
 import { cn } from "@/lib/utils";
@@ -47,7 +47,7 @@ export function OperatorActivation({
   // model) does not demand a credential the vault already holds. Plain-text
   // keys are not stored, so those still have to be re-entered.
   const [apiKey, setApiKey] = useState(
-    initial.credentialKey ? `vault:${initial.credentialKey}` : "",
+    initial.credentialKey ? toVaultRef(initial.credentialKey) : "",
   );
   const [baseUrl, setBaseUrl] = useState("");
   const [environment, setEnvironment] = useState(initial.environment);
@@ -82,9 +82,7 @@ export function OperatorActivation({
     if (cfg) setModel(cfg.defaultModel);
     // A key is provider-specific, so carrying it across a provider switch would
     // silently send the wrong credential.
-    setApiKey(next === initial.provider && initial.credentialKey
-      ? `vault:${initial.credentialKey}`
-      : "");
+    setApiKey(next === initial.provider && initial.credentialKey ? toVaultRef(initial.credentialKey) : "");
   }
 
   function handleActivate() {
@@ -406,7 +404,8 @@ function Field({
   groupRole?: "group" | "radiogroup";
   children: React.ReactNode;
 }) {
-  const hintId = hint && htmlFor ? `${htmlFor}-hint` : undefined;
+  // Only meaningful when it can actually be referenced by a control.
+  const hintId = hint ? `${htmlFor ?? label.replace(/\s+/g, "-").toLowerCase()}-hint` : undefined;
   return (
     <div className="space-y-2">
       <div>
@@ -420,7 +419,7 @@ function Field({
         )}
       </div>
       {asGroup ? (
-        <div role={groupRole} aria-label={label} className="space-y-2">
+        <div role={groupRole} aria-label={label} aria-describedby={hintId} className="space-y-2">
           {children}
         </div>
       ) : (

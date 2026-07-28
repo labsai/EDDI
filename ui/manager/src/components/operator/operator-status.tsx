@@ -142,6 +142,7 @@ export function OperatorStatusPanel({
         title={t("operator.status.deactivateConfirmTitle")}
         description={t("operator.status.deactivateConfirmBody")}
         confirmLabel={t("operator.status.deactivate")}
+        cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={() => {
           setConfirmDeactivate(false);
@@ -154,6 +155,7 @@ export function OperatorStatusPanel({
         title={t("operator.status.resetConfirmTitle")}
         description={t("operator.status.resetConfirmBody")}
         confirmLabel={t("operator.status.reset")}
+        cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={() => {
           setConfirmReset(false);

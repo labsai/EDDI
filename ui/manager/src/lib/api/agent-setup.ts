@@ -30,7 +30,10 @@ export interface CreateApiAgentRequest {
   provider?: string;
   model?: string;
   apiKey?: string;
+  /** Target server of the generated tools. */
   apiBaseUrl?: string;
+  /** Base URL of the LLM provider itself (Ollama, Jlama) — not the tool target. */
+  baseUrl?: string;
   apiAuth?: string;
   endpoints?: string;
   enableQuickReplies?: boolean;

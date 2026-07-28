@@ -12,7 +12,7 @@ import {
   deployAgent,
   getDeploymentStatus,
 } from "./agents";
-import { startConversation, sendMessageStreaming } from "./chat";
+import { startConversation, sendMessageStreaming, endConversation } from "./chat";
 import {
   buildEndpointFilter,
   parseEndpoint,
@@ -198,7 +198,13 @@ export interface ProvisionOperatorParams {
   config: OperatorConfig;
   /** Vault reference or plain key for the LLM. Not the EDDI credential. */
   apiKey: string;
-  /** Optional base URL for local providers (Ollama, Jlama). */
+  /**
+   * Base URL of the LLM provider itself, for local models (Ollama, Jlama).
+   *
+   * Distinct from `apiBaseUrl`, which is the target server of the *generated
+   * tools*. Sending this as `apiBaseUrl` pointed every operator tool at the
+   * local model server instead of at EDDI.
+   */
   baseUrl?: string;
   /**
    * The spec to send, already fetched by the caller.
@@ -227,7 +233,10 @@ export async function provisionOperator(
     provider: config.provider,
     model: config.model,
     apiKey,
-    apiBaseUrl: baseUrl || currentOrigin(),
+    // Always this deployment: the generated tools call the EDDI instance the
+    // manager is talking to. Never the LLM's base URL.
+    apiBaseUrl: currentOrigin(),
+    baseUrl: baseUrl || undefined,
     apiAuth: apiAuthForMode(config.authMode),
     endpoints: buildEndpointFilter(config.scope),
     deploy: true,
@@ -306,6 +315,9 @@ export interface CanaryResult {
 }
 
 /** The probe message. Phrased to force exactly one cheap read. */
+/** How long a probe read may take before it is treated as a failure. */
+export const CANARY_TIMEOUT_MS = 60_000;
+
 export const CANARY_PROMPT =
   "List the agents on this platform. Use your tools; do not guess.";
 
@@ -330,8 +342,15 @@ export async function runOperatorCanary(
     return { ok: false, toolCalls: 0, error: "No operator agent is configured." };
   }
 
+  // A stalled stream would otherwise leave activation spinning with no way out
+  // but a page reload.
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), CANARY_TIMEOUT_MS);
+  const effectiveSignal = signal ?? timeout.signal;
+
+  let conversationId = null;
   try {
-    const conversationId = await startConversation(config.environment, config.agentId);
+    conversationId = await startConversation(config.environment, config.agentId);
     let toolCalls = 0;
     let toolError: string | undefined;
     let streamError: string | undefined;
@@ -341,7 +360,7 @@ export async function runOperatorCanary(
       config.agentId,
       conversationId,
       { input: CANARY_PROMPT },
-      signal,
+      effectiveSignal,
     );
 
     for await (const event of stream) {
@@ -383,14 +402,36 @@ export async function runOperatorCanary(
     return {
       ok: false,
       toolCalls: 0,
-      error: error instanceof Error ? error.message : String(error),
+      error: timeout.signal.aborted
+        ? "The connection check timed out."
+        : error instanceof Error
+          ? error.message
+          : String(error),
     };
+  } finally {
+    clearTimeout(timer);
+    // The probe turn is ours; do not leave it open on the platform.
+    if (conversationId) {
+      try {
+        await endConversation(conversationId);
+      } catch {
+        // Best effort — the probe result is what matters.
+      }
+    }
   }
 }
 
+/**
+ * Whether a tool result reports an auth rejection.
+ *
+ * Anchored to how a failed call is reported rather than matched anywhere in the
+ * payload: an agent whose description contains "forbidden" is data, not a 401,
+ * and flagging it pushed the admin toward a reconfigure that was not needed.
+ */
 function looksLikeAuthFailure(result: string | undefined): boolean {
   if (!result) return false;
-  return /\b(401|403)\b|unauthorized|forbidden/i.test(result);
+  return /(^|[^0-9])(401|403)\s*(unauthorized|forbidden)?\b/i.test(result.slice(0, 200))
+    && /error|unauthorized|forbidden|denied/i.test(result.slice(0, 200));
 }
 
 /* ─── Lifecycle ─── */

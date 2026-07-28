@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/empty-state";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { OperatorActivation } from "@/components/operator/operator-activation";
 import { OperatorChat } from "@/components/operator/operator-chat";
 import { OperatorStatusPanel } from "@/components/operator/operator-status";
@@ -48,6 +49,8 @@ export function OperatorPage() {
    * that sends the admin back to the form.
    */
   const [canaryWarning, setCanaryWarning] = useState<string | null>(null);
+  /** Delete is irreversible, so it is confirmed wherever it is offered. */
+  const [confirmPausedReset, setConfirmPausedReset] = useState(false);
 
   const activate = useActivateOperator();
   const reactivate = useReactivateOperator();
@@ -73,6 +76,8 @@ export function OperatorPage() {
           onSuccess: (outcome) => {
             setStage("idle");
             setShowActivation(false);
+            // The predecessor agent was hard-deleted; its conversation id is dead.
+            chat.reset();
             if (outcome.canary.ok) {
               setCanaryWarning(null);
               toast.success(t("operator.toast.activated"));
@@ -88,7 +93,8 @@ export function OperatorPage() {
         },
       );
     },
-    [activate, t],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activate, chat.reset, t],
   );
 
   const handleReactivate = useCallback(() => {
@@ -204,7 +210,7 @@ export function OperatorPage() {
             disabled={reactivate.isPending}
             data-testid="operator-reactivate"
           >
-            {reactivate.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {reactivate.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
             {t("operator.paused.action")}
           </Button>
           <Button variant="outline" onClick={() => setShowActivation(true)}>
@@ -212,13 +218,27 @@ export function OperatorPage() {
           </Button>
           <Button
             variant="ghost"
-            onClick={handleReset}
+            onClick={() => setConfirmPausedReset(true)}
             disabled={reset.isPending}
             data-testid="operator-reset"
           >
             {t("operator.status.reset")}
           </Button>
         </div>
+
+        <AlertDialog
+          open={confirmPausedReset}
+          onOpenChange={setConfirmPausedReset}
+          title={t("operator.status.resetConfirmTitle")}
+          description={t("operator.status.resetConfirmBody")}
+          confirmLabel={t("operator.status.reset")}
+          cancelLabel={t("common.cancel")}
+          variant="destructive"
+          onConfirm={() => {
+            setConfirmPausedReset(false);
+            handleReset();
+          }}
+        />
       </div>
     );
   }
@@ -268,9 +288,9 @@ export function OperatorPage() {
             data-testid="operator-canary-recheck"
           >
             {canary.isPending ? (
-              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+              <Loader2 className="me-2 h-3 w-3 animate-spin" />
             ) : (
-              <RefreshCw className="mr-2 h-3 w-3" />
+              <RefreshCw className="me-2 h-3 w-3" />
             )}
             {t("operator.canary.recheck")}
           </Button>

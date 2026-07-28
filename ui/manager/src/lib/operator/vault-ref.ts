@@ -9,6 +9,17 @@
 
 const VAULT_REF = /^\$?\{?(?:eddi)?vault:([^}]+)\}?$/;
 
+/**
+ * Format a vault key name as the canonical reference.
+ *
+ * The braces matter: the backend's `SecretReference.isVaultReference` requires
+ * `${vault:...}`, and a bare `vault:KEY` falls through to the plaintext branch
+ * and is stored verbatim as the provider credential.
+ */
+export function toVaultRef(keyName: string): string {
+  return `\${vault:${keyName}}`;
+}
+
 /** Extract the vault key name, or `null` when the value is not a vault reference. */
 export function extractVaultKeyName(value: string): string | null {
   const match = VAULT_REF.exec(value.trim());

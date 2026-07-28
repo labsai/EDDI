@@ -438,9 +438,11 @@ export function DashboardPage() {
  */
 function OperatorDiscoveryCard() {
   const { t } = useTranslation();
-  const { data: config, isLoading } = useOperatorConfig();
+  const { data: config, isLoading, isError } = useOperatorConfig();
 
-  if (isLoading || (config?.enabled && config.agentId)) return null;
+  // Hide once an operator exists at all — a paused one is configured, not
+  // undiscovered — and while the config cannot be read.
+  if (isLoading || isError || config?.agentId) return null;
 
   return (
     <Card className="border-primary/30 bg-primary/5" data-testid="operator-discovery-card">
