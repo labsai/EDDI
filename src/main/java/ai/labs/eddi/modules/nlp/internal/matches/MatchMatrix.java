@@ -51,24 +51,44 @@ public class MatchMatrix implements Iterable<Suggestion> {
         }
     }
 
-    private Map<Match, List<MatchingResult>> mappedMatchMatrix = new LinkedHashMap<>();
+    private final Map<Match, List<MatchingResult>> mappedMatchMatrix = new LinkedHashMap<>();
+
+    /**
+     * Positional view on {@link #mappedMatchMatrix}. Rebuilding it on every
+     * {@link #getMatchingResults(int)} call copied the whole collection per lookup,
+     * which is quadratic in the hot solution-enumeration loop. The cache is dropped
+     * whenever a new input term is added; the inner lists are shared, so appending
+     * to an existing term needs no invalidation.
+     */
+    private List<List<MatchingResult>> matchingResultsByIndex;
 
     public void addMatchingResult(int index, String inputTerm, MatchingResult matchingResult) {
         Match match = new Match(index, inputTerm);
-        if (!mappedMatchMatrix.containsKey(match)) {
-            mappedMatchMatrix.put(match, new LinkedList<>());
+        List<MatchingResult> matchingResults = mappedMatchMatrix.get(match);
+        if (matchingResults == null) {
+            matchingResults = new LinkedList<>();
+            mappedMatchMatrix.put(match, matchingResults);
+            matchingResultsByIndex = null;
         }
 
-        mappedMatchMatrix.get(match).add(matchingResult);
+        matchingResults.add(matchingResult);
     }
 
     public List<MatchingResult> getMatchingResults(int index) {
-        Collection<List<MatchingResult>> allMatchingResults = mappedMatchMatrix.values();
+        List<List<MatchingResult>> allMatchingResults = matchingResultsByIndex();
         if (index < allMatchingResults.size()) {
-            return new ArrayList<>(allMatchingResults).get(index);
+            return allMatchingResults.get(index);
         }
 
         return null;
+    }
+
+    private List<List<MatchingResult>> matchingResultsByIndex() {
+        if (matchingResultsByIndex == null) {
+            matchingResultsByIndex = new ArrayList<>(mappedMatchMatrix.values());
+        }
+
+        return matchingResultsByIndex;
     }
 
     @Override
@@ -77,9 +97,20 @@ public class MatchMatrix implements Iterable<Suggestion> {
     }
 
     class SolutionIterator implements Iterator<Suggestion> {
+        /**
+         * Last-resort safety valve. Iteration plans whose index is out of bounds for a
+         * given input term are silently skipped, so a caller that limits how many
+         * <em>suggestions</em> it consumes still cannot bound the number of plans this
+         * iterator walks through. The parser's configurable {@code maxSuggestions}
+         * limit normally stops the enumeration long before this is reached; this
+         * guarantees termination in reasonable time even when it does not.
+         */
+        private static final int MAX_ITERATION_PLANS = 100_000;
+
         private final IterationCounter iterationCounter;
         private Suggestion nextSuggestion = null;
         private final Integer[] resultLengths;
+        private int consumedIterationPlans;
 
         SolutionIterator() {
             resultLengths = createResultLengths(mappedMatchMatrix.values());
@@ -121,7 +152,8 @@ public class MatchMatrix implements Iterable<Suggestion> {
 
         private Suggestion calculateNext() {
             Suggestion nextSuggestion;
-            while (iterationCounter.hasNext()) {
+            while (iterationCounter.hasNext() && consumedIterationPlans < MAX_ITERATION_PLANS) {
+                consumedIterationPlans++;
                 IterationCounter.IterationPlan iterationPlan = iterationCounter.next();
 
                 nextSuggestion = new Suggestion();

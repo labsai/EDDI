@@ -54,8 +54,9 @@ public class InputMatcher extends BaseMatcher {
     @Override
     public void setConfigs(Map<String, String> configs) {
         if (configs != null && !configs.isEmpty()) {
-            if (configs.containsKey(expressionsQualifier)) {
-                expressions = expressionProvider.parseExpressions(configs.get(expressionsQualifier));
+            String configuredExpressions = configs.get(expressionsQualifier);
+            if (configuredExpressions != null && !configuredExpressions.isBlank()) {
+                expressions = expressionProvider.parseExpressions(configuredExpressions);
             }
 
             setConversationOccurrenceQualifier(configs);
@@ -99,6 +100,15 @@ public class InputMatcher extends BaseMatcher {
             return SUCCESS;
         } else {
             return FAIL;
+        }
+    }
+
+    @Override
+    public void validateConfiguration() {
+        if (expressions == null || expressions.isEmpty()) {
+            throw new IllegalArgumentException(String.format(
+                    "'%s' requires a non-empty '%s' config value — an empty matcher would match every conversation step.", ID,
+                    expressionsQualifier));
         }
     }
 

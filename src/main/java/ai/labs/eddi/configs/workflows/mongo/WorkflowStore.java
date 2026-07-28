@@ -27,9 +27,21 @@ import java.util.stream.Collectors;
  */
 @ApplicationScoped
 public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> implements IWorkflowStore {
-    public static final String WORKFLOW_EXTENSIONS_FIELD = "WorkflowSteps";
-    public static final String WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD = "WorkflowSteps.config.uri";
-    public static final String WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD = "WorkflowSteps.extensions.dictionaries.config.uri";
+    public static final String WORKFLOW_EXTENSIONS_FIELD = "workflowSteps";
+    /**
+     * Query paths into the PERSISTED document, so they must match what
+     * {@link WorkflowConfiguration} actually serializes: {@code workflowSteps},
+     * lower-case w.
+     * <p>
+     * They were spelled {@code WorkflowSteps} — and both MongoDB paths and
+     * PostgreSQL JSON keys are case-sensitive, so every reverse lookup built on
+     * them matched nothing, silently. That is what made
+     * {@code RestWorkflowStore.deleteResourceSafely}'s "is anyone else still using
+     * this?" guard a no-op: it always saw zero referencing workflows and
+     * cascade-deleted configs that other workflows were still pointing at.
+     */
+    public static final String WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD = "workflowSteps.config.uri";
+    public static final String WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD = "workflowSteps.extensions.dictionaries.config.uri";
 
     private final IDocumentDescriptorStore documentDescriptorStore;
 

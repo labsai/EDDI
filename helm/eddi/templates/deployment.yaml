@@ -1,3 +1,9 @@
+{{- if .Values.autoscaling.enabled }}
+{{- fail "autoscaling.enabled=true is not supported: EDDI serialises the turns of a conversation with a JVM-local lock (InMemoryConversationCoordinator), and the NATS coordinator still executes each Callable in the JVM that published it. With more than one replica two turns of the same conversation race and one is silently lost, and in-memory replay nonces stop detecting replayed signed envelopes. Scale vertically via eddi.resources. This gate lifts when a distributed conversation coordinator ships." }}
+{{- end }}
+{{- if gt (int .Values.eddi.replicas) 1 }}
+{{- fail "eddi.replicas must be 1: EDDI is single-writer per conversation and the coordinator lock is JVM-local, so extra replicas silently drop conversation turns. Scale vertically via eddi.resources." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,9 +12,9 @@ metadata:
     {{- include "eddi.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
-  {{- if not .Values.autoscaling.enabled }}
+  # Always rendered — autoscaling is gated off above, so there is never an HPA
+  # competing for ownership of this field.
   replicas: {{ .Values.eddi.replicas }}
-  {{- end }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -36,24 +42,83 @@ spec:
         runAsUser: 185
         runAsGroup: 185
         fsGroup: 185
+        seccompProfile:
+          type: RuntimeDefault
       terminationGracePeriodSeconds: 30
+      volumes:
+        # Secrets arrive as FILES, never as environment variables: environ is
+        # readable through /proc/<pid>/environ by anything sharing the PID
+        # namespace, and it leaks into crash dumps and child processes.
+        # Each Secret contributes one *.properties file; QUARKUS_CONFIG_LOCATIONS
+        # below lists them for the Quarkus config system.
+        - name: eddi-secrets
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: {{ include "eddi.fullname" . }}-secrets
+              {{- if .Values.postgres.enabled }}
+              - secret:
+                  name: {{ include "eddi.fullname" . }}-postgres
+                  items:
+                    - key: postgres-secrets.properties
+                      path: postgres-secrets.properties
+              {{- end }}
+        # readOnlyRootFilesystem needs explicit writable scratch space.
+        # What the app actually writes at runtime:
+        #   /tmp             java.io.tmpdir — Quarkus multipart upload buffer and
+        #                    PdfReaderTool's Files.createTempFile
+        #   /deployments/tmp agent export/import scratch (RestExportService /
+        #                    RestImportService build it under ${user.dir}/tmp)
+        #   /opt/eddi/data   audit ledger dead-letter file
+        - name: tmp
+          emptyDir: {}
+        - name: deployments-tmp
+          emptyDir: {}
+        - name: eddi-data
+          emptyDir: {}
       containers:
         - name: eddi
-          image: "{{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}"
+          # Prefer a digest: set eddi.image.digest so the running bits are the
+          # exact ones CI cosign-signed and SLSA-attested. Resolve it with
+          #   cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+          #     --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
+          #     labsai/eddi:<tag>
+          #   crane digest labsai/eddi:<tag>
+          image: "{{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}{{- with .Values.eddi.image.digest }}@{{ . }}{{- end }}"
           imagePullPolicy: {{ .Values.eddi.image.pullPolicy }}
+          # Container-level hardening — without this the pod is rejected outright
+          # by a namespace running the "restricted" Pod Security Standard.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 185
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: 7070
               name: http
               protocol: TCP
+          env:
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: "/etc/eddi/secrets/application-secrets.properties{{ if .Values.postgres.enabled }},/etc/eddi/secrets/postgres-secrets.properties{{ end }}"
           envFrom:
             - configMapRef:
                 name: {{ include "eddi.fullname" . }}-config
-            - secretRef:
-                name: {{ include "eddi.fullname" . }}-secrets
-            {{- if .Values.postgres.enabled }}
-            - secretRef:
-                name: {{ include "eddi.fullname" . }}-postgres
-            {{- end }}
+          volumeMounts:
+            - name: eddi-secrets
+              mountPath: /etc/eddi/secrets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: deployments-tmp
+              mountPath: /deployments/tmp
+            - name: eddi-data
+              mountPath: /opt/eddi/data
           startupProbe:
             httpGet:
               path: /q/health/ready

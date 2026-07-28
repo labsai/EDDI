@@ -35,6 +35,27 @@ public class PunctuationNormalizerTest {
     }
 
     @Test
+    public void containsPunctuationOnlyMatchesActualPunctuation() {
+        // an unpunctuated token must not be reported as containing punctuation
+        Assertions.assertFalse(normalizer.containsPunctuation("hello"));
+        Assertions.assertFalse(normalizer.containsPunctuation("21st"));
+        Assertions.assertFalse(normalizer.containsPunctuation(""));
+
+        Assertions.assertTrue(normalizer.containsPunctuation("hello,"));
+        Assertions.assertTrue(normalizer.containsPunctuation("what?"));
+    }
+
+    @Test
+    public void containsPunctuationHonoursConfiguredPattern() {
+        // setup — an agent designer may override the punctuation characters
+        var customNormalizer = new PunctuationNormalizer(new PunctuationNormalizerProvider().toRegexPattern("|"), false);
+
+        // test & assert
+        Assertions.assertTrue(customNormalizer.containsPunctuation("a|b"));
+        Assertions.assertFalse(customNormalizer.containsPunctuation("a,b"));
+    }
+
+    @Test
     public void normalizeRemovePunctuation() {
         // setup
         final String expected = "This is just an example of a string that needs to be fixed by inserting a whitespace after punctuation marks";

@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.output.model.types;
 import ai.labs.eddi.modules.output.model.OutputItem;
 
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 public class InputFieldOutputItem extends OutputItem {
     private String subType;
@@ -31,6 +32,19 @@ public class InputFieldOutputItem extends OutputItem {
     @Override
     protected void initType() {
         super.type = "inputField";
+    }
+
+    @Override
+    protected OutputItem templatedCopy(UnaryOperator<String> templating) {
+        return new InputFieldOutputItem(subType, templating.apply(placeholder), templating.apply(label), templating.apply(defaultValue),
+                templatedValidation(templating));
+    }
+
+    private Validation templatedValidation(UnaryOperator<String> templating) {
+        if (validation == null) {
+            return null;
+        }
+        return new Validation(validation.minLength(), validation.maxLength(), templating.apply(validation.validationErrorMessage()));
     }
 
     @Override

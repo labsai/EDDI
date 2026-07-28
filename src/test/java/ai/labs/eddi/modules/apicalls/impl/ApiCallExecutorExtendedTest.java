@@ -53,7 +53,8 @@ class ApiCallExecutorExtendedTest {
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
-        executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver, false);
+        executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver, false, 30_000L,
+                2_000_000);
 
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);

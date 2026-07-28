@@ -29,8 +29,11 @@ spec:
           env:
             - name: KC_BOOTSTRAP_ADMIN_USERNAME
               value: {{ .Values.keycloak.adminUsername | quote }}
+              # No default password — `required` fails rendering rather than
+              # shipping admin/admin as the identity provider for the whole
+              # deployment.
             - name: KC_BOOTSTRAP_ADMIN_PASSWORD
-              value: {{ .Values.keycloak.adminPassword | quote }}
+              value: {{ required "keycloak.adminPassword is required when keycloak.enabled=true — the chart no longer ships a default. Generate one: openssl rand -base64 24" .Values.keycloak.adminPassword | quote }}
             - name: KC_HTTP_PORT
               value: "8080"
           resources:

@@ -72,6 +72,6 @@ public class RuleSetStore extends AbstractResourceStore<RuleSetConfiguration> im
         List<String> actions = read(id, version).getBehaviorGroups().stream().map(RuleGroupConfiguration::getRules).flatMap(Collection::stream)
                 .map(RuleConfiguration::getActions).flatMap(Collection::stream).collect(Collectors.toList());
 
-        return limit > 0 ? actions.subList(0, limit) : actions;
+        return limit > 0 ? actions.subList(0, Math.min(limit, actions.size())) : actions;
     }
 }

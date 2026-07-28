@@ -13,6 +13,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
@@ -36,6 +37,12 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
     // unsupported" errors whenever tools are enabled.
     // JSON response format is enforced at the REQUEST level by LegacyChatExecutor,
     // which only applies it when no tools are present.
+
+    @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_API_KEY, KEY_MODEL_NAME, KEY_TEMPERATURE, KEY_LOG_REQUESTS_AND_RESPONSES,
+                KEY_MAX_OUTPUT_TOKENS, KEY_ALLOW_CODE_EXECUTION, KEY_TIMEOUT);
+    }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
