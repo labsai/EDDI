@@ -30,11 +30,27 @@ import java.util.List;
 public record ChatCompletionRequest(String model,
         List<ChatMessage> messages,
         Boolean stream,
+        Boolean stateless,
         JsonNode user) {
 
     /** Whether the client asked for an SSE stream. {@code stream} is nullable. */
     public boolean isStreaming() {
         return Boolean.TRUE.equals(stream);
+    }
+
+    /**
+     * EDDI extension: run this turn in a throwaway conversation.
+     * <p>
+     * The same thing the {@code :stateless} model suffix selects, expressed as an
+     * explicit parameter for programmatic callers — {@code extra_body} in the
+     * Python SDK. The suffix exists because a model name is the only per-request
+     * dimension a UI like Open WebUI can express; this is the honest form for
+     * clients that can say what they mean.
+     * <p>
+     * Not part of the OpenAI specification, so it is absent from most requests.
+     */
+    public boolean isStateless() {
+        return Boolean.TRUE.equals(stateless);
     }
 
     /**

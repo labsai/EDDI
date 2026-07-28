@@ -140,7 +140,7 @@ public class RestOpenAiAdapter {
                                     @Context ContainerRequestContext requestContext) {
         requireEnabled();
 
-        var model = resolveOrFail(request == null ? null : request.model());
+        var model = applyStatelessOverride(resolveOrFail(request == null ? null : request.model()), request);
         String userId = requireUserId(requestContext);
         Map<String, String> headers = flatten(httpHeaders);
 
@@ -232,6 +232,34 @@ public class RestOpenAiAdapter {
             }
         }
         return headers;
+    }
+
+    /**
+     * Apply the {@code stateless} body field on top of the resolved model.
+     * <p>
+     * The field and the {@code :stateless} model suffix are two routes to one
+     * behaviour — the suffix because a model name is all a UI like Open WebUI can
+     * express, the field because a programmatic caller should be able to say what
+     * it means. They are OR-ed rather than letting either win: the combination
+     * {@code model:"x:stateless"} + {@code stateless:false} is self-contradictory,
+     * and of the two readings, running stateless merely loses continuity while
+     * running stateful would persist a conversation the caller may not have wanted.
+     * <p>
+     * The {@code expose-stateless-variants} switch gates this route too, so turning
+     * the capability off cannot be circumvented by moving the request from the
+     * model id into the body.
+     */
+    AgentModelResolver.ResolvedModel applyStatelessOverride(AgentModelResolver.ResolvedModel model,
+                                                            ChatCompletionRequest request) {
+        if (request == null || !request.isStateless()) {
+            return model;
+        }
+        if (!config.isExposeStatelessVariants()) {
+            throw OpenAiApiException.badRequest(OpenAiErrorResponse.CODE_INVALID_REQUEST_FIELD,
+                    "Stateless requests are disabled on this deployment "
+                            + "(eddi.openai-compat.expose-stateless-variants=false).");
+        }
+        return model.asStateless();
     }
 
     /**

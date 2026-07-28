@@ -22,6 +22,7 @@ import static ai.labs.eddi.integrations.openai.OpenAiTestFixtures.AGENT_ID_SALES
 import static ai.labs.eddi.integrations.openai.OpenAiTestFixtures.AGENT_ID_SUPPORT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -222,6 +223,33 @@ class AgentModelResolverTest {
 
         assertEquals("Customer Support", resolved.requestedModelId());
         assertEquals("customer-support-a3f9c1", resolved.canonicalModelId());
+    }
+
+    @Test
+    void asStateless_flipsTheFlagAndTheCanonicalId() throws Exception {
+        givenAgent(AGENT_ID_SUPPORT, "Support");
+        var stateful = resolver().resolve("support-a3f9c1");
+
+        var forced = stateful.asStateless();
+
+        assertTrue(forced.stateless());
+        assertEquals("support-a3f9c1:stateless", forced.canonicalModelId(),
+                "both routes to statelessness must describe themselves identically");
+        assertEquals("support-a3f9c1", forced.requestedModelId(),
+                "the echoed id still reflects what the client sent");
+        assertEquals(AGENT_ID_SUPPORT, forced.agentId());
+    }
+
+    @Test
+    void asStateless_isIdempotent() throws Exception {
+        givenAgent(AGENT_ID_SUPPORT, "Support");
+        var alreadyStateless = resolver().resolve("support-a3f9c1:stateless");
+
+        var forced = alreadyStateless.asStateless();
+
+        assertSame(alreadyStateless, forced);
+        assertEquals("support-a3f9c1:stateless", forced.canonicalModelId(),
+                "the suffix must not be doubled");
     }
 
     @Test

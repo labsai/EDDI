@@ -30,6 +30,7 @@ public record OpenAiErrorResponse(OpenAiError error) {
     public static final String CODE_NO_USER_MESSAGE = "no_user_message";
     public static final String CODE_AGENT_NOT_READY = "agent_not_ready";
     public static final String CODE_UNKNOWN_ENDPOINT = "unknown_endpoint";
+    public static final String CODE_INVALID_REQUEST_FIELD = "invalid_request_field";
     public static final String CODE_TIMEOUT = "timeout";
 
     public static OpenAiErrorResponse of(String message, String type, String code) {

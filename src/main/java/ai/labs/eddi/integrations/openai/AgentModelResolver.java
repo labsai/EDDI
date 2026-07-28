@@ -115,6 +115,20 @@ public class AgentModelResolver {
     public record ResolvedModel(String agentId, Environment environment, String displayName,
             String requestedModelId, String canonicalModelId, long createdEpochSeconds,
             boolean stateless) {
+
+        /**
+         * This model with statelessness forced on, for a request that asked via the
+         * body field rather than the model suffix. Returns {@code this} when already
+         * stateless, and keeps {@link #canonicalModelId()} consistent so the two routes
+         * to the same behaviour describe themselves identically.
+         */
+        public ResolvedModel asStateless() {
+            if (stateless) {
+                return this;
+            }
+            return new ResolvedModel(agentId, environment, displayName, requestedModelId,
+                    canonicalModelId + STATELESS_SUFFIX, createdEpochSeconds, true);
+        }
     }
 
     /** Raised when no deployed agent matches the requested model id. */

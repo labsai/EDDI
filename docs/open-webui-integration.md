@@ -90,11 +90,44 @@ Each deployed agent is exposed under two ids:
 | Model id | Behaviour |
 |---|---|
 | `customer-support-a3f9c1` | **Stateful (default).** Maps to a persistent EDDI conversation. Memory, properties, rule position and HITL survive across turns. |
-| `customer-support-a3f9c1:stateless` | **Stateless.** Starts a conversation, sends one message, ends it. Classic one-shot OpenAI semantics. |
+| `customer-support-a3f9c1:stateless` | **Stateless.** Starts a conversation, sends one message, ends it. No conversation memory (see below). |
 
 The format is `<slugified agent name>-<last 6 characters of the agent id>`. The suffix is there because agent names are not unique — two agents both called "Support" would otherwise be indistinguishable. Accented characters are folded (`Übersicht` → `ubersicht`) rather than dropped.
 
 The adapter also accepts the bare agent id, the exact agent name, or the bare slug — the last two only when they match exactly one agent. An ambiguous name returns `400` listing the candidates rather than picking one.
+
+### Stateless requests
+
+Both routes select the same behaviour — a throwaway conversation, ended as soon as the turn completes, with no entry in the managed-conversation store:
+
+```jsonc
+// 1. the model suffix — the only route a UI like Open WebUI can express,
+//    since a model name is all it lets you pick per request
+{"model": "customer-support-a3f9c1:stateless", "messages": [...]}
+
+// 2. the `stateless` body field — an EDDI extension, for callers that can
+//    say what they mean
+{"model": "customer-support-a3f9c1", "messages": [...], "stateless": true}
+```
+
+```python
+client.chat.completions.create(
+    model="customer-support-a3f9c1",
+    messages=[{"role": "user", "content": "Classify this ticket"}],
+    extra_body={"stateless": True},
+)
+```
+
+The suffix follows the ecosystem convention for behavioural model variants — OpenRouter's `:nitro`/`:floor`/`:free`, Ollama's `llama3:8b` — and has the advantage of appearing in `GET /v1/models`, so the capability is discoverable. The body field is the honest parameter for programmatic callers. **They are OR-ed**: `model: "x:stateless"` together with `stateless: false` is self-contradictory, and of the two readings, running stateless merely loses continuity while running stateful would persist a conversation the caller may not have wanted.
+
+Setting `expose-stateless-variants=false` disables **both** routes, so the switch cannot be circumvented by moving the request from the model id into the body.
+
+Two things stateless does **not** mean:
+
+- **Not "no memory at all".** User-scoped long-term memory is keyed by `userId`, not by conversation, so an agent with user memory enabled still loads that user's entries at init and still persists `longTerm` properties at teardown. A thin LLM-only agent has neither, so nothing happens.
+- **Not "client-managed history".** The adapter sends only the last user message in *both* modes. A client that resends its own history each turn gets no context from the earlier entries. Stateless is genuinely single-turn.
+
+It is also only sensible for LLM-only agents: a rule-based agent under `:stateless` restarts at `CONVERSATION_START` on every request, which is correct but useless for a wizard.
 
 ### Session mapping
 
@@ -149,7 +182,7 @@ Because every message goes through `IConversationService`, the whole pipeline ap
 | `eddi.openai-compat.request-timeout-seconds` | `120` | Per-turn wait before returning `504`. |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | In-flight completions; excess gets `429`. |
 | `eddi.openai-compat.model-cache-seconds` | `30` | Model catalogue TTL. |
-| `eddi.openai-compat.expose-stateless-variants` | `true` | Also list the `:stateless` ids. |
+| `eddi.openai-compat.expose-stateless-variants` | `true` | Enable stateless requests — lists the `:stateless` ids and accepts the `stateless` body field. Disabling blocks both. |
 
 Every property has an environment-variable form: `eddi.openai-compat.api-key` → `EDDI_OPENAI_COMPAT_API_KEY`.
 
@@ -251,6 +284,7 @@ This is safe because the adapter has no message-count heuristic — truncating h
 | `content` as string | Plain text. |
 | `content` as array | Text extracted; `image_url`, `file` and `input_audio` parts mapped to attachments. |
 | `stream` | Selects JSON vs SSE. The only dispatch signal. |
+| `stateless` | **EDDI extension.** Run this turn in a throwaway conversation — same as the `:stateless` model suffix. See §2. |
 | `user` | Fallback chat key when `X-OpenWebUI-Chat-Id` is absent. Accepts both the string form and Open WebUI's object form. |
 | `temperature`, `max_tokens`, `top_p`, `stream_options`, `tools`, `tool_choice`, `metadata`, `files`, … | **Accepted and ignored.** Model parameters belong to the agent's `langchain.json`. |
 
@@ -313,6 +347,7 @@ Every failure uses the OpenAI envelope:
 | Unresolvable caller identity | 401 | `invalid_api_key` |
 | Unknown model | 404 | `model_not_found` |
 | Ambiguous model name | 400 | `ambiguous_model` |
+| `stateless:true` while stateless requests are disabled | 400 | `invalid_request_field` |
 | No `user` message | 400 | `no_user_message` |
 | Agent not deployed | 503 | `agent_not_ready` |
 | Conversation busy / concurrency cap | 429 | — |
