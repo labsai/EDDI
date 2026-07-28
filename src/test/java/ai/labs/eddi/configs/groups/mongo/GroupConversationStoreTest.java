@@ -372,4 +372,96 @@ class GroupConversationStoreTest {
         assertDoesNotThrow(() -> store.updateIfState(gc, GroupConversationState.IN_PROGRESS));
         verify(storage).storeIfFieldEquals(resource, "state", "IN_PROGRESS");
     }
+
+    // ==================== G15: user-scoped erasure ====================
+
+    private static IResourceStore.IResourceId resourceId(String id) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return 1;
+            }
+        };
+    }
+
+    private IResourceStorage.IResource<GroupConversation> resourceFor(String userId) throws IOException {
+        GroupConversation gc = new GroupConversation();
+        gc.setUserId(userId);
+        gc.setOriginalQuestion("something the user actually typed");
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(resource.getData()).thenReturn(gc);
+        return resource;
+    }
+
+    /**
+     * A GroupConversation holds the user's id next to the verbatim transcript of
+     * the discussion, and the erasure cascade had no way to reach it at all.
+     */
+    @Test
+    @DisplayName("deleteAllForUser — removes the user's transcripts")
+    void deleteAllForUserRemovesTranscripts() throws Exception {
+        // Built up front: Mockito rejects a when(...) nested inside another when(...).
+        var first = resourceFor("user-1");
+        var second = resourceFor("user-1");
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), eq(0)))
+                .thenReturn(List.of(resourceId("gc-1"), resourceId("gc-2")));
+        when(storage.read("gc-1", 1)).thenReturn(first);
+        when(storage.read("gc-2", 1)).thenReturn(second);
+
+        assertEquals(2, store.deleteAllForUser("user-1"));
+
+        verify(storage).removeAllPermanently("gc-1");
+        verify(storage).removeAllPermanently("gc-2");
+    }
+
+    /**
+     * The storage layer turns a String filter into a regex whose metacharacter
+     * handling differs between MongoDB and PostgreSQL. Deleting on the regex result
+     * alone could wipe another user's transcripts, so the userId is re-checked with
+     * an exact comparison first.
+     */
+    @Test
+    @DisplayName("deleteAllForUser — never deletes a transcript whose userId is not an exact match")
+    void deleteAllForUserSkipsInexactMatches() throws Exception {
+        var mine = resourceFor("user-1");
+        var somebodyElses = resourceFor("user-10"); // over-broad regex hit
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), eq(0)))
+                .thenReturn(List.of(resourceId("gc-1"), resourceId("gc-2")));
+        when(storage.read("gc-1", 1)).thenReturn(mine);
+        when(storage.read("gc-2", 1)).thenReturn(somebodyElses);
+
+        assertEquals(1, store.deleteAllForUser("user-1"));
+
+        verify(storage).removeAllPermanently("gc-1");
+        verify(storage, never()).removeAllPermanently("gc-2");
+    }
+
+    @Test
+    @DisplayName("deleteAllForUser — anchors and escapes the userId filter")
+    void deleteAllForUserAnchorsTheFilter() throws Exception {
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), eq(0)))
+                .thenReturn(List.of());
+
+        store.deleteAllForUser("user.1+x");
+
+        ArgumentCaptor<IResourceFilter.QueryFilters[]> captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        verify(storage).findResources(captor.capture(), eq("lastModified"), eq(0), eq(0));
+        var queryFilter = captor.getValue()[0].getQueryFilters().getFirst();
+        assertEquals("userId", queryFilter.getField());
+        assertEquals("^user\\.1\\+x$", queryFilter.getFilter().toString(),
+                "the filter must be anchored and its metacharacters escaped, or it matches other users");
+    }
+
+    @Test
+    @DisplayName("deleteAllForUser — a blank user deletes nothing")
+    void deleteAllForBlankUserDeletesNothing() throws Exception {
+        assertEquals(0, store.deleteAllForUser(null));
+        assertEquals(0, store.deleteAllForUser("   "));
+        verify(storage, never()).removeAllPermanently(anyString());
+    }
 }
