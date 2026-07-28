@@ -83,8 +83,32 @@
         button.setAttribute("title", LABELS[value]);
     }
 
+    /*
+     * Keycloak only renders the header-utilities container when it has a locale
+     * switcher to put in it. A realm with a single supported locale — the admin
+     * console's `master` realm, for one — has no switcher and therefore no
+     * container, which left the toggle with nowhere to go and silently absent.
+     * Create the container in that case; the stylesheet already styles it.
+     */
+    function utilitiesHost() {
+        var existing = document.querySelector(".pf-v5-c-login__main-header-utilities");
+        if (existing) {
+            return existing;
+        }
+
+        var header = document.querySelector(".pf-v5-c-login__main-header");
+        if (!header) {
+            return null;
+        }
+
+        var created = document.createElement("div");
+        created.className = "pf-v5-c-login__main-header-utilities";
+        header.appendChild(created);
+        return created;
+    }
+
     function build() {
-        var host = document.querySelector(".pf-v5-c-login__main-header-utilities");
+        var host = utilitiesHost();
         if (!host || host.querySelector(".eddi-theme-toggle")) {
             return;
         }

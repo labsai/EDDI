@@ -402,6 +402,7 @@
     background-size: contain;
     filter: var(--eddi-logo-filter); /* inverted to black in light mode */
     text-indent: -9999px;
+    position: relative;
     overflow: hidden;
     white-space: nowrap;
 }
@@ -598,6 +599,19 @@
 
 .pf-v5-c-login__main-header-utilities {
     margin-left: 16px;
+}
+
+/* A realm can put arbitrary markup in displayNameHtml, and it lands inside
+   #kc-header-wrapper — where we are already painting the wordmark. Keycloak's
+   own `master` realm ships
+   `<div class="kc-logo-text"><span>Keycloak</span></div>`, and keycloak.v2's
+   stylesheet still carries the rule that gives that div the Keycloak logo, so
+   on the admin console login the two logos rendered on top of each other.
+   Suppressing any such box leaves our background image as the only mark; the
+   text inside it stays in the accessibility tree via the text-indent above. */
+#kc-header-wrapper .kc-logo-text,
+#kc-header-wrapper img {
+    display: none;
 }
 
 .pf-v5-c-login__main-header-utilities {

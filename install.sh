@@ -1031,7 +1031,9 @@ print(json.load(sys.stdin).get('loginTheme') or '')" 2>/dev/null)
     # no lang/dir on <html> (WCAG 3.1.1) on a page we now brand. A single
     # supported locale adds the attributes without adding a locale switcher,
     # and loses nothing: with i18n off the page was English-only anyway.
-    updated_master=$(echo "$master_config" | jq \n      '.loginTheme = "eddi"
+    updated_master=$(echo "$master_config" | jq \
+      '.loginTheme = "eddi"
+       | .displayNameHtml = "EDDI"
        | if (.internationalizationEnabled // false) then .
          else .internationalizationEnabled = true
               | .supportedLocales = ["en"]
@@ -1041,6 +1043,11 @@ print(json.load(sys.stdin).get('loginTheme') or '')" 2>/dev/null)
 import sys, json
 d = json.load(sys.stdin)
 d['loginTheme'] = 'eddi'
+# master's displayNameHtml ships as a div.kc-logo-text, which keycloak.v2 still
+# styles with the Keycloak logo — it renders on top of ours. Plain text also
+# gives the header a correct accessible name. displayName is left alone: it
+# labels the realm in the admin console's realm selector.
+d['displayNameHtml'] = 'EDDI'
 # master ships with i18n off, so <html> gets no lang/dir (WCAG 3.1.1) on a page
 # we now brand. One supported locale adds them without adding a switcher, and
 # loses nothing: with i18n off the page was English-only anyway.
