@@ -9,8 +9,11 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.modules.llm.impl.PromptSnippetService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import io.quarkus.security.ForbiddenException;
+import jakarta.annotation.security.RolesAllowed;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -27,7 +30,8 @@ import static org.mockito.Mockito.*;
  * <p>
  * Covers: null/blank input handling, default sample data path, conversation
  * memory loading, prompt snippet injection, variable flattening, template
- * resolution errors, and conversation not-found handling.
+ * resolution errors, conversation not-found handling, and (A7) the
+ * per-conversation ownership gate on the real-data path.
  */
 class RestTemplatePreviewTest {
 
@@ -35,6 +39,7 @@ class RestTemplatePreviewTest {
     private IConversationMemoryStore conversationMemoryStore;
     private IMemoryItemConverter memoryItemConverter;
     private PromptSnippetService promptSnippetService;
+    private ConversationAccessGuard conversationAccessGuard;
     private RestTemplatePreview restTemplatePreview;
 
     @BeforeEach
@@ -43,11 +48,12 @@ class RestTemplatePreviewTest {
         conversationMemoryStore = mock(IConversationMemoryStore.class);
         memoryItemConverter = mock(IMemoryItemConverter.class);
         promptSnippetService = mock(PromptSnippetService.class);
+        conversationAccessGuard = mock(ConversationAccessGuard.class);
         when(promptSnippetService.getAll()).thenReturn(Map.of());
 
         restTemplatePreview = new RestTemplatePreview(
                 templatingEngine, conversationMemoryStore,
-                memoryItemConverter, promptSnippetService);
+                memoryItemConverter, promptSnippetService, conversationAccessGuard);
     }
 
     // ==================== Null / Blank Input ====================
@@ -533,5 +539,68 @@ class RestTemplatePreviewTest {
 
             verify(promptSnippetService).getAll();
         }
+    }
+
+    // ==================== A7: conversation ownership ====================
+
+    @Nested
+    class ConversationOwnership {
+
+        @Test
+        void shouldRejectPreviewAgainstAForeignConversation() throws Exception {
+            when(conversationAccessGuard.requireConversationOwner("someone-elses-conv"))
+                    .thenThrow(new ForbiddenException("Access denied: you do not own this conversation"));
+
+            assertThrows(ForbiddenException.class, () -> restTemplatePreview.previewTemplate(
+                    new TemplatePreviewRequest("{properties.email}", "someone-elses-conv")));
+        }
+
+        @Test
+        void shouldNotLeakMemoryOrVariableValuesWhenOwnershipIsDenied() throws Exception {
+            when(conversationAccessGuard.requireConversationOwner("someone-elses-conv"))
+                    .thenThrow(new ForbiddenException("Access denied: you do not own this conversation"));
+
+            assertThrows(ForbiddenException.class, () -> restTemplatePreview.previewTemplate(
+                    new TemplatePreviewRequest("{properties.email}", "someone-elses-conv")));
+
+            // Neither the snapshot nor the flattened variable dump may be produced
+            verifyNoInteractions(conversationMemoryStore);
+            verifyNoInteractions(memoryItemConverter);
+            verifyNoInteractions(templatingEngine);
+        }
+
+        @Test
+        void shouldCheckOwnershipBeforeLoadingTheSnapshot() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            when(conversationMemoryStore.loadConversationMemorySnapshot("own-conv")).thenReturn(snapshot);
+            when(memoryItemConverter.convert(any(IConversationMemory.class))).thenReturn(new LinkedHashMap<>());
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenReturn("ok");
+
+            restTemplatePreview.previewTemplate(new TemplatePreviewRequest("template", "own-conv"));
+
+            var order = inOrder(conversationAccessGuard, conversationMemoryStore);
+            order.verify(conversationAccessGuard).requireConversationOwner("own-conv");
+            order.verify(conversationMemoryStore).loadConversationMemorySnapshot("own-conv");
+        }
+
+        @Test
+        void shouldNotGuardTheSampleDataPath() throws Exception {
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenReturn("ok");
+
+            restTemplatePreview.previewTemplate(new TemplatePreviewRequest("template", null));
+
+            verifyNoInteractions(conversationAccessGuard);
+        }
+    }
+
+    // ==================== A7: role gate ====================
+
+    @Test
+    void restInterfaceShouldBeRestrictedToAuthoringRoles() {
+        RolesAllowed roles = IRestTemplatePreview.class.getAnnotation(RolesAllowed.class);
+
+        assertNotNull(roles, "/administration/preview must not be role-less — it renders "
+                + "caller-supplied templates against real conversation memory");
+        assertEquals(List.of("eddi-admin", "eddi-editor"), List.of(roles.value()));
     }
 }

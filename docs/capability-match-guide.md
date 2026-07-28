@@ -92,7 +92,7 @@ Config values support **Jinja2 template expressions**, resolved against the conv
 {
   "type": "capabilityMatch",
   "configs": {
-    "skill": "{{properties.requiredSkill.valueString}}",
+    "skill": "{{properties.requiredSkill}}",
     "strategy": "{{context.routingStrategy}}",
     "minResults": "1"
   }
@@ -228,7 +228,7 @@ Use PropertySetter to capture the user's intent, then route dynamically:
     {
       "type": "capabilityMatch",
       "configs": {
-        "skill": "{{properties.requiredSkill.valueString}}",
+        "skill": "{{properties.requiredSkill}}",
         "strategy": "highest_confidence",
         "minResults": "1"
       }

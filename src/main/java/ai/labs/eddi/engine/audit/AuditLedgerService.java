@@ -22,6 +22,7 @@ import org.jboss.logging.Logger;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.nio.file.*;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
@@ -51,6 +52,17 @@ public class AuditLedgerService {
     private static final Logger LOGGER = Logger.getLogger(AuditLedgerService.class);
     private static final int MAX_FLUSH_RETRIES = 3;
 
+    /** Default bound for {@code eddi.audit.max-queue-size}. */
+    static final int DEFAULT_MAX_QUEUE_SIZE = 100_000;
+
+    /**
+     * Cap on how many conversations are tracked for sequence assignment at once. On
+     * overflow the whole table is dropped; the next entry for a conversation then
+     * re-seeds from the store, which costs one count query and keeps the sequence
+     * gap-free.
+     */
+    private static final int MAX_TRACKED_CONVERSATIONS = 50_000;
+
     private final IAuditStore auditStore;
     private final boolean enabled;
     private final int flushIntervalSeconds;
@@ -62,10 +74,18 @@ public class AuditLedgerService {
     private final String defaultTenantId;
     private final AgentSigningService agentSigningService;
     private final ObjectMapper objectMapper;
+    private final int maxQueueSize;
 
     private byte[] hmacKey;
     private final ConcurrentLinkedQueue<AuditEntry> queue = new ConcurrentLinkedQueue<>();
+    /**
+     * Tracks {@link #queue}'s length. {@link ConcurrentLinkedQueue#size()} is an
+     * O(n) traversal, so it cannot be consulted on every submit to enforce the
+     * bound.
+     */
+    private final AtomicInteger queueSize = new AtomicInteger(0);
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
+    private final ConcurrentHashMap<String, AtomicLong> conversationSequences = new ConcurrentHashMap<>();
     private ScheduledExecutorService flushExecutor;
 
     @Inject
@@ -75,6 +95,7 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.dead-letter-path", defaultValue = "/opt/eddi/data/eddi-audit-deadletter.jsonl") String deadLetterPath,
             @ConfigProperty(name = "eddi.audit.agent-signing-enabled", defaultValue = "true") boolean agentSigningEnabled,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
+            @ConfigProperty(name = "eddi.audit.max-queue-size", defaultValue = "100000") int maxQueueSize,
             io.micrometer.core.instrument.MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
             AgentSigningService agentSigningService, ObjectMapper objectMapper) {
         this.auditStore = auditStore;
@@ -84,6 +105,7 @@ public class AuditLedgerService {
         this.deadLetterPath = deadLetterPath;
         this.agentSigningEnabled = agentSigningEnabled;
         this.defaultTenantId = defaultTenantId;
+        this.maxQueueSize = maxQueueSize > 0 ? maxQueueSize : DEFAULT_MAX_QUEUE_SIZE;
         this.droppedCounter = meterRegistry.counter("eddi_audit_entries_dropped_total");
         this.natsConnectionInstance = natsConnectionInstance;
         this.agentSigningService = agentSigningService;
@@ -96,8 +118,16 @@ public class AuditLedgerService {
      */
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
                                                io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+        return createForTesting(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, meterRegistry, DEFAULT_MAX_QUEUE_SIZE);
+    }
+
+    /**
+     * Factory method for unit testing with an explicit queue bound.
+     */
+    static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
+                                               io.micrometer.core.instrument.MeterRegistry meterRegistry, int maxQueueSize) {
         return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
-                false, "default", meterRegistry, null, null, new ObjectMapper());
+                false, "default", maxQueueSize, meterRegistry, null, null, new ObjectMapper());
     }
 
     @PostConstruct
@@ -154,6 +184,11 @@ public class AuditLedgerService {
         // Scrub secrets from string values in maps
         AuditEntry scrubbed = scrubSecrets(entry);
 
+        // Assign the conversation chain position BEFORE signing — the sequence is
+        // part of the signed payload, which is what makes a deleted entry's gap
+        // impossible to close by renumbering its neighbours.
+        scrubbed = scrubbed.withSequence(nextSequence(scrubbed.conversationId()));
+
         // Compute HMAC if key is available
         AuditEntry signed;
         if (hmacKey != null) {
@@ -168,7 +203,63 @@ public class AuditLedgerService {
             signed = applyAgentSignature(signed);
         }
 
-        queue.offer(signed);
+        offerBounded(signed);
+    }
+
+    /**
+     * Enqueue one entry, refusing it once the queue is at its bound.
+     * <p>
+     * The queue used to be unbounded while a failed flush re-offered its whole
+     * batch back into it: a store that slows down or stops therefore turned every
+     * subsequent turn's entries into permanently retained heap, and the retry path
+     * fed itself. Dropping past the bound (loudly, and counted on
+     * {@code eddi_audit_entries_dropped_total}) keeps a broken ledger from taking
+     * the process down with it.
+     *
+     * @return true if the entry was queued, false if it was dropped
+     */
+    private boolean offerBounded(AuditEntry entry) {
+        if (queueSize.get() >= maxQueueSize) {
+            droppedCounter.increment();
+            LOGGER.warnv("Audit queue is full ({0} entries) — dropping entry for conversation {1}. "
+                    + "The audit store is not keeping up; raise eddi.audit.max-queue-size or fix the store.", maxQueueSize,
+                    entry.conversationId());
+            return false;
+        }
+        queue.offer(entry);
+        queueSize.incrementAndGet();
+        return true;
+    }
+
+    /**
+     * Next 0-based position for {@code conversationId}, or
+     * {@link AuditEntry#UNSEQUENCED} when the entry cannot be chained.
+     * <p>
+     * Entries without a conversation (compliance events) and stores that do not
+     * round-trip the field are left unsequenced rather than signed with a value the
+     * store would drop — that would make every row read as tampered.
+     */
+    private long nextSequence(String conversationId) {
+        if (conversationId == null || conversationId.isBlank() || !auditStore.supportsSequence()) {
+            return AuditEntry.UNSEQUENCED;
+        }
+
+        if (conversationSequences.size() >= MAX_TRACKED_CONVERSATIONS) {
+            // Bounded by construction: re-seeding is correct, only slower.
+            LOGGER.warnv("Audit sequence table hit {0} conversations — resetting; sequences will be re-seeded from the store",
+                    MAX_TRACKED_CONVERSATIONS);
+            conversationSequences.clear();
+        }
+
+        try {
+            AtomicLong counter = conversationSequences.computeIfAbsent(conversationId, id -> new AtomicLong(auditStore.countByConversation(id)));
+            return counter.getAndIncrement();
+        } catch (Exception e) {
+            // A failed seed must not fabricate a duplicate sequence — an unsequenced
+            // entry still verifies, it just does not participate in the chain.
+            LOGGER.warnv("Could not seed audit sequence for conversation {0}: {1}", conversationId, e.getMessage());
+            return AuditEntry.UNSEQUENCED;
+        }
     }
 
     /**
@@ -181,6 +272,7 @@ public class AuditLedgerService {
         List<AuditEntry> batch = new ArrayList<>();
         AuditEntry entry;
         while ((entry = queue.poll()) != null) {
+            queueSize.decrementAndGet();
             batch.add(entry);
         }
 
@@ -193,11 +285,20 @@ public class AuditLedgerService {
                 LOGGER.errorv("Failed to flush {0} audit entries (attempt {1}/{2}): {3}", batch.size(), failures, MAX_FLUSH_RETRIES, e.getMessage());
 
                 if (failures < MAX_FLUSH_RETRIES) {
-                    // Re-queue entries at the front so the next flush retries them
+                    // Re-queue entries at the front so the next flush retries them.
+                    // The re-offer respects the bound: whatever no longer fits goes
+                    // straight to the dead-letter sink instead of growing the heap.
+                    List<AuditEntry> rejected = new ArrayList<>();
                     for (int i = batch.size() - 1; i >= 0; i--) {
-                        queue.offer(batch.get(i));
+                        if (!offerBounded(batch.get(i))) {
+                            rejected.add(batch.get(i));
+                        }
                     }
-                    LOGGER.warnv("Re-queued {0} audit entries for retry", batch.size());
+                    LOGGER.warnv("Re-queued {0} audit entries for retry", batch.size() - rejected.size());
+                    if (!rejected.isEmpty()) {
+                        LOGGER.errorv("Audit queue full — dead-lettering {0} entries that did not fit on retry", rejected.size());
+                        writeToDeadLetter(rejected);
+                    }
                 } else {
                     LOGGER.errorv("Dropping {0} audit entries after {1} consecutive failures — writing to dead-letter log", batch.size(),
                             MAX_FLUSH_RETRIES);
@@ -214,6 +315,41 @@ public class AuditLedgerService {
      */
     public boolean isEnabled() {
         return enabled;
+    }
+
+    /**
+     * Whether entries are being written with an HMAC integrity signature. False
+     * when no vault master key is configured — the ledger is then a plain log, not
+     * evidence.
+     */
+    public boolean isSigningEnabled() {
+        return hmacKey != null;
+    }
+
+    /**
+     * Re-check a stored entry's HMAC against the deployment's signing key.
+     * <p>
+     * This is the only place the key is used for verification; it is deliberately
+     * kept inside the service so no caller has to hold key material. Backs the
+     * admin verification endpoint — without it {@link AuditHmac#verifyHmac} had no
+     * production caller at all, and the ledger shipped with tamper detection that
+     * nothing ever ran.
+     *
+     * @param entry
+     *            a stored entry, as read back from {@link IAuditStore}
+     * @return the verification outcome for that entry
+     */
+    public AuditVerificationStatus verifyEntry(AuditEntry entry) {
+        if (entry == null) {
+            return AuditVerificationStatus.INVALID;
+        }
+        if (hmacKey == null) {
+            return AuditVerificationStatus.SIGNING_DISABLED;
+        }
+        if (entry.hmac() == null || entry.hmac().isBlank()) {
+            return AuditVerificationStatus.UNSIGNED;
+        }
+        return AuditHmac.verifyHmac(entry, hmacKey) ? AuditVerificationStatus.VALID : AuditVerificationStatus.INVALID;
     }
 
     /**
@@ -238,7 +374,7 @@ public class AuditLedgerService {
     // ==================== Visible for Testing ====================
 
     int getQueueSize() {
-        return queue.size();
+        return queueSize.get();
     }
 
     byte[] getHmacKey() {
@@ -255,8 +391,8 @@ public class AuditLedgerService {
                 entry.stepIndex(), entry.taskId(), entry.taskType(), entry.taskIndex(), entry.durationMs(), scrubMap(entry.input()),
                 scrubMap(entry.output()), scrubMap(entry.llmDetail()), scrubMap(entry.toolCalls()), entry.actions(), entry.cost(), entry.timestamp(),
                 null, // HMAC not yet computed
-                null // agentSignature
-        );
+                null, // agentSignature
+                entry.sequence());
     }
 
     private static Map<String, Object> scrubMap(Map<String, Object> map) {

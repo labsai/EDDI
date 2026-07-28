@@ -25,11 +25,11 @@ Content-Type: application/json
 Reference the snippet in your LLM task's system prompt template:
 
 ```
-You are a helpful customer service agent for {{properties.company_name.valueString}}.
+You are a helpful customer service agent for {{properties.company_name}}.
 
 {{snippets.cautious_mode}}
 
-Always respond in {{properties.preferred_language.valueString}}.
+Always respond in {{properties.preferred_language}}.
 ```
 
 That's it. The snippet content is automatically injected at template resolution time.
@@ -90,7 +90,7 @@ Controls whether the Jinja2 template engine resolves template markers inside the
 ```json
 {
   "name": "personalized_greeting",
-  "content": "Address the user as {{properties.preferred_name.valueString}} and respond in {{properties.preferred_language.valueString}}.",
+  "content": "Address the user as {{properties.preferred_name}} and respond in {{properties.preferred_language}}.",
   "templateEnabled": true
 }
 ```
@@ -112,7 +112,7 @@ Even when `templateEnabled` is `true`, you can protect specific sections using J
 ```json
 {
   "name": "mixed_content",
-  "content": "Hello {{properties.name.valueString}}! {% raw %}Use {{placeholder}} in templates.{% endraw %}",
+  "content": "Hello {{properties.name}}! {% raw %}Use {{placeholder}} in templates.{% endraw %}",
   "templateEnabled": true
 }
 ```
@@ -193,7 +193,7 @@ Usage: `{{snippets.cautious_mode}}`
   "name": "gdpr_notice",
   "category": "compliance",
   "description": "GDPR-compliant data handling instructions",
-  "content": "DATA PRIVACY: You are operating under GDPR regulations. Never store or repeat personal data beyond the current conversation unless the user explicitly consents. If asked about data handling, refer to our privacy policy at {{properties.privacy_policy_url.valueString}}.",
+  "content": "DATA PRIVACY: You are operating under GDPR regulations. Never store or repeat personal data beyond the current conversation unless the user explicitly consents. If asked about data handling, refer to our privacy policy at {{properties.privacy_policy_url}}.",
   "tags": ["compliance", "gdpr", "eu"],
   "templateEnabled": true
 }
@@ -206,7 +206,7 @@ Usage: `{{snippets.cautious_mode}}`
   "name": "routing_context",
   "category": "custom",
   "description": "Injects department-specific instructions from properties",
-  "content": "You are handling inquiries for the {{properties.department.valueString}} department. Follow these department-specific guidelines:\n{{properties.department_guidelines.valueString}}",
+  "content": "You are handling inquiries for the {{properties.department}} department. Follow these department-specific guidelines:\n{{properties.department_guidelines}}",
   "tags": ["routing", "dynamic"],
   "templateEnabled": true
 }
@@ -227,7 +227,7 @@ You are a customer service agent for Acme Corp.
 
 {{snippets.gdpr_notice}}
 
-Your specialization is {{properties.specialization.valueString}}.
+Your specialization is {{properties.specialization}}.
 
 Important context:
 {{snippets.routing_context}}

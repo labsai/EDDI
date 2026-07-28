@@ -193,7 +193,7 @@ class AuditLedgerServiceBranchTest {
         doReturn(false).when(natsInstance).isResolvable();
 
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.of("master-key"), "deadletter.jsonl", true, "default",
+                Optional.of("master-key"), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 meterRegistry, natsInstance, signingService, new ObjectMapper());
         service.init();
 
@@ -229,7 +229,7 @@ class AuditLedgerServiceBranchTest {
         doReturn(false).when(natsInstance).isResolvable();
 
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "deadletter.jsonl", true, "default",
+                Optional.empty(), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 meterRegistry, natsInstance, signingService, new ObjectMapper());
         service.init();
 
@@ -262,7 +262,7 @@ class AuditLedgerServiceBranchTest {
 
         // No master key → no hmac
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "deadletter.jsonl", true, "default",
+                Optional.empty(), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 meterRegistry, natsInstance, signingService, new ObjectMapper());
         service.init();
 
@@ -312,7 +312,7 @@ class AuditLedgerServiceBranchTest {
         doReturn(conn).when(natsInstance).get();
 
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "deadletter.jsonl", false, "default",
+                Optional.empty(), "deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
@@ -349,7 +349,7 @@ class AuditLedgerServiceBranchTest {
         // Use a temp file path that likely fails (to cover the file-fallback error
         // path)
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "Z:\\nonexistent\\path\\deadletter.jsonl", false, "default",
+                Optional.empty(), "Z:\\nonexistent\\path\\deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
@@ -376,7 +376,7 @@ class AuditLedgerServiceBranchTest {
 
         // Use a nonexistent path to test error handling
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "Z:\\nonexistent\\deadletter.jsonl", false, "default",
+                Optional.empty(), "Z:\\nonexistent\\deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
@@ -405,7 +405,7 @@ class AuditLedgerServiceBranchTest {
         doReturn(false).when(natsInstance).isResolvable();
 
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "deadletter.jsonl", false, "default",
+                Optional.empty(), "deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 meterRegistry, natsInstance, null, failingMapper);
         service.init();
 
@@ -454,7 +454,7 @@ class AuditLedgerServiceBranchTest {
         doReturn(conn).when(natsInstance).get();
 
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "Z:\\nonexistent\\deadletter.jsonl", false, "default",
+                Optional.empty(), "Z:\\nonexistent\\deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 

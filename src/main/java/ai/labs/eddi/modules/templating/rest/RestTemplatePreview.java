@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.modules.llm.impl.PromptSnippetService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -34,16 +35,19 @@ public class RestTemplatePreview implements IRestTemplatePreview {
     private final IConversationMemoryStore conversationMemoryStore;
     private final IMemoryItemConverter memoryItemConverter;
     private final PromptSnippetService promptSnippetService;
+    private final ConversationAccessGuard conversationAccessGuard;
 
     @Inject
     public RestTemplatePreview(ITemplatingEngine templatingEngine,
             IConversationMemoryStore conversationMemoryStore,
             IMemoryItemConverter memoryItemConverter,
-            PromptSnippetService promptSnippetService) {
+            PromptSnippetService promptSnippetService,
+            ConversationAccessGuard conversationAccessGuard) {
         this.templatingEngine = templatingEngine;
         this.conversationMemoryStore = conversationMemoryStore;
         this.memoryItemConverter = memoryItemConverter;
         this.promptSnippetService = promptSnippetService;
+        this.conversationAccessGuard = conversationAccessGuard;
     }
 
     @Override
@@ -88,8 +92,16 @@ public class RestTemplatePreview implements IRestTemplatePreview {
     /**
      * Load real conversation memory and convert it to the template data map
      * (identical to what {@code LlmTask} uses at runtime).
+     * <p>
+     * The ownership check runs <em>before</em> the snapshot is read: the response
+     * echoes back the flattened variable values, so a preview against a foreign
+     * conversationId would otherwise dump that conversation's properties, context
+     * and memory to the caller. A {@code ForbiddenException} from the guard is
+     * deliberately not caught here — it must surface as 403 rather than degrade
+     * into the "conversation not found" response, which would leak existence.
      */
     private Map<String, Object> loadConversationData(String conversationId) {
+        conversationAccessGuard.requireConversationOwner(conversationId);
         try {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             var memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);

@@ -34,6 +34,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 import static ai.labs.eddi.engine.model.Deployment.Environment.production;
 
@@ -82,8 +83,7 @@ public class RestAgentManagement implements IRestAgentManagement {
                 asyncResponse.resume(memorySnapshot);
             }
         } catch (CannotCreateConversationException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+            throw new InternalServerErrorException(logAndBuildOpaqueMessage("Failed to load conversation memory", e));
         }
     }
 
@@ -104,16 +104,34 @@ public class RestAgentManagement implements IRestAgentManagement {
                     response);
 
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            Response.ResponseBuilder responseStatus;
-            if (e instanceof WebApplicationException) {
-                Response exResponse = ((WebApplicationException) e).getResponse();
-                responseStatus = Response.status(exResponse.getStatus());
-            } else {
-                responseStatus = Response.status(Response.Status.INTERNAL_SERVER_ERROR);
-            }
-            response.resume(responseStatus.type(MediaType.TEXT_PLAIN).entity(e.getLocalizedMessage()).build());
+            int status = e instanceof WebApplicationException webApplicationException
+                    ? webApplicationException.getResponse().getStatus()
+                    : Response.Status.INTERNAL_SERVER_ERROR.getStatusCode();
+
+            // A 4xx message is authored for the client (e.g. the HITL 409 tells the
+            // caller how to resolve the pause) and stays. Anything else is a server
+            // fault whose message describes the deployment, so it is replaced.
+            String entity = status < 400 || status >= 500
+                    ? logAndBuildOpaqueMessage("Failed to process input", e)
+                    : e.getLocalizedMessage();
+
+            response.resume(Response.status(status).type(MediaType.TEXT_PLAIN).entity(entity).build());
         }
+    }
+
+    /**
+     * Logs the failure detail at ERROR under a fresh correlation id and returns the
+     * only thing safe to hand back to the caller: a fixed message plus that id.
+     * <p>
+     * The exception here can originate deep in the store layer (sneaky-thrown
+     * {@code ResourceStoreException}s reach this catch), and those messages name
+     * collections, hosts, and replica-set members. Echoing them turns any failing
+     * request into deployment reconnaissance.
+     */
+    private static String logAndBuildOpaqueMessage(String context, Exception e) {
+        String correlationId = UUID.randomUUID().toString();
+        log.errorf(e, "%s [correlationId=%s]: %s", context, correlationId, e.getLocalizedMessage());
+        return "Internal server error (correlationId: " + correlationId + ")";
     }
 
     private UserConversationResult initUserConversation(String intent, String userId, String language) throws CannotCreateConversationException {

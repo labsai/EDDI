@@ -7,15 +7,22 @@ package ai.labs.eddi.engine.triggermanagement.rest;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.triggermanagement.IRestUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.model.Deployment;
+import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -31,6 +38,10 @@ class RestUserConversationStoreTest {
     private ICacheFactory cacheFactory;
     @Mock
     private ICache<String, UserConversation> cache;
+    @Mock
+    private SecurityIdentity identity;
+    @Mock
+    private OwnershipValidator ownershipValidator;
 
     private RestUserConversationStore restStore;
 
@@ -39,7 +50,7 @@ class RestUserConversationStoreTest {
     void setUp() {
         openMocks(this);
         when(cacheFactory.<String, UserConversation>getCache("userConversations")).thenReturn(cache);
-        restStore = new RestUserConversationStore(userConversationStore, cacheFactory);
+        restStore = new RestUserConversationStore(userConversationStore, cacheFactory, identity, ownershipValidator);
     }
 
     // ==================== calculateCacheKey ====================
@@ -199,5 +210,87 @@ class RestUserConversationStoreTest {
             assertThrows(IResourceStore.ResourceStoreException.class,
                     () -> restStore.deleteUserConversation("intent1", "user1"));
         }
+    }
+
+    // ==================== A6: conversation-id oracle ====================
+
+    @Nested
+    @DisplayName("ownership enforcement")
+    class OwnershipEnforcementTests {
+
+        /**
+         * Mirrors the real validator for a non-admin caller "user1": their own userId
+         * passes, any other userId raises ForbiddenException.
+         */
+        private void denyEveryoneExcept(String ownUserId) {
+            doThrow(new ForbiddenException("Access denied: you do not own this user's data"))
+                    .when(ownershipValidator).validateUserAccess(same(identity), argThat(id -> !ownUserId.equals(id)));
+        }
+
+        @Test
+        @DisplayName("read of another user's mapping must be denied before the conversationId is revealed")
+        void readDeniesForeignUser() throws Exception {
+            denyEveryoneExcept("user1");
+            UserConversation victim = new UserConversation("intent1", "victim",
+                    Deployment.Environment.production, "agent1", "secret-conversation-id");
+            when(cache.get("intent1::victim")).thenReturn(victim);
+
+            assertThrows(ForbiddenException.class, () -> restStore.readUserConversation("intent1", "victim"));
+            verify(cache, never()).get("intent1::victim");
+            verify(userConversationStore, never()).readUserConversation(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("create for another user must be denied before the store is written")
+        void createDeniesForeignUser() throws Exception {
+            denyEveryoneExcept("user1");
+            UserConversation uc = new UserConversation("intent1", "victim",
+                    Deployment.Environment.production, "agent1", "conv1");
+
+            assertThrows(ForbiddenException.class, () -> restStore.createUserConversation("intent1", "victim", uc));
+            verify(userConversationStore, never()).createUserConversation(any(UserConversation.class));
+            verify(cache, never()).put(anyString(), any(UserConversation.class));
+        }
+
+        @Test
+        @DisplayName("delete for another user must be denied before the store is touched")
+        void deleteDeniesForeignUser() throws Exception {
+            denyEveryoneExcept("user1");
+
+            assertThrows(ForbiddenException.class, () -> restStore.deleteUserConversation("intent1", "victim"));
+            verify(userConversationStore, never()).deleteUserConversation(anyString(), anyString());
+            verify(cache, never()).remove(anyString());
+        }
+
+        @Test
+        @DisplayName("own mapping is still served")
+        void ownUserStillServed() throws Exception {
+            denyEveryoneExcept("user1");
+            UserConversation uc = new UserConversation("intent1", "user1",
+                    Deployment.Environment.production, "agent1", "conv1");
+            when(cache.get("intent1::user1")).thenReturn(uc);
+
+            assertSame(uc, restStore.readUserConversation("intent1", "user1"));
+        }
+
+        @Test
+        @DisplayName("every operation consults the validator with the path userId")
+        void everyOperationConsultsValidator() throws Exception {
+            restStore.createUserConversation("intent1", "user1", new UserConversation());
+            restStore.deleteUserConversation("intent1", "user1");
+
+            verify(ownershipValidator, times(2)).validateUserAccess(identity, "user1");
+        }
+    }
+
+    // ==================== A6: role gate ====================
+
+    @Test
+    @DisplayName("the store must be admin-gated — it hands out live conversation ids")
+    void restInterfaceIsAdminOnly() {
+        RolesAllowed roles = IRestUserConversationStore.class.getAnnotation(RolesAllowed.class);
+
+        assertNotNull(roles, "/userconversationstore/userconversations must not be role-less");
+        assertEquals(List.of("eddi-admin"), List.of(roles.value()));
     }
 }

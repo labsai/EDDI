@@ -211,6 +211,13 @@ Inverts the overall outcome of the children conditions
 
 In some cases it is more relevant if a `condition` is `false` than if it is `true`, this is where the `negation` `condition` comes into play. The logical result of all children together (`AND` connected), will be _**inverted**_.
 
+This is exactly what the engine does: every child is evaluated in order, the first child that _fails_ makes the negation succeed (the `AND` is already false), and the negation only fails when _every_ child succeeded. Multi-child negations therefore behave as documented — earlier EDDI versions only looked at the first child, which made a negation with more than one child effectively always true.
+
+Two edge cases are worth knowing:
+
+- A `negation` **must** declare at least one nested condition. An empty `negation` is rejected at configuration validation time.
+- If a child reports `ERROR` or `NOT_EXECUTED` (e.g. a `sizematcher` where every bound is `-1`), there is nothing meaningful to invert — that state is propagated unchanged instead of being flipped.
+
 ### Example:
 
 ```bash
@@ -316,12 +323,26 @@ This condition type checks the size of arrays or collections in the conversation
 (...)
 ```
 
+The example above matches whenever the API call stored between 1 and 10 result elements. Collections, maps and arrays report their **element count** — earlier EDDI versions ran the resolved value through `Integer.parseInt`, so a real collection silently degraded to size `0` and a rule like this one could never match.
+
 | Config      | Type   | Description                              |
 | ----------- | ------ | ---------------------------------------- |
 | `valuePath` | string | Path to the array/collection to check    |
 | `min`       | int    | Minimum size required (-1 to skip check) |
 | `max`       | int    | Maximum size allowed (-1 to skip check)  |
 | `equal`     | int    | Exact size required (-1 to skip check)   |
+
+**How the size is determined** — the value the `valuePath` resolves to decides the rule:
+
+| Resolved value            | Size used                                                              |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `null` / path not found   | `0`                                                                    |
+| Collection, Map, or array | Its element count                                                      |
+| Number                    | The number itself (the value _is_ the size)                            |
+| Numeric string            | The parsed number (kept for backwards compatibility)                   |
+| Any other value           | The length of its textual representation                               |
+
+If `min`, `max` and `equal` are all `-1`, the condition reports `NOT_EXECUTED` — it neither succeeds nor fails, and a wrapping `negation` propagates that state instead of inverting it.
 
 ## The Behavior Rule API Endpoints
 

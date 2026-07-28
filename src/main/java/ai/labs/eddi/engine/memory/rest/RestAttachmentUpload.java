@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.memory.rest;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.container.AsyncResponse;
@@ -38,11 +40,20 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@link IAttachmentStore} (GridFS or PostgreSQL BYTEA). Returns a storage
  * reference that can be used in subsequent conversation turns to forward
  * attachments to multimodal LLM models.
+ * <p>
+ * <strong>Access control:</strong> every endpoint here is conversation-scoped
+ * and takes the conversationId from the path. {@code IAttachmentStore} only
+ * verifies that the NAMED conversation owns the blob — a check the caller
+ * satisfies by choosing the name — so it says nothing about the CALLER. Each
+ * method therefore asserts caller-owns-conversation through
+ * {@link ConversationAccessGuard} first, the same gate {@code RestAgentEngine}
+ * uses.
  *
  * @since 6.0.0
  */
 @Path("/conversations")
 @Tag(name = "Conversations / Attachments", description = "Upload and manage binary conversation attachments")
+@RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public class RestAttachmentUpload {
 
     private static final Logger LOGGER = Logger.getLogger(RestAttachmentUpload.class);
@@ -54,18 +65,21 @@ public class RestAttachmentUpload {
     private static final Pattern TENANT_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]{1,64}$");
 
     private final IAttachmentStore attachmentStore;
+    private final ConversationAccessGuard conversationAccessGuard;
     private final ManagedExecutor managedExecutor;
     private final long maxUploadBytes;
     private final long maxForwardBytes;
 
     @Inject
     public RestAttachmentUpload(IAttachmentStore attachmentStore,
+            ConversationAccessGuard conversationAccessGuard,
             ManagedExecutor managedExecutor,
             @ConfigProperty(name = "eddi.attachments.max-size-bytes",
                             defaultValue = "20971520") long maxUploadBytes,
             @ConfigProperty(name = "eddi.attachments.max-forward-bytes",
                             defaultValue = "10485760") long maxForwardBytes) {
         this.attachmentStore = attachmentStore;
+        this.conversationAccessGuard = conversationAccessGuard;
         this.managedExecutor = managedExecutor;
         this.maxUploadBytes = maxUploadBytes;
         this.maxForwardBytes = maxForwardBytes;
@@ -96,6 +110,10 @@ public class RestAttachmentUpload {
                                  @Parameter(description = "Optional tenant identifier for multi-tenant isolation.")
                                  @QueryParam("tenantId") String tenantId,
                                  @Suspended AsyncResponse asyncResponse) {
+
+        // On the request thread, before the async hop: the guard reads the caller's
+        // SecurityIdentity, which is request-scoped.
+        conversationAccessGuard.requireConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -187,6 +205,8 @@ public class RestAttachmentUpload {
                                 @Parameter(description = "Conversation ID to list attachments for.")
                                 @PathParam("conversationId") String conversationId,
                                 @Suspended AsyncResponse asyncResponse) {
+        conversationAccessGuard.requireConversationOwner(conversationId);
+
         CompletableFuture.runAsync(() -> {
             try {
                 List<Attachment> attachments = attachmentStore.listByConversation(conversationId);
@@ -216,6 +236,8 @@ public class RestAttachmentUpload {
                                    @Parameter(description = "Storage reference of the attachment.")
                                    @PathParam("storageRef") String storageRef,
                                    @Suspended AsyncResponse asyncResponse) {
+        conversationAccessGuard.requireConversationOwner(conversationId);
+
         CompletableFuture.runAsync(() -> {
             try {
                 Attachment meta = attachmentStore.getMetadata(storageRef, conversationId);
@@ -270,6 +292,8 @@ public class RestAttachmentUpload {
                                  @Parameter(description = "Storage reference of the attachment.")
                                  @PathParam("storageRef") String storageRef,
                                  @Suspended AsyncResponse asyncResponse) {
+        conversationAccessGuard.requireConversationOwner(conversationId);
+
         CompletableFuture.runAsync(() -> {
             try {
                 boolean deleted = attachmentStore.delete(storageRef, conversationId);
@@ -307,6 +331,8 @@ public class RestAttachmentUpload {
                                   @Parameter(description = "Conversation ID to delete attachments for.")
                                   @PathParam("conversationId") String conversationId,
                                   @Suspended AsyncResponse asyncResponse) {
+        conversationAccessGuard.requireConversationOwner(conversationId);
+
         CompletableFuture.runAsync(() -> {
             try {
                 long deleted = attachmentStore.deleteByConversation(conversationId);

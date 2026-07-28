@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -20,6 +21,12 @@ import java.util.List;
 import static ai.labs.eddi.datastore.IResourceStore.*;
 
 /**
+ * Conversation history store.
+ * <p>
+ * The per-conversation operations owner-scope their own results through
+ * {@code ConversationAccessGuard}; the deployment-wide sweep has no such
+ * scoping to apply and is therefore role-gated to {@code eddi-admin}.
+ *
  * @author ginccc
  */
 @Path("/conversationstore/conversations")
@@ -61,8 +68,15 @@ public interface IRestConversationStore {
                                @DefaultValue("false") Boolean deletePermanently)
             throws ResourceStoreException, ResourceNotFoundException;
 
+    /**
+     * Deployment-wide retention sweep: permanently deletes EVERY ended conversation
+     * older than {@code deleteOlderThanDays}, across all owners. Admin-only, and
+     * the age must be at least one day — {@code 0} would wipe the whole
+     * deployment's ended conversations in a single unauthenticated request.
+     */
     @DELETE
     @Path("/")
+    @RolesAllowed("eddi-admin")
     Integer permanentlyDeleteEndedConversationLogs(@QueryParam("deleteOlderThanDays") Integer deleteOlderThanDays)
             throws ResourceStoreException, ResourceNotFoundException, ResourceModifiedException;
 

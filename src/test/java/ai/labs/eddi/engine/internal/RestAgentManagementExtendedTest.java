@@ -23,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
 import java.net.URI;
@@ -273,6 +274,37 @@ class RestAgentManagementExtendedTest {
 
             // Verify asyncResponse.resume was called with a Response (error wrapped)
             verify(asyncResponse).resume(any(Response.class));
+        }
+
+        /**
+         * A12 — store failures reach this catch sneaky-thrown, and their messages name
+         * collections, hosts, and replica-set members. The resumed body must carry a
+         * fixed message plus a correlation id, nothing else.
+         */
+        @Test
+        @DisplayName("A12: the error body carries no internal detail, only a correlation id")
+        void errorBodyIsOpaque() throws Exception {
+            var mgmt = create(false);
+
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(null);
+            when(agentTriggerStore.readAgentTrigger("intent-1"))
+                    .thenReturn(triggerWithDeployment("agent-1"));
+            when(restAgentEngine.startConversationWithContext(eq("agent-1"), any(), eq("user-1"), anyMap()))
+                    .thenThrow(new RuntimeException(
+                            "Timed out connecting to replica set [mongo-01.internal:27017] db=eddi coll=conversationmemories"));
+
+            mgmt.sayWithinContext("intent-1", "user-1", false, false,
+                    List.of(), new InputData("Hello", Map.of()), asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+
+            String body = String.valueOf(captor.getValue().getEntity());
+            assertTrue(body.contains("correlationId:"), "body must carry a correlation id");
+            assertFalse(body.contains("mongo-01.internal"), "hostname leaked to the client");
+            assertFalse(body.contains("conversationmemories"), "collection name leaked to the client");
+            assertFalse(body.contains("replica set"), "topology detail leaked to the client");
         }
 
         @Test

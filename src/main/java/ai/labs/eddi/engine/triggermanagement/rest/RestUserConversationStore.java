@@ -9,7 +9,9 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
+import io.quarkus.security.identity.SecurityIdentity;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -26,15 +28,21 @@ public class RestUserConversationStore implements IRestUserConversationStore {
     private static final String CACHE_NAME = "userConversations";
     private final IUserConversationStore userConversationStore;
     private final ICache<String, UserConversation> userConversationCache;
+    private final SecurityIdentity identity;
+    private final OwnershipValidator ownershipValidator;
 
     @Inject
-    public RestUserConversationStore(IUserConversationStore userConversationStore, ICacheFactory cacheFactory) {
+    public RestUserConversationStore(IUserConversationStore userConversationStore, ICacheFactory cacheFactory,
+            SecurityIdentity identity, OwnershipValidator ownershipValidator) {
         this.userConversationStore = userConversationStore;
+        this.identity = identity;
+        this.ownershipValidator = ownershipValidator;
         userConversationCache = cacheFactory.getCache(CACHE_NAME);
     }
 
     @Override
     public UserConversation readUserConversation(String intent, String userId) {
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             String cacheKey = calculateCacheKey(intent, userId);
             UserConversation userConversation = userConversationCache.get(cacheKey);
@@ -60,6 +68,7 @@ public class RestUserConversationStore implements IRestUserConversationStore {
 
     @Override
     public Response createUserConversation(String intent, String userId, UserConversation userConversation) {
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             userConversationStore.createUserConversation(userConversation);
             userConversationCache.put(calculateCacheKey(intent, userId), userConversation);
@@ -71,6 +80,7 @@ public class RestUserConversationStore implements IRestUserConversationStore {
 
     @Override
     public Response deleteUserConversation(String intent, String userId) {
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             userConversationStore.deleteUserConversation(intent, userId);
             userConversationCache.remove(calculateCacheKey(intent, userId));

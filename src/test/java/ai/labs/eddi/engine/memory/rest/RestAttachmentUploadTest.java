@@ -8,6 +8,9 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentNotFoundException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentStoreException;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import io.quarkus.security.ForbiddenException;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.context.ManagedExecutor;
@@ -37,14 +40,17 @@ class RestAttachmentUploadTest {
     private static final long MAX_FORWARD_BYTES = 10 * 1024 * 1024; // 10MB
 
     private IAttachmentStore attachmentStore;
+    private ConversationAccessGuard conversationAccessGuard;
     private ManagedExecutor managedExecutor;
     private RestAttachmentUpload endpoint;
 
     @BeforeEach
     void setUp() {
         attachmentStore = mock(IAttachmentStore.class);
+        conversationAccessGuard = mock(ConversationAccessGuard.class);
         managedExecutor = ManagedExecutor.builder().build();
-        endpoint = new RestAttachmentUpload(attachmentStore, managedExecutor, MAX_UPLOAD_BYTES, MAX_FORWARD_BYTES);
+        endpoint = new RestAttachmentUpload(attachmentStore, conversationAccessGuard, managedExecutor,
+                MAX_UPLOAD_BYTES, MAX_FORWARD_BYTES);
     }
 
     /**
@@ -282,7 +288,8 @@ class RestAttachmentUploadTest {
         @Test
         void shouldReturn400WhenFileTooLarge() throws Exception {
             // Create endpoint with very small max size
-            var smallEndpoint = new RestAttachmentUpload(attachmentStore, managedExecutor, 100, MAX_FORWARD_BYTES);
+            var smallEndpoint = new RestAttachmentUpload(attachmentStore, conversationAccessGuard, managedExecutor,
+                    100, MAX_FORWARD_BYTES);
 
             Path tempFile = Files.createTempFile("test-large", ".bin");
             Files.write(tempFile, new byte[200]); // Exceeds 100 byte limit
@@ -515,6 +522,86 @@ class RestAttachmentUploadTest {
             @SuppressWarnings("unchecked")
             var body = (Map<String, Object>) response.getEntity();
             assertEquals("ATTACHMENT_ACCESS_DENIED", body.get("code"));
+        }
+    }
+
+    // ==================== Caller-ownership Tests (finding A2) ====================
+
+    /**
+     * A2 — {@code IAttachmentStore} only verifies that the conversation NAMED in
+     * the path owns the blob, and the caller picks that name, so the check is
+     * self-satisfying. Every endpoint must therefore assert that the CALLER owns
+     * the conversation, and must do so before touching the store.
+     */
+    @Nested
+    class CallerOwnershipTests {
+
+        private static final String FOREIGN = "conversation-of-user-a";
+
+        @BeforeEach
+        void denyForeignConversation() {
+            doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
+                    .when(conversationAccessGuard).requireConversationOwner(FOREIGN);
+        }
+
+        @Test
+        void uploadToForeignConversationIsDenied() {
+            FileUpload file = mock(FileUpload.class);
+
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.uploadAttachment(FOREIGN, file, null, mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void listOfForeignConversationIsDenied() {
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.listAttachments(FOREIGN, mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void downloadFromForeignConversationIsDenied() {
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.downloadAttachment(FOREIGN, "ref-1", mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void deleteOneInForeignConversationIsDenied() {
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.deleteAttachment(FOREIGN, "ref-1", mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void deleteAllInForeignConversationIsDenied() {
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.deleteAttachments(FOREIGN, mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void ownedConversationIsAdmittedAndStillChecked() throws Exception {
+            when(attachmentStore.listByConversation("conv-1")).thenReturn(List.of());
+
+            Response response = captureAsync(ar -> endpoint.listAttachments("conv-1", ar));
+
+            assertEquals(200, response.getStatus());
+            verify(conversationAccessGuard).requireConversationOwner("conv-1");
+        }
+
+        @Test
+        void attachmentEndpointsAreNotAnonymous() {
+            RolesAllowed roles = RestAttachmentUpload.class.getAnnotation(RolesAllowed.class);
+
+            assertNotNull(roles, "RestAttachmentUpload must declare @RolesAllowed");
+            assertFalse(List.of(roles.value()).isEmpty());
         }
     }
 }

@@ -64,6 +64,42 @@ public interface IScheduleStore {
      */
     int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Delete all schedules owned by a user (GDPR Art. 17 erasure).
+     * <p>
+     * A schedule carries the {@code userId} it fires conversations as. Left behind,
+     * it keeps starting new conversations under an erased user's identity —
+     * recreating the very data the erasure just removed, indefinitely.
+     * <p>
+     * The default implementation is a portable scan-and-delete over
+     * {@link #readAllSchedules}, so every backend erases correctly; backends with
+     * an index on {@code userId} should override it with a single bulk delete. The
+     * scan is bounded by {@link #ERASURE_SCAN_LIMIT} — an explicit number rather
+     * than a "no limit" sentinel, because the backends disagree on what 0 means
+     * ({@code LIMIT 0} returns nothing on PostgreSQL, everything on MongoDB), and
+     * an erasure that silently deletes nothing is the worst possible failure here.
+     *
+     * @param userId
+     *            the user whose schedules to delete
+     * @return number of deleted schedules
+     */
+    default int deleteSchedulesByUserId(String userId) throws IResourceStore.ResourceStoreException {
+        if (userId == null || userId.isBlank()) {
+            return 0;
+        }
+        int deleted = 0;
+        for (ScheduleConfiguration schedule : readAllSchedules(ERASURE_SCAN_LIMIT)) {
+            if (userId.equals(schedule.getUserId())) {
+                deleteSchedule(schedule.getId());
+                deleted++;
+            }
+        }
+        return deleted;
+    }
+
+    /** Bound for the portable {@link #deleteSchedulesByUserId} scan. */
+    int ERASURE_SCAN_LIMIT = 10_000;
+
     List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException;
 
     List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException;

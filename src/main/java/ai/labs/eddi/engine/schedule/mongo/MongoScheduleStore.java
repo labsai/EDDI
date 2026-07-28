@@ -69,6 +69,7 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String UPDATED_AT = "updatedAt";
     private static final String AGENT_ID = "agentId";
     private static final String TENANT_ID = "tenantId";
+    private static final String USER_ID = "userId";
     private static final String SCHEDULE_ID = "scheduleId";
     private static final String STARTED_AT = "startedAt";
     private static final String STATUS = "status";
@@ -105,6 +106,8 @@ public class MongoScheduleStore implements IScheduleStore {
         // resume, cancel, and crash-recovery pass — without this index each of
         // those is a collection scan.
         scheduleCollection.createIndex(Indexes.ascending(NAME), new IndexOptions().name("idx_schedules_name"));
+        // Backs the GDPR erasure bulk delete (deleteSchedulesByUserId).
+        scheduleCollection.createIndex(Indexes.ascending(USER_ID), new IndexOptions().name("idx_schedules_userId"));
 
         // Fire log indexes
         fireLogCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(SCHEDULE_ID), Indexes.descending(STARTED_AT)),
@@ -227,6 +230,28 @@ public class MongoScheduleStore implements IScheduleStore {
             return count;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to delete schedules for Agent " + agentId, e);
+        }
+    }
+
+    /**
+     * Indexed bulk override of the portable default: a left-behind schedule keeps
+     * firing conversations under an erased user's id, so this runs on every GDPR
+     * erasure and must not degrade to a full scan.
+     */
+    @Override
+    public int deleteSchedulesByUserId(String userId) throws IResourceStore.ResourceStoreException {
+        if (userId == null || userId.isBlank()) {
+            return 0;
+        }
+        try {
+            var result = scheduleCollection.deleteMany(eq(USER_ID, userId));
+            int count = (int) result.getDeletedCount();
+            if (count > 0) {
+                LOGGER.infof("Erased %d schedule(s) owned by user %s", count, sanitize(userId));
+            }
+            return count;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete schedules for user", e);
         }
     }
 

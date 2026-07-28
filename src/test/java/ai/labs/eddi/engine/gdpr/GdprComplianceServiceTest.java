@@ -4,19 +4,28 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
+import ai.labs.eddi.engine.triggermanagement.rest.RestUserConversationStore;
+import ai.labs.eddi.datastore.IResourceStore;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,6 +58,11 @@ class GdprComplianceServiceTest {
     private Instance<IAttachmentStore> attachmentStorageInstance;
     private IAttachmentStore attachmentStore;
     private IConversationDescriptorStore conversationDescriptorStore;
+    private IConversationCheckpointStore checkpointStore;
+    private GroupConversationStore groupConversationStore;
+    private Instance<GroupConversationStore> groupConversationStoreInstance;
+    private IScheduleStore scheduleStore;
+    private CacheFactory cacheFactory;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -61,16 +75,30 @@ class GdprComplianceServiceTest {
         auditLedgerService = mock(AuditLedgerService.class);
         hitlToolJournalStore = mock(IHitlToolJournalStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
+        checkpointStore = mock(IConversationCheckpointStore.class);
+        groupConversationStore = mock(GroupConversationStore.class);
+        groupConversationStoreInstance = mock(Instance.class);
+        when(groupConversationStoreInstance.isResolvable()).thenReturn(true);
+        when(groupConversationStoreInstance.get()).thenReturn(groupConversationStore);
+        scheduleStore = mock(IScheduleStore.class);
+        // A real cache factory, not a mock: the cache-invalidation test needs the
+        // same Caffeine instance the REST store reads through.
+        cacheFactory = new CacheFactory();
 
         attachmentStorageInstance = mock(Instance.class);
         attachmentStore = mock(IAttachmentStore.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
 
-        service = new GdprComplianceService(
+        service = newService(attachmentStorageInstance);
+    }
+
+    private GdprComplianceService newService(Instance<IAttachmentStore> attachments) {
+        return new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore,
-                conversationDescriptorStore);
+                auditLedgerService, attachments, hitlToolJournalStore,
+                conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, scheduleStore, cacheFactory);
     }
 
     @Test
@@ -219,11 +247,7 @@ class GdprComplianceServiceTest {
         when(attachmentStorage.deleteByConversation("conv-1")).thenReturn(2L);
         when(attachmentStorage.deleteByConversation("conv-2")).thenReturn(3L);
 
-        var serviceWithAttachments = new GdprComplianceService(
-                userMemoryStore, conversationMemoryStore,
-                userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachInstance, hitlToolJournalStore,
-                conversationDescriptorStore);
+        var serviceWithAttachments = newService(attachInstance);
 
         when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
@@ -251,11 +275,7 @@ class GdprComplianceServiceTest {
         var attachmentStorage = mock(IAttachmentStore.class);
         when(attachInstance.get()).thenReturn(attachmentStorage);
 
-        var serviceWithAttachments = new GdprComplianceService(
-                userMemoryStore, conversationMemoryStore,
-                userConversationStore, databaseLogs, auditStore,
-                auditLedgerService, attachInstance, hitlToolJournalStore,
-                conversationDescriptorStore);
+        var serviceWithAttachments = newService(attachInstance);
 
         when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
@@ -746,5 +766,112 @@ class GdprComplianceServiceTest {
 
         // Then — conversations list is empty but export succeeds
         assertTrue(export.conversations().isEmpty());
+    }
+
+    // ==================== G14: cache invalidation ====================
+
+    /**
+     * Erasure used to delete the mapping rows straight from the store while the
+     * REST read path served them out of a Caffeine cache that has no TTL and was
+     * never invalidated — so {@code readUserConversation} kept returning the erased
+     * mapping for the lifetime of the process.
+     * <p>
+     * The test drives the REAL cache through the REAL REST store, so it fails if
+     * the invalidation is removed.
+     */
+    @Test
+    void deleteUserData_invalidatesCachedConversationMappings() throws Exception {
+        var mapping = new UserConversation("support", USER_ID, Deployment.Environment.production, "agent-1", "conv-1");
+
+        // authorization.enabled=false — the ownership check is a no-op here, this
+        // test is about cache invalidation, not access control.
+        var restStore = new RestUserConversationStore(userConversationStore, cacheFactory,
+                mock(SecurityIdentity.class), new OwnershipValidator(false));
+        when(userConversationStore.readUserConversation("support", USER_ID)).thenReturn(mapping);
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of(mapping));
+
+        // Warm the cache the way a real read does.
+        assertEquals("conv-1", restStore.readUserConversation("support", USER_ID).getConversationId());
+
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(1L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        service.deleteUserData(USER_ID);
+
+        // The store no longer has the row — the only way a value could come back
+        // now is the stale cache entry.
+        when(userConversationStore.readUserConversation("support", USER_ID)).thenReturn(null);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class,
+                () -> restStore.readUserConversation("support", USER_ID),
+                "a post-erasure read must return nothing, not the cached mapping");
+    }
+
+    @Test
+    void deleteUserData_readsMappingIntentsBeforeDeletingThem() throws Exception {
+        var mapping = new UserConversation("support", USER_ID, Deployment.Environment.production, "agent-1", "conv-1");
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of(mapping));
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(1L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        service.deleteUserData(USER_ID);
+
+        // Once the rows are gone there is no way left to derive the cache keys.
+        var inOrder = inOrder(userConversationStore);
+        inOrder.verify(userConversationStore).getAllForUser(USER_ID);
+        inOrder.verify(userConversationStore).deleteAllForUser(USER_ID);
+    }
+
+    // ==================== G15: the three missed stores ====================
+
+    @Test
+    void deleteUserData_deletesCheckpointsGroupTranscriptsAndSchedules() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-1", "conv-2"));
+        when(checkpointStore.deleteByConversationId("conv-1")).thenReturn(2L);
+        when(checkpointStore.deleteByConversationId("conv-2")).thenReturn(1L);
+        when(groupConversationStore.deleteAllForUser(USER_ID)).thenReturn(4L);
+        when(scheduleStore.deleteSchedulesByUserId(USER_ID)).thenReturn(3);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(2L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        service.deleteUserData(USER_ID);
+
+        // Checkpoints carry a copy of the conversation properties (PII) and must go
+        // BEFORE the snapshots they hang off are bulk-deleted.
+        var inOrder = inOrder(checkpointStore, conversationMemoryStore);
+        inOrder.verify(checkpointStore).deleteByConversationId("conv-1");
+        inOrder.verify(checkpointStore).deleteByConversationId("conv-2");
+        inOrder.verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
+
+        verify(groupConversationStore).deleteAllForUser(USER_ID);
+        verify(scheduleStore).deleteSchedulesByUserId(USER_ID);
+    }
+
+    @Test
+    void deleteUserData_continuesWhenTheNewStoresFail() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        when(checkpointStore.deleteByConversationId("conv-1")).thenThrow(new RuntimeException("checkpoint store down"));
+        when(groupConversationStore.deleteAllForUser(USER_ID)).thenThrow(new RuntimeException("group store down"));
+        when(scheduleStore.deleteSchedulesByUserId(USER_ID)).thenThrow(new RuntimeException("schedule store down"));
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(1L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        assertEquals(1, result.conversationsDeleted());
+        verify(scheduleStore).deleteSchedulesByUserId(USER_ID);
     }
 }

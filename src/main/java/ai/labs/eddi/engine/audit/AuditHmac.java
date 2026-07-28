@@ -38,8 +38,9 @@ public final class AuditHmac {
     private static final int PBKDF2_ITERATIONS = 600_000;
 
     /**
-     * Marker prefixed to every HMAC produced by {@link #computeHmac}, identifying
-     * the canonical form it was computed over.
+     * Marker identifying the v2 canonical form. No longer produced — see
+     * {@link #V3_PREFIX} — but still selected by {@link #verifyHmac} for rows
+     * written while v2 was current.
      * <p>
      * The stored value carries the version because the two canonicalizers are not
      * interchangeable: verification must pick the one the entry was signed with. A
@@ -51,8 +52,71 @@ public final class AuditHmac {
      */
     static final String V2_PREFIX = "v2:";
 
+    /**
+     * Marker for the <strong>v3</strong> canonical form — the one
+     * {@link #computeHmac} writes today. v3 differs from v2 in exactly two places:
+     * the user identifier is signed through {@link #identityToken} rather than
+     * verbatim, and the per-conversation {@code sequence} joins the signed payload.
+     *
+     * @see #buildCanonicalStringV3
+     */
+    static final String V3_PREFIX = "v3:";
+
+    /**
+     * Prefix of a GDPR-pseudonymised user identifier. Shared with the erasure
+     * cascade so the two cannot drift — the whole point of {@link #identityToken}
+     * is that it recognises the exact string erasure writes.
+     */
+    public static final String GDPR_PSEUDONYM_PREFIX = "gdpr-erased:";
+
     private AuditHmac() {
         // Utility class
+    }
+
+    /**
+     * The pseudonym GDPR erasure substitutes for {@code userId}:
+     * {@value #GDPR_PSEUDONYM_PREFIX} followed by the hex SHA-256 of the original
+     * identifier.
+     *
+     * @param userId
+     *            the original user identifier
+     * @return the deterministic pseudonym for that user
+     */
+    public static String pseudonymFor(String userId) {
+        return GDPR_PSEUDONYM_PREFIX + sha256Hex(userId);
+    }
+
+    /**
+     * The value v3 signs in place of the raw {@code userId}: the identifier's
+     * <em>pseudonym</em>, whether or not erasure has already run.
+     * <p>
+     * This is what makes GDPR pseudonymisation signature-preserving. Erasure
+     * rewrites {@code userId} from {@code alice} to
+     * {@code gdpr-erased:<sha256(alice)>}; both map to the same token, so the HMAC
+     * computed before erasure still verifies after it. Under v1/v2 — which signed
+     * {@code userId} verbatim — a routine erasure left every affected row
+     * cryptographically indistinguishable from a tampered one.
+     * <p>
+     * Identity is still bound: swapping {@code alice} for {@code bob} yields a
+     * different token and breaks the HMAC. The one substitution that verifies is
+     * replacing an identifier with its own pseudonym, which is precisely the
+     * mutation {@link ai.labs.eddi.engine.audit.IAuditStore#pseudonymizeByUserId}
+     * is permitted to make.
+     */
+    static String identityToken(String userId) {
+        if (userId == null || userId.isEmpty()) {
+            return "";
+        }
+        return userId.startsWith(GDPR_PSEUDONYM_PREFIX) ? userId : pseudonymFor(userId);
+    }
+
+    private static String sha256Hex(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(input.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 
     /**
@@ -76,24 +140,26 @@ public final class AuditHmac {
 
     /**
      * Compute HMAC-SHA256 over all audit entry fields (excluding the hmac field
-     * itself), using the v2 canonical form.
+     * itself), using the v3 canonical form.
      *
      * @param entry
      *            the audit entry (hmac field is ignored)
      * @param hmacKey
      *            the 32-byte HMAC key
-     * @return version-tagged, hex-encoded HMAC string ({@code v2:<64 hex chars>})
+     * @return version-tagged, hex-encoded HMAC string ({@code v3:<64 hex chars>})
      */
     public static String computeHmac(AuditEntry entry, byte[] hmacKey) {
-        return V2_PREFIX + hmacSha256(buildCanonicalStringV2(entry), hmacKey);
+        return V3_PREFIX + hmacSha256(buildCanonicalStringV3(entry), hmacKey);
     }
 
     /**
      * Verify that an audit entry's HMAC matches the expected value.
      * <p>
-     * The canonical form is selected from the stored value's version tag, so
-     * entries signed before {@link #V2_PREFIX} existed keep verifying against the
-     * v1 canonicalizer and entries signed after it are held to v2 only.
+     * The canonical form is selected from the stored value's version tag: a
+     * {@link #V3_PREFIX} row is held to v3 only, a {@link #V2_PREFIX} row to v2
+     * only, and an untagged row (written before either existed) to v1. A form is
+     * never retried against another — falling back would hand the weaker form's
+     * collisions back to an attacker.
      * <p>
      * The digests are compared as raw bytes through
      * {@link MessageDigest#isEqual(byte[], byte[])} rather than with
@@ -121,7 +187,10 @@ public final class AuditHmac {
 
         String expectedDigest;
         String storedDigest;
-        if (stored.startsWith(V2_PREFIX)) {
+        if (stored.startsWith(V3_PREFIX)) {
+            expectedDigest = hmacSha256(buildCanonicalStringV3(entry), hmacKey);
+            storedDigest = stored.substring(V3_PREFIX.length());
+        } else if (stored.startsWith(V2_PREFIX)) {
             expectedDigest = hmacSha256(buildCanonicalStringV2(entry), hmacKey);
             storedDigest = stored.substring(V2_PREFIX.length());
         } else {
@@ -149,6 +218,48 @@ public final class AuditHmac {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    /**
+     * Build the <strong>v3</strong> canonical string — the form new entries are
+     * signed with.
+     * <p>
+     * Same escaping and type-tagging as {@link #buildCanonicalStringV2}, with two
+     * changes:
+     * <ul>
+     * <li>{@code uid} is the {@link #identityToken}, not the raw identifier, so a
+     * GDPR pseudonymisation no longer invalidates the signature it had.</li>
+     * <li>{@code seq} — the entry's position in its conversation — is signed, so an
+     * entry cannot be renumbered and a deletion leaves a gap that verification can
+     * see. A per-entry HMAC on its own only detects in-place edits.</li>
+     * </ul>
+     * <p>
+     * <strong>Frozen once written.</strong> Same rule as v1/v2: changing a byte
+     * here makes every v3 row read as tampered. Add a v4 instead.
+     */
+    static String buildCanonicalStringV3(AuditEntry entry) {
+        StringBuilder sb = new StringBuilder(512);
+        sb.append("v3");
+        sb.append("|id=").append(escape(entry.id()));
+        sb.append("|cid=").append(escape(entry.conversationId()));
+        sb.append("|bid=").append(escape(entry.agentId()));
+        sb.append("|bv=").append(entry.agentVersion());
+        sb.append("|uid=").append(escape(identityToken(entry.userId())));
+        sb.append("|env=").append(escape(entry.environment()));
+        sb.append("|si=").append(entry.stepIndex());
+        sb.append("|tid=").append(escape(entry.taskId()));
+        sb.append("|tt=").append(escape(entry.taskType()));
+        sb.append("|ti=").append(entry.taskIndex());
+        sb.append("|seq=").append(entry.sequence());
+        sb.append("|dur=").append(entry.durationMs());
+        sb.append("|in=").append(canonicalValueV2(entry.input()));
+        sb.append("|out=").append(canonicalValueV2(entry.output()));
+        sb.append("|llm=").append(canonicalValueV2(entry.llmDetail()));
+        sb.append("|tools=").append(canonicalValueV2(entry.toolCalls()));
+        sb.append("|actions=").append(canonicalValueV2(entry.actions()));
+        sb.append("|cost=").append(entry.cost());
+        sb.append("|ts=").append(escape(Objects.toString(entry.timestamp(), "")));
+        return sb.toString();
     }
 
     /**

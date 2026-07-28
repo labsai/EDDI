@@ -340,6 +340,8 @@ A new `ILifecycleTask` requires ALL of:
 - [ ] `ExtensionDescriptor` (UI field definitions via `getExtensionDescriptor()`)
 - [ ] Unit test with Mockito
 
+> **Note on `@ConfigurationUpdate`:** it is declared in `IResourceStore` as an `@InterceptorBinding`, but **no `@Interceptor` class currently implements it** — today the annotation has no runtime behaviour and is purely a marker documenting "this method mutates stored configuration". Keep applying it for consistency with the existing stores, but do **not** rely on it to invalidate caches or fire events; caches such as `PromptSnippetService` use an explicit `invalidateCache()` plus a Caffeine TTL instead. Whether to implement the interceptor or drop the annotation is still open.
+
 All task implementations MUST implement: `getId()` (returns `TaskId`), `getType()`, `execute()`, `configure()`, `getExtensionDescriptor()`.
 
 ### 4.4 Code Patterns
@@ -808,7 +810,7 @@ Matcher:      "actions" : "ask_for_model"
 #### Qute template safety in HTTP call bodies
 
 When embedding `{properties.x}` in HTTP call body templates, be aware:
-- `quarkus.qute.strict-rendering=false` renders missing properties as empty strings (no error)
+- `quarkus.qute.strict-rendering=false` renders missing properties as empty strings (no error). This is set once in `application.properties` and applies to **every profile** — there is deliberately no `%prod` override, so dev, test and production all render leniently and fail identically. (Earlier releases turned strict rendering **on** in prod only, which meant a missing property rendered blank in dev but leaked the raw `{properties.x}` literal to the end user in production.)
 - Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`
 - User-entered text containing `{` or `}` will be interpreted as Qute expressions, potentially eating content
 
