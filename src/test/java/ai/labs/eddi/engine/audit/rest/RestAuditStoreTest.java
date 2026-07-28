@@ -156,6 +156,28 @@ class RestAuditStoreTest {
         assertFalse(report.intact());
     }
 
+    /**
+     * A gap is not the only way to break the chain. If two entries carry the SAME
+     * sequence number the chain is ambiguous — one of them may have been replaced,
+     * or an entry inserted — and the run has no gap to reveal it. checkChain used
+     * to collect duplicates and then decide purely on {@code missing.isEmpty()}, so
+     * this reported INTACT and handed an auditor a false assurance.
+     */
+    @Test
+    @DisplayName("duplicate sequence numbers break the chain even with no gap")
+    void duplicateSequenceIsDetected() {
+        when(auditStore.getEntries("conv-1", 0, 1000))
+                .thenReturn(List.of(entryAt("id-1", 0), entryAt("id-2", 1), entryAt("id-3", 1)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(0, report.invalid(), "each row still verifies on its own — the chain is what is compromised");
+        assertEquals(List.of(), report.missingSequences(), "there is no gap; only the duplicate reveals it");
+        assertEquals(List.of(1L), report.duplicateSequences());
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertFalse(report.intact(), "a chain with an ambiguous position must never report intact");
+    }
+
     @Test
     @DisplayName("unsequenced rows report the chain as unavailable, not broken")
     void unsequencedRowsReportUnavailable() {

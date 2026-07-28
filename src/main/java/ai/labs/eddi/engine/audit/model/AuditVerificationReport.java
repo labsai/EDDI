@@ -61,10 +61,13 @@ public record AuditVerificationReport(String scope, String scopeId, boolean sign
     /**
      * Whether the sweep found nothing wrong. False whenever an entry failed
      * verification or the chain is broken — note that a sweep with no signing key
-     * is never {@code intact}, because it checked nothing.
+     * is never {@code intact}, because it checked nothing. Duplicate sequence
+     * numbers also defeat it: the chain cannot be trusted when two entries claim
+     * the same position, even where no number is missing.
      */
     public boolean intact() {
-        return signingEnabled && invalid == 0 && unsigned == 0 && chainStatus == ChainStatus.INTACT;
+        return signingEnabled && invalid == 0 && unsigned == 0 && chainStatus == ChainStatus.INTACT
+                && (duplicateSequences == null || duplicateSequences.isEmpty());
     }
 
     /** Continuity of the per-conversation sequence chain. */

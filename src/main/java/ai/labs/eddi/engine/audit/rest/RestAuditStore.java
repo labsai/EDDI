@@ -136,6 +136,10 @@ public class RestAuditStore implements IRestAuditStore {
             }
         }
 
-        return missing.isEmpty() ? ChainStatus.INTACT : ChainStatus.BROKEN;
+        // Duplicates matter as much as gaps. Two entries claiming the same position
+        // make the chain ambiguous, which defeats the very property the sequence
+        // exists to provide: that a deletion or reordering is detectable. Reporting
+        // INTACT here would hand an auditor a false assurance.
+        return missing.isEmpty() && duplicates.isEmpty() ? ChainStatus.INTACT : ChainStatus.BROKEN;
     }
 }
