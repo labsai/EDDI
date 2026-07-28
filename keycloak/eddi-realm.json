@@ -1,6 +1,43 @@
 {
   "realm": "eddi",
   "enabled": true,
+  "displayName": "EDDI",
+  "displayNameHtml": "EDDI",
+  "loginTheme": "eddi",
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "ar",
+    "ca",
+    "cs",
+    "da",
+    "de",
+    "el",
+    "en",
+    "es",
+    "fa",
+    "fi",
+    "fr",
+    "hu",
+    "it",
+    "ja",
+    "ko",
+    "lt",
+    "lv",
+    "nl",
+    "no",
+    "pl",
+    "pt",
+    "pt-BR",
+    "ru",
+    "sk",
+    "sv",
+    "th",
+    "tr",
+    "uk",
+    "zh-CN",
+    "zh-TW"
+  ],
+  "defaultLocale": "en",
   "sslRequired": "none",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
@@ -10,10 +47,12 @@
   "bruteForceProtected": true,
   "defaultRole": {
     "name": "default-roles-eddi",
-    "description": "Default roles assigned to every new user on registration",
+    "description": "Default role for every new user — least privilege. Elevated roles (eddi-admin, eddi-editor) are granted explicitly.",
     "composite": true,
     "composites": {
-      "realm": ["eddi-admin", "eddi-editor", "eddi-user"]
+      "realm": [
+        "eddi-user"
+      ]
     },
     "clientRole": false
   },
@@ -37,10 +76,12 @@
       },
       {
         "name": "default-roles-eddi",
-        "description": "Default roles assigned to every new user on registration",
+        "description": "Default role for every new user — least privilege. Elevated roles (eddi-admin, eddi-editor) are granted explicitly.",
         "composite": true,
         "composites": {
-          "realm": ["eddi-admin", "eddi-editor", "eddi-user"]
+          "realm": [
+            "eddi-user"
+          ]
         },
         "clientRole": false
       }
