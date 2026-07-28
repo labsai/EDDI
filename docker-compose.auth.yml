@@ -3,9 +3,16 @@
 #
 # Usage: docker compose -f docker-compose.yml -f docker-compose.auth.yml up -d
 #
-# Pre-configured test users (password change required on first login):
-#   eddi  / eddi   (admin)
-#   viewer / viewer (read-only)
+# Pre-configured test users, seeded by keycloak/eddi-realm.json — DEV ONLY:
+#   eddi   / eddi    (eddi-admin + eddi-editor)
+#   viewer / viewer  (eddi-viewer — read-only)
+#   user   / user    (eddi-user — end-user access)
+#
+# These log straight in; there is no forced password change. The credentials
+# are marked "temporary": true in the realm JSON, but Keycloak 26 does not
+# turn that into an UPDATE_PASSWORD required action on realm import — after
+# import the users' requiredActions are empty. Change them through the admin
+# console if you need the prompt.
 
 services:
   eddi:
@@ -55,6 +62,14 @@ services:
     volumes:
       - keycloak-data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro
+      # Custom login theme (activated via "loginTheme" in eddi-realm.json).
+      # Mount the one theme directory, not ./keycloak/themes over
+      # /opt/keycloak/themes. The built-in themes are NOT on that path — they
+      # ship inside org.keycloak.keycloak-themes-<version>.jar, so parent theme
+      # resolution is unaffected either way — but /opt/keycloak/themes is the
+      # custom-theme root and also holds Keycloak's README; mounting over it
+      # hides anything the image places there now or later.
+      - ./keycloak/themes/eddi:/opt/keycloak/themes/eddi:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && timeout 2 cat <&3 | grep -q '200'"]
       interval: 10s
