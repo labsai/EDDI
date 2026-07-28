@@ -448,14 +448,14 @@ function OperatorDiscoveryCard() {
         <div className="flex items-start gap-3">
           <Sparkles className="mt-0.5 h-6 w-6 shrink-0 text-primary" />
           <div>
-            <p className="font-medium">{t("operator.discovery.title")}</p>
+            <p className="font-medium">{t("operator.discovery.title", "Meet your Platform Operator")}</p>
             <p className="text-sm text-muted-foreground">
-              {t("operator.discovery.description")}
+              {t("operator.discovery.description", "An assistant that inspects and explains this deployment. Off by default, read-only, one click to activate.")}
             </p>
           </div>
         </div>
         <Button asChild>
-          <Link to="/manage/operator">{t("operator.discovery.action")}</Link>
+          <Link to="/manage/operator">{t("operator.discovery.action", "Activate")}</Link>
         </Button>
       </CardContent>
     </Card>

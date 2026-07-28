@@ -227,15 +227,26 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
           setState((s) => ({ ...s, error: getErrorMessage(error) }));
         }
       } finally {
-        abortRef.current = null;
+        // A stopped-then-resent turn can settle *after* its successor started.
+        // Such a turn owns only its own message: touching the shared state would
+        // null the live controller, wipe the new turn's events, and file them
+        // under this turn's message id.
+        const isStillCurrent = abortRef.current === controller;
+        if (isStillCurrent) {
+          abortRef.current = null;
+        }
         setState((s) => ({
           ...s,
-          isStreaming: false,
-          events: [],
-          tracesByMessageId:
-            s.events.length > 0
-              ? { ...s.tracesByMessageId, [agentId]: s.events }
-              : s.tracesByMessageId,
+          ...(isStillCurrent
+            ? {
+                isStreaming: false,
+                events: [],
+                tracesByMessageId:
+                  s.events.length > 0
+                    ? { ...s.tracesByMessageId, [agentId]: s.events }
+                    : s.tracesByMessageId,
+              }
+            : {}),
           messages: s.messages.map((m) =>
             m.id === agentId ? { ...m, isStreaming: false } : m,
           ),

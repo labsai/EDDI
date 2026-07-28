@@ -475,3 +475,21 @@ describe("reactivateOperator", () => {
     await expect(reactivateOperator(config())).rejects.toThrow(/no provisioned agent/i);
   });
 });
+
+describe("readOperatorConfig — malformed blob shapes", () => {
+  // JSON.parse succeeds for these; casting one to OperatorConfig would surface
+  // downstream as undefined property reads rather than "not configured".
+  it.each([
+    ["a JSON null", "null"],
+    ["a bare number", "42"],
+    ["a bare string", '"not a config"'],
+    ["an array", "[1,2,3]"],
+  ])("treats %s as not configured", async (_label, value) => {
+    server.use(
+      http.get(`${BASE}/${OPERATOR_VARIABLE_KEY}`, () =>
+        HttpResponse.json({ key: OPERATOR_VARIABLE_KEY, value }),
+      ),
+    );
+    await expect(readOperatorConfig()).resolves.toBeNull();
+  });
+});

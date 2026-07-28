@@ -107,7 +107,14 @@ export async function readOperatorConfig(): Promise<OperatorConfig | null> {
   }
   if (!variable?.value) return null;
   try {
-    return JSON.parse(variable.value) as OperatorConfig;
+    const parsed: unknown = JSON.parse(variable.value);
+    // `JSON.parse` also succeeds for `null`, a number or a bare string. Casting
+    // one of those to OperatorConfig would surface later as undefined property
+    // reads rather than the intended "not configured".
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as OperatorConfig;
   } catch {
     return null;
   }

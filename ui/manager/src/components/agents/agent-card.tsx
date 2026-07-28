@@ -124,10 +124,10 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
           <span
             className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
             data-testid={`agent-managed-${agent.id}`}
-            title={t("operator.managedAgentHint")}
+            title={t("operator.managedAgentHint", "Provisioned and managed by the Platform Operator screen. Editing or deleting it here will break that screen.")}
           >
             <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("operator.managedAgentBadge")}
+            {t("operator.managedAgentBadge", "Operator")}
           </span>
         )}
 
