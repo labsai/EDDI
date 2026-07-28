@@ -129,6 +129,10 @@
     --eddi-card-edge:     inset 0 1px 0 0 rgba(255, 255, 255, .05);
     --eddi-card-shadow:   0 24px 64px -16px rgba(0, 0, 0, .85);
     --eddi-logo-filter:   none;
+    --eddi-bloom-near:    rgba(245, 158, 11, .14);
+    --eddi-bloom-mid:     rgba(245, 158, 11, .07);
+    --eddi-bloom-far:     rgba(245, 158, 11, .025);
+    --eddi-vignette:      rgba(39, 39, 42, .45);
 
     /* Native form controls, scrollbars and autofill follow this. PF5's dark
        theme sets it too; repeated here so the page degrades sanely if the
@@ -151,8 +155,16 @@
  * keeps this block to a palette swap plus the handful of treatments that are
  * inherently directional (a highlight lit from above, a recess, a shadow).
  * ------------------------------------------------------------------------ */
+/* The light values live in one place and are applied by two selectors: the
+ * media query governs when the visitor has expressed no preference here (so the
+ * page follows the OS, like the Manager's "system" default), and the attribute
+ * wins when they have chosen explicitly with the control in the card header.
+ * `[data-eddi-theme="dark"]` needs no rules — it simply excludes itself from the
+ * media query and inherits the dark base above.
+ *
+ * KEEP THE TWO LISTS IN SYNC. */
 @media (prefers-color-scheme: light) {
-    :root {
+    :root:not([data-eddi-theme]) {
         --eddi-bg:            #fafaf9; /* stone-50   page background        */
         --eddi-surface:       #ffffff; /*            login card             */
         --eddi-surface-alt:   #f5f5f4; /* stone-100                         */
@@ -184,22 +196,44 @@
         --pf-v5-global--BoxShadow--lg: 0 6px 18px rgba(28, 25, 23, .10);
         --pf-v5-global--BoxShadow--xl: 0 12px 32px rgba(28, 25, 23, .14);
 
+        /* On a light page the bloom cannot read as emitted light — at any
+           visible alpha it reads as a stain. It becomes a faint warm wash, and
+           the vignette flips from near-black to a cool grey so the card still
+           separates from the page. */
+        --eddi-bloom-near:    rgba(245, 158, 11, .10);
+        --eddi-bloom-mid:     rgba(245, 158, 11, .04);
+        --eddi-bloom-far:     transparent;
+        --eddi-vignette:      rgba(120, 113, 108, .10);
+
         color-scheme: light;
     }
+}
 
-    /* On a light page the bloom cannot read as emitted light — at any visible
-       alpha it reads as a stain. It becomes a faint warm wash, and the vignette
-       flips from near-black to a cool grey so the card still separates. */
-    .login-pf body {
-        background:
-            radial-gradient(34% 24% at 50% 29%,
-                rgba(245, 158, 11, .10),
-                rgba(245, 158, 11, .04) 45%,
-                transparent 78%),
-            radial-gradient(78% 48% at 50% 108%, rgba(120, 113, 108, .10), transparent 72%),
-            var(--eddi-bg);
-        background-attachment: fixed;
-    }
+/* Explicit light choice — mirror of the block above. */
+:root[data-eddi-theme="light"] {
+    --eddi-bg:            #fafaf9;
+    --eddi-surface:       #ffffff;
+    --eddi-surface-alt:   #f5f5f4;
+    --eddi-border:        #e7e5e4;
+    --eddi-border-strong: #d6d3d1;
+    --eddi-fg:            #1c1917;
+    --eddi-muted:         #78716c;
+    --eddi-error:         #dc2626;
+    --eddi-link:          #b45309;
+    --eddi-focus:         #b45309;
+    --eddi-recess:        #f5f5f4;
+    --eddi-inset-shadow:  inset 0 1px 2px rgba(28, 25, 23, .06);
+    --eddi-card-sheen:    none;
+    --eddi-card-edge:     inset 0 1px 0 0 rgba(255, 255, 255, .9);
+    --eddi-card-shadow:   0 10px 30px -12px rgba(28, 25, 23, .18);
+    --eddi-logo-filter:   invert(1);
+    --pf-v5-global--BoxShadow--lg: 0 6px 18px rgba(28, 25, 23, .10);
+    --pf-v5-global--BoxShadow--xl: 0 12px 32px rgba(28, 25, 23, .14);
+    --eddi-bloom-near:    rgba(245, 158, 11, .10);
+    --eddi-bloom-mid:     rgba(245, 158, 11, .04);
+    --eddi-bloom-far:     transparent;
+    --eddi-vignette:      rgba(120, 113, 108, .10);
+    color-scheme: light;
 }
 
 /* --- PatternFly 5 global tokens ------------------------------------------
@@ -322,11 +356,11 @@
            low alpha over near-black bands visibly, which read as a smudge
            rather than as light. */
         radial-gradient(34% 24% at 50% 29%,
-            rgba(245, 158, 11, .14),
-            rgba(245, 158, 11, .07) 38%,
-            rgba(245, 158, 11, .025) 62%,
+            var(--eddi-bloom-near),
+            var(--eddi-bloom-mid) 38%,
+            var(--eddi-bloom-far) 62%,
             transparent 80%),
-        radial-gradient(78% 48% at 50% 108%, rgba(39, 39, 42, .45), transparent 72%),
+        radial-gradient(78% 48% at 50% 108%, var(--eddi-vignette), transparent 72%),
         var(--eddi-bg);
     background-attachment: fixed;
 }
@@ -514,6 +548,96 @@
     -webkit-text-fill-color: var(--eddi-fg);
     caret-color: var(--eddi-fg);
     transition: background-color 5000s ease-in-out 0s;
+}
+
+/* --- Locale picker -------------------------------------------------------
+ * Keycloak renders the language selector as a native <select> wrapped in a
+ * .pf-v5-c-form-control, in the card header beside the title. The field styling
+ * above therefore hit it too, giving it the recess, border, radius and 38px
+ * height of the password input — so it read as a stray form field competing
+ * with the heading rather than as a utility.
+ *
+ * It is quiet at rest and reveals its affordance on hover or focus, which is
+ * the usual treatment for a header utility. The native <select> keeps its own
+ * keyboard and screen-reader behaviour untouched.
+ * ------------------------------------------------------------------------ */
+/* PatternFly's header is a grid whose two tracks are content-sized and packed
+   left, so the picker landed one column-gap (16px) to the right of where the
+   form fields end — close enough to look like a mistake rather than a choice.
+   Letting the title track take the free space puts the picker's right edge on
+   the same line as the fields and the Sign In button. */
+.pf-v5-c-login__main-header {
+    /* The header's grid tracks overflow its padding box by exactly the column
+       gap, which pushed the picker 16px past the right edge of the fields —
+       near enough to read as a mistake rather than a choice. Track sizing does
+       not fix it (`minmax(0, 1fr)` and a zero min-width on the title were both
+       tried against the live page and neither moved it). Zeroing the gap does,
+       so the spacing moves onto the utilities instead, which is equivalent
+       visually and actually works. */
+    column-gap: 0;
+}
+
+.pf-v5-c-login__main-header-utilities {
+    margin-left: 16px;
+}
+
+.pf-v5-c-login__main-header-utilities {
+    justify-self: end;
+}
+
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control {
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control:hover,
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control:focus-within {
+    background-color: var(--eddi-recess);
+    border-color: var(--eddi-border);
+}
+
+.pf-v5-c-login__main-header-utilities select {
+    color: var(--eddi-muted);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control:hover select,
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control:focus-within select {
+    color: var(--eddi-fg);
+}
+
+/* Colour-scheme toggle, injected next to the locale picker. Same quiet
+   treatment, so the two read as one row of header utilities. */
+.pf-v5-c-login__main-header-utilities {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.eddi-theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto; /* the header row is flex; without this it squashes to 24px */
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--eddi-radius);
+    background-color: transparent;
+    color: var(--eddi-muted);
+    cursor: pointer;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.eddi-theme-toggle:hover,
+.eddi-theme-toggle:focus-visible {
+    background-color: var(--eddi-recess);
+    border-color: var(--eddi-border);
+    color: var(--eddi-fg);
 }
 
 /* --- Type treatment ------------------------------------------------------

@@ -657,6 +657,7 @@ resolve_compose_files() {
       "keycloak/themes/eddi/login/resources/fonts/noto-sans-cyrillic-variable.woff2"
       "keycloak/themes/eddi/login/resources/fonts/noto-sans-greek-variable.woff2"
       "keycloak/themes/eddi/login/resources/js/eddi-a11y.js"
+      "keycloak/themes/eddi/login/resources/js/eddi-theme.js"
     )
     for kf in "${kc_files[@]}"; do
       local kf_target="$EDDI_DIR/$kf"
