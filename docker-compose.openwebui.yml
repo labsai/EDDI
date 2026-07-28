@@ -114,6 +114,16 @@ services:
       - "ENABLE_AUTOCOMPLETE_GENERATION=false"
       - "ENABLE_SEARCH_QUERY_GENERATION=false"
       - "ENABLE_RETRIEVAL_QUERY_GENERATION=false"
+      # LOAD-BEARING for any agent that inspects its input. Open WebUI's RAG
+      # wraps the retrieved chunks AND its own instruction template around the
+      # user's message by default (env.py: RAG_SYSTEM_CONTEXT defaults to
+      # False), so an EDDI agent receives a few thousand tokens of <source>
+      # markup as {memory.current.input} instead of what the user typed —
+      # which breaks input matchers, property setters and quick replies alike.
+      # Setting this puts the context in the system message instead, where the
+      # adapter maps it to the openai_system_message context entry and the
+      # agent can use or ignore it deliberately.
+      - "RAG_SYSTEM_CONTEXT=true"
     volumes:
       - openwebui-demo-data:/app/backend/data
     depends_on:

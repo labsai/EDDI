@@ -69,6 +69,14 @@ The unit tests had all passed because their Mockito stubs invoked the handler **
 
 Also noted while building the demo, and **not fixed here** because it is unrelated to this PR: `POST /backup/import/initialAgents` cannot import the bundled Agent Father on Linux. The ZIP's entries are correctly forward-slashed, but extraction writes them as single files with literal backslashes, so the workflow directory never exists and the import 500s. The demo seeds through the ordinary REST API instead.
 
+**A documentation error found by using the demo, and two settings verified from Open WebUI v0.11.0's notes.**
+
+The guide claimed Open WebUI injects RAG context into the **system message**. It does not, by default. Verified in the running container: `RAG_SYSTEM_CONTEXT` defaults to `False` (`open_webui/env.py`), and `middleware.py` then calls `add_or_update_user_message(...)` rather than `add_or_update_system_message(...)`. So dropping a PDF into a chat delivers several thousand tokens of `### Task: …`, `<context><source id="1">…</source></context>` and `<attached_files>` markup as `{memory.current.input}`, with the user's real question buried at the end — which breaks input matchers, makes property setters capture the whole blob, and stops quick replies firing. Corrected in the guide, added to the must-configure table, and `RAG_SYSTEM_CONTEXT=true` set in the demo compose. This was found by actually uploading a file, not by review.
+
+Also verified and documented: **`AIOHTTP_CLIENT_STREAM_IDLE_TIMEOUT`** (new in v0.11.0) ends a stream when the upstream goes quiet — sized for an LLM's time-to-first-token it will cut EDDI agents short, since a rule-based agent emits nothing at all until its turn completes; and **`passthrough_params`** on a connection forwards non-standard body fields verbatim, which makes the `stateless` field settable from the Open WebUI UI rather than only via `extra_body`.
+
+The demo agent's prompt was also reworded. A property setter bound to `{memory.current.input}` stores the *whole* turn, so answering "Gregor. What are you capable of?" stored all of it as the name and looked like a parsing bug. It now says it stores the next message verbatim — which is what a naive slot-filler does, and a fair thing for a demo to teach.
+
 **Not implemented (v1):** `/v1/embeddings`, `tool_calls` passthrough (would cause double-execution — EDDI's tools do not exist in Open WebUI), `n > 1`, `logprobs`. Quick replies and `inputField` outputs are dropped; only text reaches OpenAI clients.
 
 ---

@@ -252,6 +252,7 @@ EDDI **refuses to start** when the adapter is enabled, `http-policy=permit`, no 
 | Title / Tag generation model | a `…:stateless` model, or a separate connection | Otherwise Open WebUI's "write a title for this chat" prompt is injected into the user's real conversation. |
 | System Prompt (per model) | *leave empty* | The agent owns its prompt. A value here arrives as `openai_system_message` context and is ignored unless the agent references it. |
 | Tools / Functions (per model) | *assign none* | EDDI executes tools inside its own pipeline; the adapter never returns `tool_calls`. |
+| `RAG_SYSTEM_CONTEXT` | `true` | **Set this.** Default `false` puts Open WebUI's retrieved chunks and instruction template into the *user* message, so your agent reads that instead of what the user typed. See below. |
 
 ### Title generation
 
@@ -261,6 +262,43 @@ Two ways to avoid it, in order of preference:
 
 1. **Point the task model at a separate connection** (Ollama, a small hosted model). Best titles, no EDDI involvement.
 2. **Point it at `<agent>:stateless`.** The adapter starts a throwaway conversation, answers, and ends it. Nothing touches the user's real conversation. Title quality depends on the agent's own system prompt.
+
+### RAG context: set `RAG_SYSTEM_CONTEXT=true`
+
+**This one silently breaks rule-based agents.** When you drop a file into a chat, Open WebUI retrieves the relevant chunks and wraps them — together with its own multi-paragraph instruction template — around your message. By default it puts all of that in the **user message**, not the system message:
+
+```python
+# open_webui/env.py
+RAG_SYSTEM_CONTEXT = os.getenv('RAG_SYSTEM_CONTEXT', 'False').lower() == 'true'
+
+# open_webui/utils/middleware.py
+if RAG_SYSTEM_CONTEXT:
+    return add_or_update_system_message(...)   # system message
+else:
+    return add_or_update_user_message(...)     # <- the default
+```
+
+So instead of `what is this pdf about?`, your agent receives `{memory.current.input}` containing several thousand tokens of `### Task: ...`, `<context><source id="1">...</source></context>` and `<attached_files>` markup, with the real question buried at the end. Input matchers stop matching, property setters capture the whole blob, and quick replies never fire.
+
+```yaml
+- "RAG_SYSTEM_CONTEXT=true"
+```
+
+With it set, the context lands in the system message, the adapter maps it to the `openai_system_message` context entry, and the agent decides whether to use it — `{context.openai_system_message}` — or ignore it. The user's actual text stays the user's actual text.
+
+If you are using EDDI's own RAG pipeline instead, this still matters: without it, Open WebUI's retrieval output pollutes the input regardless.
+
+### Streaming: watch `AIOHTTP_CLIENT_STREAM_IDLE_TIMEOUT`
+
+Open WebUI can end a streamed reply when the upstream sends nothing for that long. EDDI can legitimately be silent for a while before its first token — conversation start, behaviour rules, HTTP calls, an MCP tool chain — and a **rule-based agent emits nothing at all until the turn completes**, since its text comes from the output task rather than token-by-token.
+
+If you set this, size it against your slowest agent, not against a typical LLM's time-to-first-token. Leaving it unset keeps the previous behaviour, where only the overall `AIOHTTP_CLIENT_TIMEOUT` applies.
+
+### Sending `stateless` from the Open WebUI UI
+
+The `stateless` body field (§2) is not an OpenAI-standard parameter, so Open WebUI would normally drop it. Newer versions can forward it: set **`passthrough_params`** in the connection's Advanced settings to a comma-separated list of parameter names — or `*` for every non-standard parameter — and it reaches EDDI verbatim.
+
+That makes the body field usable from the UI, not just from `extra_body` in code. It is the cleaner alternative to picking a `...:stateless` model where your Open WebUI version supports it.
 
 ### Optional: an Inlet Filter to save bandwidth
 
@@ -326,7 +364,7 @@ Notes worth knowing:
 - **The per-turn cap (`eddi.attachments.max-per-turn`, default 5) counts all three types together.** Excess attachments are dropped with a warning rather than failing the turn.
 - Beyond PDFs, any type EDDI's text extractor handles (`.txt`, `.md`, `.csv`, `.json`, `.xml`, `.html`) is inlined as text.
 
-> **Open WebUI specifically** sends images as `image_url` and does *not* send documents as `file` parts — it runs its own RAG over uploads and injects the retrieved text into the system message instead (see the table in §7). The `file` path is for the OpenAI SDK and other clients that send PDFs inline.
+> **Open WebUI specifically** sends images as `image_url` and does *not* send documents as `file` parts — it runs its own RAG over uploads and injects the retrieved text into the prompt. **Where it injects matters a great deal to an EDDI agent — see [§5, RAG context](#rag-context-set-rag_system_contexttrue).** The `file` path is for the OpenAI SDK and other clients that send PDFs inline.
 
 ### HITL
 
@@ -347,7 +385,7 @@ The conversation id is also on every response as `X-EDDI-Conversation-Id`.
 | **Regenerate** | Sends the message to EDDI **again** — a genuine new turn. Behavior rules advance and tools re-run. Inherent to a stateful backend. |
 | **Edit and resend** | Same: a new turn, not a rewrite of history. |
 | **Deleting a chat in Open WebUI** | Does not end the EDDI conversation. It is abandoned and reaped by normal conversation lifecycle policy. |
-| **Documents dropped into chat** | Handled entirely by Open WebUI's own RAG (upload → chunk → embed → inject into the system message). Arrives as `openai_system_message`. For production document RAG, use EDDI's own pipeline. |
+| **Documents dropped into chat** | Handled entirely by Open WebUI's own RAG (upload → chunk → embed → inject into the prompt). **By default it injects into the *user* message, not the system message** — set `RAG_SYSTEM_CONTEXT=true` (§5) or your agent receives the whole `<source>` blob as its input. For production document RAG, use EDDI's own pipeline. |
 | **Token counts** | Not shown — `usage` is omitted (see §10). |
 | **Two requests in one chat at once** | The second is dropped by `ConversationCoordinator` and returns `429`; clients retry. |
 

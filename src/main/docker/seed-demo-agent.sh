@@ -102,7 +102,7 @@ OUTPUT=$(create /outputstore/outputsets '{
         "type": "text",
         "valueAlternatives": [{
           "type": "text",
-          "text": "Hello! I am an EDDI demo agent, reached over the OpenAI-compatible API. What is your name?"
+          "text": "Hello! I am an EDDI demo agent, reached over the OpenAI-compatible API. Tell me your name — I will store your next message verbatim, so keep it short."
         }]
       }]
     },
@@ -113,7 +113,7 @@ OUTPUT=$(create /outputstore/outputsets '{
         "type": "text",
         "valueAlternatives": [{
           "type": "text",
-          "text": "Nice to meet you, {properties.userName}! I will remember that for the rest of this chat. Try asking me something, then open a new chat and watch me forget."
+          "text": "Stored: \"{properties.userName}\". That is now a conversation property and will survive every following turn. Ask me anything, then open a new chat and watch me forget."
         }]
       }]
     },
@@ -124,7 +124,7 @@ OUTPUT=$(create /outputstore/outputsets '{
         "type": "text",
         "valueAlternatives": [{
           "type": "text",
-          "text": "You said: \"{memory.current.input}\" — and I still know you are {properties.userName}. That state lives in EDDI, not in the request."
+          "text": "You said: \"{memory.current.input}\" — and I still have \"{properties.userName}\" from earlier. That state lives in EDDI, not in the request."
         }]
       }]
     }
