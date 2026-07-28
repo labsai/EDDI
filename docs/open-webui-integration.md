@@ -18,6 +18,7 @@ The adapter lives at `/v1` and is **disabled by default**.
 8. [Errors](#8-errors)
 9. [Troubleshooting](#9-troubleshooting)
 10. [Known gaps](#10-known-gaps)
+11. [Recipe: EDDI as a thin LLM gateway](#11-recipe-eddi-as-a-thin-llm-gateway)
 
 ---
 
@@ -385,6 +386,117 @@ Every failure uses the OpenAI envelope:
 5. **One worker thread per in-flight completion**, bounded by `max-concurrent-requests`.
 6. **`http-policy=authenticated` is impractical with Open WebUI**, which cannot mint per-user upstream OIDC tokens.
 7. **`tool_calls` are never returned.** EDDI runs tools inside its pipeline; echoing them would make Open WebUI try to execute EDDI's HTTP/MCP/memory tools locally, where they do not exist. Tool activity remains visible in the audit ledger and `toolTrace`.
+
+---
+
+## 11. Recipe: EDDI as a thin LLM gateway
+
+If what you want from EDDI is **vaulted API keys, an audit trail, tenant quotas and cost tracking** — not agent logic — you do not need a passthrough proxy. A minimal LLM-only agent behind this adapter already provides all of it, and behaves like a plain model call.
+
+> [!IMPORTANT]
+> **Read the limits first.** This is genuinely useful for single-turn workloads (classification, extraction, summarisation, drafting). It is **not** a drop-in replacement for an OpenAI-compatible gateway such as LiteLLM or Portkey:
+> - **Single-turn only.** The adapter sends just the last user message, so a client that manages its own history gets no context from earlier turns (§2).
+> - **One agent per model.** A caller cannot send `model: "gpt-4o"` and have it routed; each model you want exposed is one agent config.
+> - **No caching, fallbacks, load balancing or virtual per-user keys.** Those are what a dedicated gateway is for.
+>
+> If you need any of the above, use a real gateway. If you want key custody and an audit trail on single-turn calls you are already making, this is a few config files.
+
+### What you get
+
+| | |
+|---|---|
+| **API keys** | Stored via EDDI's Secrets Vault, never in the client |
+| **Audit** | Every call recorded in the audit ledger with user attribution |
+| **Quotas / cost** | Tenant quotas and per-conversation cost tracking apply |
+| **Access control** | The adapter's shared key or OIDC, plus per-user identity |
+| **Model swap** | Change provider or model in config; callers keep the same model id |
+
+### The four config files
+
+Assembled from the standard shapes — see [`langchain.md`](langchain.md) for the full LLM parameter reference and [`architecture.md`](architecture.md) for the workflow model. Use valid hex ids (≥18 chars) throughout.
+
+**1. `…0002.behavior.json`** — fire the LLM on every user turn:
+
+```json
+{
+  "expressionsAsActions": true,
+  "behaviorGroups": [{
+    "behaviorRules": [{
+      "name": "Always answer",
+      "actions": ["send_message"],
+      "conditions": [{
+        "type": "inputmatcher",
+        "configs": { "expressions": "*", "occurrence": "currentStep" }
+      }]
+    }]
+  }]
+}
+```
+
+> A single unconditional `inputmatcher` deliberately departs from the guidance in [`AGENTS.md` §5.3](../AGENTS.md) that every rule carry an `actionmatcher` on `lastStep`. That rule exists to stop wizard-style agents firing out of order; here, firing on every turn *is* the intent.
+
+**2. `…0003.langchain.json`** — the model:
+
+```json
+{
+  "tasks": [{
+    "actions": ["send_message"],
+    "id": "gateway",
+    "type": "openai",
+    "description": "Thin LLM gateway",
+    "parameters": {
+      "apiKey": "${vault:openai-key}",
+      "modelName": "gpt-4o",
+      "systemMessage": "",
+      "logSizeLimit": "-1",
+      "addToOutput": "true"
+    }
+  }]
+}
+```
+
+Set `logSizeLimit: "0"` if you want each turn to carry no conversation history at all — belt and braces alongside `:stateless`.
+
+**3. `…0001.workflow.json`** — three steps, no output task (the LLM's `addToOutput` supplies the response):
+
+```json
+{
+  "workflowSteps": [
+    { "type": "eddi://ai.labs.parser",    "extensions": { "dictionaries": [], "corrections": [] }, "config": {} },
+    { "type": "eddi://ai.labs.behavior",  "extensions": {}, "config": { "uri": "eddi://ai.labs.rules/rulestore/rulesets/…0002?version=1" } },
+    { "type": "eddi://ai.labs.langchain", "extensions": {}, "config": { "uri": "eddi://ai.labs.llm/llmstore/llms/…0003?version=1" } }
+  ]
+}
+```
+
+**4. `…0000.agent.json`**:
+
+```json
+{ "workflows": ["eddi://ai.labs.workflow/workflowstore/workflows/…0001?version=1"], "channels": [] }
+```
+
+Name the agent descriptor something client-facing — `gpt-4o-gateway` — since it becomes the model id (`gpt-4o-gateway-<last6>`).
+
+### Calling it
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="https://eddi.example.com/v1", api_key="sk-eddi-…",
+                default_headers={"X-OpenWebUI-User-Id": "svc-billing"})
+
+client.chat.completions.create(
+    model="gpt-4o-gateway-a3f9c1",
+    messages=[{"role": "user", "content": "Classify: 'my card was declined'"}],
+    extra_body={"stateless": True},      # throwaway conversation per call
+)
+```
+
+`stateless` matters here: without it every call from that identity accumulates into one conversation, since a service caller sends no `X-OpenWebUI-Chat-Id`.
+
+Add one agent per model you want to expose. Each appears in `GET /v1/models` automatically.
+
+> **Not verified end-to-end by the adapter's test suite.** The config shapes above are taken from working examples in this repository, but the recipe as a whole is a pattern — deploy it to a test environment before relying on it.
 
 ---
 
