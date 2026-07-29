@@ -545,6 +545,63 @@ class RestScheduleStoreTest {
         assertThrows(jakarta.ws.rs.NotFoundException.class, () -> rest.updateSchedule("gone", makeCronSchedule("gone")));
     }
 
+    /**
+     * A blank time zone answered 500 on BOTH create and update. The originally
+     * reported mechanism — update skipping {@code applyDefaults} — was not the
+     * cause: {@code validateSchedule} runs before defaulting on both paths, and it
+     * was its own unguarded {@code ZoneId.of} that threw, because the three call
+     * sites disagreed about whether "absent" meant null or also blank. A blank
+     * string is non-null. See {@code zoneOf}.
+     */
+    @Test
+    void createSchedule_withBlankTimeZone_appliesTheDefaultInsteadOfThrowing() throws Exception {
+        when(scheduleStore.createSchedule(any())).thenReturn("new-id");
+
+        var body = makeCronSchedule("c1");
+        body.setTimeZone("");
+
+        Response response = rest.createSchedule(body);
+
+        assertEquals(201, response.getStatus(), "create carried the identical defect");
+        assertEquals("UTC", ((ScheduleConfiguration) response.getEntity()).getTimeZone());
+    }
+
+    @Test
+    void updateSchedule_withBlankTimeZone_appliesTheDefaultInsteadOfThrowing() throws Exception {
+        asAdmin("root");
+        when(scheduleStore.readSchedule("t1")).thenReturn(makeCronSchedule("t1"));
+
+        var body = makeCronSchedule("t1");
+        body.setTimeZone("");
+
+        Response response = rest.updateSchedule("t1", body);
+
+        assertEquals(200, response.getStatus(), "a blank timeZone must default, not 500");
+        assertEquals("UTC", body.getTimeZone());
+        verify(scheduleStore).updateSchedule(eq("t1"), any());
+    }
+
+    /**
+     * The other half, and the one that touches ownership: an absent userId was
+     * stored as null rather than the scheduler placeholder. Ownership treats null
+     * as unowned, so an editor updating their OWN schedule silently made it
+     * writable by every other editor.
+     */
+    @Test
+    void updateSchedule_withoutUserId_storesTheSchedulerPlaceholderNotNull() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("u1")).thenReturn(dreamSchedule("u1", "editor-1"));
+
+        var body = makeCronSchedule("u1");
+        body.setUserId(null);
+
+        Response response = rest.updateSchedule("u1", body);
+
+        assertEquals(200, response.getStatus());
+        assertEquals("system:scheduler", body.getUserId(), "an omitted userId must not persist as null — null reads as unowned");
+        verify(scheduleStore).updateSchedule(eq("u1"), any());
+    }
+
     @Test
     void updateSchedule_ofOwnStoredSchedule_allowedForEditor() throws Exception {
         asEditor("editor-1");

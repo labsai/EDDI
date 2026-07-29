@@ -207,6 +207,21 @@ public class RestScheduleStore implements IRestScheduleStore {
 
             validateSchedule(schedule);
 
+            // Same order as createSchedule, and for the same reason: PUT is a full
+            // replace, so a field the body omits must be defaulted rather than
+            // persisted empty. Update skipped this entirely, so an absent userId was
+            // stored as null instead of SCHEDULER_USER_ID — and because ownership
+            // treats null as unowned, an editor updating their OWN schedule silently
+            // made it writable by every other editor.
+            //
+            // (The blank-timeZone half of that report was a different bug in a
+            // different place: validateSchedule runs BEFORE this on both paths, and it
+            // was validateSchedule's own ZoneId.of that threw. Fixed in zoneOf().)
+            //
+            // Deliberately AFTER the ownership guards above, so they judge what the
+            // caller actually sent rather than what defaulting turned it into.
+            applyDefaults(schedule);
+
             // Recompute nextFire
             computeInitialNextFire(schedule);
 
@@ -539,6 +554,23 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
     }
 
+    /**
+     * The schedule's time zone, or the configured default when it is absent.
+     * <p>
+     * "Absent" means null OR blank. The three {@code ZoneId.of} call sites used to
+     * disagree about this: one passed the raw value, two null-checked but not blank
+     * — and a blank string is non-null, so it reached {@code ZoneId.of("")} and
+     * threw {@code DateTimeException}. That surfaced as a 500 on both create and
+     * update for a body carrying {@code "timeZone": ""}, even though
+     * {@link #applyDefaults} treats blank as "use the default" and
+     * {@link #validateSchedule} deliberately skips validating a blank value. One
+     * accessor, one definition of absent.
+     */
+    private ZoneId zoneOf(ScheduleConfiguration schedule) {
+        String zone = schedule.getTimeZone();
+        return ZoneId.of(zone == null || zone.isBlank() ? defaultTimeZone : zone);
+    }
+
     private void applyDefaults(ScheduleConfiguration schedule) {
         // Infer trigger type from fields — must also handle the case where the
         // default CRON value is set but heartbeatIntervalSeconds indicates HEARTBEAT
@@ -577,8 +609,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             // Heartbeat: first fire = now + interval
             schedule.setNextFire(Instant.now().plusSeconds(schedule.getHeartbeatIntervalSeconds()));
         } else if (schedule.getCronExpression() != null && !schedule.getCronExpression().isBlank()) {
-            ZoneId zoneId = ZoneId.of(schedule.getTimeZone());
-            Instant nextFire = CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneId);
+            Instant nextFire = CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneOf(schedule));
             schedule.setNextFire(nextFire);
         } else if (schedule.getOneTimeAt() != null && !schedule.getOneTimeAt().isBlank()) {
             schedule.setNextFire(Instant.parse(schedule.getOneTimeAt()));
@@ -590,8 +621,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return Instant.now().plusSeconds(schedule.getHeartbeatIntervalSeconds());
         }
         if (schedule.getCronExpression() != null && !schedule.getCronExpression().isBlank()) {
-            ZoneId zoneId = ZoneId.of(schedule.getTimeZone() != null ? schedule.getTimeZone() : defaultTimeZone);
-            return CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneId);
+            return CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneOf(schedule));
         }
         return null;
     }
@@ -649,8 +679,7 @@ public class RestScheduleStore implements IRestScheduleStore {
                 CronParser.validate(schedule.getCronExpression());
 
                 // Enforce minimum interval
-                ZoneId zoneId = ZoneId.of(schedule.getTimeZone() != null ? schedule.getTimeZone() : defaultTimeZone);
-                long intervalSec = CronParser.computeMinIntervalSeconds(schedule.getCronExpression(), zoneId);
+                long intervalSec = CronParser.computeMinIntervalSeconds(schedule.getCronExpression(), zoneOf(schedule));
                 if (intervalSec < minIntervalSeconds) {
                     throw new IllegalArgumentException(String.format(
                             "Cron interval (%ds) is below minimum allowed (%ds). "
