@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.schedule.rest;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -509,6 +510,39 @@ class RestScheduleStoreTest {
 
         assertEquals(403, response.getStatus(), "a non-admin must not overwrite a schedule owned by another user");
         verify(scheduleStore, never()).updateSchedule(eq("v1"), any());
+    }
+
+    /**
+     * An unverifiable owner must DENY, never allow.
+     * <p>
+     * Be precise about what this proves. On the update path
+     * {@code requireAdminForHitl} reads the same schedule first and already fails
+     * closed, so it is that guard producing the 500 here — the ownership guard's
+     * own fail-closed branch is defence in depth, not the thing standing between a
+     * caller and the mutation today. What the assertion genuinely pins is the
+     * property that matters: a store failure never results in the update
+     * proceeding.
+     */
+    @Test
+    void updateSchedule_whenOwnershipCannotBeRead_refusesInsteadOfFailingOpen() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("x1")).thenThrow(new IResourceStore.ResourceStoreException("store down"));
+
+        Response response = rest.updateSchedule("x1", makeCronSchedule("x1"));
+
+        assertEquals(500, response.getStatus(), "an unverifiable owner must deny, not allow");
+        verify(scheduleStore, never()).updateSchedule(eq("x1"), any());
+    }
+
+    @Test
+    void updateSchedule_ofMissingSchedule_stillReportsNotFound() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("gone")).thenThrow(new IResourceStore.ResourceNotFoundException("nope"));
+        doThrow(new IResourceStore.ResourceNotFoundException("nope")).when(scheduleStore).updateSchedule(eq("gone"), any());
+
+        // A missing schedule must not be reported as forbidden — otherwise the guard
+        // becomes an oracle for which schedule ids exist.
+        assertThrows(jakarta.ws.rs.NotFoundException.class, () -> rest.updateSchedule("gone", makeCronSchedule("gone")));
     }
 
     @Test

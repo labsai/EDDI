@@ -451,14 +451,30 @@ public class RestScheduleStore implements IRestScheduleStore {
      * A missing schedule is left to the caller's own not-found handling rather than
      * being reported as forbidden, so this guard cannot be used to probe which
      * schedule ids exist.
+     * <p>
+     * "Not found" and "could not read it" are deliberately NOT the same outcome. An
+     * earlier version caught {@code Exception} and returned "allow" for both,
+     * collapsing two very different causes into one benign answer on a security
+     * check.
+     * <p>
+     * On the update path that was not actually exploitable —
+     * {@link #requireAdminForHitl} reads the same schedule first and already fails
+     * closed — but a guard whose safety depends on an unrelated guard running
+     * before it is one reordering away from being a hole, so this one fails closed
+     * on its own account. It mirrors that method's status and phrasing rather than
+     * inventing a second convention for the same condition.
      */
     private Response requireOwnUserIdOfStoredSchedule(String scheduleId, String operation) {
         ScheduleConfiguration stored;
         try {
             stored = scheduleStore.readSchedule(scheduleId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null; // no schedule to protect — let the downstream op surface its 404
         } catch (Exception e) {
-            // Not found / unreadable: let the normal path produce the 404.
-            return null;
+            LOGGER.error("Failed to verify schedule ownership for " + sanitize(scheduleId) + " (" + sanitize(operation) + ")", e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity("Unable to verify schedule authorization; refusing to " + operation + " schedule.")
+                    .build();
         }
         if (stored == null) {
             return null;

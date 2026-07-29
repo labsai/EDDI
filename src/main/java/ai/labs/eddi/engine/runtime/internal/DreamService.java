@@ -879,16 +879,6 @@ public class DreamService {
     }
 
     /**
-     * Result of a dream consolidation cycle.
-     *
-     * @param estimatedCostUsd
-     *            estimated LLM spend of this cycle — reported on the schedule fire
-     *            log so the dollar budget is observable
-     * @param error
-     *            {@code null} on success; otherwise the cause, which the schedule
-     *            dispatcher turns into a FAILED fire
-     */
-    /**
      * A never-null, always-informative description of a failure.
      * <p>
      * {@code DreamResult.isSuccess()} is {@code error == null}, and
@@ -912,6 +902,16 @@ public class DreamService {
         return currentId == null || currentId.getVersion() == null ? -1 : currentId.getVersion();
     }
 
+    /**
+     * Result of a dream consolidation cycle.
+     *
+     * @param estimatedCostUsd
+     *            estimated LLM spend of this cycle — reported on the schedule fire
+     *            log so the dollar budget is observable
+     * @param error
+     *            {@code null} on success; otherwise the cause, which the schedule
+     *            dispatcher turns into a FAILED fire
+     */
     public record DreamResult(String userId, int entriesPruned, int contradictionsFound, int entriesSummarized, long durationMs,
             double estimatedCostUsd, String error) {
 
