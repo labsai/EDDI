@@ -157,6 +157,24 @@ class RestAuditStoreTest {
     }
 
     /**
+     * skip is a query parameter, so a client can send a negative value. MongoDB
+     * ignores it; PostgreSQL rejects OFFSET -1 and the request becomes a 500. It is
+     * clamped rather than rejected, matching how an out-of-range limit is already
+     * handled.
+     */
+    @Test
+    @DisplayName("a negative skip is clamped, not passed to the store")
+    void negativeSkipIsClamped() {
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-1", 0)));
+        when(auditStore.countByConversation("conv-1")).thenReturn(1L);
+
+        restAuditStore.verifyConversation("conv-1", -5, 1000);
+
+        verify(auditStore).getEntries("conv-1", 0, 1000);
+        verify(auditStore, never()).getEntries(anyString(), intThat(i -> i < 0), anyInt());
+    }
+
+    /**
      * An agent-scope sweep spans many conversations, so their sequences interleave
      * and no single ascending run exists — the chain is deliberately reported
      * NOT_APPLICABLE. Requiring INTACT made every clean agent sweep report

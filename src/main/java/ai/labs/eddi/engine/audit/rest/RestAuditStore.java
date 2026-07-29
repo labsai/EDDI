@@ -60,7 +60,7 @@ public class RestAuditStore implements IRestAuditStore {
 
     @Override
     public AuditVerificationReport verifyConversation(String conversationId, int skip, int limit) {
-        List<AuditEntry> entries = auditStore.getEntries(conversationId, skip, clampLimit(limit));
+        List<AuditEntry> entries = auditStore.getEntries(conversationId, clampSkip(skip), clampLimit(limit));
         // Anchoring the run at sequence 0 is only sound when the window provably
         // holds the WHOLE conversation. skip == 0 does NOT establish that: getEntries
         // sorts by timestamp DESCENDING ("newest first"), so skip == 0 is the most
@@ -73,7 +73,7 @@ public class RestAuditStore implements IRestAuditStore {
 
     @Override
     public AuditVerificationReport verifyAgent(String agentId, Integer agentVersion, int skip, int limit) {
-        List<AuditEntry> entries = auditStore.getEntriesByAgent(agentId, agentVersion, skip, clampLimit(limit));
+        List<AuditEntry> entries = auditStore.getEntriesByAgent(agentId, agentVersion, clampSkip(skip), clampLimit(limit));
         // An agent range spans conversations, so the sequences interleave and a
         // single ascending run is not expected — HMACs only.
         return verify("agent", agentId, entries, false, false);
@@ -81,6 +81,18 @@ public class RestAuditStore implements IRestAuditStore {
 
     private static int clampLimit(int limit) {
         return limit < 1 ? MAX_VERIFY_LIMIT : Math.min(limit, MAX_VERIFY_LIMIT);
+    }
+
+    /**
+     * {@code skip} arrives from a query parameter, so it can be negative. The
+     * backends disagree about what that means — MongoDB ignores a negative skip
+     * while PostgreSQL rejects {@code OFFSET -1} outright — so an unclamped value
+     * turns a bad request into a 500 on one backend and silently succeeds on the
+     * other. Clamping matches how {@link #clampLimit} already treats an
+     * out-of-range limit.
+     */
+    private static int clampSkip(int skip) {
+        return Math.max(skip, 0);
     }
 
     private AuditVerificationReport verify(String scope, String scopeId, List<AuditEntry> entries, boolean checkChain,
