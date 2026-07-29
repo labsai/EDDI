@@ -114,13 +114,13 @@ public class RestAuditStore implements IRestAuditStore {
                 problems, Instant.now());
     }
 
+    private static final Logger LOGGER = Logger.getLogger(RestAuditStore.class);
+
     /**
      * First sequence number a conversation is assigned. {@code AuditLedgerService}
      * seeds each conversation's counter from the stored entry count and hands out
      * {@code getAndIncrement()}, so a conversation's first entry is 0.
      */
-    private static final Logger LOGGER = Logger.getLogger(RestAuditStore.class);
-
     private static final long SEQUENCE_ORIGIN = 0L;
 
     /**
