@@ -9,6 +9,21 @@ metadata:
     app.kubernetes.io/component: server
     app.kubernetes.io/part-of: eddi
 spec:
+  # ⚠️  MUST stay 1 — do NOT scale this Deployment horizontally.
+  #
+  # EDDI serialises the turns of a single conversation with a JVM-LOCAL lock
+  # (InMemoryConversationCoordinator keeps one BlockingQueue per conversation
+  # and guards it with synchronized(queue)). The NATS coordinator is not a way
+  # out either: it uses JetStream purely as an ordering primitive and still
+  # executes the Callable in the JVM that published it.
+  #
+  # With two replicas and no sticky sessions, two turns of the same
+  # conversation run concurrently in different JVMs, each replaceOne()s the
+  # whole conversation document, and the slower writer SILENTLY DISCARDS the
+  # other turn. Signed-envelope replay nonces are in-memory too, so a replayed
+  # envelope routed to a different pod is not detected.
+  #
+  # Scale vertically (resources) until a distributed coordinator ships.
   replicas: 1
   strategy:
     type: RollingUpdate
@@ -36,20 +51,82 @@ spec:
         runAsUser: 185
         runAsGroup: 185
         fsGroup: 185
+        seccompProfile:
+          type: RuntimeDefault
       terminationGracePeriodSeconds: 30
+      volumes:
+        # Secrets are mounted as files instead of being injected as env vars:
+        # environ is world-readable via /proc/<pid>/environ for anything sharing
+        # the PID namespace, and env leaks into crash dumps and child processes.
+        # The Secret holds ONE key, "application-secrets.properties", whose value
+        # is a Quarkus properties file; QUARKUS_CONFIG_LOCATIONS below points the
+        # config system at it.
+        - name: eddi-secrets
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: eddi-secrets
+        # readOnlyRootFilesystem needs explicit writable scratch space.
+        # What the app actually writes at runtime:
+        #   /tmp                 java.io.tmpdir — Quarkus multipart upload buffer
+        #                        and PdfReaderTool's Files.createTempFile
+        #   /deployments/tmp     agent export/import scratch (RestExportService /
+        #                        RestImportService build it under ${user.dir}/tmp)
+        #   /opt/eddi/data       audit ledger dead-letter file (eddi.audit.dead-letter-path)
+        - name: tmp
+          emptyDir: {}
+        - name: deployments-tmp
+          emptyDir: {}
+        - name: eddi-data
+          emptyDir: {}
       containers:
         - name: eddi
-          image: labsai/eddi:6
+          # Pin an immutable patch version, never the mutable major tag: with
+          # ":6" + IfNotPresent nothing ties the running bits to the digest CI
+          # cosign-signed and SLSA-attested.
+          # Strongest form — resolve and pin the digest at rollout time:
+          #   cosign verify \
+          #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+          #     --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
+          #     labsai/eddi:6.2.0
+          #   crane digest labsai/eddi:6.2.0   # → sha256:...
+          # then append it here:  image: labsai/eddi:6.2.0@sha256:<digest>
+          image: labsai/eddi:6.2.0
           imagePullPolicy: IfNotPresent
+          # Container-level hardening — without this the pod is rejected outright
+          # by a namespace running the "restricted" Pod Security Standard.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 185
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: 7070
               name: http
               protocol: TCP
+          env:
+            # Load secrets from the mounted properties file rather than env vars.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /etc/eddi/secrets/application-secrets.properties
           envFrom:
             - configMapRef:
                 name: eddi-config
-            - secretRef:
-                name: eddi-secrets
+          volumeMounts:
+            - name: eddi-secrets
+              mountPath: /etc/eddi/secrets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: deployments-tmp
+              mountPath: /deployments/tmp
+            - name: eddi-data
+              mountPath: /opt/eddi/data
           # Startup probe: allow up to 60s for first boot (slow image pull, DB init)
           startupProbe:
             httpGet:

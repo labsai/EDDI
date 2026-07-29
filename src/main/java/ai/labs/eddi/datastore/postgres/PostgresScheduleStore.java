@@ -48,6 +48,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                 name VARCHAR(512),
                 agent_id VARCHAR(255),
                 tenant_id VARCHAR(255),
+                user_id VARCHAR(255),
                 trigger_type VARCHAR(64),
                 cron_expression VARCHAR(128),
                 heartbeat_interval_seconds BIGINT,
@@ -77,6 +78,52 @@ public class PostgresScheduleStore implements IScheduleStore {
      */
     private static final String ADD_METADATA_COLUMN = "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS metadata JSONB";
 
+    /**
+     * Adds the {@code user_id} column to schedule tables created before it existed.
+     * Mongo persists the whole document, so {@code userId} has always been stored
+     * there; Postgres never had the column at all. The portable
+     * {@code deleteSchedulesByUserId} scan therefore compared against a column that
+     * did not exist, matched nothing, and reported a successful GDPR erasure while
+     * the user's schedules kept firing. Without this upgrade an existing deployment
+     * stays in that state.
+     */
+    private static final String ADD_USER_ID_COLUMN = "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS user_id VARCHAR(255)";
+
+    /**
+     * Bulk delete by user, overriding the portable scan-and-delete default.
+     * <p>
+     * The default in {@link IScheduleStore} reads every schedule and filters in
+     * Java, which is bounded by {@code ERASURE_SCAN_LIMIT}; a deployment with more
+     * schedules than that would erase only part of the user's data. A single
+     * indexed DELETE has no such ceiling and is what an erasure needs.
+     *
+     * @param userId
+     *            the user whose schedules to erase
+     * @return number of schedules deleted
+     */
+    @Override
+    public int deleteSchedulesByUserId(String userId) throws IResourceStore.ResourceStoreException {
+        if (userId == null || userId.isBlank()) {
+            return 0;
+        }
+        // Every other public operation here initialises the schema first. An erasure
+        // must too: if it is the first call after a cold start the table (or the
+        // user_id column) may not exist yet, and an erasure that fails with a SQL
+        // error is a compliance incident, not a retry.
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE user_id = ?")) {
+            ps.setString(1, userId);
+            int deleted = ps.executeUpdate();
+            if (deleted > 0) {
+                LOGGER.infof("GDPR erasure: deleted %d schedule(s)", deleted);
+            }
+            return deleted;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete schedules by userId", e);
+        }
+    }
+
     private static final String CREATE_FIRE_LOGS_TABLE = """
             CREATE TABLE IF NOT EXISTS eddi_schedule_fire_logs (
                 id VARCHAR(255) PRIMARY KEY,
@@ -98,6 +145,7 @@ public class PostgresScheduleStore implements IScheduleStore {
             CREATE INDEX IF NOT EXISTS idx_schedules_due ON eddi_schedules (enabled, next_fire, fire_status);
             CREATE INDEX IF NOT EXISTS idx_schedules_agent ON eddi_schedules (agent_id);
             CREATE INDEX IF NOT EXISTS idx_schedules_tenant ON eddi_schedules (tenant_id);
+            CREATE INDEX IF NOT EXISTS idx_schedules_user ON eddi_schedules (user_id);
             CREATE INDEX IF NOT EXISTS idx_schedules_name ON eddi_schedules (name);
             CREATE INDEX IF NOT EXISTS idx_fire_logs_schedule ON eddi_schedule_fire_logs (schedule_id, started_at DESC);
             CREATE INDEX IF NOT EXISTS idx_fire_logs_status ON eddi_schedule_fire_logs (status, started_at DESC);
@@ -120,12 +168,40 @@ public class PostgresScheduleStore implements IScheduleStore {
         this.pollBatchSize = pollBatchSize > 0 ? pollBatchSize : 100;
     }
 
+    /**
+     * Adding {@code user_id} to an existing table leaves every schedule created
+     * before the upgrade with a NULL value, and nothing in the row can tell us who
+     * owned it — the identity was simply never recorded. Those rows therefore
+     * cannot be erased by user, and silently doing nothing about them is exactly
+     * the failure mode this column was added to end. There is no data to backfill
+     * from, so the honest response is to make the residue visible and let an
+     * operator decide (attribute them, or delete them wholesale).
+     */
+    private static void warnAboutUnattributableSchedules(Statement stmt) {
+        // Purely diagnostic: schema initialisation must never fail because a count
+        // could not be taken. (A real driver never returns a null ResultSet from
+        // executeQuery, but this runs on the startup path, so it stays defensive.)
+        try (var rs = stmt.executeQuery("SELECT COUNT(*) FROM eddi_schedules WHERE user_id IS NULL")) {
+            if (rs != null && rs.next()) {
+                long legacy = rs.getLong(1);
+                if (legacy > 0) {
+                    LOGGER.warnf("%d schedule(s) predate the user_id column and carry no owner. They cannot be removed by "
+                            + "a GDPR erasure request; attribute or delete them manually.", legacy);
+                }
+            }
+        } catch (SQLException | RuntimeException e) {
+            LOGGER.warnf("Could not count unattributable schedules: %s", e.getMessage());
+        }
+    }
+
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_SCHEDULES_TABLE);
             stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
+            stmt.execute(ADD_USER_ID_COLUMN); // idempotent upgrade for pre-existing tables (GDPR erasure)
+            warnAboutUnattributableSchedules(stmt);
             stmt.execute(CREATE_FIRE_LOGS_TABLE);
             for (String idx : CREATE_INDEXES.split(";")) {
                 String trimmed = idx.trim();
@@ -152,27 +228,31 @@ public class PostgresScheduleStore implements IScheduleStore {
         schedule.setUpdatedAt(now);
 
         String sql = """
-                INSERT INTO eddi_schedules (id, name, agent_id, tenant_id, trigger_type, cron_expression,
+                INSERT INTO eddi_schedules (id, name, agent_id, tenant_id, user_id, trigger_type, cron_expression,
                     heartbeat_interval_seconds, conversation_strategy, max_cost_per_fire,
                     enabled, next_fire, fire_status, fail_count, metadata, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?::jsonb, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?::jsonb, ?, ?)
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, schedule.getName());
             ps.setString(3, schedule.getAgentId());
             ps.setString(4, schedule.getTenantId());
-            ps.setString(5, schedule.getTriggerType() != null ? schedule.getTriggerType().name() : null);
-            ps.setString(6, schedule.getCronExpression());
-            setNullableLong(ps, 7, schedule.getHeartbeatIntervalSeconds());
-            ps.setString(8, schedule.getConversationStrategy());
-            setNullableDouble(ps, 9, schedule.getMaxCostPerFire());
-            ps.setBoolean(10, schedule.isEnabled());
-            setNullableEpoch(ps, 11, schedule.getNextFire());
-            ps.setString(12, FireStatus.PENDING.name());
-            ps.setString(13, serializeMetadata(schedule.getMetadata()));
-            setNullableEpoch(ps, 14, now);
+            // Persisted so GDPR erasure can find this row. Without it
+            // deleteSchedulesByUserId scans a column that is always null, matches
+            // nothing, and reports success while the schedule keeps firing.
+            ps.setString(5, schedule.getUserId());
+            ps.setString(6, schedule.getTriggerType() != null ? schedule.getTriggerType().name() : null);
+            ps.setString(7, schedule.getCronExpression());
+            setNullableLong(ps, 8, schedule.getHeartbeatIntervalSeconds());
+            ps.setString(9, schedule.getConversationStrategy());
+            setNullableDouble(ps, 10, schedule.getMaxCostPerFire());
+            ps.setBoolean(11, schedule.isEnabled());
+            setNullableEpoch(ps, 12, schedule.getNextFire());
+            ps.setString(13, FireStatus.PENDING.name());
+            ps.setString(14, serializeMetadata(schedule.getMetadata()));
             setNullableEpoch(ps, 15, now);
+            setNullableEpoch(ps, 16, now);
             ps.executeUpdate();
             LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
                     schedule.getAgentId());
@@ -208,7 +288,7 @@ public class PostgresScheduleStore implements IScheduleStore {
         ensureSchema();
         schedule.setUpdatedAt(Instant.now());
         String sql = """
-                UPDATE eddi_schedules SET name=?, agent_id=?, tenant_id=?, trigger_type=?, cron_expression=?,
+                UPDATE eddi_schedules SET name=?, agent_id=?, tenant_id=?, user_id=?, trigger_type=?, cron_expression=?,
                     heartbeat_interval_seconds=?, conversation_strategy=?, max_cost_per_fire=?,
                     enabled=?, next_fire=?, fire_status=?, fail_count=?, metadata=?::jsonb, updated_at=?
                 WHERE id=?
@@ -217,18 +297,19 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setString(1, schedule.getName());
             ps.setString(2, schedule.getAgentId());
             ps.setString(3, schedule.getTenantId());
-            ps.setString(4, schedule.getTriggerType() != null ? schedule.getTriggerType().name() : null);
-            ps.setString(5, schedule.getCronExpression());
-            setNullableLong(ps, 6, schedule.getHeartbeatIntervalSeconds());
-            ps.setString(7, schedule.getConversationStrategy());
-            setNullableDouble(ps, 8, schedule.getMaxCostPerFire());
-            ps.setBoolean(9, schedule.isEnabled());
-            setNullableEpoch(ps, 10, schedule.getNextFire());
-            ps.setString(11, schedule.getFireStatus() != null ? schedule.getFireStatus().name() : FireStatus.PENDING.name());
-            ps.setInt(12, schedule.getFailCount());
-            ps.setString(13, serializeMetadata(schedule.getMetadata()));
-            setNullableEpoch(ps, 14, schedule.getUpdatedAt());
-            ps.setString(15, scheduleId);
+            ps.setString(4, schedule.getUserId());
+            ps.setString(5, schedule.getTriggerType() != null ? schedule.getTriggerType().name() : null);
+            ps.setString(6, schedule.getCronExpression());
+            setNullableLong(ps, 7, schedule.getHeartbeatIntervalSeconds());
+            ps.setString(8, schedule.getConversationStrategy());
+            setNullableDouble(ps, 9, schedule.getMaxCostPerFire());
+            ps.setBoolean(10, schedule.isEnabled());
+            setNullableEpoch(ps, 11, schedule.getNextFire());
+            ps.setString(12, schedule.getFireStatus() != null ? schedule.getFireStatus().name() : FireStatus.PENDING.name());
+            ps.setInt(13, schedule.getFailCount());
+            ps.setString(14, serializeMetadata(schedule.getMetadata()));
+            setNullableEpoch(ps, 15, schedule.getUpdatedAt());
+            ps.setString(16, scheduleId);
             int rows = ps.executeUpdate();
             if (rows == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
@@ -575,6 +656,7 @@ public class PostgresScheduleStore implements IScheduleStore {
         config.setName(rs.getString("name"));
         config.setAgentId(rs.getString("agent_id"));
         config.setTenantId(rs.getString("tenant_id"));
+        config.setUserId(rs.getString("user_id"));
 
         String triggerType = rs.getString("trigger_type");
         if (triggerType != null) {

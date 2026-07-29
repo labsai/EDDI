@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -24,17 +23,63 @@ import static org.mockito.Mockito.*;
 class DescriptorStoreTest {
 
     private IResourceStorage<String> resourceStorage;
+    private IResourceStorageFactory storageFactory;
+    private IDocumentBuilder documentBuilder;
     private DescriptorStore<String> store;
 
     @BeforeEach
     void setUp() throws Exception {
-        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
-        IDocumentBuilder documentBuilder = mock(IDocumentBuilder.class);
+        storageFactory = mock(IResourceStorageFactory.class);
+        documentBuilder = mock(IDocumentBuilder.class);
         resourceStorage = mock(IResourceStorage.class);
 
-        when(storageFactory.create(eq("descriptors"), eq(documentBuilder), eq(String.class))).thenReturn(resourceStorage);
+        when(storageFactory.create(eq("descriptors"), eq(documentBuilder), eq(String.class),
+                eq("resource"), eq("userId"), eq("name"), eq("agentName"),
+                eq("description"), eq("lastModifiedOn"), eq("deleted"), eq("originId")))
+                .thenReturn(resourceStorage);
 
         store = new DescriptorStore<>(storageFactory, documentBuilder, String.class);
+    }
+
+    /**
+     * Stub the batch read so that every requested id resolves to a descriptor. The
+     * listing paths go through {@link IResourceStorage#readMany} — one round trip
+     * for the whole page instead of one {@code read()} per id.
+     */
+    private void stubReadMany() {
+        when(resourceStorage.readMany(anyList())).thenAnswer(invocation -> {
+            List<IResourceStore.IResourceId> requested = invocation.getArgument(0);
+            List<IResourceStorage.IResource<String>> resources = new ArrayList<>();
+            for (IResourceStore.IResourceId id : requested) {
+                resources.add(new StubResource(id.getId(), id.getVersion()));
+            }
+            return resources;
+        });
+    }
+
+    private static final class StubResource implements IResourceStorage.IResource<String> {
+        private final String id;
+        private final Integer version;
+
+        private StubResource(String id, Integer version) {
+            this.id = id;
+            this.version = version;
+        }
+
+        @Override
+        public String getId() {
+            return id;
+        }
+
+        @Override
+        public Integer getVersion() {
+            return version;
+        }
+
+        @Override
+        public String getData() {
+            return "data-" + id;
+        }
     }
 
     // ==================== readDescriptor ====================
@@ -129,14 +174,78 @@ class DescriptorStoreTest {
 
         when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
                 .thenReturn(List.of(resourceId));
-
-        IResourceStorage.IResource<String> resource = mock(IResourceStorage.IResource.class);
-        when(resource.getData()).thenReturn("desc-data");
-        when(resourceStorage.read("res-1", 1)).thenReturn(resource);
-        when(resourceStorage.getCurrentVersion("res-1")).thenReturn(1);
+        stubReadMany();
 
         List<String> result = store.readDescriptors("agents", "search", 0, 20, false);
         assertEquals(1, result.size());
+        assertEquals("data-res-1", result.getFirst());
+    }
+
+    // ==================== batching / indexing ====================
+
+    @Test
+    @DisplayName("readDescriptors — reads the whole page in ONE batch, not one read() per id")
+    void readDescriptorsBatchesReads() throws Exception {
+        List<IResourceStore.IResourceId> ids = new ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            IResourceStore.IResourceId id = mock(IResourceStore.IResourceId.class);
+            when(id.getId()).thenReturn("res-" + i);
+            when(id.getVersion()).thenReturn(1);
+            ids.add(id);
+        }
+        when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt())).thenReturn(ids);
+        stubReadMany();
+
+        List<String> result = store.readDescriptors("agents", null, 0, IDescriptorStore.NO_LIMIT, false);
+
+        assertEquals(25, result.size());
+        // The N+1: this used to be 25 separate reads for a single listing, and up
+        // to MAX_RESULT_LIMIT of them for a large one.
+        verify(resourceStorage, times(1)).readMany(anyList());
+        verify(resourceStorage, never()).read(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("readDescriptors — batch result order is the storage sort order")
+    void readDescriptorsPreservesOrder() throws Exception {
+        IResourceStore.IResourceId first = mock(IResourceStore.IResourceId.class);
+        when(first.getId()).thenReturn("res-b");
+        when(first.getVersion()).thenReturn(1);
+        IResourceStore.IResourceId second = mock(IResourceStore.IResourceId.class);
+        when(second.getId()).thenReturn("res-a");
+        when(second.getVersion()).thenReturn(1);
+
+        when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of(first, second));
+        stubReadMany();
+
+        assertEquals(List.of("data-res-b", "data-res-a"), store.readDescriptors("agents", null, 0, 20, false));
+    }
+
+    @Test
+    @DisplayName("construction — declares every filtered/sorted field as an index hint")
+    void declaresIndexHints() {
+        // Without these the descriptor collection has no index any of its queries
+        // can use: listing agents becomes a full scan with a regex and a text sort
+        // on top, over a collection that also holds one row per conversation.
+        verifyIndexHints(storageFactory, "descriptors", documentBuilder);
+    }
+
+    @Test
+    @DisplayName("construction — the collection name is overridable so descriptor types can be split apart")
+    void collectionNameIsOverridable() {
+        IResourceStorageFactory factory = mock(IResourceStorageFactory.class);
+        IDocumentBuilder builder = mock(IDocumentBuilder.class);
+
+        new DescriptorStore<>(factory, builder, String.class, "conversationdescriptors");
+
+        verifyIndexHints(factory, "conversationdescriptors", builder);
+    }
+
+    private static void verifyIndexHints(IResourceStorageFactory factory, String collectionName, IDocumentBuilder builder) {
+        verify(factory).create(eq(collectionName), eq(builder), eq(String.class),
+                eq("resource"), eq("userId"), eq("name"), eq("agentName"),
+                eq("description"), eq("lastModifiedOn"), eq("deleted"), eq("originId"));
     }
 
     // ==================== limit semantics ====================
@@ -219,14 +328,10 @@ class DescriptorStoreTest {
                 when(id.getId()).thenReturn("res-" + i);
                 when(id.getVersion()).thenReturn(1);
                 ids.add(id);
-
-                IResourceStorage.IResource<String> resource = mock(IResourceStorage.IResource.class);
-                when(resource.getData()).thenReturn("data-" + i);
-                when(resourceStorage.read("res-" + i, 1)).thenReturn(resource);
-                when(resourceStorage.getCurrentVersion("res-" + i)).thenReturn(1);
             }
             when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
                     .thenReturn(ids);
+            stubReadMany();
 
             List<String> result = store.readDescriptors("agents", null, 0, IDescriptorStore.NO_LIMIT, false);
 
@@ -307,13 +412,10 @@ class DescriptorStoreTest {
 
         when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
                 .thenReturn(List.of(resourceId));
-
-        IResourceStorage.IResource<String> resource = mock(IResourceStorage.IResource.class);
-        when(resource.getData()).thenReturn("found-data");
-        when(resourceStorage.read("res-1", 1)).thenReturn(resource);
-        when(resourceStorage.getCurrentVersion("res-1")).thenReturn(1);
+        stubReadMany();
 
         List<String> result = store.findByOriginId("origin-1");
         assertEquals(1, result.size());
+        assertEquals("data-res-1", result.getFirst());
     }
 }

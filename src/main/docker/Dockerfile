@@ -105,6 +105,17 @@ ENV LANG='C.utf8' LANGUAGE='C.utf8'
 
 USER root
 
+# TEMPORARY CVE STOPGAP - remove once the base image ships the fixes.
+# ubi9/openjdk-25-runtime:1.24 has not been republished with these, so there is no
+# newer digest to move to (verified against the registry: the tag still resolves to
+# the digest pinned above). Per the Trivy remediation procedure in AGENTS.md, patch
+# the packages in place rather than dropping the digest pin.
+#   CVE-2026-58016  glib2    integer underflow in gio/gdbusintrospection.c
+#   CVE-2026-54369  libacl   symlink traversal privilege escalation
+#   CVE-2026-15308  python3  CPU denial of service in the HTML parser
+# These block the image push now that the Trivy gate enforces (exit-code: 1).
+RUN microdnf update -y glib2 libacl python3 && microdnf clean all
+
 RUN mkdir -p /deployments/tmp/import && \
       chown -R 185:0 /deployments/tmp && \
       chmod -R 775 /deployments/tmp
@@ -114,7 +125,26 @@ COPY --chown=185 target/quarkus-app/*.jar /deployments/
 COPY --chown=185 target/quarkus-app/app/ /deployments/app/
 COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
 COPY --chown=185 licenses/ /licenses/
-COPY --chown=185 docs/ /deployments/docs/
+
+# Documentation served to MCP clients via McpDocResources (eddi://docs/*).
+#
+# Only the TOP-LEVEL *.md pages are ever reachable at runtime: listDocs() calls
+# Files.newDirectoryStream(docsDir, "*.md") — non-recursive — and readDoc()
+# rejects any name containing '/', so nothing under docs/agent-configs/,
+# docs/templates/, docs/your-first-agent/ etc. can be requested. Copying the
+# whole tree (~2.2 MB) shipped those subdirectories as dead weight.
+COPY --chown=185 docs/*.md /deployments/docs/
+
+# Drop the internal-only pages that have no business being served to an MCP
+# client: the 1.1 MB running engineering changelog, the breach-response runbook
+# (detection indicators and escalation contacts), our internal code-review
+# process, and the GitBook table of contents (whose links point at
+# subdirectories that are intentionally not in the image).
+# docs/security-review.md is kept — it is a published OpenSSF Gold artefact.
+RUN rm -f /deployments/docs/changelog.md \
+      /deployments/docs/code-review-standards.md \
+      /deployments/docs/incident-response.md \
+      /deployments/docs/SUMMARY.md
 
 # Run as non-root user (UID 185 = jboss user from UBI base image)
 # This is a security requirement — containers MUST NOT run as root

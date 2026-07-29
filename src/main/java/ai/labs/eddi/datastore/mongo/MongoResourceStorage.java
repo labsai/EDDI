@@ -9,19 +9,23 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import com.mongodb.MongoWriteException;
+import com.mongodb.WriteConcern;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.model.ReplaceOptions;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
@@ -83,14 +87,25 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         return resource;
     }
 
+    /**
+     * A write REPLACES the stored document — it does not merge into it.
+     * <p>
+     * This used to be an {@code $set} of the whole document, which merges: because
+     * the mapper serializes with {@code NON_NULL} inclusion, clearing a config
+     * field produced JSON without that key, so {@code $set} left the OLD value in
+     * place and the API still answered 200 with a fresh version. The PostgreSQL
+     * backend has always replaced ({@code data = EXCLUDED.data}), so the same edit
+     * behaved differently per backend. Replace is the semantics both backends now
+     * share.
+     */
     @Override
     public void store(IResource<T> currentResource) {
         Resource resource = checkInternalResource(currentResource);
         if (resource.getId() == null) {
             currentCollection.insertOne(resource.getMongoDocument());
         } else {
-            currentCollection.updateOne(Filters.eq("_id", new ObjectId(resource.getId())), new Document("$set", resource.getMongoDocument()),
-                    new UpdateOptions().upsert(true));
+            currentCollection.replaceOne(Filters.eq(ID_FIELD, new ObjectId(resource.getId())), resource.getMongoDocument(),
+                    new ReplaceOptions().upsert(true));
         }
     }
 
@@ -98,11 +113,11 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     public void storeIfCurrentVersion(IResource<T> newResource, int expectedCurrentVersion)
             throws IResourceStore.ResourceModifiedException {
         Resource resource = checkInternalResource(newResource);
-        var result = currentCollection.updateOne(
+        var result = currentCollection.replaceOne(
                 Filters.and(
                         Filters.eq(ID_FIELD, new ObjectId(resource.getId())),
                         Filters.eq(VERSION_FIELD, expectedCurrentVersion)),
-                new Document("$set", resource.getMongoDocument()));
+                resource.getMongoDocument());
         if (result.getMatchedCount() == 0) {
             throw new IResourceStore.ResourceModifiedException(
                     String.format("Resource was modified concurrently (id=%s, expected version=%d)",
@@ -114,11 +129,11 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     public void storeIfFieldEquals(IResource<T> newResource, String fieldName, String expectedValue)
             throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         Resource resource = checkInternalResource(newResource);
-        var result = currentCollection.updateOne(
+        var result = currentCollection.replaceOne(
                 Filters.and(
                         Filters.eq(ID_FIELD, new ObjectId(resource.getId())),
                         Filters.eq(fieldName, expectedValue)),
-                new Document("$set", resource.getMongoDocument()));
+                resource.getMongoDocument());
         if (result.getMatchedCount() == 0) {
             // Distinguish "deleted" (404) from "field mismatch" (409) — a bare
             // matchedCount==0 conflates them and misleads callers/operators.
@@ -151,8 +166,86 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
+    public List<IResource<T>> readMany(List<IResourceStore.IResourceId> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+
+        // $in on _id rather than an $or of (id, version) pairs: a page can be as
+        // long as MAX_RESULT_LIMIT, and a 10_000-clause $or is a query planner
+        // hazard. The version is re-checked below instead.
+        List<ObjectId> objectIds = new ArrayList<>(ids.size());
+        for (IResourceStore.IResourceId id : ids) {
+            objectIds.add(new ObjectId(id.getId()));
+        }
+
+        Map<String, Resource> byId = new HashMap<>();
+        currentCollection.find(Filters.in(ID_FIELD, objectIds)).forEach(doc -> byId.put(doc.get(ID_FIELD).toString(), new Resource(doc)));
+
+        // Request order is the caller's sort order — a Mongo cursor is not.
+        List<IResource<T>> resources = new ArrayList<>(ids.size());
+        for (IResourceStore.IResourceId id : ids) {
+            Resource resource = byId.get(id.getId());
+            if (resource != null && id.getVersion().equals(resource.getVersion())) {
+                resources.add(resource);
+            }
+        }
+        return resources;
+    }
+
+    @Override
     public void remove(String id) {
         currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)));
+    }
+
+    /**
+     * MongoDB multi-document transactions require a replica set, and EDDI supports
+     * standalone deployments (the documented local setup is a bare {@code mongo:7}
+     * container), so a session transaction here would break the default install.
+     * Instead both writes are acknowledged by a majority of nodes before the next
+     * one is issued, which removes the "acknowledged then lost on failover" half of
+     * the problem; the ordering (history first) bounds the rest — a crash in
+     * between leaves a redundant history row, never a missing one.
+     */
+    @Override
+    public void storeHistoryAndUpdate(IHistoryResource<T> history, IResource<T> newResource, int expectedCurrentVersion)
+            throws IResourceStore.ResourceModifiedException {
+        HistoryResource historyResource = checkInternalHistoryResource(history);
+        Resource resource = checkInternalResource(newResource);
+
+        durableInsertHistory(historyResource);
+
+        var result = currentCollection.withWriteConcern(WriteConcern.MAJORITY).replaceOne(
+                Filters.and(
+                        Filters.eq(ID_FIELD, new ObjectId(resource.getId())),
+                        Filters.eq(VERSION_FIELD, expectedCurrentVersion)),
+                resource.getMongoDocument());
+        if (result.getMatchedCount() == 0) {
+            throw new IResourceStore.ResourceModifiedException(
+                    String.format("Resource was modified concurrently (id=%s, expected version=%d)",
+                            resource.getId(), expectedCurrentVersion));
+        }
+    }
+
+    /**
+     * @see #storeHistoryAndUpdate(IHistoryResource, IResource, int) for why this is
+     *      not a session transaction
+     */
+    @Override
+    public void storeHistoryAndRemove(IHistoryResource<T> history, String id) {
+        durableInsertHistory(checkInternalHistoryResource(history));
+        currentCollection.withWriteConcern(WriteConcern.MAJORITY).deleteOne(new Document(ID_FIELD, new ObjectId(id)));
+    }
+
+    private void durableInsertHistory(HistoryResource historyResource) {
+        try {
+            historyCollection.withWriteConcern(WriteConcern.MAJORITY).insertOne(historyResource.getMongoDocument());
+        } catch (MongoWriteException e) {
+            if (e.getError().getCode() != 11000) {
+                throw e;
+            }
+            // Duplicate key — another thread already archived this exact version.
+        }
     }
 
     @Override

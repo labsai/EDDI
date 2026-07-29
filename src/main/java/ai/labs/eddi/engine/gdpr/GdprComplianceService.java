@@ -4,17 +4,23 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.engine.audit.AuditHmac;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.caching.ICache;
+import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -22,12 +28,8 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.*;
-import java.util.HexFormat;
 
 /**
  * Orchestrates GDPR-compliant data operations across all stores.
@@ -58,6 +60,10 @@ public class GdprComplianceService {
     private final Instance<IAttachmentStore> attachmentStorageInstance;
     private final IHitlToolJournalStore hitlToolJournalStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
+    private final IConversationCheckpointStore checkpointStore;
+    private final Instance<GroupConversationStore> groupConversationStoreInstance;
+    private final IScheduleStore scheduleStore;
+    private final ICache<String, UserConversation> userConversationCache;
 
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
@@ -68,7 +74,11 @@ public class GdprComplianceService {
             AuditLedgerService auditLedgerService,
             Instance<IAttachmentStore> attachmentStorageInstance,
             IHitlToolJournalStore hitlToolJournalStore,
-            IConversationDescriptorStore conversationDescriptorStore) {
+            IConversationDescriptorStore conversationDescriptorStore,
+            IConversationCheckpointStore checkpointStore,
+            Instance<GroupConversationStore> groupConversationStoreInstance,
+            IScheduleStore scheduleStore,
+            ICacheFactory cacheFactory) {
         this.userMemoryStore = userMemoryStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.userConversationStore = userConversationStore;
@@ -78,6 +88,28 @@ public class GdprComplianceService {
         this.attachmentStorageInstance = attachmentStorageInstance;
         this.hitlToolJournalStore = hitlToolJournalStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
+        this.checkpointStore = checkpointStore;
+        this.groupConversationStoreInstance = groupConversationStoreInstance;
+        this.scheduleStore = scheduleStore;
+        this.userConversationCache = cacheFactory.getCache(USER_CONVERSATION_CACHE_NAME);
+    }
+
+    /**
+     * Name of the Caffeine cache {@code RestUserConversationStore} reads managed
+     * conversation mappings through. Erasure deletes from the store directly, so
+     * without an explicit invalidation the REST API kept serving the deleted
+     * mapping — the cache has no TTL, so "indefinitely" is literal.
+     */
+    static final String USER_CONVERSATION_CACHE_NAME = "userConversations";
+
+    /**
+     * Cache key format used by {@code RestUserConversationStore}. Duplicated rather
+     * than shared because the erasure cascade must not depend on a REST resource;
+     * the two are pinned together by
+     * {@code GdprComplianceServiceTest.erasureUsesTheSameCacheKeyAsTheRestStore}.
+     */
+    private static String userConversationCacheKey(String intent, String userId) {
+        return intent + "::" + userId;
     }
 
     /**
@@ -90,23 +122,27 @@ public class GdprComplianceService {
      * <li>Delete all HITL tool execution journal entries for user
      * conversations</li>
      * <li>Delete all conversation descriptors</li>
+     * <li>Delete all conversation memory checkpoints</li>
      * <li>Delete all conversation memory snapshots</li>
-     * <li>Delete all managed conversation mappings</li>
+     * <li>Delete all managed conversation mappings (and invalidate their
+     * cache)</li>
+     * <li>Delete all group conversation transcripts</li>
+     * <li>Delete all schedules owned by the user</li>
      * <li>Pseudonymize database log entries</li>
      * <li>Pseudonymize audit ledger entries</li>
      * </ol>
      * <p>
      * Conversation IDs are resolved once before step 2 and reused across steps 2–4.
-     * The journal and descriptor deletions (steps 3–4) run <em>before</em> the
-     * conversation snapshots are deleted (step 5) because they reference
-     * conversation IDs that the bulk delete removes.
+     * The journal, descriptor and checkpoint deletions run <em>before</em> the
+     * conversation snapshots are deleted because they reference conversation IDs
+     * that the bulk delete removes.
      *
      * @param userId
      *            the user to erase
      * @return result with per-store deletion/pseudonymization counts
      */
     public GdprDeletionResult deleteUserData(String userId) {
-        String pseudonym = "gdpr-erased:" + sha256(userId);
+        String pseudonym = AuditHmac.pseudonymFor(userId);
         LOGGER.infof("[GDPR] Starting erasure cascade for pseudonym '%s'", pseudonym);
 
         // 1. Delete user memories
@@ -184,7 +220,25 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
-        // 4b. Delete conversation memory snapshots
+        // 4b. Delete conversation memory checkpoints.
+        // A MemoryCheckpoint carries a copy of the conversation properties — the
+        // same PII the conversation holds — so an erasure that stopped at the
+        // snapshots left a full copy of it behind.
+        long checkpointsDeleted = 0;
+        try {
+            for (String convId : conversationIds) {
+                checkpointsDeleted += checkpointStore.deleteByConversationId(convId);
+            }
+            if (checkpointsDeleted > 0) {
+                LOGGER.infof("[GDPR] Deleted %d conversation checkpoints [%s]",
+                        checkpointsDeleted, pseudonym);
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to delete conversation checkpoints [%s]",
+                    pseudonym);
+        }
+
+        // 4c. Delete conversation memory snapshots
         long conversationsDeleted = 0;
         try {
             conversationsDeleted = conversationMemoryStore
@@ -196,8 +250,21 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
-        // 5. Delete managed conversation mappings
+        // 5. Delete managed conversation mappings.
+        // The intents are read FIRST: the cache is keyed by intent+userId, and once
+        // the rows are gone there is no way left to work out which keys to evict.
         long mappingsDeleted = 0;
+        List<String> mappedIntents = List.of();
+        try {
+            mappedIntents = userConversationStore.getAllForUser(userId).stream()
+                    .map(UserConversation::getIntent)
+                    .filter(Objects::nonNull)
+                    .toList();
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to resolve conversation mapping intents [%s]",
+                    pseudonym);
+        }
+
         try {
             mappingsDeleted = userConversationStore.deleteAllForUser(userId);
             LOGGER.infof("[GDPR] Deleted %d conversation mappings [%s]",
@@ -205,6 +272,47 @@ public class GdprComplianceService {
         } catch (Exception e) {
             LOGGER.errorf(e, "[GDPR] Failed to delete conversation mappings [%s]",
                     pseudonym);
+        }
+
+        // 5b. Evict the mappings from the read-through cache.
+        // Deleting straight from the store bypassed it entirely, and the cache has
+        // no TTL — so readUserConversation kept serving erased data for as long as
+        // the process lived.
+        try {
+            for (String intent : mappedIntents) {
+                userConversationCache.remove(userConversationCacheKey(intent, userId));
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to invalidate conversation mapping cache [%s]",
+                    pseudonym);
+        }
+
+        // 5c. Delete group conversation transcripts. A GroupConversation stores the
+        // user's id next to the verbatim discussion transcript.
+        long groupConversationsDeleted = 0;
+        try {
+            if (groupConversationStoreInstance.isResolvable()) {
+                groupConversationsDeleted = groupConversationStoreInstance.get().deleteAllForUser(userId);
+                if (groupConversationsDeleted > 0) {
+                    LOGGER.infof("[GDPR] Deleted %d group conversations [%s]",
+                            groupConversationsDeleted, pseudonym);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to delete group conversations [%s]",
+                    pseudonym);
+        }
+
+        // 5d. Delete schedules owned by the user. Left behind, they keep firing new
+        // conversations under the erased identity — recreating the data forever.
+        long schedulesDeleted = 0;
+        try {
+            schedulesDeleted = scheduleStore.deleteSchedulesByUserId(userId);
+            if (schedulesDeleted > 0) {
+                LOGGER.infof("[GDPR] Deleted %d schedules [%s]", schedulesDeleted, pseudonym);
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to delete schedules [%s]", pseudonym);
         }
 
         // 6. Pseudonymize database logs (not deleted — operational data)
@@ -234,20 +342,25 @@ public class GdprComplianceService {
                 auditPseudonymized, Instant.now());
 
         LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
-                + "memories=%d, conversations=%d, mappings=%d, "
-                + "logs=%d, audit=%d",
-                pseudonym, memoriesDeleted, conversationsDeleted,
-                mappingsDeleted, logsPseudonymized, auditPseudonymized);
+                + "memories=%d, conversations=%d, checkpoints=%d, mappings=%d, "
+                + "groupConversations=%d, schedules=%d, logs=%d, audit=%d",
+                pseudonym, memoriesDeleted, conversationsDeleted, checkpointsDeleted,
+                mappingsDeleted, groupConversationsDeleted, schedulesDeleted,
+                logsPseudonymized, auditPseudonymized);
 
         // Write compliance event to immutable audit ledger
-        submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, Map.of(
-                "memoriesDeleted", memoriesDeleted,
-                "attachmentsDeleted", attachmentsDeleted,
-                "journalEntriesDeleted", journalEntriesDeleted,
-                "conversationsDeleted", conversationsDeleted,
-                "mappingsDeleted", mappingsDeleted,
-                "logsPseudonymized", logsPseudonymized,
-                "auditPseudonymized", auditPseudonymized));
+        var auditDetails = new LinkedHashMap<String, Object>();
+        auditDetails.put("memoriesDeleted", memoriesDeleted);
+        auditDetails.put("attachmentsDeleted", attachmentsDeleted);
+        auditDetails.put("journalEntriesDeleted", journalEntriesDeleted);
+        auditDetails.put("checkpointsDeleted", checkpointsDeleted);
+        auditDetails.put("conversationsDeleted", conversationsDeleted);
+        auditDetails.put("mappingsDeleted", mappingsDeleted);
+        auditDetails.put("groupConversationsDeleted", groupConversationsDeleted);
+        auditDetails.put("schedulesDeleted", schedulesDeleted);
+        auditDetails.put("logsPseudonymized", logsPseudonymized);
+        auditDetails.put("auditPseudonymized", auditPseudonymized);
+        submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, auditDetails);
 
         return result;
     }
@@ -260,7 +373,7 @@ public class GdprComplianceService {
      * @return a JSON-serializable bundle of all user data
      */
     public UserDataExport exportUserData(String userId) {
-        String pseudonym = "gdpr-erased:" + sha256(userId);
+        String pseudonym = AuditHmac.pseudonymFor(userId);
         LOGGER.infof("[GDPR] Starting data export [%s]", pseudonym);
 
         // 1. User memories
@@ -374,7 +487,7 @@ public class GdprComplianceService {
      *            the user whose processing to restrict
      */
     public void restrictProcessing(String userId) {
-        String pseudonym = "gdpr-erased:" + sha256(userId);
+        String pseudonym = AuditHmac.pseudonymFor(userId);
         LOGGER.infof("[GDPR] Processing restriction applied [%s]", pseudonym);
 
         try {
@@ -401,7 +514,7 @@ public class GdprComplianceService {
      *            the user whose restriction to lift
      */
     public void unrestrictProcessing(String userId) {
-        String pseudonym = "gdpr-erased:" + sha256(userId);
+        String pseudonym = AuditHmac.pseudonymFor(userId);
         LOGGER.infof("[GDPR] Processing restriction removed [%s]", pseudonym);
 
         try {
@@ -478,16 +591,4 @@ public class GdprComplianceService {
         }
     }
 
-    /**
-     * Compute SHA-256 hash for pseudonymization.
-     */
-    private static String sha256(String input) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 not available", e);
-        }
-    }
 }

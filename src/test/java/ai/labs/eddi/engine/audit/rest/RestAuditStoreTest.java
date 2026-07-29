@@ -4,8 +4,11 @@
  */
 package ai.labs.eddi.engine.audit.rest;
 
+import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.AuditVerificationStatus;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.audit.model.AuditVerificationReport.ChainStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,6 +18,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /**
@@ -24,6 +30,7 @@ import static org.mockito.Mockito.*;
 class RestAuditStoreTest {
 
     private IAuditStore auditStore;
+    private AuditLedgerService auditLedgerService;
     private RestAuditStore restAuditStore;
 
     private AuditEntry sampleEntry() {
@@ -34,7 +41,10 @@ class RestAuditStoreTest {
     @BeforeEach
     void setUp() {
         auditStore = mock(IAuditStore.class);
-        restAuditStore = new RestAuditStore(auditStore);
+        auditLedgerService = mock(AuditLedgerService.class);
+        when(auditLedgerService.isSigningEnabled()).thenReturn(true);
+        when(auditLedgerService.verifyEntry(any())).thenReturn(AuditVerificationStatus.VALID);
+        restAuditStore = new RestAuditStore(auditStore, auditLedgerService);
     }
 
     @Test
@@ -81,5 +91,254 @@ class RestAuditStoreTest {
 
         assertEquals(42L, count);
         verify(auditStore).countByConversation("conv-1");
+    }
+
+    // ==================== G16/G18: integrity sweep ====================
+
+    private static AuditEntry entryAt(String id, long sequence) {
+        return new AuditEntry(id, "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test-type", 0, 42L, null, null, null, null,
+                List.of("greet"), 0.0, Instant.now(), "v3:deadbeef", null, sequence);
+    }
+
+    /**
+     * The point of the endpoint: {@code AuditHmac.verifyHmac} previously had no
+     * production caller at all, so a tampered row shipped undetected. A row whose
+     * HMAC no longer recomputes must be named in the report.
+     */
+    @Test
+    @DisplayName("a tampered row is reported")
+    void tamperedRowIsReported() {
+        var good = entryAt("id-1", 0);
+        var tampered = entryAt("id-2", 1);
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(good, tampered));
+        when(auditLedgerService.verifyEntry(good)).thenReturn(AuditVerificationStatus.VALID);
+        when(auditLedgerService.verifyEntry(tampered)).thenReturn(AuditVerificationStatus.INVALID);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(2, report.entriesChecked());
+        assertEquals(1, report.valid());
+        assertEquals(1, report.invalid());
+        assertFalse(report.intact());
+        assertEquals(1, report.problems().size());
+        assertEquals("id-2", report.problems().getFirst().entryId());
+        assertEquals(AuditVerificationStatus.INVALID, report.problems().getFirst().status());
+    }
+
+    @Test
+    @DisplayName("an untouched trail reports intact")
+    void untouchedTrailIsIntact() {
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-1", 0), entryAt("id-2", 1), entryAt("id-3", 2)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(ChainStatus.INTACT, report.chainStatus());
+        assertTrue(report.intact());
+        assertTrue(report.missingSequences().isEmpty());
+    }
+
+    /**
+     * A per-entry HMAC cannot see a DELETED entry — nothing is left to fail
+     * verification. The signed per-conversation sequence is what makes the hole
+     * visible.
+     */
+    @Test
+    @DisplayName("deleting a middle entry is detected")
+    void deletedMiddleEntryIsDetected() {
+        // entry with sequence 1 has been removed from the ledger
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-1", 0), entryAt("id-3", 2)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(0, report.invalid(), "every surviving row still verifies — that is exactly the problem");
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertEquals(List.of(1L), report.missingSequences());
+        assertFalse(report.intact());
+    }
+
+    /**
+     * skip is a query parameter, so a client can send a negative value. MongoDB
+     * ignores it; PostgreSQL rejects OFFSET -1 and the request becomes a 500. It is
+     * clamped rather than rejected, matching how an out-of-range limit is already
+     * handled.
+     */
+    @Test
+    @DisplayName("a negative skip is clamped, not passed to the store")
+    void negativeSkipIsClamped() {
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-1", 0)));
+        when(auditStore.countByConversation("conv-1")).thenReturn(1L);
+
+        restAuditStore.verifyConversation("conv-1", -5, 1000);
+
+        verify(auditStore).getEntries("conv-1", 0, 1000);
+        verify(auditStore, never()).getEntries(anyString(), intThat(i -> i < 0), anyInt());
+    }
+
+    /**
+     * An agent-scope sweep spans many conversations, so their sequences interleave
+     * and no single ascending run exists — the chain is deliberately reported
+     * NOT_APPLICABLE. Requiring INTACT made every clean agent sweep report
+     * intact=false, which makes the health bit worthless for the endpoint added for
+     * G16.
+     */
+    @Test
+    @DisplayName("a clean agent-scope sweep is intact despite NOT_APPLICABLE")
+    void cleanAgentSweepIsIntact() {
+        when(auditStore.getEntriesByAgent("agent-1", null, 0, 1000))
+                .thenReturn(List.of(entryAt("id-1", 0), entryAt("id-2", 7)));
+
+        var report = restAuditStore.verifyAgent("agent-1", null, 0, 1000);
+
+        assertEquals(ChainStatus.NOT_APPLICABLE, report.chainStatus());
+        assertEquals(0, report.invalid());
+        assertTrue(report.intact(), "every entry verified; the chain is simply not evaluated at agent scope");
+    }
+
+    /**
+     * An upgraded deployment has legacy rows with no sequence alongside new
+     * sequenced ones — and because the counter is seeded from countByConversation,
+     * which counts the legacy rows, the first sequenced entry starts above 0. With
+     * the origin anchor that looks exactly like a deleted prefix, so the ledger
+     * would accuse an untampered deployment of destroying records. A window that
+     * mixes the two simply cannot be judged.
+     */
+    @Test
+    @DisplayName("legacy unsequenced rows alongside sequenced ones report UNAVAILABLE, not BROKEN")
+    void mixedSequencedAndUnsequencedIsUnavailable() {
+        when(auditStore.getEntries("conv-1", 0, 1000))
+                .thenReturn(List.of(entryAt("legacy-1", -1), entryAt("id-6", 5), entryAt("id-7", 6)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(ChainStatus.UNAVAILABLE, report.chainStatus());
+        assertEquals(List.of(), report.missingSequences(), "0..4 were never assigned, not deleted");
+        assertFalse(report.intact(), "an unestablishable chain is not an intact one");
+    }
+
+    /**
+     * Deleting the FIRST entry leaves no gap behind: 1,2,3 is a perfectly gap-free
+     * run. Anchoring the expected range at the smallest sequence present therefore
+     * made a prefix deletion completely invisible — the easiest deletion to perform
+     * was the one the chain could not see.
+     */
+    @Test
+    @DisplayName("deleting the first entry is detected, not just a middle one")
+    void deletedFirstEntryIsDetected() {
+        // sequence 0 has been removed; the survivors still form an unbroken run
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-2", 1), entryAt("id-3", 2)));
+        when(auditStore.countByConversation("conv-1")).thenReturn(2L); // the window holds the whole conversation
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(0, report.invalid(), "every survivor still verifies — the hole is only visible via the sequence");
+        assertEquals(List.of(0L), report.missingSequences());
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertFalse(report.intact());
+    }
+
+    /**
+     * getEntries sorts newest-first, so skip == 0 is the most RECENT page, not the
+     * conversation's beginning. Using skip as the signal meant verifying the latest
+     * few entries of a long conversation anchored at 0 and reported the entire
+     * history below them as deleted. The window must be shown to hold the whole
+     * conversation before the origin can be assumed.
+     */
+    @Test
+    @DisplayName("a newest-first window that is not the whole conversation is judged on continuity only")
+    void partialNewestPageIsNotAnchoredAtOrigin() {
+        // the newest two entries of a conversation that holds 100
+        when(auditStore.getEntries("conv-1", 0, 2)).thenReturn(List.of(entryAt("id-98", 97), entryAt("id-99", 98)));
+        when(auditStore.countByConversation("conv-1")).thenReturn(100L);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 2);
+
+        assertEquals(List.of(), report.missingSequences(), "0..96 are simply not in this window");
+        assertEquals(ChainStatus.INTACT, report.chainStatus());
+    }
+
+    /**
+     * The origin anchor must not fire on a paginated sweep: with skip > 0 the
+     * earlier entries were legitimately not fetched, so reporting them missing
+     * would cry wolf on every second page.
+     */
+    @Test
+    @DisplayName("a paginated window is judged on internal continuity only")
+    void paginatedWindowDoesNotReportTheSkippedPrefixAsMissing() {
+        when(auditStore.getEntries("conv-1", 5, 1000)).thenReturn(List.of(entryAt("id-6", 5), entryAt("id-7", 6)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 5, 1000);
+
+        assertEquals(List.of(), report.missingSequences(), "0..4 were skipped, not deleted");
+        assertEquals(ChainStatus.INTACT, report.chainStatus());
+    }
+
+    /**
+     * A gap is not the only way to break the chain. If two entries carry the SAME
+     * sequence number the chain is ambiguous — one of them may have been replaced,
+     * or an entry inserted — and the run has no gap to reveal it. checkChain used
+     * to collect duplicates and then decide purely on {@code missing.isEmpty()}, so
+     * this reported INTACT and handed an auditor a false assurance.
+     */
+    @Test
+    @DisplayName("duplicate sequence numbers break the chain even with no gap")
+    void duplicateSequenceIsDetected() {
+        when(auditStore.getEntries("conv-1", 0, 1000))
+                .thenReturn(List.of(entryAt("id-1", 0), entryAt("id-2", 1), entryAt("id-3", 1)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(0, report.invalid(), "each row still verifies on its own — the chain is what is compromised");
+        assertEquals(List.of(), report.missingSequences(), "there is no gap; only the duplicate reveals it");
+        assertEquals(List.of(1L), report.duplicateSequences());
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertFalse(report.intact(), "a chain with an ambiguous position must never report intact");
+    }
+
+    @Test
+    @DisplayName("unsequenced rows report the chain as unavailable, not broken")
+    void unsequencedRowsReportUnavailable() {
+        when(auditStore.getEntries("conv-1", 0, 1000))
+                .thenReturn(List.of(entryAt("id-1", AuditEntry.UNSEQUENCED), entryAt("id-2", AuditEntry.UNSEQUENCED)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(ChainStatus.UNAVAILABLE, report.chainStatus());
+        assertFalse(report.intact());
+    }
+
+    @Test
+    @DisplayName("without a signing key the sweep proves nothing")
+    void withoutSigningKeyNothingIsProven() {
+        when(auditLedgerService.isSigningEnabled()).thenReturn(false);
+        when(auditLedgerService.verifyEntry(any())).thenReturn(AuditVerificationStatus.SIGNING_DISABLED);
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-1", 0)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertFalse(report.signingEnabled());
+        assertEquals(0, report.valid());
+        assertFalse(report.intact());
+        assertEquals(AuditVerificationStatus.SIGNING_DISABLED, report.problems().getFirst().status());
+    }
+
+    @Test
+    @DisplayName("an agent sweep checks HMACs but not the chain")
+    void agentSweepSkipsChainCheck() {
+        when(auditStore.getEntriesByAgent("agent-1", 1, 0, 1000)).thenReturn(List.of(entryAt("id-1", 0), entryAt("id-3", 2)));
+
+        var report = restAuditStore.verifyAgent("agent-1", 1, 0, 1000);
+
+        assertEquals(ChainStatus.NOT_APPLICABLE, report.chainStatus());
+        assertTrue(report.missingSequences().isEmpty(), "sequences interleave across conversations — a gap here means nothing");
+    }
+
+    @Test
+    @DisplayName("the verification limit is clamped")
+    void verificationLimitIsClamped() {
+        restAuditStore.verifyConversation("conv-1", 0, Integer.MAX_VALUE);
+        verify(auditStore).getEntries("conv-1", 0, RestAuditStore.MAX_VERIFY_LIMIT);
+
+        restAuditStore.verifyConversation("conv-2", 0, 0);
+        verify(auditStore).getEntries("conv-2", 0, RestAuditStore.MAX_VERIFY_LIMIT);
     }
 }

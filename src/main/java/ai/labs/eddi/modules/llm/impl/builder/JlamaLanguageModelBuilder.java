@@ -9,6 +9,7 @@ import dev.langchain4j.model.jlama.JlamaChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
@@ -20,6 +21,11 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_AUTH_TOKEN = "authToken";
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_MAX_TOKENS = "maxTokens";
+
+    @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_MODEL_NAME, KEY_AUTH_TOKEN, KEY_TEMPERATURE, KEY_MAX_TOKENS);
+    }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {

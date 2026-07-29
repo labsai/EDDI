@@ -23,7 +23,7 @@ A property has:
 
 | Mechanism | Source | Lifetime | Access Pattern |
 |---|---|---|---|
-| **Properties** | Agent-set (via PropertySetter, LLM tools) | Configurable (step → longTerm) | `{properties.key.valueString}` |
+| **Properties** | Agent-set (via PropertySetter, LLM tools) | Configurable (step → longTerm) | `{properties.key}` |
 | **Context** | Your application (passed per request) | Per request | `{context.key}` |
 | **Memory** | Pipeline (each task writes data) | Per step (current turn's data) | `{memory.current.key}` |
 
@@ -145,40 +145,44 @@ See [Persistent User Memory](user-memory.md) for full details on the LLM memory 
 
 ## Accessing Properties in Templates
 
-Properties are available in **all** templates via the `properties` namespace:
+Properties are available in **all** templates via the `properties` namespace.
+
+> ⚠️ **`properties` exposes raw values, not `Property` objects.** `MemoryItemConverter.convert()` puts `ConversationProperties.toMap()` into the template context, and `toMap()` returns the unwrapped Java value that was stored (`String`, `Integer`, `Float`, `Boolean`, `List`, `Map`) — the `Property` wrapper never reaches the template. Use `{properties.key}` directly. A `.valueString` / `.valueInt` / … suffix resolves against the raw value (a `String` has no `valueString` property) and fails at render time. The `valueString`, `valueInt`, … names are **write-side** field names of the JSON property-setter config only. AGENTS.md §5.1 is the authoritative reference for the template data model.
 
 ### In Output Templates
 
 ```
-Hello {properties.userName.valueString}! Your preferred language is {properties.preferred_language.valueString}.
+Hello {properties.userName}! Your preferred language is {properties.preferred_language}.
 ```
 
 ### In System Prompts (LLM)
 
 ```
-You are a helpful assistant. The user's name is {properties.userName.valueString}.
-They prefer {properties.preferred_language.valueString} responses.
+You are a helpful assistant. The user's name is {properties.userName}.
+They prefer {properties.preferred_language} responses.
 ```
 
 ### In HTTP Call Bodies
 
 ```json
 {
-  "userId": "{properties.userId.valueString}",
-  "language": "{properties.preferred_language.valueString}"
+  "userId": "{properties.userId}",
+  "language": "{properties.preferred_language}"
 }
 ```
 
-### Property Value Accessors
+### Reading the Different Value Types
 
-| Accessor | Type | Example |
+The property-setter config picks the value type by which `value*` field you write (`valueString`, `valueInt`, `valueFloat`, `valueObject`, `valueList`, `valueBoolean`). In templates, all of them are read the same way — through the property name:
+
+| Written as | Read in a template | Example |
 |---|---|---|
-| `.valueString` | String value | `{properties.name.valueString}` |
-| `.valueInt` | Integer value | `{properties.age.valueInt}` |
-| `.valueFloat` | Float value | `{properties.score.valueFloat}` |
-| `.valueObject` | Object/Map | `{properties.profile.valueObject.email}` |
-| `.valueList` | List | `{#for item in properties.tags.valueList}...{/for}` |
-| `.valueBoolean` | Boolean | `{#if properties.isPremium.valueBoolean}...{/if}` |
+| `valueString` | `{properties.name}` | `Hello {properties.name}` |
+| `valueInt` | `{properties.age}` | `You are {properties.age}` |
+| `valueFloat` | `{properties.score}` | `Score: {properties.score}` |
+| `valueObject` | `{properties.profile.<field>}` | `{properties.profile.email}` |
+| `valueList` | `{properties.tags}` | `{#for item in properties.tags}...{/for}` |
+| `valueBoolean` | `{properties.isPremium}` | `{#if properties.isPremium}...{/if}` |
 
 ---
 
@@ -198,7 +202,9 @@ Conversation.init()
       └─→ Available as {properties.key} in all templates
 ```
 
-Recall order (`most_recent` or `most_accessed`) and max entries come from the agent's `UserMemoryConfig` if configured, otherwise sensible defaults (1000 entries, most recent).
+Recall order (`most_recent` or `most_accessed`) and the maximum number of recalled entries come from the agent's `userMemoryConfig`. The documented defaults are **`most_recent` ordering and 50 entries** — the field defaults of `AgentConfiguration.UserMemoryConfig`, which apply as soon as the agent declares a `userMemoryConfig` block, however small.
+
+> **Known inconsistency:** an agent with *no* `userMemoryConfig` block at all falls back to a separate hard-coded default in `Conversation` (`DEFAULT_MAX_RECALL_ENTRIES = 1000`) rather than to the 50 above, so the effective cap silently changes by a factor of 20 depending on whether the block is present. Treat 50 as the intended default and set `maxRecallEntries` explicitly if the number matters to you; unifying the two constants is tracked as a code fix.
 
 ### 2. Pipeline Execution
 

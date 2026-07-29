@@ -198,15 +198,35 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     }
 
     private void deleteResourceSafely(URI resourceUri, boolean permanent) {
+        List<DocumentDescriptor> referencingWorkflows;
         try {
-            // Check if this resource is referenced by other workflows
-            var referencingWorkflows = workflowStore.getWorkflowDescriptorsContainingResource(resourceUri.toString(), false);
-            if (referencingWorkflows.size() > 1) {
-                log.infof("Skipping cascade-delete of resource %s — " + "still referenced by %d other workflow(s)", resourceUri,
-                        referencingWorkflows.size() - 1);
-                return;
-            }
+            // Is this resource still referenced by other workflows?
+            referencingWorkflows = workflowStore.getWorkflowDescriptorsContainingResource(resourceUri.toString(), false);
+        } catch (Exception e) {
+            // FAIL CLOSED. A cascade-delete is irreversible and this is the only
+            // thing standing between it and a config another workflow still uses —
+            // if the reference check cannot answer, we do not get to guess.
+            //
+            // ERROR, not WARN: a backend whose reverse-lookup query is broken
+            // answers this way for EVERY resource, which silently turns cascade
+            // delete into a permanent no-op. That must be loud, and the cause must
+            // be in the log — hence the throwable rather than just its message.
+            log.errorf(e, "Reference check for %s failed — NOT cascade-deleting it", resourceUri);
+            return;
+        }
 
+        if (referencingWorkflows == null) {
+            log.warnf("Reference check for %s returned no answer — NOT cascade-deleting it", resourceUri);
+            return;
+        }
+
+        if (referencingWorkflows.size() > 1) {
+            log.infof("Skipping cascade-delete of resource %s — still referenced by %d other workflow(s)", resourceUri,
+                    referencingWorkflows.size() - 1);
+            return;
+        }
+
+        try {
             resourceClientLibrary.deleteResource(resourceUri, permanent);
             log.infof("Cascade-deleted resource %s", resourceUri);
         } catch (Exception e) {

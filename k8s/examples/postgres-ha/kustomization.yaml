@@ -1,7 +1,13 @@
-# EDDI + PostgreSQL + NATS (multi-replica) — combined example
+# EDDI + PostgreSQL + NATS — combined production example
 #
-# Production-ready: PostgreSQL backend with NATS JetStream for
-# durable messaging across multiple EDDI replicas.
+# Production-ready: PostgreSQL backend with NATS JetStream for durable,
+# ordered conversation messaging.
+#
+# ⚠️  This is NOT a horizontally scaled deployment. NATS gives EDDI durable
+# ordering and dead-lettering, but the Callable still executes in the JVM that
+# published it, and the per-conversation lock is JVM-local — so EDDI runs at
+# exactly ONE replica regardless of messaging backend. See the comment on
+# spec.replicas in k8s/base/eddi-deployment.yaml.
 #
 # Usage: kubectl apply -k k8s/examples/postgres-ha/
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -13,12 +19,12 @@ resources:
   # PostgreSQL overlay (includes base + PostgreSQL)
   - ../../overlays/postgres
 
-  # NATS for multi-replica messaging
+  # NATS for durable, ordered messaging
   - ../../overlays/nats/nats-statefulset.yaml
   - ../../overlays/nats/nats-service.yaml
 
   # Production hardening
-  - ../../overlays/production/eddi-hpa.yaml
+  # NOTE: eddi-hpa.yaml is deliberately absent — see that file's header.
   - ../../overlays/production/eddi-pdb.yaml
   - ../../overlays/production/network-policy.yaml
 
@@ -34,7 +40,7 @@ patches:
       - op: add
         path: /data/EDDI_NATS_URL
         value: "nats://nats:4222"
-  # Production resource limits + replicas
+  # Production resource limits — scale UP, never OUT.
   - target:
       kind: Deployment
       name: eddi
@@ -50,4 +56,4 @@ patches:
             memory: 2Gi
       - op: replace
         path: /spec/replicas
-        value: 2
+        value: 1

@@ -165,6 +165,45 @@ class RestWorkflowStoreTest {
         }
 
         @Test
+        @DisplayName("two workflows sharing one output config — deleting one leaves the shared config alive")
+        void deleteWorkflow_cascade_sharedOutputConfigSurvives() throws Exception {
+            String sharedOutputUri = "eddi://ai.labs.output/outputstore/outputsets/shared-out?version=1";
+
+            WorkflowConfiguration workflowBeingDeleted = new WorkflowConfiguration();
+            WorkflowStep outputStep = new WorkflowStep();
+            outputStep.setType(URI.create("eddi://ai.labs.output"));
+            outputStep.setConfig(new HashMap<>(Map.of("uri", sharedOutputUri)));
+            workflowBeingDeleted.getWorkflowSteps().add(outputStep);
+
+            when(WorkflowStore.read("wf1", 1)).thenReturn(workflowBeingDeleted);
+            // Both wf1 (the one being deleted) and wf2 reference the same output set.
+            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(sharedOutputUri), eq(false)))
+                    .thenReturn(List.of(new DocumentDescriptor(), new DocumentDescriptor()));
+
+            restWorkflowStore.deleteWorkflow("wf1", 1, true, true);
+
+            verify(resourceClientLibrary, never()).deleteResource(eq(URI.create(sharedOutputUri)), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("reference check failure must FAIL CLOSED — never cascade-delete on an unanswered query")
+        void deleteWorkflow_cascade_referenceCheckFailsClosed() throws Exception {
+            WorkflowConfiguration config = new WorkflowConfiguration();
+            WorkflowStep outputStep = new WorkflowStep();
+            outputStep.setType(URI.create("eddi://ai.labs.output"));
+            outputStep.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.output/outputstore/outputsets/out1?version=1")));
+            config.getWorkflowSteps().add(outputStep);
+
+            when(WorkflowStore.read("wf1", 1)).thenReturn(config);
+            when(WorkflowStore.getWorkflowDescriptorsContainingResource(anyString(), eq(false)))
+                    .thenThrow(new IResourceStore.ResourceStoreException("index unavailable"));
+
+            restWorkflowStore.deleteWorkflow("wf1", 1, true, true);
+
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
+
+        @Test
         @DisplayName("should continue when individual resource delete fails")
         void deleteWorkflow_cascade_partialFailure() throws Exception {
             mockSingleReference();

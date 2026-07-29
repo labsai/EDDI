@@ -90,11 +90,11 @@ class AuditHmacTest {
         void producesHex() {
             String hmac = AuditHmac.computeHmac(createTestEntry(), hmacKey);
             assertNotNull(hmac);
-            assertTrue(hmac.startsWith("v2:"),
+            assertTrue(hmac.startsWith("v3:"),
                     "the stored value must name its canonical form, or verification cannot pick a canonicalizer");
             // Hex string should be 64 chars (32 bytes) after the version tag
-            assertEquals(64, hmac.substring("v2:".length()).length());
-            assertTrue(hmac.substring("v2:".length()).matches("[0-9a-f]{64}"));
+            assertEquals(64, hmac.substring("v3:".length()).length());
+            assertTrue(hmac.substring("v3:".length()).matches("[0-9a-f]{64}"));
         }
 
         @Test
@@ -173,22 +173,25 @@ class AuditHmacTest {
          * string; a v2 row carries {@code v2:} + a digest over the v2 form.
          */
         @Test
-        @DisplayName("a v1 row and a v2 row both verify, and either one tampered is rejected")
-        void bothVersionsVerifyAndBothRejectTampering() {
+        @DisplayName("v1, v2 and v3 rows all verify, and any of them tampered is rejected")
+        void allVersionsVerifyAndAllRejectTampering() {
             AuditEntry entry = createTestEntry();
 
             String v1Hmac = legacySignV1(AuditHmac.buildCanonicalString(entry));
-            String v2Hmac = AuditHmac.computeHmac(entry, hmacKey);
+            String v2Hmac = "v2:" + legacySignV1(AuditHmac.buildCanonicalStringV2(entry));
+            String v3Hmac = AuditHmac.computeHmac(entry, hmacKey);
 
-            assertFalse(v1Hmac.startsWith("v2:"), "precondition: the v1 row carries no version tag");
-            assertTrue(v2Hmac.startsWith("v2:"), "precondition: the v2 row names its canonical form");
+            assertFalse(v1Hmac.startsWith("v"), "precondition: the v1 row carries no version tag");
+            assertTrue(v3Hmac.startsWith("v3:"), "precondition: the current row names its canonical form");
 
             assertTrue(AuditHmac.verifyHmac(entry.withHmac(v1Hmac), hmacKey), "a pre-v2 ledger row must still verify");
             assertTrue(AuditHmac.verifyHmac(entry.withHmac(v2Hmac), hmacKey), "a v2 ledger row must verify");
+            assertTrue(AuditHmac.verifyHmac(entry.withHmac(v3Hmac), hmacKey), "a v3 ledger row must verify");
 
             AuditEntry tampered = entry.withEnvironment("TAMPERED");
             assertFalse(AuditHmac.verifyHmac(tampered.withHmac(v1Hmac), hmacKey), "a tampered v1 row must be rejected");
             assertFalse(AuditHmac.verifyHmac(tampered.withHmac(v2Hmac), hmacKey), "a tampered v2 row must be rejected");
+            assertFalse(AuditHmac.verifyHmac(tampered.withHmac(v3Hmac), hmacKey), "a tampered v3 row must be rejected");
         }
 
         /**
@@ -570,6 +573,103 @@ class AuditHmacTest {
 
         /** Reproduces exactly what the pre-v2 code wrote into the ledger. */
         private String legacySign(String canonical) {
+            try {
+                Mac mac = Mac.getInstance("HmacSHA256");
+                mac.init(new SecretKeySpec(hmacKey, "HmacSHA256"));
+                return HexFormat.of().formatHex(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
+            } catch (GeneralSecurityException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+    }
+
+    // ==================== GDPR pseudonymisation & chain position
+    // ====================
+
+    @Nested
+    @DisplayName("v3 canonical form")
+    class V3Tests {
+
+        /**
+         * A normal GDPR erasure rewrites {@code userId} to its pseudonym across every
+         * matching row. v1/v2 signed the identifier verbatim, so that routine,
+         * legally-required mutation left every affected entry cryptographically
+         * indistinguishable from a tampered one — the ledger accused itself.
+         */
+        @Test
+        @DisplayName("pseudonymising a user does not invalidate the entry's HMAC")
+        void pseudonymisedEntryStillVerifies() {
+            AuditEntry entry = createTestEntry();
+            String hmac = AuditHmac.computeHmac(entry, hmacKey);
+
+            AuditEntry pseudonymised = entry.withUserId(AuditHmac.pseudonymFor("user-1")).withHmac(hmac);
+
+            assertNotEquals(entry.userId(), pseudonymised.userId(), "precondition: the identifier really changed");
+            assertTrue(AuditHmac.verifyHmac(pseudonymised, hmacKey),
+                    "a GDPR-pseudonymised entry must still verify — it is a permitted mutation, not tampering");
+        }
+
+        @Test
+        @DisplayName("re-signing an already-pseudonymised entry yields the same digest")
+        void pseudonymIsIdempotentUnderSigning() {
+            AuditEntry entry = createTestEntry();
+            AuditEntry pseudonymised = entry.withUserId(AuditHmac.pseudonymFor("user-1"));
+
+            assertEquals(AuditHmac.computeHmac(entry, hmacKey), AuditHmac.computeHmac(pseudonymised, hmacKey));
+        }
+
+        /**
+         * The identity is still bound — otherwise pseudonymisation-invariance would
+         * just be a licence to reattribute an action to somebody else.
+         */
+        @Test
+        @DisplayName("swapping in a different user still breaks the HMAC")
+        void reattributingToAnotherUserIsRejected() {
+            AuditEntry entry = createTestEntry();
+            String hmac = AuditHmac.computeHmac(entry, hmacKey);
+
+            assertFalse(AuditHmac.verifyHmac(entry.withUserId("user-2").withHmac(hmac), hmacKey));
+            assertFalse(AuditHmac.verifyHmac(entry.withUserId(AuditHmac.pseudonymFor("user-2")).withHmac(hmac), hmacKey));
+        }
+
+        /**
+         * The sequence has to be inside the signed payload, or an attacker could delete
+         * an entry and renumber its successors to close the gap.
+         */
+        @Test
+        @DisplayName("the conversation sequence is signed — renumbering is rejected")
+        void renumberingAnEntryIsRejected() {
+            AuditEntry entry = createTestEntry().withSequence(7);
+            String hmac = AuditHmac.computeHmac(entry, hmacKey);
+
+            assertTrue(AuditHmac.verifyHmac(entry.withHmac(hmac), hmacKey), "precondition: the entry verifies as written");
+            assertFalse(AuditHmac.verifyHmac(entry.withSequence(6).withHmac(hmac), hmacKey), "a renumbered entry must be rejected");
+            assertFalse(AuditHmac.verifyHmac(entry.withSequence(AuditEntry.UNSEQUENCED).withHmac(hmac), hmacKey),
+                    "dropping the sequence must be rejected too, or the chain can just be erased");
+        }
+
+        @Test
+        @DisplayName("identityToken maps a raw id and its pseudonym to the same value")
+        void identityTokenCollapsesPseudonym() {
+            assertEquals(AuditHmac.identityToken("alice"), AuditHmac.identityToken(AuditHmac.pseudonymFor("alice")));
+            assertNotEquals(AuditHmac.identityToken("alice"), AuditHmac.identityToken("bob"));
+            assertEquals("", AuditHmac.identityToken(null));
+        }
+
+        /**
+         * A v3-tagged value must never be re-checked against an older canonicalizer.
+         */
+        @Test
+        @DisplayName("a v2 digest stored under the v3 tag does not verify")
+        void v2DigestUnderV3TagDoesNotVerify() {
+            AuditEntry entry = createTestEntry();
+            String mislabelled = "v3:" + sign(AuditHmac.buildCanonicalStringV2(entry));
+
+            assertFalse(AuditHmac.verifyHmac(entry.withHmac(mislabelled), hmacKey),
+                    "the version tag selects the canonicalizer and is never retried against another one");
+        }
+
+        private String sign(String canonical) {
             try {
                 Mac mac = Mac.getInstance("HmacSHA256");
                 mac.init(new SecretKeySpec(hmacKey, "HmacSHA256"));

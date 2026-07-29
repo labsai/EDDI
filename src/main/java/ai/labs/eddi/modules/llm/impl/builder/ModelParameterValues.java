@@ -6,7 +6,11 @@ package ai.labs.eddi.modules.llm.impl.builder;
 
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.DoubleConsumer;
 import java.util.function.IntConsumer;
 import java.util.function.LongConsumer;
@@ -27,8 +31,56 @@ final class ModelParameterValues {
 
     private static final Logger LOGGER = Logger.getLogger(ModelParameterValues.class);
 
+    /**
+     * Keys that live in an LLM task's {@code parameters} map but are consumed
+     * <em>outside</em> the provider builders, so they must never be reported as
+     * unrecognised.
+     * <p>
+     * {@code timeout} is on the list even though most builders do read it: the two
+     * that do not (jlama, oracle-genai) still honour it, because
+     * {@code ObservableChatModel} applies it as a wall-clock bound around
+     * {@code chat(...)}. Everything else here is read by {@code LlmTask} or
+     * {@code ChatModelRegistry} before a builder is ever reached.
+     */
+    private static final Set<String> PIPELINE_KEYS = Set.of(
+            "systemMessage", "prompt", "logSizeLimit", "includeFirstAgentMessage",
+            "convertToObject", "addToOutput", "responseSchema", "logRequests", "logResponses", "timeout");
+
     private ModelParameterValues() {
         // non-instantiable utility
+    }
+
+    /**
+     * Warn about configured parameters the selected provider builder does not read.
+     * <p>
+     * A dropped parameter is silent otherwise: the model is built, the turn
+     * succeeds, and the agent designer simply never gets the {@code temperature}
+     * they set. Emitted from the build path only (a cache miss), so it does not
+     * repeat on every turn.
+     *
+     * @param provider
+     *            the model type, used only as log context
+     * @param parameters
+     *            the map handed to the builder
+     * @param recognised
+     *            the keys the builder reads; an <em>empty</em> set means the
+     *            builder does not declare its parameters and the check is skipped
+     *            entirely
+     */
+    static void warnAboutUnrecognisedKeys(String provider, Map<String, String> parameters, Set<String> recognised) {
+        if (parameters == null || parameters.isEmpty() || recognised == null || recognised.isEmpty()) {
+            return;
+        }
+        var unrecognised = new TreeSet<String>();
+        for (String key : parameters.keySet()) {
+            if (key != null && !recognised.contains(key) && !PIPELINE_KEYS.contains(key)) {
+                unrecognised.add(sanitize(key));
+            }
+        }
+        if (!unrecognised.isEmpty()) {
+            LOGGER.warnv("LLM parameter(s) {0} are not read by the ''{1}'' model builder and have no effect. "
+                    + "Recognised parameters: {2}.", unrecognised, sanitize(provider), new TreeSet<>(recognised));
+        }
     }
 
     /** Parsed integer, or {@code null} when the key is absent or not a number. */

@@ -13,6 +13,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
@@ -42,6 +43,12 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
      * not this ceiling.
      */
     private static final int DEFAULT_MAX_TOKENS = 16384;
+
+    @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_API_KEY, KEY_TEMPERATURE, KEY_MODEL_NAME, KEY_MAX_TOKENS, KEY_TOP_P, KEY_TOP_K, KEY_TIMEOUT,
+                KEY_LOG_REQUESTS, KEY_LOG_RESPONSES);
+    }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {

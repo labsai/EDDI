@@ -24,6 +24,19 @@ public class ApiCall {
     private Boolean fireAndForget = false;
     private Boolean isBatchCalls = false;
     private String iterationObjectName;
+    /**
+     * Request timeout for this call in milliseconds. {@code null} falls back to the
+     * deployment-wide default ({@code eddi.httpcalls.default-timeout-millis}).
+     */
+    private Integer timeoutInMillis;
+    /**
+     * Maximum accepted response size for this call in bytes. Larger responses are
+     * rejected by the http client and, should one still get through, truncated
+     * before being written to conversation memory. {@code null} falls back to the
+     * deployment-wide default
+     * ({@code eddi.httpcalls.default-max-response-size-bytes}).
+     */
+    private Integer maxResponseSizeInBytes;
     private HttpPreRequest preRequest;
     private Request request;
     private HttpPostResponse postResponse;
@@ -106,6 +119,22 @@ public class ApiCall {
 
     public void setIterationObjectName(String iterationObjectName) {
         this.iterationObjectName = iterationObjectName;
+    }
+
+    public Integer getTimeoutInMillis() {
+        return timeoutInMillis;
+    }
+
+    public void setTimeoutInMillis(Integer timeoutInMillis) {
+        this.timeoutInMillis = timeoutInMillis;
+    }
+
+    public Integer getMaxResponseSizeInBytes() {
+        return maxResponseSizeInBytes;
+    }
+
+    public void setMaxResponseSizeInBytes(Integer maxResponseSizeInBytes) {
+        this.maxResponseSizeInBytes = maxResponseSizeInBytes;
     }
 
     public HttpPreRequest getPreRequest() {

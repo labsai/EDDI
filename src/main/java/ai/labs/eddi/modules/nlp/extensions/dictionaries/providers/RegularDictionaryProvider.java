@@ -83,6 +83,11 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
     private RegularDictionary addConfigsToDictionary(DictionaryConfiguration regularDictionaryConfiguration) {
         var regularDictionary = new RegularDictionary();
         regularDictionary.setLookupIfKnown(true);
+        // Must be set before words/phrases are added — entries are stamped with the
+        // dictionary's language code at creation time. Without this the parser's
+        // language filter (InputParser#iterateDictionaries) could never skip a
+        // dictionary, so an "en" and a "de" dictionary both matched every input.
+        regularDictionary.setLanguageCode(regularDictionaryConfiguration.getLang());
 
         regularDictionaryConfiguration.getWords().forEach(wordConfig -> {
             String word = wordConfig.getWord();

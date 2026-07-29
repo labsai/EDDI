@@ -53,7 +53,7 @@ class ToolExecutionServiceExtendedTest {
         @Test
         @DisplayName("should execute with all features enabled")
         void executesWithAllFeatures() {
-            when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "myTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "myTool", "arg1")).thenReturn(null);
 
             String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
@@ -67,7 +67,7 @@ class ToolExecutionServiceExtendedTest {
         @Test
         @DisplayName("should return cached when caching enabled")
         void returnsCachedWhenEnabled() {
-            when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "myTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "myTool", "arg1")).thenReturn("cached");
 
             String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
@@ -79,7 +79,7 @@ class ToolExecutionServiceExtendedTest {
         @Test
         @DisplayName("should skip cache when disabled")
         void skipsCacheWhenDisabled() {
-            when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "myTool", 60)).thenReturn(true);
 
             String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
                     () -> "direct result", true, false, false, 60);
@@ -91,7 +91,7 @@ class ToolExecutionServiceExtendedTest {
         @Test
         @DisplayName("should return error when rate limited")
         void rateLimited() {
-            when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(false);
+            when(rateLimiter.tryAcquire("conv-1", "myTool", 60)).thenReturn(false);
 
             String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
                     () -> "should not run", true, false, false, 60);
@@ -106,7 +106,7 @@ class ToolExecutionServiceExtendedTest {
                     () -> "no rate limit", false, false, false, 0);
 
             assertEquals("no rate limit", result);
-            verify(rateLimiter, never()).tryAcquire(anyString(), anyInt());
+            verify(rateLimiter, never()).tryAcquire(nullable(String.class), anyString(), anyInt());
         }
 
         /**

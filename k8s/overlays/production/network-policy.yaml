@@ -79,13 +79,31 @@ spec:
         - protocol: TCP
           port: 8080
     # External HTTPS — LLM API providers (OpenAI, Anthropic, etc.)
+    #
+    # The `except` list mirrors the application's own SSRF blocklist
+    # (UrlValidationUtils / SafeHttpClient) at the network layer, so a bypass in
+    # one is still caught by the other. Keep the two in sync.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:
+              # RFC 1918 private ranges
               - 10.0.0.0/8
               - 172.16.0.0/12
               - 192.168.0.0/16
+              # Link-local — this is what 169.254.169.254 lives on: the AWS/GCP/
+              # Azure/OpenStack instance metadata service. Omitting it left the
+              # single most valuable SSRF target reachable from the pod.
+              - 169.254.0.0/16
+              # Loopback and "this network"
+              - 127.0.0.0/8
+              - 0.0.0.0/8
+              # RFC 6598 carrier-grade NAT — used for node/service ranges by
+              # several managed Kubernetes offerings
+              - 100.64.0.0/10
+              # Multicast / reserved
+              - 224.0.0.0/4
+              - 240.0.0.0/4
       ports:
         - protocol: TCP
           port: 443

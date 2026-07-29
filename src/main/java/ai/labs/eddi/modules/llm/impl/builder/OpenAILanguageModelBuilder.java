@@ -13,6 +13,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
@@ -31,6 +32,12 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_BASE_URL = "baseUrl";
     private static final String KEY_MAX_TOKENS = "maxTokens";
     private static final String TYPE_JSON = "json";
+
+    @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_API_KEY, KEY_TEMPERATURE, KEY_MODEL_NAME, KEY_TIMEOUT, KEY_LOG_REQUESTS, KEY_LOG_RESPONSES,
+                KEY_RESPONSE_FORMAT, KEY_BASE_URL, KEY_MAX_TOKENS);
+    }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {

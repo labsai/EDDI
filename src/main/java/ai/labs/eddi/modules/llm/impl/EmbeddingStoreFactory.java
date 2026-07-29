@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.RemovalCause;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
@@ -24,17 +25,21 @@ import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoDriverInformation;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -58,9 +63,38 @@ public class EmbeddingStoreFactory {
     private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
     private static final Pattern TRAILING_UNDERSCORES = Pattern.compile("_+$");
 
+    /**
+     * Ceiling on distinct MongoDB deployments a single EDDI instance keeps clients
+     * for. Generous relative to any realistic number of Atlas clusters behind one
+     * deployment's knowledge bases, which is what makes size-based eviction safe:
+     * it only fires in the pathological case the bound exists to contain.
+     */
+    static final int MAX_MONGO_CLIENTS = 20;
+
     private final Cache<String, EmbeddingStore<TextSegment>> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30))
             .build();
-    private final Map<String, MongoClient> mongoClientCache = new ConcurrentHashMap<>();
+
+    /**
+     * MongoClients shared by every Atlas-backed store pointing at the same
+     * deployment.
+     * <p>
+     * Bounded, keyed on a SHA-256 digest of the connection string rather than the
+     * string itself, and closing the client (and therefore its connection pool)
+     * when an entry leaves. The previous plain {@code ConcurrentHashMap} did none
+     * of the three: it grew one never-closed client per distinct RAG config for the
+     * lifetime of the process, and every one of those map keys was a live
+     * credential-bearing URI sitting in the heap.
+     * <p>
+     * Deliberately size-bounded only — no idle TTL. The key is consulted on the
+     * store <em>build</em> path, so an actively used store would not refresh it,
+     * and an expiring entry would close a client that a live
+     * {@code MongoDbEmbeddingStore} still holds.
+     */
+    private final Cache<String, MongoClient> mongoClientCache = Caffeine.newBuilder()
+            .maximumSize(MAX_MONGO_CLIENTS)
+            .removalListener((String key, MongoClient client, RemovalCause cause) -> closeQuietly(client))
+            .build();
+
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
 
@@ -68,6 +102,37 @@ public class EmbeddingStoreFactory {
     public EmbeddingStoreFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
+    }
+
+    /**
+     * Evict cached stores when a vault secret or a global variable changes.
+     * <p>
+     * Store parameters carry credentials — {@code password}, {@code apiKey},
+     * {@code connectionString} — and the cache had no invalidation hook at all:
+     * {@code expireAfterAccess} resets on every read, so a store serving traffic
+     * never reached its TTL, and {@link #clearCache()} had no production caller.
+     * Rotating a vector store's credential therefore kept the pre-rotation one
+     * alive for the lifetime of the process.
+     */
+    @PostConstruct
+    void registerInvalidation() {
+        secretResolver.registerInvalidationListener(reference -> invalidateStores());
+        globalVariableResolver.registerInvalidationListener(this::invalidateStores);
+        LOGGER.info("EmbeddingStoreFactory registered for secret and global variable invalidation events");
+    }
+
+    /**
+     * Drop cached stores so the next lookup rebuilds them from current credentials.
+     * <p>
+     * Deliberately does <em>not</em> close pooled MongoClients: an invalidation
+     * fires for any secret in the deployment, including ones no vector store uses,
+     * and closing a client would break a RAG query that is in flight on a store
+     * another thread already holds. A rotated connection string simply hashes to a
+     * new key and gets a new client; the superseded one is closed when the bounded
+     * client cache evicts it.
+     */
+    private void invalidateStores() {
+        cache.invalidateAll();
     }
 
     /**
@@ -168,9 +233,11 @@ public class EmbeddingStoreFactory {
         LOGGER.infof("Building MongoDB Atlas store: database=%s, collection=%s, index=%s", sanitize(databaseName), sanitize(collectionName),
                 sanitize(indexName));
 
-        MongoClient mongoClient = mongoClientCache.computeIfAbsent(connectionString, cs -> {
+        // Keyed on a digest, never on the connection string itself: the string is a
+        // credential and a cache key outlives the call that produced it.
+        MongoClient mongoClient = mongoClientCache.get(connectionKey(connectionString), key -> {
             MongoClientSettings settings = MongoClientSettings.builder()
-                    .applyConnectionString(new ConnectionString(cs))
+                    .applyConnectionString(new ConnectionString(connectionString))
                     .build();
             return MongoClients.create(settings, DRIVER_INFO);
         });
@@ -369,17 +436,40 @@ public class EmbeddingStoreFactory {
     }
 
     /**
-     * Clears the store cache. Useful for testing or config hot-reload.
+     * Stable, non-reversible cache key for a connection string. SHA-256 rather than
+     * {@code hashCode()} so that two distinct clusters cannot collide onto one
+     * shared client.
+     */
+    static String connectionKey(String connectionString) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(connectionString.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is mandated by the JLS for every conforming JRE.
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private static void closeQuietly(MongoClient client) {
+        if (client == null) {
+            return;
+        }
+        try {
+            client.close();
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to close MongoClient: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Clears the store cache and closes every pooled MongoClient. Called on secret
+     * rotation and global-variable edits (see {@link #registerInvalidation()}), and
+     * by tests.
      */
     public void clearCache() {
         cache.invalidateAll();
-        mongoClientCache.values().forEach(client -> {
-            try {
-                client.close();
-            } catch (Exception e) {
-                LOGGER.warnf("Failed to close MongoClient: %s", e.getMessage());
-            }
-        });
-        mongoClientCache.clear();
+        // invalidateAll fires the removal listener, which closes each client.
+        mongoClientCache.invalidateAll();
+        mongoClientCache.cleanUp();
     }
 }

@@ -14,19 +14,48 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 public class RegularDictionary implements IDictionary {
-    private static final String ID = "regular";
     private List<IPhrase> phrases = new LinkedList<>();
     private Map<String, IWord> words = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     private List<IRegEx> regExs = new LinkedList<>();
 
     private boolean lookupIfKnown;
+    private String languageCode;
+
+    /**
+     * Cached, flattened view of {@link #words} plus all words contained in
+     * {@link #phrases}. {@code getWords()} is called once per input token by the
+     * corrections (e.g. Damerau-Levenshtein), so rebuilding the whole list on every
+     * call allocated the entire dictionary per token. Mutating the dictionary drops
+     * the cache.
+     */
+    private List<IWord> allWordsCache;
 
     @Override
     public List<IWord> getWords() {
-        List<IWord> allWords = new LinkedList<>(words.values());
-        phrases.stream().map(IPhrase::getWords).forEach(allWords::addAll);
+        if (allWordsCache == null) {
+            List<IWord> allWords = new LinkedList<>(words.values());
+            phrases.stream().map(IPhrase::getWords).forEach(allWords::addAll);
+            allWordsCache = Collections.unmodifiableList(allWords);
+        }
 
-        return Collections.unmodifiableList(allWords);
+        return allWordsCache;
+    }
+
+    @Override
+    public String getLanguageCode() {
+        return languageCode;
+    }
+
+    /**
+     * Sets the ISO language code this dictionary is written for. The parser skips
+     * dictionaries whose language does not match the current user language; a
+     * {@code null} or blank value means "applies to every language".
+     * <p>
+     * Set this <em>before</em> adding words or phrases — entries are stamped with
+     * the language code at creation time.
+     */
+    public void setLanguageCode(String languageCode) {
+        this.languageCode = languageCode;
     }
 
     @Override
@@ -64,7 +93,8 @@ public class RegularDictionary implements IDictionary {
     }
 
     public void addWord(final String value, final Expressions expressions, int rating) {
-        words.put(value, new Word(value, expressions, ID, rating, false));
+        words.put(value, new Word(value, expressions, languageCode, rating, false));
+        allWordsCache = null;
     }
 
     public void addRegex(final String regEx, Expressions expressions) {
@@ -72,15 +102,18 @@ public class RegularDictionary implements IDictionary {
     }
 
     public void addPhrase(String value, Expressions expressions) {
-        phrases.add(new Phrase(value, expressions, ID));
+        phrases.add(new Phrase(value, expressions, languageCode));
+        allWordsCache = null;
     }
 
     public void setPhrases(List<IPhrase> phrases) {
         this.phrases = phrases;
+        allWordsCache = null;
     }
 
     public void setWords(Map<String, IWord> words) {
         this.words = words;
+        allWordsCache = null;
     }
 
     public List<IRegEx> getRegExs() {

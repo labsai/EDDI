@@ -36,6 +36,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -69,6 +70,26 @@ public class AgentSetupService {
     private final IRestAgentAdministration agentAdmin;
     private final ISecretProvider secretProvider;
     private final String ollamaDefaultBaseUrl;
+
+    /**
+     * Whether a wizard-created agent should log full LLM prompts and completions.
+     * <p>
+     * Defaults to {@code false}: {@code logRequests}/{@code logResponses} make
+     * {@code ObservableChatModel} write conversation content — user input, system
+     * prompt, model output — to the application log, and hardcoding them to
+     * {@code true} gave every agent this wizard has ever created that behaviour
+     * with no opt-out. Content logging is a debugging choice, not a default, so it
+     * belongs in configuration: flip
+     * {@code eddi.setup.llm.log-conversation-content=true} to have the wizard emit
+     * the noisy variant, or edit the two parameters on the generated LLM config in
+     * the Manager at any time.
+     * <p>
+     * Field-injected rather than a constructor parameter so that a directly
+     * constructed instance (tests, non-CDI callers) gets the safe default.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.setup.llm.log-conversation-content", defaultValue = "false")
+    boolean logConversationContent;
 
     @Inject
     public AgentSetupService(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin,
@@ -242,6 +263,12 @@ public class AgentSetupService {
         if (!isLocalLLM && (request.apiKey() == null || request.apiKey().isBlank())) {
             throw new AgentSetupException("API key is required for cloud LLM providers");
         }
+        // Scheme-level check only. Full SSRF validation would reject loopback and
+        // private addresses, which is precisely where a local LLM provider lives —
+        // the reason this field exists.
+        if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank() && !UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
+            throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
+        }
 
         var params = resolveParams(request.provider(), request.model(), request.deploy(), request.environment());
         var createdResources = new LinkedHashMap<String, Object>();
@@ -295,8 +322,11 @@ public class AgentSetupService {
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
             // Auto-vault the API key before storing in LLM config
             String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName());
-            var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null, null,
-                    promptResponseJson, quickReplies, sentiment, httpCallsLocations);
+            // 7th slot is the LLM's own base URL — not apiBaseUrl, which is the target
+            // server of the generated tools. Passing null here left local providers
+            // (Ollama, Jlama) with no endpoint to reach.
+            var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null,
+                    request.llmBaseUrl(), promptResponseJson, quickReplies, sentiment, httpCallsLocations);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
@@ -396,8 +426,11 @@ public class AgentSetupService {
         params.put("addToOutput", promptResponseJson == null ? "true" : "false");
         params.put("timeout", "60000");
         params.put("temperature", "0.3");
-        params.put("logRequests", "true");
-        params.put("logResponses", "true");
+        // Written explicitly (rather than omitted) so the setting is visible and
+        // flippable on the generated config in the Manager. See
+        // #logConversationContent for why the default is off.
+        params.put("logRequests", String.valueOf(logConversationContent));
+        params.put("logResponses", String.valueOf(logConversationContent));
 
         if (promptResponseJson != null) {
             params.put("convertToObject", "true");

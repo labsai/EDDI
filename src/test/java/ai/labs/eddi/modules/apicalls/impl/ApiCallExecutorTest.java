@@ -15,8 +15,12 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -33,6 +37,9 @@ import static org.mockito.Mockito.*;
  */
 class ApiCallExecutorTest {
 
+    private static final long DEFAULT_TIMEOUT_MILLIS = 30_000L;
+    private static final int DEFAULT_MAX_RESPONSE_SIZE = 2_000_000;
+
     private IHttpClient httpClient;
     private IJsonSerialization jsonSerialization;
     private IRuntime runtime;
@@ -44,6 +51,8 @@ class ApiCallExecutorTest {
     private IRequest mockRequest;
     private IResponse mockResponse;
     private SecretResolver secretResolver;
+    private CallerIdentityResolver callerIdentityResolver;
+    private CallerIdentityContext callerIdentityContext;
     private GlobalVariableResolver globalVariableResolver;
 
     @BeforeEach
@@ -53,11 +62,17 @@ class ApiCallExecutorTest {
         runtime = mock(IRuntime.class);
         prePostUtils = mock(PrePostUtils.class);
         secretResolver = mock(SecretResolver.class);
+        callerIdentityResolver = mock(CallerIdentityResolver.class);
+        callerIdentityContext = mock(CallerIdentityContext.class);
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        // Pass-through: these tests exercise no ${caller:...} references.
+        when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
         globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
-        executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver, false);
+        executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver,
+                callerIdentityResolver, callerIdentityContext, false, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
 
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);
@@ -295,6 +310,45 @@ class ApiCallExecutorTest {
     // ==================== Header Scrubbing Tests ====================
 
     @Test
+    @DisplayName("a caller token in an unconventionally named header is still redacted before persistence")
+    void execute_callerTokenInUnconventionalHeader_isRedacted() throws Exception {
+        // The header-name patterns cannot catch this one; only value matching can.
+        // With the resolver mocked as a pass-through this assertion is vacuous, so
+        // a real resolver with a real bound identity is used here.
+        var realContext = new CallerIdentityContext(null, null);
+        realContext.bind(new CallerIdentity("caller-jwt-value", "alice", "https://eddi.example:443"));
+        var realResolver = new CallerIdentityResolver(realContext, true);
+        var executorWithRealResolver = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
+                secretResolver, realResolver, realContext, false, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
+        try {
+            ApiCall call = createSimpleApiCall("redact-call", false);
+
+            Map<String, Object> requestMap = new HashMap<>();
+            Map<String, Object> headers = new LinkedHashMap<>();
+            headers.put("X-Trace-Context", "id=1; tok=caller-jwt-value");
+            requestMap.put("headers", headers);
+            when(mockRequest.toMap()).thenReturn(requestMap);
+            setupSuccessResponse(200, "ok", "text/plain");
+
+            executorWithRealResolver.execute(call, memory, new HashMap<>(), "http://example.com");
+
+            var captor = ArgumentCaptor.forClass(Object.class);
+            verify(prePostUtils, atLeastOnce()).createMemoryEntry(
+                    eq(currentStep), captor.capture(), contains("Request"), eq("httpCalls"));
+            @SuppressWarnings("unchecked")
+            var capturedMap = (Map<String, Object>) captor.getValue();
+            @SuppressWarnings("unchecked")
+            var scrubbedHeaders = (Map<String, Object>) capturedMap.get("headers");
+            String persisted = String.valueOf(scrubbedHeaders.get("X-Trace-Context"));
+            assertFalse(persisted.contains("caller-jwt-value"),
+                    "the caller's token must not reach conversation memory, whatever the header is called");
+            assertTrue(persisted.contains("<REDACTED>"), persisted);
+        } finally {
+            realContext.clear();
+        }
+    }
+
+    @Test
     void execute_sensitiveHeaders_areScrubbed() throws Exception {
         ApiCall call = createSimpleApiCall("scrub-call", false);
 
@@ -325,6 +379,68 @@ class ApiCallExecutorTest {
         assertEquals("<REDACTED>", scrubbedHeaders.get("Token"));
         assertEquals("<REDACTED>", scrubbedHeaders.get("X-Secret-Data"));
         assertEquals("visible-value", scrubbedHeaders.get("X-Custom"));
+    }
+
+    @Test
+    @DisplayName("a caller reference in the path fails with a message that names the cause")
+    void execute_callerReferenceInPath_isRejectedClearly() {
+        // A real resolver, for the same reason as the redaction test above: the
+        // mocked one does nothing, so the assertion would hold either way.
+        var realContext = new CallerIdentityContext(null, null);
+        realContext.bind(new CallerIdentity("caller-jwt-value", "alice", "https://eddi.example:443"));
+        var realResolver = new CallerIdentityResolver(realContext, true);
+        var executorWithRealResolver = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
+                secretResolver, realResolver, realContext, false, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
+        try {
+            ApiCall call = createSimpleApiCall("path-ref-call", false);
+            call.getRequest().setPath("/users/${caller:userId}/profile");
+
+            // Without the guard this reaches URI.create() and dies as "Illegal
+            // character in path", naming the symptom and not the cause.
+            var e = assertThrows(LifecycleException.class,
+                    () -> executorWithRealResolver.execute(call, memory, new HashMap<>(), "http://example.com"));
+            String message = String.valueOf(e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
+            assertTrue(message.contains("${caller:userId}"), message);
+            assertTrue(message.contains("the request path"), message);
+        } finally {
+            realContext.clear();
+        }
+    }
+
+    @Test
+    @DisplayName("header scrubbing survives a Turkish locale")
+    void execute_sensitiveHeaders_areScrubbedUnderTurkishLocale() throws Exception {
+        // "AUTHORIZATION".toLowerCase() under tr-TR gives a dotless 'ı', so a
+        // locale-sensitive lowercase makes every name test miss and the secret is
+        // persisted to conversation memory in the clear.
+        Locale original = Locale.getDefault();
+        Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+        try {
+            ApiCall call = createSimpleApiCall("scrub-locale-call", false);
+
+            Map<String, Object> requestMap = new HashMap<>();
+            Map<String, Object> headers = new LinkedHashMap<>();
+            headers.put("AUTHORIZATION", "Bearer secret-token");
+            headers.put("X-API-KEY", "my-api-key");
+            requestMap.put("headers", headers);
+            when(mockRequest.toMap()).thenReturn(requestMap);
+            setupSuccessResponse(200, "ok", "text/plain");
+
+            executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+            var captor = ArgumentCaptor.forClass(Object.class);
+            verify(prePostUtils, atLeastOnce()).createMemoryEntry(
+                    eq(currentStep), captor.capture(), contains("Request"), eq("httpCalls"));
+
+            @SuppressWarnings("unchecked")
+            var capturedMap = (Map<String, Object>) captor.getValue();
+            @SuppressWarnings("unchecked")
+            var scrubbedHeaders = (Map<String, Object>) capturedMap.get("headers");
+            assertEquals("<REDACTED>", scrubbedHeaders.get("AUTHORIZATION"));
+            assertEquals("<REDACTED>", scrubbedHeaders.get("X-API-KEY"));
+        } finally {
+            Locale.setDefault(original);
+        }
     }
 
     @Test
@@ -473,7 +589,7 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_blocksInternalUrl() {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, true);
+                secretResolver, callerIdentityResolver, callerIdentityContext, true, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
         ApiCall call = createSimpleApiCall("ssrf-call", false);
         // 169.254.169.254 is a literal IP (no DNS) blocked by UrlValidationUtils.
         assertThrows(LifecycleException.class, () -> protectedExecutor.execute(call, memory, new HashMap<>(), "http://169.254.169.254"));
@@ -482,7 +598,7 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_disablesRedirectsOnPublicUrl() throws Exception {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, true);
+                secretResolver, callerIdentityResolver, callerIdentityContext, true, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
         ApiCall call = createSimpleApiCall("redir-call", false);
         setupSuccessResponse(200, "ok", "text/plain");
         // 1.1.1.1 is a public literal IP — passes validation without a DNS lookup.
@@ -513,8 +629,25 @@ class ApiCallExecutorTest {
     @Test
     void getDelayInMillis_cappedAtCeiling() {
         ApiCall call = callWithBackoff(100_000);
-        // 100000 * 2^9 = 51,200,000 — capped to the 5-minute ceiling.
-        assertEquals(300_000, ApiCallExecutor.getDelayInMillis(call, true, 10));
+        // 100000 * 2^9 = 51,200,000 — capped to the hard ceiling, which has to stay
+        // inside the turn budget (a retry sleeps on the conversation thread).
+        assertEquals(30_000, ApiCallExecutor.getDelayInMillis(call, true, 10));
+        assertEquals(30_000, ApiCallExecutor.MAX_BACKOFF_MILLIS);
+    }
+
+    @Test
+    void getDelayInMillis_perCallBackoffCapLowersCeiling() {
+        ApiCall call = callWithBackoff(1_000);
+        call.getPostResponse().getRetryApiCallInstruction().setMaxBackoffDelayInMillis(2_500);
+        // 1000 * 2^4 = 16,000 — lowered to the configured 2.5s cap.
+        assertEquals(2_500, ApiCallExecutor.getDelayInMillis(call, true, 5));
+    }
+
+    @Test
+    void getDelayInMillis_perCallBackoffCapCannotExceedHardCeiling() {
+        ApiCall call = callWithBackoff(100_000);
+        call.getPostResponse().getRetryApiCallInstruction().setMaxBackoffDelayInMillis(600_000);
+        assertEquals(30_000, ApiCallExecutor.getDelayInMillis(call, true, 10));
     }
 
     @Test
@@ -674,6 +807,56 @@ class ApiCallExecutorTest {
     }
 
     // ==================== Exception from request.send() Tests ====================
+
+    // ==================== Timeout / Response Size Cap ====================
+
+    @Test
+    void execute_appliesDefaultTimeoutAndResponseSizeCapToRequest() throws Exception {
+        ApiCall call = createSimpleApiCall("bounded-call", false);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest).setTimeout(DEFAULT_TIMEOUT_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        verify(mockRequest).setMaxResponseSize(DEFAULT_MAX_RESPONSE_SIZE);
+    }
+
+    @Test
+    void execute_perCallTimeoutAndResponseSizeOverrideDefaults() throws Exception {
+        ApiCall call = createSimpleApiCall("tight-call", false);
+        call.setTimeoutInMillis(1_500);
+        call.setMaxResponseSizeInBytes(4_096);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest).setTimeout(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS);
+        verify(mockRequest).setMaxResponseSize(4_096);
+    }
+
+    @Test
+    void execute_oversizedSuccessBody_isTruncatedBeforeBeingStored() throws Exception {
+        ApiCall call = createSimpleApiCall("huge-call", true);
+        call.setMaxResponseSizeInBytes(100);
+        String hugeBody = "x".repeat(100_000);
+        setupSuccessResponse(200, hugeBody, "text/plain");
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals("x".repeat(100), result.get("body"));
+        verify(prePostUtils).createMemoryEntry(eq(currentStep), eq("x".repeat(100)), eq("response"), eq("httpCalls"));
+    }
+
+    @Test
+    void execute_successBodyWithinCap_isStoredUnchanged() throws Exception {
+        ApiCall call = createSimpleApiCall("small-call", true);
+        call.setMaxResponseSizeInBytes(100);
+        setupSuccessResponse(200, "short body", "text/plain");
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals("short body", result.get("body"));
+    }
 
     @Test
     void execute_requestSendThrowsException_wrapsInLifecycleException() throws Exception {

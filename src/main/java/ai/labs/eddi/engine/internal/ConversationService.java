@@ -46,10 +46,14 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import jakarta.enterprise.context.ContextNotActiveException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
@@ -96,6 +100,7 @@ public class ConversationService implements IConversationService {
     private final IConversationCoordinator conversationCoordinator;
     private final IRuntime runtime;
     private final IContextLogger contextLogger;
+    private final CallerIdentityContext callerIdentityContext;
     private final AuditLedgerService auditLedgerService;
     private final GdprComplianceService gdprComplianceService;
     private final TenantQuotaService tenantQuotaService;
@@ -113,6 +118,23 @@ public class ConversationService implements IConversationService {
 
     @ConfigProperty(name = "eddi.attachments.max-per-turn", defaultValue = "5")
     int maxAttachmentsPerTurn;
+
+    /**
+     * Conversation-ownership gate for the conversationId-only entry points — the
+     * ones every external adapter (REST, streaming SSE, MCP) funnels through.
+     * <p>
+     * The check lives HERE, not only in the adapters, so a new adapter cannot
+     * re-open the hole by forgetting it: driving a turn executes under the TARGET
+     * conversation's userId (its long-term memories are loaded into the prompt and
+     * its tools run in its context), so an unchecked adapter is an account-takeover
+     * primitive for anyone who learns a conversationId. The adapters keep their own
+     * check as defence in depth.
+     * <p>
+     * Field-injected for the same reason as {@link #attachmentStore}: the numerous
+     * direct-construction unit tests need no change.
+     */
+    @Inject
+    ConversationAccessGuard conversationAccessGuard;
 
     /**
      * Fires {@link HitlResumeCompletedEvent} when a resume settles to a non-paused
@@ -161,7 +183,7 @@ public class ConversationService implements IConversationService {
             IContextLogger contextLogger, AuditLedgerService auditLedgerService, GdprComplianceService gdprComplianceService,
             TenantQuotaService tenantQuotaService, IScheduleStore scheduleStore, IAgentStore agentStore,
             IJsonSerialization jsonSerialization,
-            MeterRegistry meterRegistry, Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent,
+            MeterRegistry meterRegistry, Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent, CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.agentFactory = agentFactory;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -175,6 +197,7 @@ public class ConversationService implements IConversationService {
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
+        this.callerIdentityContext = callerIdentityContext;
         this.auditLedgerService = auditLedgerService;
         this.gdprComplianceService = gdprComplianceService;
         this.tenantQuotaService = tenantQuotaService;
@@ -821,6 +844,7 @@ public class ConversationService implements IConversationService {
                     boolean rerunOnly, ConversationResponseHandler responseHandler)
             throws Exception {
 
+        requireConversationAccess(conversationId);
         var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                 rerunOnly, responseHandler);
@@ -831,9 +855,38 @@ public class ConversationService implements IConversationService {
                              InputData inputData, StreamingResponseHandler streamingHandler)
             throws Exception {
 
+        requireConversationAccess(conversationId);
         var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
                 inputData, streamingHandler);
+    }
+
+    /**
+     * Asserts the caller may drive this conversation, throwing
+     * {@code ForbiddenException} (403) otherwise. See
+     * {@link #conversationAccessGuard} for why the gate sits at this layer.
+     * <p>
+     * Two deliberate pass-throughs, neither of which weakens an authenticated
+     * request:
+     * <ul>
+     * <li>a {@code null} guard means the bean was constructed outside CDI — only
+     * the direct-construction unit tests do that; CDI always injects it in
+     * production</li>
+     * <li>no active request context means a server-internal caller (e.g. the Slack
+     * webhook worker thread) with no principal to compare against — ownership is
+     * simply not decidable there, and it was never checked before. Every
+     * request-scoped caller (REST, streaming, MCP) still is.</li>
+     * </ul>
+     */
+    private void requireConversationAccess(String conversationId) {
+        if (conversationAccessGuard == null) {
+            return;
+        }
+        try {
+            conversationAccessGuard.requireConversationOwner(conversationId);
+        } catch (ContextNotActiveException e) {
+            LOGGER.debugf("No active request context — skipping ownership check for conversation %s", sanitize(conversationId));
+        }
     }
 
     @Override
@@ -915,6 +968,21 @@ public class ConversationService implements IConversationService {
     private Callable<Void> processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                    Map<String, String> loggingContext, Callable<Void> executeConversation,
                                                    Consumer<IConversationMemory> skipNotifier) {
+        // Captured here because this method still runs on the REST request
+        // thread, where SecurityIdentity resolves. Everything downstream runs on
+        // pool threads with no request context, so the identity travels with the
+        // callable rather than with the thread.
+        // Binding is CallerIdentityContext's job — it owns the clearing semantics
+        // that keep a token off the next caller's turn on a pooled thread.
+        //
+        // captureOrCurrent, not capture: a group discussion calls say() from its own
+        // virtual thread, which it has already bound to the caller. There is no
+        // request there, so capture() alone would return null — and since a null
+        // identity now masks rather than inherits, it would erase the very binding
+        // the group dispatcher established.
+        final Callable<Void> identityBoundExecution = callerIdentityContext.withIdentity(callerIdentityContext.captureOrCurrent(),
+                executeConversation);
+
         return () -> {
             // Queued-say guard: this memory copy was loaded at REST-request time;
             // a previously queued turn may have committed a pause (or a resume may
@@ -967,7 +1035,7 @@ public class ConversationService implements IConversationService {
             populateToolApprovalsConfig(conversationMemory);
             try {
                 runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
-                        executeConversation, memoryStateAtSubmit, persistedState);
+                        identityBoundExecution, memoryStateAtSubmit, persistedState);
             } finally {
                 // value-conditional: only the leg that registered this memory may
                 // unregister — a plain remove(key) could evict a NEWER execution's
@@ -1432,6 +1500,13 @@ public class ConversationService implements IConversationService {
 
             Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, memory.getUserId());
 
+            // The resume is itself an authenticated request, so the pipeline it
+            // continues should run as the person who approved — captured here, on
+            // the request thread, for the same reason as in the say path. Falls back
+            // to the thread binding for an internally driven resume, which has no
+            // request to capture from.
+            final CallerIdentity resumeCallerIdentity = callerIdentityContext.captureOrCurrent();
+
             Callable<Void> resumeCallable = () -> {
                 // #3: a cancel or a terminal end may have landed between the CAS
                 // and this execution (flag on the registered memory, or DB-only in
@@ -1556,7 +1631,8 @@ public class ConversationService implements IConversationService {
             Callable<Void> guardedResume = () -> {
                 try {
                     waitForExecutionFinishOrTimeout(loggingContext, conversationId,
-                            runtime.submitCallable(resumeCallable, resumeFinished, null));
+                            runtime.submitCallable(callerIdentityContext.withIdentity(resumeCallerIdentity, resumeCallable),
+                                    resumeFinished, null));
                 } finally {
                     // value-conditional: never evict a newer execution's registration
                     inFlightConversations.remove(conversationId, memory);

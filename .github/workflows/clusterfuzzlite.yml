@@ -22,10 +22,85 @@ on:
 permissions: {}
 
 jobs:
+  # ─── Guard: vendored fuzz sources must match the real ones ─────
+  #
+  # The fuzz targets do NOT compile src/main/java. .clusterfuzzlite/build.sh
+  # compiles VENDORED COPIES of the three security-critical utilities, because
+  # the CFL builder image has no Maven and no JDK 25. That copy is only useful
+  # while it is byte-identical to what ships: without this check, a PR that
+  # changes PathNavigator.java triggers a fuzz run that exercises the stale
+  # duplicate and reports green about code that is no longer in the product.
+  #
+  # The only permitted difference is the SPDX licence header, which the vendored
+  # files omit; everything after it must match exactly.
+  vendored-source-sync:
+    name: Vendored Fuzz Sources In Sync
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read  # checkout only
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Compare .clusterfuzzlite copies against src/main/java
+        run: |
+          set -euo pipefail
+
+          # Strip a leading /* ... */ block comment (the SPDX header). A javadoc
+          # opener is "/**" and therefore never matches, so real documentation
+          # is always compared.
+          strip_header() {
+            awk 'NR == 1 && /^\/\*[^*]*$/ { skip = 1 }
+                 skip { if (/\*\//) skip = 0; next }
+                 { print }' "$1"
+          }
+
+          EXPECTED="MatchingUtilities PathNavigator RuntimeUtilities"
+
+          # Fail if someone vendors a fourth file without extending this guard.
+          ACTUAL=$(find .clusterfuzzlite -maxdepth 1 -name '*.java' -printf '%f\n' \
+                     | sed 's/\.java$//' | sort | tr '\n' ' ' | sed 's/ $//')
+          if [ "$ACTUAL" != "$(echo $EXPECTED | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')" ]; then
+            echo "::error::.clusterfuzzlite contains [$ACTUAL] but this check knows about [$EXPECTED]."
+            echo "Add the new file to EXPECTED in .github/workflows/clusterfuzzlite.yml."
+            exit 1
+          fi
+
+          DRIFT=0
+          for name in $EXPECTED; do
+            real="src/main/java/ai/labs/eddi/utils/${name}.java"
+            vendored=".clusterfuzzlite/${name}.java"
+
+            if [ ! -f "$real" ]; then
+              echo "::error file=${vendored}::${real} no longer exists — the fuzz target points at a class that moved or was deleted."
+              DRIFT=1
+              continue
+            fi
+
+            if ! diff -u --label "$real" --label "$vendored" \
+                 <(strip_header "$real") <(strip_header "$vendored"); then
+              echo "::error file=${vendored}::${vendored} has drifted from ${real}. Fuzzing would exercise the stale copy. Run: cp ${real} ${vendored} && sed -i '1,4d' ${vendored}"
+              DRIFT=1
+            else
+              echo "✅ ${name}.java in sync"
+            fi
+          done
+
+          if [ "$DRIFT" -ne 0 ]; then
+            echo "### ❌ Vendored fuzz sources out of sync" >> $GITHUB_STEP_SUMMARY
+            echo "The ClusterFuzzLite build compiles the copies in \`.clusterfuzzlite/\`, not \`src/main/java\`. Re-vendor them so the fuzzers test the shipping code." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "### ✅ Vendored fuzz sources in sync" >> $GITHUB_STEP_SUMMARY
+
   # ─── PR mode: fuzz only changed code paths ─────────────────────
   pr-fuzzing:
     name: Fuzz (PR)
     runs-on: ubuntu-latest
+    needs: vendored-source-sync
     if: github.event_name == 'pull_request'
 
     permissions:
@@ -56,6 +131,7 @@ jobs:
   batch-fuzzing:
     name: Fuzz (Weekly)
     runs-on: ubuntu-latest
+    needs: vendored-source-sync
     if: github.event_name == 'schedule'
 
     permissions:

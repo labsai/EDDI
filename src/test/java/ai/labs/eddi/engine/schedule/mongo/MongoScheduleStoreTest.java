@@ -381,4 +381,35 @@ class MongoScheduleStoreTest {
         ScheduleConfiguration config = new ScheduleConfiguration();
         when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenReturn(config);
     }
+
+    // ==================== G15: user-scoped erasure ====================
+
+    /**
+     * A schedule keeps the {@code userId} it fires conversations as. Left behind by
+     * a GDPR erasure it goes on starting new conversations under the erased
+     * identity — indefinitely recreating the data that was just removed.
+     */
+    @Test
+    @DisplayName("deleteSchedulesByUserId — bulk-deletes on the userId field")
+    void deleteSchedulesByUserId() throws Exception {
+        DeleteResult deleteResult = mock(DeleteResult.class);
+        when(deleteResult.getDeletedCount()).thenReturn(2L);
+        when(scheduleCollection.deleteMany(any(Bson.class))).thenReturn(deleteResult);
+
+        int count = store.deleteSchedulesByUserId("user-1");
+
+        assertEquals(2, count);
+        var captor = org.mockito.ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).deleteMany(captor.capture());
+        assertTrue(captor.getValue().toString().contains("userId"),
+                "the filter must scope the delete to the user: " + captor.getValue());
+    }
+
+    @Test
+    @DisplayName("deleteSchedulesByUserId — a blank user deletes nothing")
+    void deleteSchedulesByBlankUserIdDeletesNothing() throws Exception {
+        assertEquals(0, store.deleteSchedulesByUserId(null));
+        assertEquals(0, store.deleteSchedulesByUserId("  "));
+        verify(scheduleCollection, never()).deleteMany(any(Bson.class));
+    }
 }

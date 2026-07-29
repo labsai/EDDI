@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -77,7 +78,7 @@ class CascadingModelExecutorEnterpriseTest {
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(),
-                meterRegistry);
+                meterRegistry, new CallerIdentityContext(null, null));
         return executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(), mock(AgentOrchestrator.class), Map.of(), false,
                 false, false);
     }
@@ -334,7 +335,8 @@ class CascadingModelExecutorEnterpriseTest {
 
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null,
+                new CallerIdentityContext(null, null));
 
         var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory, mock(AgentOrchestrator.class),
                 Map.of(), false, false, /* allowLiveStreaming */ true);
@@ -386,7 +388,8 @@ class CascadingModelExecutorEnterpriseTest {
         var task = task();
         task.setStreamingTimeoutSeconds(1);
 
-        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null,
+                new CallerIdentityContext(null, null));
         var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory, mock(AgentOrchestrator.class),
                 Map.of(), false, false, /* allowLiveStreaming */ true);
 
@@ -419,7 +422,8 @@ class CascadingModelExecutorEnterpriseTest {
 
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null,
+                new CallerIdentityContext(null, null));
 
         var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), mock(IConversationMemory.class),
                 mock(AgentOrchestrator.class), Map.of(), false, false, false);

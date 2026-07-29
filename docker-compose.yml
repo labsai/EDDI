@@ -4,7 +4,21 @@ services:
     environment:
       - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-}"
       - "EDDI_DATASTORE_TYPE=${EDDI_DATASTORE_TYPE:-mongodb}"
-      - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
+      # ⚠️  Authentication escape hatch — defaults to "true" so the README
+      # quick start works out of the box on a laptop. Every API endpoint is
+      # then reachable WITHOUT a token, so this must be "false" for anything
+      # reachable from outside localhost.
+      #
+      # Set it in .env (or the shell) to turn authentication back on:
+      #   EDDI_SECURITY_ALLOW_UNAUTHENTICATED=false
+      #   QUARKUS_OIDC_TENANT_ENABLED=true
+      # and bring up docker-compose.auth.yml for a local Keycloak.
+      #
+      # EDDI already announces the unauthenticated state itself: AuthStartupGuard
+      # logs a [SECURITY] ERROR banner at boot and a WARN reminder every hour
+      # whenever OIDC is off in production mode.
+      - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=${EDDI_SECURITY_ALLOW_UNAUTHENTICATED:-true}"
+      - "QUARKUS_OIDC_TENANT_ENABLED=${QUARKUS_OIDC_TENANT_ENABLED:-false}"
       - "MONGODB_CONNECTIONSTRING=mongodb://${MONGO_INITDB_ROOT_USERNAME:-eddi}:${MONGO_INITDB_ROOT_PASSWORD:-changeme}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     extra_hosts:

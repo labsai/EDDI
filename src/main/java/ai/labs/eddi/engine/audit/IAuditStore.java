@@ -21,7 +21,8 @@ import java.util.List;
  * pseudonymized (replaced with a SHA-256 hash), not deleted. The
  * {@link #pseudonymizeByUserId} method is the sole permitted mutation.
  * <p>
- * both MongoDB and PostgreSQL implementations enforce insert-only semantics.
+ * both MongoDB and PostgreSQL implementations enforce insert-only semantics
+ * apart from that one mutation.
  *
  * @author ginccc
  * @since 6.0.0
@@ -111,4 +112,22 @@ public interface IAuditStore {
      * @return number of entries pseudonymized
      */
     long pseudonymizeByUserId(String userId, String pseudonym);
+
+    // === Tamper detection ===
+
+    /**
+     * Whether this store round-trips {@link AuditEntry#sequence()}.
+     * <p>
+     * The sequence is part of the signed payload, so a store that silently dropped
+     * it on write would make every one of its rows verify as tampered.
+     * Implementations therefore <em>opt in</em>: only when this returns true does
+     * {@code AuditLedgerService} assign a real sequence — otherwise entries are
+     * signed as {@link AuditEntry#UNSEQUENCED} and stay verifiable, at the cost of
+     * not being chained.
+     *
+     * @return true if the sequence survives a write/read round trip
+     */
+    default boolean supportsSequence() {
+        return false;
+    }
 }

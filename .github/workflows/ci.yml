@@ -23,13 +23,16 @@ jobs:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      code: ${{ steps.result.outputs.code }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Check paths
         id: filter
+        # Skipped on tag pushes — a release must run the FULL pipeline no matter
+        # what the tagged commit happens to touch (see "Resolve" below).
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
         with:
           filters: |
@@ -45,11 +48,29 @@ jobs:
               - 'mvnw*'
               - '.mvn/**'
 
+      - name: Resolve
+        id: result
+        run: |
+          # A tag push always counts as a code change. The docker job used to
+          # bypass its own gates with always() + a tag short-circuit so that a
+          # release could not be skipped by the path filter — which also meant a
+          # tag published REGARDLESS of test results. Forcing code=true here lets
+          # docker rely on plain `needs` success instead, so a tag on a commit
+          # with failing tests builds nothing.
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "code=true" >> $GITHUB_OUTPUT
+          else
+            echo "code=${{ steps.filter.outputs.code }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Log result
         run: |
           echo "### 📊 Change Detection" >> $GITHUB_STEP_SUMMARY
-          echo "- Code changed: **${{ steps.filter.outputs.code }}**" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ steps.filter.outputs.code }}" = "false" ]; then
+          echo "- Code changed: **${{ steps.result.outputs.code }}**" >> $GITHUB_STEP_SUMMARY
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "- 🏷️ Tag push — full pipeline forced regardless of changed paths" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.result.outputs.code }}" = "false" ]; then
             echo "- ⏭️ Skipping build/test/docker (docs/licenses/config-only change)" >> $GITHUB_STEP_SUMMARY
           fi
 
@@ -387,14 +408,25 @@ jobs:
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-and-test]
+    # Every gate that must hold before anything is published is a `needs`:
+    #   build-and-test    unit tests
+    #   integration-test  `mvnw verify` — the ONLY job that runs the JaCoCo
+    #                     90/80 coverage gate, so without it the threshold could
+    #                     never block a ship
+    #   trivy-scan        blocking filesystem CVE scan (exit-code 1)
+    #   codeql            SAST build + analysis
+    #   gitleaks          secret scanning
+    needs: [detect-changes, build-and-test, integration-test, trivy-scan, codeql, gitleaks]
+    # NOTE: deliberately no always(). always() cancelled the implicit
+    # needs-success gate, and the tag branch then short-circuited the explicit
+    # one — so a tag on a commit with failing tests still built, pushed, tagged
+    # :latest, cosign-signed and SLSA-attested. Tag pushes are kept unskippable
+    # by forcing detect-changes to report code=true for them instead.
     if: >
-      always() &&
       github.event_name == 'push' &&
       github.repository == 'labsai/EDDI' &&
       (startsWith(github.ref, 'refs/tags/') ||
-       (needs.build-and-test.result == 'success' &&
-        !contains(github.event.head_commit.message || '', '[skip docker]')))
+       !contains(github.event.head_commit.message || '', '[skip docker]'))
 
     outputs:
       primary-tag: ${{ steps.meta.outputs.primary-tag }}
@@ -485,15 +517,24 @@ jobs:
             .
 
       - name: Scan Docker image for vulnerabilities
-        # Advisory only — OS-level CVEs in Red Hat's base image are outside our control.
-        # The base-image-check.yml workflow monitors for digest updates weekly.
-        # Filesystem scan (Job 2c) remains strict for our own dependencies.
+        # BLOCKING, and deliberately placed before "Login to Docker Hub" so a
+        # failure stops the push, the :latest retag, the cosign signature and the
+        # SLSA attestation. It used to be exit-code: 0 — advisory only — which
+        # meant no vulnerability scan anywhere in this workflow could stop a
+        # release.
+        #
+        # ignore-unfixed: true keeps this actionable: only CVEs with an available
+        # fix can block. When Red Hat ships a patched base image, bump the
+        # @sha256 digest in src/main/docker/Dockerfile (see AGENTS.md, "Trivy CVE
+        # Remediation Procedure"); base-image-check.yml watches for those digests
+        # weekly. If a fix genuinely is not available yet, add the CVE to
+        # .trivyignore with a written justification.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
           image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.primary-tag }}
           severity: CRITICAL,HIGH
-          exit-code: 0
+          exit-code: 1
           ignore-unfixed: true
           format: table
           trivyignores: .trivyignore
@@ -712,88 +753,24 @@ jobs:
           docker rm -f eddi 2>/dev/null || true
           docker rm -f mongodb 2>/dev/null || true
 
-  # ─── Job 4b: ZAP API Scan (DAST) ────────────────────────────────
-  zap-scan:
-    name: ZAP API Scan
-    runs-on: ubuntu-latest
-    needs: [smoke-test, docker]
-    # Only run on pushes (smoke-test already has the running container infrastructure)
-    if: github.event_name == 'push'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Start MongoDB
-        run: |
-          docker run -d --name mongodb \
-            --network host \
-            mongo:6.0
-          echo "Waiting for MongoDB..."
-          for i in $(seq 1 15); do
-            if docker exec mongodb mongosh --eval "db.runCommand({ping:1})" > /dev/null 2>&1; then
-              echo "✅ MongoDB ready"
-              break
-            fi
-            sleep 1
-          done
-
-      - name: Start EDDI
-        run: |
-          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
-          if [ -z "$PRIMARY_TAG" ]; then
-            POM_VERSION=$(grep -m1 '<version>' pom.xml | sed 's/.*<version>\(.*\)<\/version>.*/\1/')
-            PRIMARY_TAG="${POM_VERSION}-b${{ github.run_number }}"
-          fi
-          echo "Starting ${DOCKER_IMAGE}:${PRIMARY_TAG}..."
-
-          docker pull ${DOCKER_IMAGE}:${PRIMARY_TAG} || true
-          docker run -d --name eddi-zap \
-            --network host \
-            -e "MONGODB_CONNECTIONSTRING=mongodb://localhost:27017/eddi-zap?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000" \
-            -e "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true" \
-            ${DOCKER_IMAGE}:${PRIMARY_TAG}
-
-      - name: Wait for healthy
-        run: |
-          echo "Waiting for EDDI to start..."
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:7070/q/health/ready > /dev/null 2>&1; then
-              echo "✅ EDDI is healthy after $((i * 2))s"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "❌ EDDI failed to start within 60s"
-          docker logs eddi-zap
-          exit 1
-
-      - name: ZAP API Scan (passive)
-        uses: zaproxy/action-api-scan@5158fe4d9d8fcc75ea204db81317cce7f9e5453d # v0.10.0
-        with:
-          target: http://localhost:7070/openapi
-          format: openapi
-          fail_action: false  # Report-only — promote to true after tuning false positives
-          # -S  = passive-only (skip active fuzzing — CodeQL SAST + Trivy already cover injection/CVE)
-          # -T 2 = cap spider at 2 min for deterministic CI time
-          # -a  = include alpha passive rules (headers, cookies, CORS, info disclosure)
-          cmd_options: '-S -T 2 -a -z "-config api.disablekey=true"'
-          allow_issue_writing: false
-
-      - name: Upload ZAP report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: zap-report
-          path: report_json.json
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Cleanup
-        if: always()
-        run: |
-          docker rm -f eddi-zap 2>/dev/null || true
-          docker rm -f mongodb 2>/dev/null || true
+  # ─── Job 4b: DAST — intentionally absent ────────────────────────
+  #
+  # A ZAP API scan used to live here. It was removed rather than kept as
+  # decorative coverage, because as wired it could not catch anything:
+  #   * it ran AFTER the image was pushed to Docker Hub, so a finding could not
+  #     stop a release;
+  #   * it scanned an instance started with EDDI_SECURITY_ALLOW_UNAUTHENTICATED,
+  #     i.e. the one configuration in which the authorization layer under test
+  #     is switched off, so every authenticated code path went unexercised;
+  #   * it ran passive-only (-S) with fail_action: false, so it could not fail
+  #     the job under any circumstance.
+  #
+  # Re-adding it means fixing all three at once: build the image in a job that
+  # does not push, stand up Keycloak, drive an authenticated OpenAPI scan
+  # against it, and gate the publish job on the result. Until that exists, do
+  # not cite DAST as part of this pipeline's coverage — the active gates are
+  # CodeQL (SAST), Trivy filesystem + image scans, Gitleaks, and the fuzzing in
+  # clusterfuzzlite.yml, all of which now block the publish.
 
   # ─── Job 5: Red Hat Preflight — PR Dry-Run ──────────────────────
   preflight-check:
@@ -1005,7 +982,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [detect-changes, build-and-test, integration-test, docker, smoke-test, zap-scan, trivy-scan, gitleaks, preflight-check, preflight-push]
+      [detect-changes, build-and-test, integration-test, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push]
 
     steps:
       - name: Send build notification
@@ -1033,7 +1010,7 @@ jobs:
           IT="${{ needs.integration-test.result }}"
           DOCKER="${{ needs.docker.result }}"
           SMOKE="${{ needs.smoke-test.result }}"
-          ZAP="${{ needs.zap-scan.result }}"
+          CODEQL="${{ needs.codeql.result }}"
           GITLEAKS="${{ needs.gitleaks.result }}"
           TRIVY="${{ needs.trivy-scan.result }}"
           PREFLIGHT_PR="${{ needs.preflight-check.result }}"
@@ -1056,15 +1033,12 @@ jobs:
             esac
           }
 
-          # On tag pushes, build-and-test may be skipped (detect-changes bypass) — that's OK
-          # because Docker builds from source independently
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            [ "$BUILD" = "skipped" ] && BUILD="success"
-            [ "$IT" = "skipped" ] && IT="success"
-          fi
+          # Tag pushes no longer bypass the test jobs — detect-changes forces
+          # code=true for them, so build-and-test and integration-test really run
+          # and docker only starts if they pass. Nothing to normalise here.
 
           # Overall status
-          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ]; then
+          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ] && [ "$CODEQL" != "failure" ]; then
             OVERALL_ICON="✅"
             OVERALL_TEXT="Build Passed"
           else
@@ -1098,6 +1072,7 @@ jobs:
             --arg smoke_icon "$(status_icon $SMOKE)" \
             --arg gitleaks_icon "$(status_icon $GITLEAKS)" \
             --arg trivy_icon "$(status_icon $TRIVY)" \
+            --arg codeql_icon "$(status_icon $CODEQL)" \
             --arg preflight_icon "$(status_icon $PREFLIGHT)" \
             --arg run_url "$RUN_URL" \
             --arg run_number "$RUN_NUMBER" \
@@ -1123,6 +1098,7 @@ jobs:
                     { type: "mrkdwn", text: ($smoke_icon + " Smoke Test") },
                     { type: "mrkdwn", text: ($gitleaks_icon + " Secret Scan") },
                     { type: "mrkdwn", text: ($trivy_icon + " Vuln Scan") },
+                    { type: "mrkdwn", text: ($codeql_icon + " CodeQL SAST") },
                     { type: "mrkdwn", text: ($preflight_icon + " Red Hat Preflight") }
                   ]
                 },

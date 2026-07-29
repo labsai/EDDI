@@ -14,8 +14,8 @@ EDDI includes a built-in global variable store for managing configuration values
         ▼
 ┌─────────────────┐
 │  Template Layer  │
-│  {{vars.<key>}}  │
-│  (Jinja2/Qute)   │
+│  {vars.<key>}  │
+│      (Qute)      │
 └─────────────────┘
 ```
 
@@ -35,13 +35,13 @@ EDDI includes a built-in global variable store for managing configuration values
 
 Global variables are available through two complementary syntaxes:
 
-### 1. Template Syntax: `{{vars.<key>}}`
+### 1. Template Syntax: `{vars.<key>}`
 
-Available in LLM task system prompts and other template contexts. Resolved by the Jinja2/Qute template engine at template processing time.
+Available in LLM task system prompts and other template contexts. Resolved by the Qute template engine at template processing time.
 
 ```text
-You are an AI assistant powered by {{vars.default-model}}.
-Always respond at temperature {{vars.default-temperature}}.
+You are an AI assistant powered by {vars.default-model}.
+Always respond at temperature {vars.default-temperature}.
 ```
 
 ### 2. Late-Binding Syntax: `${vars:<key>}` / `${vars:tenantId/<key>}`
@@ -79,7 +79,7 @@ Multi-tenant example:
 
 | Syntax | Where It Works | When to Use |
 |--------|---------------|-------------|
-| `{{vars.<key>}}` | System prompts, template-processed strings | Dynamic prompt content that changes per-deployment |
+| `{vars.<key>}` | System prompts, template-processed strings | Dynamic prompt content that changes per-deployment |
 | `${vars:<key>}` | Everywhere (params, URLs, headers, type) | Operational config that affects infrastructure |
 
 ### Resolution Order
@@ -87,7 +87,7 @@ Multi-tenant example:
 EDDI resolves configuration values in a strict three-step order:
 
 ```text
-1. Jinja2/Qute templates   →  {{vars.x}}, {{snippets.x}}, {{properties.x}}, etc.
+1. Qute templates          →  {vars.x}, {snippets.x}, {properties.x}, etc.
 2. Global variables         →  ${vars:x}   ← this feature
 3. Vault secrets           →  ${vault:x}
 ```
@@ -274,9 +274,9 @@ Reference in agent config:
 ### System Prompt Injection
 
 ```text
-You are an AI assistant for {{vars.company-name}}.
-Your default language is {{vars.default-language}}.
-Current API version: {{vars.api-version}}.
+You are an AI assistant for {vars.company-name}.
+Your default language is {vars.default-language}.
+Current API version: {vars.api-version}.
 ```
 
 ## Comparison: Global Variables vs Secrets vs Properties vs Snippets
@@ -287,7 +287,7 @@ Current API version: {{vars.api-version}}.
 | **Scope** | Per-tenant (all agents) | Per-tenant | Per-user or per-conversation | Deployment-wide |
 | **Encryption** | None | AES-256-GCM | None | None |
 | **Visibility** | Fully visible | Write-only | Fully visible | Fully visible |
-| **Template syntax** | `{{vars.<key>}}` | — | `{{properties.<key>}}` | `{{snippets.<name>}}` |
+| **Template syntax** | `{vars.<key>}` | — | `{properties.<key>}` | `{snippets.<name>}` |
 | **Late-binding** | `${vars:<key>}` or `${vars:tenantId/<key>}` | `${vault:<key>}` or `${vault:tenantId/<key>}` | — | — |
 | **Versioned** | No | No | No | Yes |
 | **REST path** | `/variablestore/variables/{tenantId}` | `/secretstore/secrets/{tenantId}` | via PropertySetter | `/snippetstore/snippets` |
@@ -299,7 +299,7 @@ Current API version: {{vars.api-version}}.
 - **Need to store an API key?** → Use the **Secrets Vault** (`${vault:...}`)
 - **Need to change the LLM model for all agents?** → Use a **Global Variable** (`${vars:...}`)
 - **Need to remember a user's name across conversations?** → Use **Properties** with `scope: longTerm`
-- **Need reusable system prompt instructions?** → Use **Prompt Snippets** (`{{snippets.<name>}}`)
+- **Need reusable system prompt instructions?** → Use **Prompt Snippets** (`{snippets.<name>}`)
 
 ## Testing
 

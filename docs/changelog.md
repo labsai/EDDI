@@ -5,6 +5,412 @@
 
 ---
 
+## 🧵 fix(security): carry caller identity across the cascade and group dispatches (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+The caller binding is a `ThreadLocal`, and four more dispatch sites hand a turn to a fresh virtual
+thread without carrying it. A `${caller:token}` apicall reached from any of them failed closed with
+"the conversation turn has no authenticated caller" — safe, but invisible to the agent designer and
+dependent on unrelated configuration.
+
+- `CascadingModelExecutor:577` — every cascade step runs on `TIMEOUT_EXECUTOR`. The same agent config
+  worked or failed purely on whether `modelCascade` was set.
+- `GroupConversationService:282` — the whole discussion is dispatched to a virtual thread, so *no*
+  member agent had a caller.
+- `GroupConversationService:2366` — parallel-phase speakers fan out to further threads.
+- `GroupConversationService:3772` — the HITL resume path.
+
+`CallerIdentityContext` gains `withIdentity` for `Runnable`/`Callable`, `withIdentitySupplying` for
+`Supplier` (needed by `CompletableFuture.supplyAsync`), and `captureOrCurrent()`, which prefers the
+active request and falls back to the thread's binding — the group discussion is dispatched from the
+REST thread, the cascade from mid-pipeline.
+
+**Design note.** The `Supplier` variant is named apart from the `withIdentity` overloads on purpose:
+a value-returning lambda satisfies both `Callable` and `Supplier`, so same-named overloads are
+ambiguous at every call site.
+
+**Review round two** found a fifth site and two flaws in the wrapper itself:
+
+- `GroupConversationService:1788` — the task-force EXECUTE phase fans out again through
+  `CompletableFuture.runAsync`, so every task wave lost the caller. Missed first time because the
+  search pattern covered `submit` and `supplyAsync` but not `runAsync`.
+- The parallel-phase fan-out captured with `current()`, which is null when `discuss()` is called
+  synchronously on the REST thread — only `captureOrCurrent()` sees the request there.
+- **A null identity was a no-op**, so work dispatched *without* a caller inherited whatever binding
+  the pooled thread still carried from the turn before. It now binds null, masking it.
+- **Nested wrappers cleared instead of restoring**, so an inner wrapper wiped the outer caller and
+  the rest of that turn ran unauthenticated. The previous binding is now saved and restored.
+
+**Note on scope.** A group member agent now acts as the person who started the discussion. That
+follows the feature's model — the operator acts as the chatting user — but it is worth stating,
+because a member agent's reads are now attributed to that user in the audit trail.
+
+1204 tests pass across the affected suites. Neutering the `Runnable` wrapper fails the propagation
+test, so the binding is pinned rather than assumed.
+
+---
+
+## 🔓 fix(security): ${caller:token} never reached its resolver (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+A critical review of the caller-identity PR found the feature was **dead on arrival**, and the same
+defect silently disables two older documented features.
+
+`ApiCallExecutor.buildRequest` runs every header value through `prePostUtils.templateValues`
+*before* the caller-identity, global-variable and vault resolvers. `TemplatingEngine`'s trigger
+regex `\{[a-zA-Z#/!]` matches `{c`, so `Bearer ${caller:token}` is handed to Qute, which parses
+`{caller:token}` as a namespaced expression. An unresolvable namespace is a hard failure regardless
+of `strictRendering`, and no `caller` resolver existed. Proven against the project's own build:
+
+```text
+Bearer ${caller:token} -> THREW: No namespace resolver found for [caller]
+Bearer ${vault:my-key} -> THREW: No namespace resolver found for [vault]
+${vars:default-model}  -> THREW: No namespace resolver found for [vars]
+```
+
+So `${vault:...}` and `${vars:...}` in apicall headers have never worked either.
+
+**Fix.** `CallerNamespaceResolver` returns the `caller` placeholder verbatim so it round-trips
+through templating to the real resolver. It resolves nothing itself.
+
+**Deliberately `caller` only.** `vault`/`eddivault` keep failing loudly in templated positions.
+Letting them through would widen where a secret is substituted, and the resolved request *body* is
+written to conversation memory unscrubbed — a vault reference in a body template would put a
+plaintext API key into MongoDB. Docs claiming vault works in apicall headers were the bug, not the
+behaviour.
+
+**Why no test caught it:** all three `ApiCallExecutor` suites stub templating as a pass-through, and
+`CallerIdentityResolverTest` calls the resolver directly. Nothing exercised header -> Qute ->
+resolver. `CallerNamespaceResolverTest` now does, including a guard-rail test that fails without the
+resolver and one asserting vault still refuses.
+
+**Also fixed**
+- `setup-api` hardcoded `null` for the LLM base URL while the manager sent Ollama's URL as
+  `apiBaseUrl` — the *tool target* — pointing every generated tool at the model server.
+  `CreateApiAgentRequest` gains an `llmBaseUrl` field, passed to `createLlmConfig`.
+- The by-value token redaction added last round was untested through `ApiCallExecutor`; deleting the
+  call kept every test green. Now covered with a real resolver and mutation-checked.
+- Docs overclaimed: `${caller:userId}` is resolved in headers and query parameters, not "anywhere";
+  `rejectTokenReference`'s Javadoc claimed request bodies are checked.
+
+---
+
+## 🔐 feat(security): forward the caller's identity to apicall headers (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+An agent could only call an API with a *static* credential baked into its apicall config. That is the wrong shape whenever the API being called is EDDI's own: an OIDC token expires within the hour, cannot be least-privilege, and collapses every action to one synthetic principal in the audit trail. The EDDI-Manager "Platform Operator" needs exactly this — an agent that reads the platform on behalf of whoever is chatting with it — and could only be built by smuggling the user's bearer through the per-turn conversation `context`, which persists the token to MongoDB.
+
+**What changed.** Apicall *headers* may now reference the authenticated caller:
+
+- `${caller:token}` — the caller's raw bearer token
+- `${caller:userId}` — the caller's principal name (not a secret)
+
+`ApiCallExecutor` resolves these last in the header chain (after global variables and vault refs), because resolution needs the target URI.
+
+**Files**
+- `engine/security/CallerIdentity.java` — record (token, userId, origin); deliberately not part of `IConversationMemory`.
+- `engine/security/CallerIdentityContext.java` — captures the identity on the REST request thread and binds it to whichever pool thread runs the turn.
+- `engine/security/CallerIdentityResolver.java` — the `${caller:...}` resolver, mirroring `SecretResolver` / `GlobalVariableResolver`.
+- `engine/security/OriginMatcher.java` — scheme/host/port comparison with default-port normalization.
+- `engine/internal/ConversationService.java` — captures in `processConversationStep` and decorates the callable.
+- `modules/apicalls/impl/ApiCallExecutor.java` — resolves in headers; rejects a token reference in a query parameter.
+
+**Threading — the non-obvious part.** A turn is built on the request thread but executed twice removed from it: `submitInOrder` hands it to a coordinator thread, which hands the pipeline to *another* thread via `runtime.submitCallable`. Request-scoped beans (`SecurityIdentity`) resolve at none of those points. So the identity is captured while the request context is still live and travels **with the callable** (`withCallerIdentity`), not with a thread. Binding the coordinator thread would have missed the pipeline entirely — an easy and silent mistake.
+
+**Design decisions**
+1. **Same-origin only.** The token is released only when the outbound call targets the exact `scheme://host:port` the caller addressed, taken from the inbound request rather than configuration. An agent config naming a third-party host therefore cannot exfiltrate a user's token, and the feature needs no allow-list to be safe out of the box.
+2. **Headers only.** `${caller:token}` in a query parameter or request body is rejected — tokens in URLs leak through access logs, proxies and browser history, and outside a header the reference is never substituted. `${caller:userId}` is resolved in headers and query parameters.
+3. **Fails closed.** An unsatisfiable reference throws rather than resolving to `""`, which would silently send `Bearer ` and surface far away as a puzzling 401.
+4. **Never stored.** Resolution happens while building the request, and `scrubSensitiveHeaders` redacts it before the request is written to conversation memory. Header-*name* matching alone was not enough — a token placed in an unconventionally named header would have slipped through — so the resolved token is additionally matched by value.
+5. **Opt-out.** `eddi.caller-identity.enabled` (default `true`) forbids the feature outright.
+
+**Async boundaries.** Two further hand-offs lose a `ThreadLocal` binding and had to be covered explicitly, or `${caller:token}` would fail closed for no reason the config author could see: the HITL **resume** path (`runtime.submitCallable(resumeCallable, ...)`) and **fire-and-forget batch** calls in `ApiCallExecutor`. `CallerIdentityContext.propagate()` carries the binding across the latter; the resume path captures its own caller, since a resume is itself an authenticated request.
+
+**Tests.** `CallerIdentityResolverTest` (24) and `CallerIdentityContextTest` (10) — same-origin refusals (host, port, scheme downgrade), fail-closed paths, regex-escaping of tokens containing `$`/`\`, thread isolation, and clearing on pooled threads. Disabling the same-origin guard fails 4 tests (mutation-checked). All 227 `ConversationService*Test` tests still pass.
+
+**Note for the manager:** the operator ships this as its `caller-identity` auth mode, provisioning `apiAuth` as `Bearer ${caller:token}`; the conversation-context workaround and its token-at-rest warning are gone.
+
+---
+
+## 🔐 fix(security): code-review findings wave 2a — access control, A2A ownership, GDPR & audit ledger (2026-07-28)
+
+**Repo:** EDDI (`fix/code-review-access-control`)
+
+Second wave of the 124-finding external code review, split into two PRs so each stays under CodeRabbit's 100-file review limit (wave 1 at 151 files was skipped by it entirely). This half is the access-control and compliance surface.
+
+### The guard triad existed — it just wasn't called everywhere
+
+EDDI already has `OwnershipValidator`, `ConversationAccessGuard` and `HitlAccessGuard`, used correctly in `engine/internal`, `engine/hitl` and the MCP surface. Every finding here is a place that never called them.
+
+- **A1 (critical)** — The **SSE turn endpoint had no ownership check** while its non-streaming twin did. The turn then executed under the *target* conversation's `userId`, loading that user's long-term memories into the prompt and running tool calls in their context. Fixed in two layers: the guard moved **down into `ConversationService.say`/`sayStreaming`** so no future REST adapter can omit it, *before* the memory snapshot loads — plus a REST-layer check so denial is a plain 403 rather than an error event on an already-200 SSE stream.
+- **A2 (critical)** — Attachment endpoints **authorised the path parameter, not the caller**. `IAttachmentStore.load(ref, requestingConversationId)` checks that the *named* conversation owns the blob — and the caller supplies that name, so the check was self-satisfying. All five methods now require caller ownership, checked on the request thread *before* the async hop (`SecurityIdentity` is request-scoped).
+- **A3** — `?deleteOlderThanDays=0` permanently deleted **every ended conversation in the deployment**, from an endpoint with no role at all. Now admin-only with a minimum of 1 day.
+- **A4** — The tool control plane carried no `@RolesAllowed` at all: rate-limiter reset, cost-budget reset, and a history endpoint dumping **raw tool arguments and results** for any conversation.
+- **A5** — `/propertiesstore/properties/{userId}` had neither role nor ownership check over the same `IUserMemoryStore` that `RestUserMemoryStore` guards on all nine of its methods. Writes there land in the victim's next system prompt.
+- **A6** — A **conversation-id oracle**: it returned another user's live `conversationId`, which is the discovery half of A1 and A3.
+- **A7** — Template preview read **any** conversation's memory and returned a flattened dump of properties/context/memory — and since the caller supplies the template, it was effectively a query language over someone else's conversation.
+- **A8** — Config stores with full CRUD and no role. The review named one; **the actual inventory was six**, including two it missed (`IRestCapabilityRegistry`, `IRestWorkflowStepStore`). `IRestVersionInfo` was deliberately left alone — it has no `@Path` and is a mixin, reasoning recorded in the code.
+- **A9** — A2A sat entirely outside the ownership model: caches keyed on a caller-supplied id, `contextId` as an unauthenticated read+write conversation handle, conversations created with `userId = null` (which `OwnershipValidator` treats as "legacy — allow", so permanently unowned), and raw `e.getMessage()` returned to arbitrary peers.
+- **A12** — The global exception mapper returned the **raw driver message** as the 500 body — collection names, hostnames, replica-set topology. Now logged at ERROR with a correlation id.
+
+### GDPR & audit (G14–G20)
+
+- **G14** — Erasure was **served stale indefinitely** from a Caffeine cache with no TTL that erasure never invalidated.
+- **G15** — The erasure cascade missed three stores while `docs/gdpr-compliance.md` asserted it "covers all data stores": conversation **checkpoints** (which carry `propertiesCopy` including PII, behind a javadoc claiming it was "used during GDPR erasure" when its only caller was unreachable), **group transcripts**, and **schedules** that kept firing under an erased user's id.
+- **G16** — `AuditHmac.verifyHmac` had **zero production callers**; the docs told operators to "recompute the HMAC and compare it" and the product shipped no way to do so. Added admin verification endpoints.
+- **G17** — GDPR pseudonymisation did `updateMany($set userId)` with no HMAC recompute, and `userId` is a *signed* field — so **every routine erasure produced rows cryptographically indistinguishable from tampered ones**. The class javadoc claiming a write-once contract was literally true and substantively false.
+- **G18** — No hash chain: entries were independently signed, so **deletion and reordering were undetectable**. Added a per-conversation sequence inside the signed payload (chosen over a global chain, which would serialise all audit writes).
+  - **Follow-up (review):** the first cut shipped this on **MongoDB only**. `PostgresAuditStore` persisted no sequence and left `supportsSequence()` at its `false` default, so `AuditLedgerService` skipped assigning one entirely — **every PostgreSQL deployment silently had no deletion detection**, reported as `UNAVAILABLE`, which reads like "not applicable" rather than "unprotected". Added the column, an idempotent `ALTER TABLE` defaulting old rows to the `UNSEQUENCED` sentinel, the `(conversation_id, sequence)` index verification reads, and `supportsSequence() = true`. This is the second cross-backend gap in this PR (after schedule `userId`), both in compliance code, both invisible because the degraded answer looked benign — the case for the deferred D4/J3 conformance suite.
+- **G19** — `eddi.vault.master-key` ships empty, so entries were written **unsigned by default** while the docs present the ledger as evidence-grade. `ComplianceStartupChecks` had zero references to vault/HMAC/audit.
+- **G20** — Unbounded audit queue that **re-offered failed batches into itself** — an OOM loop under a slow store.
+
+### Documentation corrected (I7–I13)
+
+Several docs described behaviour that did not exist. `docs/semantic-parser.md` documented a **stemming extension that does not exist**, four times, including inside the flagship copy-paste config — copying it throws `UnrecognizedExtensionException` and the agent will not start. The same doc's expression table claimed `number(42)` and `time(15:00)` where the code emits `integer(42)` and epoch millis, so rules written from it never fired. `docs/conversation-memory.md` and `docs/properties.md` both contradicted AGENTS.md §5.1 on the template model (`{properties.X.valueString}` fails at runtime — `MemoryItemConverter` puts raw values).
+
+### Verification
+
+Full unit suite: 12,384 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature — this machine cannot bind sockets; CI is the gate for those). Five high-stakes fixes were **mutation-checked** — revert the fix, confirm a test actually fails, restore: G2, G12, A1, A2 and F18 all bite, verified against whole test classes (a `-Dtest=Class#method` filter silently runs 0 tests and exits 0 when the method is in a `@Nested` class, which reads exactly like a pass).
+
+---
+
+## 🐞 fix(engine): code-review findings wave 1 — parser, rules, templating, apicalls, datastore, LLM infra, deployment (2026-07-28)
+
+**Repo:** EDDI (`fix/code-review-findings`)
+
+First of four waves applying a 124-finding external code review. Wave 1 covers the findings whose file sets are disjoint, so they could be worked in parallel without conflicting. **53 findings: 50 fixed, 3 partial.** Every finding was verified against source before being acted on — none turned out to be a false positive.
+
+### Crash / correctness
+
+- **B1** `readActions(..., limit)` did `actions.subList(0, limit)` with every caller defaulting `limit=20`, so any config with fewer than 20 actions threw `IndexOutOfBoundsException` → 500. Fixed in `OutputStore`, `RuleSetStore`, `ApiCallsStore` with `Math.min(limit, actions.size())`. Invisible to tests because they all mock the store.
+- **B4** `Permutation` accumulated `n!` into an `int`. From n=13 the product wraps; at n=17 it goes negative, so the iterator yielded a single permutation and parse quality silently got *worse* on longer sentences. The counter was redundant — `calculateNext()` already terminates — so it was deleted, with an explicit `length < 2` guard replacing the one case it was load-bearing for.
+- **B5** `containsPunctuation` asked whether a string contains its own characters — always true. Now consults the configured `punctuationRegexPattern` (not the `PUNCTUATION` constant, which is only the default and would disagree with the replacement regex on a customised deployment).
+- **B6** `isOrdinalNumber` returned `String` from an `is*` predicate; `indexOf("")` is always 0, so `"5."` returned `""` and the three callers disagreed on what that meant. Renamed to `extractOrdinalValue` → `Optional<Integer>`.
+- **B7** `KEY_MODEL_ID = "modelID"` (capital D) blanked the model name for Vertex Gemini, losing capability lookup, token estimation and audit model naming.
+- **B8** The Ollama builder — the default local provider — silently dropped `temperature`, `maxTokens`, `topP`/`topK`. Added, plus a shared unrecognised-key warning across all 11 builders.
+- **B9** `ModelCapabilityService` was the inverse of its own javadoc: unknown models resolved to *supported*, so images were forwarded and 400'd at the provider. Now fails closed, with a per-task override so an unlisted-but-capable model can still be asserted.
+
+### Behaviour-rule engine (E1–E5, E11)
+
+The systemic defect was **silent acceptance of invalid config** — for a config-driven engine, the worst failure mode, because the agent designer gets no feedback and the agent looks healthy.
+
+- **E1** `NOT_EXECUTED` was folded into `SUCCESS`, so every path yielding it made a guard rule fire unconditionally. Now treated as `FAIL` — this is the amplifier that made E2–E5 dangerous rather than merely wrong.
+- **E2** Multi-child negation (the form the docs demonstrate) was ignored; now AND-combines children.
+- **E3** Empty/misspelled matcher configs matched everything via `indexOfSubList(x, [])  == 0`; now rejected at `configure()`.
+- **E4** A typo'd `occurrence` silently became `currentStep`, converting the exact guard AGENTS.md §5.3 mandates into the globally-firing rule it warns against. Now throws, naming the bad value and the legal set.
+- **E5** `sizematcher` could never match a collection (`parseInt("[a, b]")`); the documented example was unreachable.
+- **E11** `ContextMatcher` NPE'd on a runtime/config context-type mismatch, killing the turn.
+
+### Templating & output (E7–E9, E13)
+
+- **E7** `strict-rendering` differed between dev (`false`) and prod (`true`), so a missing property rendered empty in dev and in prod shipped the **raw template literal to the end user**, while quick replies put `null` in the list. Aligned on one lenient, safe behaviour across profiles.
+- **E8** Templates were re-parsed on every output, httpcall body/header and property instruction, every turn. Now a bounded Caffeine cache.
+- **E9** `TemplateMode` was accepted and ignored (no escaping), and the HTML branch was unreachable because `"output:html".startsWith("output")` is always true.
+- **E13** Only 3 of 8 output types were templated — `inputField`, `button`, `applicationLink`, `agentFace`, `other` shipped `{properties.x}` raw. Now an abstract `templatedCopy` on `OutputItem`, so a new type *cannot* silently miss templating.
+
+### Parser (E14–E18)
+
+- **E14** `appendExpressions=false` disabled the whole parser rather than just the merge — the entire storage block sat inside the flag, so no expressions and no intents reached any rule. Store/merge decisions are now separate.
+- **E15** Dictionary `lang` was dead: no implementation overrode `getLanguageCode()`, so an agent with `en` and `de` dictionaries matched both against every turn.
+- **E16** `PhoneticCorrection` kept only the last word per phonetic code — and the codes are lossy by construction, so night/knight/nite collapsed to one entry.
+- **E17** No caps on solution enumeration (13.8s at 15 tokens with a dense dictionary). Added config-driven `maxInputTokens`/`maxSuggestions`/`maxSolutions`, a `HashSet` for the O(k²) scan, and cached `values()`.
+- **E18** Damerau-Levenshtein returned the *entire* dictionary as candidates and computed `accuracy = 1.0 - distance`, yielding 0.0 and −1.0 against a documented 0..1 contract.
+
+### API calls (E10, E19, E20)
+
+- **E10** A `"*"` httpcall fired once **per action**, duplicating non-idempotent POSTs on a multi-action turn.
+- **E19** Output JSON was built by string concatenation from upstream API response bodies — a `"` broke the JSON and a crafted value injected arbitrary output items into the agent's reply. Now built with Jackson.
+- **E20** httpcalls had no timeout and no response-size cap; success bodies landed unbounded in conversation memory against Mongo's 16MB limit. Added per-call `timeoutInMillis` / `maxResponseSizeInBytes` with defaults.
+
+### Datastore (D1–D3, D5–D10)
+
+The two backends had silently diverged, because nothing tests them against each other.
+
+- **D1** Postgres `data->'a.b.c'` looks up a *literal* key of that name — it does not traverse. Dotted paths returned zero rows forever while Mongo traversed correctly. Now a real JSONB path, keeping the existing injection-safety.
+- **D2** The Postgres factory accepted an `indexes` argument and dropped it; real callers passed real hints and got sequential scans.
+- **D3** Mongo used `$set` (merge), Postgres used `EXCLUDED.data` (replace) — so clearing a config field was a no-op on one backend and took effect on the other, both returning 200. Unified on full-document replace.
+- **D5** The cascade-delete reference guard never worked: the query said `WorkflowSteps...` (capital W) against a field persisted as `workflowSteps`, and Mongo paths are case-sensitive — so shared configs were cascade-deleted while other workflows still referenced them. The guard now also fails *closed* on a query error.
+- **D6** `PRIMARY KEY (id, collection_name)` put `id` first, so `WHERE collection_name = ?` could not use it, and nothing indexed `data` — every listing was a sequential scan over the single shared table. Reordered for new tables; existing tables get the equivalent index (column order can't be changed by `CREATE TABLE IF NOT EXISTS`).
+- **D7** *(partial)* Restored the seven index declarations lost when the DB-agnostic `DescriptorStore` replaced the legacy one, and made `originId` a real indexed constant. **Not done:** splitting config descriptors from per-conversation descriptors into separate collections — that needs a data migration and two callers outside this workstream.
+- **D8** Descriptor listings did one `read()` per id after fetching up to 10,000 ids. Added `readMany`.
+- **D9** *(partial)* Fixed the `int` overflow in `ResultManipulator.limitEntities` (`index * limit` wrapped negative on deep pages). **Not done:** keyset pagination — it changes the `index`/`limit` paging contract across every REST store and the Manager UI. Deep offsets are at least index-served now.
+- **D10** History and current-row writes were non-atomic; a crash between them left an archived-as-deleted row with the live row still present. Added `storeHistoryAndUpdate`/`storeHistoryAndRemove`.
+
+### LLM infrastructure (F1–F5, F20)
+
+- **F1** Rate limiting was a single **global** bucket per tool name, so one conversation starved every other user of that tool. Now keyed on `(conversationId, toolName)`, with an optional global bucket for provider-quota protection, and the gauge is finally tagged.
+- **F2** `ChatModelRegistry` caches were unbounded *and* keyed on Qute-resolved parameters — so `"modelName": "{properties.preferredModel}"` minted a retained `ChatModel` + HTTP client per conversation-derived value. Now bounded, matching the sibling factories.
+- **F3** Embedding model/store caches never evicted on credential rotation and used `expireAfterAccess`, which resets on read.
+- **F4** `mongoClientCache` was unbounded, keyed on a raw connection string (a credential), and leaked `MongoClient`s on eviction.
+- **F5** Cost-budget eviction claimed "oldest" but iterated `ConcurrentHashMap.keySet()` — arbitrary order — so an in-flight conversation's spend could be dropped, resetting its budget to $0.
+- **F11 (part)** `ObservableChatModel` leaked a platform thread per timeout from an unbounded cached pool.
+- **F20** Every wizard-created agent hardcoded `logRequests`/`logResponses` to `true`, writing all conversation content to application logs with no opt-out — a Pillar 1 violation. Now config, defaulting to `false`.
+
+### Deployment & CI (H1–H3, H5–H10, H12–H15)
+
+- **H1** Both k8s and Helm scaled to 2–10 replicas against a coordinator whose per-conversation serialisation is a **JVM-local** `synchronized(queue)` — so two turns of one conversation ran concurrently on different pods, both replaced the whole document, and one was silently lost. Pinned to 1 with the reasoning inline; autoscaling is now gated behind a genuinely distributed coordinator.
+- **H2** *(CI half)* `always()` cancelled the implicit needs-gate and the tag branch short-circuited it, so a tag push published, signed and attested **regardless of test result**. Also added `integration-test` to `docker`'s needs, since it is the only job running the JaCoCo gate.
+- **H3** The image scan ran with `exit-code: 0`, so no vulnerability could block a release.
+- **H5** No container-level `securityContext` in any manifest — both deployments were rejected by a restricted Pod Security Standards namespace.
+- **H6** *(partial)* Replaced mutable tag `labsai/eddi:6` with an immutable patch tag and added a digest value + `cosign verify` guidance. Pinning the literal digest remains a release-time step — inventing one would break every `kubectl apply`.
+- **H7** `networkPolicy.enabled` was a dead Helm value with no template behind it; added one, plus link-local to the egress deny list so the network layer mirrors the app's own SSRF protections.
+- **H8** Secrets were injected as env vars (readable via `/proc/<pid>/environ`, leaks into crash dumps). Verified Quarkus can read them from files, then switched to a mounted projected volume.
+- **H9** The quick-start compose file hardcoded auth off with no override.
+- **H10** Helm shipped default PostgreSQL/Keycloak credentials and rendered an empty vault key without failing; now `required`.
+- **H12** The production image copied the entire docs tree — changelog, incident-response playbook, internal review standards — and served it to MCP clients.
+- **H13** ZAP ran after publish, against an instance with auth deliberately disabled, passive-only, unable to fail. Dropped rather than cited as coverage it never provided.
+- **H14** Fuzzing targeted vendored *copies* of the security-critical parsers with no drift check, so PRs touching the real sources fuzzed a stale duplicate.
+
+### Verification
+
+`./mvnw clean test-compile` green from scratch (deliberately clean, not incremental — several signature changes crossed workstream boundaries, and incremental builds reuse stale `.class` files for unedited callers). 158 targeted tests pass. E1's fix was mutation-checked: reverting it fails 2 tests in `RuleTest`.
+
+**Deliberately deferred to later waves:** E6 (write-time config validation), E12, D4/J3 (cross-backend conformance suite — needs Testcontainers), the `pom.xml` batch (H4/H11/H15 + J1/J8/J9), and the doc corrections these fixes imply (I7, I8, I12, `semantic-parser.md`, `httpcalls.md`).
+
+---
+
+## 🎨 Keycloak login theme matching the EDDI corporate identity (2026-07-27)
+
+**Repo:** EDDI (`feat/keycloak-eddi-theme`)
+
+Users redirected from the Manager or Workforce UI to Keycloak went from EDDI's amber-on-near-black design to stock Keycloak blue-on-white. This adds an `eddi` **login** theme — **no FreeMarker overrides** — plus the wiring to activate and ship it. As finally shipped the theme is eleven resources: `theme.properties`, one stylesheet, two enhancement scripts, four Noto Sans subsets, the wordmark and the favicon. The sections below are in the order the work happened, so earlier ones describe smaller inventories.
+
+**What changed.**
+
+- `keycloak/themes/eddi/login/theme.properties` — `parent=keycloak.v2`, `styles=css/styles.css css/eddi-login.css`, `kcHtmlClass=login-pf pf-v5-theme-dark`.
+- `keycloak/themes/eddi/login/resources/css/eddi-login.css` — the palette, a block of PatternFly global-token overrides, and a short list of targeted rules (logo, page background, card border, button label, autofill).
+- `.../resources/img/{logo_eddi.png,favicon.ico}` — byte-identical copies of the app's own assets.
+- `keycloak/eddi-realm.json` — `loginTheme`, `displayName`, `displayNameHtml`.
+- `docker-compose.auth.yml` — bind-mounts `./keycloak/themes/eddi` into `/opt/keycloak/themes/eddi`.
+- `install.sh` — fetches the theme resources alongside the realm JSON (only the realm JSON is fatal; see the atomicity note below), and sets `loginTheme` through the Admin API after startup.
+- `planning/keycloak-eddi-theme.md` — the full design, the verified-facts table, and the corrections below.
+
+**How it works.** Three layers. `kcHtmlClass` adds PatternFly 5's built-in `.pf-v5-theme-dark` to `<html>`, which flips every PF component the login pages use — including ones we would never enumerate (tiles, data lists, helper text, panels). A `:root` block of `--pf-v5-global--*` overrides then recolours PF's dark defaults to EDDI's stone/amber palette. A handful of targeted rules cover what tokens cannot express. We own zero FreeMarker, so a Keycloak upgrade can only break this loudly.
+
+**Design decisions.**
+
+- **Pure CSS over template overrides.** Every `.ftl` we do not ship is a file we do not re-diff on every upgrade. The logo is applied to `#kc-header-wrapper` with accessible image replacement (`text-indent: -9999px`), keeping `displayNameHtml` in the accessibility tree so screen readers still announce "EDDI".
+- **`styles` must name the parent stylesheet.** Theme properties merge key-by-key with the child winning, so `styles` *replaces* rather than appends; omitting `css/styles.css` silently drops all base styling. It resolves up the inheritance chain, so we ship no copy.
+- **Prefer global-token overrides to component rules.** Component rules are what rot on upgrade.
+- **Login theme only.** The account console, admin console and email templates remain stock; adding them later means sibling directories reusing the same palette block.
+
+**Three things the live run corrected — none were visible from source reading alone.**
+
+1. **`:where()` specificity 0 does not mean `:root` always wins.** PF's dark theme also sets *component* variables on *component elements* (`:where(.pf-v5-theme-dark) .pf-v5-c-login { --pf-v5-c-login__main--BackgroundColor: … }`). Custom properties resolve from the nearest declaring element, so that beats `:root` regardless of specificity.
+2. **The dark theme re-points components at a different tier of globals.** The primary button reads `primary-color--300`/`--400`, the card `BackgroundColor--300`, form controls `BackgroundColor--400`, the underline `BorderColor--400`. Overriding only the `--100` tier left the Sign In button Keycloak blue (`#06c`) and the card the wrong grey. Both tiers are now set.
+3. **Field-level error text reads `danger-color--200`.** Set to a red-700 (`#b91c1c`) it rendered at ~2.4:1 on the card — a WCAG failure on the most important message on a failed login. On a dark surface the higher tiers must get *lighter*, not darker; it is now red-400 at **6.40:1**.
+
+**Verification.** Against a running `quay.io/keycloak/keycloak:26.0` on a fresh volume, reading computed styles rather than eyeballing. Realm import log clean. All assets 200, including the inherited `css/styles.css` and our favicon. Flows exercised: sign-in, failed login, update password (forced action), re-authenticate, logout confirmation, forgot password, error page. Contrast: button label 9.20:1, links 10.61:1, labels 6.91:1, error text 6.40:1 — all past AA. Mobile 375×812: no horizontal overflow. Full measurements in `planning/keycloak-eddi-theme.md` §6.1.
+
+**Operational note — existing installations.** Realm import is one-shot: Keycloak skips realms that already exist, so editing `eddi-realm.json` does **not** reach an existing deployment. `install.sh` now applies `loginTheme` through the Admin API so upgrades pick it up; for local development the equivalent is `docker compose -f docker-compose.yml -f docker-compose.auth.yml down -v` (⚠️ destroys `keycloak-data` — all users and sessions).
+
+**Incidental finding, now fixed.** `"temporary": true` on an imported credential does **not** create an `UPDATE_PASSWORD` required action in Keycloak 26 — the seeded users log straight through (`requiredActions` is empty after import). That made the comment at the top of `docker-compose.auth.yml` ("password change required on first login") wrong. The comment now says so explicitly, including *why* the `"temporary": true` flag is misleading, so the next reader does not "fix" the realm JSON in the wrong direction. The same block listed only two of the three seeded users and labelled them loosely; it now lists all three with their actual realm roles. Recorded as F19 in the plan.
+
+**A colour-scheme control, and the locale picker no longer looks like a stray field.** Both came from looking at the rendered page.
+
+- **The switcher exists now.** The earlier decision to omit it was wrong for a reason I had not checked: the Manager and Workforce show a theme switcher on *every* page, so offering one here is consistent rather than duplicative. It is a quiet icon button beside the locale picker with the same three states as the rest of the product — system (default) / light / dark — persisted per origin. It deliberately does not sync with the Manager's setting: Keycloak is a different origin, so that `localStorage` is unreadable from here. The control is a genuine enhancement — "system" removes the attribute so the CSS media query governs, which means the page follows the OS with no JavaScript at all, and the button only adds the ability to override.
+- **The locale picker was my fault.** Keycloak renders it as a native `<select>` wrapped in a `.pf-v5-c-form-control`, so the field styling hit it too and gave it the recess, border, radius and 38px height of the password input — sitting next to the H1, it read as a stray form field. It is now quiet at rest and reveals its affordance on hover or focus.
+- **A 16px misalignment** put the picker past the right edge of the fields, close enough to look like a mistake. The cause is the header grid's tracks overflowing its padding box by exactly the column gap. Worth recording because two plausible fixes do *not* work — `minmax(0, 1fr)` on the title track and `min-width: 0` on the title were both verified against the live page and neither moved it. Zeroing the gap and moving the spacing onto the utilities does.
+
+Also corrected: the claim that `start-dev` randomises the resource-path hash per boot is **false** — it survived a container restart. That matters beyond testing, because it means a theme edit does not change the CSS URL, so returning browsers can hold a stale stylesheet. The response does send `Cache-Control: no-cache`, so revalidation happens, but the "bump the version to bust the cache" assumption in the plan was wrong.
+
+**Light mode, all 30 locales, and two palette corrections.** Three things came out of questioning earlier decisions.
+
+- **Locales — the single-locale choice was wrong.** Enabling internationalisation with `supportedLocales: ["en"]` (done purely to get `lang` on `<html>` without a switcher) silently discarded 29 translations the theme already had. Keycloak's server-info endpoint confirms the `eddi` theme inherits **30 locales** — ar, ca, cs, da, de, el, en, es, fa, fi, fr, hu, it, ja, ko, lt, lv, nl, no, pl, pt, pt-BR, ru, sk, sv, th, tr, uk, zh-CN, zh-TW — for free. All 30 are now offered; German renders as `lang="de"` with "Passwort vergessen?" / "Anmelden". The switcher Keycloak renders is a native `<select aria-label="languages">` wrapped in `.pf-v5-c-form-control`, so it inherits the field styling and is keyboard-accessible without extra work.
+- **Light mode via `prefers-color-scheme`.** The Manager's own default is `defaultTheme: "system"`, so a user on a light OS already gets a light Manager while the login page stayed hard dark. Following the system preference matches that default exactly. *(At this point no toggle was added, on the reasoning that the Manager owned the explicit choice. That was revisited — see the colour-scheme control above — and `prefers-color-scheme` is now what the control's "system" state resolves to.)* Values are the Manager's own light token block. Because every PatternFly token is declared as `var(--eddi-…)`, the light block is a palette swap plus the treatments that are inherently directional — a highlight lit from above, a recess, a shadow, and the bloom, which on a light page reads as a stain rather than as light and so drops to a faint wash. The white wordmark is handled with `filter: invert(1)`; `invert()` leaves alpha alone, so no second asset is needed.
+- **Two palette errors, found by reading the Manager's tokens properly.** `#0c0a09` is its `--color-primary-foreground` — the label on an amber fill — not its background; the dark background is `#09090b`. The page colour was wrong from the first commit. (The button label was coincidentally correct.) Destructive is `#dc2626`, not `#ef4444`; that is now used in light mode, while dark keeps a lighter red because `#dc2626` is only ~3.2:1 on our dark card.
+
+Two contrast defects that only light mode exposed: amber-400 links and an amber-500 focus ring are 1.7:1 and 2.15:1 on white. Links and the ring now step down to amber-700 in light (5.02:1, clearing 4.5:1 for text and 3:1 for a focus indicator). Verified in both schemes: light gives title 21:1, field text 16:1, links 5.02:1, labels 4.8:1, button label 9.2:1; dark is unchanged.
+
+Fonts gained the Latin-ext, Cyrillic and Greek subsets, because Latin-only would put fallback glyphs *inside* otherwise-branded words for Czech, Polish and Turkish. Measured rather than assumed: `unicode-range` normally defers those files, but the switcher lists all 30 languages under native names, so every range is in the DOM and all four are fetched (~245 KB). Accepted — `font-display: swap` keeps it off the paint path, it caches for the session, and the page already loads a ~1.5 MB PatternFly stylesheet.
+
+**Least-privilege default role — a privilege-escalation trap closed.** `eddi-realm.json` composited `default-roles-eddi` to `eddi-admin`, `eddi-editor` and `eddi-user`, so **any user created without explicit realm roles became an admin** — which is exactly what self-registration produces. Nothing was exposed, because `registrationAllowed: false`, but enabling registration (a one-flag change that looks innocuous) would have silently granted admin to everyone who signed up. Found while verifying the seeded users' roles for the compose comment, and independently flagged in review afterwards.
+
+The composite is now `eddi-user` alone, in both places it is declared. Verified on a **fresh import**, since editing the file does not touch a running realm:
+
+- `default-roles-eddi` → `eddi-user, manage-account, offline_access, uma_authorization, view-profile` — Keycloak's own built-ins survive, so refresh tokens and account access are unaffected.
+- A user created with no roles → `eddi-user` and the built-ins. No admin.
+- The three seeded users are untouched: `eddi` keeps admin+editor, `viewer` keeps viewer, `user` keeps user — they declare `realmRoles` explicitly, and Keycloak's import does not add the default role on top.
+
+**Existing deployments are detected, not migrated.** Realm import is one-shot, so a realm created before this keeps the old composite. `install.sh` now checks it on every run and **warns** when the default role still grants `eddi-admin`/`eddi-editor`, printing the exact fix — but changes nothing. That asymmetry with the branding fields (which are forced) is deliberate: branding is cosmetic, whereas silently stripping elevated defaults during an upgrade could break a deployment that granted them on purpose. To apply it manually: Admin console → Realm roles → `default-roles-eddi` → Associated roles → remove them, or `DELETE /admin/realms/eddi/roles-by-id/{id}/composites`. Both branches of the check were verified against the running realm — silent once fixed, firing when the elevated roles are put back.
+
+**A duplicated token, and the bug hiding behind it.** CodeRabbit flagged `--eddi-chevron` as declared twice in the light media query (a Stylelint error). It was worth looking at why rather than just deleting the second line: the patch that introduced the chevron had matched the same anchor twice, so it inserted **both** copies into the media query and **none** into `:root[data-eddi-theme="light"]`. The duplicate was the harmless symptom; the real defect was that choosing "light" explicitly from the toggle while the OS is dark left the chevron at the dark grey. Duplicate removed, missing declaration added, and all three paths checked: system follows the OS, explicit light `#78716c`, explicit dark `#a1a1aa`.
+
+**The header utilities looked accidental on narrow screens.** Below PatternFly's header breakpoint the grid collapses to a single column and the utilities wrap onto their own row — which is fine — but the locale picker stretched to fill it: **268px at a 560px viewport against 82px on desktop**, so the same control looked like two different things depending on width.
+
+The fix is to keep both utilities content-sized. Worth recording *why* it needed a newer property: `width: auto` does not size a `<select>` to its selected option (it fills), and `max-content` sizes it to the **widest option in the list** — which here is a 30-language menu, so that is worse. `field-sizing: content` is the one that does the right thing. It is Chrome/Edge-only at present, so a `max-width` cap is the fallback: capped rather than full-bleed everywhere else.
+
+Measured at 375, 560 and 1280: the picker is **76px at every width**, the row stays right-aligned with the form fields, no horizontal overflow, and no dead selectors.
+
+**Locale picker restored on the admin console; both realms offer the full set.**
+
+The admin console had no language picker because I had given `master` a single locale — a deliberate trade to get `lang` on `<html>` without adding a switcher, but the wrong one once that console is EDDI-branded. Both realms now show the picker.
+
+On which languages: they were briefly narrowed to the Manager's 14 (its bundle declares `supportedLngs` as `cs, de, es, fr, it, ja, ko, pl, pt-br, ru, tr, zh-cn, zh-tw` with `fallbackLng: "en"`), on a parity argument — a user who picks a language at login lands somewhere that speaks it. That was reverted on review: **both realms offer all 30 locales Keycloak ships**, deliberately a superset. The reasoning that won is that a localised login page is worth having even when the app behind it falls back to English; the alternative denied 16 free translations to speakers of ar, ca, da, el, fa, fi, hu, lt, lv, nl, no, pt, sk, sv, th and uk in order to avoid an inconsistency they would only notice *after* signing in.
+
+All four font subsets are therefore shipped (~245 KB), Greek included.
+
+**RTL now verified, having previously only been assumed.** The superset makes Arabic and Farsi reachable, and the wordmark uses `text-indent: -9999px`, which in a right-to-left document pushes text the *other* way. Checked in Arabic: `<html lang="ar" dir="rtl">`, **no horizontal overflow** — `overflow: hidden` on the header contains it — with the logo, the 30-option picker and the theme toggle all intact.
+
+**Admin console follow-ups — a logo collision, a missing toggle, and a shipped bug.**
+
+- **Two logos on top of each other.** Keycloak's `master` realm ships `displayNameHtml` as `<div class="kc-logo-text"><span>Keycloak</span></div>`, and that markup lands inside `#kc-header-wrapper` where we paint the EDDI wordmark — with `keycloak.v2`'s stylesheet still carrying the rule that gives that div the Keycloak logo. **This corrects F5 in the plan:** `div.kc-logo-text` is not dead CSS in general, only for realms whose `displayNameHtml` does not contain that markup. Fixed both ways — the theme now suppresses any logo box inside the header, and `install.sh` sets master's `displayNameHtml` to plain `EDDI` so the header also has a correct accessible name. `displayName` is deliberately left as "Keycloak", because it labels the realm in the admin console's realm selector.
+- **The theme toggle was missing there.** Keycloak only renders the header-utilities container when it has a locale switcher to put in it, and master has a single locale — so the control had nowhere to attach and was silently absent. `eddi-theme.js` now creates the container when it is not there.
+- **A bug this branch shipped in `97c7a0d0`:** the patch that added the master-realm block wrote a literal `
+` instead of a line continuation, so the jq path read `jq 
+ '...'` — `bash -n` accepts it, but at runtime jq would take `n` as its filter and the branch would fail on any machine that has jq. Repaired, and the whole file checked for further damage.
+
+**Keycloak manages `pf-v5-theme-dark` itself.** The template ships an inline script that adds and removes that class from `prefers-color-scheme`, so `kcHtmlClass` only sets the initial state and the class is stripped on a light OS. Nothing depends on it: because the token block assigns both the `--100` and the `--300`/`--400` tiers, components render correctly either way — verified by forcing dark on a light OS and confirming page `#09090b`, card `#18181b`, amber button with near-black label.
+
+**Admin console login themed, and two picker defects.**
+
+- **The admin console is now branded too.** It authenticates against Keycloak's `master` realm, which is not part of `eddi-realm.json`, so it kept the stock polygon-and-Keycloak-logo page while the EDDI realm was branded. `install.sh` now sets `loginTheme` on `master` through the Admin API — but only when master has no login theme of its own, so on a Keycloak shared with other products an operator's existing admin branding wins. It also enables internationalisation there with a single locale: master ships with i18n off, which meant no `lang`/`dir` on a page we now own the appearance of (WCAG 3.1.1). One locale adds the attributes without adding a switcher, and loses nothing, since i18n-off was English-only anyway. Verified: `<html class="login-pf pf-v5-theme-dark" lang="en" dir="ltr">` with no locale picker.
+- **The locale picker had a stray underline.** PatternFly draws the field underline with `::after`; quietening the picker removed its background and border but left that line hanging under the label with no box around it.
+- **And its label overlapped the caret.** PF's caret is not part of the `<select>` — it is a 32px sibling grid item overlaying the field, and the select's width comes from the wrapper's grid rather than its content, so it does not grow for a longer label. "Deutsch" therefore ran **17px underneath** the caret, and more right padding could not help because the caret is not in the select's box. Fixed by hiding PF's caret and drawing our own as a background inside the select's own padding: both are now in one box, so overflowing text clips at the content edge instead of painting over the chevron. Measured 5px clearance for "Deutsch"; the chevron colour follows the colour scheme via `--eddi-chevron`.
+
+**Accessibility and keyboard pass.** Audited against the running page with real key events rather than assumptions.
+
+Already correct, and left alone — Keycloak gets these right: tab order (username → password → show-password → forgot → Sign In, no `tabindex` anywhere), `<label for>` association on both fields, `autocomplete="username"`/`current-password`, `autofocus` on username (restored after a failed attempt), a single `<h1>`, a submit button inside the form so **Enter submits from any field** (verified with a real Return keypress), and an `aria-live="polite"` region that announces the error.
+
+Three real defects fixed:
+
+- **A focus-ring regression I had introduced.** `overflow: hidden` on the input-group — added to clip the password field and its toggle into one control — also clipped the toggle's focus ring, because that ring uses a *positive* `outline-offset` and the button sits flush against the group's edge. A keyboard user tabbing to "Show password" got a partially invisible indicator (WCAG 2.4.7). Rings inside the group now draw inward (`outline-offset: -2px`), verified fully visible.
+- **No `lang` on `<html>`** — a WCAG 3.1.1 Level A failure. The template only emits `lang` when the realm has internationalisation enabled, which it did not. Fixed in **realm config, not FreeMarker**: enabling `internationalizationEnabled` emits `lang` and `dir` on `<html>`. *(This was first done with a single supported locale to avoid adding a switcher; that was the wrong trade and the realm now offers all 30 — see above.)*
+- **Errors were not programmatically associated with their field.** Keycloak renders `<span id="input-error-password">` and sets `aria-invalid="true"`, but never `aria-describedby`, so a screen reader reaching the field announced "invalid entry" with no reason; the message was only spoken once, via the live region, at page load. Also, untouched fields carried `aria-invalid=""`, which is not valid ARIA and reads as *true* to some assistive tech.
+
+That last fix required the theme's **first JavaScript** (`resources/js/eddi-a11y.js`, the accessibility helper, wired via `scripts=` in theme.properties; `eddi-theme.js` was added later for the colour-scheme control): CSS cannot set ARIA attributes. It is ~20 lines, adds no event handlers, reads no user input and makes no network calls. This is a deliberate departure from the "pure CSS, no FreeMarker" principle — the alternative was overriding templates, which is worse, or leaving the gap. `keycloak.v2` sets no `scripts` of its own, so nothing is replaced; that needs re-checking on upgrade, since `scripts` replaces like `styles` does.
+
+**Not done, deliberately:** arrow-key navigation between fields and an Esc handler. Neither is standard for a login form, both would fight the platform conventions assistive technology relies on, and adding them would mean shipping keyboard handlers to an auth page for no real gain.
+
+**Second design pass — after actually looking at the rendered page.** Everything up to here was measured, never seen. Seeing it made the problem obvious: the page ignored its own logo's design language. The wordmark is hairline, widely tracked, geometric — an instrument face — while the form under it was heavy 700 labels, pure-black input voids and a flat slab button. The direction taken is *a machined panel lit from a single thin source*:
+
+- **Signature — a hairline amber light-line across the card's top edge**, brightest at centre and fading to nothing at both ends, with a matching ambient bloom behind the wordmark so the logo reads as the light source. One gesture expressed twice rather than several competing effects. It animates in once on load (620ms) and is suppressed under `prefers-reduced-motion`.
+- **Depth.** The flat page fill became a layered radial wash; the card gained a 1px inset top highlight, a falloff gradient and a real shadow, so it sits *off* the page instead of *on* it.
+- **The password field seam.** The field and its visibility toggle are siblings in a `pf-v5-c-input-group`, each with its own box — they met in a hard seam with mismatched corners, the most obviously unfinished detail on the page. The group is now the field; its children go flat, so the pair reads as one control.
+- **Inputs** moved from pure black (which pulled more attention than the button) to a translucent recess with an inset shadow, plus an amber focus glow.
+- **Type** now echoes the wordmark: title dropped to weight 300 with tracking, labels to 12px tracked caps. The title had to be set through `--pf-v5-c-title--m-3xl--FontWeight`, since `.pf-v5-c-title.pf-m-3xl` carries the weight at two-class specificity and beats a plain declaration.
+- **Deliberately not done:** no gradient on the button. It is already the heaviest element; a gradient there would compete with the signature. The primary button did gain vertical padding, which incidentally takes it to a 44px touch target on mobile.
+
+**Design pass — the page was correct but not designed.** Three fixes after looking at what the measurements implied rather than only whether they matched the palette:
+
+- **Typography.** The page rendered in PatternFly's Red Hat Text/Display — the one EDDI surface in a different typeface, and matching neither the Manager (Noto Sans) nor this plan's own stated `system-ui` intent, because no `font-family` was ever set. Now ships the **same variable font the Manager loads**. At this point that was the Latin subset only — 35 KB for weights 100–900 — with other scripts falling through to the system stack; the Latin-ext, Cyrillic and Greek subsets were added later when the realm began offering all 30 locales (see above). Overriding `--pf-v5-global--FontFamily--text` alone is not enough — PF re-declares it as `var(--…--text--vf)` when variable fonts are present, so the `--vf` pair must be set too.
+- **Inputs were invisible as inputs.** Fixing the card background had left fields at the card's own `#18181b`, separated from their container by a 1px hairline alone. Fields are now recessed to the page colour (`#0c0a09`), so they read as cut into the card rather than laid on it; the password-visibility toggle follows so the input group stays one control.
+- **Three corner radii on one card** (8px card, 4px input, 3px button). Replaced with a deliberate two-step scale — 6px controls, 12px card — driven through `--pf-v5-global--BorderRadius--sm` so every PF control inherits it.
+
+**WCAG 1.4.11 — since closed.** This was recorded as a known gap at the time: the resting input border (`#27272a` on `#18181b`) was 1.19:1 against a 3:1 requirement for UI component boundaries, and reaching it meant departing from the border colour the Manager uses throughout. It is now fixed with a dedicated `--eddi-field-border` token — zinc-500 on dark (**3.67:1**), stone-500 on light (**4.8:1**) — while the card keeps `--eddi-border`, because a panel edge is decoration and 1.4.11 does not apply to it. Fields consequently read more strongly than the Manager's do; that is the cost of the criterion.
+
+**Review pass — four things the first commit had not established.**
+
+1. **Graceful degradation confirmed.** Emptying the theme directory while `loginTheme: eddi` stays set — exactly what a failed `install.sh` asset download produces — yields **HTTP 200 with the built-in theme** and `ERROR ... Failed to find LOGIN theme eddi, using built-in themes` in the log. So the decision to make theme downloads non-fatal is safe **provided the fallback is all-or-nothing**: a *missing* theme cannot take authentication down. A *partial* one is a different matter — `theme.properties` would still resolve and Keycloak would render the eddi theme with its stylesheet or fonts 404ing — so `install.sh` discards the whole theme directory if any resource fails rather than leaving a half-built one mounted.
+2. **The verification protocol is not vacuous.** Run against that deliberately broken state, both §6 step 2 (log grep) and step 3 (html-class and stylesheet assertions) fail as designed. Checks that cannot fail are worthless; these can.
+3. **The `install.sh` realm update was executed, not just written.** Against a realm reset to `loginTheme: ""`, the GET-modify-PUT returns 204, sets all three fields, and is idempotent on a second run.
+4. **A dead CSS selector removed.** `.pf-v5-c-login__main-header-desc` matches nothing and appears in no `keycloak.v2` template — the same mistake (styling an element the theme never emits) that killed the original `div.kc-logo-text` approach, reproduced at low stakes. Found by auditing every selector in our stylesheet against the live DOM. `.pf-v5-c-login__main-footer-band` was checked the same way and **kept**: it is emitted by `login.ftl` and only hidden because `registrationAllowed: false`. Also verified the keyboard focus ring — `:focus-visible` needs a real key event to match, and does then give `solid 2px #f59e0b` at 8.25:1 on the card, past WCAG 2.2's 3:1 for non-text indicators.
+
+---
+
 ## 🧹 fix(release): retire stale deployment records, quiet the Postgres health line, revive two dead checks (2026-07-27)
 
 **Repo:** EDDI (`fix/release-6.2-polish`) + eddi-chat-ui (`fix/release-6.2-polish`)

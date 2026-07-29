@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.templating;
 
+import ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.Assertions;
@@ -13,6 +14,12 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Comprehensive tests for the Qute-based TemplatingEngine.
@@ -229,5 +236,79 @@ public class TemplatingEngineTest {
         String result = templatingEngine.processTemplate(template, data);
 
         Assertions.assertEquals("[\"a\",\"b\"]", result);
+    }
+
+    // --- TemplateMode is honoured (E9) ---
+
+    @Test
+    public void processTemplateInHtmlModeEscapesSubstitutedValues() throws Exception {
+        String template = "<p>{value}</p>";
+        var data = Map.<String, Object>of("value", "<script>alert('x') && \"y\"</script>");
+
+        String result = templatingEngine.processTemplate(template, data, TemplateMode.HTML);
+
+        // The literal markup of the template survives, the injected value does not
+        Assertions.assertEquals("<p>&lt;script&gt;alert(&#39;x&#39;) &amp;&amp; &quot;y&quot;&lt;/script&gt;</p>", result);
+    }
+
+    @Test
+    public void processTemplateInHtmlModeEscapesNestedValues() throws Exception {
+        String template = "<b>{properties.name}</b> {#for tag in tags}<i>{tag}</i>{/for}";
+        var data = Map.<String, Object>of("properties", Map.of("name", "<img src=x>"), "tags", List.of("<hr>"));
+
+        String result = templatingEngine.processTemplate(template, data, TemplateMode.HTML);
+
+        Assertions.assertEquals("<b>&lt;img src=x&gt;</b> <i>&lt;hr&gt;</i>", result);
+    }
+
+    @Test
+    public void processTemplateInTextModeDoesNotEscape() throws Exception {
+        String template = "{value}";
+        var data = Map.<String, Object>of("value", "<b>bold & beautiful</b>");
+
+        String result = templatingEngine.processTemplate(template, data, TemplateMode.TEXT);
+
+        Assertions.assertEquals("<b>bold & beautiful</b>", result);
+    }
+
+    @Test
+    public void processTemplateInJavaScriptModeEscapesSubstitutedValues() throws Exception {
+        String template = "var greeting = '{value}';";
+        var data = Map.<String, Object>of("value", "';alert(1);//");
+
+        String result = templatingEngine.processTemplate(template, data, TemplateMode.JAVASCRIPT);
+
+        Assertions.assertEquals("var greeting = '\\x27\\x3Balert\\x281\\x29\\x3B\\x2F\\x2F';", result);
+    }
+
+    // --- Compiled templates are cached (E8) ---
+
+    @Test
+    public void compiledTemplateIsParsedOnceAndReused() throws Exception {
+        Engine realEngine = Engine.builder().addDefaults().strictRendering(false).build();
+        Engine countingEngine = mock(Engine.class);
+        when(countingEngine.parse(anyString())).thenAnswer(invocation -> realEngine.parse(invocation.getArgument(0, String.class)));
+        var cachingTemplatingEngine = new TemplatingEngine(countingEngine);
+
+        String template = "Hello {name}";
+        for (int i = 0; i < 5; i++) {
+            Assertions.assertEquals("Hello Alice", cachingTemplatingEngine.processTemplate(template, Map.of("name", "Alice")));
+        }
+
+        verify(countingEngine, times(1)).parse(template);
+    }
+
+    @Test
+    public void distinctTemplatesAreParsedSeparately() throws Exception {
+        Engine realEngine = Engine.builder().addDefaults().strictRendering(false).build();
+        Engine countingEngine = mock(Engine.class);
+        when(countingEngine.parse(anyString())).thenAnswer(invocation -> realEngine.parse(invocation.getArgument(0, String.class)));
+        var cachingTemplatingEngine = new TemplatingEngine(countingEngine);
+
+        Assertions.assertEquals("Hi Alice", cachingTemplatingEngine.processTemplate("Hi {name}", Map.of("name", "Alice")));
+        Assertions.assertEquals("Bye Alice", cachingTemplatingEngine.processTemplate("Bye {name}", Map.of("name", "Alice")));
+
+        verify(countingEngine, times(1)).parse("Hi {name}");
+        verify(countingEngine, times(1)).parse("Bye {name}");
     }
 }

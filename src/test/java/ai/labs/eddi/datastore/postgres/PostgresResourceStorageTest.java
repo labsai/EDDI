@@ -4,18 +4,25 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
+import org.postgresql.core.NativeQuery;
+import org.postgresql.core.Parser;
 
 import javax.sql.DataSource;
 import java.sql.*;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
 
 /**
@@ -50,8 +57,390 @@ class PostgresResourceStorageTest {
 
     @Test
     void shouldInitSchemaOnConstruction() throws Exception {
-        // The constructor calls initSchema which creates tables
-        verify(statement, times(3)).execute(anyString());
+        // The constructor calls initSchema which creates the two tables plus the
+        // shared indexes.
+        var executed = ArgumentCaptor.forClass(String.class);
+        verify(statement, atLeastOnce()).execute(executed.capture());
+
+        List<String> statements = executed.getAllValues();
+        assertTrue(statements.stream().anyMatch(s -> s.contains("CREATE TABLE IF NOT EXISTS resources ")));
+        assertTrue(statements.stream().anyMatch(s -> s.contains("CREATE TABLE IF NOT EXISTS resources_history ")));
+    }
+
+    @Test
+    void shouldPutCollectionNameFirstInThePrimaryKey() throws Exception {
+        var executed = ArgumentCaptor.forClass(String.class);
+        verify(statement, atLeastOnce()).execute(executed.capture());
+
+        String createResources = executed.getAllValues().stream()
+                .filter(s -> s.contains("CREATE TABLE IF NOT EXISTS resources "))
+                .findFirst().orElseThrow();
+
+        // Every query filters on collection_name; a btree is only usable from its
+        // leading column, so (id, collection_name) meant none of them could use the
+        // primary key.
+        assertTrue(createResources.contains("PRIMARY KEY (collection_name, id)"), createResources);
+    }
+
+    @Test
+    void shouldCreateTheIndexesEveryQueryNeeds() throws Exception {
+        var executed = ArgumentCaptor.forClass(String.class);
+        verify(statement, atLeastOnce()).execute(executed.capture());
+        String all = String.join("\n", executed.getAllValues());
+
+        // Migration path for tables created before the primary-key reorder — their
+        // PK stays (id, collection_name), so collection_name needs its own index.
+        assertTrue(all.contains("idx_resources_collection_name"), all);
+        assertTrue(all.contains("idx_resources_history_collection_name"), all);
+        // Backs the @? jsonpath lookups used for reverse "who references X" queries.
+        assertTrue(all.contains("gin (data jsonb_path_ops)"), all);
+        // Idempotent: existing deployments re-run this on every startup.
+        assertTrue(all.contains("CREATE INDEX IF NOT EXISTS"), all);
+    }
+
+    @Test
+    void shouldMaterialiseCallerSuppliedIndexHintsAsExpressionIndexes() throws Exception {
+        Statement indexStatement = mock(Statement.class);
+        Connection indexConnection = mock(Connection.class);
+        DataSource indexDataSource = mock(DataSource.class);
+        when(indexDataSource.getConnection()).thenReturn(indexConnection);
+        when(indexConnection.createStatement()).thenReturn(indexStatement);
+
+        new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "name", "workflowSteps.config.uri");
+
+        var executed = ArgumentCaptor.forClass(String.class);
+        verify(indexStatement, atLeastOnce()).execute(executed.capture());
+        String all = String.join("\n", executed.getAllValues());
+
+        // The factory used to accept the hints and drop them on the floor.
+        assertTrue(all.contains("idx_resources_field_name"), all);
+        assertTrue(all.contains("(collection_name, (data ->> 'name'))"), all);
+        // Dotted paths address values inside arrays — a btree expression index
+        // cannot represent those, the GIN index serves them instead.
+        assertFalse(all.contains("idx_resources_field_workflowsteps"), all);
+    }
+
+    /**
+     * PostgreSQL truncates an identifier past 63 bytes SILENTLY. Two long hints
+     * sharing a prefix would therefore collapse onto one index name and CREATE
+     * INDEX IF NOT EXISTS would no-op for the second — the same silent miss the
+     * case handling above prevents, reached by length instead. The digest is also
+     * the part the server would cut, so it stops disambiguating exactly when it is
+     * needed.
+     */
+    @Test
+    void fieldIndexNamesStayDistinctAndWithinPostgresIdentifierLimit() throws Exception {
+        Statement indexStatement = mock(Statement.class);
+        Connection indexConnection = mock(Connection.class);
+        DataSource indexDataSource = mock(DataSource.class);
+        when(indexDataSource.getConnection()).thenReturn(indexConnection);
+        when(indexConnection.createStatement()).thenReturn(indexStatement);
+
+        // identical for the first 50 characters, differing only at the end
+        String a = "averyLongCustomerFacingConfigurationFieldNameForA_one";
+        String b = "averyLongCustomerFacingConfigurationFieldNameForA_two";
+
+        new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, a, b);
+
+        var executed = ArgumentCaptor.forClass(String.class);
+        verify(indexStatement, atLeastOnce()).execute(executed.capture());
+
+        List<String> indexNames = executed.getAllValues().stream()
+                .filter(s -> s.contains("idx_resources_field_"))
+                .map(s -> s.substring(s.indexOf("idx_resources_field_"), s.indexOf(" ON ")))
+                .toList();
+
+        assertEquals(2, indexNames.size(), indexNames.toString());
+        assertEquals(2, Set.copyOf(indexNames).size(), "long hints collapsed onto one index name: " + indexNames);
+        for (String name : indexNames) {
+            assertTrue(name.length() <= 63, "PostgreSQL would truncate and re-collapse this: " + name + " (" + name.length() + ")");
+        }
+    }
+
+    @Test
+    void fieldIndexNamesDistinguishHintsThatDifferOnlyInCase() throws Exception {
+        Statement indexStatement = mock(Statement.class);
+        Connection indexConnection = mock(Connection.class);
+        DataSource indexDataSource = mock(DataSource.class);
+        when(indexDataSource.getConnection()).thenReturn(indexConnection);
+        when(indexConnection.createStatement()).thenReturn(indexStatement);
+
+        new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "userid", "userId");
+
+        var executed = ArgumentCaptor.forClass(String.class);
+        verify(indexStatement, atLeastOnce()).execute(executed.capture());
+
+        // JSON keys are case-sensitive; PostgreSQL index names are not. Naming both
+        // idx_resources_field_userid made CREATE INDEX IF NOT EXISTS skip the second
+        // one with nothing but a NOTICE, so one of the two expressions was left
+        // unindexed while this class believed it was indexed.
+        List<String> indexNames = executed.getAllValues().stream()
+                .filter(s -> s.contains("idx_resources_field_"))
+                .map(s -> s.substring(s.indexOf("idx_resources_field_"), s.indexOf(" ON ")))
+                .toList();
+        assertEquals(2, indexNames.size(), indexNames.toString());
+        assertEquals(2, Set.copyOf(indexNames).size(), "both hints collapsed onto one index name: " + indexNames);
+        // An all-lower-case hint keeps its historical name, so existing deployments
+        // do not grow a duplicate index on upgrade.
+        assertTrue(indexNames.contains("idx_resources_field_userid"), indexNames.toString());
+    }
+
+    @Test
+    void shouldNotFailStartupWhenIndexCreationIsRejected() throws Exception {
+        Statement indexStatement = mock(Statement.class);
+        Connection indexConnection = mock(Connection.class);
+        DataSource indexDataSource = mock(DataSource.class);
+        when(indexDataSource.getConnection()).thenReturn(indexConnection);
+        when(indexConnection.createStatement()).thenReturn(indexStatement);
+        // Tables must still be created; only the index statements fail.
+        doThrow(new SQLException("permission denied")).when(indexStatement).execute(contains("CREATE INDEX"));
+
+        assertDoesNotThrow(() -> new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "name"));
+    }
+
+    // ─── dotted JSON paths ─────────────────────────────────────
+
+    @Test
+    void containmentJsonPath_traversesDottedPathsIntoArrays() {
+        // `data->'workflowSteps.config.uri'` looked up a LITERAL top-level key
+        // spelled with dots, which never exists — the query returned nothing,
+        // forever, while MongoDB traversed the same path correctly.
+        assertEquals("$.\"workflowSteps\"[*].\"config\"[*].\"uri\"[*] ? (@ == \"eddi://x?version=1\")",
+                PostgresResourceStorage.toContainmentJsonPath("workflowSteps.config.uri", "eddi://x?version=1"));
+    }
+
+    @Test
+    void containmentJsonPath_handlesSingleSegmentArrayFields() {
+        assertEquals("$.\"workflows\"[*] ? (@ == \"eddi://wf?version=2\")",
+                PostgresResourceStorage.toContainmentJsonPath("workflows", "eddi://wf?version=2"));
+    }
+
+    @Test
+    void containmentJsonPath_escapesTheValueSoItCannotBreakOutOfTheLiteral() {
+        String path = PostgresResourceStorage.toContainmentJsonPath("field", "a\"b\\c\nd");
+
+        assertEquals("$.\"field\"[*] ? (@ == \"a\\\"b\\\\c\\nd\")", path);
+    }
+
+    @Test
+    void findResourceIdsContaining_bindsTheJsonPathAsAParameter() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        storage.findResourceIdsContaining("workflowSteps.config.uri", "eddi://out?version=1");
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        // The path (and the value inside it) must never be concatenated into SQL.
+        assertFalse(sql.getValue().contains("workflowSteps"), sql.getValue());
+        verify(preparedStatement).setString(2, PostgresResourceStorage.toContainmentJsonPath("workflowSteps.config.uri", "eddi://out?version=1"));
+    }
+
+    /**
+     * Hand the statement to pgjdbc's own parser — the code that actually decides
+     * what a {@code ?} means — and report what the driver would send to the server.
+     * <p>
+     * Every JDBC object in this class is a Mockito mock, so
+     * {@code ps.setString(2, ...)} on a mock can never notice that the statement
+     * declares three placeholders. This is the only way to catch that without a
+     * live server.
+     */
+    private static NativeQuery asDriverWouldSend(String sql) throws SQLException {
+        try {
+            return Parser.parseJdbcSql(sql, true, true, true, false, true).getFirst();
+        } catch (LinkageError e) {
+            // org.postgresql.core.Parser is driver-internal and can move between
+            // versions. If it does, say so plainly rather than surfacing an opaque
+            // NoClassDefFoundError: the SQL is probably still fine and this helper
+            // needs updating. The literal-escape assertions below do not depend on
+            // it and keep pinning the intent in the meantime.
+            throw new AssertionError("pgjdbc internals moved (" + e + "); update asDriverWouldSend for the current driver", e);
+        }
+    }
+
+    @Test
+    void findResourceIdsContaining_jsonpathOperatorIsNotSwallowedAsABindPlaceholder() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        storage.findResourceIdsContaining("workflowSteps.config.uri", "eddi://out?version=1");
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+
+        // `@` is not special to pgjdbc, so a literally spelled `data @? ?::jsonpath`
+        // leaves a bare `?` that the driver turns into a THIRD placeholder while
+        // only two values are ever bound — the query then fails at execution time
+        // on a real server instead of merely returning nothing. `@??` is pgjdbc's
+        // escape for a literal question mark.
+        // Stable half: the escape must be present in the SQL we emit. This holds
+        // regardless of driver version.
+        assertTrue(sql.getValue().contains("data @?? ?::jsonpath"), sql.getValue());
+
+        // Authoritative half: what pgjdbc ACTUALLY does with it. Asserting a
+        // hand-rolled placeholder count here would only re-state our assumption about
+        // the driver — and that assumption being wrong is what caused this defect.
+        NativeQuery sent = asDriverWouldSend(sql.getValue());
+        assertEquals(2, sent.bindPositions.length, "placeholders the driver found in: " + sent.nativeSql);
+        assertTrue(sent.nativeSql.contains("data @? $2::jsonpath"), sent.nativeSql);
+    }
+
+    @Test
+    void findHistoryResourceIdsContaining_jsonpathOperatorIsNotSwallowedAsABindPlaceholder() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        storage.findHistoryResourceIdsContaining("workflows", "eddi://wf?version=1");
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+
+        assertTrue(sql.getValue().contains("data @?? ?::jsonpath"), sql.getValue());
+
+        NativeQuery sent = asDriverWouldSend(sql.getValue());
+        assertEquals(2, sent.bindPositions.length, "placeholders the driver found in: " + sent.nativeSql);
+        assertTrue(sent.nativeSql.contains("resources_history"), sent.nativeSql);
+        assertTrue(sent.nativeSql.contains("data @? $2::jsonpath"), sent.nativeSql);
+    }
+
+    @Test
+    void findResourceIdsContaining_theBoundJsonPathIsNeverRescannedForPlaceholders() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        // The generated jsonpath itself contains `?` (the filter operator) and the
+        // value may too (`?version=1`). Those live in a bind VALUE, never in SQL,
+        // so they must not shift the placeholder count.
+        storage.findResourceIdsContaining("workflows", "eddi://wf?version=1");
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertEquals(2, asDriverWouldSend(sql.getValue()).bindPositions.length);
+        verify(preparedStatement).setString(2, PostgresResourceStorage.toContainmentJsonPath("workflows", "eddi://wf?version=1"));
+    }
+
+    @Test
+    void findResources_traversesDottedFilterAndSortPaths() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        var filter = new IResourceFilter.QueryFilter("meta.owner", "someone");
+        var queryFilters = new IResourceFilter.QueryFilters(List.of(filter));
+
+        storage.findResources(new IResourceFilter.QueryFilters[]{queryFilters}, "meta.updatedAt", 0, 10);
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("data -> 'meta' ->> 'owner'"), sql.getValue());
+        assertTrue(sql.getValue().contains("ORDER BY data -> 'meta' ->> 'updatedAt' DESC"), sql.getValue());
+    }
+
+    // ─── batch read ────────────────────────────────────────────
+
+    @Test
+    void readMany_readsThePageInOneStatementAndKeepsRequestOrder() throws Exception {
+        when(resultSet.next()).thenReturn(true, true, false);
+        // Deliberately returned in the opposite order to the request.
+        when(resultSet.getString("id")).thenReturn("id-a", "id-b");
+        when(resultSet.getInt("version")).thenReturn(1, 1);
+        when(resultSet.getString("data")).thenReturn("{}", "{}");
+
+        var results = storage.readMany(List.of(resourceId("id-b", 1), resourceId("id-a", 1)));
+
+        assertEquals(List.of("id-b", "id-a"), results.stream().map(IResourceStorage.IResource::getId).toList());
+        verify(connection, times(1)).prepareStatement(anyString());
+    }
+
+    @Test
+    void readMany_emptyInputIssuesNoQuery() throws Exception {
+        assertTrue(storage.readMany(List.of()).isEmpty());
+        verify(connection, never()).prepareStatement(anyString());
+    }
+
+    @Test
+    void readMany_skipsIdsThatNoLongerExist() throws Exception {
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getString("id")).thenReturn("id-a");
+        when(resultSet.getInt("version")).thenReturn(1);
+        when(resultSet.getString("data")).thenReturn("{}");
+
+        var results = storage.readMany(List.of(resourceId("id-a", 1), resourceId("id-gone", 1)));
+
+        assertEquals(1, results.size());
+        assertEquals("id-a", results.getFirst().getId());
+    }
+
+    private static IResourceStore.IResourceId resourceId(String id, int version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
+    }
+
+    // ─── atomic history + current writes ───────────────────────
+
+    @Test
+    void storeHistoryAndUpdate_commitsBothWritesInOneTransaction() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
+        var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 2, config);
+        var history = storage.newHistoryResourceFor(resource, false);
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        storage.storeHistoryAndUpdate(history, resource, 1);
+
+        InOrder inOrder = inOrder(connection);
+        inOrder.verify(connection).setAutoCommit(false);
+        inOrder.verify(connection).commit();
+        verify(connection, never()).rollback();
+    }
+
+    @Test
+    void storeHistoryAndUpdate_rollsBackAndReportsAConcurrentEdit() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
+        var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 2, config);
+        var history = storage.newHistoryResourceFor(resource, false);
+        // history insert succeeds, the version-checked update matches nothing
+        when(preparedStatement.executeUpdate()).thenReturn(1, 0);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class, () -> storage.storeHistoryAndUpdate(history, resource, 1));
+
+        // The archived row must not survive an update that never happened.
+        verify(connection).rollback();
+        verify(connection, never()).commit();
+    }
+
+    @Test
+    void storeHistoryAndRemove_commitsBothWritesInOneTransaction() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
+        var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 1, config);
+        var history = storage.newHistoryResourceFor(resource, true);
+
+        storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111");
+
+        InOrder inOrder = inOrder(connection);
+        inOrder.verify(connection).setAutoCommit(false);
+        inOrder.verify(connection).commit();
+        verify(connection, never()).rollback();
+    }
+
+    @Test
+    void storeHistoryAndRemove_rollsBackWhenTheRemovalFails() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
+        var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 1, config);
+        var history = storage.newHistoryResourceFor(resource, true);
+        when(preparedStatement.executeUpdate()).thenReturn(1).thenThrow(new SQLException("connection lost"));
+
+        assertThrows(RuntimeException.class, () -> storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111"));
+
+        // Otherwise the resource is archived as deleted while its live row remains.
+        verify(connection).rollback();
+        verify(connection, never()).commit();
     }
 
     @Test
@@ -665,6 +1054,23 @@ class PostgresResourceStorageTest {
 
         assertThrows(IResourceStore.ResourceModifiedException.class,
                 () -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
+    }
+
+    @Test
+    void storeIfFieldEquals_traversesADottedFieldPath() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(VALID_UUID, 2, config);
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        storage.storeIfFieldEquals(resource, "meta.state", "AWAITING_APPROVAL");
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        // MongoDB resolves a dotted field name in its filter; binding it as a
+        // literal key here would compare against a key spelled with a dot, which
+        // never exists — the CAS would report a spurious conflict.
+        assertTrue(sql.getValue().contains("data -> 'meta' ->> 'state' = ?"), sql.getValue());
     }
 
     // Simple test POJO

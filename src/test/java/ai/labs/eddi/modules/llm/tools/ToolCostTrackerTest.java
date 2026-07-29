@@ -278,6 +278,60 @@ class ToolCostTrackerTest {
             tracker.evictIfNeeded();
             assertNotNull(tracker.getConversationCosts("conv-1"));
         }
+
+        /**
+         * Eviction must take the least recently touched conversations and nothing else.
+         *
+         * <p>
+         * It used to iterate {@code ConcurrentHashMap.keySet()} and remove whatever
+         * came first, i.e. in hash-bucket order. Dropping an entry here is not a lost
+         * metric — it resets that conversation's accumulated spend to $0, so
+         * {@code isWithinBudget} lets a conversation that has already blown its budget
+         * spend the whole thing again. Asserting the survivor set exactly (rather than
+         * just "the active one lives") is what makes this fail under hash ordering: the
+         * chance that hash order happens to pick precisely the 1&nbsp;001
+         * least-recently-used entries is nil.
+         * </p>
+         */
+        @Test
+        @DisplayName("evicts the least recently used entries, never an active conversation")
+        void evictsLeastRecentlyUsed() throws InterruptedException {
+            int cap = ToolCostTracker.MAX_CONVERSATION_ENTRIES;
+            int idleCount = cap / 5;
+            int activeCount = cap - idleCount + 1; // one over the cap in total
+            int expectedRemovals = idleCount + activeCount - (int) (cap * 0.9);
+
+            for (int i = 0; i < idleCount; i++) {
+                tracker.trackToolCall("websearch", "idle-" + i);
+            }
+
+            // A measurable gap so that every "active" entry is unambiguously newer than
+            // every "idle" one; ordering *within* a cohort is not asserted.
+            Thread.sleep(5);
+
+            for (int i = 0; i < activeCount; i++) {
+                tracker.trackToolCall("websearch", "active-" + i);
+            }
+
+            int survivingIdle = countSurviving("idle-", idleCount);
+            int survivingActive = countSurviving("active-", activeCount);
+
+            assertEquals(activeCount, survivingActive,
+                    "every recently active conversation must survive — evicting one resets its accumulated "
+                            + "spend to $0 and hands it its whole budget again");
+            assertEquals(idleCount - expectedRemovals, survivingIdle,
+                    "the victims must be drawn exclusively from the idle cohort");
+        }
+
+        private int countSurviving(String prefix, int count) {
+            int surviving = 0;
+            for (int i = 0; i < count; i++) {
+                if (tracker.getConversationCosts(prefix + i) != null) {
+                    surviving++;
+                }
+            }
+            return surviving;
+        }
     }
 
     @Nested
