@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.model;
 
+import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 import org.jboss.logging.Logger;
@@ -74,7 +75,8 @@ public class Deployment {
             try {
                 return parseStrict(value);
             } catch (IllegalArgumentException e) {
-                LOGGER.warnv("Unknown environment ''{0}'' — falling back to ''{1}''. Valid values: {2}", value, production, VALID_ENVIRONMENTS);
+                LOGGER.warnv("Unknown environment ''{0}'' — falling back to ''{1}''. Valid values: {2}", LogSanitizer.sanitize(value), production,
+                        VALID_ENVIRONMENTS);
                 return production;
             }
         }

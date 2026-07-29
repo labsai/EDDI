@@ -47,6 +47,7 @@ import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -1137,15 +1138,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             try {
                 resolveStore(resource.storeClass()).deleteAllPermanently(resource.id());
                 LOGGER.debugf("Rollback deleted %s '%s' (v%s)",
-                        resource.storeClass().getSimpleName(), resource.id(), resource.version());
+                        resource.storeClass().getSimpleName(), LogSanitizer.sanitize(resource.id()), resource.version());
             } catch (Exception e) {
                 LOGGER.warnf("Rollback could not delete %s '%s': %s",
-                        resource.storeClass().getSimpleName(), resource.id(), e.getMessage());
+                        resource.storeClass().getSimpleName(), LogSanitizer.sanitize(resource.id()), LogSanitizer.sanitize(e.getMessage()));
             }
             try {
                 documentDescriptorStore.deleteAllDescriptor(resource.id());
             } catch (Exception e) {
-                LOGGER.warnf("Rollback could not delete descriptor of '%s': %s", resource.id(), e.getMessage());
+                LOGGER.warnf("Rollback could not delete descriptor of '%s': %s", LogSanitizer.sanitize(resource.id()),
+                        LogSanitizer.sanitize(e.getMessage()));
             }
         }
     }
