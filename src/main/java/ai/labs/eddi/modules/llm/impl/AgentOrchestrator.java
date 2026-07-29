@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
@@ -263,6 +264,11 @@ class AgentOrchestrator {
     // call it directly — untouched.
     @Inject
     volatile IAttachmentStore attachmentStore;
+
+    // Same reason. Handed to TeardownAgentTool so a deleted dynamic agent leaves
+    // no deployment record the runtime keeps trying to redeploy.
+    @Inject
+    volatile IDeploymentStore deploymentStore;
 
     @Inject
     volatile AttachmentTextExtractor attachmentTextExtractor;
@@ -2145,7 +2151,7 @@ class AgentOrchestrator {
                     }
                 }
                 if (whitelist.contains("teardown_agent") && agentFactory != null && agentStore != null) {
-                    tools.add(new TeardownAgentTool(agentFactory, agentStore, sharedCreatedIds, sharedRetainedIds));
+                    tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds));
                     LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
                     anyDynamicToolAdded = true;
                 }

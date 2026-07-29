@@ -18,7 +18,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 | --------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------ |
 | **EDDI** (this repo)                                            | Java 25, Quarkus, MongoDB  | Backend engine, REST API, lifecycle pipeline                 |
 | **[quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi)** | Java 21, Quarkus Extension | Quarkus SDK — `@Inject EddiClient`, Dev Services, MCP bridge |
-| **EDDI-Manager**                                                | React 19, Vite, Tailwind   | Admin dashboard (served from EDDI at `/chat/production`)     |
+| **EDDI-Manager**                                                | React 19, Vite, Tailwind   | Admin dashboard (served from EDDI at `/manage`; `/` redirects to the `/welcome` chooser, `/workforce` is the group-conversation workspace) |
 | **eddi-chat-ui**                                                | React, TypeScript          | Standalone chat widget                                       |
 | **eddi-website**                                                | Astro, Starlight           | Marketing site + documentation at eddi.labs.ai               |
 
@@ -31,7 +31,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 - **Stateless tasks, stateful memory**: `ILifecycleTask` implementations are singletons; all state lives in `IConversationMemory`
 - **Action-based orchestration**: Tasks emit/listen for string-based actions, never call each other directly
 - **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IUserMemoryStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in MongoDB or imported via ZIP.
-- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`v6.0.0-RC2` → `labsai/eddi:6.0.0-RC2`). Separate security workflows run CodeQL, Trivy, Gitleaks, ZAP, CycloneDX (SBOM), and Jazzer fuzzing.
+- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`6.2.0` → `labsai/eddi:6.2.0`) — the release job triggers on tags matching `[0-9]*`, so the tag must **not** be `v`-prefixed or nothing fires. Separate security workflows run CodeQL, Trivy, Gitleaks, ZAP, CycloneDX (SBOM), and Jazzer fuzzing.
 
 ### Build & Test Commands
 
@@ -840,7 +840,7 @@ Resolution is narrow and fails loudly rather than degrading quietly:
   `${caller:userId}` is allowed in headers and query parameters.
 - **Authenticated turns only** — scheduled jobs and triggers cannot satisfy it.
 - **Fails closed** — an unsatisfiable reference errors instead of sending
-  `Bearer `.
+  `"Bearer "` with an empty token.
 
 The token is never persisted: authorization headers are scrubbed before the
 request is written to conversation memory. Disable with
