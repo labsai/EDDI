@@ -135,6 +135,38 @@ class RestRagStoreWriteValidationTest {
         assertEquals("recursive", copy.getValue().getChunkStrategy());
     }
 
+    /**
+     * The write boundary must not make already-stored data un-copyable. A knowledge
+     * base holding a strategy the engine never implemented can still be read back
+     * through {@code readRag}; refusing to duplicate it would be a new failure mode
+     * for existing data rather than a guard against creating bad data — which is
+     * why every other {@code duplicate*} endpoint in the codebase skips validation
+     * too.
+     */
+    @Test
+    @DisplayName("duplicating a knowledge base with an unsupported strategy still succeeds")
+    void duplicateDoesNotRejectAnUnsupportedStoredStrategy() throws Exception {
+        var storedConfig = new RagConfiguration();
+        storedConfig.setName("odd-kb");
+        storedConfig.setChunkStrategy("semantic");
+        when(ragStore.read(RAG_ID, 1)).thenReturn(storedConfig);
+
+        var response = restRagStore.duplicateRag(RAG_ID, 1);
+
+        assertEquals(201, response.getStatus(), "an existing document the store serves must remain copyable");
+        verify(ragStore).create(any());
+    }
+
+    @Test
+    @DisplayName("create still rejects the same strategy duplicate tolerates")
+    void createStillRejectsWhatDuplicateTolerates() {
+        var config = new RagConfiguration();
+        config.setName("odd-kb");
+        config.setChunkStrategy("semantic");
+
+        assertThrows(BadRequestException.class, () -> restRagStore.createRag(config));
+    }
+
     private static IResourceStore.IResourceId resourceId(String id, Integer version) {
         return new IResourceStore.IResourceId() {
             @Override

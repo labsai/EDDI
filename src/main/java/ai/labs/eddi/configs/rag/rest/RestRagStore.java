@@ -93,15 +93,33 @@ public class RestRagStore implements IRestRagStore {
             return;
         }
 
-        String normalized = ragConfiguration.normalizeLegacyChunkStrategy();
-        if (normalized != null) {
-            LOGGER.warnf("Knowledge base '%s': %s", LogSanitizer.sanitize(ragConfiguration.getName()), LogSanitizer.sanitize(normalized));
-        }
+        normalizeLegacyChunkStrategy(ragConfiguration);
 
         try {
             ragConfiguration.validate();
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The half of {@link #prepareForWrite} that is always safe to apply: rewrite a
+     * legacy strategy to what ingestion actually did, and say so.
+     * <p>
+     * Duplication uses only this half. Rejecting there would mean the store happily
+     * serves a document through {@code readRag} that it then refuses to copy — a
+     * new failure mode for data that already exists, rather than a guard against
+     * creating bad data. Every other {@code duplicate*} endpoint declines to
+     * validate for the same reason.
+     */
+    private void normalizeLegacyChunkStrategy(RagConfiguration ragConfiguration) {
+        if (ragConfiguration == null) {
+            return;
+        }
+
+        String normalized = ragConfiguration.normalizeLegacyChunkStrategy();
+        if (normalized != null) {
+            LOGGER.warnf("Knowledge base '%s': %s", LogSanitizer.sanitize(ragConfiguration.getName()), LogSanitizer.sanitize(normalized));
         }
     }
 
@@ -114,7 +132,10 @@ public class RestRagStore implements IRestRagStore {
     public Response duplicateRag(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         RagConfiguration config = restVersionInfo.read(id, version);
-        prepareForWrite(config);
+        // Normalize only — see normalizeLegacyChunkStrategy: a copy of an existing
+        // document must not be refused just because the rules tightened after it was
+        // stored.
+        normalizeLegacyChunkStrategy(config);
         return restVersionInfo.create(config);
     }
 
