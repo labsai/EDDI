@@ -54,7 +54,21 @@ function useBreadcrumbs() {
     sync: t("nav.sync", "Sync"),
     gdpr: t("nav.gdpr", "GDPR"),
     wizard: t("wizard.title", "Agent Wizard"),
+    agentview: t("nav.agents"),
     workflowview: t("nav.packages"),
+    conversationview: t("nav.conversations"),
+  };
+
+  /**
+   * Detail pages live at /manage/<thing>view/:id, but there is no
+   * /manage/<thing>view route — only the list at /manage/<things>. Linking the
+   * intermediate crumb to the accumulated path therefore produced a dead link
+   * that fell through to the catch-all, so point it at the list instead.
+   */
+  const listRouteForSegment: Record<string, string> = {
+    agentview: "/manage/agents",
+    workflowview: "/manage/workflows",
+    conversationview: "/manage/conversations",
   };
 
   let currentPath = "/manage";
@@ -66,7 +80,7 @@ function useBreadcrumbs() {
       (segment.match(/^[a-f0-9]{24}$/)
         ? `${segment.substring(0, 8)}…`
         : segment.replace(/view$/, ""));
-    crumbs.push({ label, to: currentPath });
+    crumbs.push({ label, to: listRouteForSegment[segment] ?? currentPath });
   }
 
   return crumbs;

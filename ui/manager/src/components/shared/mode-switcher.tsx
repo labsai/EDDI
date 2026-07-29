@@ -20,7 +20,8 @@ const MODES: ModeOption[] = [
     key: "manager",
     icon: Settings2,
     path: "/manage",
-    prefValue: "manager",
+    // Must match the value the landing page accepts (see landing-page.tsx).
+    prefValue: "manage",
   },
   {
     key: "workforce",

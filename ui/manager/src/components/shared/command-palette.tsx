@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Command } from "cmdk";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { useAgentDescriptors } from "@/hooks/use-agents";
+import { parseResourceUri } from "@/lib/api/agents";
 import {
   LayoutDashboard,
   Bot,
@@ -181,7 +182,11 @@ export function CommandPalette() {
                     value={`agent ${agent.name} ${agent.description ?? ""}`}
                     onSelect={() =>
                       handleSelect(
-                        `/manage/agents/${encodeURIComponent(agent.resource)}`,
+                        // Agent detail lives at /manage/agentview/:id, and :id is
+                        // the trailing segment of the resource URI — not the URI
+                        // itself. Passing the encoded URI matched no route and
+                        // dropped the user on the catch-all.
+                        `/manage/agentview/${parseResourceUri(agent.resource).id}`,
                         agent.name,
                       )
                     }
