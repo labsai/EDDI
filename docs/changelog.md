@@ -55,7 +55,9 @@ Per the repo owner's decision, `DreamService` is now registered with `ScheduleFi
 
 ### Partial
 
-**F6** — the REST/pipeline half is done (a `ConnectionCallback` now sets cancelled on client disconnect, and cancellation is checked at more points). The in-`modules/llm` half — cancellation checks inside the tool loop and the cascade — is deferred, since that module is owned by another workstream.
+**F6** — the REST/pipeline half is done (client disconnect now sets cancelled, and cancellation is checked at more points). The in-`modules/llm` half — cancellation checks inside the tool loop and the cascade — is deferred, since that module is owned by another workstream.
+
+> Disconnect is detected by testing `SseEventSink.isClosed()` before and around each send — **not** by a `ConnectionCallback`, which RESTEasy Reactive does not invoke on this path, as `RestAgentEngineStreaming` documents at the call site. An earlier draft of this entry named `ConnectionCallback`: it described the approach that was tried, not the one that shipped.
 
 ### Verification
 

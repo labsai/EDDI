@@ -121,7 +121,20 @@ public class GracefulShutdownService {
         shuttingDown = true;
         LOGGER.info("Shutdown signalled — readiness is now DOWN and new conversation turns are rejected");
 
-        sleepQuietly(readinessGraceMillis);
+        // The poll loop below honours this return value; the grace sleep must too, or
+        // an interrupt gets acknowledged (the flag is restored) and then ignored — we
+        // would keep waiting after being told to stop, and the first poll would throw
+        // immediately anyway, landing in the "timed out" branch and misreporting why.
+        if (!sleepQuietly(readinessGraceMillis)) {
+            int remaining = countInFlight();
+            if (remaining == 0) {
+                LOGGER.info("Readiness grace interrupted, but nothing was in flight — shutdown drain completed");
+                return true;
+            }
+            LOGGER.warnf("Shutdown drain interrupted during the readiness grace window with %d conversation task(s) in flight — "
+                    + "not waiting further; crash recovery reconciles their state on the next boot", remaining);
+            return false;
+        }
 
         long deadline = System.nanoTime() + drainTimeoutMillis * 1_000_000L;
         int inFlight = countInFlight();
@@ -131,17 +144,27 @@ public class GracefulShutdownService {
         }
 
         LOGGER.infof("Draining %d in-flight conversation task(s), waiting up to %d ms", inFlight, drainTimeoutMillis);
+        boolean interrupted = false;
         while (inFlight > 0 && System.nanoTime() < deadline) {
             if (!sleepQuietly(pollIntervalMillis)) {
+                interrupted = true;
                 break;
             }
             inFlight = countInFlight();
         }
 
         if (inFlight > 0) {
-            LOGGER.warnf("Shutdown drain timed out after %d ms with %d conversation task(s) still in flight — "
-                    + "they will be abandoned; crash recovery reconciles their state on the next boot",
-                    drainTimeoutMillis, inFlight);
+            // Interrupt and timeout are different failures and must not read alike:
+            // "timed out after 30000 ms" for a drain cut short after 50 ms sends
+            // whoever reads that log hunting the wrong problem.
+            if (interrupted) {
+                LOGGER.warnf("Shutdown drain interrupted with %d conversation task(s) still in flight — "
+                        + "they will be abandoned; crash recovery reconciles their state on the next boot", inFlight);
+            } else {
+                LOGGER.warnf("Shutdown drain timed out after %d ms with %d conversation task(s) still in flight — "
+                        + "they will be abandoned; crash recovery reconciles their state on the next boot",
+                        drainTimeoutMillis, inFlight);
+            }
             return false;
         }
 
