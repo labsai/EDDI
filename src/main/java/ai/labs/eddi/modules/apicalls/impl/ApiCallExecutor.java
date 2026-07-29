@@ -215,8 +215,17 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // property instruction never sees a validation error. Passing the flag
                 // explicitly keeps the (unused) `runOnValidationError` semantics visible
                 // should validation ever be added.
-                prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, response != null ? response.getHttpCode() : 500,
-                        false);
+                //
+                // `response` is non-null here, and the `!= null` ternary that used to guard
+                // this call was removed rather than reinforced: the do-while assigns it
+                // unconditionally with no continue/break, executeAndMeasureRequest
+                // dereferences it before returning (so it cannot hand back null), and the
+                // loop condition itself reads response.getHttpCode(). Anything that fails
+                // earlier lands in the catch below instead of reaching this line. The dead
+                // branch was actively harmful: it was the sole reason static analysis
+                // inferred the variable nullable and reported the loop body as an NPE risk,
+                // and a fabricated 500 would have masked a real defect instead of surfacing it.
+                prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, response.getHttpCode(), false);
 
                 return result;
             }

@@ -369,6 +369,50 @@ class ConversationHistoryBuilderTest {
             assertTrue(messages.size() < 22, "Should not include all messages");
         }
 
+        /**
+         * When {@code anchorFirstSteps} met or exceeded the message count, every
+         * message became an anchor: {@code effectiveAnchor == size} made
+         * {@code lastIsAnchored} true, which both zeroed the current-turn reservation
+         * and disabled the anchor-trim loop (guarded on {@code !lastIsAnchored}).
+         * Nothing could then be dropped, and the windowing path — whose entire job is
+         * to stay under budget — returned a prompt well over it.
+         * <p>
+         * Reachable with any generous {@code anchorFirstSteps} while a conversation is
+         * still shorter than it, which is every conversation's opening turns.
+         */
+        @Test
+        @DisplayName("anchorFirstSteps larger than the history still trims to the budget")
+        void anchorLargerThanHistoryStillTrims() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 6; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message " + i + " with a good deal of padding text to consume the token budget quickly");
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // The budget must be one the history genuinely exceeds, or old and new code
+            // both return everything and the test proves nothing.
+            int fullHistoryTokens = builder.buildTokenAwareMessages(memory, null, null, Integer.MAX_VALUE, 0, true, estimator).stream()
+                    .mapToInt(estimator::estimateTokenCountInMessage).sum();
+            int budget = fullHistoryTokens / 3;
+
+            // anchorFirstSteps (50) far exceeds the 6 messages available.
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, "System", null, budget, 50, true, estimator);
+
+            assertTrue(messages.size() < 7, "every message was anchored and nothing could be trimmed — the window did not window");
+
+            int historyTokens = messages.stream().filter(m -> !(m instanceof SystemMessage)).mapToInt(estimator::estimateTokenCountInMessage).sum();
+            assertTrue(historyTokens <= budget, "returned an over-budget prompt: " + historyTokens + " tokens against a " + budget + " budget");
+
+            // The G13 guarantee must survive the fix: the turn being answered is still
+            // present.
+            assertInstanceOf(UserMessage.class, messages.getLast());
+            assertTrue(((UserMessage) messages.getLast()).singleText().contains("Message 5"), "the current turn must never be dropped");
+        }
+
         @Test
         @DisplayName("prompt replacement works in token-aware mode")
         void promptReplacement() {

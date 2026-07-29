@@ -103,7 +103,12 @@ public class ConversationProperties extends LinkedHashMap<String, Property> impl
             return;
         }
         Map<String, Object> propertyMap = new LinkedHashMap<>();
-        propertyMap.put(property.getName(), value);
+        // Same fallback as toMap(): Property is deserialized from stored configs and
+        // may legally carry a null name, and the map key is the name the caller used.
+        // Without this the two views of one property disagree — {properties.x} resolves
+        // through toMap() while the conversation output gets a null key for the same
+        // entry, which is both unusable to a client and inconsistent by construction.
+        propertyMap.put(property.getName() != null ? property.getName() : key, value);
         currentStep.addConversationOutputMap(KEY_PROPERTIES, propertyMap);
     }
 

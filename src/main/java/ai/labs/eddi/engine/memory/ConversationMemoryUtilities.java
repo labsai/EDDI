@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
@@ -143,7 +144,7 @@ public class ConversationMemoryUtilities {
             // different counts. Indexing steps by the OUTPUT index then threw
             // IndexOutOfBoundsException and failed the whole conversation load.
             LOGGER.warnf("Conversation '%s': %d conversation step(s) for %d conversation output(s) — "
-                    + "pairing by index and skipping the drift.", snapshot.getConversationId(), conversationSteps.size(),
+                    + "pairing by index and skipping the drift.", LogSanitizer.sanitize(snapshot.getConversationId()), conversationSteps.size(),
                     conversationOutputs.size());
         }
         for (int i = 0; i < conversationOutputs.size(); i++) {

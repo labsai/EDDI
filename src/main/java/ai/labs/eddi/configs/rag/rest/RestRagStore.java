@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -94,7 +95,7 @@ public class RestRagStore implements IRestRagStore {
 
         String normalized = ragConfiguration.normalizeLegacyChunkStrategy();
         if (normalized != null) {
-            LOGGER.warnf("Knowledge base '%s': %s", ragConfiguration.getName(), normalized);
+            LOGGER.warnf("Knowledge base '%s': %s", LogSanitizer.sanitize(ragConfiguration.getName()), LogSanitizer.sanitize(normalized));
         }
 
         try {
