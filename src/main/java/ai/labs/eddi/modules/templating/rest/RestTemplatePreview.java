@@ -97,8 +97,13 @@ public class RestTemplatePreview implements IRestTemplatePreview {
      * echoes back the flattened variable values, so a preview against a foreign
      * conversationId would otherwise dump that conversation's properties, context
      * and memory to the caller. A {@code ForbiddenException} from the guard is
-     * deliberately not caught here — it must surface as 403 rather than degrade
-     * into the "conversation not found" response, which would leak existence.
+     * deliberately not caught here: it must surface as a 403 rather than be
+     * degraded into the "conversation not found" response below, which would mask a
+     * genuine authorization failure and hide it from the operator. (Collapsing 403
+     * into 404 would in fact disclose <em>less</em> — it is distinguishing the two
+     * that reveals which conversations exist — but this endpoint is already
+     * restricted to admins and editors, so an honest authorization signal is worth
+     * more here than that marginal reduction.)
      */
     private Map<String, Object> loadConversationData(String conversationId) {
         conversationAccessGuard.requireConversationOwner(conversationId);

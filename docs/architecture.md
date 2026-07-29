@@ -896,7 +896,7 @@ EDDI's memory model extends beyond single conversations. The `IUserMemoryStore` 
 
 **How it integrates with the pipeline:**
 
-- At **conversation init**, visible user memories are loaded as `longTerm` properties and made available in all templates via `{{properties.key}}`
+- At **conversation init**, visible user memories are loaded as `longTerm` properties and made available in all templates via `{properties.key}`
 - During the pipeline, the LLM can autonomously store and recall facts using built-in memory tools (when enabled)
 - At **conversation teardown**, `longTerm` properties are persisted back to the user memory store
 - **Background consolidation** (the "Dream" service) performs scheduled maintenance: stale pruning, contradiction detection, and optional LLM-driven summarization

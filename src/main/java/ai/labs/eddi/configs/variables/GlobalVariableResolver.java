@@ -184,7 +184,7 @@ public class GlobalVariableResolver {
 
     /**
      * Get all global variables for the default tenant as a map suitable for
-     * injection into the Jinja2 template data model (the {@code {{vars.<key>}}}
+     * injection into the Qute template data model (the {@code {vars.<key>}}
      * namespace).
      *
      * @return a map of key → value (cast to Object for template compatibility)

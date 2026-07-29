@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.jboss.logging.Logger;
 
 /**
  * REST implementation for the audit ledger — delegates to {@link IAuditStore}.
@@ -59,23 +60,43 @@ public class RestAuditStore implements IRestAuditStore {
 
     @Override
     public AuditVerificationReport verifyConversation(String conversationId, int skip, int limit) {
-        List<AuditEntry> entries = auditStore.getEntries(conversationId, skip, clampLimit(limit));
-        return verify("conversation", conversationId, entries, true);
+        List<AuditEntry> entries = auditStore.getEntries(conversationId, clampSkip(skip), clampLimit(limit));
+        // Anchoring the run at sequence 0 is only sound when the window provably
+        // holds the WHOLE conversation. skip == 0 does NOT establish that: getEntries
+        // sorts by timestamp DESCENDING ("newest first"), so skip == 0 is the most
+        // recent page. Verifying the latest 10 entries of a 1000-entry conversation
+        // would otherwise report ~990 deleted. Compare against the stored count
+        // instead, which is independent of sort order and paging.
+        boolean wholeConversation = entries.size() == auditStore.countByConversation(conversationId);
+        return verify("conversation", conversationId, entries, true, wholeConversation);
     }
 
     @Override
     public AuditVerificationReport verifyAgent(String agentId, Integer agentVersion, int skip, int limit) {
-        List<AuditEntry> entries = auditStore.getEntriesByAgent(agentId, agentVersion, skip, clampLimit(limit));
+        List<AuditEntry> entries = auditStore.getEntriesByAgent(agentId, agentVersion, clampSkip(skip), clampLimit(limit));
         // An agent range spans conversations, so the sequences interleave and a
         // single ascending run is not expected — HMACs only.
-        return verify("agent", agentId, entries, false);
+        return verify("agent", agentId, entries, false, false);
     }
 
     private static int clampLimit(int limit) {
         return limit < 1 ? MAX_VERIFY_LIMIT : Math.min(limit, MAX_VERIFY_LIMIT);
     }
 
-    private AuditVerificationReport verify(String scope, String scopeId, List<AuditEntry> entries, boolean checkChain) {
+    /**
+     * {@code skip} arrives from a query parameter, so it can be negative. The
+     * backends disagree about what that means — MongoDB ignores a negative skip
+     * while PostgreSQL rejects {@code OFFSET -1} outright — so an unclamped value
+     * turns a bad request into a 500 on one backend and silently succeeds on the
+     * other. Clamping matches how {@link #clampLimit} already treats an
+     * out-of-range limit.
+     */
+    private static int clampSkip(int skip) {
+        return Math.max(skip, 0);
+    }
+
+    private AuditVerificationReport verify(String scope, String scopeId, List<AuditEntry> entries, boolean checkChain,
+                                           boolean expectRunFromOrigin) {
         boolean signingEnabled = auditLedgerService.isSigningEnabled();
         int valid = 0;
         int invalid = 0;
@@ -99,11 +120,28 @@ public class RestAuditStore implements IRestAuditStore {
 
         var missing = new ArrayList<Long>();
         var duplicates = new ArrayList<Long>();
-        ChainStatus chainStatus = checkChain ? checkChain(entries, missing, duplicates) : ChainStatus.NOT_APPLICABLE;
+        ChainStatus chainStatus = checkChain ? checkChain(entries, missing, duplicates, expectRunFromOrigin) : ChainStatus.NOT_APPLICABLE;
 
         return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, invalid, unsigned, chainStatus, missing, duplicates,
                 problems, Instant.now());
     }
+
+    private static final Logger LOGGER = Logger.getLogger(RestAuditStore.class);
+
+    /**
+     * First sequence number a conversation is assigned. {@code AuditLedgerService}
+     * seeds each conversation's counter from the stored entry count and hands out
+     * {@code getAndIncrement()}, so a conversation's first entry is 0.
+     */
+    private static final long SEQUENCE_ORIGIN = 0L;
+
+    /**
+     * Upper bound on the holes enumerated for one report. The chain is BROKEN the
+     * moment anything is missing, so the exhaustive list adds nothing beyond the
+     * first few — and without a bound a single tampered sequence near
+     * {@code Long.MAX_VALUE} would turn this into an unbounded loop.
+     */
+    private static final int MAX_REPORTED_MISSING = 1_000;
 
     /**
      * Check that the sequences present form a gap-free ascending run.
@@ -113,13 +151,24 @@ public class RestAuditStore implements IRestAuditStore {
      * inside the signed payload, so the surviving entries cannot be renumbered to
      * close the gap without invalidating their own HMACs.
      */
-    private static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> duplicates) {
-        List<Long> sequences = entries.stream().map(AuditEntry::sequence).filter(s -> s >= 0).sorted().toList();
-
-        if (sequences.isEmpty()) {
-            // Pre-sequencing rows, or a store that does not persist the field.
-            return entries.isEmpty() ? ChainStatus.INTACT : ChainStatus.UNAVAILABLE;
+    private static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> duplicates, boolean expectRunFromOrigin) {
+        if (entries.isEmpty()) {
+            return ChainStatus.INTACT;
         }
+
+        // A window that mixes sequenced and unsequenced rows cannot be judged at all.
+        // AuditLedgerService seeds a conversation's counter from countByConversation,
+        // which COUNTS THE LEGACY ROWS — so after an upgrade the first sequenced entry
+        // starts at N, not 0, and the N positions below it were never assigned to
+        // anything. Anchoring at the origin would report them as missing and accuse
+        // the deployment of deleting audit records it never had. Unsequenced rows also
+        // make a genuine deletion undetectable, so the honest answer for a mixed window
+        // is that the chain cannot be established.
+        if (entries.stream().anyMatch(e -> e.sequence() < 0)) {
+            return ChainStatus.UNAVAILABLE;
+        }
+
+        List<Long> sequences = entries.stream().map(AuditEntry::sequence).sorted().toList();
 
         Set<Long> seen = new HashSet<>();
         for (Long sequence : sequences) {
@@ -128,14 +177,36 @@ public class RestAuditStore implements IRestAuditStore {
             }
         }
 
-        long first = sequences.getFirst();
+        // Anchoring the expected run at the smallest sequence PRESENT would make a
+        // deletion at the very start invisible: drop sequence 0 and 1,2,3 is still a
+        // gap-free run. When the window starts at the conversation's beginning the
+        // run must therefore begin at SEQUENCE_ORIGIN, so a missing prefix is
+        // reported like any other hole. For a paginated window (skip > 0) the
+        // preceding entries were legitimately not fetched, so only continuity
+        // within the window can be judged.
+        long first = expectRunFromOrigin ? SEQUENCE_ORIGIN : sequences.getFirst();
         long last = sequences.stream().max(Comparator.naturalOrder()).orElse(first);
-        for (long expected = first; expected <= last; expected++) {
+        // A tampered or corrupt sequence can be arbitrarily large, and anchoring the
+        // run at the origin means `first` is 0 — so a single bogus row near
+        // Long.MAX_VALUE would make this walk effectively forever (and `expected++`
+        // would overflow at the top). Cap the enumeration: the chain is already
+        // known to be BROKEN once anything is missing, and listing the first N holes
+        // is all a report needs. Anything beyond that is noise the caller cannot act
+        // on individually.
+        for (long expected = first; expected <= last && missing.size() < MAX_REPORTED_MISSING; expected++) {
             if (!seen.contains(expected)) {
                 missing.add(expected);
             }
         }
+        if (missing.size() >= MAX_REPORTED_MISSING) {
+            LOGGER.warnf("Chain verification stopped after %d missing sequences; the range under inspection spans %d..%d",
+                    MAX_REPORTED_MISSING, first, last);
+        }
 
-        return missing.isEmpty() ? ChainStatus.INTACT : ChainStatus.BROKEN;
+        // Duplicates matter as much as gaps. Two entries claiming the same position
+        // make the chain ambiguous, which defeats the very property the sequence
+        // exists to provide: that a deletion or reordering is detectable. Reporting
+        // INTACT here would hand an auditor a false assurance.
+        return missing.isEmpty() && duplicates.isEmpty() ? ChainStatus.INTACT : ChainStatus.BROKEN;
     }
 }

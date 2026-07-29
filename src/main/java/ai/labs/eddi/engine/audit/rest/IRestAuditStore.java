@@ -95,8 +95,9 @@ public interface IRestAuditStore {
      */
     @GET
     @Path("/verify/{conversationId}")
-    AuditVerificationReport verifyConversation(@PathParam("conversationId") String conversationId, @QueryParam("skip")
-    @DefaultValue("0") int skip,
+    AuditVerificationReport verifyConversation(@PathParam("conversationId") String conversationId,
+                                               @QueryParam("skip")
+                                               @DefaultValue("0") int skip,
                                                @QueryParam("limit")
                                                @DefaultValue("1000") int limit);
 

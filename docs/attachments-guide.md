@@ -279,7 +279,7 @@ Use `contentTypeMatcher` to create different workflows based on attachment type:
 Attachments are available in templates via the memory namespace:
 
 ```
-Current step attachments: {{memory.current.attachments}}
+Current step attachments: {memory.current.attachments}
 ```
 
 This can be useful for logging, debugging, or constructing custom prompts that reference attachment metadata.
