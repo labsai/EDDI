@@ -13,9 +13,11 @@ import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.modules.llm.impl.PromptSnippetService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.quarkus.security.ForbiddenException;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.annotation.security.RolesAllowed;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -231,17 +233,25 @@ class RestTemplatePreviewTest {
             assertTrue(response.availableVariables().isEmpty());
         }
 
+        /**
+         * This used to assert that a store failure produced the same "conversation not
+         * found" response as a genuinely missing conversation — pinning behaviour that
+         * told an operator mid-outage to go looking for a conversation that was there
+         * all along. A store failure is now a server error, and the driver message
+         * stays in the log.
+         */
         @Test
-        void shouldReturnErrorWhenStoreThrowsResourceStoreException() throws Exception {
+        void shouldReportAStoreFailureAsAServerErrorRatherThanNotFound() throws Exception {
             when(conversationMemoryStore.loadConversationMemorySnapshot("bad-conv"))
                     .thenThrow(new IResourceStore.ResourceStoreException("DB error"));
 
-            TemplatePreviewResponse response = restTemplatePreview.previewTemplate(
-                    new TemplatePreviewRequest("template", "bad-conv"));
+            var thrown = assertThrows(InternalServerErrorException.class, () -> restTemplatePreview.previewTemplate(
+                    new TemplatePreviewRequest("template", "bad-conv")));
 
-            assertNull(response.resolved());
-            assertNotNull(response.error());
-            assertTrue(response.error().contains("bad-conv"));
+            assertFalse(thrown.getMessage().toLowerCase().contains("not found"), thrown.getMessage());
+            assertFalse(thrown.getMessage().contains("DB error"),
+                    "the driver message must not reach the client: " + thrown.getMessage());
+            assertTrue(thrown.getMessage().contains("correlationId"), thrown.getMessage());
         }
 
         @Test
