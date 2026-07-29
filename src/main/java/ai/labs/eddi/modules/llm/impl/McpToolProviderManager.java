@@ -263,7 +263,7 @@ public class McpToolProviderManager {
             // a live tools/list RPC per server per turn was pure overhead. Nothing
             // reaches the cache without having passed validation first, so this is
             // checked before the (potentially DNS-resolving) validation below.
-            CachedTools cached = toolCache.get(url);
+            CachedTools cached = toolCache.get(cacheKey(serverConfig));
             if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
                 LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
                 mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), cached.executors(), serverName);
@@ -319,7 +319,7 @@ public class McpToolProviderManager {
                     LOGGER.infof("Discovered %d tools from MCP server '%s'", serverSpecs.size(), sanitize(serverName));
                 }
 
-                toolCache.put(url, new CachedTools(List.copyOf(serverSpecs), Map.copyOf(serverExecutors),
+                toolCache.put(cacheKey(serverConfig), new CachedTools(List.copyOf(serverSpecs), Map.copyOf(serverExecutors),
                         System.currentTimeMillis()));
                 mergeServerTools(allSpecs, allExecutors, serverSpecs, serverExecutors, serverName);
 
@@ -528,6 +528,10 @@ public class McpToolProviderManager {
         // conversation exists. A caller reference is left alone — it is resolved per
         // request below.
         String apiKey = config.getApiKey();
+        // A bare {caller:token} — the natural Qute namespace form — is a reference the
+        // resolver never substitutes. Left to containsReference() it would look like a
+        // static key and be sent as literal text; this turns it into a clear error.
+        callerIdentityResolver.rejectUnsupportedReference(apiKey);
         boolean callerBound = CallerIdentityResolver.containsReference(apiKey);
         if (!isNullOrEmpty(apiKey) && !callerBound) {
             apiKey = globalVariableResolver.resolveValue(apiKey);
@@ -551,6 +555,25 @@ public class McpToolProviderManager {
     }
 
     /**
+     * Give a bare token the {@code Bearer} scheme, leaving an already-qualified
+     * value alone.
+     * <p>
+     * {@code McpServerConfig.apiKey} is documented as a key or token, and the
+     * static path has always prefixed {@code Bearer }. A caller-bound key must
+     * behave the same or {@code apiKey: "${caller:token}"} — the form the
+     * documentation implies — would send a raw token with no scheme and the server
+     * would reject it. An author who spells the scheme out (as apicall headers do)
+     * is not double-prefixed.
+     */
+    private static String withBearerPrefix(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        // A scheme is one token followed by a space; anything else is a bare secret.
+        return value.trim().matches("(?i)(bearer|basic|token|apikey)\\s.+") ? value : "Bearer " + value;
+    }
+
+    /**
      * Build the {@code Authorization} header for a single MCP request.
      * <p>
      * A static key behaves exactly as before. A {@code ${caller:...}} reference
@@ -560,28 +583,42 @@ public class McpToolProviderManager {
      * including the same-origin restriction and failing closed rather than sending
      * a placeholder.
      * <p>
-     * Two request kinds arrive here with no caller: the {@code initialize}
-     * handshake and {@code tools/list}, which langchain4j performs with a null
-     * invocation context while the client is being constructed. A caller-bound
-     * config cannot satisfy them, so they are sent unauthenticated and the server
-     * decides — which is correct, because discovery must not run with one user's
-     * credential and then be reused for everyone else's calls.
+     * Only a tool call may carry the caller. Discovery — the {@code initialize}
+     * handshake and {@code tools/list} — must not, even though it runs on a thread
+     * that <em>is</em> bound to a caller: the client is cached, so a session
+     * established with one user's token would be reused by everyone after them, and
+     * a tool list reflecting one user's permissions would be offered to the next.
+     * <p>
+     * langchain4j draws that line for us. {@code DefaultMcpClient.listTools()}
+     * delegates with a null invocation context, while {@code McpToolExecutor}
+     * always builds one — so {@link McpCallContext#invocationContext()} is the
+     * discriminator. The context itself is null on some transport-internal
+     * requests, which count as not-a-tool-call.
+     * <p>
+     * A caller-bound config therefore has nothing to offer discovery and sends it
+     * unauthenticated, letting the server decide.
      */
     private Map<String, String> authorizationHeader(String configuredKey, McpServerConfig config, boolean callerBound,
                                                     McpCallContext callContext) {
         if (!callerBound) {
-            return Map.of("Authorization", "Bearer " + configuredKey);
+            return Map.of("Authorization", withBearerPrefix(configuredKey));
+        }
+        if (callContext == null || callContext.invocationContext() == null) {
+            LOGGER.debugf("MCP discovery request to '%s' carries no caller by design — sending it unauthenticated",
+                    sanitize(config.getUrl()));
+            return Map.of();
         }
         if (callerIdentityContext.current() == null) {
-            // Discovery, a scheduled turn, or a retry that landed on an HTTP callback
-            // thread where the binding does not exist. Sending the placeholder text
-            // would be nonsense and sending nothing is honest; the MCP server refuses
-            // if it requires authentication.
-            LOGGER.debugf("No caller bound for MCP request to '%s' — sending it unauthenticated", sanitize(config.getUrl()));
+            // A scheduled turn, or a retry that landed on an HTTP callback thread where
+            // the binding does not exist. Sending the placeholder text would be
+            // nonsense and sending nothing is honest: the server refuses if it requires
+            // authentication, which is a visible failure rather than the wrong
+            // authority.
+            LOGGER.debugf("No caller bound for MCP tool call to '%s' — sending it unauthenticated", sanitize(config.getUrl()));
             return Map.of();
         }
         String resolved = callerIdentityResolver.resolveValue(configuredKey, URI.create(config.getUrl()));
-        return Map.of("Authorization", resolved);
+        return Map.of("Authorization", withBearerPrefix(resolved));
     }
 
     /**
@@ -594,9 +631,11 @@ public class McpToolProviderManager {
         if (url == null) {
             return;
         }
-        // The cached executors are bound to this client — drop them with it.
-        toolCache.remove(url);
         String prefix = url + "|";
+        // The cached executors hold a reference to the client, so they are keyed the
+        // same way and must be dropped with it — a bare toolCache.remove(url) would
+        // leave executors bound to a closed client behind.
+        toolCache.keySet().removeIf(key -> key.startsWith(prefix));
         for (var key : List.copyOf(clientCache.keySet())) {
             if (!key.startsWith(prefix)) {
                 continue;

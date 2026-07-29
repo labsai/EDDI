@@ -25,6 +25,7 @@ import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -948,6 +949,25 @@ class AgentOrchestratorTest {
         assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("agentstore/agents"));
         assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("  /agentstore/agents  "));
         assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("https://eddi.example:7070/agentstore/agents"));
+    }
+
+    @Test
+    @DisplayName("a value that merely begins \"http\" is not parsed as a URL")
+    void normalizeEndpointPath_doesNotMistakeANonUrlForAUrl() {
+        // The case that actually distinguishes the two implementations: a value
+        // beginning "http" that parses as an OPAQUE URI (scheme, then no slash).
+        // URI.getPath() is null for those, so the loose startsWith("http") test
+        // collapsed it to an empty string and the endpoint provenance vanished —
+        // taking the approval pattern's ability to match with it.
+        assertEquals("/httpfoo:bar", AgentOrchestrator.normalizeEndpointPath("httpfoo:bar"));
+
+        // These agree under either implementation — a relative URI keeps its path —
+        // but they are the shapes a config is actually likely to hold.
+        assertEquals("/httpcalls/agents", AgentOrchestrator.normalizeEndpointPath("httpcalls/agents"));
+        assertEquals("/httpstuff", AgentOrchestrator.normalizeEndpointPath("httpstuff"));
+
+        // A real absolute URL still contributes only its path, whatever its case.
+        assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("HTTPS://eddi.example/agentstore/agents"));
     }
 
     @Test

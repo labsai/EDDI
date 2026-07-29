@@ -63,7 +63,8 @@ public final class ToolApprovalPatterns {
             return Optional.of("pattern exceeds " + MAX_LENGTH + " characters");
         }
         if (!LEGAL_CHARS.matcher(pattern).matches()) {
-            return Optional.of("pattern '" + pattern + "' contains illegal characters — allowed: A-Za-z0-9_-.:* (tool names never contain spaces)");
+            return Optional.of("pattern '" + pattern + "' contains illegal characters — allowed: A-Za-z0-9_-.:* plus / { } for endpoint paths "
+                    + "(tool names never contain spaces)");
         }
         if (pattern.startsWith(":") || pattern.endsWith(":")) {
             return Optional.of("pattern '" + pattern

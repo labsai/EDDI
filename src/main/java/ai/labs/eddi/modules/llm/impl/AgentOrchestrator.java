@@ -2504,7 +2504,12 @@ class AgentOrchestrator {
      */
     static String normalizeEndpointPath(String rawPath) {
         String path = rawPath.trim();
-        if (path.startsWith("http")) {
+        // Only a real absolute URL, not merely a path that happens to begin "http".
+        // ApiCallExecutor tests startsWith("http"), which is loose enough that a
+        // relative path like "httpcalls/agents" would be parsed as a URI here — and an
+        // opaque one collapses to an empty path, losing the endpoint entirely.
+        String lower = path.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
             try {
                 String extracted = URI.create(path).getPath();
                 path = extracted != null ? extracted : "";

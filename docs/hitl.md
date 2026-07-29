@@ -264,8 +264,9 @@ Patterns are matched by `ToolApprovalPatterns` / `ToolApprovalGate`:
 - **Source-qualified or bare.** A pattern may carry a known source prefix (`mcp:read_*`, `http:*`) or match the bare tool name (`delete_account`). Each call is tested against `source:name` **first**, then the bare dispatch name — a tool with an unknown source still matches bare-name patterns (fail-safe).
 - **Endpoint-qualified** (`http` tools only). A pattern may also address *what a tool calls* rather than what it is named: `http.post:*` matches every POST, `http.post:/agentstore/agents` matches exactly one endpoint. This is the robust form for tools generated from an OpenAPI spec, whose names come from `operationId` or a slug and change when the spec does — `http.post:*` keeps gating every mutation even when a name changes or a new endpoint appears. The path is matched **as the httpcall config declares it**, normalised to a leading slash (an absolute URL contributes only its path).
 - **Known sources** (the only accepted prefixes): `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`. An unknown prefix is rejected at save time with a typo suggestion (Levenshtein ≤ 2). Only `http` may carry a method qualifier: it is the only source whose tools record an endpoint, so `mcp.post:` is rejected rather than saved as a pattern nothing could match.
-- **Case-sensitive.** Patterns match tool names exactly; `Delete_*` does not match `delete_account`.
-- Patterns may not start or end with `:`, and are capped at 256 characters. Allowed characters: `A-Za-z0-9_-.:*`.
+- **Allowed characters:** `A-Za-z0-9_-.:*` plus `/` `{` `}` for endpoint path templates. Braces are matched literally, not as regex quantifiers.
+- **Case-sensitive.** Patterns match tool names exactly; `Delete_*` does not match `delete_account`. An endpoint path is matched as the httpcall config declares it, so its case must match too; the method half is normalised to lower case.
+- Patterns may not start or end with `:`, and are capped at 256 characters.
 
 ### Precedence
 

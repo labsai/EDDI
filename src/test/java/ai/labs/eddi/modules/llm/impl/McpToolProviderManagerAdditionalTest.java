@@ -5,6 +5,11 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import dev.langchain4j.mcp.client.McpCallContext;
+import dev.langchain4j.invocation.InvocationContext;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.mcp.client.McpClient;
@@ -152,6 +157,111 @@ class McpToolProviderManagerAdditionalTest {
             method.setAccessible(true);
             assertSame(seeded, method.invoke(manager, config), "must resolve the client cached under the credential-aware key");
             assertEquals(1, manager.getActiveConnectionCount(), "no second client should have been constructed");
+        }
+    }
+
+    // ==================== caller identity on the wire ====================
+
+    @Nested
+    @DisplayName("only a tool call carries the caller")
+    class CallerIdentityHeaderTests {
+
+        private final CallerIdentityContext context = new CallerIdentityContext(null, null);
+
+        private McpServerConfig callerBoundServer() {
+            var config = new McpServerConfig();
+            config.setUrl("https://eddi.example:443/mcp");
+            config.setApiKey("Bearer ${caller:token}");
+            return config;
+        }
+
+        /** A context shaped like a tools/call, i.e. carrying an invocation context. */
+        private McpCallContext toolCall() {
+            return new McpCallContext(InvocationContext.builder().chatMemoryId(null).build(), null);
+        }
+
+        /** A context shaped like tools/list, i.e. no invocation context. */
+        private McpCallContext discovery() {
+            return new McpCallContext(null, null);
+        }
+
+        private Map<String, String> headersFor(McpServerConfig config, McpCallContext callContext) throws Exception {
+            var manager = new McpToolProviderManager(globalVariableResolver, secretResolver,
+                    new CallerIdentityResolver(context, true), context, false, 1024, 300000L);
+            var method = McpToolProviderManager.class.getDeclaredMethod("authorizationHeader", String.class, McpServerConfig.class,
+                    boolean.class, McpCallContext.class);
+            method.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var headers = (Map<String, String>) method.invoke(manager, config.getApiKey(), config, true, callContext);
+            return headers;
+        }
+
+        @AfterEach
+        void unbind() {
+            context.clear();
+        }
+
+        @Test
+        @DisplayName("a tool call sends the caller's token")
+        void toolCallCarriesTheCaller() throws Exception {
+            context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+            assertEquals("Bearer alice-token", headersFor(callerBoundServer(), toolCall()).get("Authorization"));
+        }
+
+        @Test
+        @DisplayName("discovery does not, even on a thread that is bound")
+        void discoveryNeverCarriesTheCaller() throws Exception {
+            // The client is cached: a session established with alice's token would be
+            // reused by everyone after her, and a tool list reflecting her permissions
+            // would be offered to the next user.
+            context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+
+            assertTrue(headersFor(callerBoundServer(), discovery()).isEmpty(), "tools/list must not be authenticated as alice");
+            assertTrue(headersFor(callerBoundServer(), null).isEmpty(), "a transport-internal request has no caller either");
+        }
+
+        @Test
+        @DisplayName("a bare token gets the Bearer scheme, like the static path")
+        void callerTokenIsGivenTheBearerScheme() throws Exception {
+            // apiKey is documented as a key/token and the static path prefixes
+            // "Bearer ". A caller-bound key must match, or apiKey: "${caller:token}"
+            // would send a raw token with no scheme and the server would reject it.
+            context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+            var config = new McpServerConfig();
+            config.setUrl("https://eddi.example:443/mcp");
+            config.setApiKey("${caller:token}");
+
+            assertEquals("Bearer alice-token", headersFor(config, toolCall()).get("Authorization"));
+        }
+
+        @Test
+        @DisplayName("an author who spells the scheme out is not double-prefixed")
+        void anExplicitSchemeIsLeftAlone() throws Exception {
+            context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+            assertEquals("Bearer alice-token", headersFor(callerBoundServer(), toolCall()).get("Authorization"));
+        }
+
+        @Test
+        @DisplayName("an unbound tool call is refused rather than sent as a placeholder")
+        void unboundToolCallSendsNothing() throws Exception {
+            assertTrue(headersFor(callerBoundServer(), toolCall()).isEmpty(), "must not ship the literal ${caller:token}");
+        }
+
+        @Test
+        @DisplayName("a static key is unaffected and reaches every request")
+        void staticKeyStillWorks() throws Exception {
+            var config = new McpServerConfig();
+            config.setUrl("https://eddi.example:443/mcp");
+            config.setApiKey("static-key");
+
+            var manager = new McpToolProviderManager(globalVariableResolver, secretResolver,
+                    new CallerIdentityResolver(context, true), context, false, 1024, 300000L);
+            var method = McpToolProviderManager.class.getDeclaredMethod("authorizationHeader", String.class, McpServerConfig.class,
+                    boolean.class, McpCallContext.class);
+            method.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var onDiscovery = (Map<String, String>) method.invoke(manager, "static-key", config, false, discovery());
+            assertEquals("Bearer static-key", onDiscovery.get("Authorization"), "discovery keeps the service credential");
         }
     }
 
