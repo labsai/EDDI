@@ -138,9 +138,24 @@ public class GroupConversationService implements IGroupConversationService {
 
     /**
      * How long an aborting orchestrator waits for cooperatively cancelled member
-     * turns to unwind before reclaiming their tasks. Cancellation releases the
-     * turns at their await points immediately, so this is only a safety bound for a
-     * turn that is between two await points.
+     * turns to unwind before reclaiming their tasks.
+     * <p>
+     * This is NOT merely a safety bound, which is what an earlier version of this
+     * comment claimed. Cancellation releases the turn promptly at
+     * {@code responseFuture.get(...)}, but that is not a member turn's only await
+     * point, and the others do not observe the token:
+     * <ul>
+     * <li>{@code tryResolveMemberToolPause} blocks on a {@code resumeFuture} that
+     * was never registered against the cancellation token;</li>
+     * <li>a {@code MemberType.GROUP} member is dispatched into a nested synchronous
+     * {@code discuss(...)} with no token at all, under its own {@code activeTokens}
+     * entry.</li>
+     * </ul>
+     * For a turn parked at either of those, this timeout is the mechanism rather
+     * than the backstop: the orchestrator reclaims the task once it expires while
+     * the child work carries on. Making those paths cancellation-aware is tracked
+     * separately — until then this is a bound that can genuinely be hit, not an
+     * unreachable guard.
      */
     private static final int MEMBER_TURN_CANCEL_DRAIN_SECONDS = 5;
 
@@ -2064,26 +2079,60 @@ public class GroupConversationService implements IGroupConversationService {
                             // document alone; the reset sweep reclaims the task.
                             break;
                         } catch (GroupDiscussionException e) {
-                            if (cancellation.isCancelled()) {
-                                break; // no writes after the orchestrator gave up on this wave
-                            }
-                            // Quota errors are non-retryable — abort all tasks immediately
+                            // Quota errors are non-retryable — abort all tasks immediately.
+                            // Checked before the cancellation guard so a quota breach is still
+                            // reported even when the wave is already unwinding.
                             if (e.getCause() instanceof QuotaExceededException) {
                                 errors.add(e);
                                 return; // exit the entire agent's CompletableFuture
                             }
-                            handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors, e);
+                            // The check AND the write go under the monitor, exactly like the
+                            // success path above.
+                            //
+                            // The tempting argument for reading the token unlocked is that
+                            // abortWave is cancel() THEN allOf(futures).get(...), so the reset
+                            // sweep cannot begin until every worker has returned. That argument
+                            // does NOT hold: the join is bounded by
+                            // MEMBER_TURN_CANCEL_DRAIN_SECONDS and proceeds to
+                            // resetStrandedInProgressTasks on timeout — and that timeout is
+                            // reachable, because a member parked in tryResolveMemberToolPause
+                            // or in a nested GROUP discuss() never observes the token (see
+                            // MEMBER_TURN_CANCEL_DRAIN_SECONDS). A late failure write can
+                            // therefore race the sweep, marking a task FAILED that the sweep
+                            // just reset and appending an error entry to a finished wave.
+                            // Only the monitor orders the two. Lock order: taskList -> transcript.
+                            boolean recorded;
+                            synchronized (taskList) {
+                                recorded = !cancellation.isCancelled();
+                                if (recorded) {
+                                    recordTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, errors, e);
+                                }
+                            }
+                            if (!recorded) {
+                                break; // no writes after the orchestrator gave up on this wave
+                            }
+                            // Outside the monitor: the listener is an SSE sink, and holding
+                            // taskList across a client write would stall sibling workers. The
+                            // success path emits its event outside the lock for the same reason.
+                            notifyTaskFailure(listener, member, e.getMessage(), phaseIdx, phase);
                             if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
                                 break;
                             }
                         } catch (IllegalStateException e) {
-                            if (cancellation.isCancelled()) {
-                                break; // see above
-                            }
                             // H5 fix: catch status transition errors (e.g., double completion)
                             LOGGER.warnf("Task state error for '%s': %s", task.subject(), e.getMessage());
-                            handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors,
-                                    new GroupDiscussionException(e.getMessage(), e));
+                            boolean recorded;
+                            synchronized (taskList) { // see the reasoning above
+                                recorded = !cancellation.isCancelled();
+                                if (recorded) {
+                                    recordTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, errors,
+                                            new GroupDiscussionException(e.getMessage(), e));
+                                }
+                            }
+                            if (!recorded) {
+                                break;
+                            }
+                            notifyTaskFailure(listener, member, e.getMessage(), phaseIdx, phase);
                         }
                     }
                 }), executorService);
@@ -2545,9 +2594,17 @@ public class GroupConversationService implements IGroupConversationService {
      * Marks the task as failed, adds an error transcript entry, emits SSE events,
      * and collects the error for potential ABORT propagation.
      */
-    private void handleTaskFailure(GroupConversation gc, TaskItem task, GroupMember member,
+    /**
+     * The document-mutating half of a task failure: fail the task and append the
+     * error entry. Callers MUST hold the task-list monitor so this write is ordered
+     * against {@code abortWave}'s reset sweep — see the call sites for why the
+     * cancel-then-join ordering does not suffice on its own.
+     * <p>
+     * Split from {@link #notifyTaskFailure} deliberately: the listener is an SSE
+     * sink and must not be invoked while holding the monitor.
+     */
+    private void recordTaskFailure(GroupConversation gc, TaskItem task, GroupMember member,
                                    String errorMessage, int phaseIdx, DiscussionPhase phase,
-                                   GroupDiscussionEventListener listener,
                                    List<GroupDiscussionException> errors, GroupDiscussionException ex) {
         try {
             gc.getTaskList().failTask(task.id(), errorMessage);
@@ -2564,14 +2621,19 @@ public class GroupConversationService implements IGroupConversationService {
                     Instant.now(), null, null));
         }
 
-        // Emit error event so SSE clients see the failure
+        errors.add(ex);
+    }
+
+    /**
+     * Emit the failure to SSE clients. Called OUTSIDE the task-list monitor.
+     */
+    private void notifyTaskFailure(GroupDiscussionEventListener listener, GroupMember member,
+                                   String errorMessage, int phaseIdx, DiscussionPhase phase) {
         if (listener != null) {
             listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
                     member.agentId(), member.displayName(),
                     "[ERROR] " + errorMessage, phaseIdx, phase.name()));
         }
-
-        errors.add(ex);
     }
 
     private GroupMember findMember(List<GroupMember> members, String agentId) {

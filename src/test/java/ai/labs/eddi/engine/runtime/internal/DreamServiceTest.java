@@ -804,6 +804,29 @@ class DreamServiceTest {
         assertFalse(DreamService.isTransientLlmFailure(new SelfCausedException("bad request")));
     }
 
+    /**
+     * A hostname that does not resolve is a WRONG ENDPOINT — the very example the
+     * classifier's own javadoc gives for "permanent". Classifying it as transient
+     * made every cycle skip its groups and report SUCCESS indefinitely: the
+     * schedule never retried, never dead-lettered, and the operator never learned
+     * the endpoint was misconfigured.
+     * <p>
+     * ConnectException is the contrast that makes the distinction meaningful: the
+     * host resolved and refused, which is what a restarting service looks like.
+     */
+    @Test
+    void isTransientLlmFailure_treatsAnUnresolvableHostAsPermanent() {
+        assertFalse(DreamService.isTransientLlmFailure(new java.net.UnknownHostException("api.wrong-endpoint.invalid")),
+                "an unresolvable host is a misconfiguration; reporting success forever hides it");
+        assertFalse(DreamService.isTransientLlmFailure(
+                new RuntimeException("llm call failed", new java.net.UnknownHostException("api.wrong-endpoint.invalid"))),
+                "also when wrapped — the classifier walks the cause chain");
+
+        // Still transient: resolved but refused, i.e. a service that may come back.
+        assertTrue(DreamService.isTransientLlmFailure(
+                new RuntimeException("llm call failed", new java.net.ConnectException("connection refused"))));
+    }
+
     /** Exception whose cause is itself — guards the cause-chain walk. */
     private static final class SelfCausedException extends RuntimeException {
         SelfCausedException(String message) {

@@ -638,13 +638,24 @@ public class DreamService {
      * permanent configuration fault (bad credentials, wrong endpoint, unknown
      * model). Only the latter should fail the schedule fire, because a FAILED fire
      * consumes the schedule's dead-letter budget.
+     * <p>
+     * {@link UnknownHostException} is deliberately NOT transient, though it sits
+     * beside the ones that are. A hostname that does not resolve is a wrong
+     * endpoint — the very example this javadoc gives for "permanent" — so treating
+     * it as transient made every cycle skip its groups and report SUCCESS forever:
+     * the schedule never retried, never dead-lettered, and the operator never
+     * learned the endpoint was misconfigured. The classifier contradicted its own
+     * stated contract.
+     * <p>
+     * {@link ConnectException} stays transient by contrast: the host resolved and
+     * refused, which is what a restarting or briefly unreachable service looks
+     * like.
      */
     static boolean isTransientLlmFailure(Throwable throwable) {
         Throwable current = throwable;
         // Bounded walk — a self-referential cause chain must not spin forever.
         for (int depth = 0; current != null && depth < 10; depth++, current = current.getCause()) {
-            if (current instanceof SocketTimeoutException || current instanceof TimeoutException
-                    || current instanceof ConnectException || current instanceof UnknownHostException) {
+            if (current instanceof SocketTimeoutException || current instanceof TimeoutException || current instanceof ConnectException) {
                 return true;
             }
             String message = current.getMessage();
