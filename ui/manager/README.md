@@ -60,7 +60,7 @@ npm run build        # Production build
 | UI         | React 19 + TypeScript 5 (strict)                |
 | Styling    | Tailwind CSS v4                                 |
 | State      | TanStack Query v5 + Zustand                     |
-| Routing    | React Router v6                                 |
+| Routing    | React Router v7                                 |
 | Editor     | Monaco                                          |
 | DnD        | @dnd-kit                                        |
 | Auth       | Keycloak 26 (optional)                          |

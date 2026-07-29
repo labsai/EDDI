@@ -59,6 +59,27 @@ We will credit you in the security advisory unless you prefer to remain anonymou
 - User configuration errors
 - Vulnerabilities in dependencies (report upstream; we monitor via [Renovate](renovate.json))
 
+### Known accepted `npm audit` findings
+
+> **`react-router` — GHSA-qwww-vcr4-c8h2 (high, "RSC Mode CSRF Bypass")**
+>
+> **Do not "fix" this by downgrading.** `npm audit fix --force` proposes
+> `react-router-dom@7.11.0`, which falls back inside the range of
+> GHSA-wrjc-x8rr-h8h6 (open redirect via backslash in `<Link>`/`useNavigate`,
+> leading to XSS) — an advisory that *does* apply to a client-side SPA.
+>
+> The RSC advisory requires React Server Components mode. This app is a pure
+> client SPA: `BrowserRouter` in `src/main.tsx`, declarative `<Routes>` only, no
+> `createBrowserRouter`, no data-router loaders or actions, no server runtime and
+> no `@react-router/*` server packages. The vulnerable code path is not reachable
+> here, so we stay on the newest release and accept this finding.
+>
+> Re-evaluate if this app ever adopts the data router or any server rendering.
+
+The remaining `npm audit` highs are dev-only toolchain transitives (`eslint`,
+`@vitest/coverage-v8` → `glob`/`minimatch`/`brace-expansion`) and are not shipped
+in the built asset.
+
 ## Security Best Practices for Contributors
 
 - Never commit API keys, tokens, or passwords

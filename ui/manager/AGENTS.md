@@ -27,7 +27,7 @@ All repos live under `c:\dev\git\`:
 | **Styling**        | Tailwind CSS v4 + CSS variables (black/gold)                           |
 | **State (server)** | TanStack Query v5                                                      |
 | **State (UI)**     | Zustand (chat/debug), `useState` / `useCallback` elsewhere             |
-| **Routing**        | React Router v6 (`react-router-dom` 6.x — NOT v7, do not use v7-only APIs) |
+| **Routing**        | React Router v7 (`react-router-dom` 7.x, declarative mode — no data router) |
 | **i18n**           | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
 | **Test (unit)**    | Vitest + React Testing Library + MSW                                   |
 | **Test (e2e)**     | Playwright                                                             |
