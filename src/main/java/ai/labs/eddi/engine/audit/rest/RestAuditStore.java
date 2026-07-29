@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.jboss.logging.Logger;
 
 /**
  * REST implementation for the audit ledger — delegates to {@link IAuditStore}.
@@ -114,7 +115,17 @@ public class RestAuditStore implements IRestAuditStore {
      * seeds each conversation's counter from the stored entry count and hands out
      * {@code getAndIncrement()}, so a conversation's first entry is 0.
      */
+    private static final Logger LOGGER = Logger.getLogger(RestAuditStore.class);
+
     private static final long SEQUENCE_ORIGIN = 0L;
+
+    /**
+     * Upper bound on the holes enumerated for one report. The chain is BROKEN the
+     * moment anything is missing, so the exhaustive list adds nothing beyond the
+     * first few — and without a bound a single tampered sequence near
+     * {@code Long.MAX_VALUE} would turn this into an unbounded loop.
+     */
+    private static final int MAX_REPORTED_MISSING = 1_000;
 
     /**
      * Check that the sequences present form a gap-free ascending run.
@@ -148,10 +159,21 @@ public class RestAuditStore implements IRestAuditStore {
         // within the window can be judged.
         long first = expectRunFromOrigin ? SEQUENCE_ORIGIN : sequences.getFirst();
         long last = sequences.stream().max(Comparator.naturalOrder()).orElse(first);
-        for (long expected = first; expected <= last; expected++) {
+        // A tampered or corrupt sequence can be arbitrarily large, and anchoring the
+        // run at the origin means `first` is 0 — so a single bogus row near
+        // Long.MAX_VALUE would make this walk effectively forever (and `expected++`
+        // would overflow at the top). Cap the enumeration: the chain is already
+        // known to be BROKEN once anything is missing, and listing the first N holes
+        // is all a report needs. Anything beyond that is noise the caller cannot act
+        // on individually.
+        for (long expected = first; expected <= last && missing.size() < MAX_REPORTED_MISSING; expected++) {
             if (!seen.contains(expected)) {
                 missing.add(expected);
             }
+        }
+        if (missing.size() >= MAX_REPORTED_MISSING) {
+            LOGGER.warnf("Chain verification stopped after %d missing sequences; the range under inspection spans %d..%d",
+                    MAX_REPORTED_MISSING, first, last);
         }
 
         // Duplicates matter as much as gaps. Two entries claiming the same position

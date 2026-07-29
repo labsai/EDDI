@@ -106,6 +106,11 @@ public class PostgresScheduleStore implements IScheduleStore {
         if (userId == null || userId.isBlank()) {
             return 0;
         }
+        // Every other public operation here initialises the schema first. An erasure
+        // must too: if it is the first call after a cold start the table (or the
+        // user_id column) may not exist yet, and an erasure that fails with a SQL
+        // error is a compliance incident, not a retry.
+        ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE user_id = ?")) {
             ps.setString(1, userId);
@@ -163,6 +168,32 @@ public class PostgresScheduleStore implements IScheduleStore {
         this.pollBatchSize = pollBatchSize > 0 ? pollBatchSize : 100;
     }
 
+    /**
+     * Adding {@code user_id} to an existing table leaves every schedule created
+     * before the upgrade with a NULL value, and nothing in the row can tell us who
+     * owned it — the identity was simply never recorded. Those rows therefore
+     * cannot be erased by user, and silently doing nothing about them is exactly
+     * the failure mode this column was added to end. There is no data to backfill
+     * from, so the honest response is to make the residue visible and let an
+     * operator decide (attribute them, or delete them wholesale).
+     */
+    private static void warnAboutUnattributableSchedules(Statement stmt) {
+        // Purely diagnostic: schema initialisation must never fail because a count
+        // could not be taken. (A real driver never returns a null ResultSet from
+        // executeQuery, but this runs on the startup path, so it stays defensive.)
+        try (var rs = stmt.executeQuery("SELECT COUNT(*) FROM eddi_schedules WHERE user_id IS NULL")) {
+            if (rs != null && rs.next()) {
+                long legacy = rs.getLong(1);
+                if (legacy > 0) {
+                    LOGGER.warnf("%d schedule(s) predate the user_id column and carry no owner. They cannot be removed by "
+                            + "a GDPR erasure request; attribute or delete them manually.", legacy);
+                }
+            }
+        } catch (SQLException | RuntimeException e) {
+            LOGGER.warnf("Could not count unattributable schedules: %s", e.getMessage());
+        }
+    }
+
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
@@ -170,6 +201,7 @@ public class PostgresScheduleStore implements IScheduleStore {
             stmt.execute(CREATE_SCHEDULES_TABLE);
             stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
             stmt.execute(ADD_USER_ID_COLUMN); // idempotent upgrade for pre-existing tables (GDPR erasure)
+            warnAboutUnattributableSchedules(stmt);
             stmt.execute(CREATE_FIRE_LOGS_TABLE);
             for (String idx : CREATE_INDEXES.split(";")) {
                 String trimmed = idx.trim();

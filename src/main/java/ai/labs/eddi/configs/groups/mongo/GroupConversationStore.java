@@ -17,6 +17,7 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -178,6 +179,13 @@ public class GroupConversationStore implements IGroupConversationStore {
     }
 
     /**
+     * Upper bound on erasure pages, purely so a pathological store cannot spin
+     * forever. At {@link IResourceStorage#MAX_RESULT_LIMIT} per pass this covers
+     * far more transcripts than any single user plausibly has.
+     */
+    private static final int MAX_ERASURE_PASSES = 1_000;
+
+    /**
      * Delete every group-conversation transcript belonging to {@code userId} (GDPR
      * Art. 17 erasure).
      * <p>
@@ -204,29 +212,61 @@ public class GroupConversationStore implements IGroupConversationStore {
         }
 
         long deleted = 0;
+        var processed = new HashSet<String>();
         try {
             var filter = new IResourceFilter.QueryFilters(
                     List.of(new IResourceFilter.QueryFilter("userId", "^" + escapeRegex(userId) + "$")));
-            var resourceIds = storage.findResources(
-                    new IResourceFilter.QueryFilters[]{filter}, "lastModified", 0, 0);
 
-            for (var resourceId : resourceIds) {
-                try {
-                    var resource = storage.read(resourceId.getId(), SINGLE_VERSION);
-                    if (resource == null) {
+            // findResources caps any page at MAX_RESULT_LIMIT (a limit < 1 does NOT
+            // mean "unbounded" — it resolves to the cap). A single call would erase
+            // at most 10,000 transcripts and then report success, leaving the rest of
+            // the user's words in the store; a partial erasure that claims to be
+            // complete is the worst outcome available here. Page until a pass finds
+            // nothing. Rows are removed as we go, so the next page is always fetched
+            // from offset 0.
+            for (int pass = 0; pass < MAX_ERASURE_PASSES; pass++) {
+                var resourceIds = storage.findResources(
+                        new IResourceFilter.QueryFilters[]{filter}, "lastModified", 0, IResourceStorage.MAX_RESULT_LIMIT);
+                if (resourceIds == null || resourceIds.isEmpty()) {
+                    return deleted;
+                }
+
+                long newThisPass = 0;
+                for (var resourceId : resourceIds) {
+                    if (!processed.add(resourceId.getId())) {
+                        // already handled in an earlier pass — the query is handing back
+                        // rows we have dealt with, so this page carries no new work
                         continue;
                     }
-                    if (!userId.equals(resource.getData().getUserId())) {
-                        // regex matched more than it should have — never delete on it
-                        LOGGER.warnf("Skipping group conversation %s during erasure: userId is not an exact match", resourceId.getId());
-                        continue;
+                    newThisPass++;
+                    try {
+                        var resource = storage.read(resourceId.getId(), SINGLE_VERSION);
+                        if (resource == null) {
+                            continue;
+                        }
+                        if (!userId.equals(resource.getData().getUserId())) {
+                            // regex matched more than it should have — never delete on it
+                            LOGGER.warnf("Skipping group conversation %s during erasure: userId is not an exact match", resourceId.getId());
+                            continue;
+                        }
+                        storage.removeAllPermanently(resourceId.getId());
+                        deleted++;
+                    } catch (IOException e) {
+                        LOGGER.warnf("Failed to erase group conversation %s: %s", resourceId.getId(), e.getMessage());
                     }
-                    storage.removeAllPermanently(resourceId.getId());
-                    deleted++;
-                } catch (IOException e) {
-                    LOGGER.warnf("Failed to erase group conversation %s: %s", resourceId.getId(), e.getMessage());
+                }
+
+                // No row in this page was new. Either every candidate was rejected by
+                // the exact-match re-check, or the store keeps returning rows we have
+                // already removed. Re-querying would return the same page forever, so
+                // stop rather than spin. Termination therefore does not depend on the
+                // delete actually taking effect.
+                if (newThisPass == 0) {
+                    LOGGER.warnf("Erasure made no progress with %d candidate(s) still matching; stopping", resourceIds.size());
+                    return deleted;
                 }
             }
+            LOGGER.warnf("Erasure stopped after %d passes; more group conversations may remain", MAX_ERASURE_PASSES);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to delete group conversations for user: " + e.getMessage(), e);
         }

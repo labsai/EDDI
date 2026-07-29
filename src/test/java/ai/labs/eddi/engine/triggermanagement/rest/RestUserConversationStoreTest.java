@@ -193,6 +193,9 @@ class RestUserConversationStoreTest {
                     () -> restStore.createUserConversation("intent1", "user1", uc));
 
             verify(userConversationStore, never()).createUserConversation(any());
+            // A regression that skipped the store but still wrote the cache would
+            // poison the (intent, user) key with a record for a different intent.
+            verify(cache, never()).put(anyString(), any());
         }
 
         @Test
