@@ -256,8 +256,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 batchRequest.setExecuteCallsSequentially(false);
             }
 
-            // main renamed the helper; the propagate() wrapper is this branch's — a
-            // batch is dispatched to another thread and would otherwise lose the caller.
+            // A batch runs on a thread of its own, where the caller binding does not
+            // follow, so ${caller:...} in these requests would fail closed without
+            // propagate() carrying it across.
             runtime.submitCallable(callerIdentityContext.propagate(() -> {
                 List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
                         batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
