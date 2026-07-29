@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.*;
@@ -33,6 +35,7 @@ class McpToolProviderManagerBranchTest {
     @Mock
     private SecretResolver secretResolver;
 
+    private final CallerIdentityContext callerIdentityContext = new CallerIdentityContext(null, null);
     private McpToolProviderManager manager;
 
     @BeforeEach
@@ -40,7 +43,8 @@ class McpToolProviderManagerBranchTest {
         openMocks(this);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        manager = new McpToolProviderManager(globalVariableResolver, secretResolver);
+        manager = new McpToolProviderManager(globalVariableResolver, secretResolver, new CallerIdentityResolver(callerIdentityContext, true),
+                callerIdentityContext);
     }
 
     // =========================================================

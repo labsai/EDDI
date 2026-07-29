@@ -5,11 +5,14 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.McpToolProvider;
 import dev.langchain4j.mcp.client.DefaultMcpClient;
+import dev.langchain4j.mcp.client.McpCallContext;
 import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
@@ -22,6 +25,10 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.net.URI;
+import java.security.NoSuchAlgorithmException;
+import java.security.MessageDigest;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
@@ -51,6 +58,8 @@ public class McpToolProviderManager {
 
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
+    private final CallerIdentityResolver callerIdentityResolver;
+    private final CallerIdentityContext callerIdentityContext;
 
     /**
      * Cache of active MCP clients, keyed by server URL. Connections are reused
@@ -67,9 +76,12 @@ public class McpToolProviderManager {
     private final Map<String, List<Instant>> failureTimestamps = new ConcurrentHashMap<>();
 
     @Inject
-    public McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+    public McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
+            CallerIdentityResolver callerIdentityResolver, CallerIdentityContext callerIdentityContext) {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
+        this.callerIdentityResolver = callerIdentityResolver;
+        this.callerIdentityContext = callerIdentityContext;
     }
 
     /**
@@ -151,11 +163,45 @@ public class McpToolProviderManager {
     }
 
     /**
+     * Cache key for a client: the URL plus a digest of the configured credential.
+     * <p>
+     * Keying on the URL alone let two agents configured against the same server
+     * with <em>different</em> credentials share whichever client was constructed
+     * first — the second silently borrowed the first's authorization. That is a
+     * privilege boundary, not a caching detail.
+     * <p>
+     * The credential is digested rather than used directly so a literal key never
+     * becomes a map key that could reach a heap dump or a log line. The value is
+     * taken <em>unresolved</em>, so two configs sharing one vault reference still
+     * share a client — the distinction that matters is which credential a config
+     * names, not what it resolves to.
+     * <p>
+     * This does not multiply clients per user: a {@code ${caller:...}} config
+     * yields one client whose header supplier reads the caller per request, so
+     * every user of that config shares it.
+     */
+    private static String cacheKey(McpServerConfig config) {
+        String apiKey = config.getApiKey();
+        if (isNullOrEmpty(apiKey)) {
+            return config.getUrl() + "|anonymous";
+        }
+        try {
+            var digest = MessageDigest.getInstance("SHA-256").digest(apiKey.getBytes(StandardCharsets.UTF_8));
+            return config.getUrl() + "|" + HexFormat.of().formatHex(digest, 0, 8);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is mandated by the platform; if it is truly absent, fall back to
+            // isolating by identity so distinct credentials still cannot share.
+            return config.getUrl() + "|" + System.identityHashCode(apiKey);
+        }
+    }
+
+    /**
      * Get or create an MCP client for the given server configuration. Clients are
-     * cached by URL for connection reuse.
+     * cached per URL and credential for connection reuse.
      */
     private McpClient getOrCreateClient(McpServerConfig config) {
-        return clientCache.computeIfAbsent(config.getUrl(), url -> {
+        return clientCache.computeIfAbsent(cacheKey(config), key -> {
+            String url = config.getUrl();
             LOGGER.infof("Creating MCP client for '%s' (%s transport)", sanitize(config.getName() != null ? config.getName() : url),
                     sanitize(config.getTransport()));
 
@@ -171,9 +217,12 @@ public class McpToolProviderManager {
      * Create the appropriate MCP transport based on configuration.
      */
     private McpTransport createTransport(McpServerConfig config, Duration timeout) {
-        // Resolve API key if it's a global variable or vault reference
+        // Resolve the static half once: a global variable or vault reference does not
+        // change between requests, and the handshake needs a credential before any
+        // conversation exists.
         String apiKey = config.getApiKey();
-        if (!isNullOrEmpty(apiKey)) {
+        boolean callerBound = CallerIdentityResolver.containsReference(apiKey);
+        if (!isNullOrEmpty(apiKey) && !callerBound) {
             apiKey = globalVariableResolver.resolveValue(apiKey);
             apiKey = secretResolver.resolveValue(apiKey);
         }
@@ -182,21 +231,71 @@ public class McpToolProviderManager {
         // HttpMcpTransport)
         var transportBuilder = StreamableHttpMcpTransport.builder().url(config.getUrl()).timeout(timeout);
 
-        // Add API key as Authorization header if configured
         if (!isNullOrEmpty(apiKey)) {
-            final String resolvedKey = apiKey;
-            transportBuilder.customHeaders(Map.of("Authorization", "Bearer " + resolvedKey));
+            final String configuredKey = apiKey;
+            // Per request, not per client. The Map overload would freeze this value
+            // into the cached client, which is why a ${caller:...} reference has to be
+            // resolved here: the client is shared across conversations, the caller is
+            // not. Applies to every POST the transport makes.
+            transportBuilder.customHeaders(callContext -> authorizationHeader(configuredKey, config, callerBound, callContext));
         }
 
         return transportBuilder.build();
     }
 
     /**
-     * Close a specific MCP client connection and remove it from the cache.
+     * Build the {@code Authorization} header for a single MCP request.
+     * <p>
+     * A static key behaves exactly as before. A {@code ${caller:...}} reference
+     * resolves against the caller bound to this thread, so the tool call reaches
+     * the MCP server as the person chatting rather than as a standing service
+     * principal — the same guarantee {@code ApiCallExecutor} gives apicall headers,
+     * including the same-origin restriction and failing closed rather than sending
+     * a placeholder.
+     * <p>
+     * Two request kinds arrive here with no caller: the {@code initialize}
+     * handshake and {@code tools/list}, which langchain4j performs with a null
+     * invocation context while the client is being constructed. A caller-bound
+     * config cannot satisfy them, so they are sent unauthenticated and the server
+     * decides — which is correct, because discovery must not run with one user's
+     * credential and then be reused for everyone else's calls.
+     */
+    private Map<String, String> authorizationHeader(String configuredKey, McpServerConfig config, boolean callerBound,
+                                                    McpCallContext callContext) {
+        if (!callerBound) {
+            return Map.of("Authorization", "Bearer " + configuredKey);
+        }
+        if (callerIdentityContext.current() == null) {
+            // Discovery, a scheduled turn, or a retry that landed on an HTTP callback
+            // thread where the binding does not exist. Sending the placeholder text
+            // would be nonsense and sending nothing is honest; the MCP server refuses
+            // if it requires authentication.
+            LOGGER.debugf("No caller bound for MCP request to '%s' — sending it unauthenticated", sanitize(config.getUrl()));
+            return Map.of();
+        }
+        String resolved = callerIdentityResolver.resolveValue(configuredKey, URI.create(config.getUrl()));
+        return Map.of("Authorization", resolved);
+    }
+
+    /**
+     * Close every cached client for a server URL and remove them from the cache.
+     * <p>
+     * A URL can now hold more than one client — one per configured credential — so
+     * this closes all of them. Callers identify a server, not a credential.
      */
     void closeClient(String url) {
-        McpClient client = clientCache.remove(url);
-        if (client != null) {
+        if (url == null) {
+            return;
+        }
+        String prefix = url + "|";
+        for (var key : List.copyOf(clientCache.keySet())) {
+            if (!key.startsWith(prefix)) {
+                continue;
+            }
+            McpClient client = clientCache.remove(key);
+            if (client == null) {
+                continue;
+            }
             try {
                 client.close();
                 LOGGER.infof("Closed MCP client for '%s'", sanitize(url));

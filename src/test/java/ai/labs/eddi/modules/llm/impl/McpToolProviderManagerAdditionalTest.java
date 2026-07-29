@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.mcp.client.McpClient;
@@ -34,13 +36,15 @@ class McpToolProviderManagerAdditionalTest {
     @Mock
     private SecretResolver secretResolver;
 
+    private final CallerIdentityContext callerIdentityContext = new CallerIdentityContext(null, null);
     private McpToolProviderManager manager;
     private AutoCloseable mocks;
 
     @BeforeEach
     void setUp() {
         mocks = openMocks(this);
-        manager = new McpToolProviderManager(globalVariableResolver, secretResolver);
+        manager = new McpToolProviderManager(globalVariableResolver, secretResolver, new CallerIdentityResolver(callerIdentityContext, true),
+                callerIdentityContext);
     }
 
     @AfterEach
@@ -69,7 +73,7 @@ class McpToolProviderManagerAdditionalTest {
         @DisplayName("closing cached client — removes and closes it")
         void closeCachedClient() throws Exception {
             McpClient mockClient = mock(McpClient.class);
-            getClientCache().put("http://test-server:8080", mockClient);
+            getClientCache().put("http://test-server:8080|anonymous", mockClient);
             assertEquals(1, manager.getActiveConnectionCount());
 
             manager.closeClient("http://test-server:8080");
@@ -83,10 +87,75 @@ class McpToolProviderManagerAdditionalTest {
         void closeClientWithException() throws Exception {
             McpClient mockClient = mock(McpClient.class);
             doThrow(new RuntimeException("close error")).when(mockClient).close();
-            getClientCache().put("http://error-server:8080", mockClient);
+            getClientCache().put("http://error-server:8080|anonymous", mockClient);
 
             assertDoesNotThrow(() -> manager.closeClient("http://error-server:8080"));
             assertEquals(0, manager.getActiveConnectionCount());
+        }
+    }
+
+    // ==================== credential isolation ====================
+
+    @Nested
+    @DisplayName("client cache keys on the credential, not just the URL")
+    class CredentialIsolationTests {
+
+        private McpServerConfig serverWith(String apiKey) {
+            var config = new McpServerConfig();
+            config.setUrl("http://shared-server:8080");
+            config.setApiKey(apiKey);
+            return config;
+        }
+
+        private String keyFor(McpServerConfig config) throws Exception {
+            var method = McpToolProviderManager.class.getDeclaredMethod("cacheKey", McpServerConfig.class);
+            method.setAccessible(true);
+            return (String) method.invoke(null, config);
+        }
+
+        @Test
+        @DisplayName("two credentials against one URL do not share a client")
+        void differentCredentialsGetDifferentKeys() throws Exception {
+            // Keying on the URL alone meant the second agent silently borrowed the
+            // first's authorization — a privilege boundary, not a caching detail.
+            assertNotEquals(keyFor(serverWith("key-alpha")), keyFor(serverWith("key-beta")));
+        }
+
+        @Test
+        @DisplayName("the same credential shares one client, so users do not multiply connections")
+        void sameCredentialSharesAKey() throws Exception {
+            assertEquals(keyFor(serverWith("${caller:token}")), keyFor(serverWith("${caller:token}")));
+        }
+
+        @Test
+        @DisplayName("the configured credential never appears in the key")
+        void keyDoesNotLeakTheCredential() throws Exception {
+            String key = keyFor(serverWith("super-secret-literal-key"));
+            assertFalse(key.contains("super-secret-literal-key"), "a heap dump or log line must not reveal it: " + key);
+            assertTrue(key.startsWith("http://shared-server:8080|"));
+        }
+
+        @Test
+        void aCredentiallessServerStillGetsAStableKey() throws Exception {
+            assertEquals(keyFor(serverWith(null)), keyFor(serverWith(null)));
+            assertTrue(keyFor(serverWith(null)).endsWith("|anonymous"));
+        }
+
+        @Test
+        @DisplayName("the lookup actually uses that key, not the bare URL")
+        void getOrCreateClientLooksUpByCredentialAwareKey() throws Exception {
+            // Asserting cacheKey() alone proves nothing about the call site: with the
+            // lookup reverted to config.getUrl() the key tests still pass. Seeding the
+            // credential-aware key and requiring a cache HIT is what pins it — a
+            // URL-keyed lookup misses and tries to build a real client instead.
+            var config = serverWith("key-alpha");
+            McpClient seeded = mock(McpClient.class);
+            getClientCache().put(keyFor(config), seeded);
+
+            var method = McpToolProviderManager.class.getDeclaredMethod("getOrCreateClient", McpServerConfig.class);
+            method.setAccessible(true);
+            assertSame(seeded, method.invoke(manager, config), "must resolve the client cached under the credential-aware key");
+            assertEquals(1, manager.getActiveConnectionCount(), "no second client should have been constructed");
         }
     }
 

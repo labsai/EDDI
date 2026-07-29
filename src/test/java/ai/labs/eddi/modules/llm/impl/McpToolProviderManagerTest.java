@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.*;
@@ -25,13 +27,15 @@ class McpToolProviderManagerTest {
     @Mock
     private SecretResolver secretResolver;
 
+    private final CallerIdentityContext callerIdentityContext = new CallerIdentityContext(null, null);
     private McpToolProviderManager manager;
     private AutoCloseable mocks;
 
     @BeforeEach
     void setUp() {
         mocks = openMocks(this);
-        manager = new McpToolProviderManager(globalVariableResolver, secretResolver);
+        manager = new McpToolProviderManager(globalVariableResolver, secretResolver, new CallerIdentityResolver(callerIdentityContext, true),
+                callerIdentityContext);
     }
 
     @AfterEach
