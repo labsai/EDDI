@@ -1494,7 +1494,7 @@
     "confirmDeleteTitle": "删除 Secret",
     "confirmDeleteMessage": "确定要永久删除 \"{{key}}\" 吗？此操作无法撤销。",
     "empty": "未找到 Secrets",
-    "emptyHint": "创建一个 Secret 或更改上方的命名空间筛选器。",
+    "emptyHint": "租户 \"{{tenant}}\" 尚未存储任何密钥。点击\"添加密钥\"以创建一个。",
     "vaultUp": "Vault 在线",
     "vaultDown": "Vault 离线",
     "descriptionLabel": "描述（可选）",
@@ -3046,7 +3046,8 @@
       "activeTools": "活动工具",
       "noLlm": "未配置 LLM",
       "noTools": "未配置"
-    }
+    },
+    "dashboard": "仪表板"
   },
   "operator": {
     "title": "平台操作员",

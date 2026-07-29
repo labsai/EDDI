@@ -3073,7 +3073,8 @@
       "activeTools": "Active Tools",
       "noLlm": "No LLM configured",
       "noTools": "None configured"
-    }
+    },
+    "dashboard": "Dashboard"
   },
   "operator": {
     "title": "Platform Operator",

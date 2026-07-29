@@ -1494,7 +1494,7 @@
     "confirmDeleteTitle": "Secret löschen",
     "confirmDeleteMessage": "Möchten Sie \"{{key}}\" wirklich dauerhaft löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
     "empty": "Keine Secrets gefunden",
-    "emptyHint": "Erstellen Sie ein Secret oder ändern Sie die Namespace-Filter oben.",
+    "emptyHint": "Für den Mandanten „{{tenant}}“ sind noch keine Secrets gespeichert. Klicken Sie auf „Secret hinzufügen“, um eines zu erstellen.",
     "vaultUp": "Vault online",
     "vaultDown": "Vault offline",
     "descriptionLabel": "Beschreibung (optional)",
@@ -3046,7 +3046,8 @@
       "activeTools": "Aktive Tools",
       "noLlm": "Kein LLM konfiguriert",
       "noTools": "Keine konfiguriert"
-    }
+    },
+    "dashboard": "Übersicht"
   },
   "operator": {
     "title": "Plattform-Operator",

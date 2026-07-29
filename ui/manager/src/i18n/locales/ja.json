@@ -1494,7 +1494,7 @@
     "confirmDeleteTitle": "Secret を削除",
     "confirmDeleteMessage": "\"{{key}}\" を完全に削除してもよろしいですか？この操作は元に戻せません。",
     "empty": "Secrets が見つかりません",
-    "emptyHint": "Secret を作成するか、上の Namespace フィルタを変更してください。",
+    "emptyHint": "テナント \"{{tenant}}\" にはまだシークレットが保存されていません。「シークレットを追加」をクリックして作成してください。",
     "vaultUp": "Vault オンライン",
     "vaultDown": "Vault オフライン",
     "descriptionLabel": "説明 (任意)",
@@ -3046,7 +3046,8 @@
       "activeTools": "アクティブツール",
       "noLlm": "LLM未設定",
       "noTools": "未設定"
-    }
+    },
+    "dashboard": "ダッシュボード"
   },
   "operator": {
     "title": "プラットフォームオペレーター",

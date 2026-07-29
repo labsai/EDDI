@@ -1494,7 +1494,7 @@
     "confirmDeleteTitle": "Secret हटाएं",
     "confirmDeleteMessage": "क्या आप वाकई \"{{key}}\" को स्थायी रूप से हटाना चाहते हैं? यह पूर्ववत नहीं किया जा सकता।",
     "empty": "कोई Secrets नहीं मिला",
-    "emptyHint": "Secret बनाएं या ऊपर Namespace फ़िल्टर बदलें।",
+    "emptyHint": "टेनेंट \"{{tenant}}\" के लिए अभी तक कोई सीक्रेट संग्रहीत नहीं है। एक बनाने के लिए \"सीक्रेट जोड़ें\" पर क्लिक करें।",
     "vaultUp": "Vault ऑनलाइन",
     "vaultDown": "Vault ऑफ़लाइन",
     "descriptionLabel": "विवरण (वैकल्पिक)",
@@ -3046,7 +3046,8 @@
       "activeTools": "सक्रिय उपकरण",
       "noLlm": "कोई LLM कॉन्फ़िगर नहीं",
       "noTools": "कोई कॉन्फ़िगर नहीं"
-    }
+    },
+    "dashboard": "डैशबोर्ड"
   },
   "operator": {
     "title": "प्लेटफ़ॉर्म ऑपरेटर",

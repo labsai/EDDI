@@ -1494,7 +1494,7 @@
     "confirmDeleteTitle": "Secret 삭제",
     "confirmDeleteMessage": "\"{{key}}\"을(를) 영구적으로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
     "empty": "Secret을 찾을 수 없습니다",
-    "emptyHint": "Secret을 생성하거나 위의 네임스페이스 필터를 변경하세요.",
+    "emptyHint": "테넌트 \"{{tenant}}\"에 저장된 시크릿이 아직 없습니다. \"시크릿 추가\"를 클릭하여 만드세요.",
     "vaultUp": "Vault 온라인",
     "vaultDown": "Vault 오프라인",
     "descriptionLabel": "설명 (선택)",
@@ -3046,7 +3046,8 @@
       "activeTools": "활성 도구",
       "noLlm": "LLM 미구성",
       "noTools": "미구성"
-    }
+    },
+    "dashboard": "대시보드"
   },
   "operator": {
     "title": "플랫폼 오퍼레이터",

@@ -233,7 +233,11 @@
     "emptyDescription": "استخدم المعالج لإنشاء وكيل مكوّن بالكامل في دقائق.",
     "chat": "محادثة",
     "deployAndChat": "نشر ومحادثة",
-    "openExternalChat": "فتح في تبويب جديد"
+    "openExternalChat": "فتح في تبويب جديد",
+    "count_zero": "{{count}} وكلاء",
+    "count_two": "{{count}} وكلاء",
+    "count_few": "{{count}} وكلاء",
+    "count_many": "{{count}} وكيل"
   },
   "agentDetail": {
     "a2aDescHint": "يظهر في بطاقة الوكيل — يساعد الوكلاء الآخرين على فهم ما يفعله هذا الوكيل",
@@ -527,7 +531,11 @@
     "confirmDelete": "هل أنت متأكد من حذف هذا Workflow؟",
     "count_one": "سير عمل واحد",
     "count_other": "{{count}} سير عمل",
-    "emptyDescription": "تحدد مسارات العمل خط أنابيب المعالجة لوكلائك."
+    "emptyDescription": "تحدد مسارات العمل خط أنابيب المعالجة لوكلائك.",
+    "count_zero": "{{count}} سير عمل",
+    "count_two": "{{count}} سير عمل",
+    "count_few": "{{count}} سير عمل",
+    "count_many": "{{count}} سير عمل"
   },
   "packageDetail": {
     "backToAgent": "العودة إلى الوكيل",
@@ -611,7 +619,11 @@
     "olderThanDays": "أقدم من (أيام)",
     "purgeAction": "تطهير",
     "confirmEndTitle": "إنهاء المحادثات المحددة؟",
-    "confirmPurgeTitle": "تطهير المحادثات المنتهية؟"
+    "confirmPurgeTitle": "تطهير المحادثات المنتهية؟",
+    "count_zero": "{{count}} محادثات",
+    "count_two": "{{count}} محادثات",
+    "count_few": "{{count}} محادثات",
+    "count_many": "{{count}} محادثة"
   },
   "conversationDetail": {
     "backToConversations": "العودة إلى المحادثات",
@@ -751,7 +763,15 @@
         "description": "تحليل المدخلات بمعالجة اللغة الطبيعية وتهيئة القواميس"
       }
     },
-    "emptyDescription": "أنشئ أول {{type}} لاستخدامه في مسارات العمل."
+    "emptyDescription": "أنشئ أول {{type}} لاستخدامه في مسارات العمل.",
+    "itemCount_zero": "{{count}} عناصر",
+    "itemCount_two": "{{count}} عناصر",
+    "itemCount_few": "{{count}} عناصر",
+    "itemCount_many": "{{count}} عنصر",
+    "count_zero": "{{count}} موارد",
+    "count_two": "{{count}} موارد",
+    "count_few": "{{count}} موارد",
+    "count_many": "{{count}} مورد"
   },
   "editor": {
     "cascadePartialFailure": "فشل {{count}} من التحديثات المتتالية",
@@ -1494,7 +1514,7 @@
     "confirmDeleteTitle": "حذف Secret",
     "confirmDeleteMessage": "هل أنت متأكد من الحذف الدائم لـ \"{{key}}\"؟ لا يمكن التراجع عن هذا.",
     "empty": "لم يتم العثور على Secrets",
-    "emptyHint": "أنشئ Secret أو غيّر فلاتر namespace أعلاه.",
+    "emptyHint": "لا توجد أسرار مخزّنة للمستأجر \"{{tenant}}\" بعد. انقر على \"إضافة سر\" لإنشاء واحد.",
     "vaultUp": "Vault متصل",
     "vaultDown": "Vault غير متصل",
     "descriptionLabel": "الوصف (اختياري)",
@@ -2331,7 +2351,11 @@
     "sendFollowup": "إرسال المتابعة",
     "closeConfirmTitle": "إغلاق هذه المناقشة؟",
     "closeConfirmButton": "إغلاق المناقشة",
-    "closeConfirmDismiss": "رجوع"
+    "closeConfirmDismiss": "رجوع",
+    "count_zero": "{{count}} مجموعات",
+    "count_two": "{{count}} مجموعات",
+    "count_few": "{{count}} مجموعات",
+    "count_many": "{{count}} مجموعة"
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -3046,7 +3070,8 @@
       "activeTools": "الأدوات النشطة",
       "noLlm": "لم يتم تكوين LLM",
       "noTools": "لم يتم التكوين"
-    }
+    },
+    "dashboard": "لوحة التحكم"
   },
   "operator": {
     "title": "مُشغّل المنصة",

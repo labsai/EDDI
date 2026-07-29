@@ -1494,7 +1494,7 @@
     "confirmDeleteTitle": "ลบ Secret",
     "confirmDeleteMessage": "คุณแน่ใจหรือไม่ว่าต้องการลบ \"{{key}}\" อย่างถาวร? ไม่สามารถยกเลิกได้",
     "empty": "ไม่พบ Secrets",
-    "emptyHint": "สร้าง Secret หรือเปลี่ยนตัวกรอง Namespace ด้านบน",
+    "emptyHint": "ยังไม่มีข้อมูลลับที่จัดเก็บสำหรับผู้เช่า \"{{tenant}}\" คลิก \"เพิ่มข้อมูลลับ\" เพื่อสร้าง",
     "vaultUp": "Vault ออนไลน์",
     "vaultDown": "Vault ออฟไลน์",
     "descriptionLabel": "คำอธิบาย (ไม่จำเป็น)",
@@ -3046,7 +3046,8 @@
       "activeTools": "เครื่องมือที่ใช้งาน",
       "noLlm": "ไม่ได้กำหนดค่า LLM",
       "noTools": "ไม่ได้กำหนดค่า"
-    }
+    },
+    "dashboard": "แดชบอร์ด"
   },
   "operator": {
     "title": "ผู้ดูแลแพลตฟอร์ม",

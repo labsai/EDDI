@@ -233,7 +233,8 @@
     "chat": "Chat",
     "deployAndChat": "Déployer & Discuter",
     "openExternalChat": "Ouvrir dans un nouvel onglet",
-    "emptyDescription": "Utilisez l'assistant pour créer un agent entièrement configuré en quelques minutes."
+    "emptyDescription": "Utilisez l'assistant pour créer un agent entièrement configuré en quelques minutes.",
+    "count_many": "{{count}} agents"
   },
   "agentDetail": {
     "a2aDescHint": "Affiché dans l'Agent Card — aide les autres agents à comprendre ce que fait cet agent",
@@ -527,7 +528,8 @@
     "confirmDelete": "Êtes-vous sûr de vouloir supprimer ce workflow ?",
     "count_one": "{{count}} workflow",
     "count_other": "{{count}} workflows",
-    "emptyDescription": "Les workflows définissent le pipeline de traitement de vos agents."
+    "emptyDescription": "Les workflows définissent le pipeline de traitement de vos agents.",
+    "count_many": "{{count}} workflows"
   },
   "packageDetail": {
     "backToAgent": "Retour à l'agent",
@@ -611,7 +613,8 @@
     "olderThanDays": "Plus ancien que (jours)",
     "purgeAction": "Purger",
     "confirmEndTitle": "Terminer les conversations sélectionnées ?",
-    "confirmPurgeTitle": "Purger les conversations terminées ?"
+    "confirmPurgeTitle": "Purger les conversations terminées ?",
+    "count_many": "{{count}} conversations"
   },
   "conversationDetail": {
     "backToConversations": "Retour aux conversations",
@@ -751,7 +754,9 @@
         "description": "Analyse NLP des entrées et configuration des dictionnaires"
       }
     },
-    "emptyDescription": "Créez votre premier(ère) {{type}} pour l'utiliser dans les workflows."
+    "emptyDescription": "Créez votre premier(ère) {{type}} pour l'utiliser dans les workflows.",
+    "itemCount_many": "{{count}} éléments",
+    "count_many": "{{count}} ressources"
   },
   "editor": {
     "cascadePartialFailure": "{{count}} mise(s) à jour en cascade échouée(s)",
@@ -1494,7 +1499,7 @@
     "confirmDeleteTitle": "Supprimer le secret",
     "confirmDeleteMessage": "Êtes-vous sûr de vouloir supprimer définitivement \"{{key}}\" ? Cette action est irréversible.",
     "empty": "Aucun secret trouvé",
-    "emptyHint": "Créez un secret ou modifiez les filtres de namespace ci-dessus.",
+    "emptyHint": "Aucun secret n'est encore enregistré pour le locataire « {{tenant}} ». Cliquez sur « Ajouter un secret » pour en créer un.",
     "vaultUp": "Vault en ligne",
     "vaultDown": "Vault hors ligne",
     "descriptionLabel": "Description (facultatif)",
@@ -2331,7 +2336,8 @@
     "sendFollowup": "Envoyer la relance",
     "closeConfirmTitle": "Clôturer cette discussion ?",
     "closeConfirmButton": "Clôturer la discussion",
-    "closeConfirmDismiss": "Retour"
+    "closeConfirmDismiss": "Retour",
+    "count_many": "{{count}} groupes"
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -3046,7 +3052,8 @@
       "activeTools": "Outils actifs",
       "noLlm": "Aucun LLM configuré",
       "noTools": "Aucun configuré"
-    }
+    },
+    "dashboard": "Tableau de bord"
   },
   "operator": {
     "title": "Opérateur de plateforme",
