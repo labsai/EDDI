@@ -62,7 +62,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("store new snapshot — generates ID and round-trips")
-        void storeNewSnapshot() {
+        void storeNewSnapshot() throws Exception {
             var snapshot = createSnapshot(null, "agent1", 1, "user1",
                     ConversationState.IN_PROGRESS);
 
@@ -79,7 +79,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("update existing snapshot — preserves ID, updates state")
-        void updateExistingSnapshot() {
+        void updateExistingSnapshot() throws Exception {
             var snapshot = createSnapshot(null, "agent1", 1, "user1",
                     ConversationState.IN_PROGRESS);
             String id = store.storeConversationMemorySnapshot(snapshot);
@@ -100,6 +100,45 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             assertNull(store.loadConversationMemorySnapshot(
                     "00000000-0000-0000-0000-000000000000"));
         }
+
+        /**
+         * G12 parity with {@code ConversationMemoryStore}: the UPDATE matches zero rows
+         * when the conversation was deleted mid-turn (GDPR erasure, retention sweep).
+         * Discarding the affected-row count made the turn's memory vanish while the
+         * caller still saw a normal completion — and because the override dropped the
+         * interface's {@code throws}, it could not even report it.
+         */
+        @Test
+        @DisplayName("G12 — a conversation deleted mid-turn surfaces as an error, not silent loss")
+        void concurrentDeleteDuringTurnIsReported() throws Exception {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.IN_PROGRESS);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+            snapshot.setId(id);
+            snapshot.setConversationId(id);
+
+            // the turn is still running when the row is erased
+            store.deleteConversationMemorySnapshot(id);
+
+            var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                    () -> store.storeConversationMemorySnapshot(snapshot));
+            assertTrue(thrown.getMessage().contains(id), thrown.getMessage());
+            assertTrue(thrown.getMessage().contains("NOT persisted"), thrown.getMessage());
+            // and it must NOT have been silently re-created behind the caller's back
+            assertNull(store.loadConversationMemorySnapshot(id));
+        }
+
+        @Test
+        @DisplayName("G12 — a matched update still returns the conversation id")
+        void matchedUpdateStillSucceeds() throws Exception {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.IN_PROGRESS);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+            snapshot.setId(id);
+            snapshot.setConversationId(id);
+            snapshot.setConversationState(ConversationState.READY);
+
+            assertEquals(id, store.storeConversationMemorySnapshot(snapshot));
+            assertEquals(ConversationState.READY, store.getConversationState(id));
+        }
     }
 
     // ─── State Management ───────────────────────────────────────
@@ -110,7 +149,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("setConversationState — updates state")
-        void setConversationState() {
+        void setConversationState() throws Exception {
             String id = store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
 
@@ -134,7 +173,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("deleteConversationMemorySnapshot — removes snapshot")
-        void deleteSnapshot() {
+        void deleteSnapshot() throws Exception {
             String id = store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
 
@@ -168,7 +207,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("getActiveConversationCount — counts non-ENDED only")
-        void activeCount() {
+        void activeCount() throws Exception {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "agent2", 1, "u1", ConversationState.IN_PROGRESS));
             String endedId = store.storeConversationMemorySnapshot(
@@ -180,7 +219,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("getEndedConversationIds — returns only ENDED")
-        void endedIds() {
+        void endedIds() throws Exception {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
             String endedId = store.storeConversationMemorySnapshot(
@@ -201,7 +240,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("create + read round-trip")
-        void createAndRead() {
+        void createAndRead() throws Exception {
             var snapshot = createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS);
             var resourceId = store.create(snapshot);
             assertNotNull(resourceId.getId());
@@ -212,7 +251,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("delete — removes via IResourceStore interface")
-        void deleteViaAdapter() {
+        void deleteViaAdapter() throws Exception {
             String id = store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
             store.delete(id, 0);
@@ -222,7 +261,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("deleteAllPermanently — removes via IResourceStore interface")
-        void deleteAllPermanently() {
+        void deleteAllPermanently() throws Exception {
             String id = store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
             store.deleteAllPermanently(id);
@@ -239,7 +278,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("getConversationIdsByUserId — finds by userId in JSONB")
-        void getByUserId() {
+        void getByUserId() throws Exception {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "target_user", ConversationState.IN_PROGRESS));
             store.storeConversationMemorySnapshot(
@@ -253,7 +292,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("deleteConversationsByUserId — removes all for user")
-        void deleteByUserId() {
+        void deleteByUserId() throws Exception {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "delete_me", ConversationState.IN_PROGRESS));
             store.storeConversationMemorySnapshot(

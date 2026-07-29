@@ -795,6 +795,20 @@ public class AgentConfiguration {
      * <strong>Note:</strong> Conversation forking (session branching) is planned
      * for a future release. When implemented, forking config fields will be added
      * here alongside the implementation.
+     * <p>
+     * <strong>Current wiring status — read before relying on these fields.</strong>
+     * A checkpoint captures the conversation PROPERTIES only; rolling one back does
+     * not restore steps, outputs or external side-effects (see
+     * {@code MemorySnapshotService#rollbackToCheckpoint}). Checkpointing itself is
+     * performed unconditionally by {@code AgentOrchestrator} before every tool call
+     * — {@link AutoSnapshot#isEnabled()} and {@link AutoSnapshot#getTriggerOn()}
+     * are NOT consulted yet, and {@link #getMaxCheckpointsPerConversation()} is
+     * honoured only where a caller passes it to
+     * {@code MemorySnapshotService#createCheckpoint(..., int)}. No production
+     * caller does: {@code AgentOrchestrator} uses the 3-arg overload because
+     * {@code SessionManagement} has no slot on {@code IConversationMemory} (unlike
+     * {@link UserMemoryConfig} and {@link MemoryPolicy}), so auto-checkpointing
+     * always prunes to the service default of 10.
      *
      * @since 6.0.0
      */
@@ -821,6 +835,10 @@ public class AgentConfiguration {
         /**
          * Auto-snapshot configuration. When enabled, checkpoints are created
          * automatically before state-changing tool executions.
+         * <p>
+         * <strong>Reserved — not yet honoured by the engine.</strong>
+         * Auto-checkpointing currently runs before every tool call regardless of these
+         * values; see the wiring note on {@link SessionManagement}.
          */
         public static class AutoSnapshot {
             private boolean enabled = false;

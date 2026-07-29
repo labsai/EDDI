@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
+import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +48,8 @@ class McpCallsTaskBranchCoverageTest {
     @Mock
     private PrePostUtils prePostUtils;
     @Mock
+    private ToolExecutionService toolExecutionService;
+    @Mock
     private IConversationMemory memory;
     @Mock
     private IConversationMemory.IWritableConversationStep currentStep;
@@ -54,10 +57,18 @@ class McpCallsTaskBranchCoverageTest {
     private McpCallsTask task;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         openMocks(this);
+
+        // Finding F14: rule-triggered MCP calls now run through ToolExecutionService
+        // (rate limiting / cost tracking). Pass the supplier straight through so these
+        // tests keep asserting on the raw tool result.
+        lenient().when(toolExecutionService.executeToolWrapped(anyString(), any(), any(), any(), any(),
+                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                .thenAnswer(inv -> ((java.util.function.Supplier<String>) inv.getArgument(4)).get());
         task = new McpCallsTask(resourceClientLibrary, memoryItemConverter, jsonSerialization,
-                mcpToolProviderManager, prePostUtils);
+                mcpToolProviderManager, prePostUtils, toolExecutionService);
         when(memory.getCurrentStep()).thenReturn(currentStep);
     }
 
@@ -494,6 +505,7 @@ class McpCallsTaskBranchCoverageTest {
         @DisplayName("valid URI returns config from resourceClientLibrary")
         void validUri() throws Exception {
             var expected = new McpCallsConfiguration();
+            expected.setMcpServerUrl("http://mcp.example.com/mcp");
             when(resourceClientLibrary.getResource(any(), eq(McpCallsConfiguration.class))).thenReturn(expected);
 
             Map<String, Object> config = new HashMap<>();

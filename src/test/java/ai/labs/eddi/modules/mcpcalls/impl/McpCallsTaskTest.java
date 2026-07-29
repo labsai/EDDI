@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
+import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -26,6 +27,7 @@ import org.mockito.Mock;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
 
@@ -42,15 +44,25 @@ class McpCallsTaskTest {
     private McpToolProviderManager mcpToolProviderManager;
     @Mock
     private PrePostUtils prePostUtils;
+    @Mock
+    private ToolExecutionService toolExecutionService;
 
     private McpCallsTask task;
     private AutoCloseable mocks;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         mocks = openMocks(this);
+        // Finding F14: rule-triggered MCP calls now run through ToolExecutionService
+        // (rate limiting / cost tracking). Pass the supplier straight through so these
+        // tests keep asserting on the raw tool result.
+        lenient().when(toolExecutionService.executeToolWrapped(anyString(), any(), any(), any(), any(),
+                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                .thenAnswer(inv -> ((java.util.function.Supplier<String>) inv.getArgument(4)).get());
+
         task = new McpCallsTask(resourceClientLibrary, memoryItemConverter, jsonSerialization,
-                mcpToolProviderManager, prePostUtils);
+                mcpToolProviderManager, prePostUtils, toolExecutionService);
     }
 
     @AfterEach
@@ -219,6 +231,7 @@ class McpCallsTaskTest {
         @DisplayName("valid URI — returns McpCallsConfiguration")
         void validUri() throws Exception {
             var config = new McpCallsConfiguration();
+            config.setMcpServerUrl("http://mcp.example.com/mcp");
             when(resourceClientLibrary.getResource(any(), eq(McpCallsConfiguration.class)))
                     .thenReturn(config);
 

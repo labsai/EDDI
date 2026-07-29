@@ -5,6 +5,72 @@
 
 ---
 
+## 🧠 fix(llm): code-review findings wave 2b — LLM core, persistent memory, migration, import/export (2026-07-28)
+
+**Repo:** EDDI (`fix/code-review-llm-memory`)
+
+Second half of wave 2, stacked on the access-control PR. Covers the LLM tool pipeline, the persistent-memory subsystem, the v5→v6 migrations, and import/export.
+
+### Pre-merge review pass — and corrections to the claims below (2026-07-29)
+
+This PR reached "approved" having been reviewed by **no CI run and no review bot**: CodeRabbit reported `Review skipped: reviews are disabled for this base branch` because it was stacked on a disabled base, and a base-branch retarget fires `edited`, which is not in the default `pull_request` trigger set — so no workflow ever ran on its head SHA. A dedicated review pass over the 91-file diff found **16 findings that survived adversarial verification**, plus 21 from completeness/test critics. All are fixed here except one, named below. **Several entries further down overstated what the code delivered; those claims are corrected here rather than quietly edited away.**
+
+Fixes with user-visible consequence:
+
+- **F14 broke the error path it was meant to unify.** Routing rule-triggered MCP calls through `ToolExecutionService.executeToolWrapped` was right in intent, but that wrapper *catches every exception and returns an error string*. `RetryConfiguration.executeWithRetry` therefore never saw a throwable: retry never retried, `continueOnError` became dead code, and a failed MCP call was **stored as a successful response**. The metering wrapper is kept; a real failure signal is restored on top of it.
+- **F18's delegation-depth guard was inert in production.** `delegationDepth` was injected only into the callee's `startConversation` context, landing on step 0; the follow-up `say` carried no context, so the turn that actually decides delegation read nothing. The claim below that F18 was "mutation-checked" was true of the *test*, not of production — the test drove the mechanism directly and never crossed the `say` boundary where the value was lost. The depth now propagates to the turn that reads it.
+- **F15 was fixed on two of three merge routes.** Within-server dedupe and the `AgentOrchestrator` source merge were handled; the cross-server merge in `discoverTools()` was still `addAll`/`putAll`, so two MCP servers advertising the same tool name still shadowed silently.
+- **G12 / G5 / G7 shipped on MongoDB only.** The "a turn is never silently discarded" guarantee, the `most_accessed` recency reservation, and global-entry ownership preservation were all absent from the PostgreSQL adapter — which answered benignly rather than signalling the gap. Now ported, with tests. **This is the third cross-backend gap in this stack** (after schedule `userId` and the audit `sequence`), which is no longer coincidence: each was a feature built against one backend, silently missing on the other, and invisible because the degraded answer looked like a normal one. The cross-backend conformance suite (D4/J3) is the real fix and remains outstanding.
+- **A summarizer could be handed another vendor's API key.** When `conversationSummary` names a different `llmProvider` than the parent task, the parent's resolved parameters — `apiKey`, `baseUrl` — were inherited and passed to that other vendor's client. Not theoretical: the pre-PR POJO defaults serialized `llmProvider: "anthropic"` into stored configs. Credential- and endpoint-bearing keys now stop at a provider boundary; vendor-neutral tuning keys still travel.
+- **Validation moved to the boundary where rejecting is safe.** `McpCallsTask.configure()` and RAG retrieval were both throwing/dropping on *stored* configs — a workflow-load failure and a silently empty knowledge base respectively. Both are now lenient on read (stored configs stay loadable, which is the one backward-compat contract that matters) and strict on write, in `RestMcpCallsStore` and `RestRagStore`.
+- Also fixed: the v6 rename migration aborting permanently when a v6 collection merely *exists* (EDDI creates those itself via `createIndex`) instead of skipping; the new pre-migration backup duplicating conversation transcripts outside the reach of GDPR erasure; export cleanup recursively deleting a shared `tmp/<agentId>` it could not prove it created, reaching `tmp/import/`; and the streaming no-partials fallback overwriting the `warning` key that `responseValidation` dispatches on, silently skipping `onTruncation`/`onContentFilter`.
+
+**Still not fixed — I5.** `AgentConfiguration.maxCheckpointsPerConversation` is *still ignored at runtime*. The test named `explicitRetentionIsHonoured` exercises an overload no production path calls, so it proved nothing; the misleading label is removed rather than left to imply coverage. Wiring the value through needs a session-scope slot on `IConversationMemory` and propagation via `IAgent`/`Agent`, which is a larger change than a review fix should smuggle in. **Any statement below that I5 is complete is wrong.**
+
+One critic finding was investigated and **rejected**: the `ExpressionFactory.setDomain` removal was claimed to change `and(...)`/`or(...)` parsing, but domain splitting happens only in `setExpressionName(String)` and the parser builds children through constructors that assign the name verbatim — the deleted line really was a no-op.
+
+### The tool pipeline had a second door
+
+- **F14** — `executeToolWrapped` is genuinely well-built and has one production call site, so every one of the seven tool sources routes through it. Except **`McpCallsTask` doesn't** — a behaviour-rule-triggered lifecycle task invoking the *same* external MCP tools, which resolved a `ToolExecutor` and called it directly. It also bypassed `ToolApprovalGate`, so **`hitlConfig.toolApprovals` gated LLM-initiated calls and not rule-initiated ones** — a human-approval gate with a hole in it.
+- **F18** — `converse_with_agent` had **no guardrails at all**: it never consulted `DynamicAgentConfig`, and `allowDelegation` was never checked anywhere. Agent A could call B, which calls A — and with no `conversationId` a *fresh* conversation starts, so the busy-guard never breaks the cycle. Prompt injection in a user message was sufficient to start it. Now enforces `allowDelegation`, a target allowlist, and a delegation-depth counter propagated through conversation context (reusing the mechanism groups already use for `groupDepth`).
+- **F17** — `maxCreatedAgentsPerDiscussion` was enforced **per turn, not per discussion**, because `sharedCreatedIds` was created fresh in every `buildToolList` call. A 5-member × 3-phase discussion with the default cap of 5 permitted **up to 75 agents deployed to production**.
+- **F15/F16** — Remote MCP tools silently **shadowed built-in tools** (specs accumulated in a `List`, executors in a `Map`, so duplicates reached the model and last-write-won), and their **descriptions entered the prompt verbatim** with no length cap or sanitisation — whitelisting operates on names, so a whitelisted tool whose description changes was ungoverned.
+- **A10** — The MCP client did **no URL validation at all**, unlike its A2A sibling, while a discovery endpoint echoed the response body — a full SSRF read primitive.
+
+### Two real bugs found by the tests, not by the review
+
+The review's F12 fix (cache the workflow traversal that runs 3–4× per LLM task per turn) introduced two defects that only surfaced when `WorkflowTraversalTest` started returning 0 instead of 1:
+
+1. **The cache memoized failure-derived results.** A traversal whose workflow read threw still cached its empty result for the full TTL, and replayed it to the other traversals of the same turn — an agent silently losing its httpcalls/mcpcalls/RAG configuration with nothing in the logs but one WARN. Now only complete traversals are cached.
+2. **The cache key omitted the target class** while the value was cast with an unchecked `(List<StepConfig<T>>)`. Justified by a comment asserting a 1:1 mapping that nothing enforces — any future caller asking for the same step type with a different class would get another caller's entry and a `ClassCastException` from a cache hit with no connection to the calling code.
+
+This is why the triage pass asked "stale test, bad fixture, or **real bug**?" for every failure rather than adjusting tests until green.
+
+### F13 was fixed but unreachable
+
+The wave-2 agent added `inheritedParameters` overloads to `SummarizationService` and tested them directly — but **no caller in `src/main` passed them**. `ConversationSummarizer` still called the 4-arg overload, so the rolling summary still could not authenticate and still silently never materialised. Threading the parent task's resolved parameters through `LlmTask → ConversationSummarizer → SummarizationService` is what actually closes it; both hops now have tests that fail if the parameters are dropped.
+
+`DreamService` remains on the un-inherited path — it is a background job with no parent task, so it needs a credential source of its own. That is part of wiring Dream up (finding I1), scheduled for wave 3.
+
+### Memory & properties
+
+- **G2** — `scope: "secret"` **failed open to plaintext**. On vault failure the method returned the plaintext *before* the scrub block, persisting the secret twice: as a conversation property *and* as raw `input:initial` data. Vault-disabled is the **default** (`eddi.vault.master-key` ships empty), so this was the common path. Now fails closed, scrubbing first.
+- **G1** — User-memory search and delete **crossed agent boundaries**: `getVisibleEntries` builds a proper self/group/global filter, but `filterEntries` and `getByKey` filter on `userId` alone — and the tool path used that unscoped pair.
+- **G13** — Token-aware windowing could emit a prompt with **no user message at all**: the backward fill breaks on the first message that doesn't fit, and if the anchors alone exceed the budget the code only warned. The model then answered with no idea what was asked. The final user message is now reserved first; anchors get trimmed instead.
+- **G12** — A turn could be **silently lost**: `replaceOne` with no upsert whose `UpdateResult` was discarded, so a conversation deleted mid-turn by erasure or a retention sweep discarded the turn while the caller got a normal response.
+- **G5/G6/G7** — `most_accessed` recall did an N+1 write *inside* an open read cursor and was self-reinforcing (only already-top-N entries got incremented, so a new entry could never climb in); `storePropertiesPermanently` refreshed `updatedAt` on every longTerm property every turn, so `most_recent` degenerated to "everything is recent" and `deleteOlderThan` never expired anything for an active user; and re-upserting a recalled entry **silently flipped its owner** to the reading agent.
+- **G9/G10/G11** — `ConversationProperties` broke the `Map` contract (`clear()`/`remove()` left the template map stale, so a checkpoint rollback left post-checkpoint properties visible); `scope: "step"` was persisted despite the docs; one malformed field failed the entire conversation load.
+
+### Migration & import/export
+
+- **B12** — Migration **irrecoverably erased typed BSON values**: it deleted the legacy `value` field unconditionally but only wrote a replacement for String/Map/Integer/Float, dropping doubles, longs, booleans and arrays with no error.
+- **B13** — The template migrator rewrote **any** `{...+...}` sequence, corrupting JSON bodies and arithmetic that merely sat in a document containing Thymeleaf syntax.
+- **B14** — The rename migration **skipped when the v6 collection already existed** and still marked itself complete, abandoning the v5 data.
+- **D11/D12** — Import had no rollback (any failure mid-way left every already-created resource orphaned), and neither import nor export ever deleted their temp directories — `ZipResourceSource` is `AutoCloseable` and its `close()` does the cleanup, but two call sites constructed it outside try-with-resources.
+
+### Verification
+
+Full unit suite: 12,384 tests, **0 non-environmental failures**. G2 and G12 mutation-checked, plus a second sharper mutation for G2 that removes only the input-scrub call — both halves are independently covered. F13's new wiring is mutation-checked at the `LlmTask` hop.
 ## 🧵 fix(security): carry caller identity across the cascade and group dispatches (2026-07-28)
 
 **Repo:** EDDI (`feat/caller-identity-passthrough`)

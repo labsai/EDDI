@@ -55,8 +55,6 @@ public class ExpressionFactory implements IExpressionFactory {
                         exp = new Expression(exp.getExpressionName(), exp.getSubExpressions());
                     }
                 }
-
-                exp.setDomain(exp.getDomain());
             }
         } catch (CloneNotSupportedException e) {
             log.error(e.getLocalizedMessage(), e);

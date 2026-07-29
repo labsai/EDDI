@@ -8,11 +8,14 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
+ * Outcome of evaluating a {@link RuleSet}. {@code RulesEvaluator} places every
+ * evaluated rule into exactly one of the two lists below — there is no third
+ * "dropped success" category.
+ *
  * @author ginccc
  */
 public class RuleSetResult {
     private List<Rule> successRules = new LinkedList<>();
-    private List<Rule> droppedSuccessRules = new LinkedList<>();
     private List<Rule> failRules = new LinkedList<>();
 
     public RuleSetResult() {
@@ -26,14 +29,6 @@ public class RuleSetResult {
         this.successRules = successRules;
     }
 
-    public List<Rule> getDroppedSuccessRules() {
-        return droppedSuccessRules;
-    }
-
-    public void setDroppedSuccessRules(List<Rule> droppedSuccessRules) {
-        this.droppedSuccessRules = droppedSuccessRules;
-    }
-
     public List<Rule> getFailRules() {
         return failRules;
     }
@@ -44,6 +39,6 @@ public class RuleSetResult {
 
     @Override
     public String toString() {
-        return "RuleSetResult(" + "successRules=" + successRules + ", droppedSuccessRules=" + droppedSuccessRules + ", failRules=" + failRules + ")";
+        return "RuleSetResult(" + "successRules=" + successRules + ", failRules=" + failRules + ")";
     }
 }

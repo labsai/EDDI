@@ -340,8 +340,10 @@ class LlmConfigurationTest {
         void defaults() {
             var cfg = new ConversationSummaryConfig();
             assertFalse(cfg.isEnabled());
-            assertEquals("anthropic", cfg.getLlmProvider());
-            assertEquals("claude-sonnet-4-6", cfg.getLlmModel());
+            // Finding F13: no hardcoded vendor default — blank means "inherit the
+            // parent LLM task".
+            assertNull(cfg.getLlmProvider());
+            assertNull(cfg.getLlmModel());
             assertEquals(800, cfg.getMaxSummaryTokens());
             assertTrue(cfg.isExcludePropertiesFromSummary());
             assertEquals(5, cfg.getRecentWindowSteps());
@@ -408,30 +410,30 @@ class LlmConfigurationTest {
         }
 
         @Test
-        @DisplayName("validate() resets null llmProvider to anthropic")
+        @DisplayName("F13: validate() leaves a null llmProvider unset so the parent task is inherited")
         void validate_nullProvider() {
             var cfg = new ConversationSummaryConfig();
             cfg.setLlmProvider(null);
             cfg.validate();
-            assertEquals("anthropic", cfg.getLlmProvider());
+            assertNull(cfg.getLlmProvider());
         }
 
         @Test
-        @DisplayName("validate() resets blank llmProvider to anthropic")
+        @DisplayName("F13: validate() leaves a blank llmProvider blank instead of picking a vendor")
         void validate_blankProvider() {
             var cfg = new ConversationSummaryConfig();
             cfg.setLlmProvider("  ");
             cfg.validate();
-            assertEquals("anthropic", cfg.getLlmProvider());
+            assertEquals("  ", cfg.getLlmProvider());
         }
 
         @Test
-        @DisplayName("validate() resets null llmModel to default")
+        @DisplayName("F13: validate() leaves a null llmModel unset so the parent task is inherited")
         void validate_nullModel() {
             var cfg = new ConversationSummaryConfig();
             cfg.setLlmModel(null);
             cfg.validate();
-            assertEquals("claude-sonnet-4-6", cfg.getLlmModel());
+            assertNull(cfg.getLlmModel());
         }
 
         @Test

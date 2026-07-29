@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -133,6 +134,24 @@ public class RagContextProvider {
                 minScore = ref.getMinScore() != null ? ref.getMinScore() : ragConfig.getMinScore();
             }
 
+            // Finding I3: chunkStrategy was accepted and never read — ingestion always
+            // splits recursively. Surface an unimplemented value as a warning plus a
+            // trace entry, but never drop the knowledge base: chunkStrategy is an
+            // ingestion-time setting, the documents are already embedded, and they
+            // stay retrievable. Rejection belongs at the create/update boundary
+            // (RestRagStore), not on the retrieval hot path — failing here would mean
+            // a knowledge base that answered fine yesterday silently contributes
+            // nothing today.
+            String unsupportedSettings = ragConfig.findUnsupportedSettings();
+            if (unsupportedSettings != null) {
+                LOGGER.warnf("Knowledge base '%s': %s Retrieval continues unaffected.", LogSanitizer.sanitize(kbName),
+                        LogSanitizer.sanitize(unsupportedSettings));
+                Map<String, Object> warningTrace = new HashMap<>();
+                warningTrace.put("kb", kbName);
+                warningTrace.put("warning", unsupportedSettings);
+                traceEntries.add(warningTrace);
+            }
+
             try {
                 // Step 4: Build EmbeddingModel + EmbeddingStore + ContentRetriever
                 EmbeddingModel embeddingModel = embeddingModelFactory.getOrCreate(ragConfig);
@@ -178,8 +197,12 @@ public class RagContextProvider {
             return null;
         }
 
-        // Step 7: Format context
-        String formattedContext = formatRagContext(allResults);
+        // Step 7: Format context, bounded by the task's maxRagContextChars.
+        // Finding F7: without this, every chunk from every matched knowledge base was
+        // concatenated verbatim into the system prompt, which maxContextTokens
+        // explicitly does not cover — with enableWorkflowRag across N knowledge bases
+        // the prompt grew until the provider rejected the request.
+        String formattedContext = formatRagContext(allResults, resolveMaxChars(task));
 
         // Store formatted context in memory for audit
         var ragContextData = dataFactory.createData("rag:context:" + taskId, formattedContext);
@@ -189,23 +212,53 @@ public class RagContextProvider {
     }
 
     /**
-     * Formats retrieval results into a structured context string for the LLM.
+     * Resolve the character cap for the assembled RAG block. {@code null},
+     * {@code -1} or {@code 0} mean "unbounded" (the pre-F7 behavior).
      */
-    private String formatRagContext(List<RetrievalResult> results) {
+    static int resolveMaxChars(LlmConfiguration.Task task) {
+        Integer configured = task != null ? task.getMaxRagContextChars() : null;
+        return configured != null && configured > 0 ? configured : -1;
+    }
+
+    /**
+     * Formats retrieval results into a structured context string for the LLM,
+     * stopping once {@code maxChars} is reached.
+     *
+     * @param maxChars
+     *            character ceiling for the whole block; {@code -1} = unbounded
+     */
+    static String formatRagContext(List<RetrievalResult> results, int maxChars) {
         StringBuilder sb = new StringBuilder();
         String currentKb = null;
+        int omitted = 0;
 
         for (RetrievalResult result : results) {
+            var chunk = new StringBuilder();
             if (!result.kbName().equals(currentKb)) {
                 if (currentKb != null) {
-                    sb.append("\n");
+                    chunk.append("\n");
                 }
-                sb.append("### Source: ").append(result.kbName()).append("\n\n");
-                currentKb = result.kbName();
+                chunk.append("### Source: ").append(result.kbName()).append("\n\n");
             }
-            sb.append(result.content().textSegment() != null && result.content().textSegment().text() != null
+            chunk.append(result.content().textSegment() != null && result.content().textSegment().text() != null
                     ? result.content().textSegment().text()
                     : "").append("\n\n");
+
+            if (maxChars > 0 && sb.length() + chunk.length() > maxChars) {
+                omitted++;
+                continue;
+            }
+            if (!result.kbName().equals(currentKb)) {
+                currentKb = result.kbName();
+            }
+            sb.append(chunk);
+        }
+
+        if (omitted > 0) {
+            LOGGER.warnf("RAG context capped at %d chars — %d retrieved chunk(s) omitted. "
+                    + "Raise maxRagContextChars or lower maxResults/knowledge base count.", maxChars, omitted);
+            sb.append("\n[... ").append(omitted).append(" further retrieved passage(s) omitted: RAG context limit (")
+                    .append(maxChars).append(" chars) reached ...]");
         }
 
         return sb.toString().trim();

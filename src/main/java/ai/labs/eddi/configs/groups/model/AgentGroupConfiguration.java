@@ -367,6 +367,25 @@ public class AgentGroupConfiguration {
         private int maxRecruitedAgentsPerDiscussion = 10;
         private int maxDelegationsPerTask = 3;
 
+        /**
+         * Maximum delegation hops. Agent A calling B calling C is depth 2; the call
+         * that would exceed this depth is refused.
+         * <p>
+         * Finding F18: {@code converse_with_agent} had no depth bound at all, so an
+         * A→B→A cycle recursed until the 60s per-hop watchdog happened to fire — and
+         * because a call without a {@code conversationId} starts a FRESH conversation,
+         * the busy-guard never broke the loop. Prompt injection in a single user
+         * message was enough to start it.
+         */
+        private int maxDelegationDepth = 3;
+
+        /**
+         * Agent IDs this agent may delegate to via {@code converse_with_agent}.
+         * {@code null} or empty means "any deployed agent" (the previous, unrestricted
+         * behavior).
+         */
+        private List<String> allowedDelegationTargets;
+
         /** Allowed LLM providers for created agents. Null = inherit parent. */
         private List<String> allowedProviders;
         /**
@@ -428,6 +447,18 @@ public class AgentGroupConfiguration {
         }
         public void setMaxDelegationsPerTask(int max) {
             this.maxDelegationsPerTask = max;
+        }
+        public int getMaxDelegationDepth() {
+            return maxDelegationDepth;
+        }
+        public void setMaxDelegationDepth(int maxDelegationDepth) {
+            this.maxDelegationDepth = maxDelegationDepth;
+        }
+        public List<String> getAllowedDelegationTargets() {
+            return allowedDelegationTargets;
+        }
+        public void setAllowedDelegationTargets(List<String> allowedDelegationTargets) {
+            this.allowedDelegationTargets = allowedDelegationTargets;
         }
         public List<String> getAllowedProviders() {
             return allowedProviders;
