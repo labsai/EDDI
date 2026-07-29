@@ -65,6 +65,32 @@ class PostgresAuditStoreUnitTest {
         verify(preparedStatement).executeUpdate();
     }
 
+    /**
+     * G18's tamper detection rests on a signed per-conversation sequence. This
+     * backend did not persist it and left supportsSequence() at its false default,
+     * so AuditLedgerService skipped assigning one and every PostgreSQL deployment
+     * silently degraded to HMAC-only — where a DELETED audit row leaves nothing
+     * behind to fail verification. MongoDB deployments were protected; these were
+     * not, and nothing said so.
+     */
+    @Test
+    void appendEntry_persistsTheSequenceSoTheChainCanBeVerified() throws Exception {
+        AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production",
+                0, "task-1", "langchain", 0, 100L, null, null, null, null, null, 0.0, Instant.now(), "hmac", null, 7L);
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.appendEntry(entry);
+
+        verify(preparedStatement).setLong(16, 7L);
+    }
+
+    @Test
+    void supportsSequence_isTrueSoTheChainIsActuallyChecked() {
+        assertTrue(store.supportsSequence(),
+                "returning false here silently disables deletion detection on this backend");
+    }
+
     @Test
     void appendEntry_nullId_generatesUuid() throws Exception {
         AuditEntry entry = new AuditEntry(null, "conv-1", "agent-1", 1, "user-1", "production",
