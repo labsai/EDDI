@@ -82,6 +82,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -2302,6 +2303,37 @@ class AgentOrchestrator {
     }
 
     /**
+     * Normalise a configured path to the shape an approval pattern is written in.
+     * <p>
+     * The config accepts three shapes for the same endpoint — {@code /a/b},
+     * {@code a/b}, and an absolute {@code https://host/a/b} (see
+     * {@code ApiCallExecutor#buildRequest}, which applies the same leading-slash
+     * rule). Storing the raw value would make {@code http.post:/a/b} miss two of
+     * them, and a require-pattern that misses is an ungated write.
+     * <p>
+     * An absolute URL keeps only its path, so the same pattern matches however the
+     * target server was configured.
+     */
+    static String normalizeEndpointPath(String rawPath) {
+        String path = rawPath.trim();
+        if (path.startsWith("http")) {
+            try {
+                String extracted = URI.create(path).getPath();
+                path = extracted != null ? extracted : "";
+            } catch (IllegalArgumentException e) {
+                // Not parseable as a URI — a templated host, most likely. Leave it be:
+                // matching something odd is better than throwing during discovery.
+                LOGGER.debugf("Could not normalise endpoint path '%s' for approval matching", rawPath);
+                return path;
+            }
+        }
+        if (!path.isEmpty() && !path.startsWith("/")) {
+            path = "/" + path;
+        }
+        return path;
+    }
+
+    /**
      * Discovers httpcall configurations from the workflow and creates
      * ToolSpecification + ToolExecutor for each ApiCall.
      * <p>
@@ -2348,7 +2380,7 @@ class AgentOrchestrator {
                     var apiRequest = apiCall.getRequest();
                     if (apiRequest != null && apiRequest.getMethod() != null && apiRequest.getPath() != null) {
                         endpoints.put(apiCall.getName(),
-                                apiRequest.getMethod().toLowerCase(Locale.ROOT) + ":" + apiRequest.getPath());
+                                apiRequest.getMethod().toLowerCase(Locale.ROOT) + ":" + normalizeEndpointPath(apiRequest.getPath()));
                     }
 
                     executors.put(apiCall.getName(), (toolRequest, memoryId) -> {

@@ -934,4 +934,26 @@ class AgentOrchestratorTest {
         assertEquals(1, result.size());
         assertTrue(result.get(0) instanceof UserMemoryTool);
     }
+
+    // =========================================================================
+    // Endpoint provenance for approval matching
+    // =========================================================================
+
+    @Test
+    void normalizeEndpointPath_acceptsEveryConfiguredShape() {
+        // The httpcall config accepts all of these for the same endpoint. Storing
+        // them verbatim would make "http.post:/agentstore/agents" miss most — and a
+        // require-pattern that misses is an ungated write.
+        assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("/agentstore/agents"));
+        assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("agentstore/agents"));
+        assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("  /agentstore/agents  "));
+        assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("https://eddi.example:7070/agentstore/agents"));
+    }
+
+    @Test
+    void normalizeEndpointPath_leavesAnUnparseableValueAlone() {
+        // A templated host is not a URI; matching something odd beats throwing
+        // during tool discovery.
+        assertEquals("http://{host}/x", AgentOrchestrator.normalizeEndpointPath("http://{host}/x"));
+    }
 }

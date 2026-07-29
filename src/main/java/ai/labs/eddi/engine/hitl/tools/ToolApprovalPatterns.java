@@ -25,7 +25,12 @@ public final class ToolApprovalPatterns {
      */
     private static final Pattern LEGAL_CHARS = Pattern.compile("[A-Za-z0-9_\\-.:*/{}]+");
 
-    /** HTTP methods that may qualify a source prefix, as {@code http.post:…}. */
+    /**
+     * The only source whose tools carry an endpoint, so the only one qualifiable.
+     */
+    private static final String HTTP_SOURCE = "http";
+
+    /** HTTP methods that may qualify the http source, as {@code http.post:…}. */
     private static final List<String> KNOWN_METHODS = List.of("get", "post", "put", "patch", "delete", "head", "options");
     private static final int MAX_LENGTH = 256;
 
@@ -70,26 +75,31 @@ public final class ToolApprovalPatterns {
             if (!prefix.contains("*") && !KNOWN_SOURCES.contains(prefix) && !isMethodQualifiedSource(prefix)) {
                 return Optional.of("unknown tool source prefix '" + prefix + ":' in pattern '" + pattern + "'"
                         + suggestionFor(prefix) + " — known sources: " + String.join(", ", KNOWN_SOURCES)
-                        + "; a source may also be qualified by HTTP method, e.g. 'http.post:'");
+                        + "; only the http source may be qualified by method, e.g. 'http.post:'");
             }
         }
         return Optional.empty();
     }
 
     /**
-     * Whether a prefix is {@code <knownSource>.<httpMethod>}, e.g.
-     * {@code http.post}.
+     * Whether a prefix is {@code http.<httpMethod>}, e.g. {@code http.post}.
      * <p>
-     * Validated rather than accepted loosely so a typo like {@code http.pots:} is
-     * still reported. An unvalidated prefix would compile to a pattern that simply
-     * never matches — and a require-pattern that never matches is an ungated write.
+     * Deliberately restricted to {@code http}: it is the only source whose tools
+     * carry an endpoint (see {@code AgentOrchestrator} — the mcp and a2a branches
+     * register a source and no endpoint). Accepting {@code mcp.post:} would let a
+     * pattern save cleanly and then match nothing at runtime, and since the gate
+     * allows an unmatched call, that is an ungated write — the very failure this
+     * validation exists to prevent. Widen this only together with whatever
+     * populates endpoints for the other source.
+     * <p>
+     * A typo like {@code http.pots:} is reported for the same reason.
      */
     private static boolean isMethodQualifiedSource(String prefix) {
         int dot = prefix.indexOf('.');
         if (dot <= 0) {
             return false;
         }
-        return KNOWN_SOURCES.contains(prefix.substring(0, dot)) && KNOWN_METHODS.contains(prefix.substring(dot + 1));
+        return HTTP_SOURCE.equals(prefix.substring(0, dot)) && KNOWN_METHODS.contains(prefix.substring(dot + 1));
     }
 
     private static String suggestionFor(String prefix) {

@@ -81,6 +81,29 @@ class ToolApprovalGateTest {
     }
 
     @Test
+    void methodQualifierIsRejectedForSourcesThatCarryNoEndpoint() {
+        // mcp and a2a tools register a source and no endpoint, so "mcp.post:*"
+        // would save cleanly and then match nothing — and an unmatched call is
+        // allowed. Saving must fail rather than produce a gate that does nothing.
+        for (String pattern : List.of("mcp.post:*", "a2a.delete:*", "memory.put:x", "builtin.get:*")) {
+            assertTrue(ToolApprovalPatterns.validate(pattern).isPresent(), pattern + " must be rejected: nothing can ever match it");
+        }
+        assertTrue(ToolApprovalPatterns.validate("http.post:*").isEmpty(), "http is the one source that carries an endpoint");
+    }
+
+    @Test
+    void aMethodQualifiedMcpPatternCannotSilentlyGateNothing() {
+        // The runtime half of the guarantee above: even if such a pattern reached
+        // the gate, it must not look like protection.
+        var gate = new ToolApprovalGate();
+        var batch = List.of(req("1", "mcp_write_thing"));
+        var sources = Map.of("mcp_write_thing", "mcp");
+
+        var result = gate.classify(batch, sources, Map.of(), cfg(List.of("mcp.post:*"), null), Set.of());
+        assertTrue(result.gated().isEmpty(), "documents the fail-open: this is why save-time validation must reject it");
+    }
+
+    @Test
     void existingSourcePatternsKeepWorkingWithoutEndpointData() {
         // Backward compatibility: agents configured before endpoint provenance
         // existed pass an empty map and must gate exactly as they did.
