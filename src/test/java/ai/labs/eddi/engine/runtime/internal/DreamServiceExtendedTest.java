@@ -267,7 +267,7 @@ class DreamServiceExtendedTest {
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 5000, 5000));
 
-            var result = dreamService.process("user-1", dreamConfig);
+            var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
         }
     }
@@ -295,7 +295,7 @@ class DreamServiceExtendedTest {
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 100, 50));
 
-            var result = dreamService.process("user-1", dreamConfig);
+            var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
             // Only 1 upsert should happen (capped to target)
             verify(store, times(1)).upsert(any(UserMemoryEntry.class));
@@ -324,7 +324,7 @@ class DreamServiceExtendedTest {
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 100, 50));
 
-            var result = dreamService.process("user-1", dreamConfig);
+            var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
             assertEquals(0, result.entriesSummarized());
             verify(store, never()).upsert(any(UserMemoryEntry.class));
@@ -344,6 +344,7 @@ class DreamServiceExtendedTest {
             dreamConfig.setSummarizeGroupBy("all");
             dreamConfig.setPreserveAgentProvenance(false);
             dreamConfig.setSummarizeMinEntries(2);
+            dreamConfig.setCrossAgentMaintenance(true); // other agents' entries are only in scope when opted in
 
             // Two self-scoped entries per agent, from 2 different agents
             var entries = new ArrayList<>(List.of(
@@ -366,7 +367,7 @@ class DreamServiceExtendedTest {
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 0, 0));
 
-            var result = dreamService.process("user-1", dreamConfig);
+            var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
 
             // One self-scoped entry per contributing agent; nothing widened
@@ -381,6 +382,7 @@ class DreamServiceExtendedTest {
             dreamConfig.setSummarizeGroupBy("all");
             dreamConfig.setPreserveAgentProvenance(false);
             dreamConfig.setSummarizeMinEntries(2);
+            dreamConfig.setCrossAgentMaintenance(true); // other agents' entries are only in scope when opted in
 
             var entries = new ArrayList<>(List.of(
                     new UserMemoryEntry("id1", "user-1", "k1", "v1", "fact",
@@ -395,7 +397,7 @@ class DreamServiceExtendedTest {
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult("[{\"key\": \"c\", \"value\": \"m\"}]", 0, 0));
 
-            var result = dreamService.process("user-1", dreamConfig);
+            var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
 
             // Already shared → a single merged entry, still group-scoped
@@ -414,6 +416,7 @@ class DreamServiceExtendedTest {
         void groupByAll() throws Exception {
             dreamConfig.setSummarizeGroupBy("all");
             dreamConfig.setPreserveAgentProvenance(false);
+            dreamConfig.setCrossAgentMaintenance(true); // the agent-2 half is only in scope when opted in
 
             var entries = makeEntries(4, "fact", "agent-1");
             entries.addAll(makeEntries(2, "preference", "agent-2"));
@@ -424,7 +427,7 @@ class DreamServiceExtendedTest {
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 0, 0));
 
-            var result = dreamService.process("user-1", dreamConfig);
+            var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
             // One LLM call for the "all" group
             verify(summarizationService, times(1))
@@ -437,6 +440,7 @@ class DreamServiceExtendedTest {
             dreamConfig.setSummarizeGroupBy("category");
             dreamConfig.setPreserveAgentProvenance(true);
             dreamConfig.setSummarizeMinEntries(2);
+            dreamConfig.setCrossAgentMaintenance(true); // the agent-2 sub-group is only in scope when opted in
 
             var entries = new ArrayList<>(List.of(
                     new UserMemoryEntry("id1", "user-1", "k1", "v1", "fact",
@@ -458,7 +462,7 @@ class DreamServiceExtendedTest {
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 0, 0));
 
-            var result = dreamService.process("user-1", dreamConfig);
+            var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
             // Two sub-groups: fact:agent-1 and fact:agent-2
             verify(summarizationService, times(2))
@@ -486,7 +490,7 @@ class DreamServiceExtendedTest {
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 0, 0));
 
-            var result = dreamService.process("user-1", dreamConfig);
+            var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
             verify(summarizationService, times(1))
                     .summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
@@ -504,7 +508,7 @@ class DreamServiceExtendedTest {
         void exceptionReturnsError() throws Exception {
             when(store.getAllEntries("user-1")).thenThrow(new RuntimeException("DB error"));
 
-            var result = dreamService.process("user-1", dreamConfig);
+            var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertFalse(result.isSuccess());
             assertNotNull(result.error());
             assertTrue(result.error().contains("DB error"));

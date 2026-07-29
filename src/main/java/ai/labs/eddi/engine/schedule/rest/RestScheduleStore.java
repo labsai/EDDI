@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -51,8 +52,15 @@ public class RestScheduleStore implements IRestScheduleStore {
      * side-step the owner/admin/approver check on {@code /resume}) or disarm them
      * (defeating an ABORT/AUTO_REJECT deadline).
      */
-    private static final String HITL_TYPE_KEY = ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_KEY;
-    private static final String HITL_TYPE_TIMEOUT = ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_TIMEOUT;
+    private static final String HITL_TYPE_KEY = HitlSchedules.METADATA_TYPE_KEY;
+    private static final String HITL_TYPE_TIMEOUT = HitlSchedules.METADATA_TYPE_TIMEOUT;
+
+    /**
+     * Placeholder identity for schedules that act for the system rather than for a
+     * specific end user. It is not a real principal — {@code DreamService} refuses
+     * to consolidate memories for it — so ownership checks treat it as unowned.
+     */
+    private static final String SCHEDULER_USER_ID = "system:scheduler";
 
     @Inject
     IScheduleStore scheduleStore;
@@ -126,6 +134,13 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return bodyGuard;
             }
 
+            // A schedule runs AS its userId — refuse to mint one that acts as
+            // somebody else (see requireOwnUserId).
+            Response ownerGuard = requireOwnUserId(schedule != null ? schedule.getUserId() : null, "create");
+            if (ownerGuard != null) {
+                return ownerGuard;
+            }
+
             // Validate
             validateSchedule(schedule);
 
@@ -167,6 +182,13 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response guard = requireAdminForHitl(scheduleId, "update");
             if (guard != null) {
                 return guard;
+            }
+
+            // Checked on the incoming BODY: this is the path that would re-point an
+            // otherwise harmless schedule at another user's identity.
+            Response ownerGuard = requireOwnUserId(schedule != null ? schedule.getUserId() : null, "update");
+            if (ownerGuard != null) {
+                return ownerGuard;
             }
 
             validateSchedule(schedule);
@@ -243,6 +265,14 @@ public class RestScheduleStore implements IRestScheduleStore {
                                 + "Approve or reject via POST /agents/{conversationId}/resume, "
                                 + "or terminate via POST /agents/{conversationId}/cancel.")
                         .build();
+            }
+            // Checked on the STORED schedule: firing one that acts as another user is
+            // the step that actually executes as them — including the
+            // dreamType=dream_consolidation fast-path, which prunes and rewrites that
+            // user's persistent memories.
+            Response ownerGuard = requireOwnUserId(schedule.getUserId(), "fire");
+            if (ownerGuard != null) {
+                return ownerGuard;
             }
             ScheduleFireLog fireLog = fireExecutor.fire(schedule, pollerService.getInstanceId(), 1);
             return Response.ok(fireLog).build();
@@ -353,6 +383,48 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     /**
+     * A schedule's {@code userId} is the identity every fire ACTS AS: it becomes
+     * the owner of the conversation the fire starts, and for a
+     * {@code dreamType=dream_consolidation} schedule it is the user whose
+     * persistent memories {@code DreamService} prunes, rewrites and permanently
+     * deletes. The direct memory API ({@code IRestUserMemoryStore}) refuses a
+     * non-admin access to another user's memories on every method, so this surface
+     * must not become a back door around it: a non-admin may only create, re-point
+     * or manually fire a schedule that runs as themselves, or as the unowned
+     * {@value #SCHEDULER_USER_ID} placeholder (which Dream consolidation explicitly
+     * rejects).
+     * <p>
+     * Deliberately refuses instead of silently rewriting {@code userId} to the
+     * caller: a rewrite would hand back a schedule that does something other than
+     * what was asked for, and would hide the attempt. Blank/absent and placeholder
+     * identities are left alone, so existing stored schedules and system schedules
+     * keep working unchanged. All checks are no-ops when
+     * {@code authorization.enabled=false}.
+     *
+     * @param userId
+     *            the identity the schedule would run as (may be {@code null})
+     * @param operation
+     *            the operation name, for the log line and error message
+     * @return a 403 {@link Response} to short-circuit the caller, or {@code null}
+     *         when the operation may proceed
+     */
+    private Response requireOwnUserId(String userId, String operation) {
+        if (userId == null || userId.isBlank() || SCHEDULER_USER_ID.equals(userId)) {
+            return null; // no end-user identity to act as
+        }
+        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, userId)) {
+            return null;
+        }
+        LOGGER.warnf("Refused %s of a schedule running as another user by a non-admin caller", sanitize(operation));
+        LOGGER.debugf("Schedule ownership detail: operation='%s', userId='%s'", sanitize(operation), sanitize(userId));
+        return Response.status(Response.Status.FORBIDDEN)
+                .entity("A schedule may only run as yourself: set userId to your own identity, or leave it "
+                        + "unset to run as the system scheduler. Only an administrator may " + operation
+                        + " a schedule that runs as another user.")
+                .build();
+    }
+
+    /**
      * For mutating operations on a HITL timeout schedule, require the eddi-admin
      * role. Reads the STORED schedule so a request body cannot hide the marker. The
      * guard fails CLOSED: only a genuine not-found falls through (so the downstream
@@ -424,7 +496,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             schedule.setEnvironment("production");
         }
         if (schedule.getUserId() == null || schedule.getUserId().isBlank()) {
-            schedule.setUserId("system:scheduler");
+            schedule.setUserId(SCHEDULER_USER_ID);
         }
         if (schedule.getConversationStrategy() == null || schedule.getConversationStrategy().isBlank()) {
             // Heartbeats default to persistent, cron to new

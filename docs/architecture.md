@@ -899,7 +899,30 @@ EDDI's memory model extends beyond single conversations. The `IUserMemoryStore` 
 - At **conversation init**, visible user memories are loaded as `longTerm` properties and made available in all templates via `{properties.key}`
 - During the pipeline, the LLM can autonomously store and recall facts using built-in memory tools (when enabled)
 - At **conversation teardown**, `longTerm` properties are persisted back to the user memory store
-- **Background consolidation** (the "Dream" service) performs stale pruning, contradiction detection, and optional LLM-driven summarization. It runs on the same cluster-aware schedule machinery as every other background job — a `ScheduleConfiguration` whose metadata carries `{"dreamType": "dream_consolidation"}` together with the target `agentId` and `userId` is claimed by `SchedulePollerService` and dispatched by `ScheduleFireExecutor` to `DreamService`, which reads the agent's `userMemoryConfig.dream` block and runs one cycle. Create such a schedule through the normal schedule surface (`POST /schedules` or the `create_schedule` MCP tool) using the cron expression from `dream.schedule`. Spend is bounded per cycle by `dream.maxCostPerRun` (US dollars), and because Dream has no parent LLM task to inherit credentials from, its model credentials come from `dream.parameters` (which resolves `${vault:…}` and `${vars:…}` like any LLM task's parameters). A cycle that cannot run — no `userId`, dream disabled on the agent, or a failing LLM call — is logged at ERROR and marked FAILED on the fire log, so it retries with backoff and dead-letters rather than silently doing nothing
+- **Background consolidation** (the "Dream" service) performs stale pruning, contradiction detection, and optional LLM-driven summarization. It runs on the same cluster-aware schedule machinery as every other background job — a `ScheduleConfiguration` whose `metadata` carries `{"dreamType": "dream_consolidation"}` is claimed by `SchedulePollerService` and dispatched by `ScheduleFireExecutor` to `DreamService`, which reads the agent's `userMemoryConfig.dream` block and runs one cycle. The target agent and user come from the schedule's **top-level** `agentId` / `agentVersion` / `userId` fields — `metadata` carries only the `dreamType` marker. Spend is bounded per cycle by `dream.maxCostPerRun` (US dollars), and because Dream has no parent LLM task to inherit credentials from, its model credentials come from `dream.parameters` (which resolves `${vault:…}` and `${vars:…}` like any LLM task's parameters). A cycle that cannot run — no `userId`, dream disabled on the agent, or a failing LLM call — is logged at ERROR and marked FAILED on the fire log, so it retries with backoff and dead-letters rather than silently doing nothing
+
+**Creating a Dream schedule** — use the raw REST body, `POST /schedulestore/schedules`, with the cron expression from `dream.schedule`:
+
+```json
+{
+  "name": "nightly dream — alice",
+  "agentId": "5a8b1c2d3e4f5a6b7c8d9e0f",
+  "agentVersion": 0,
+  "triggerType": "CRON",
+  "cronExpression": "0 3 * * *",
+  "timeZone": "UTC",
+  "userId": "alice",
+  "message": "dream",
+  "metadata": { "dreamType": "dream_consolidation" },
+  "enabled": true
+}
+```
+
+Three things this body does that are easy to get wrong:
+
+- **The `create_schedule` MCP tool cannot do this.** Its arguments (`agentId`, `triggerType`, `cron`, `heartbeatIntervalSeconds`, `message`, `name`, `timeZone`, `conversationStrategy`, `userId`, `environment`) contain no `metadata`, so a schedule created that way has `metadata == null`, `DreamService.isDreamSchedule(…)` returns `false`, and the schedule fires an ordinary chat turn against the agent on the dream cron forever — logged COMPLETED, consolidating nothing. REST is the only route that produces a working Dream schedule today.
+- **`message` is required even though Dream never reads it.** `RestScheduleStore.validateSchedule` rejects a CRON schedule without a non-blank `message`; the Dream fast-path bypasses `say()` entirely, so the value is inert — supply any placeholder.
+- **`userId` must name the real user whose memories are consolidated.** Left unset it defaults to `system:scheduler`, which `DreamService` rejects (the cycle is marked FAILED rather than consolidating an empty memory set).
 
 Memory visibility is enforced at the storage level — agents can only see memories matching their visibility scope, preventing cross-tenant memory leaks.
 

@@ -99,6 +99,30 @@ public class GroupConversationService implements IGroupConversationService {
     private static final int DEFAULT_AGENT_TIMEOUT_SECONDS = 180;
 
     /**
+     * Default number of retries per member turn when not configured via
+     * {@code protocol.maxRetries}. Shared by the retry loop in
+     * {@code executeAgentTurn} and the batch budget a parallel phase derives from
+     * it, so the two cannot drift apart.
+     */
+    private static final int DEFAULT_MAX_RETRIES = 2;
+
+    /**
+     * Slack added on top of a member's own budget when a parallel phase arms its
+     * batch deadline. A member reaches its {@code responseFuture.get(timeout)} only
+     * after agent lookup, conversation start and attachment sharing, so without a
+     * grace the orchestrator's deadline — armed the instant the batch is dispatched
+     * — expires while the member is still legitimately inside its own budget.
+     */
+    private static final int PARALLEL_BATCH_GRACE_SECONDS = 1;
+
+    /**
+     * Ceiling on the derived parallel-batch budget, so an absurd
+     * {@code agentTimeoutSeconds} × {@code maxRetries} combination cannot overflow
+     * the nanosecond deadline into the past.
+     */
+    private static final long MAX_PARALLEL_BATCH_BUDGET_SECONDS = TimeUnit.HOURS.toSeconds(24);
+
+    /**
      * How long an aborting orchestrator waits for cooperatively cancelled member
      * turns to unwind before reclaiming their tasks. Cancellation releases the
      * turns at their await points immediately, so this is only a safety bound for a
@@ -1669,6 +1693,30 @@ public class GroupConversationService implements IGroupConversationService {
         }
     }
 
+    /**
+     * Wall-clock budget a parallel batch gets before the orchestrator gives up on
+     * the speakers still running.
+     * <p>
+     * It is derived from what ONE member turn may legitimately consume — its
+     * per-attempt {@code agentTimeoutSeconds} multiplied by the number of attempts
+     * {@code onAgentFailure} allows (only {@code RETRY} retries, and it retries at
+     * most {@code maxRetries} times) — plus {@link #PARALLEL_BATCH_GRACE_SECONDS}.
+     * The normalisation of both protocol values is deliberately identical to
+     * {@code executeAgentTurn}'s: if the orchestrator's deadline is shorter than
+     * the member's own, the member's timeout handling (retry / abort / attributed
+     * SKIP) becomes unreachable.
+     *
+     * @return the batch budget in seconds, capped at
+     *         {@link #MAX_PARALLEL_BATCH_BUDGET_SECONDS}
+     */
+    static long parallelBatchBudgetSeconds(ProtocolConfig protocol) {
+        long timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
+        long attempts = protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY
+                ? (protocol.maxRetries() > 0 ? protocol.maxRetries() : DEFAULT_MAX_RETRIES) + 1L
+                : 1L;
+        return Math.min(timeout * attempts + PARALLEL_BATCH_GRACE_SECONDS, MAX_PARALLEL_BATCH_BUDGET_SECONDS);
+    }
+
     // =================================================================
     // Task-oriented phase execution (TASK_FORCE style)
     // =================================================================
@@ -2608,11 +2656,18 @@ public class GroupConversationService implements IGroupConversationService {
                     }
                 }), executorService)).toList();
 
-        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
         // ONE deadline for the whole batch: these turns run concurrently, so giving
         // every get() the full budget in turn made the worst case N × timeout
-        // (10 members × 180s = 30 minutes) instead of the configured timeout.
-        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeout);
+        // (10 members × 180s = 30 minutes) instead of the configured timeout. The
+        // budget stays independent of the batch size — that is the point — but it has
+        // to cover what a SINGLE member is allowed to take: its per-attempt timeout
+        // times the attempts onAgentFailure grants it, plus a grace for the setup it
+        // does before reaching its own await point. Armed at exactly one attempt, the
+        // orchestrator won every race: it cancelled the batch while members were still
+        // inside their own budget, so executeAgentTurn's TimeoutException branch —
+        // which owns the RETRY and ABORT policies — was unreachable in parallel phases
+        // and every member timeout became an unattributed SKIPPED "unknown" entry.
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(parallelBatchBudgetSeconds(protocol));
         for (int i = 0; i < futures.size(); i++) {
             try {
                 long remainingNanos = Math.max(0, deadlineNanos - System.nanoTime());
@@ -2810,7 +2865,9 @@ public class GroupConversationService implements IGroupConversationService {
 
         // Call through ConversationService with retry
         int retries = 0;
-        int maxRetries = protocol.maxRetries() > 0 ? protocol.maxRetries() : 2;
+        // Keep both normalisations in step with parallelBatchBudgetSeconds(), which
+        // sizes the orchestrator's batch deadline from exactly these two values.
+        int maxRetries = protocol.maxRetries() > 0 ? protocol.maxRetries() : DEFAULT_MAX_RETRIES;
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
 
         while (true) {

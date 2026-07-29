@@ -26,10 +26,17 @@ import java.util.concurrent.atomic.AtomicLong;
  * In-memory implementation of {@link IConversationCoordinator}.
  *
  * <p>
- * This is the default event bus — uses in-process queues with no external
- * dependencies. Suitable for single-instance deployments. For horizontal
- * scaling, use {@code NatsConversationCoordinator} by setting
- * {@code eddi.messaging.type=nats}.
+ * This is the default event bus ({@code @DefaultBean}) — in-process queues, no
+ * external dependencies, suitable for single-instance deployments.
+ * </p>
+ *
+ * <p>
+ * For horizontal scaling there is {@code NatsConversationCoordinator}, but it
+ * is gated on {@code @IfBuildProfile("nats")} — a <strong>build-time</strong>
+ * condition. It exists only in an artifact built with that profile, and setting
+ * {@code eddi.messaging.type=nats} at runtime does NOT switch coordinators:
+ * that property sits in {@code application.properties} but no Java code reads
+ * it. The previous wording here promised a runtime switch that does not exist.
  * </p>
  *
  * <p>

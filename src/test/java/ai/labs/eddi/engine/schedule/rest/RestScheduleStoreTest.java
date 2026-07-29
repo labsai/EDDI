@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
+import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -16,6 +17,7 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.security.Principal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -258,7 +260,7 @@ class RestScheduleStoreTest {
         var regular = makeCronSchedule("r1");
         when(scheduleStore.readSchedule("r1")).thenReturn(regular);
         when(fireExecutor.fire(any(), any(), anyInt()))
-                .thenReturn(new ai.labs.eddi.engine.schedule.model.ScheduleFireLog(
+                .thenReturn(new ScheduleFireLog(
                         "log-1", "r1", "fire-1", null, Instant.now(), Instant.now(),
                         FireStatus.COMPLETED.name(), "n1", "conv-1", null, 1, 0.0));
 
@@ -386,6 +388,172 @@ class RestScheduleStoreTest {
         List<ScheduleConfiguration> result = rest.readAllSchedules(null);
 
         assertEquals(2, result.size());
+    }
+
+    // --- Cross-user schedules: a schedule runs AS its userId ---
+
+    /**
+     * The schedule surface is the one place a plain {@code eddi-editor} can name an
+     * arbitrary {@code userId}. Every fire then acts as that identity, and for a
+     * {@code dreamType=dream_consolidation} schedule that means
+     * {@code DreamService} prunes, rewrites and permanently deletes the named
+     * user's persistent memories — an operation the direct memory API
+     * ({@code IRestUserMemoryStore}, roles {@code {eddi-admin, eddi-user}},
+     * {@code validateUserAccess} on every method) refuses that caller outright.
+     * These tests pin the guard that stops the schedule API becoming a back door
+     * around it.
+     */
+    private static ScheduleConfiguration dreamSchedule(String id, String userId) {
+        var s = makeCronSchedule(id);
+        s.setName("dream-" + id);
+        s.setCronExpression("0 3 * * *");
+        s.setUserId(userId);
+        s.setMetadata(Map.of("dreamType", "dream_consolidation"));
+        return s;
+    }
+
+    /** Authenticate the mocked identity as a plain (non-admin) editor. */
+    private void asEditor(String principalName) {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.getPrincipal()).thenReturn(new TestPrincipal(principalName));
+    }
+
+    /** Authenticate the mocked identity as an admin. */
+    private void asAdmin(String principalName) {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.getPrincipal()).thenReturn(new TestPrincipal(principalName));
+    }
+
+    @Test
+    void createSchedule_actingAsAnotherUser_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+
+        Response response = rest.createSchedule(dreamSchedule("d1", "victim-42"));
+
+        assertEquals(403, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void createSchedule_actingAsSelf_allowedForEditor() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.createSchedule(any())).thenReturn("d2");
+
+        Response response = rest.createSchedule(dreamSchedule("d2", "editor-1"));
+
+        assertEquals(201, response.getStatus());
+        assertEquals("editor-1", ((ScheduleConfiguration) response.getEntity()).getUserId());
+        verify(scheduleStore).createSchedule(any());
+    }
+
+    @Test
+    void createSchedule_actingAsAnotherUser_allowedForAdmin() throws Exception {
+        // Admins legitimately schedule work on behalf of any user.
+        asAdmin("root");
+        when(scheduleStore.createSchedule(any())).thenReturn("d3");
+
+        Response response = rest.createSchedule(dreamSchedule("d3", "victim-42"));
+
+        assertEquals(201, response.getStatus());
+        assertEquals("victim-42", ((ScheduleConfiguration) response.getEntity()).getUserId());
+    }
+
+    @Test
+    void createSchedule_systemSchedulerPlaceholder_allowedForEditor() throws Exception {
+        // 'system:scheduler' is not a real principal (DreamService refuses to
+        // consolidate for it) and it is what applyDefaults/readSchedule hand back, so
+        // round-tripping it must not turn into a 403.
+        asEditor("editor-1");
+        when(scheduleStore.createSchedule(any())).thenReturn("s1");
+
+        var schedule = makeCronSchedule("s1");
+        schedule.setUserId("system:scheduler");
+
+        Response response = rest.createSchedule(schedule);
+
+        assertEquals(201, response.getStatus());
+        verify(scheduleStore).createSchedule(any());
+    }
+
+    @Test
+    void updateSchedule_repointingToAnotherUser_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+        // Stored schedule is an innocuous system schedule; the BODY re-points it at a
+        // victim — the conversion path the create guard would otherwise miss.
+        when(scheduleStore.readSchedule("r1")).thenReturn(makeCronSchedule("r1"));
+
+        Response response = rest.updateSchedule("r1", dreamSchedule("r1", "victim-42"));
+
+        assertEquals(403, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(eq("r1"), any());
+    }
+
+    @Test
+    void fireNow_scheduleActingAsAnotherUser_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("d1")).thenReturn(dreamSchedule("d1", "victim-42"));
+
+        Response response = rest.fireNow("d1");
+
+        assertEquals(403, response.getStatus());
+        // The destructive dispatch must never be reached.
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_scheduleActingAsAnotherUser_allowedForAdmin() throws Exception {
+        asAdmin("root");
+        when(scheduleStore.readSchedule("d1")).thenReturn(dreamSchedule("d1", "victim-42"));
+        when(fireExecutor.fire(any(), any(), anyInt()))
+                .thenReturn(new ScheduleFireLog(
+                        "log-d1", "d1", "fire-1", null, Instant.now(), Instant.now(),
+                        FireStatus.COMPLETED.name(), "n1", null, null, 1, 0.0));
+
+        Response response = rest.fireNow("d1");
+
+        assertEquals(200, response.getStatus());
+        verify(fireExecutor).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_scheduleActingAsSelf_allowedForEditor() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("d2")).thenReturn(dreamSchedule("d2", "editor-1"));
+        when(fireExecutor.fire(any(), any(), anyInt()))
+                .thenReturn(new ScheduleFireLog(
+                        "log-d2", "d2", "fire-1", null, Instant.now(), Instant.now(),
+                        FireStatus.COMPLETED.name(), "n1", null, null, 1, 0.0));
+
+        Response response = rest.fireNow("d2");
+
+        assertEquals(200, response.getStatus());
+        verify(fireExecutor).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_systemSchedulerSchedule_stillFiresForEditor() throws Exception {
+        asEditor("editor-1");
+        var schedule = makeCronSchedule("r2");
+        schedule.setUserId("system:scheduler");
+        when(scheduleStore.readSchedule("r2")).thenReturn(schedule);
+        when(fireExecutor.fire(any(), any(), anyInt()))
+                .thenReturn(new ScheduleFireLog(
+                        "log-r2", "r2", "fire-1", null, Instant.now(), Instant.now(),
+                        FireStatus.COMPLETED.name(), "n1", "conv-1", null, 1, 0.0));
+
+        Response response = rest.fireNow("r2");
+
+        assertEquals(200, response.getStatus());
+        verify(fireExecutor).fire(any(), any(), anyInt());
+    }
+
+    private record TestPrincipal(String name) implements Principal {
+        @Override
+        public String getName() {
+            return name;
+        }
     }
 
     private static ScheduleConfiguration makeCronSchedule(String id) {

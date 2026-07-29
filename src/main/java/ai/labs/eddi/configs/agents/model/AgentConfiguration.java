@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.agents.model;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -585,6 +586,29 @@ public class AgentConfiguration {
         private boolean preserveAgentProvenance = false;
 
         /**
+         * Whether this agent's dream cycle may act on memories written by
+         * <em>other</em> agents.
+         * <p>
+         * Every knob in this block — {@link #getPruneStaleAfterDays()}, the grouping
+         * strategy, the consolidation model and its endpoint — comes from exactly one
+         * agent. Letting that agent's cycle delete or rewrite another agent's memories
+         * means a retention value their owner never configured decides when their data
+         * disappears, and (with {@link #isSummarizeInteractions()} on) their text is
+         * sent to this agent's provider. So the default is {@code false}: the cycle
+         * only touches entries whose {@code sourceAgentId} is the firing agent, the
+         * same ownership rule {@code UserMemoryTool} applies before evicting.
+         * <p>
+         * Set to {@code true} for a dedicated housekeeping agent that is meant to
+         * maintain the user's whole memory set across agents — the cross-agent
+         * consolidation {@link #isPreserveAgentProvenance()}{@code =false} describes.
+         * Entries without a {@code sourceAgentId} (legacy/migrated rows) are only in
+         * scope in this mode, since no agent owns them.
+         *
+         * @since 6.1.0
+         */
+        private boolean crossAgentMaintenance = false;
+
+        /**
          * Model parameters for the consolidation LLM — {@code apiKey}, {@code baseUrl},
          * {@code temperature}, … — passed through to {@code ChatModelRegistry} exactly
          * like an LLM task's {@code parameters} block, so {@code ${vault:...}} and
@@ -601,14 +625,28 @@ public class AgentConfiguration {
         private Map<String, String> parameters = new HashMap<>();
 
         /**
-         * @deprecated Since 6.1.0. Superseded by {@link #getMaxCostPerRun()} and no
-         *             longer enforced. A call count is a meaningless ceiling because
-         *             different consolidations cost vastly different amounts; Dream is
-         *             bounded by the dollar budget instead. Retained only so existing
-         *             stored/imported configurations keep deserializing.
+         * @deprecated Since 6.1.0. Superseded by {@link #getMaxCostPerRun()}, which is
+         *             the real budget: a call count says nothing about spend, because
+         *             different consolidations cost vastly different amounts. It is
+         *             <em>still enforced as a secondary backstop</em> whenever a stored
+         *             configuration actually carries the field
+         *             ({@link #isMaxSummarizationCallsSet()}) — silently discarding a
+         *             ceiling an operator wrote would let a config that says "at most 3
+         *             calls" make hundreds. Configurations that never set it are
+         *             bounded by the dollar budget alone, so this field's default value
+         *             never caps anything on its own.
          */
         @Deprecated(since = "6.1.0", forRemoval = true)
         private int maxSummarizationCalls = 10;
+
+        /**
+         * Whether {@link #maxSummarizationCalls} was explicitly configured, as opposed
+         * to sitting at its default. Set by the setter, which Jackson calls only when
+         * the property is present in the stored/imported JSON — that is what lets the
+         * deprecated ceiling stay honoured for the configs that declare it without
+         * imposing it on the ones that do not.
+         */
+        private boolean maxSummarizationCallsSet = false;
 
         /**
          * LLM instructions for memory consolidation. Customizable by the agent
@@ -744,6 +782,14 @@ public class AgentConfiguration {
             this.preserveAgentProvenance = preserveAgentProvenance;
         }
 
+        public boolean isCrossAgentMaintenance() {
+            return crossAgentMaintenance;
+        }
+
+        public void setCrossAgentMaintenance(boolean crossAgentMaintenance) {
+            this.crossAgentMaintenance = crossAgentMaintenance;
+        }
+
         public Map<String, String> getParameters() {
             return parameters;
         }
@@ -753,8 +799,9 @@ public class AgentConfiguration {
         }
 
         /**
-         * @deprecated Since 6.1.0. No longer enforced — see
-         *             {@link #getMaxCostPerRun()}.
+         * @deprecated Since 6.1.0. Secondary backstop only, and only when
+         *             {@link #isMaxSummarizationCallsSet()} — see
+         *             {@link #getMaxCostPerRun()} for the real budget.
          */
         @Deprecated(since = "6.1.0", forRemoval = true)
         public int getMaxSummarizationCalls() {
@@ -762,12 +809,29 @@ public class AgentConfiguration {
         }
 
         /**
-         * @deprecated Since 6.1.0. No longer enforced — see
-         *             {@link #setMaxCostPerRun(double)}.
+         * @deprecated Since 6.1.0. Prefer {@link #setMaxCostPerRun(double)}. Calling
+         *             this marks the ceiling as explicitly configured, which keeps it
+         *             enforced as a backstop until the field is removed.
          */
         @Deprecated(since = "6.1.0", forRemoval = true)
         public void setMaxSummarizationCalls(int maxSummarizationCalls) {
             this.maxSummarizationCalls = maxSummarizationCalls;
+            this.maxSummarizationCallsSet = true;
+        }
+
+        /**
+         * True when {@link #getMaxSummarizationCalls()} was explicitly configured
+         * (present in the stored/imported JSON, or set programmatically) rather than
+         * left at its default. Never serialized — it is derived from the presence of
+         * {@code maxSummarizationCalls}, so it survives an export/import round trip
+         * without adding a field to stored agent configurations.
+         *
+         * @deprecated Since 6.1.0, together with the ceiling it guards.
+         */
+        @JsonIgnore
+        @Deprecated(since = "6.1.0", forRemoval = true)
+        public boolean isMaxSummarizationCallsSet() {
+            return maxSummarizationCallsSet;
         }
 
         public String getSummarizationPrompt() {

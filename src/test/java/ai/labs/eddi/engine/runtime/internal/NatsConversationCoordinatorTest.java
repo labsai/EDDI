@@ -18,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.util.concurrent.Callable;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -28,7 +29,8 @@ import static org.mockito.Mockito.*;
  * Unit tests for {@link NatsConversationCoordinator}.
  *
  * <p>
- * Tests verify local ordering, retry/dead-letter logic, and metrics without
+ * Tests verify local ordering, failure/dead-letter handling (C13: no
+ * re-execution, C10: rejected submissions roll back), and metrics without
  * requiring a running NATS server. JetStream interactions are mocked.
  * </p>
  */
@@ -168,11 +170,13 @@ class NatsConversationCoordinatorTest {
 
         verify(runtime, times(1)).submitCallable(eq(task1), callbackCaptor.capture(), isNull());
 
-        // Simulate task1 failure — first failure triggers retry, not next task
+        // C13: onFailure is raised from INSIDE the executor task, so task1 has already
+        // run (LLM calls, tools, memory writes, money). It must be dead-lettered once
+        // and the queue must move on to task2 — never re-executed.
         callbackCaptor.getValue().onFailure(new RuntimeException("boom"));
 
-        // task1 should be retried (attempt 1 of 3)
-        verify(runtime, times(2)).submitCallable(eq(task1), any(), isNull());
+        verify(runtime, times(1)).submitCallable(eq(task1), any(), isNull());
+        verify(runtime, times(1)).submitCallable(eq(task2), any(), isNull());
     }
 
     @Test
@@ -206,9 +210,15 @@ class NatsConversationCoordinatorTest {
 
     // ==================== Dead-Letter Tests ====================
 
+    /**
+     * C13 parity with {@link InMemoryConversationCoordinator}: a turn that reports
+     * failure has already executed. It is dead-lettered on the FIRST failure and
+     * never handed to the runtime a second time — even though
+     * {@code eddi.nats.max-retries} is still 3 here.
+     */
     @Test
     @SuppressWarnings("unchecked")
-    void shouldRetryTaskBeforeDeadLettering() throws Exception {
+    void shouldNotReExecuteAFailedTaskAndDeadLetterImmediately() throws Exception {
         Callable<Void> failingTask = () -> {
             throw new RuntimeException("fail");
         };
@@ -217,24 +227,20 @@ class NatsConversationCoordinatorTest {
 
         coordinator.submitInOrder("conv-retry", failingTask);
 
-        // First execution
+        // First (and only) execution
         verify(runtime, times(1)).submitCallable(eq(failingTask), callbackCaptor.capture(), isNull());
+        assertEquals(3, coordinator.getMaxRetries(), "guard: the config knob is still 3, it just must not re-execute turns");
 
-        // Simulate failure (attempt 1)
         callbackCaptor.getValue().onFailure(new RuntimeException("fail"));
-        verify(runtime, times(2)).submitCallable(eq(failingTask), callbackCaptor.capture(), isNull());
 
-        // Simulate failure (attempt 2)
-        callbackCaptor.getValue().onFailure(new RuntimeException("fail"));
-        verify(runtime, times(3)).submitCallable(eq(failingTask), callbackCaptor.capture(), isNull());
-
-        // No dead-letter yet — still have 1 more attempt
-        verify(jetStream, never()).publish(startsWith("eddi.deadletter."), any(byte[].class));
+        verify(runtime, times(1)).submitCallable(eq(failingTask), any(), isNull());
+        verify(jetStream).publish(eq("eddi.deadletter.conv-retry"), any(byte[].class));
+        assertEquals(1L, coordinator.getTotalDeadLettered());
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void shouldDeadLetterAfterMaxRetries() throws Exception {
+    void shouldDeadLetterOnFirstFailure() throws Exception {
         Callable<Void> failingTask = () -> {
             throw new RuntimeException("persistent failure");
         };
@@ -242,16 +248,70 @@ class NatsConversationCoordinatorTest {
         ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
 
         coordinator.submitInOrder("conv-dl", failingTask);
+        verify(runtime, times(1)).submitCallable(eq(failingTask), callbackCaptor.capture(), isNull());
 
-        // Exhaust all retries (maxRetries=3)
-        for (int i = 0; i < coordinator.getMaxRetries(); i++) {
-            verify(runtime, times(i + 1)).submitCallable(eq(failingTask), callbackCaptor.capture(), isNull());
-            callbackCaptor.getValue().onFailure(new RuntimeException("persistent failure"));
-        }
+        callbackCaptor.getValue().onFailure(new RuntimeException("persistent failure"));
 
         // Should publish to dead-letter subject
         verify(jetStream).publish(eq("eddi.deadletter.conv-dl"), any(byte[].class));
         verify(deadLetterCount).increment();
+        // ... and the queue must be released, not left holding the dead task
+        assertFalse(coordinator.getQueueDepths().containsKey("conv-dl"),
+                "the dead-lettered task must be dropped from the queue so the conversation stays usable");
+    }
+
+    /**
+     * C10 parity: when handing the task to the runtime throws, the enqueue must be
+     * rolled back. Otherwise every later turn for that conversation sees a
+     * non-empty queue, waits for a completion callback that will never come, and
+     * the conversation is wedged for the JVM's lifetime.
+     */
+    @Test
+    void rejectedSubmissionRollsTheTaskBackOffTheQueue() throws Exception {
+        Callable<Void> task = () -> null;
+        doThrow(new RejectedExecutionException("pool is shutting down"))
+                .when(runtime).submitCallable(eq(task), any(), isNull());
+
+        assertThrows(RejectedExecutionException.class,
+                () -> coordinator.submitInOrder("conv-rejected", task));
+
+        assertFalse(coordinator.getQueueDepths().containsKey("conv-rejected"),
+                "a rejected submission must not leave the task queued — nothing would ever drain it");
+
+        // ... and the conversation must still accept the next turn.
+        Callable<Void> nextTask = () -> null;
+        coordinator.submitInOrder("conv-rejected", nextTask);
+        verify(runtime).submitCallable(eq(nextTask), any(), isNull());
+    }
+
+    /**
+     * C10 (submitNext side): the completion callback has no caller to propagate to.
+     * A task that cannot be scheduled must be dead-lettered and the queue must keep
+     * draining, otherwise the conversation wedges just the same.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void unschedulableQueuedTaskIsDeadLetteredAndTheQueueKeepsDraining() throws Exception {
+        Callable<Void> first = () -> null;
+        Callable<Void> unschedulable = () -> null;
+        Callable<Void> third = () -> null;
+
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+
+        coordinator.submitInOrder("conv-drain", first);
+        coordinator.submitInOrder("conv-drain", unschedulable);
+        coordinator.submitInOrder("conv-drain", third);
+
+        verify(runtime, times(1)).submitCallable(eq(first), callbackCaptor.capture(), isNull());
+
+        doThrow(new RejectedExecutionException("pool is shutting down"))
+                .when(runtime).submitCallable(eq(unschedulable), any(), isNull());
+
+        // first completes → submitNext hits the un-schedulable task
+        callbackCaptor.getValue().onComplete(null);
+
+        verify(jetStream).publish(eq("eddi.deadletter.conv-drain"), any(byte[].class));
+        verify(runtime, times(1)).submitCallable(eq(third), any(), isNull());
     }
 
     @Test

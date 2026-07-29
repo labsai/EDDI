@@ -439,19 +439,48 @@ public class Conversation implements IConversation {
                 paused = true;
             }
         }
-        // A cancelled turn must not commit its side effects. ConversationService
-        // discards the snapshot of a cancelled turn, but storePropertiesPermanently()
-        // writes straight to the user-memory store, so without this guard a turn the
-        // caller was told is CANCELLED still upserts whatever longTerm properties it
-        // managed to set before stopping — the same "a failed turn must not persist
+        // A turn whose outcome is discarded must not commit its side effects.
+        // ConversationService discards the snapshot of a cancelled or abandoned turn,
+        // but storePropertiesPermanently() writes straight to the user-memory store,
+        // so without this guard such a turn still upserts whatever longTerm properties
+        // it managed to set before stopping — the same "a failed turn must not persist
         // partial state" rule the ERROR path already follows.
-        if (!paused && !conversationMemory.isCancelled()) {
+        if (!paused && !isTurnDiscarded()) {
             try {
                 postConversationLifecycleTasks();
             } catch (IResourceStore.ResourceStoreException e) {
                 throw new LifecycleException(e.getLocalizedMessage(), e);
             }
         }
+    }
+
+    /**
+     * True when this turn's result will be thrown away, so its side effects outside
+     * the conversation snapshot must not be committed either.
+     * <p>
+     * Two independent abort signals reach a running turn, and only one of them is a
+     * flag on the memory:
+     * <ul>
+     * <li>a cooperative <em>cancel</em> ({@code /cancel}, client disconnect) sets
+     * {@code conversationMemory.setCancelled(true)}; the pipeline observes it and
+     * the snapshot is discarded;</li>
+     * <li>the runtime watchdog <em>abandons</em> a turn that exceeded
+     * {@code agentTimeoutInSeconds} by interrupting the pipeline thread —
+     * {@code BaseRuntime.AbandonableFuture#cancel} only sets its own
+     * {@code abandoned} flag and interrupts, it never sets the memory's cancel flag
+     * — and routes the late completion to {@code onFailure}, so the conversation
+     * document is never stored.</li>
+     * </ul>
+     * Only the first was checked here, so an interrupt that landed during the last
+     * task of the last workflow (a short in-memory task such as output or
+     * templating; interruptibly-blocking tasks throw instead) left the pipeline
+     * returning normally and this turn's changed longTerm properties upserted into
+     * {@code usermemories} for a turn whose conversation document was then thrown
+     * away. Narrow race, pre-existing; the interrupt flag is only read here, never
+     * cleared, so the runtime still sees it.
+     */
+    private boolean isTurnDiscarded() {
+        return conversationMemory.isCancelled() || Thread.currentThread().isInterrupted();
     }
 
     private void checkActionsForConversationEnd() {
@@ -925,12 +954,13 @@ public class Conversation implements IConversation {
             }
             // Persist long-term properties only on a clean outcome. Skip on a
             // re-pause (AWAITING_HUMAN — the pause is not the end of the turn), on
-            // ERROR, and on a cancel — mirroring the say path (executeConversationStep
-            // only runs post-tasks when execution did not throw and was not
-            // cancelled), so a failed or cancelled resume does not upsert
-            // partial/inconsistent property state into the user memory store.
+            // ERROR, and on a discarded turn (cancelled, or abandoned by the watchdog
+            // that guards the resume exactly like the say path) — mirroring
+            // executeConversationStep, so a failed, cancelled or abandoned resume does
+            // not upsert partial/inconsistent property state into the user memory
+            // store.
             if (finalState != ConversationState.AWAITING_HUMAN && finalState != ConversationState.ERROR
-                    && !conversationMemory.isCancelled()) {
+                    && !isTurnDiscarded()) {
                 try {
                     postConversationLifecycleTasks();
                 } catch (IResourceStore.ResourceStoreException ex) {

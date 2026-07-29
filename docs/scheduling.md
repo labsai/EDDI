@@ -177,7 +177,6 @@ Dream consolidation is configured in the agent configuration:
         "summarizeTargetEntries": 2,
         "summarizeGroupBy": "category",
         "preserveAgentProvenance": false,
-        "maxSummarizationCalls": 10,
         "llmProvider": "anthropic",
         "llmModel": "claude-sonnet-4-6",
         "maxCostPerRun": 0.50,
@@ -188,6 +187,10 @@ Dream consolidation is configured in the agent configuration:
   }
 }
 ```
+
+> **Scope:** a dream cycle only touches memories the **firing agent** wrote (`sourceAgentId`). Set `crossAgentMaintenance: true` to maintain the user's whole memory set across agents — without it, agent A's `pruneStaleAfterDays` would delete agent B's memories and A's model endpoint would see B's private text.
+>
+> `maxSummarizationCalls` is **deprecated** in favour of `maxCostPerRun` (a call count is a poor budget — consolidations differ wildly in cost). It is still honoured as a secondary backstop if a stored config sets it explicitly, so existing configurations keep their bound.
 
 ### Cost Control
 

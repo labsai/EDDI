@@ -21,10 +21,15 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.Collection;
+import java.util.concurrent.TimeoutException;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -53,8 +58,19 @@ import java.util.stream.Collectors;
  * <p>
  * Cost ceiling: {@code maxCostPerRun} (US dollars, estimated from token usage)
  * bounds the spend per user per cycle. The former {@code maxSummarizationCalls}
- * count is deprecated and no longer enforced — different consolidations cost
- * vastly different amounts, so a call count is not a budget.
+ * count is deprecated — different consolidations cost vastly different amounts,
+ * so a call count is not a budget — but it is still honoured as a secondary
+ * backstop for stored configurations that set it explicitly
+ * ({@link AgentConfiguration.DreamConfig#isMaxSummarizationCallsSet()}),
+ * because silently dropping a bound an operator wrote is worse than enforcing a
+ * redundant one.
+ *
+ * <p>
+ * Ownership: a cycle is configured by exactly one agent, so by default it only
+ * acts on memories that agent wrote ({@code sourceAgentId}) — see
+ * {@link AgentConfiguration.DreamConfig#isCrossAgentMaintenance()}. Otherwise
+ * agent A's retention value would delete agent B's memories and A's model
+ * endpoint would see B's private text.
  *
  * @author ginccc
  * @since 6.0.0
@@ -186,7 +202,7 @@ public class DreamService {
                     + "(userMemoryConfig.dream.enabled=false or absent), but a dream schedule fired for it.");
         }
 
-        return process(userId, dreamConfig);
+        return process(userId, agentId, dreamConfig);
     }
 
     private DreamResult rejected(String userId, Instant start, String reason) {
@@ -196,16 +212,60 @@ public class DreamService {
     }
 
     /**
+     * Restrict a user's memory set to what the firing agent is entitled to
+     * maintain.
+     * <p>
+     * {@code getAllEntries(userId)} is deliberately agent-unscoped (its documented
+     * use case is admin/export), but every knob this cycle obeys —
+     * {@code pruneStaleAfterDays}, the grouping strategy, the consolidation model
+     * and its endpoint — comes from one agent's {@code userMemoryConfig.dream}.
+     * Acting on the whole set would let agent A delete agent B's memories under a
+     * retention value B's owner never configured, and hand B's {@code self}-scoped
+     * text to A's provider. So the default keeps the same ownership rule
+     * {@code UserMemoryTool.evictableEntries()} applies before it evicts: an entry
+     * belongs to the agent whose id is its {@code sourceAgentId}, and nothing else
+     * is touched. Entries without a {@code sourceAgentId} have no owner and are
+     * therefore left alone as well.
+     * <p>
+     * {@code crossAgentMaintenance=true} opts back into whole-set maintenance for a
+     * dedicated housekeeping agent — the cross-agent consolidation
+     * {@code preserveAgentProvenance=false} describes.
+     */
+    private static List<UserMemoryEntry> scopeToOwningAgent(List<UserMemoryEntry> entries, String agentId,
+                                                            AgentConfiguration.DreamConfig dreamConfig) {
+        if (dreamConfig.isCrossAgentMaintenance()) {
+            return entries;
+        }
+
+        List<UserMemoryEntry> owned = entries.stream()
+                .filter(entry -> agentId != null && agentId.equals(entry.sourceAgentId()))
+                .toList();
+
+        int foreign = entries.size() - owned.size();
+        if (foreign > 0) {
+            LOGGER.infof("[DREAM] Skipping %d of %d memory entries not owned by agent '%s' — set "
+                    + "userMemoryConfig.dream.crossAgentMaintenance=true if this agent is meant to maintain "
+                    + "the user's memories across agents.", foreign, entries.size(), agentId);
+        }
+        return owned;
+    }
+
+    /**
      * Process dream consolidation for a specific user's memories. Called by
      * {@link #processScheduledFire} when a Dream schedule fires.
      *
      * @param userId
      *            the user whose memories to consolidate
+     * @param agentId
+     *            the agent whose {@code dreamConfig} governs this cycle — also the
+     *            ownership boundary: unless
+     *            {@link AgentConfiguration.DreamConfig#isCrossAgentMaintenance()},
+     *            only memories this agent wrote are touched
      * @param dreamConfig
      *            the dream configuration from the agent
      * @return a summary of what was done
      */
-    public DreamResult process(String userId, AgentConfiguration.DreamConfig dreamConfig) {
+    public DreamResult process(String userId, String agentId, AgentConfiguration.DreamConfig dreamConfig) {
         Instant start = Instant.now();
         int pruned = 0;
         int contradictions = 0;
@@ -214,10 +274,10 @@ public class DreamService {
         String summarizationError = null;
 
         try {
-            LOGGER.infof("[DREAM] Starting dream cycle for user='%s'", userId);
+            LOGGER.infof("[DREAM] Starting dream cycle for user='%s', agent='%s'", userId, agentId);
 
             // Load entries once — shared across pruning and contradiction detection
-            List<UserMemoryEntry> allEntries = userMemoryStore.getAllEntries(userId);
+            List<UserMemoryEntry> allEntries = scopeToOwningAgent(userMemoryStore.getAllEntries(userId), agentId, dreamConfig);
 
             // 1. Prune stale entries (deterministic, zero LLM cost)
             if (dreamConfig.getPruneStaleAfterDays() > 0) {
@@ -227,7 +287,7 @@ public class DreamService {
             // After pruning, reload once — shared by contradiction detection and
             // summarization
             List<UserMemoryEntry> currentEntries = pruned > 0
-                    ? userMemoryStore.getAllEntries(userId)
+                    ? scopeToOwningAgent(userMemoryStore.getAllEntries(userId), agentId, dreamConfig)
                     : allEntries;
 
             // 2. Detect contradictions (read-only — does not modify entries)
@@ -346,8 +406,13 @@ public class DreamService {
      * <li>If insert fails, originals are preserved</li>
      * <li>If LLM returns empty/garbage, the group is skipped</li>
      * <li>If LLM returns more entries than input, the group is skipped</li>
-     * <li>Cost bounded by {@code maxCostPerRun} (estimated from token usage)</li>
-     * <li>An LLM failure aborts the phase and is reported, never swallowed</li>
+     * <li>Cost bounded by {@code maxCostPerRun} (estimated from token usage), plus
+     * the deprecated {@code maxSummarizationCalls} when a config sets it</li>
+     * <li>A <em>permanent</em> LLM failure (auth, endpoint, unknown model) aborts
+     * the phase and is reported, never swallowed</li>
+     * <li>A <em>transient</em> LLM failure (rate limit, timeout, 5xx) skips its
+     * group and is logged, but does not fail the cycle — see
+     * {@link #isTransientLlmFailure}</li>
      * </ul>
      */
     private SummarizationOutcome summarizeInteractions(String userId,
@@ -355,6 +420,7 @@ public class DreamService {
                                                        AgentConfiguration.DreamConfig config) {
         int totalConsolidated = 0;
         int llmCallsMade = 0;
+        int transientFailures = 0;
         double estimatedCostAccumulated = 0.0;
 
         // 1. Build groups
@@ -371,11 +437,23 @@ public class DreamService {
             // Respect cost ceiling (soft cap: checked before each call, so the
             // last call may push total slightly over — this is by design, since
             // we cannot know output cost before the call). This dollar budget is
-            // the ONLY ceiling; the legacy maxSummarizationCalls count is not
-            // enforced because a call count says nothing about spend.
+            // the primary ceiling, because a call count says nothing about spend.
             if (estimatedCostAccumulated >= config.getMaxCostPerRun()) {
                 LOGGER.infof("[DREAM] Cost ceiling ($%.4f >= $%.2f) reached for user='%s' " +
                         "after %d calls", estimatedCostAccumulated, config.getMaxCostPerRun(), userId, llmCallsMade);
+                break;
+            }
+
+            // Deprecated secondary backstop: a stored configuration that explicitly
+            // sets maxSummarizationCalls asked for a hard call ceiling, and silently
+            // dropping it would let "at most 3 calls" turn into hundreds under the
+            // dollar budget alone. Configs that never set it are bounded by
+            // maxCostPerRun only — the field's default value caps nothing.
+            if (config.isMaxSummarizationCallsSet() && llmCallsMade >= config.getMaxSummarizationCalls()) {
+                LOGGER.warnf("[DREAM] Legacy call ceiling maxSummarizationCalls=%d reached for user='%s' "
+                        + "after $%.4f of an allowed $%.2f. This field is deprecated — configure maxCostPerRun "
+                        + "instead, which bounds actual spend.",
+                        config.getMaxSummarizationCalls(), userId, estimatedCostAccumulated, config.getMaxCostPerRun());
                 break;
             }
 
@@ -384,11 +462,15 @@ public class DreamService {
 
             // 3. Call LLM. Dream is a background job with no parent LLM task to
             // inherit credentials from, so the model parameters come from the
-            // agent's dream config (finding I1/F13). A failure here is almost
+            // agent's dream config (finding I1/F13). A PERMANENT failure is almost
             // always a configuration fault that would repeat for every remaining
             // group — abort the phase, log at ERROR and report it upward so the
             // schedule fire is marked FAILED, instead of leaving Dream to look
-            // like it ran and simply found nothing to do.
+            // like it ran and simply found nothing to do. A TRANSIENT failure
+            // (rate limit, timeout, 5xx) is not a fault of the configuration and
+            // must not be reported as a failed fire: three of them in a row would
+            // exhaust the schedule's retry budget and dead-letter the user's dream
+            // schedule for good over what is typically a minutes-long provider blip.
             SummarizationService.SummarizationResult llmResult;
             try {
                 llmResult = summarizationService.summarizeWithUsage(
@@ -397,6 +479,14 @@ public class DreamService {
                         config.getParameters());
             } catch (Exception e) {
                 summarizationFailedCounter.increment();
+                if (isTransientLlmFailure(e)) {
+                    transientFailures++;
+                    LOGGER.warnf(e, "[DREAM] Memory consolidation LLM call failed transiently for user='%s', group='%s' "
+                            + "(provider=%s, model=%s). Original entries are preserved; skipping this group and continuing. "
+                            + "The cycle is NOT marked failed, so a provider blip cannot dead-letter the dream schedule.",
+                            userId, group.getKey(), config.getLlmProvider(), config.getLlmModel());
+                    continue;
+                }
                 LOGGER.errorf(e, "[DREAM] Memory consolidation LLM call failed for user='%s', group='%s' "
                         + "(provider=%s, model=%s, configured parameter keys=%s). Original entries are preserved and "
                         + "consolidation is ABORTED for this cycle. If this is an authentication or endpoint error, set the "
@@ -515,7 +605,47 @@ public class DreamService {
             }
         }
 
+        if (transientFailures > 0) {
+            LOGGER.warnf("[DREAM] %d of %d groups were skipped for user='%s' after transient LLM failures — "
+                    + "they are retried on the next dream cycle.", transientFailures, groups.size(), userId);
+        }
+
         return new SummarizationOutcome(totalConsolidated, estimatedCostAccumulated, null);
+    }
+
+    /**
+     * Transient-failure signatures in an exception message — throttling, timeouts
+     * and server-side 5xx, which resolve on their own. Mirrors
+     * {@code CascadingModelExecutor.isRetryableError} /
+     * {@code AgentExecutionHelper} (both private to their modules).
+     */
+    private static final Pattern TRANSIENT_LLM_FAILURE = Pattern.compile(
+            "timeout|timed out|rate limit|too many requests|429|50[234]|529|overloaded|temporarily unavailable",
+            Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Whether an LLM failure is transient (retry later succeeds) rather than a
+     * permanent configuration fault (bad credentials, wrong endpoint, unknown
+     * model). Only the latter should fail the schedule fire, because a FAILED fire
+     * consumes the schedule's dead-letter budget.
+     */
+    static boolean isTransientLlmFailure(Throwable throwable) {
+        Throwable current = throwable;
+        // Bounded walk — a self-referential cause chain must not spin forever.
+        for (int depth = 0; current != null && depth < 10; depth++, current = current.getCause()) {
+            if (current instanceof SocketTimeoutException || current instanceof TimeoutException
+                    || current instanceof ConnectException || current instanceof UnknownHostException) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null && TRANSIENT_LLM_FAILURE.matcher(message).find()) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return false;
     }
 
     /**

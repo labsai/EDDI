@@ -118,6 +118,7 @@ public class ScheduleFireExecutor {
         String errorMessage = null;
         String status;
         double cost = 0.0;
+        boolean interrupted = false;
 
         try {
             Environment env = resolveEnvironment(schedule.getEnvironment());
@@ -150,11 +151,10 @@ public class ScheduleFireExecutor {
         } catch (Exception e) {
             // B2: latch.await() above CLEARS the interrupt flag when it throws
             // InterruptedException, and this broad catch would otherwise swallow the
-            // poller thread's shutdown signal — it would keep firing further schedules
-            // while the executor is shutting down. Restore it before continuing; the
-            // fire is still logged FAILED below so the attempt stays visible.
+            // cancellation signal entirely. Only REMEMBER it here — re-asserting the
+            // flag now would break the fire log below (see the finally).
             if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
+                interrupted = true;
             }
             status = ScheduleConfiguration.FireStatus.FAILED.name();
             errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
@@ -169,9 +169,29 @@ public class ScheduleFireExecutor {
             scheduleStore.logFire(fireLog);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Failed to log fire for schedule %s", schedule.getId());
+        } finally {
+            restoreInterrupt(interrupted);
         }
 
         return fireLog;
+    }
+
+    /**
+     * Re-assert an interrupt that was consumed by a blocking call inside this fire,
+     * so the cancellation signal still reaches the caller.
+     * <p>
+     * Ordering matters: this MUST run only after the store round trips this method
+     * owns. The synchronous MongoDB driver checks out a connection with
+     * {@code lockInterruptibly()} and aborts with {@code MongoInterruptedException}
+     * when the calling thread's flag is already set, so restoring the flag before
+     * {@code logFire} would destroy the FAILED fire log that the interrupt path
+     * exists to write — leaving the attempt invisible on exactly the path where it
+     * matters most.
+     */
+    private static void restoreInterrupt(boolean interrupted) {
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -187,6 +207,7 @@ public class ScheduleFireExecutor {
         String status;
         String errorMessage = null;
         double cost = 0.0;
+        boolean interrupted = false;
 
         try {
             // userId is passed through unchanged — DreamService rejects a missing or
@@ -208,14 +229,13 @@ public class ScheduleFireExecutor {
                         errorMessage);
             }
         } catch (Exception e) {
-            // Same B2 reasoning as fire() above, and it has to be repeated here because
-            // this catch is just as broad: a blocking call inside Dream consolidation
-            // CLEARS the interrupt flag when it throws InterruptedException, so
-            // swallowing it would leave the poller thread running further schedules
-            // through a shutdown. The fix landing on only one of two sibling catches in
-            // the same class is exactly how these gaps happen.
+            // Same B2 reasoning — and the same ordering — as fire() above, repeated here
+            // because this catch is just as broad: a blocking call inside Dream
+            // consolidation CLEARS the interrupt flag when it throws
+            // InterruptedException. Remember it and re-assert it in the finally below,
+            // AFTER the fire log is written.
             if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
+                interrupted = true;
             }
             status = ScheduleConfiguration.FireStatus.FAILED.name();
             errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
@@ -228,6 +248,8 @@ public class ScheduleFireExecutor {
             scheduleStore.logFire(fireLog);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Failed to log dream fire for schedule %s", schedule.getId());
+        } finally {
+            restoreInterrupt(interrupted);
         }
         return fireLog;
     }

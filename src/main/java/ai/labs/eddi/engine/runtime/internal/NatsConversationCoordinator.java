@@ -34,8 +34,18 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>
  * Uses NATS JetStream for durable, ordered message processing per conversation.
- * Activated when {@code eddi.messaging.type=nats} is set in
- * application.properties.
+ * </p>
+ *
+ * <p>
+ * <b>Activation is BUILD-time, not runtime</b>: this bean carries
+ * {@code @IfBuildProfile("nats")}, so it only exists in an artifact built with
+ * {@code -Dquarkus.profile=nats}. The stock distribution (and the published
+ * Docker image) is built without it and therefore always runs
+ * {@link InMemoryConversationCoordinator}, the {@code @DefaultBean}; setting
+ * {@code eddi.messaging.type=nats} at runtime does NOT switch coordinators.
+ * Nothing here is on the shipped path — which is exactly why the
+ * failure-handling rules below have to be maintained deliberately rather than
+ * being caught by production traffic.
  * </p>
  *
  * <p>
@@ -47,11 +57,24 @@ import java.util.concurrent.atomic.AtomicLong;
  * </p>
  *
  * <p>
- * <b>Dead-letter handling</b>: When a task fails more than {@code maxRetries}
- * times, the message is published to a dead-letter stream
- * ({@code eddi.deadletter.<conversationId>}) with 30-day retention for operator
- * inspection and replay.
+ * <b>Dead-letter handling</b>: A failed task is published to a dead-letter
+ * stream ({@code eddi.deadletter.<conversationId>}) with 30-day retention for
+ * operator inspection and replay.
  * </p>
+ *
+ * <h3>Failure handling (kept in lockstep with
+ * {@link InMemoryConversationCoordinator})</h3>
+ * <ul>
+ * <li><b>No retry after execution starts</b>: a task that reports failure has
+ * already run — possibly calling an LLM, executing tools and spending money. It
+ * is dead-lettered once, never re-executed. {@code eddi.nats.max-retries} is
+ * retained as a configuration key (so existing deployments keep loading) but no
+ * longer governs re-execution of a conversation turn.</li>
+ * <li><b>Submission rejection rolls back</b>: if handing the task to the
+ * runtime throws, the task is taken back off the queue (and the map entry
+ * dropped when it was the head), so a rejected submission cannot wedge the
+ * conversation.</li>
+ * </ul>
  *
  * <p>
  * For horizontal scaling, a future enhancement will serialize InputData instead
@@ -242,7 +265,8 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 }
 
                 boolean wasEmpty = queue.isEmpty();
-                boolean enqueued = queue.offer(new RetryableCallable(callable));
+                RetryableCallable retryable = new RetryableCallable(callable);
+                boolean enqueued = queue.offer(retryable);
                 if (!enqueued) {
                     log.warnf("Failed to enqueue task for conversationId=%s", safeConversationId);
                     throw new java.util.concurrent.RejectedExecutionException(
@@ -250,13 +274,48 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 }
 
                 if (wasEmpty) {
-                    publishAndExecute(conversationId, queue, queue.element());
+                    try {
+                        publishAndExecute(conversationId, queue, retryable);
+                    } catch (RuntimeException | java.lang.Error e) {
+                        // C10: the submission failed, so NOTHING is scheduled to run
+                        // the head of this queue — and submitNext() only ever runs
+                        // from a completion callback. Leaving the callable queued
+                        // would wedge this conversation permanently (every later turn
+                        // sees a non-empty queue and just waits) and leak the map
+                        // entry for the JVM's lifetime. Undo the enqueue and drop the
+                        // now-empty queue so the next turn starts a fresh one.
+                        //
+                        // We still hold the queue monitor, so nothing can have been
+                        // offered in between: our callable is the only element.
+                        queue.remove(retryable);
+                        if (queue.isEmpty()) {
+                            conversationQueues.remove(conversationId, queue);
+                        }
+                        log.warnf("Submission failed for conversationId=%s — rolled the task back off the queue "
+                                + "so the conversation stays usable", safeConversationId);
+                        throw e;
+                    }
                 }
                 return; // success
             }
         }
     }
 
+    /**
+     * Publishes the ordering marker to NATS and hands the task to the runtime.
+     * Throws (synchronously) if the SUBMISSION itself is rejected — the only
+     * genuinely pre-execution failure mode; callers must un-queue the task in that
+     * case (C10). A failed NATS publish is not fatal: the callable is still
+     * executed locally, as before.
+     * <p>
+     * C13: there is deliberately NO retry on {@code onFailure}. That callback is
+     * only ever raised from INSIDE the executor task, i.e. after the turn has
+     * already started running — it may have called an LLM, executed tools, written
+     * memory and spent money. Re-running the very same callable repeats all of it.
+     * A failed turn is dead-lettered once and the queue moves on. This mirrors
+     * {@link InMemoryConversationCoordinator} exactly; the two coordinators must
+     * not diverge on failure semantics.
+     */
     private void publishAndExecute(String conversationId, BlockingQueue<RetryableCallable> queue, RetryableCallable retryable) {
         String subject = SUBJECT_PREFIX + sanitizeSubject(conversationId);
 
@@ -289,20 +348,15 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             @Override
             public void onFailure(Throwable t) {
                 recordConsumeMetrics(consumeStart);
+                // The attempt counter is still advanced so the dead-letter log records
+                // how often this conversation's head task was handed to the runtime,
+                // but it never triggers a re-execution (see the C13 note above).
                 int attempt = retryable.incrementAndGetAttempt();
-
-                if (attempt < maxRetries) {
-                    log.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitize(conversationId), attempt,
-                            maxRetries);
-                    // Re-execute the same callable (retry)
-                    publishAndExecute(conversationId, queue, retryable);
-                } else {
-                    log.errorf(t, "Conversation task exhausted retries (conversationId=%s, attempts=%d), " + "routing to dead-letter",
-                            sanitize(conversationId),
-                            attempt);
-                    routeToDeadLetter(conversationId, t);
-                    submitNext(conversationId, queue);
-                }
+                log.errorf(t, "Conversation task failed after it had already started (conversationId=%s, attempts=%d) — "
+                        + "dead-lettering without retry; re-running it would repeat any side effects it already performed",
+                        sanitize(conversationId), attempt);
+                routeToDeadLetter(conversationId, t);
+                submitNext(conversationId, queue);
             }
         }, null);
     }
@@ -338,16 +392,30 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
     private void submitNext(String conversationId, BlockingQueue<RetryableCallable> queue) {
         synchronized (queue) {
-            if (!queue.isEmpty()) {
-                queue.remove();
+            if (queue.isEmpty()) {
+                return;
+            }
+            queue.remove(); // drop the task that just finished
 
-                if (!queue.isEmpty()) {
+            while (!queue.isEmpty()) {
+                try {
                     publishAndExecute(conversationId, queue, queue.element());
-                } else {
-                    // Eager cleanup: remove empty queue to prevent memory leaks.
-                    conversationQueues.remove(conversationId, queue);
+                    return;
+                } catch (RuntimeException | java.lang.Error e) {
+                    // C10 (submitNext side): there is no caller to propagate to here —
+                    // this runs from a completion callback. Dropping out would leave
+                    // the queue non-empty with nothing scheduled to drain it, wedging
+                    // the conversation forever. Dead-letter the task we could not
+                    // schedule and try the next one.
+                    log.errorf(e, "Failed to schedule the next queued task (conversationId=%s) — dead-lettering it "
+                            + "so the conversation queue keeps draining", sanitize(conversationId));
+                    routeToDeadLetter(conversationId, e);
+                    queue.remove();
                 }
             }
+
+            // Eager cleanup: remove empty queue to prevent memory leaks.
+            conversationQueues.remove(conversationId, queue);
         }
     }
 
@@ -497,7 +565,10 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     }
 
     /**
-     * @return the max retries configuration value (for testing)
+     * @return the {@code eddi.nats.max-retries} configuration value. Retained so
+     *         existing deployments keep starting; it no longer causes a
+     *         conversation turn to be re-executed (see the class javadoc, "Failure
+     *         handling").
      */
     int getMaxRetries() {
         return maxRetries;
@@ -511,7 +582,10 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     }
 
     /**
-     * Wraps a Callable with a retry attempt counter.
+     * Wraps a Callable with an attempt counter. The counter is diagnostic only — it
+     * records how often the head task of a conversation was handed to the runtime
+     * and is reported in the dead-letter log. It never drives a re-execution: a
+     * turn that reported failure has already run.
      */
     static class RetryableCallable {
         private final Callable<Void> callable;

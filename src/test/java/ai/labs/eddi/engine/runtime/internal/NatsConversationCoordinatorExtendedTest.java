@@ -503,56 +503,53 @@ class NatsConversationCoordinatorExtendedTest {
         assertTrue(coordinator.getQueueDepths().isEmpty());
     }
 
-    // ==================== Retry on Failure ====================
+    // ==================== Failure handling (C13: no re-execution)
+    // ====================
 
     @Nested
-    class PublishAndExecuteRetry {
+    class PublishAndExecuteFailure {
 
+        /**
+         * The callback is raised from inside the executor task, so the turn has already
+         * run. Re-submitting the identical callable would repeat its LLM calls, tool
+         * invocations and memory writes — which is why the retry loop was removed from
+         * BOTH coordinators.
+         */
         @Test
         @SuppressWarnings("unchecked")
-        void onFailure_retries_whenAttemptsRemain() {
+        void onFailure_neverReSubmitsTheSameCallable() {
             Callable<Void> task = () -> null;
 
-            // 1st submission → captures the callback
             ArgumentCaptor<IRuntime.IFinishedExecution<Void>> cb1 = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
             coordinator.submitInOrder("conv-retry", task);
             verify(runtime, times(1)).submitCallable(eq(task), cb1.capture(), isNull());
 
-            // Trigger failure (attempt 1 of 3) → should re-submit
             cb1.getValue().onFailure(new RuntimeException("transient error"));
-            verify(runtime, times(2)).submitCallable(eq(task), any(), isNull());
+
+            verify(runtime, times(1)).submitCallable(eq(task), any(), isNull());
         }
 
         @Test
         @SuppressWarnings("unchecked")
-        void onFailure_routesToDeadLetter_whenRetriesExhausted() throws Exception {
-            // maxRetries = 3 → need 3 failures to exhaust
+        void onFailure_routesToDeadLetter_onTheFirstFailure() throws Exception {
+            // maxRetries is 3 for this coordinator — and deliberately irrelevant
             Callable<Void> task = () -> null;
             ArgumentCaptor<IRuntime.IFinishedExecution<Void>> cbCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
 
             coordinator.submitInOrder("conv-exhaust", task);
             verify(runtime, times(1)).submitCallable(eq(task), cbCaptor.capture(), isNull());
 
-            // failure 1 → retry
             cbCaptor.getValue().onFailure(new RuntimeException("fail-1"));
-            verify(runtime, times(2)).submitCallable(eq(task), cbCaptor.capture(), isNull());
 
-            // failure 2 → retry
-            cbCaptor.getValue().onFailure(new RuntimeException("fail-2"));
-            verify(runtime, times(3)).submitCallable(eq(task), cbCaptor.capture(), isNull());
-
-            // failure 3 → retries exhausted (attempt == maxRetries) → dead-letter
-            cbCaptor.getValue().onFailure(new RuntimeException("fail-3"));
-
-            // Should NOT have been submitted a 4th time
-            verify(runtime, times(3)).submitCallable(eq(task), any(), isNull());
-
-            // Dead-letter published to JetStream
+            // Dead-letter published to JetStream on the very first failure
             verify(jetStream).publish(
                     eq("eddi.deadletter.conv-exhaust"), any(byte[].class));
 
             // totalDeadLettered incremented
             assertEquals(1L, coordinator.getTotalDeadLettered());
+
+            // ... and no second execution of a turn that already ran
+            verify(runtime, times(1)).submitCallable(eq(task), any(), isNull());
         }
     }
 

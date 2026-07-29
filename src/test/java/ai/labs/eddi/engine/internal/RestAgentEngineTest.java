@@ -33,6 +33,7 @@ import org.mockito.ArgumentCaptor;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.RejectedExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -381,6 +382,56 @@ class RestAgentEngineTest {
         }
 
         @Test
+        @DisplayName("should resume with 503 + Retry-After, not 500, when the node is draining")
+        void rejectedWhileShuttingDown() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            // ConversationService#rejectIfShuttingDown throws this synchronously on the
+            // request thread once GracefulShutdownService flips isShuttingDown.
+            doThrow(new RejectedExecutionException(
+                    "This node is shutting down and no longer accepts new conversation turns — retry against another node"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            // Without the explicit catch this fell through to the generic handler, which
+            // THROWS InternalServerErrorException instead of resuming — so the assertions
+            // below (resume called at all, and with 503) both fail on the old code.
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(503, resumed.getStatus());
+            assertEquals("5", resumed.getHeaderString("Retry-After"));
+            assertEquals(Map.of("error", "capacity_exceeded",
+                    "message", "This node is shutting down and no longer accepts new conversation turns"
+                            + " — retry against another node"),
+                    resumed.getEntity());
+        }
+
+        @Test
+        @DisplayName("should resume with 503 when the coordinator rejects with a null message")
+        void rejectedWithoutMessage() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new RejectedExecutionException())
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(503, resumed.getStatus());
+            // mirrors RejectedExecutionExceptionMapper's null-message fallback
+            assertEquals(Map.of("error", "capacity_exceeded", "message", "Service temporarily unavailable"),
+                    resumed.getEntity());
+        }
+
+        @Test
         @DisplayName("should throw ISE for generic exception")
         void genericException() throws Exception {
             var asyncResponse = mock(AsyncResponse.class);
@@ -392,6 +443,7 @@ class RestAgentEngineTest {
             assertThrows(InternalServerErrorException.class,
                     () -> restAgentEngine.sayWithinContext("conv-1", false, false,
                             List.of(), inputData, asyncResponse));
+            verify(asyncResponse, never()).resume(any(Response.class));
         }
     }
 
@@ -431,6 +483,24 @@ class RestAgentEngineTest {
             InputData capturedInput = captor.getValue();
             assertEquals("", capturedInput.getInput());
             assertTrue(capturedInput.getContext().containsKey("lang"));
+        }
+
+        @Test
+        @DisplayName("should resume with 503 while draining (rerun shares sayInternal)")
+        void rejectedWhileShuttingDown() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+
+            doThrow(new RejectedExecutionException("node draining"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.rerunLastConversationStep("conv-1", "en", false, false,
+                    List.of(), asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(503, resumed.getStatus());
+            assertEquals("5", resumed.getHeaderString("Retry-After"));
         }
     }
 

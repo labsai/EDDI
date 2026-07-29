@@ -29,6 +29,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -67,6 +68,7 @@ class RestSemanticParserCacheTest {
     private IInputParser inputParser;
     private AsyncResponse asyncResponse;
     private RestSemanticParser parser;
+    private Map<String, Provider<ILifecycleTask>> lifecycleTasks;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -77,7 +79,7 @@ class RestSemanticParserCacheTest {
         inputParser = mock(IInputParser.class);
         asyncResponse = mock(AsyncResponse.class);
 
-        Map<String, Provider<ILifecycleTask>> lifecycleTasks = new HashMap<>();
+        lifecycleTasks = new HashMap<>();
         lifecycleTasks.put("ai.labs.parser", parserProvider);
         parser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks);
 
@@ -181,7 +183,7 @@ class RestSemanticParserCacheTest {
 
     @Test
     @Timeout(60)
-    @DisplayName("invalidateCache drops cached parsers so an updated configuration is re-read")
+    @DisplayName("invalidateCache empties the cache so the next request rebuilds from the store")
     void invalidateCacheForcesReload() throws Exception {
         doReturn(new ParserConfiguration()).when(resourceClientLibrary).getResource(any(), eq(ParserConfiguration.class));
 
@@ -199,5 +201,53 @@ class RestSemanticParserCacheTest {
 
         verify(parserProvider, times(2)).get();
         verify(resourceClientLibrary, times(2)).getResource(any(), eq(ParserConfiguration.class));
+    }
+
+    /**
+     * The TTL is the only thing that ever removes a cached parser on its own — the
+     * store never invalidates it. Without a fake clock this is untestable (five
+     * minutes of wall time), so the parser is built with an injectable
+     * {@code Ticker} here and the clock is advanced by hand: no sleeps, no
+     * flakiness. Drop {@code expireAfterWrite} from the Caffeine builder and the
+     * two assertions after the advance both fail — the entry is still cached and
+     * the store is never re-read.
+     */
+    @Test
+    @Timeout(60)
+    @DisplayName("a cached parser survives until PARSER_CACHE_TTL and is rebuilt from the store afterwards")
+    void cachedParserExpiresAfterTtl() throws Exception {
+        doReturn(new ParserConfiguration()).when(resourceClientLibrary).getResource(any(), eq(ParserConfiguration.class));
+
+        AtomicLong nanos = new AtomicLong();
+        RestSemanticParser expiringParser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks, nanos::get);
+
+        expiringParser.parse(CONFIG_ID, 1, "first", asyncResponse);
+        captureCallables(1).getFirst().call();
+        assertEquals(1, expiringParser.cachedParserCount());
+        verify(resourceClientLibrary, times(1)).getResource(any(), eq(ParserConfiguration.class));
+
+        // One nanosecond short of the TTL: still the same cached parser instance.
+        nanos.addAndGet(RestSemanticParser.PARSER_CACHE_TTL.toNanos() - 1);
+        reset(runtime);
+        doReturn(mock(Future.class)).when(runtime).submitCallable(any(Callable.class), any());
+        expiringParser.parse(CONFIG_ID, 1, "second", mock(AsyncResponse.class));
+        captureCallables(1).getFirst().call();
+
+        assertEquals(1, expiringParser.cachedParserCount(), "entry must not expire before the TTL elapses");
+        verify(resourceClientLibrary, times(1)).getResource(any(), eq(ParserConfiguration.class));
+        verify(parserProvider, times(1)).get();
+
+        // Past the TTL: the entry is gone and the next request rebuilds it.
+        nanos.addAndGet(2);
+        assertEquals(0, expiringParser.cachedParserCount(), "entry must be evicted once the TTL has elapsed");
+
+        reset(runtime);
+        doReturn(mock(Future.class)).when(runtime).submitCallable(any(Callable.class), any());
+        expiringParser.parse(CONFIG_ID, 1, "third", mock(AsyncResponse.class));
+        captureCallables(1).getFirst().call();
+
+        verify(resourceClientLibrary, times(2)).getResource(any(), eq(ParserConfiguration.class));
+        verify(parserProvider, times(2)).get();
+        assertEquals(1, expiringParser.cachedParserCount());
     }
 }

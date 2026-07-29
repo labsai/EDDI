@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -174,10 +175,20 @@ class BaseRuntimeConcurrencyTest {
      * therefore reported the turn as failed, and the coordinator's retry then
      * re-executed a callable that had ALREADY run (duplicate LLM calls, duplicate
      * tool side effects, duplicate cost).
+     *
+     * <p>
+     * Suppressing onFailure must not turn the failure into silence: the throw is
+     * surfaced through the Future instead, so the submitter (which knows the
+     * conversation) can still log it with context and flip the state —
+     * {@code ConversationService.waitForExecutionFinishOrTimeout} maps the
+     * resulting {@link java.util.concurrent.ExecutionException} onto
+     * {@code logConversationError} + ERROR. Swallowing it here (log-only) would
+     * leave the caller unable to tell a persisted turn from a lost one.
+     * </p>
      */
     @Test
     @Timeout(30)
-    @DisplayName("C9: a throwing completion callback is not reported as a failure")
+    @DisplayName("C9: a throwing completion callback is not reported as a failure, but fails the Future")
     void throwingCompletionCallbackIsNotRoutedToOnFailure() throws Exception {
         AtomicInteger executions = new AtomicInteger();
         CountDownLatch onCompleteCalled = new CountDownLatch(1);
@@ -204,7 +215,11 @@ class BaseRuntimeConcurrencyTest {
         assertTrue(onCompleteCalled.await(10, TimeUnit.SECONDS), "onComplete should have been invoked");
         // The Future settles only after the callback dispatch, so once it is done the
         // decision about onFailure has already been made — no polling window needed.
-        assertEquals("ok", future.get(10, TimeUnit.SECONDS));
+        ExecutionException thrown = assertThrows(ExecutionException.class, () -> future.get(10, TimeUnit.SECONDS),
+                "a completion callback that blew up must reach the submitter through the Future — "
+                        + "logging it inside BaseRuntime leaves nobody able to act on it");
+        assertInstanceOf(IllegalStateException.class, thrown.getCause());
+        assertEquals("completion callback blew up", thrown.getCause().getMessage());
         assertEquals(1, onFailureCalled.getCount(),
                 "onFailure must not fire after the work already executed — callers read it as 'never ran' and re-execute");
         assertEquals(1, executions.get(), "the callable must be executed exactly once");
