@@ -28,3 +28,24 @@
 06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:423
 06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:427
 06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:445
+
+# OpenAI-compatible adapter docs — placeholder credentials in examples, never real.
+# Gitleaks scans the PR's commit history, so fixing the working tree in a later
+# commit cannot clear a finding from an earlier one; these entries cover the
+# commits that introduced them. The examples themselves have since been changed
+# to use $EDDI_API_KEY / os.environ so no future commit re-triggers the rule.
+#
+# docs/open-webui-integration.md: two curl examples that passed a placeholder
+# bearer token inline. (Not quoted here -- the rule matches this file too.)
+3b384d99d6c6a5ef652a4294618fa9df16b753df:docs/open-webui-integration.md:curl-auth-header:56
+3b384d99d6c6a5ef652a4294618fa9df16b753df:docs/open-webui-integration.md:curl-auth-header:60
+# planning/openai-api-adapter-plan.md: the same two curl examples, plus a
+# generic-api-key hit on the literal "<api-key>" placeholder in an ASCII
+# request diagram.
+5283853e511b20937a13ab8a9dc13698d3ef6496:planning/openai-api-adapter-plan.md:generic-api-key:138
+5283853e511b20937a13ab8a9dc13698d3ef6496:planning/openai-api-adapter-plan.md:curl-auth-header:791
+5283853e511b20937a13ab8a9dc13698d3ef6496:planning/openai-api-adapter-plan.md:curl-auth-header:795
+# The justification comment above originally quoted the offending example
+# verbatim, so the rule matched this file too. The quote is gone now, but the
+# commit that carried it stays in history and still needs an entry.
+36e741846f2fcf3e25aa3bcb6efca0feeba69dd0:.gitleaksignore:curl-auth-header:38

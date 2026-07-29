@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.agents.rest;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -54,6 +55,8 @@ class RestAgentStoreExtendedTest {
     private IScheduleStore scheduleStore;
     @Mock
     private CapabilityRegistryService capabilityRegistryService;
+    @Mock
+    private IDeploymentStore deploymentStore;
 
     private RestAgentStore restAgentStore;
 
@@ -61,7 +64,7 @@ class RestAgentStoreExtendedTest {
     void setUp() {
         openMocks(this);
         restAgentStore = new RestAgentStore(agentStore, restWorkflowStore,
-                documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService);
+                documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore);
     }
 
     // ==================== readJsonSchema ====================

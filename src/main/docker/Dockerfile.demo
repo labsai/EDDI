@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Self-building image for the Open WebUI demo (docker-compose.openwebui.yml).
+#
+# The production image (./Dockerfile) copies a prebuilt target/quarkus-app and
+# is digest-pinned for supply-chain reasons — that is the one CI publishes, and
+# it is deliberately left alone. This one compiles the working tree inside the
+# container instead, so the demo needs no local JDK, no local Maven, and no
+# `./mvnw package` before `docker compose up`.
+#
+# It uses the official Maven image rather than the project's ./mvnw wrapper.
+# The wrapper is right for developer machines, but in a container it adds two
+# failure modes for nothing: a Windows checkout leaves CRLF on mvnw (whose
+# "#!/bin/sh\r" shebang fails as a bare "exit code 127") and on
+# maven-wrapper.properties (whose distributionSha256Sum then keeps a trailing
+# \r, reported as "your Maven distribution might be compromised" — alarming,
+# and nothing to do with security). The image ships the same Maven 3.9 line the
+# wrapper pins, and pom.xml governs everything that actually matters.
+#
+# Not for production: unpinned base images and a full build toolchain in the
+# build stage. It exists so the adapter can be demonstrated from a checkout.
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM maven:3.9-eclipse-temurin-25 AS build
+
+WORKDIR /src
+
+# POM first, so the dependency resolution layer survives source edits. The
+# cache mount then makes rebuilds cheap without baking ~/.m2 into a layer.
+COPY pom.xml ./
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -q dependency:go-offline
+
+# Bound to the build by pom.xml: Checkstyle runs at validate and the formatter
+# plugin reads eclipse-formatter.xml, so both must be in the context or the
+# build dies well before compiling anything.
+COPY checkstyle.xml eclipse-formatter.xml ./
+
+COPY src/ src/
+COPY licenses/ licenses/
+COPY docs/ docs/
+
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B package -DskipTests
+
+# ── Runtime ──
+FROM eclipse-temurin:25-jre
+
+ENV LANG='C.utf8' LANGUAGE='C.utf8'
+
+WORKDIR /deployments
+
+# curl is for the compose healthcheck, not for the app. The production image
+# inherits it from UBI; this base does not ship it, and without it the
+# healthcheck can never pass — which silently blocks every service that waits
+# on `condition: service_healthy`.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /deployments/tmp/import
+
+COPY --from=build /src/target/quarkus-app/lib/     /deployments/lib/
+COPY --from=build /src/target/quarkus-app/*.jar    /deployments/
+COPY --from=build /src/target/quarkus-app/app/     /deployments/app/
+COPY --from=build /src/target/quarkus-app/quarkus/ /deployments/quarkus/
+
+EXPOSE 7070
+
+ENTRYPOINT ["java", "-jar", "/deployments/quarkus-run.jar"]
