@@ -81,7 +81,8 @@ public class PostgresAuditStore implements IAuditStore {
 
     private static final String SELECT_ALL = """
             id, conversation_id, AGENT_ID, AGENT_VERSION, user_id, environment,
-            step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data
+            step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data,
+            sequence
             """;
 
     private final Instance<DataSource> dataSourceInstance;
