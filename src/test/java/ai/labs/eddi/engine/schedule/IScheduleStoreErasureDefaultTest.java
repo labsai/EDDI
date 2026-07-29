@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
@@ -71,8 +72,15 @@ class IScheduleStoreErasureDefaultTest {
 
         store.deleteSchedulesByUserId("user-1");
 
-        verify(store).readAllSchedules(IScheduleStore.ERASURE_SCAN_LIMIT);
-        assertTrue(IScheduleStore.ERASURE_SCAN_LIMIT > 0);
+        // Capture the argument actually passed rather than asserting on the constant:
+        // ERASURE_SCAN_LIMIT > 0 is compile-time constant-folded to `true`, so it
+        // asserts nothing. The captured value is a runtime Integer, so this genuinely
+        // fails if the limit is ever set to 0 — which would scan, and therefore erase,
+        // nothing while still reporting success.
+        var limit = ArgumentCaptor.forClass(Integer.class);
+        verify(store).readAllSchedules(limit.capture());
+        assertEquals(IScheduleStore.ERASURE_SCAN_LIMIT, limit.getValue());
+        assertTrue(limit.getValue() > 0, "erasure scan limit must be positive, otherwise erasure silently scans nothing");
     }
 
     @Test

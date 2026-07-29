@@ -206,7 +206,12 @@ public class RestWorkflowStore implements IRestWorkflowStore {
             // FAIL CLOSED. A cascade-delete is irreversible and this is the only
             // thing standing between it and a config another workflow still uses —
             // if the reference check cannot answer, we do not get to guess.
-            log.warnf("Reference check for %s failed (%s) — NOT cascade-deleting it", resourceUri, e.getMessage());
+            //
+            // ERROR, not WARN: a backend whose reverse-lookup query is broken
+            // answers this way for EVERY resource, which silently turns cascade
+            // delete into a permanent no-op. That must be loud, and the cause must
+            // be in the log — hence the throwable rather than just its message.
+            log.errorf(e, "Reference check for %s failed — NOT cascade-deleting it", resourceUri);
             return;
         }
 

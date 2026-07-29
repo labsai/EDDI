@@ -72,7 +72,9 @@ public interface IRestConversationStore {
      * Deployment-wide retention sweep: permanently deletes EVERY ended conversation
      * older than {@code deleteOlderThanDays}, across all owners. Admin-only, and
      * the age must be at least one day — {@code 0} would wipe the whole
-     * deployment's ended conversations in a single unauthenticated request.
+     * deployment's ended conversations in a single call. Before this was gated it
+     * was reachable by any caller at all, which is what made the {@code 0} case so
+     * dangerous.
      */
     @DELETE
     @Path("/")

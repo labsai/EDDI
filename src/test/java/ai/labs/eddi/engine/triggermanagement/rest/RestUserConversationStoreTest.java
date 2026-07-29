@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import jakarta.ws.rs.BadRequestException;
 import ai.labs.eddi.engine.triggermanagement.IRestUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
@@ -159,6 +160,64 @@ class RestUserConversationStoreTest {
 
             assertEquals(200, response.getStatus());
             verify(userConversationStore).createUserConversation(uc);
+            verify(cache).put("intent1::user1", uc);
+        }
+
+        /**
+         * The ownership guard authorises the PATH userId, but it is the BODY that gets
+         * persisted. Without this check a caller authorised for their own path could
+         * post a body naming someone else and write that user's mapping — defeating the
+         * guard entirely — while the cache entry went in under the path key, so a later
+         * read for the path user served the other user's record.
+         */
+        @Test
+        @DisplayName("a body naming a different user is rejected, not persisted")
+        void bodyUserIdMustMatchPath() throws Exception {
+            UserConversation uc = new UserConversation("intent1", "victim",
+                    Deployment.Environment.production, "agent1", "conv1");
+
+            assertThrows(BadRequestException.class,
+                    () -> restStore.createUserConversation("intent1", "attacker", uc));
+
+            verify(userConversationStore, never()).createUserConversation(any());
+            verify(cache, never()).put(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a body naming a different intent is rejected, not persisted")
+        void bodyIntentMustMatchPath() throws Exception {
+            UserConversation uc = new UserConversation("other-intent", "user1",
+                    Deployment.Environment.production, "agent1", "conv1");
+
+            assertThrows(BadRequestException.class,
+                    () -> restStore.createUserConversation("intent1", "user1", uc));
+
+            verify(userConversationStore, never()).createUserConversation(any());
+            // A regression that skipped the store but still wrote the cache would
+            // poison the (intent, user) key with a record for a different intent.
+            verify(cache, never()).put(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a null body is a 400, not a 500 from the store")
+        void nullBodyIsRejectedAsBadRequest() throws Exception {
+            assertThrows(BadRequestException.class,
+                    () -> restStore.createUserConversation("intent1", "user1", null));
+
+            verify(userConversationStore, never()).createUserConversation(any());
+            verify(cache, never()).put(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a body that omits them inherits the authorised path values")
+        void bodyWithoutIdsInheritsPathValues() throws Exception {
+            UserConversation uc = new UserConversation();
+
+            Response response = restStore.createUserConversation("intent1", "user1", uc);
+
+            assertEquals(200, response.getStatus());
+            assertEquals("user1", uc.getUserId());
+            assertEquals("intent1", uc.getIntent());
             verify(cache).put("intent1::user1", uc);
         }
 

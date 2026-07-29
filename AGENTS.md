@@ -230,14 +230,14 @@ When tasks process templates (system prompts, HTTP call bodies, property instruc
 
 | Key                | Type                                         | Source                                                                     | Example Access                                   |
 | ------------------ | -------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------ |
-| `context`          | `Map<String, Object>`                        | Input context variables set per turn                                       | `{{context.language}}`                           |
+| `context`          | `Map<String, Object>`                        | Input context variables set per turn                                       | `{context.language}`                           |
 | `properties`       | `Map<String, Object>`                        | Conversation properties — raw values from `ConversationProperties.toMap()` | `{properties.preferred_language}`                |
 | `memory`           | `Map` with `current`, `last`, `past`         | Conversation step data from the pipeline                                   | `{memory.current.output}`, `{memory.last.input}` |
-| `snippets`         | `Map<String, Object>`                        | Prompt Snippets — auto-injected from `PromptSnippetService`                | `{{snippets.cautious_mode}}`                     |
-| `vars`             | `Map<String, Object>`                        | Global Variables — deployment-wide config from `GlobalVariableResolver`    | `{{vars.default-model}}`                         |
-| `userInfo`         | `Map` with `userId`                          | Authenticated user identity                                                | `{{userInfo.userId}}`                            |
-| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata                                                      | `{{conversationInfo.agentId}}`                   |
-| `conversationLog`  | `String`                                     | Formatted conversation history                                             | `{{conversationLog}}`                            |
+| `snippets`         | `Map<String, Object>`                        | Prompt Snippets — auto-injected from `PromptSnippetService`                | `{snippets.cautious_mode}`                     |
+| `vars`             | `Map<String, Object>`                        | Global Variables — deployment-wide config from `GlobalVariableResolver`    | `{vars.default-model}`                         |
+| `userInfo`         | `Map` with `userId`                          | Authenticated user identity                                                | `{userInfo.userId}`                            |
+| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata                                                      | `{conversationInfo.agentId}`                   |
+| `conversationLog`  | `String`                                     | Formatted conversation history                                             | `{conversationLog}`                            |
 
 > **Key insight**: `longTerm` properties are loaded into `conversationProperties` at conversation init and are immediately available via `{properties.key}` in any template. You do NOT need a separate template namespace for persistent data — properties IS the namespace.
 
@@ -251,7 +251,7 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
        └─→ IUserMemoryStore.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries)
        └─→ Visibility scoping: self + group + global entries are loaded
        └─→ Converted to Property objects with scope=longTerm
-       └─→ Available as {{properties.key}} in all templates
+       └─→ Available as {properties.key} in all templates
 
 2. Pipeline runs
    └─→ PropertySetterTask sets properties based on actions
