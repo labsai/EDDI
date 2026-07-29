@@ -5,6 +5,16 @@
 
 ---
 
+## 🔎 fix(llm): review follow-ups — workflow version parse, log sanitization (2026-07-29)
+
+**Repo:** EDDI (`fix/review-followup-workflow-version`)
+
+Two findings Copilot raised against #618 after it had already been approved, kept out of that PR so they arrive small enough for CodeRabbit to actually review (#618 reached 120 files, past CodeRabbit's 100-file limit, so it merged without ever getting a CodeRabbit pass).
+
+- **`WorkflowTraversal` aborted tool discovery for a whole turn over one malformed URI.** Every other malformed-URI branch in that loop warns, marks the traversal degraded and continues. The version parse did not. `String.replaceAll` returns its input **unchanged** when the pattern does not match, so a workflow URI carrying `?version=abc` passed the `contains("version=")` guard and reached `Integer.parseInt` as the literal string `"version=abc"`. The `NumberFormatException` escaped `discoverConfigs` entirely — so a single bad workflow URI took out httpcall, mcpcall and RAG tool discovery for that turn, rather than skipping the one workflow that was broken. Now matched explicitly, with "present but unusable" treated exactly like "absent" (and a digit run too large for an `int` folded into the same path).
+
+- **`MemoryItemConverter` logged raw exception messages** in both the prompt-snippet and global-variable catch blocks. Exception text can carry user-controlled values, so this is the same CWE-117 class CodeQL flagged five times in #618; routed through `LogSanitizer`.
+
 ## 🐳 fix(demo): the Open WebUI seeder did nothing on a second run (2026-07-29)
 
 **Repo:** EDDI (`feat/openai-api-adapter`)
