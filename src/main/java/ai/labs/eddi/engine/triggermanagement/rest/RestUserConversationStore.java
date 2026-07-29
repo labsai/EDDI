@@ -78,17 +78,20 @@ public class RestUserConversationStore implements IRestUserConversationStore {
         // read for (intent, path user) would serve the other user's record.
         // Reject a divergence rather than silently rewriting it: a mismatch is
         // either an attack or a client bug, and both deserve to be seen.
-        if (userConversation != null) {
-            if (userConversation.getUserId() != null && !userConversation.getUserId().equals(userId)) {
-                throw new BadRequestException("userId in the request body must match the userId in the path");
-            }
-            if (userConversation.getIntent() != null && !userConversation.getIntent().equals(intent)) {
-                throw new BadRequestException("intent in the request body must match the intent in the path");
-            }
-            // A body that omits them inherits the authorised path values.
-            userConversation.setUserId(userId);
-            userConversation.setIntent(intent);
+        if (userConversation == null) {
+            // The Mongo store rejects null with checkNotNull, which surfaces as a 500.
+            // A missing body is a client error, so say so.
+            throw new BadRequestException("a UserConversation body is required");
         }
+        if (userConversation.getUserId() != null && !userConversation.getUserId().equals(userId)) {
+            throw new BadRequestException("userId in the request body must match the userId in the path");
+        }
+        if (userConversation.getIntent() != null && !userConversation.getIntent().equals(intent)) {
+            throw new BadRequestException("intent in the request body must match the intent in the path");
+        }
+        // A body that omits them inherits the authorised path values.
+        userConversation.setUserId(userId);
+        userConversation.setIntent(intent);
         try {
             userConversationStore.createUserConversation(userConversation);
             userConversationCache.put(calculateCacheKey(intent, userId), userConversation);

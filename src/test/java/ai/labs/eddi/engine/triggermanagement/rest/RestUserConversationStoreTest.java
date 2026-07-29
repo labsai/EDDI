@@ -199,6 +199,16 @@ class RestUserConversationStoreTest {
         }
 
         @Test
+        @DisplayName("a null body is a 400, not a 500 from the store")
+        void nullBodyIsRejectedAsBadRequest() throws Exception {
+            assertThrows(BadRequestException.class,
+                    () -> restStore.createUserConversation("intent1", "user1", null));
+
+            verify(userConversationStore, never()).createUserConversation(any());
+            verify(cache, never()).put(anyString(), any());
+        }
+
+        @Test
         @DisplayName("a body that omits them inherits the authorised path values")
         void bodyWithoutIdsInheritsPathValues() throws Exception {
             UserConversation uc = new UserConversation();
