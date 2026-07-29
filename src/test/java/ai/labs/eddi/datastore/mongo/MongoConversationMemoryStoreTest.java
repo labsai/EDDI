@@ -108,7 +108,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("store new snapshot — generates ID and round-trips")
-        void storeNewSnapshot() {
+        void storeNewSnapshot() throws IResourceStore.ResourceStoreException {
             var snapshot = createSnapshot(null, "agent1", 1, "user1",
                     ConversationState.IN_PROGRESS);
 
@@ -125,7 +125,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("update existing snapshot — preserves ID, updates state")
-        void updateExistingSnapshot() {
+        void updateExistingSnapshot() throws IResourceStore.ResourceStoreException {
             var snapshot = createSnapshot(null, "agent1", 1, "user1",
                     ConversationState.IN_PROGRESS);
             String id = store.storeConversationMemorySnapshot(snapshot);
@@ -144,6 +144,32 @@ class MongoConversationMemoryStoreTest {
         void loadNonExistent() {
             assertNull(store.loadConversationMemorySnapshot("000000000000000000000000"));
         }
+
+        /**
+         * G12 against the REAL driver: {@code ConversationMemoryStoreResilienceTest}
+         * proves the branch with a mocked {@code UpdateResult}, which cannot
+         * substantiate the driver-semantics claim that a non-upserting
+         * {@code replaceOne} against a deleted document reports
+         * {@code matchedCount == 0} rather than silently re-inserting it.
+         */
+        @Test
+        @DisplayName("G12 — a conversation deleted mid-turn surfaces as an error, not silent loss")
+        void concurrentDeleteDuringTurnIsReported() throws IResourceStore.ResourceStoreException {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.IN_PROGRESS);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+            snapshot.setId(id);
+            snapshot.setConversationId(id);
+
+            // the turn is still running when the document is erased
+            store.deleteConversationMemorySnapshot(id);
+
+            var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                    () -> store.storeConversationMemorySnapshot(snapshot));
+            assertTrue(thrown.getMessage().contains(id), thrown.getMessage());
+            assertTrue(thrown.getMessage().contains("NOT persisted"), thrown.getMessage());
+            assertNull(store.loadConversationMemorySnapshot(id),
+                    "the store must not resurrect the erased conversation");
+        }
     }
 
     // ─── State Management ───────────────────────────────────────
@@ -154,7 +180,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("setConversationState — updates state")
-        void setConversationState() {
+        void setConversationState() throws IResourceStore.ResourceStoreException {
             String id = store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
 
@@ -173,7 +199,7 @@ class MongoConversationMemoryStoreTest {
 
     @Test
     @DisplayName("deleteConversationMemorySnapshot — removes snapshot")
-    void deleteSnapshot() {
+    void deleteSnapshot() throws IResourceStore.ResourceStoreException {
         String id = store.storeConversationMemorySnapshot(
                 createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
 
@@ -204,7 +230,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("getActiveConversationCount — counts non-ENDED only")
-        void activeCount() {
+        void activeCount() throws IResourceStore.ResourceStoreException {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "agent2", 1, "u1", ConversationState.IN_PROGRESS));
             String endedId = store.storeConversationMemorySnapshot(
@@ -216,7 +242,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("getEndedConversationIds — returns only ENDED")
-        void endedIds() {
+        void endedIds() throws IResourceStore.ResourceStoreException {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
             String endedId = store.storeConversationMemorySnapshot(
@@ -237,7 +263,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("create + read round-trip")
-        void createAndRead() throws IResourceStore.ResourceNotFoundException {
+        void createAndRead() throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
             var snapshot = createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS);
             var resourceId = store.create(snapshot);
             assertNotNull(resourceId.getId());
@@ -263,7 +289,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("getConversationIdsByUserId — finds by userId")
-        void getByUserId() {
+        void getByUserId() throws IResourceStore.ResourceStoreException {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "target_user", ConversationState.IN_PROGRESS));
             store.storeConversationMemorySnapshot(
@@ -277,7 +303,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("deleteConversationsByUserId — removes all for user")
-        void deleteByUserId() {
+        void deleteByUserId() throws IResourceStore.ResourceStoreException {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "delete_me", ConversationState.IN_PROGRESS));
             store.storeConversationMemorySnapshot(
@@ -300,7 +326,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("compareAndSetState succeeds only from the expected state")
-        void compareAndSetState() {
+        void compareAndSetState() throws IResourceStore.ResourceStoreException {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             String id = store.storeConversationMemorySnapshot(snapshot);
 
@@ -317,7 +343,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("a no-op CAS (expected == target) succeeds even though nothing is modified")
-        void compareAndSetStateNoOp() {
+        void compareAndSetStateNoOp() throws IResourceStore.ResourceStoreException {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             String id = store.storeConversationMemorySnapshot(snapshot);
 
@@ -331,7 +357,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("after a CAS the reloaded snapshot reports the new state (parity with the Postgres column-wins guarantee)")
-        void loadReportsCasState() {
+        void loadReportsCasState() throws IResourceStore.ResourceStoreException {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             String id = store.storeConversationMemorySnapshot(snapshot);
 
@@ -346,7 +372,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("storeConversationMemorySnapshotIfState persists only while the state matches (terminal writer wins)")
-        void storeConversationMemorySnapshotIfState() {
+        void storeConversationMemorySnapshotIfState() throws IResourceStore.ResourceStoreException {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.IN_PROGRESS);
             String id = store.storeConversationMemorySnapshot(snapshot);
 
@@ -371,7 +397,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("findPendingApprovalSummaries projects the bookmark incl. approvalTimeout and honors the limit")
-        void findPendingApprovalSummaries() {
+        void findPendingApprovalSummaries() throws IResourceStore.ResourceStoreException {
             var paused = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             paused.setHitlPausedAt(java.time.Instant.now());
             paused.setHitlPauseReason("needs review");
@@ -397,7 +423,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("findPendingApprovalSummaries carries pauseType + toolNames (names only) for a TOOL_CALL pause")
-        void findPendingApprovalSummariesCarriesPauseTypeAndToolNames() {
+        void findPendingApprovalSummariesCarriesPauseTypeAndToolNames() throws IResourceStore.ResourceStoreException {
             var toolPaused = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             toolPaused.setHitlPauseType("TOOL_CALL");
             var batch = new PendingToolCallBatch();
@@ -436,7 +462,7 @@ class MongoConversationMemoryStoreTest {
         @Test
         @DisplayName("Task 14/6: a fully-populated PendingToolCallBatch survives a real BSON round-trip "
                 + "(JacksonCodec) — every field, including nested traceSoFar maps")
-        void pendingToolCallBatchFullRoundTrip() {
+        void pendingToolCallBatchFullRoundTrip() throws IResourceStore.ResourceStoreException {
             // Unlike PendingToolCallBatchSnapshotTest (plain Jackson ObjectMapper, no
             // Mongo involved), this exercises the ACTUAL codec path production uses:
             // JacksonProvider/JacksonCodec over a real BSON document in a real MongoDB
@@ -560,7 +586,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("owner-filtered summaries push the filter into the query (limit applies after the restriction)")
-        void findPendingApprovalSummariesByOwner() {
+        void findPendingApprovalSummariesByOwner() throws IResourceStore.ResourceStoreException {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN));
             store.storeConversationMemorySnapshot(
@@ -580,7 +606,7 @@ class MongoConversationMemoryStoreTest {
 
         @Test
         @DisplayName("clearHitlBookmark removes the bookmark fields but keeps the conversation")
-        void clearHitlBookmark() {
+        void clearHitlBookmark() throws IResourceStore.ResourceStoreException {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             snapshot.setHitlPausedAt(java.time.Instant.now());
             snapshot.setHitlPauseReason("needs review");

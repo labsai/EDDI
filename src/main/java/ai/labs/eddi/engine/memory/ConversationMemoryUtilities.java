@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
@@ -16,6 +17,7 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import jakarta.enterprise.context.ApplicationScoped;
+import org.jboss.logging.Logger;
 
 import java.util.*;
 
@@ -30,6 +32,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class ConversationMemoryUtilities {
+    private static final Logger LOGGER = Logger.getLogger(ConversationMemoryUtilities.class);
     private static final String KEY_CONVERSATION_STEPS = "conversationSteps";
     private static final String KEY_CONVERSATION_OUTPUTS = "conversationOutputs";
     private static final String KEY_CONVERSATION_PROPERTIES = "conversationProperties";
@@ -135,6 +138,15 @@ public class ConversationMemoryUtilities {
 
         var conversationSteps = snapshot.getConversationSteps();
         var conversationOutputs = snapshot.getConversationOutputs();
+        if (conversationSteps.size() != conversationOutputs.size()) {
+            // Legacy / drifted documents exist: the steps and outputs lists are written
+            // independently, so a document from an older or interrupted writer can carry
+            // different counts. Indexing steps by the OUTPUT index then threw
+            // IndexOutOfBoundsException and failed the whole conversation load.
+            LOGGER.warnf("Conversation '%s': %d conversation step(s) for %d conversation output(s) — "
+                    + "pairing by index and skipping the drift.", LogSanitizer.sanitize(snapshot.getConversationId()), conversationSteps.size(),
+                    conversationOutputs.size());
+        }
         for (int i = 0; i < conversationOutputs.size(); i++) {
             var conversationOutput = conversationOutputs.get(i);
             if (i > 0) {
@@ -143,6 +155,9 @@ public class ConversationMemoryUtilities {
                 conversationMemory.getConversationOutputs().get(i).putAll(conversationOutput);
             }
 
+            if (i >= conversationSteps.size()) {
+                continue;
+            }
             var conversationStepSnapshot = conversationSteps.get(i);
             for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {

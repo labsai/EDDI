@@ -11,6 +11,8 @@ import jakarta.ws.rs.core.UriBuilder;
 import jakarta.ws.rs.ext.Provider;
 import org.jboss.logging.Logger;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -31,25 +33,44 @@ import java.util.Map;
  * <li>/regulardictionarystore/regulardictionaries →
  * /dictionarystore/dictionaries</li>
  * <li>/bottriggerstore/bottriggers → /AgentTriggerStore/agenttriggers</li>
- * <li>/{production|production}/ → /production/</li>
+ * <li>/{unrestricted|restricted}/ → /production/</li>
  * </ul>
+ * <p>
+ * The environment rewrites mirror {@code Deployment.Environment.fromString},
+ * which still maps the v5 names {@code unrestricted} and {@code restricted}
+ * onto {@code production}. Target paths must match the declared {@code @Path}
+ * values exactly — JAX-RS matching is case-sensitive, so
+ * {@code /AgentTriggerStore/agenttriggers} keeps its capitalisation.
  */
 @PreMatching
 @Provider
 public class LegacyPathRewriteFilter implements ContainerRequestFilter {
     private static final Logger LOGGER = Logger.getLogger(LegacyPathRewriteFilter.class);
 
+    private static final String LEGACY_ENV_UNRESTRICTED = "unrestricted";
+    private static final String LEGACY_ENV_RESTRICTED = "restricted";
+    private static final String ENV_PRODUCTION = "production";
+
     /**
-     * Store path rewrites: old prefix → new prefix. Order matters: longer prefixes
-     * should come first to avoid partial matches.
+     * Store path rewrites: old prefix → new prefix. Backed by a
+     * {@link LinkedHashMap} so iteration order is the insertion order declared
+     * below — longer prefixes first, so a shorter prefix can never shadow a longer
+     * one (a plain {@code Map.of}/{@code Map.ofEntries} gives no order guarantee).
      */
-    private static final Map<String, String> PATH_REWRITES = Map.ofEntries(
-            Map.entry("/regulardictionarystore/regulardictionaries", "/dictionarystore/dictionaries"),
-            Map.entry("/bottriggerstore/bottriggers", "/agenttriggerstore/agenttriggers"),
-            Map.entry("/behaviorstore/behaviorsets", "/rulestore/rulesets"),
-            Map.entry("/langchainstore/langchains", "/llmstore/llms"), Map.entry("/httpcallsstore/httpcalls", "/apicallstore/apicalls"),
-            Map.entry("/packagestore/packages", "/workflowstore/workflows"), Map.entry("/botstore/bots", "/agentstore/agents"),
-            Map.entry("/langchain/tools", "/llm/tools"));
+    private static final Map<String, String> PATH_REWRITES = createPathRewrites();
+
+    private static Map<String, String> createPathRewrites() {
+        var rewrites = new LinkedHashMap<String, String>();
+        rewrites.put("/regulardictionarystore/regulardictionaries", "/dictionarystore/dictionaries");
+        rewrites.put("/bottriggerstore/bottriggers", "/AgentTriggerStore/agenttriggers");
+        rewrites.put("/behaviorstore/behaviorsets", "/rulestore/rulesets");
+        rewrites.put("/langchainstore/langchains", "/llmstore/llms");
+        rewrites.put("/httpcallsstore/httpcalls", "/apicallstore/apicalls");
+        rewrites.put("/packagestore/packages", "/workflowstore/workflows");
+        rewrites.put("/botstore/bots", "/agentstore/agents");
+        rewrites.put("/langchain/tools", "/llm/tools");
+        return Collections.unmodifiableMap(rewrites);
+    }
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
@@ -74,17 +95,25 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
             }
         }
 
-        // Rewrite environment segments: /production/ → /production/, /production/ →
+        // Rewrite environment segments: /unrestricted/ → /production/, /restricted/ →
         // /production/
-        result = result.replace("/production/", "/production/");
-        result = result.replace("/production/", "/production/");
+        result = rewriteEnvironment(result, LEGACY_ENV_UNRESTRICTED);
+        result = rewriteEnvironment(result, LEGACY_ENV_RESTRICTED);
 
-        // Handle trailing paths without slash (e.g., /agents/production)
-        if (result.endsWith("/production")) {
-            result = result.substring(0, result.length() - "/production".length()) + "/production";
-        }
-        if (result.endsWith("/production")) {
-            result = result.substring(0, result.length() - "/production".length()) + "/production";
+        return result;
+    }
+
+    /**
+     * Replaces a legacy environment segment with {@code production}, both when it
+     * sits between two slashes and when it terminates the path (e.g.
+     * {@code /agents/{id}/unrestricted}).
+     */
+    private static String rewriteEnvironment(String path, String legacyEnvironment) {
+        String result = path.replace("/" + legacyEnvironment + "/", "/" + ENV_PRODUCTION + "/");
+
+        String trailing = "/" + legacyEnvironment;
+        if (result.endsWith(trailing)) {
+            result = result.substring(0, result.length() - trailing.length()) + "/" + ENV_PRODUCTION;
         }
 
         return result;

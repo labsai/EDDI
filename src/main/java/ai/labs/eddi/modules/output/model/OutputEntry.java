@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.output.model;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -16,6 +17,24 @@ public class OutputEntry implements Comparable<OutputEntry> {
     private List<OutputValue> outputs;
     private List<QuickReply> quickReplies;
 
+    /**
+     * Orders by {@code occurred} only — deliberately.
+     * <p>
+     * {@code OutputGeneration} keeps one {@link List} of entries per action and
+     * re-sorts it with {@code Collections.sort(..)} on every insert. That sort is
+     * stable, so entries that share the same {@code occurred} value keep the order
+     * in which they were declared in the {@code output.json} config — and that is
+     * exactly the order in which {@code OutputGenerationTask} emits them as
+     * separate chat bubbles. Adding any further tie-breaker (action, content hash,
+     * …) would silently re-order user-visible output.
+     * <p>
+     * This ordering is therefore intentionally <em>not</em> consistent with
+     * {@link #equals(Object)}. {@code OutputEntry} must never be put into a
+     * {@code TreeSet}/{@code TreeMap}, which would drop distinct entries sharing an
+     * occurrence; no production code does (duplicates are filtered by
+     * {@code List.contains}, i.e. by {@code equals}, in
+     * {@code OutputGeneration.addOutputEntry}).
+     */
     @Override
     public int compareTo(OutputEntry o) {
         return Integer.compare(occurred, o.occurred);
@@ -67,13 +86,13 @@ public class OutputEntry implements Comparable<OutputEntry> {
         if (o == null || getClass() != o.getClass())
             return false;
         OutputEntry that = (OutputEntry) o;
-        return java.util.Objects.equals(action, that.action) && occurred == that.occurred && java.util.Objects.equals(outputs, that.outputs)
-                && java.util.Objects.equals(quickReplies, that.quickReplies);
+        return Objects.equals(action, that.action) && occurred == that.occurred && Objects.equals(outputs, that.outputs)
+                && Objects.equals(quickReplies, that.quickReplies);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(action, occurred, outputs, quickReplies);
+        return Objects.hash(action, occurred, outputs, quickReplies);
     }
 
     @Override

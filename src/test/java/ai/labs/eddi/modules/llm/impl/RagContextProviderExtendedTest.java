@@ -25,10 +25,12 @@ import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.List;
@@ -43,6 +45,13 @@ import static org.mockito.Mockito.*;
  * including successful retrieval with formatting, workflow discovery
  * integration, error handling during retrieval, trace data storage, and
  * ragDefaults usage.
+ * <p>
+ * Every test drives a <em>different</em> knowledge base through the same
+ * (agentId, version) coordinates, and RAG discovery goes through
+ * {@link WorkflowTraversal}'s process-wide memoization cache (finding F12) — so
+ * the cache is cleared around each test. Without that, one test's knowledge
+ * base is served to the next, which silently turns a matched KB into "no
+ * match".
  */
 class RagContextProviderExtendedTest {
 
@@ -58,6 +67,7 @@ class RagContextProviderExtendedTest {
 
     @BeforeEach
     void setUp() {
+        WorkflowTraversal.clearCache();
         restAgentStore = mock(IRestAgentStore.class);
         restWorkflowStore = mock(IRestWorkflowStore.class);
         resourceClientLibrary = mock(IResourceClientLibrary.class);
@@ -78,6 +88,12 @@ class RagContextProviderExtendedTest {
         @SuppressWarnings("unchecked")
         IData<Object> mockData = mock(IData.class);
         lenient().when(dataFactory.createData(anyString(), any())).thenReturn(mockData);
+    }
+
+    @AfterEach
+    void tearDown() {
+        // Do not leak this class's knowledge bases into test classes sharing the fork.
+        WorkflowTraversal.clearCache();
     }
 
     // ==================== No RAG Early Returns ====================
@@ -178,7 +194,13 @@ class RagContextProviderExtendedTest {
 
             String result = ragContextProvider.retrieveContext(memory, task, "query");
 
-            assertNotNull(result);
+            assertNotNull(result, "a reference with no overrides must still retrieve — the KB defaults apply");
+            assertTrue(result.contains("### Source: docs"));
+            assertTrue(result.contains("Document content"));
+
+            var trace = firstTraceEntry("rag:trace:task1");
+            assertEquals(10, trace.get("maxResults"), "null ref maxResults must fall back to the KB's own maxResults");
+            assertEquals(0.5, trace.get("minScore"), "null ref minScore must fall back to the KB's own minScore");
         }
     }
 
@@ -205,7 +227,12 @@ class RagContextProviderExtendedTest {
             String result = ragContextProvider.retrieveContext(memory, task, "query");
 
             assertNotNull(result);
-            assertTrue(result.contains("auto-kb"));
+            assertTrue(result.contains("auto-kb"), "workflow discovery must surface the KB it actually traversed");
+            assertTrue(result.contains("Auto-discovered content"));
+
+            var trace = firstTraceEntry("rag:trace:task1");
+            assertEquals(3, trace.get("maxResults"), "ragDefaults.maxResults must win over the KB default");
+            assertEquals(0.7, trace.get("minScore"), "ragDefaults.minScore must win over the KB default");
         }
 
         @Test
@@ -306,6 +333,10 @@ class RagContextProviderExtendedTest {
             String result = ragContextProvider.retrieveContext(memory, task, "query");
 
             assertNotNull(result);
+            assertTrue(result.contains("Content"));
+            assertNotNull(storedData("rag:context:default"), "a task with no id must store under the 'default' suffix");
+            assertNotNull(storedData("rag:trace:default"));
+            assertNull(storedData("rag:context:null"), "'null' must never be stringified into the memory key");
         }
     }
 
@@ -323,6 +354,33 @@ class RagContextProviderExtendedTest {
     }
 
     // ==================== Helpers ====================
+
+    /**
+     * The value the provider wrote to conversation memory under {@code key}, or
+     * null if it never wrote that key. Reading the audit trace is the only way to
+     * observe the retrieval parameters the provider actually resolved.
+     */
+    private Object storedData(String key) {
+        ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object> values = ArgumentCaptor.forClass(Object.class);
+        verify(dataFactory, atLeastOnce()).createData(keys.capture(), values.capture());
+
+        var allKeys = keys.getAllValues();
+        for (int i = allKeys.size() - 1; i >= 0; i--) {
+            if (key.equals(allKeys.get(i))) {
+                return values.getAllValues().get(i);
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> firstTraceEntry(String traceKey) {
+        var trace = (List<Map<String, Object>>) storedData(traceKey);
+        assertNotNull(trace, "expected an audit trace under " + traceKey);
+        assertFalse(trace.isEmpty());
+        return trace.get(0);
+    }
 
     private void setupWorkflowWithRagConfig(String kbName) {
         var ragConfig = new RagConfiguration();

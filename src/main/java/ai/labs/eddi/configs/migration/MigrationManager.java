@@ -16,7 +16,9 @@ import org.jboss.logging.Logger;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +55,8 @@ public class MigrationManager implements IMigrationManager {
     public static final String FIELD_NAME_VALUE_OBJECT = "valueObject";
     public static final String FIELD_NAME_VALUE_INT = "valueInt";
     public static final String FIELD_NAME_VALUE_FLOAT = "valueFloat";
+    public static final String FIELD_NAME_VALUE_LIST = "valueList";
+    public static final String FIELD_NAME_VALUE_BOOLEAN = "valueBoolean";
     public static final String FIELD_NAME_VALUE = "value";
     public static final String FIELD_NAME_SET_ON_ACTIONS = "setOnActions";
     public static final String FIELD_NAME_CONVERSATION_PROPERTIES = "conversationProperties";
@@ -75,6 +79,36 @@ public class MigrationManager implements IMigrationManager {
     public static final String FIELD_NAME_SUB_TYPE = "subType";
     public static final String OLD_FIELD_NAME_IS_PASSWORD = "isPassword";
 
+    /**
+     * Documents are copied here in their pre-migration state before they are
+     * rewritten, so a bad migration stays recoverable.
+     * <p>
+     * The copy is deliberately narrowed to the fields a migration can actually
+     * rewrite (see {@link #backupProjection(String, Document)}). Conversation
+     * memories are reduced to {@code _id} + {@code conversationProperties}: copying
+     * the whole snapshot would duplicate every conversation step — verbatim user
+     * input — and the owning {@code userId} into a collection that no retention
+     * sweep and no GDPR erasure knows about. Personal data must not survive in a
+     * store nothing ever deletes.
+     * <p>
+     * Backups are still not erased automatically. Drop them once the migration is
+     * verified, or set {@code eddi.migration.backupBeforeWrite=false} to skip them
+     * entirely; a WARN naming the collection is logged whenever one is written.
+     */
+    public static final String BACKUP_COLLECTION_SUFFIX = ".premigrationbackup";
+
+    /**
+     * The only part of a conversation-memory document
+     * {@link #migrateConversationMemory()} rewrites, plus the id needed to restore
+     * it. Everything else — most of all the conversation steps — stays out of the
+     * backup.
+     */
+    private static final List<String> CONVERSATION_MEMORY_BACKUP_FIELDS = List.of(ID_FIELD, FIELD_NAME_CONVERSATION_PROPERTIES);
+
+    private static final String LEGACY_UUID_EXPRESSION = "[[${@java.util.UUID@randomUUID()}]]";
+    private static final String QUTE_UUID_EXPRESSION = "{uuidUtils:generateUUID()}";
+
+    private final MongoDatabase database;
     private final MongoCollection<Document> propertySetterCollection;
     private final MongoCollection<Document> propertySetterCollectionHistory;
     private final MongoCollection<Document> httpCallsCollection;
@@ -84,11 +118,21 @@ public class MigrationManager implements IMigrationManager {
     private final MongoCollection<Document> conversationMemoryCollection;
     private final MigrationLogStore migrationLogStore;
     private final Boolean skipConversationMemories;
+    private final boolean backupBeforeWrite;
     private boolean isCurrentlyRunning = false;
+
+    /**
+     * Convenience constructor keeping the pre-migration backup enabled.
+     */
+    public MigrationManager(MongoDatabase database, MigrationLogStore migrationLogStore, Boolean skipConversationMemories) {
+        this(database, migrationLogStore, skipConversationMemories, true);
+    }
 
     @Inject
     public MigrationManager(MongoDatabase database, MigrationLogStore migrationLogStore,
-            @ConfigProperty(name = "eddi.migration.skipConversationMemories") Boolean skipConversationMemories) {
+            @ConfigProperty(name = "eddi.migration.skipConversationMemories") Boolean skipConversationMemories,
+            @ConfigProperty(name = "eddi.migration.backupBeforeWrite", defaultValue = "true") boolean backupBeforeWrite) {
+        this.database = database;
         this.propertySetterCollection = database.getCollection(COLLECTION_PROPERTYSETTER);
         this.propertySetterCollectionHistory = database.getCollection(COLLECTION_PROPERTYSETTER + ".history");
 
@@ -102,6 +146,7 @@ public class MigrationManager implements IMigrationManager {
 
         this.migrationLogStore = migrationLogStore;
         this.skipConversationMemories = skipConversationMemories;
+        this.backupBeforeWrite = backupBeforeWrite;
     }
 
     @Override
@@ -205,15 +250,120 @@ public class MigrationManager implements IMigrationManager {
                                      MongoCollection<Document> collection, boolean isHistory) {
 
         boolean migrationHasExecuted = false;
+        var backupCollection = resolveBackupCollection(documentType, isHistory);
+        int backedUp = 0;
         for (var document : documents) {
+            // snapshot before the migration mutates the document in place — a rewrite
+            // that turns out to be wrong must stay recoverable
+            var originalDocument = backupCollection != null ? backupProjection(documentType, document) : null;
             var migratedDocument = migration.migrate(document);
             if (migratedDocument != null) {
+                if (backupDocument(backupCollection, originalDocument)) {
+                    backedUp++;
+                }
                 saveToPersistence(documentType, migratedDocument, isHistory, collection);
                 migrationHasExecuted = true;
             }
         }
 
+        if (backedUp > 0) {
+            // operators have to know this collection exists: nothing reads, expires or
+            // erases it, so it is theirs to drop once the migration is verified
+            LOGGER.warnf("Kept %d pre-migration document(s) in '%s'. Nothing removes that collection automatically — "
+                    + "drop it once the migration is verified, or set eddi.migration.backupBeforeWrite=false to skip "
+                    + "the pre-migration backup entirely.", backedUp, backupCollectionName(documentType, isHistory));
+        }
+
         return migrationHasExecuted;
+    }
+
+    private MongoCollection<Document> resolveBackupCollection(String documentType, boolean isHistory) {
+        if (!backupBeforeWrite) {
+            return null;
+        }
+
+        return database.getCollection(backupCollectionName(documentType, isHistory));
+    }
+
+    private static String backupCollectionName(String documentType, boolean isHistory) {
+        return documentType + (isHistory ? ".history" : "") + BACKUP_COLLECTION_SUFFIX;
+    }
+
+    /**
+     * Pre-migration copy of the fields the migration for {@code documentType} can
+     * rewrite.
+     * <p>
+     * Configuration documents (propertysetter, apicalls, outputs) are copied whole
+     * — they hold no personal data and a whole-document restore is the safest thing
+     * to have. Conversation memories are projected down to
+     * {@link #CONVERSATION_MEMORY_BACKUP_FIELDS}, because
+     * {@link #migrateConversationMemory()} only ever rewrites
+     * {@code conversationProperties}: the narrowed copy restores everything the
+     * migration touched, while transcripts and the owning {@code userId} never
+     * reach a collection that GDPR erasure does not know about.
+     */
+    private static Document backupProjection(String documentType, Document document) {
+        if (!COLLECTION_CONVERSATION_MEMORY.equals(documentType)) {
+            return deepCopy(document);
+        }
+
+        var projection = new Document();
+        for (String field : CONVERSATION_MEMORY_BACKUP_FIELDS) {
+            if (document.containsKey(field)) {
+                projection.put(field, deepCopyValue(document.get(field)));
+            }
+        }
+        return projection;
+    }
+
+    /**
+     * @return true if the pre-migration state was actually stored
+     */
+    private boolean backupDocument(MongoCollection<Document> backupCollection, Document originalDocument) {
+        if (backupCollection == null || originalDocument == null) {
+            return false;
+        }
+
+        try {
+            backupCollection.insertOne(originalDocument);
+            return true;
+        } catch (Exception e) {
+            // a failed backup must not abort the migration, but it has to be visible
+            LOGGER.warnf("Could not back up document before migrating it: %s", e.getLocalizedMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Deep copy of a BSON document. Migrations mutate nested maps and lists in
+     * place, so a shallow copy would share exactly the structures that are about to
+     * change and the "backup" would already contain the migrated state.
+     */
+    static Document deepCopy(Document document) {
+        var copy = new Document();
+        document.forEach((key, value) -> copy.put(key, deepCopyValue(value)));
+        return copy;
+    }
+
+    private static Object deepCopyValue(Object value) {
+        if (value instanceof Document nestedDocument) {
+            return deepCopy(nestedDocument);
+        }
+
+        if (value instanceof Map<?, ?> map) {
+            var copy = new LinkedHashMap<String, Object>();
+            map.forEach((key, nestedValue) -> copy.put(String.valueOf(key), deepCopyValue(nestedValue)));
+            return copy;
+        }
+
+        if (value instanceof List<?> list) {
+            var copy = new ArrayList<>(list.size());
+            list.forEach(item -> copy.add(deepCopyValue(item)));
+            return copy;
+        }
+
+        // everything else is a scalar BSON value and immutable
+        return value;
     }
 
     @Override
@@ -293,32 +443,54 @@ public class MigrationManager implements IMigrationManager {
         return converted;
     }
 
+    /**
+     * Moves the legacy untyped {@code value} field onto the typed field the v6
+     * property model expects. Every BSON type that model can hold is mapped; a
+     * value it cannot hold (dates, binary, Decimal128, out-of-int-range longs, …)
+     * is left untouched under its original {@code value} key and reported —
+     * removing it without a replacement would erase the value irrecoverably.
+     *
+     * @return true if the instruction was rewritten
+     */
     private boolean convertPropertyInstructions(Map<String, Object> propertyInstruction) {
-        boolean converted = false;
-        Object value = propertyInstruction.get(FIELD_NAME_VALUE);
-        if (value != null) {
-            if (value instanceof String) {
-                if (value.equals("[[${@java.util.UUID@randomUUID()}]]")) {
-                    value = "{uuidUtils:generateUUID()}";
-                }
-                propertyInstruction.put(FIELD_NAME_VALUE_STRING, value);
-            } else if (value instanceof Map<?, ?>) {
-                propertyInstruction.put(FIELD_NAME_VALUE_OBJECT, value);
-            } else if (value instanceof Integer) {
-                propertyInstruction.put(FIELD_NAME_VALUE_INT, value);
-            } else if (value instanceof Float) {
-                propertyInstruction.put(FIELD_NAME_VALUE_FLOAT, value);
-            }
-
-            propertyInstruction.remove(FIELD_NAME_VALUE);
-
-            converted = true;
-        } else if (propertyInstruction.containsKey(FIELD_NAME_VALUE)) {
-            propertyInstruction.put(FIELD_NAME_VALUE_STRING, null);
-            converted = true;
+        if (!propertyInstruction.containsKey(FIELD_NAME_VALUE)) {
+            return false;
         }
 
-        return converted;
+        Object value = propertyInstruction.get(FIELD_NAME_VALUE);
+        Object migratedValue = value;
+        String targetField;
+
+        if (value == null || value instanceof String) {
+            targetField = FIELD_NAME_VALUE_STRING;
+            if (LEGACY_UUID_EXPRESSION.equals(value)) {
+                migratedValue = QUTE_UUID_EXPRESSION;
+            }
+        } else if (value instanceof Map<?, ?>) {
+            targetField = FIELD_NAME_VALUE_OBJECT;
+        } else if (value instanceof List<?>) {
+            targetField = FIELD_NAME_VALUE_LIST;
+        } else if (value instanceof Boolean) {
+            targetField = FIELD_NAME_VALUE_BOOLEAN;
+        } else if (value instanceof Integer || value instanceof Short || value instanceof Byte) {
+            targetField = FIELD_NAME_VALUE_INT;
+            migratedValue = ((Number) value).intValue();
+        } else if (value instanceof Long longValue && longValue >= Integer.MIN_VALUE && longValue <= Integer.MAX_VALUE) {
+            targetField = FIELD_NAME_VALUE_INT;
+            migratedValue = longValue.intValue();
+        } else if (value instanceof Float || value instanceof Double) {
+            targetField = FIELD_NAME_VALUE_FLOAT;
+        } else {
+            LOGGER.warnf("Keeping legacy property field '%s' of unsupported type %s as is — the property model has no "
+                    + "field for it and dropping it would lose the value. Migrate this document manually.", FIELD_NAME_VALUE,
+                    value.getClass().getName());
+            return false;
+        }
+
+        propertyInstruction.put(targetField, migratedValue);
+        propertyInstruction.remove(FIELD_NAME_VALUE);
+
+        return true;
     }
 
     @Override

@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
+import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager.McpToolsResult;
 import ai.labs.eddi.modules.mcpcalls.impl.McpCallsTask;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -45,16 +46,25 @@ class McpCallsTaskTest {
     private IJsonSerialization jsonSerialization;
     private McpToolProviderManager mcpToolProviderManager;
     private PrePostUtils prePostUtils;
+    private ToolExecutionService toolExecutionService;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         resourceClientLibrary = mock(IResourceClientLibrary.class);
         memoryItemConverter = mock(IMemoryItemConverter.class);
         jsonSerialization = mock(IJsonSerialization.class);
         mcpToolProviderManager = mock(McpToolProviderManager.class);
         prePostUtils = mock(PrePostUtils.class);
+        toolExecutionService = mock(ToolExecutionService.class);
+        // Finding F14: rule-triggered MCP calls now run through ToolExecutionService
+        // (rate limiting / cost tracking). Pass the supplier straight through so these
+        // tests keep asserting on the raw tool result.
+        lenient().when(toolExecutionService.executeToolWrapped(anyString(), any(), any(), any(), any(),
+                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                .thenAnswer(inv -> ((java.util.function.Supplier<String>) inv.getArgument(4)).get());
         task = new McpCallsTask(resourceClientLibrary, memoryItemConverter,
-                jsonSerialization, mcpToolProviderManager, prePostUtils);
+                jsonSerialization, mcpToolProviderManager, prePostUtils, toolExecutionService);
     }
 
     // ==================== Identity ====================
@@ -253,6 +263,7 @@ class McpCallsTaskTest {
         @DisplayName("returns config from resource client library")
         void configure_validUri_returnsConfig() throws Exception {
             McpCallsConfiguration expectedConfig = new McpCallsConfiguration();
+            expectedConfig.setMcpServerUrl("http://mcp.example.com/mcp");
             when(resourceClientLibrary.getResource(any(URI.class), eq(McpCallsConfiguration.class)))
                     .thenReturn(expectedConfig);
 

@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.configs.rag.model;
 
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * First-class versioned knowledge base configuration — analogous to
@@ -98,8 +100,41 @@ public class RagConfiguration {
 
     // --- Chunking (for ingestion) ---
 
-    /** Chunking strategy: "recursive" (default), "paragraph", "sentence" */
-    private String chunkStrategy = "recursive";
+    /** The only chunking strategy the ingestion pipeline implements. */
+    public static final String DEFAULT_CHUNK_STRATEGY = "recursive";
+
+    /**
+     * Chunking strategies the ingestion pipeline actually implements. Anything else
+     * is either normalized (see {@link #LEGACY_CHUNK_STRATEGIES}) or rejected by
+     * {@link #validate()} instead of being silently downgraded to recursive
+     * splitting (finding I3).
+     */
+    public static final Set<String> SUPPORTED_CHUNK_STRATEGIES = Set.of(DEFAULT_CHUNK_STRATEGY);
+
+    /**
+     * Strategies this class' javadoc used to advertise as valid. They never had a
+     * reader — ingestion has always built a recursive splitter — so configurations
+     * carrying them are rewritten to {@code "recursive"} on write instead of being
+     * rejected. Rejecting them would make knowledge bases that were created against
+     * the old documentation (and that work perfectly) impossible to update, import
+     * or duplicate.
+     */
+    public static final Set<String> LEGACY_CHUNK_STRATEGIES = Set.of("paragraph", "sentence");
+
+    /**
+     * Chunking strategy for ingestion. Only {@code "recursive"} is implemented —
+     * ingestion builds a {@code DocumentSplitters.recursive} splitter
+     * unconditionally.
+     * <p>
+     * Finding I3: {@code "paragraph"} and {@code "sentence"} were documented and
+     * accepted but had zero readers, so they silently produced recursive chunking.
+     * They are now {@linkplain #normalizeLegacyChunkStrategy() normalized} to
+     * {@code "recursive"} when a configuration is written, and any other
+     * unimplemented value is rejected by {@link #validate()} at the create/update
+     * boundary. Retrieval never fails on this field — it is an ingestion-time
+     * setting and already-embedded documents stay queryable regardless.
+     */
+    private String chunkStrategy = DEFAULT_CHUNK_STRATEGY;
 
     /** Chunk size in characters (default: 512) */
     private Integer chunkSize = 512;
@@ -114,6 +149,68 @@ public class RagConfiguration {
 
     /** Default minimum similarity score (0.0–1.0) */
     private Double minScore = 0.6;
+
+    /**
+     * Describes every setting the engine cannot honour as written.
+     * <p>
+     * Read paths log this and carry on — a knowledge base whose documents are
+     * already embedded stays fully retrievable no matter what {@code chunkStrategy}
+     * says. {@link #validate()} turns the same finding into an exception, but only
+     * at the create/update boundary.
+     *
+     * @return an actionable message, or {@code null} when the configuration is
+     *         implementable as written
+     */
+    public String findUnsupportedSettings() {
+        if (chunkStrategy == null || chunkStrategy.isBlank()) {
+            return null;
+        }
+        if (SUPPORTED_CHUNK_STRATEGIES.contains(chunkStrategy.trim().toLowerCase(Locale.ROOT))) {
+            return null;
+        }
+
+        return "Unsupported chunkStrategy '" + chunkStrategy + "' for knowledge base '" + name
+                + "'. Only recursive splitting is implemented (supported: " + SUPPORTED_CHUNK_STRATEGIES
+                + "); documents are chunked recursively regardless.";
+    }
+
+    /**
+     * Rewrites a historically documented but never implemented
+     * {@code chunkStrategy} to the behavior ingestion has always applied.
+     *
+     * @return a message describing what was rewritten, or {@code null} when nothing
+     *         changed
+     */
+    public String normalizeLegacyChunkStrategy() {
+        if (chunkStrategy == null || chunkStrategy.isBlank()) {
+            return null;
+        }
+        if (!LEGACY_CHUNK_STRATEGIES.contains(chunkStrategy.trim().toLowerCase(Locale.ROOT))) {
+            return null;
+        }
+
+        String legacyValue = chunkStrategy;
+        chunkStrategy = DEFAULT_CHUNK_STRATEGY;
+        return "chunkStrategy '" + legacyValue + "' is not implemented and has always produced recursive splitting"
+                + " — stored as '" + DEFAULT_CHUNK_STRATEGY + "'.";
+    }
+
+    /**
+     * Validate settings that the engine cannot honour as written. Called at the
+     * create/update boundary so an unusable configuration can never be persisted;
+     * read paths use {@link #findUnsupportedSettings()} and degrade gracefully
+     * instead.
+     *
+     * @throws IllegalArgumentException
+     *             with an actionable message when {@code chunkStrategy} names a
+     *             strategy that is not implemented
+     */
+    public void validate() {
+        String unsupported = findUnsupportedSettings();
+        if (unsupported != null) {
+            throw new IllegalArgumentException(unsupported);
+        }
+    }
 
     // --- Getters and Setters ---
 

@@ -216,7 +216,7 @@ class PropertySetterTaskExtendedTest {
         }
 
         @Test
-        @DisplayName("scope=secret with vault failure — falls back to plaintext")
+        @DisplayName("scope=secret with vault failure — fails closed: no plaintext property, input scrubbed")
         void secretScopeVaultFailure() throws Exception {
             var env = setupExecuteEnv("set_secret_fail", "apiKey");
             env.instruction.setValueString("my-secret-key");
@@ -225,11 +225,22 @@ class PropertySetterTaskExtendedTest {
 
             when(env.memory.getAgentId()).thenReturn("agent123");
             when(env.conversationProperties.containsKey("tenantId")).thenReturn(false);
+            var mockInputData = mock(IData.class);
+            when(mockInputData.getResult()).thenReturn("my-secret-key");
+            when(env.memory.getCurrentStep().getLatestData("input:initial")).thenReturn(mockInputData);
+            when(dataFactory.createData(anyString(), any())).thenReturn(mock(IData.class));
             doThrow(new ISecretProvider.SecretProviderException("vault error"))
                     .when(secretProvider).store(any(), anyString(), anyString(), anyList());
 
-            assertDoesNotThrow(() -> task.execute(env.memory, env.propertySetter));
-            verify(env.conversationProperties).put(eq("apiKey"), any(Property.class));
+            var thrown = assertThrows(LifecycleException.class, () -> task.execute(env.memory, env.propertySetter));
+            assertFalse(thrown.getMessage().contains("my-secret-key"), "the failure must not echo the secret: " + thrown.getMessage());
+
+            // The plaintext must never become a conversation property...
+            verify(env.conversationProperties, never()).put(eq("apiKey"), any(Property.class));
+            // ...and the raw input must be scrubbed even though the turn aborts, so the
+            // persisted conversation document cannot carry it either.
+            verify(dataFactory).createData("input:initial", "<secret input>");
+            verify(env.memory.getCurrentStep()).addConversationOutputString("input", "<secret input>");
         }
     }
 

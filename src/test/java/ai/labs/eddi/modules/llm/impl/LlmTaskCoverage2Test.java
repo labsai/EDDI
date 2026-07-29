@@ -435,8 +435,39 @@ class LlmTaskCoverage2Test {
     // props
     // ============================================================
 
+    /**
+     * The config the summarizer was handed for this turn.
+     * <p>
+     * Finding F13 changed the contract here: {@code LlmTask} no longer forwards the
+     * agent-author's {@code conversationSummary} block verbatim. A blank
+     * provider/model on that block now means "inherit the parent LLM task", which
+     * only {@code LlmTask} can resolve, so it passes a derived <em>effective</em>
+     * config. Asserting object identity would pin the pre-F13 behaviour, in which a
+     * summary config without its own vendor fell back to a hardcoded one the
+     * deployment might hold no credentials for — the failure that left the rolling
+     * summary permanently empty.
+     */
+    private ConversationSummaryConfig capturedSummaryConfig() {
+        var captor = ArgumentCaptor.forClass(ConversationSummaryConfig.class);
+        verify(conversationSummarizer).updateIfNeeded(eq(memory), captor.capture(), any(), any());
+        return captor.getValue();
+    }
+
+    /**
+     * The other half of F13: resolving the provider/model is useless if the parent
+     * task's resolved parameters never leave {@code LlmTask}. Without them the
+     * summarizer cannot authenticate, the failure is swallowed as a WARN, and the
+     * rolling summary silently never appears.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, String> capturedSummaryParameters() {
+        var captor = ArgumentCaptor.forClass(Map.class);
+        verify(conversationSummarizer).updateIfNeeded(eq(memory), any(), any(), captor.capture());
+        return captor.getValue();
+    }
+
     @Test
-    @DisplayName("summary enabled + no existing summary → no prefix, updateIfNeeded still called")
+    @DisplayName("summary enabled + no existing summary → summarizer runs with the parent task's provider and model")
     void summaryEnabled_noExisting_updateCalled() throws Exception {
         wireStandardMemory(List.of("action1"));
         agentReturns("done");
@@ -446,16 +477,76 @@ class LlmTaskCoverage2Test {
 
         var summaryConfig = new ConversationSummaryConfig();
         summaryConfig.setEnabled(true);
-        var t = task("taskA", List.of("action1"), null);
+        summaryConfig.setMaxSummaryTokens(1234);
+        summaryConfig.setRecentWindowSteps(7);
+        // No llmProvider/llmModel — the F13 contract is that these are inherited.
+        var t = task("taskA", List.of("action1"), Map.of("model", "gpt-4o-mini"));
         t.setConversationSummary(summaryConfig);
 
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(conversationSummarizer).updateIfNeeded(eq(memory), same(summaryConfig), any());
+        var effective = capturedSummaryConfig();
+        assertTrue(effective.isEnabled());
+        assertEquals("openai", effective.getLlmProvider(),
+                "a summary config with no provider must inherit the parent task's — not a hardcoded vendor");
+        assertEquals("gpt-4o-mini", effective.getLlmModel(),
+                "a summary config with no model must inherit the parent task's resolved model");
+        assertEquals(1234, effective.getMaxSummaryTokens(), "the author's own settings must survive the inheritance");
+        assertEquals(7, effective.getRecentWindowSteps());
     }
 
     @Test
-    @DisplayName("summary enabled + existing summary property → summary prefix built, summarizer updated")
+    @DisplayName("summarizer receives the parent task's resolved credentials, not just its provider/model")
+    void summaryEnabled_credentialsAreInherited() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        agentReturns("done");
+        var props = mock(IConversationMemory.IConversationProperties.class);
+        lenient().when(props.get(anyString())).thenReturn(null);
+        lenient().when(memory.getConversationProperties()).thenReturn(props);
+
+        var summaryConfig = new ConversationSummaryConfig();
+        summaryConfig.setEnabled(true);
+        var t = task("taskA", List.of("action1"), Map.of("baseUrl", "https://parent.example/v1"));
+        t.setConversationSummary(summaryConfig);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        // Inheriting the provider and model is not enough: without apiKey/baseUrl the
+        // summarizer cannot authenticate, the throw is swallowed as a WARN upstream,
+        // and the rolling summary silently never materialises — which is
+        // indistinguishable from the feature simply being off.
+        var params = capturedSummaryParameters();
+        assertNotNull(params, "the parent task's resolved parameters must reach the summarizer");
+        assertEquals("key", params.get("apiKey"), "apiKey must be inherited from the parent task");
+        assertEquals("https://parent.example/v1", params.get("baseUrl"), "baseUrl must be inherited from the parent task");
+    }
+
+    @Test
+    @DisplayName("summary config that names its own provider/model is forwarded untouched")
+    void summaryEnabled_explicitProvider_notOverridden() throws Exception {
+        wireStandardMemory(List.of("action1"));
+        agentReturns("done");
+        var props = mock(IConversationMemory.IConversationProperties.class);
+        lenient().when(props.get(anyString())).thenReturn(null);
+        lenient().when(memory.getConversationProperties()).thenReturn(props);
+
+        var summaryConfig = new ConversationSummaryConfig();
+        summaryConfig.setEnabled(true);
+        summaryConfig.setLlmProvider("ollama");
+        summaryConfig.setLlmModel("llama3");
+        var t = task("taskA", List.of("action1"), Map.of("model", "gpt-4o-mini"));
+        t.setConversationSummary(summaryConfig);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        var effective = capturedSummaryConfig();
+        assertSame(summaryConfig, effective, "inheritance must not kick in when the author was explicit");
+        assertEquals("ollama", effective.getLlmProvider());
+        assertEquals("llama3", effective.getLlmModel());
+    }
+
+    @Test
+    @DisplayName("summary enabled + existing summary property → prefix built from the stored summary, summarizer updated")
     void summaryEnabled_existingSummary_prefixBuilt() throws Exception {
         wireStandardMemory(List.of("action1"));
         agentReturns("done");
@@ -468,13 +559,22 @@ class LlmTaskCoverage2Test {
 
         var summaryConfig = new ConversationSummaryConfig();
         summaryConfig.setEnabled(true);
-        var t = task("taskA", List.of("action1"), null);
+        var t = task("taskA", List.of("action1"), Map.of("model", "gpt-4o-mini"));
         t.setConversationSummary(summaryConfig);
 
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        // The summary-enabled path ran end-to-end (summarizer consulted).
-        verify(conversationSummarizer).updateIfNeeded(eq(memory), same(summaryConfig), any());
+        // An existing summary makes the task skip the summarized turns, so the model
+        // is driven from the recent window only.
+        var messagesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), messagesCaptor.capture(), any(), any(), any(), anyInt(), anyInt(), any());
+        List<ChatMessage> messages = messagesCaptor.getValue();
+        assertTrue(messages.isEmpty(), "summary_through_step=3 must skip the single stored turn out of the history window");
+
+        // …and the summary-enabled path still ran end-to-end, with inheritance applied.
+        var effective = capturedSummaryConfig();
+        assertEquals("openai", effective.getLlmProvider());
+        assertEquals("gpt-4o-mini", effective.getLlmModel());
     }
 
     @Test
@@ -487,7 +587,7 @@ class LlmTaskCoverage2Test {
         lenient().when(props.isEmpty()).thenReturn(true);
         lenient().when(memory.getConversationProperties()).thenReturn(props);
         doThrow(new RuntimeException("summarizer LLM down"))
-                .when(conversationSummarizer).updateIfNeeded(any(), any(), any());
+                .when(conversationSummarizer).updateIfNeeded(any(), any(), any(), any());
 
         var summaryConfig = new ConversationSummaryConfig();
         summaryConfig.setEnabled(true);

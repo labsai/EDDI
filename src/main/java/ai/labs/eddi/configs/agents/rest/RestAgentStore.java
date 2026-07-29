@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.rest.RestWorkflowStore;
@@ -31,6 +32,7 @@ import java.util.List;
 
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 
 /**
@@ -47,12 +49,14 @@ public class RestAgentStore implements IRestAgentStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IScheduleStore scheduleStore;
     private final CapabilityRegistryService capabilityRegistryService;
+    private final IDeploymentStore deploymentStore;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
 
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService) {
+            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService,
+            IDeploymentStore deploymentStore) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore);
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
@@ -60,6 +64,7 @@ public class RestAgentStore implements IRestAgentStore {
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.scheduleStore = scheduleStore;
         this.capabilityRegistryService = capabilityRegistryService;
+        this.deploymentStore = deploymentStore;
     }
 
     /**
@@ -278,7 +283,24 @@ public class RestAgentStore implements IRestAgentStore {
             }
         }
         capabilityRegistryService.unregister(id);
-        return restVersionInfo.delete(id, version, permanent);
+
+        // Deliberately after the delete, which throws on a stale
+        // or unknown version. Clearing first would strip a
+        // still-live Agent of what it needs to redeploy.
+        Response response = restVersionInfo.delete(id, version, permanent);
+
+        // A record left behind makes the runtime retry a
+        // doomed redeploy on every startup.
+        try {
+            int deletedDeployments = deploymentStore.deleteDeploymentInfos(id);
+            if (deletedDeployments > 0) {
+                log.infof("Cascade-deleted %d deployment record(s) for Agent %s", deletedDeployments, sanitize(id));
+            }
+        } catch (Exception e) {
+            log.warnf("Failed to delete deployment record(s) for Agent %s: %s", sanitize(id), e.getMessage());
+        }
+
+        return response;
     }
 
     @Override

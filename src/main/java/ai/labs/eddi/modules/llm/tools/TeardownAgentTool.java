@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import dev.langchain4j.agent.tool.P;
@@ -14,6 +15,8 @@ import org.jboss.logging.Logger;
 
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
  * LLM tool for tearing down dynamically created agents. Constructed
@@ -35,17 +38,24 @@ public class TeardownAgentTool {
 
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
+    private final IDeploymentStore deploymentStore;
     private final List<String> createdAgentIds;
     private final Set<String> retainedAgentIds;
 
+    /**
+     * {@code deploymentStore} may be null; teardown then skips retiring deployment
+     * records.
+     */
     public TeardownAgentTool(IAgentFactory agentFactory,
             IAgentStore agentStore,
+            IDeploymentStore deploymentStore,
             List<String> createdAgentIds,
             Set<String> retainedAgentIds) {
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
-        this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new java.util.concurrent.CopyOnWriteArrayList<>();
-        this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : new java.util.concurrent.CopyOnWriteArraySet<>();
+        this.deploymentStore = deploymentStore;
+        this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new CopyOnWriteArrayList<>();
+        this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : new CopyOnWriteArraySet<>();
     }
 
     @Tool("Tear down (undeploy) a dynamically created agent. Only agents created during this discussion "
@@ -87,6 +97,7 @@ public class TeardownAgentTool {
             if (Boolean.TRUE.equals(delete)) {
                 try {
                     agentStore.deleteAllPermanently(agentId);
+                    retireDeploymentRecords(agentId);
                     LOGGER.infof("[TEARDOWN] Permanently deleted agent '%s'", agentId);
                     return "✅ Agent '%s' has been undeployed and permanently deleted.".formatted(agentId);
                 } catch (Exception e) {
@@ -102,6 +113,22 @@ public class TeardownAgentTool {
             LOGGER.errorf("[TEARDOWN] Unexpected error tearing down agent '%s': %s",
                     agentId, e.getMessage());
             return "❌ Unexpected error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * A deployment record left behind by a deleted agent makes the runtime retry a
+     * doomed redeploy. Never fatal — the agent is gone either way, and the sweep in
+     * AgentDeploymentManagement retires anything missed here.
+     */
+    private void retireDeploymentRecords(String agentId) {
+        if (deploymentStore == null) {
+            return;
+        }
+        try {
+            deploymentStore.deleteDeploymentInfos(agentId);
+        } catch (Exception e) {
+            LOGGER.warnf("[TEARDOWN] Could not clear deployment record(s) for agent '%s': %s", agentId, e.getMessage());
         }
     }
 

@@ -100,29 +100,6 @@ class RulesEvaluationTaskTest {
         }
 
         @Test
-        @DisplayName("should store dropped success rules in memory")
-        void execute_droppedSuccessRules_storesResults() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            Rule droppedRule = new Rule("DroppedRule");
-            droppedRule.setActions(List.of("dropped_action"));
-
-            var results = new RuleSetResult();
-            results.getDroppedSuccessRules().add(droppedRule);
-
-            var evaluator = mock(RulesEvaluator.class);
-            when(evaluator.evaluate(memory)).thenReturn(results);
-            when(evaluator.isAppendActions()).thenReturn(true);
-            when(evaluator.isExpressionsAsActions()).thenReturn(false);
-
-            task.execute(memory, evaluator);
-
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
         @DisplayName("should not store actions when no rules succeed")
         void execute_noSuccessRules_noActionsStored() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);

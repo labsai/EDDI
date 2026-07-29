@@ -49,4 +49,14 @@ public class DeploymentStore implements IDeploymentStore {
     public List<DeploymentInfo> readDeploymentInfos(DeploymentInfo.DeploymentStatus deploymentStatus) throws IResourceStore.ResourceStoreException {
         return storage.readDeploymentInfos(deploymentStatus.toString());
     }
+
+    @Override
+    public int deleteDeploymentInfos(String agentId) throws IResourceStore.ResourceStoreException {
+        return storage.deleteDeploymentInfos(agentId);
+    }
+
+    @Override
+    public int deleteDeploymentInfo(String environment, String agentId, Integer agentVersion) throws IResourceStore.ResourceStoreException {
+        return storage.deleteDeploymentInfo(environment, agentId, agentVersion);
+    }
 }

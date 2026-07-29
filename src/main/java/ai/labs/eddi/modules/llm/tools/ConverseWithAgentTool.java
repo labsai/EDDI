@@ -4,10 +4,13 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import dev.langchain4j.agent.tool.P;
@@ -18,8 +21,10 @@ import org.jboss.logging.Logger;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * LLM tool for conversing with another deployed EDDI agent. Constructed
@@ -39,12 +44,61 @@ public class ConverseWithAgentTool {
     private static final Logger LOGGER = Logger.getLogger(ConverseWithAgentTool.class);
     private static final Environment DEFAULT_ENV = Environment.production;
 
+    /**
+     * Context key carrying the delegation hop count into the callee's conversation.
+     * Mirrors the {@code groupDepth} mechanism {@code GroupConversationService}
+     * uses for nested groups, so {@code AgentOrchestrator} can read the depth back
+     * out of the callee's memory and refuse to go deeper.
+     */
+    public static final String CONTEXT_DELEGATION_DEPTH = "delegationDepth";
+
     private final IConversationService conversationService;
     private final String userId;
+    private final DynamicAgentConfig config;
+    private final int currentDepth;
+
+    /**
+     * Delegations performed by this tool instance. The instance is built per
+     * {@code buildToolList} call (i.e. per LLM task execution), so this bounds
+     * {@code maxDelegationsPerTask} — finding I4.
+     */
+    private final AtomicInteger delegationCount = new AtomicInteger();
 
     public ConverseWithAgentTool(IConversationService conversationService, String userId) {
+        this(conversationService, userId, permissiveDefault(), 0);
+    }
+
+    /**
+     * Permissive guardrails for a caller that supplies no config — delegation
+     * allowed, still bounded by the {@link DynamicAgentConfig} defaults for depth
+     * and per-task count. A bare {@code new DynamicAgentConfig()} would be
+     * {@code enabled=false} and refuse everything.
+     */
+    private static DynamicAgentConfig permissiveDefault() {
+        var permissive = new DynamicAgentConfig();
+        permissive.setEnabled(true);
+        permissive.setAllowDelegation(true);
+        return permissive;
+    }
+
+    /**
+     * @param config
+     *            dynamic-agent guardrails governing this delegation. {@code null}
+     *            falls back to the same {@link #permissiveDefault()} the two-arg
+     *            constructor uses — delegation allowed, still bounded by the
+     *            {@link DynamicAgentConfig} depth and per-task defaults. A bare
+     *            {@code new DynamicAgentConfig()} would be {@code enabled=false}
+     *            and refuse everything, which is not what a caller that supplies no
+     *            config means.
+     * @param currentDepth
+     *            how many delegation hops led to the current conversation (0 when a
+     *            human started it)
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth) {
         this.conversationService = conversationService;
         this.userId = userId;
+        this.config = config != null ? config : permissiveDefault();
+        this.currentDepth = Math.max(0, currentDepth);
     }
 
     @Tool("Send a message to another deployed EDDI agent and receive its response. "
@@ -65,11 +119,55 @@ public class ConverseWithAgentTool {
                 return "⚠️ Message is required.";
             }
 
+            // --- Guardrail: delegation allowed at all (finding F18 / I4) ---
+            if (!config.isEnabled() || !config.isAllowDelegation()) {
+                LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: allowDelegation is off", agentId);
+                return "⚠️ Delegating to another agent is not enabled for this agent.";
+            }
+
+            // --- Guardrail: target allowlist (finding F18) ---
+            List<String> allowedTargets = config.getAllowedDelegationTargets();
+            if (allowedTargets != null && !allowedTargets.isEmpty()
+                    && allowedTargets.stream().filter(Objects::nonNull).noneMatch(t -> t.equals(agentId))) {
+                LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: not in allowedDelegationTargets", agentId);
+                return "⚠️ Agent '%s' is not an allowed delegation target. Allowed: %s".formatted(agentId, allowedTargets);
+            }
+
+            // --- Guardrail: delegation depth (finding F18) ---
+            // Without this an A→B→A cycle recurses unbounded: each hop without a
+            // conversationId starts a FRESH conversation, so the busy-guard never fires.
+            if (currentDepth >= config.getMaxDelegationDepth()) {
+                LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: depth %d would exceed maxDelegationDepth=%d",
+                        agentId, currentDepth + 1, config.getMaxDelegationDepth());
+                return ("⚠️ Maximum delegation depth (%d) reached — this conversation is already %d hop(s) deep. "
+                        + "Answer directly instead of delegating further.").formatted(config.getMaxDelegationDepth(), currentDepth);
+            }
+
+            // --- Guardrail: delegations per task (finding I4) ---
+            if (delegationCount.incrementAndGet() > config.getMaxDelegationsPerTask()) {
+                LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: maxDelegationsPerTask=%d exhausted",
+                        agentId, config.getMaxDelegationsPerTask());
+                return "⚠️ Maximum delegations for this task (%d) reached.".formatted(config.getMaxDelegationsPerTask());
+            }
+
+            // Propagate the hop count so the callee's own converse_with_agent knows how
+            // deep it is — the same mechanism GroupConversationService uses for groupDepth.
+            //
+            // It must ride on BOTH the start context AND every per-turn InputData:
+            // Conversation.init() materializes the start context as context:delegationDepth
+            // on step 0 only, while the delegated message is processed on the NEXT step —
+            // which is the step AgentOrchestrator.resolveDelegationDepth reads. Without the
+            // per-turn context the callee always resolves depth 0 and the cycle guard below
+            // can never fire. Continuing an existing conversation (conversationId supplied)
+            // needs it for the same reason.
+            Map<String, Context> delegationContext = Map.of(CONTEXT_DELEGATION_DEPTH,
+                    new Context(Context.ContextType.string, String.valueOf(currentDepth + 1)));
+
             // --- Start new conversation if no conversationId provided ---
             if (conversationId == null || conversationId.isBlank()) {
                 try {
                     ConversationResult convResult = conversationService.startConversation(
-                            DEFAULT_ENV, agentId, userId, Collections.emptyMap());
+                            DEFAULT_ENV, agentId, userId, delegationContext);
                     conversationId = convResult.conversationId();
                     LOGGER.debugf("[CONVERSE] Started new conversation '%s' with agent '%s'",
                             conversationId, agentId);
@@ -84,6 +182,7 @@ public class ConverseWithAgentTool {
             // --- Send message and wait for response ---
             InputData inputData = new InputData();
             inputData.setInput(message);
+            inputData.setContext(delegationContext);
 
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
             final java.util.concurrent.atomic.AtomicBoolean skipped = new java.util.concurrent.atomic.AtomicBoolean();
@@ -200,8 +299,8 @@ public class ConverseWithAgentTool {
             return Collections.emptyList();
         }
         return batch.getCalls().stream()
-                .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
-                .filter(java.util.Objects::nonNull)
+                .map(PendingToolCall::getToolName)
+                .filter(Objects::nonNull)
                 .toList();
     }
 

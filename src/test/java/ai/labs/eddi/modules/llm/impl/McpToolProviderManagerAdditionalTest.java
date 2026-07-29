@@ -5,8 +5,6 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
-import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.mcp.client.McpClient;
@@ -36,15 +34,13 @@ class McpToolProviderManagerAdditionalTest {
     @Mock
     private SecretResolver secretResolver;
 
-    private final CallerIdentityContext callerIdentityContext = new CallerIdentityContext(null, null);
     private McpToolProviderManager manager;
     private AutoCloseable mocks;
 
     @BeforeEach
     void setUp() {
         mocks = openMocks(this);
-        manager = new McpToolProviderManager(globalVariableResolver, secretResolver, new CallerIdentityResolver(callerIdentityContext, true),
-                callerIdentityContext);
+        manager = new McpToolProviderManager(globalVariableResolver, secretResolver);
     }
 
     @AfterEach

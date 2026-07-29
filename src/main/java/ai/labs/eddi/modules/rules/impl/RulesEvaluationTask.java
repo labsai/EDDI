@@ -43,7 +43,6 @@ public class RulesEvaluationTask implements ILifecycleTask {
 
     public static final String BEHAVIOR_RULES_TYPE = "behavior_rules";
     private static final String KEY_BEHAVIOR_RULES_SUCCESS = BEHAVIOR_RULES_TYPE + ":success";
-    private static final String KEY_BEHAVIOR_RULES_DROPPED_SUCCESS = BEHAVIOR_RULES_TYPE + ":droppedSuccess";
     private static final String KEY_BEHAVIOR_RULES_FAIL = BEHAVIOR_RULES_TYPE + ":fail";
     private static final String BEHAVIOR_CONFIG_URI = "uri";
     private static final String BEHAVIOR_CONFIG_APPEND_ACTIONS = "appendActions";
@@ -84,7 +83,6 @@ public class RulesEvaluationTask implements ILifecycleTask {
             var results = evaluator.evaluate(memory);
             var appendActions = evaluator.isAppendActions();
             addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_SUCCESS, results.getSuccessRules(), appendActions);
-            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_DROPPED_SUCCESS, results.getDroppedSuccessRules(), appendActions);
             addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_FAIL, results.getFailRules(), appendActions);
 
             addActionsToConversationMemory(memory, results.getSuccessRules(), appendActions, evaluator.isExpressionsAsActions());

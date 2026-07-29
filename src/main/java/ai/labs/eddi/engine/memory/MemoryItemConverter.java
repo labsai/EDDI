@@ -4,9 +4,13 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.modules.llm.impl.PromptSnippetService;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.util.*;
 
@@ -17,7 +21,10 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class MemoryItemConverter implements IMemoryItemConverter {
+    private static final Logger LOGGER = Logger.getLogger(MemoryItemConverter.class);
     private static final String KEY_MEMORY = "memory";
+    private static final String KEY_SNIPPETS = "snippets";
+    private static final String KEY_VARS = "vars";
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_CURRENT = "current";
     private static final String KEY_LAST = "last";
@@ -30,6 +37,25 @@ public class MemoryItemConverter implements IMemoryItemConverter {
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_AGENT_VERSION = "agentVersion";
     private static final String KEY_CONVERSATION_LOG = "conversationLog";
+
+    /**
+     * Prompt snippets, exposed as {@code {snippets.<name>}}. Injected here — not
+     * only in {@code LlmTask} — so the documented template data model actually
+     * holds: output sets, httpCall bodies and property instructions resolve the
+     * namespace instead of silently rendering it empty.
+     * <p>
+     * Both services are Caffeine-cached, so this is a cache lookup per
+     * {@link #convert} call, not a store round-trip. Field injection (rather than
+     * constructor injection) keeps the converter usable as a plain
+     * {@code new MemoryItemConverter()} in tests, where the namespaces are simply
+     * absent.
+     */
+    @Inject
+    PromptSnippetService promptSnippetService;
+
+    /** Global variables, exposed as {@code {vars.<key>}}. See above. */
+    @Inject
+    GlobalVariableResolver globalVariableResolver;
 
     @Override
     public Map<String, Object> convert(IConversationMemory memory) {
@@ -52,6 +78,8 @@ public class MemoryItemConverter implements IMemoryItemConverter {
             conversationDataObjects.put(KEY_MEMORY, convertMemoryItems(memory));
         }
 
+        addSnippetsAndVars(conversationDataObjects);
+
         addInfoObject(conversationDataObjects, memory.getUserId(), KEY_USER_INFO, KEY_USER_ID);
         addInfoObject(conversationDataObjects, memory.getConversationId(), KEY_CONVERSATION_INFO, KEY_CONVERSATION_ID);
         addInfoObject(conversationDataObjects, memory.getAgentId(), KEY_CONVERSATION_INFO, KEY_AGENT_ID);
@@ -60,6 +88,35 @@ public class MemoryItemConverter implements IMemoryItemConverter {
         conversationDataObjects.put(KEY_CONVERSATION_LOG, new ConversationLogGenerator(memory));
 
         return conversationDataObjects;
+    }
+
+    /**
+     * Adds the {@code snippets} and {@code vars} namespaces. Never lets a snippet /
+     * variable lookup failure break a conversation turn — a missing namespace
+     * renders empty, exactly as it did before it was injected here.
+     */
+    private void addSnippetsAndVars(Map<String, Object> conversationDataObjects) {
+        if (promptSnippetService != null) {
+            try {
+                Map<String, Object> snippets = promptSnippetService.getAll();
+                if (!snippets.isEmpty()) {
+                    conversationDataObjects.put(KEY_SNIPPETS, snippets);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not resolve prompt snippets for template data: %s", e.getMessage());
+            }
+        }
+
+        if (globalVariableResolver != null) {
+            try {
+                Map<String, Object> globalVars = globalVariableResolver.getTemplateData();
+                if (!globalVars.isEmpty()) {
+                    conversationDataObjects.put(KEY_VARS, globalVars);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not resolve global variables for template data: %s", e.getMessage());
+            }
+        }
     }
 
     private void addInfoObject(Map<String, Object> ret, String id, String keyInfo, String keyId) {

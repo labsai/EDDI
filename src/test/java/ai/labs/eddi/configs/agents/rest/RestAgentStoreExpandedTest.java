@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.agents.rest;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -46,6 +47,7 @@ class RestAgentStoreExpandedTest {
     private IJsonSchemaCreator jsonSchemaCreator;
     private IScheduleStore scheduleStore;
     private CapabilityRegistryService capabilityRegistryService;
+    private IDeploymentStore deploymentStore;
     private RestAgentStore sut;
 
     @BeforeEach
@@ -56,9 +58,10 @@ class RestAgentStoreExpandedTest {
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
         scheduleStore = mock(IScheduleStore.class);
         capabilityRegistryService = mock(CapabilityRegistryService.class);
+        deploymentStore = mock(IDeploymentStore.class);
 
         sut = new RestAgentStore(agentStore, restWorkflowStore, documentDescriptorStore,
-                jsonSchemaCreator, scheduleStore, capabilityRegistryService);
+                jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore);
     }
 
     private IResourceStore.IResourceId dummyResourceId(String id, int version) {
