@@ -78,7 +78,7 @@ public class RuleDeserialization implements IRuleDeserialization {
                 behaviorGroup.getRules().addAll(groupConfiguration.getRules().stream().map(behaviorRuleJson -> {
                     Rule behaviorRule = new Rule(behaviorRuleJson.getName());
                     behaviorRule.setActions(behaviorRuleJson.getActions());
-                    behaviorRule.setConditions(convert(behaviorRuleJson.getConditions(), behaviorSet));
+                    behaviorRule.setConditions(convert(behaviorRuleJson.getName(), behaviorRuleJson.getConditions(), behaviorSet));
                     return behaviorRule;
                 }).toList());
 
@@ -91,7 +91,7 @@ public class RuleDeserialization implements IRuleDeserialization {
         }
     }
 
-    private List<IRuleCondition> convert(List<RuleConditionConfiguration> conditionConfigs, RuleSet behaviorSet) {
+    private List<IRuleCondition> convert(String ruleName, List<RuleConditionConfiguration> conditionConfigs, RuleSet behaviorSet) {
         return conditionConfigs.stream().map(conditionConfiguration -> {
             try {
                 var type = conditionConfiguration.getType();
@@ -103,17 +103,26 @@ public class RuleDeserialization implements IRuleDeserialization {
                 IRuleCondition condition = createCondition(conditionsKey);
 
                 if (condition != null) {
-                    var configs = conditionConfiguration.getConfigs();
-                    if (!isNullOrEmpty(configs)) {
-                        condition.setConfigs(configs);
+                    // An unusable config must be refused here — a condition that cannot
+                    // evaluate itself would otherwise degrade into an always-matching rule.
+                    try {
+                        var configs = conditionConfiguration.getConfigs();
+                        if (!isNullOrEmpty(configs)) {
+                            condition.setConfigs(configs);
+                        }
+                        var conditions = conditionConfiguration.getConditions();
+                        if (!isNullOrEmpty(conditions)) {
+                            var behaviorConditions = convert(ruleName, conditions, behaviorSet);
+                            List<IRuleCondition> conditionsClone = deepCopy(behaviorConditions);
+                            condition.setConditions(conditionsClone);
+                        }
+                        condition.setContainingRuleSet(behaviorSet);
+                        condition.validateConfiguration();
+                    } catch (IllegalArgumentException e) {
+                        throw new DeserializationException(
+                                format("Invalid '%s' condition in behavior rule '%s': %s", type, ruleName, e.getMessage()), e);
                     }
-                    var conditions = conditionConfiguration.getConditions();
-                    if (!isNullOrEmpty(conditions)) {
-                        var behaviorConditions = convert(conditions, behaviorSet);
-                        List<IRuleCondition> conditionsClone = deepCopy(behaviorConditions);
-                        condition.setConditions(conditionsClone);
-                    }
-                    condition.setContainingRuleSet(behaviorSet);
+
                     return condition;
                 }
 

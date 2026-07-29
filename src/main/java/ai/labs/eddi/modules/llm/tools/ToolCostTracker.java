@@ -12,6 +12,7 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -100,11 +101,28 @@ public class ToolCostTracker {
         private final DoubleAdder totalCost = new DoubleAdder();
         private final Map<String, Integer> toolUsage = new ConcurrentHashMap<>();
 
+        /**
+         * When this conversation was last written to or read. Drives eviction order —
+         * see {@link ToolCostTracker#evictIfNeeded()}. {@code volatile} rather than
+         * atomic because it is only ever overwritten with "now", so a lost update
+         * between two racing touches costs nanoseconds of accuracy.
+         */
+        private volatile long lastTouchedNanos = System.nanoTime();
+
         public ConversationCostMetrics(String conversationId) {
             // conversationId is the map key in the parent; no need to store it here
         }
 
+        void touch() {
+            lastTouchedNanos = System.nanoTime();
+        }
+
+        long lastTouchedNanos() {
+            return lastTouchedNanos;
+        }
+
         public void addToolCost(String toolName, double cost) {
+            touch();
             toolCallCount.incrementAndGet();
             totalCost.add(cost);
             toolUsage.merge(toolName, 1, (a, b) -> a + b);
@@ -201,10 +219,15 @@ public class ToolCostTracker {
     }
 
     /**
-     * Get cost for a conversation
+     * Get cost for a conversation. Counts as activity: a conversation whose spend
+     * is still being inspected must not be picked as an eviction victim.
      */
     public ConversationCostMetrics getConversationCosts(String conversationId) {
-        return conversationCosts.get(conversationId);
+        ConversationCostMetrics metrics = conversationCosts.get(conversationId);
+        if (metrics != null) {
+            metrics.touch();
+        }
+        return metrics;
     }
 
     /**
@@ -222,6 +245,7 @@ public class ToolCostTracker {
         if (metrics == null) {
             return true;
         }
+        metrics.touch();
 
         boolean withinBudget = metrics.getTotalCost() <= maxBudget;
 
@@ -236,21 +260,40 @@ public class ToolCostTracker {
     }
 
     /**
-     * Evict oldest conversation cost entries if the map exceeds the maximum size.
-     * Removes approximately 10% of entries when the limit is hit.
+     * Evict the <em>least recently touched</em> conversation cost entries once the
+     * map exceeds {@link #MAX_CONVERSATION_ENTRIES}, down to 90% of the cap.
+     * <p>
+     * Order matters, and the previous implementation had none: it iterated
+     * {@code ConcurrentHashMap.keySet()}, whose order is a function of hash bucket
+     * layout, and removed whatever came first. Above the cap it could therefore
+     * drop a conversation that was mid-turn — and dropping an entry here is not
+     * merely a lost metric, it resets that conversation's accumulated spend to $0,
+     * so {@link #isWithinBudget} would let it start spending its whole budget
+     * again. Ordering by last touch makes the victims the conversations that have
+     * actually gone quiet.
+     * <p>
+     * {@link #getConversationCosts} and {@link #isWithinBudget} count as touches,
+     * so a conversation that is only being budget-checked still looks alive.
      */
     void evictIfNeeded() {
-        if (conversationCosts.size() > MAX_CONVERSATION_ENTRIES) {
-            int toRemove = conversationCosts.size() - (int) (MAX_CONVERSATION_ENTRIES * 0.9);
-            var iterator = conversationCosts.keySet().iterator();
-            int removed = 0;
-            while (iterator.hasNext() && removed < toRemove) {
-                iterator.next();
-                iterator.remove();
+        if (conversationCosts.size() <= MAX_CONVERSATION_ENTRIES) {
+            return;
+        }
+        int toRemove = conversationCosts.size() - (int) (MAX_CONVERSATION_ENTRIES * 0.9);
+        var oldestFirst = conversationCosts.entrySet().stream()
+                .sorted(Comparator.comparingLong(
+                        (Map.Entry<String, ConversationCostMetrics> entry) -> entry.getValue().lastTouchedNanos()))
+                .limit(toRemove)
+                .map(Map.Entry::getKey)
+                .toList();
+
+        int removed = 0;
+        for (String conversationId : oldestFirst) {
+            if (conversationCosts.remove(conversationId) != null) {
                 removed++;
             }
-            LOGGER.info("Evicted " + removed + " conversation cost entries (size was " + (conversationCosts.size() + removed) + ")");
         }
+        LOGGER.info("Evicted " + removed + " least-recently-used conversation cost entries (size is now " + conversationCosts.size() + ")");
     }
 
     /**

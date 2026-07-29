@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.StringUtilities;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -18,11 +19,31 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Database-agnostic descriptor store. Uses {@link IResourceStorageFactory} to
  * obtain the underlying storage, and {@link IResourceStorage#findResources} for
  * filter/pagination queries.
+ * <p>
+ * <b>Collection sharing.</b> All descriptor types default to the single
+ * {@value #COLLECTION_DESCRIPTORS} collection — config descriptors and one row
+ * per conversation alike — so listing agents pages through a collection whose
+ * size tracks conversation volume. The collection name is a constructor
+ * argument so a caller can move a descriptor type onto its own collection;
+ * doing so needs a data migration for existing deployments (rows already
+ * written to {@value #COLLECTION_DESCRIPTORS} would otherwise become
+ * invisible), which is why the default is unchanged.
  *
  * @author ginccc
  */
 public class DescriptorStore<T> implements IDescriptorStore<T> {
     private static final Logger LOGGER = Logger.getLogger(DescriptorStore.class);
+
+    /**
+     * Default collection/table for descriptors.
+     * <p>
+     * Every descriptor type shares it today — including one row per conversation —
+     * which is why {@link #INDEXED_FIELDS} matters so much here: without those
+     * indexes, listing agents scans a collection that grows with conversation
+     * volume. The collection name is a constructor argument so descriptor types can
+     * be split apart; see the class javadoc.
+     */
+    public static final String COLLECTION_DESCRIPTORS = "descriptors";
 
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_NAME = "name";
@@ -31,12 +52,29 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     public static final String FIELD_LAST_MODIFIED = "lastModifiedOn";
     private static final String FIELD_DELETED = "deleted";
     private static final String FIELD_USER_ID = "userId";
+    private static final String FIELD_ORIGIN_ID = "originId";
+
+    /**
+     * Every field this store filters or sorts on. Passed to the storage factory so
+     * BOTH backends index them — MongoDB as ascending single-field indexes,
+     * PostgreSQL as expression indexes on the shared {@code resources} table.
+     * <p>
+     * These were declared by the (now dead) MongoDB-specific descriptor store and
+     * were lost when the DB-agnostic store replaced it, leaving every descriptor
+     * listing as a full scan with a regex and a text sort on top.
+     */
+    private static final String[] INDEXED_FIELDS = {FIELD_RESOURCE, FIELD_USER_ID, FIELD_NAME, FIELD_AGENT_NAME, FIELD_DESCRIPTION,
+            FIELD_LAST_MODIFIED, FIELD_DELETED, FIELD_ORIGIN_ID};
 
     private final ModifiableHistorizedResourceStore<T> descriptorResourceStore;
     private final IResourceStorage<T> resourceStorage;
 
     public DescriptorStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, Class<T> documentType) {
-        this.resourceStorage = storageFactory.create("descriptors", documentBuilder, documentType);
+        this(storageFactory, documentBuilder, documentType, COLLECTION_DESCRIPTORS);
+    }
+
+    public DescriptorStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, Class<T> documentType, String collectionName) {
+        this.resourceStorage = storageFactory.create(collectionName, documentBuilder, documentType, INDEXED_FIELDS);
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
     }
 
@@ -98,10 +136,30 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
                     sanitize(type), IResourceStorage.MAX_RESULT_LIMIT);
         }
 
-        // Read each matching resource
+        return readAll(matchingIds);
+    }
+
+    /**
+     * Materialise the matched ids in one batch round trip.
+     * <p>
+     * This used to issue one {@code read()} per id — up to
+     * {@link IResourceStorage#MAX_RESULT_LIMIT} of them for a single listing. Every
+     * id here came out of a query against the CURRENT collection at its current
+     * version, so a plain batch read of current rows returns the same documents the
+     * per-id reads did.
+     */
+    private List<T> readAll(List<IResourceStore.IResourceId> resourceIds) throws IResourceStore.ResourceStoreException {
         List<T> ret = new LinkedList<>();
-        for (IResourceStore.IResourceId resourceId : matchingIds) {
-            ret.add(descriptorResourceStore.read(resourceId.getId(), resourceId.getVersion()));
+        if (resourceIds.isEmpty()) {
+            return ret;
+        }
+        for (IResourceStorage.IResource<T> resource : resourceStorage.readMany(resourceIds)) {
+            try {
+                ret.add(resource.getData());
+            } catch (IOException e) {
+                String message = String.format("Unable to deserialize descriptor (id=%s, version=%s)", resource.getId(), resource.getVersion());
+                throw new IResourceStore.ResourceStoreException(message, e);
+            }
         }
         return ret;
     }
@@ -154,17 +212,13 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     public List<T> findByOriginId(String originId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         List<IResourceFilter.QueryFilter> queryFilters = new LinkedList<>();
-        queryFilters.add(new IResourceFilter.QueryFilter("originId", originId));
+        queryFilters.add(new IResourceFilter.QueryFilter(FIELD_ORIGIN_ID, originId));
         queryFilters.add(new IResourceFilter.QueryFilter(FIELD_DELETED, false));
         IResourceFilter.QueryFilters required = new IResourceFilter.QueryFilters(queryFilters);
 
         List<IResourceStore.IResourceId> matchingIds = resourceStorage.findResources(new IResourceFilter.QueryFilters[]{required},
                 FIELD_LAST_MODIFIED, 0, 10);
 
-        List<T> ret = new LinkedList<>();
-        for (IResourceStore.IResourceId resourceId : matchingIds) {
-            ret.add(descriptorResourceStore.read(resourceId.getId(), resourceId.getVersion()));
-        }
-        return ret;
+        return readAll(matchingIds);
     }
 }

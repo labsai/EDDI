@@ -112,11 +112,24 @@ if ($PSCmdlet.ShouldProcess("Kubernetes", "Delete existing 'eddi-secrets' in '$N
     kubectl delete secret eddi-secrets --namespace=$Namespace --ignore-not-found 2>$null | Out-Null
 }
 
-# Create the secret
+# Create the secret.
+#
+# One key, "application-secrets.properties", holding a Quarkus properties file.
+# The Deployment mounts it as a file (projected volume, mode 0400) and points
+# QUARKUS_CONFIG_LOCATIONS at it — secrets are deliberately NOT injected as
+# environment variables, which are readable from /proc/<pid>/environ and leak
+# into crash dumps and child processes.
 if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Namespace'")) {
-    kubectl create secret generic eddi-secrets `
-        --namespace=$Namespace `
-        --from-literal=EDDI_VAULT_MASTER_KEY="$VaultKey" 2>$null | Out-Null
+    $secretFile = Join-Path ([System.IO.Path]::GetTempPath()) ("eddi-secrets-" + [guid]::NewGuid().ToString() + ".properties")
+    try {
+        Set-Content -Path $secretFile -Value "eddi.vault.master-key=$VaultKey" -Encoding utf8 -NoNewline
+        kubectl create secret generic eddi-secrets `
+            --namespace=$Namespace `
+            --from-file=application-secrets.properties=$secretFile 2>$null | Out-Null
+    }
+    finally {
+        Remove-Item -Path $secretFile -Force -ErrorAction SilentlyContinue
+    }
     Write-Information -MessageData "  Creating eddi-secrets... ✅" -InformationAction Continue
 }
 

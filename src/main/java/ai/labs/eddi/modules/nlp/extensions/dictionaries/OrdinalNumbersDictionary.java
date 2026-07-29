@@ -10,7 +10,6 @@ import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.model.FoundWord;
 import ai.labs.eddi.modules.nlp.model.Word;
 import ai.labs.eddi.utils.LanguageUtilities;
-import ai.labs.eddi.utils.RuntimeUtilities;
 
 import java.util.Collections;
 import java.util.List;
@@ -28,8 +27,9 @@ public class OrdinalNumbersDictionary implements IDictionary {
 
     @Override
     public List<IFoundWord> lookupTerm(String value) {
-        final String ordinalNumber = LanguageUtilities.isOrdinalNumber(value.toLowerCase());
-        if (!RuntimeUtilities.isNullOrEmpty(ordinalNumber)) {
+        final var ordinalValue = LanguageUtilities.extractOrdinalValue(value.toLowerCase());
+        if (ordinalValue.isPresent()) {
+            final String ordinalNumber = String.valueOf(ordinalValue.get());
             Expression ordinalNumberExp = expressionProvider.createExpression("ordinal_number", ordinalNumber);
             IWord word = new Word(ordinalNumber, new Expressions(ordinalNumberExp), ID);
             return Collections.singletonList(new FoundWord(word, false, 1.0));

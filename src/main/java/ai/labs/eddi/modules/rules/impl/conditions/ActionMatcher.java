@@ -45,8 +45,15 @@ public class ActionMatcher extends BaseMatcher {
     @Override
     public void setConfigs(Map<String, String> configs) {
         if (configs != null && !configs.isEmpty()) {
-            if (configs.containsKey(actionsQualifier)) {
-                actions = convertToActions(configs.get(actionsQualifier));
+            // containsKey() is also true for an explicit JSON null ("actions": null), so
+            // testing the VALUE rather than the key matters: passing null on to
+            // convertToActions would throw an opaque NullPointerException here and rob
+            // validateConfiguration() of the chance to report the real problem with a
+            // message naming the rule. Leaving the field at its empty default routes a
+            // null or blank value into exactly that check. Mirrors InputMatcher.
+            String configuredActions = configs.get(actionsQualifier);
+            if (configuredActions != null && !configuredActions.isBlank()) {
+                actions = convertToActions(configuredActions);
             }
 
             setConversationOccurrenceQualifier(configs);
@@ -93,8 +100,17 @@ public class ActionMatcher extends BaseMatcher {
         }
     }
 
+    @Override
+    public void validateConfiguration() {
+        if (actions.isEmpty()) {
+            throw new IllegalArgumentException(String.format(
+                    "'%s' requires a non-empty '%s' config value — an empty matcher would match every conversation step.", ID,
+                    actionsQualifier));
+        }
+    }
+
     private List<String> convertToActions(String actions) {
-        return Stream.of(actions.split(",")).map(String::trim).toList();
+        return Stream.of(actions.split(",")).map(String::trim).filter(action -> !action.isEmpty()).toList();
     }
 
     private boolean isActionEmpty(List<String> actions) {

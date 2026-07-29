@@ -7,17 +7,21 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.openMocks;
 
@@ -294,6 +298,87 @@ class EmbeddingStoreFactoryTest {
             var store1 = factory.getOrCreate(config, "kb1");
             var store2 = factory.getOrCreate(config, "kb2");
             assertNotSame(store1, store2);
+        }
+    }
+
+    /**
+     * The store cache had no invalidation hook at all, and store parameters carry
+     * credentials ({@code password}, {@code apiKey}, {@code connectionString}).
+     * {@code expireAfterAccess} resets on every read, so a store serving traffic
+     * never reached its TTL and {@code clearCache()} had no production caller —
+     * rotating a vector store's credential left the pre-rotation store in place for
+     * the lifetime of the process.
+     */
+    @Nested
+    @DisplayName("Credential rotation evicts cached stores")
+    class InvalidationTests {
+
+        @Test
+        @DisplayName("rotating a secret rebuilds the store")
+        void rotatingASecretEvictsTheCachedStore() {
+            var secretListener = ArgumentCaptor.forClass(Consumer.class);
+            factory.registerInvalidation();
+            verify(secretResolver).registerInvalidationListener(secretListener.capture());
+
+            var config = new RagConfiguration();
+            config.setStoreType("in-memory");
+            var before = factory.getOrCreate(config, "kb1");
+
+            @SuppressWarnings("unchecked")
+            Consumer<SecretReference> listener = secretListener.getValue();
+            listener.accept(new SecretReference("default", "pgvector-password"));
+
+            assertNotSame(before, factory.getOrCreate(config, "kb1"),
+                    "a rotated credential must produce a rebuilt store, not the cached one");
+        }
+
+        @Test
+        @DisplayName("editing a global variable rebuilds the store")
+        void editingAGlobalVariableEvictsTheCachedStore() {
+            var variableListener = ArgumentCaptor.forClass(Runnable.class);
+            factory.registerInvalidation();
+            verify(globalVariableResolver).registerInvalidationListener(variableListener.capture());
+
+            var config = new RagConfiguration();
+            config.setStoreType("in-memory");
+            var before = factory.getOrCreate(config, "kb1");
+
+            variableListener.getValue().run();
+
+            assertNotSame(before, factory.getOrCreate(config, "kb1"));
+        }
+    }
+
+    /**
+     * The MongoClient cache was keyed on the raw connection string — a live
+     * credential sitting in a map for the lifetime of the process — on an unbounded
+     * {@code ConcurrentHashMap} whose entries were never closed.
+     */
+    @Nested
+    @DisplayName("MongoClient cache key")
+    class ConnectionKeyTests {
+
+        private static final String URI_A = "mongodb+srv://user:sup3rs3cret@cluster-a.example.net/?retryWrites=true";
+        private static final String URI_B = "mongodb+srv://user:sup3rs3cret@cluster-b.example.net/?retryWrites=true";
+
+        @Test
+        @DisplayName("does not contain the connection string or its credentials")
+        void keyIsNotTheCredential() {
+            String key = EmbeddingStoreFactory.connectionKey(URI_A);
+
+            assertFalse(key.contains("sup3rs3cret"), "the cache key must not carry the password");
+            assertFalse(key.contains("cluster-a.example.net"), "the cache key must not carry the host either");
+            assertNotEquals(URI_A, key);
+            assertEquals(64, key.length(), "SHA-256 hex digest");
+        }
+
+        @Test
+        @DisplayName("is stable for one connection string and distinct across clusters")
+        void keyIsStableAndCollisionFree() {
+            assertEquals(EmbeddingStoreFactory.connectionKey(URI_A), EmbeddingStoreFactory.connectionKey(URI_A),
+                    "the same deployment must resolve to the same pooled client");
+            assertNotEquals(EmbeddingStoreFactory.connectionKey(URI_A), EmbeddingStoreFactory.connectionKey(URI_B),
+                    "two different clusters must never share one client");
         }
     }
 }

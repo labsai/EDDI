@@ -97,12 +97,13 @@ class HistorizedResourceStoreTest {
         Integer newVersion = store.update("id1", 1, "updated");
 
         assertEquals(2, newVersion);
-        // Verify ordering: history MUST be archived BEFORE the conditional store.
-        // If swapped, a successful storeIfCurrentVersion followed by a failed
-        // history archive could leave the update without a corresponding history entry.
-        InOrder inOrder = inOrder(storage);
-        inOrder.verify(storage).store(historyResource); // archived old version first
-        inOrder.verify(storage).storeIfCurrentVersion(newResource, 1); // then conditional store
+        // Archive + conditional store go to the storage layer as ONE call, so a
+        // backend with transactions can make them atomic. Issuing them separately
+        // let a crash in between leave the two rows disagreeing about the current
+        // version.
+        verify(storage).storeHistoryAndUpdate(historyResource, newResource, 1);
+        verify(storage, never()).store(any(IResourceStorage.IHistoryResource.class));
+        verify(storage, never()).storeIfCurrentVersion(any(), anyInt());
     }
 
     @Test
@@ -119,13 +120,12 @@ class HistorizedResourceStoreTest {
         when(storage.newResource("id1", 2, "updated")).thenReturn(newResource);
 
         doThrow(new IResourceStore.ResourceModifiedException("concurrent edit"))
-                .when(storage).storeIfCurrentVersion(newResource, 1);
+                .when(storage).storeHistoryAndUpdate(historyResource, newResource, 1);
 
         assertThrows(IResourceStore.ResourceModifiedException.class,
                 () -> store.update("id1", 1, "updated"));
 
-        // History should still have been archived before the conditional store failed
-        verify(storage).store(historyResource);
+        verify(storage).storeHistoryAndUpdate(historyResource, newResource, 1);
     }
 
     @Test
@@ -138,8 +138,31 @@ class HistorizedResourceStoreTest {
 
         store.delete("id1", 1);
 
-        verify(storage).store(deletedHistory); // archived with deleted flag
-        verify(storage).remove("id1"); // removed from current
+        // Same reason as update: an archive that lands without the matching removal
+        // leaves the resource archived-as-deleted while the live row is still there.
+        verify(storage).storeHistoryAndRemove(deletedHistory, "id1");
+        verify(storage, never()).remove(anyString());
+    }
+
+    @Test
+    void combinedWriteDefaultsPreserveHistoryFirstOrdering() throws Exception {
+        // The SPI default is what backends without transactions run. It must keep
+        // archiving BEFORE mutating the current row, so a failure of the second
+        // write can never lose the archived predecessor.
+        IResourceStorage.IHistoryResource<String> history = mock(IResourceStorage.IHistoryResource.class);
+        IResourceStorage.IResource<String> newResource = mock(IResourceStorage.IResource.class);
+
+        IResourceStorage<String> updateDefaults = mock(IResourceStorage.class, CALLS_REAL_METHODS);
+        updateDefaults.storeHistoryAndUpdate(history, newResource, 1);
+        InOrder updateOrder = inOrder(updateDefaults);
+        updateOrder.verify(updateDefaults).store(history);
+        updateOrder.verify(updateDefaults).storeIfCurrentVersion(newResource, 1);
+
+        IResourceStorage<String> deleteDefaults = mock(IResourceStorage.class, CALLS_REAL_METHODS);
+        deleteDefaults.storeHistoryAndRemove(history, "id1");
+        InOrder deleteOrder = inOrder(deleteDefaults);
+        deleteOrder.verify(deleteDefaults).store(history);
+        deleteOrder.verify(deleteDefaults).remove("id1");
     }
 
     @Test

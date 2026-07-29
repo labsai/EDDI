@@ -30,11 +30,15 @@ public class Rule implements Cloneable {
         } else {
             trace.add(this);
 
-            ExecutionState state = ExecutionState.NOT_EXECUTED;
+            // A rule fires only if every one of its conditions actively succeeded.
+            // NOT_EXECUTED means a condition could not evaluate itself (missing or
+            // malformed config); counting that as success would make the rule fire
+            // unconditionally, so it is treated as a failure.
+            ExecutionState state = ExecutionState.SUCCESS;
             for (IRuleCondition condition : conditions) {
                 var executionState = condition.execute(memory, trace);
-                if (executionState == ExecutionState.FAIL || executionState == ExecutionState.ERROR) {
-                    state = executionState;
+                if (executionState != ExecutionState.SUCCESS) {
+                    state = executionState == ExecutionState.NOT_EXECUTED ? ExecutionState.FAIL : executionState;
                     break;
                 }
             }
@@ -43,11 +47,7 @@ public class Rule implements Cloneable {
             trace.clear();
             trace.addAll(tmp.subList(0, tmp.indexOf(this)));
 
-            if (state != ExecutionState.NOT_EXECUTED) {
-                return state;
-            }
-
-            return ExecutionState.SUCCESS;
+            return state;
         }
     }
 

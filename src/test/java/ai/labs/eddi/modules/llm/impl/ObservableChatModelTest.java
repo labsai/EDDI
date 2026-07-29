@@ -14,6 +14,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Nested;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -232,6 +235,43 @@ class ObservableChatModelTest {
             // ExecutionException)
             assertInstanceOf(IllegalArgumentException.class, ex.getCause());
             assertEquals("Bad input", ex.getCause().getMessage());
+        }
+
+        /**
+         * {@code chatWithTimeout} abandons its worker: {@code future.cancel(true)}
+         * interrupts the thread, but an interrupt cannot abort a socket read, so the
+         * worker lives on until the provider answers. On the previous
+         * {@code newCachedThreadPool} that leaked one <em>platform</em> thread per
+         * timeout with no ceiling. Asserting the worker is a virtual thread is what
+         * pins the fix: it fails the moment the executor goes back to platform threads.
+         */
+        @Test
+        void timedOutCallDoesNotLeakAPlatformThread() throws Exception {
+            var workerStarted = new CountDownLatch(1);
+            var releaseWorker = new CountDownLatch(1);
+            var workerWasVirtual = new AtomicBoolean();
+
+            ChatModel delegate = mock(ChatModel.class);
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("Hi"))).build();
+            when(delegate.chat(request)).thenAnswer(inv -> {
+                workerWasVirtual.set(Thread.currentThread().isVirtual());
+                workerStarted.countDown();
+                releaseWorker.await(); // the provider that has not answered yet
+                return MOCK_RESPONSE;
+            });
+
+            ChatModel wrapped = ObservableChatModel.wrapIfNeeded(delegate, "openai", "50", null, null);
+            try {
+                assertThrows(RuntimeException.class, () -> wrapped.chat(request));
+
+                assertTrue(workerStarted.await(5, TimeUnit.SECONDS),
+                        "the provider call must actually have been dispatched to the executor");
+                assertTrue(workerWasVirtual.get(),
+                        "the abandoned worker must be a virtual thread — a platform-thread pool leaks one OS "
+                                + "thread per timeout, unbounded, for as long as the provider stays silent");
+            } finally {
+                releaseWorker.countDown();
+            }
         }
 
         @Test

@@ -75,7 +75,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should execute tool successfully with all features enabled")
         void success() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "testTool", "args")).thenReturn(null);
 
             var result = service.executeToolWrapped(
@@ -91,7 +91,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should return cached result when available")
         void cachedResult() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "testTool", "args")).thenReturn("cached");
 
             var result = service.executeToolWrapped(
@@ -106,7 +106,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should return error when rate limited")
         void rateLimited() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(false);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(false);
 
             var result = service.executeToolWrapped(
                     "testTool", "args", SCOPE, "conv-1",
@@ -128,13 +128,15 @@ class ToolExecutionServiceTest {
                     false, true, true, 60);
 
             assertEquals("result", result);
-            verify(rateLimiter, never()).tryAcquire(anyString(), anyInt());
+            // nullable() on the scope: anyString() does not match a null conversation id,
+            // so it would make this verification pass vacuously.
+            verify(rateLimiter, never()).tryAcquire(nullable(String.class), anyString(), anyInt());
         }
 
         @Test
         @DisplayName("should skip caching when disabled")
         void cachingDisabled() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
 
             var result = service.executeToolWrapped(
                     "testTool", "args", SCOPE, "conv-1",
@@ -149,7 +151,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should skip cost tracking when disabled")
         void costTrackingDisabled() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "testTool", "args")).thenReturn(null);
 
             service.executeToolWrapped(
@@ -174,7 +176,9 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should skip cost tracking when conversationId is null")
         void nullConversationIdSkipsCostTracking() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            // An unattributable call still reaches the limiter — with a null scope, which
+            // ToolRateLimiter maps onto its shared unattributed bucket.
+            when(rateLimiter.tryAcquire(null, "testTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "testTool", "args")).thenReturn(null);
 
             var result = service.executeToolWrapped(
@@ -189,7 +193,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should return error message when tool throws exception")
         void toolThrowsException() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "testTool", "args")).thenReturn(null);
 
             var result = service.executeToolWrapped(
@@ -217,7 +221,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should handle exception without message")
         void exceptionWithoutMessage() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "testTool", "args")).thenReturn(null);
 
             var result = service.executeToolWrapped(
@@ -234,7 +238,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should record success metrics")
         void recordsSuccessMetrics() {
-            when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "myTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "myTool", "args")).thenReturn(null);
 
             service.executeToolWrapped(
@@ -251,7 +255,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should record failure metrics on error")
         void recordsFailureMetrics() {
-            when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "myTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "myTool", "args")).thenReturn(null);
 
             service.executeToolWrapped(
@@ -270,7 +274,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should record rate limit metrics when denied")
         void recordsRateLimitMetrics() {
-            when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(false);
+            when(rateLimiter.tryAcquire("conv-1", "myTool", 60)).thenReturn(false);
 
             service.executeToolWrapped(
                     "myTool", "args", SCOPE, "conv-1",
@@ -286,7 +290,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("should record cached metrics when cache hit")
         void recordsCachedMetrics() {
-            when(rateLimiter.tryAcquire("myTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "myTool", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "myTool", "args")).thenReturn("cached-value");
 
             service.executeToolWrapped(
@@ -321,7 +325,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("prices under the canonical slug, keyed under the dispatch name")
         void pricesUnderSlugKeysUnderDispatchName() {
-            when(rateLimiter.tryAcquire("searchWeb", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "searchWeb", 60)).thenReturn(true);
             when(cacheService.get(SCOPE, "searchWeb", "args")).thenReturn(null);
 
             var result = service.executeToolWrapped(SEARCH_WEB, "args", SCOPE, "conv-1",
@@ -340,21 +344,21 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("rate limits the dispatch name, never the slug")
         void rateLimitBucketIsPerDispatchName() {
-            when(rateLimiter.tryAcquire("searchWeb", 30)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "searchWeb", 30)).thenReturn(true);
 
             service.executeToolWrapped(SEARCH_WEB, "args", SCOPE, "conv-1",
                     () -> "hits", true, false, false, 30);
 
             // {"websearch": 30} configures the LIMIT; the BUCKET stays per method, so
             // searchWeb/searchNews/searchWikipedia get 30/min each, not 30 between them.
-            verify(rateLimiter).tryAcquire("searchWeb", 30);
-            verify(rateLimiter, never()).tryAcquire("websearch", 30);
+            verify(rateLimiter).tryAcquire("conv-1", "searchWeb", 30);
+            verify(rateLimiter, never()).tryAcquire("conv-1", "websearch", 30);
         }
 
         @Test
         @DisplayName("reports metrics under the dispatch name so dashboards keep working")
         void metricsUseDispatchName() {
-            when(rateLimiter.tryAcquire("searchWeb", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "searchWeb", 60)).thenReturn(true);
 
             service.executeToolWrapped(SEARCH_WEB, "args", SCOPE, "conv-1",
                     () -> "hits", true, false, false, 60);
@@ -367,7 +371,7 @@ class ToolExecutionServiceTest {
         @DisplayName("carries the operator price override through to the tracker")
         void priceOverrideIsCarried() {
             var priced = new ToolInvocation("searchWeb", "websearch", 0.05);
-            when(rateLimiter.tryAcquire("searchWeb", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "searchWeb", 60)).thenReturn(true);
 
             service.executeToolWrapped(priced, "args", SCOPE, "conv-1",
                     () -> "hits", true, false, true, 60);
@@ -378,7 +382,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("the legacy String overload behaves like an identity invocation")
         void legacyOverloadDelegates() {
-            when(rateLimiter.tryAcquire("plainTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "plainTool", 60)).thenReturn(true);
 
             service.executeToolWrapped("plainTool", "args", SCOPE, "conv-1",
                     () -> "ok", true, false, true, 60);
@@ -403,7 +407,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("does not read the cache")
         void nullScope_noCacheRead() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
 
             var result = service.executeToolWrapped(
                     "testTool", "args", null, "conv-1",
@@ -419,7 +423,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("does not write the cache")
         void nullScope_noCacheWrite() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
 
             service.executeToolWrapped(
                     "testTool", "args", null, "conv-1",
@@ -432,7 +436,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("a stale cached value can never be served when the scope tag is null")
         void nullScope_stubbedCacheIsIgnored() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
             lenient().when(cacheService.get(nullable(String.class), anyString(), anyString())).thenReturn("SOMEONE ELSES RESULT");
 
             var result = service.executeToolWrapped(
@@ -446,7 +450,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("records the eddi.tool.cache.bypassed meter")
         void nullScope_recordsBypassMeter() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
 
             service.executeToolWrapped(
                     "testTool", "args", null, "conv-1",
@@ -461,7 +465,7 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("no bypass meter when caching was disabled anyway")
         void cachingDisabled_noBypassMeter() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
 
             service.executeToolWrapped(
                     "testTool", "args", null, "conv-1",
@@ -474,14 +478,14 @@ class ToolExecutionServiceTest {
         @Test
         @DisplayName("rate limiting and cost tracking still run")
         void nullScope_otherControlsUnaffected() {
-            when(rateLimiter.tryAcquire("testTool", 60)).thenReturn(true);
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
 
             service.executeToolWrapped(
                     "testTool", "args", null, "conv-1",
                     () -> "fresh result",
                     true, true, true, 60);
 
-            verify(rateLimiter).tryAcquire("testTool", 60);
+            verify(rateLimiter).tryAcquire("conv-1", "testTool", 60);
             verify(costTracker).trackToolCall(ToolInvocation.of("testTool"), "conv-1");
         }
     }

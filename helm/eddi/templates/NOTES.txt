@@ -7,22 +7,33 @@
   ╚══════╝╚═════╝ ╚═════╝ ╚═╝
   Multi-Agent AI Orchestration Middleware
 
-{{- if not .Values.eddi.vaultMasterKey }}
+  ✅ Vault master key is configured.
+     (The chart cannot render without it — see eddi.vaultMasterKey.)
+     ⚠️  Save it! If lost, encrypted secrets are UNRECOVERABLE.
+     It reaches the pod as a FILE at
+     /etc/eddi/secrets/application-secrets.properties, never as an env var.
 
-  ⚠️  WARNING: Vault master key is not set!
-  EDDI will start but secret encryption is DISABLED.
-  Set it with:
+  🔏 Verify the image you just deployed
 
-    helm upgrade {{ .Release.Name }} ./helm/eddi \
-      --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
-      --namespace {{ .Release.Namespace }}
+     Images are cosign-signed (keyless OIDC) and carry a SLSA provenance
+     attestation. Verify before trusting a rollout:
 
-  ⚠️  Save this key! If lost, encrypted secrets are UNRECOVERABLE.
+       cosign verify \
+         --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+         --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
+         {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
+{{- if not .Values.eddi.image.digest }}
 
+     Then pin the digest, so the kubelet can never pull different bits under
+     the same tag:
+
+       crane digest {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
+       helm upgrade {{ .Release.Name }} ./helm/eddi \
+         --set eddi.image.digest="sha256:..." \
+         --namespace {{ .Release.Namespace }}
 {{- else }}
 
-  ✅ Vault master key is configured.
-
+     Deployed digest: {{ .Values.eddi.image.digest }}
 {{- end }}
 
   📡 Access EDDI:
@@ -45,14 +56,19 @@
 
     kubectl port-forward svc/{{ include "eddi.fullname" . }}-keycloak 8080:8080 -n {{ .Release.Namespace }}
     open http://localhost:8080
-    Login: {{ .Values.keycloak.adminUsername }} / {{ .Values.keycloak.adminPassword }}
+    Username: {{ .Values.keycloak.adminUsername }}
+    Password: the value you passed as keycloak.adminPassword — deliberately not
+              echoed here, since install output lands in shell history, CI logs
+              and terminal scrollback.
 
 {{- end }}
 
   📊 Components:
-    Database:    {{ if .Values.mongodb.enabled }}MongoDB{{ else if .Values.postgres.enabled }}PostgreSQL{{ else }}None (external){{ end }}
-    Messaging:   {{ .Values.eddi.messagingType }}
-    Auth (OIDC): {{ if .Values.eddi.oidc.enabled }}Enabled{{ else }}Disabled{{ end }}
-    Autoscaling: {{ if .Values.autoscaling.enabled }}Enabled ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas){{ else }}Disabled{{ end }}
+    Database:      {{ if .Values.mongodb.enabled }}MongoDB{{ else if .Values.postgres.enabled }}PostgreSQL{{ else }}None (external){{ end }}
+    Messaging:     {{ .Values.eddi.messagingType }}
+    Auth (OIDC):   {{ if .Values.eddi.oidc.enabled }}Enabled{{ else }}Disabled{{ end }}
+    Replicas:      {{ .Values.eddi.replicas }} (fixed — EDDI is single-writer per
+                   conversation; see eddi.replicas in values.yaml)
+    NetworkPolicy: {{ if .Values.networkPolicy.enabled }}Enabled{{ else }}Disabled{{ end }}
 
   📖 Full docs: https://github.com/labsai/EDDI/blob/main/docs/kubernetes.md

@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.output.model.types;
 import ai.labs.eddi.modules.output.model.OutputItem;
 
 import java.util.*;
+import java.util.function.UnaryOperator;
 
 public class OtherOutputItem extends OutputItem implements Map<String, String> {
     private final LinkedHashMap<String, String> internalMap = new LinkedHashMap<>();
@@ -14,6 +15,13 @@ public class OtherOutputItem extends OutputItem implements Map<String, String> {
     @Override
     protected void initType() {
         super.type = "other";
+    }
+
+    @Override
+    protected OutputItem templatedCopy(UnaryOperator<String> templating) {
+        var copy = new OtherOutputItem();
+        internalMap.forEach((key, value) -> copy.internalMap.put(key, templating.apply(value)));
+        return copy;
     }
 
     @Override

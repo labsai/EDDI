@@ -1,15 +1,20 @@
 # Production hardening overlay
-# Applies: HPA, PDB, NetworkPolicy, and tighter resource limits
+# Applies: PDB, NetworkPolicy, and tighter resource limits
 #
 # ⚠️  This is a COMPONENT overlay — it does NOT include the base EDDI manifests.
 # You MUST apply it together with a database overlay.
+#
+# ⚠️  Deliberately NO HorizontalPodAutoscaler. EDDI serialises the turns of a
+# conversation with a JVM-local lock, so more than one replica silently loses
+# writes (see the comment on spec.replicas in k8s/base/eddi-deployment.yaml).
+# eddi-hpa.yaml stays in this directory as a disabled template; wire it back in
+# only once a distributed conversation coordinator ships.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: eddi
 
 resources:
-  - eddi-hpa.yaml
   - eddi-pdb.yaml
   - network-policy.yaml
 
@@ -28,6 +33,9 @@ patches:
           limits:
             cpu: "4"
             memory: 2Gi
+      # Scale UP, not OUT. EDDI is single-writer per conversation and the
+      # coordinator lock is JVM-local, so 2 replicas race on replaceOne() of the
+      # conversation document and one turn is silently lost.
       - op: replace
         path: /spec/replicas
-        value: 2
+        value: 1

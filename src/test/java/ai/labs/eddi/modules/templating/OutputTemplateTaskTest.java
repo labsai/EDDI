@@ -12,16 +12,19 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.output.model.types.ImageOutputItem;
+import ai.labs.eddi.modules.output.model.types.InputFieldOutputItem;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 
+import static ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode.HTML;
 import static ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode.TEXT;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -130,12 +133,13 @@ public class OutputTemplateTaskTest {
         String expectedPostQuickReplyValue = expectedPostQuickReply.getValue();
         String expectedPostQuickReplyExpressions = expectedPostQuickReply.getExpressions();
 
-        when(templatingEngine.processTemplate(eq(expectedPreQuickReplyValue), anyMap())).then(invocation -> expectedPostQuickReplyValue);
-        when(templatingEngine.processTemplate(eq(expectedPreQuickReply.getExpressions()), anyMap()))
+        when(templatingEngine.processTemplate(eq(expectedPreQuickReplyValue), anyMap(), eq(TEXT))).then(invocation -> expectedPostQuickReplyValue);
+        when(templatingEngine.processTemplate(eq(expectedPreQuickReply.getExpressions()), anyMap(), eq(TEXT)))
                 .then(invocation -> expectedPostQuickReplyExpressions);
 
-        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyValue), anyMap())).then(invocation -> expectedPostQuickReplyValue);
-        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyExpressions), anyMap())).then(invocation -> expectedPostQuickReplyExpressions);
+        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyValue), anyMap(), eq(TEXT))).then(invocation -> expectedPostQuickReplyValue);
+        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyExpressions), anyMap(), eq(TEXT)))
+                .then(invocation -> expectedPostQuickReplyExpressions);
 
         return expectedPostQuickReplies;
     }
@@ -318,22 +322,130 @@ public class OutputTemplateTaskTest {
         verify(templatingEngine).processTemplate(eq("value with {template}"), anyMap(), any());
     }
 
+    /**
+     * E7 — a failed template must never ship raw template syntax to the end user.
+     * The failure behaviour is identical in every profile: log + empty string.
+     */
     @Test
-    public void executeTask_templateEngineThrows_doesNotCrash() throws Exception {
+    public void executeTask_templateEngineThrows_substitutesEmptyStringInsteadOfRawTemplate() throws Exception {
         when(currentStep.getAllData(eq("context"))).thenReturn(null);
 
         var textOutput = new TextOutputItem("This will {fail}");
+        var outputData = new MockData<Object>("output:text:failAction", textOutput);
         when(currentStep.getAllData(eq("output"))).then(invocation -> {
-            LinkedList<IData<TextOutputItem>> ret = new LinkedList<>();
-            ret.add(new MockData<>("output:text:failAction", textOutput));
+            LinkedList<IData<Object>> ret = new LinkedList<>();
+            ret.add(outputData);
             return ret;
         });
         when(currentStep.getAllData(eq("quickReplies"))).thenReturn(new LinkedList<>());
 
         when(templatingEngine.processTemplate(eq("This will {fail}"), anyMap(), any()))
                 .thenThrow(new ITemplatingEngine.TemplateEngineException("Template error", new RuntimeException("cause")));
+        when(dataFactory.createData(anyString(), any())).thenAnswer(i -> new Data<>(i.getArgument(0), i.getArgument(1)));
 
-        // Should not throw
-        assertDoesNotThrow(() -> outputTemplateTask.execute(conversationMemory, null));
+        outputTemplateTask.execute(conversationMemory, null);
+
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(dataFactory).createData(eq("output:text:failAction:postTemplated"), captor.capture());
+        var postTemplated = (TextOutputItem) captor.getValue();
+        assertEquals("", postTemplated.getText());
+        assertEquals(postTemplated, outputData.getResult());
+        // the untemplated original stays available as preTemplated
+        assertEquals("This will {fail}", textOutput.getText());
+    }
+
+    /**
+     * E7 — the quick reply path used to return null into the list on a template
+     * failure. Both paths now behave identically.
+     */
+    @Test
+    public void executeTask_quickReplyTemplateThrows_doesNotProduceNullEntries() throws Exception {
+        when(currentStep.getAllData(eq("context"))).thenReturn(null);
+        when(currentStep.getAllData(eq("output"))).thenReturn(new LinkedList<>());
+
+        List<QuickReply> quickReplies = new LinkedList<>();
+        quickReplies.add(new QuickReply("{fail}", "quickReply(expression)", false));
+        when(currentStep.getAllData(eq("quickReplies"))).then(invocation -> {
+            LinkedList<IData<List<QuickReply>>> ret = new LinkedList<>();
+            ret.add(new MockData<>(KEY_QUICK_REPLY_SOME_ACTION, quickReplies));
+            return ret;
+        });
+
+        when(templatingEngine.processTemplate(eq("{fail}"), anyMap(), eq(TEXT)))
+                .thenThrow(new ITemplatingEngine.TemplateEngineException("Template error", new RuntimeException("cause")));
+        when(templatingEngine.processTemplate(eq("quickReply(expression)"), anyMap(), eq(TEXT))).thenReturn("quickReply(expression)");
+        when(dataFactory.createData(anyString(), any())).thenAnswer(i -> new Data<>(i.getArgument(0), i.getArgument(1)));
+
+        outputTemplateTask.execute(conversationMemory, null);
+
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(dataFactory).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED), captor.capture());
+        @SuppressWarnings("unchecked")
+        var postTemplated = (List<QuickReply>) captor.getValue();
+        assertEquals(1, postTemplated.size());
+        assertFalse(postTemplated.contains(null));
+        assertEquals("", postTemplated.getFirst().getValue());
+    }
+
+    /**
+     * E9 — "output:html:..." also starts with "output", so the generic prefix used
+     * to win and HTML mode was never selected.
+     */
+    @Test
+    public void executeTask_htmlOutputKeySelectsHtmlMode() throws Exception {
+        when(currentStep.getAllData(eq("context"))).thenReturn(null);
+
+        var textOutput = new TextOutputItem("<b>{value}</b>");
+        when(currentStep.getAllData(eq("output"))).then(invocation -> {
+            LinkedList<IData<Object>> ret = new LinkedList<>();
+            ret.add(new MockData<>("output:html:someAction", textOutput));
+            return ret;
+        });
+        when(currentStep.getAllData(eq("quickReplies"))).thenReturn(new LinkedList<>());
+
+        when(templatingEngine.processTemplate(eq("<b>{value}</b>"), anyMap(), eq(HTML))).thenReturn("<b>&lt;script&gt;</b>");
+        when(dataFactory.createData(anyString(), any())).thenAnswer(i -> new Data<>(i.getArgument(0), i.getArgument(1)));
+
+        outputTemplateTask.execute(conversationMemory, null);
+
+        verify(templatingEngine).processTemplate(eq("<b>{value}</b>"), anyMap(), eq(HTML));
+        verify(templatingEngine, never()).processTemplate(anyString(), anyMap(), eq(TEXT));
+    }
+
+    /**
+     * E13 — inputField (and the four other previously unhandled output types) are
+     * templated now that OutputItem forces every subtype to declare its templatable
+     * fields.
+     */
+    @Test
+    public void executeTask_inputFieldOutputIsTemplated() throws Exception {
+        when(currentStep.getAllData(eq("context"))).thenReturn(null);
+
+        var inputField = new InputFieldOutputItem();
+        inputField.setSubType("password");
+        inputField.setPlaceholder("Paste {properties.keyName} here");
+        inputField.setLabel("{properties.keyName}");
+        when(currentStep.getAllData(eq("output"))).then(invocation -> {
+            LinkedList<IData<Object>> ret = new LinkedList<>();
+            ret.add(new MockData<>("output:inputField:someAction", inputField));
+            return ret;
+        });
+        when(currentStep.getAllData(eq("quickReplies"))).thenReturn(new LinkedList<>());
+
+        when(templatingEngine.processTemplate(eq("Paste {properties.keyName} here"), anyMap(), eq(TEXT))).thenReturn("Paste API Key here");
+        when(templatingEngine.processTemplate(eq("{properties.keyName}"), anyMap(), eq(TEXT))).thenReturn("API Key");
+        when(dataFactory.createData(anyString(), any())).thenAnswer(i -> new Data<>(i.getArgument(0), i.getArgument(1)));
+
+        outputTemplateTask.execute(conversationMemory, null);
+
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(dataFactory).createData(eq("output:inputField:someAction:postTemplated"), captor.capture());
+        var postTemplated = (InputFieldOutputItem) captor.getValue();
+        assertEquals("Paste API Key here", postTemplated.getPlaceholder());
+        assertEquals("API Key", postTemplated.getLabel());
+        assertEquals("inputField", postTemplated.getType());
+        assertEquals("password", postTemplated.getSubType());
+        // the original is left untouched for the preTemplated data entry
+        assertEquals("Paste {properties.keyName} here", inputField.getPlaceholder());
     }
 }

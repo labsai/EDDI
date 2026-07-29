@@ -108,12 +108,26 @@ fi
 # Delete existing secret if it exists (to avoid "already exists" error)
 kubectl delete secret eddi-secrets --namespace="$NAMESPACE" --ignore-not-found >/dev/null 2>&1
 
-# Create the secret
+# Create the secret.
+#
+# One key, "application-secrets.properties", holding a Quarkus properties file.
+# The Deployment mounts it as a file (projected volume, mode 0400) and points
+# QUARKUS_CONFIG_LOCATIONS at it — secrets are deliberately NOT injected as
+# environment variables, which are readable from /proc/<pid>/environ and leak
+# into crash dumps and child processes.
 echo -ne "  Creating eddi-secrets... "
+SECRET_FILE=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
+chmod 600 "$SECRET_FILE"
+cleanup_secret_file() { rm -f "$SECRET_FILE"; }
+trap cleanup_secret_file EXIT
+printf 'eddi.vault.master-key=%s\n' "$VAULT_KEY" > "$SECRET_FILE"
+
 kubectl create secret generic eddi-secrets \
   --namespace="$NAMESPACE" \
-  --from-literal=EDDI_VAULT_MASTER_KEY="$VAULT_KEY" \
+  --from-file=application-secrets.properties="$SECRET_FILE" \
   >/dev/null 2>&1
+cleanup_secret_file
+trap - EXIT
 echo -e "${GREEN}✅${RESET}"
 
 echo ""

@@ -17,6 +17,7 @@ import com.jayway.jsonpath.PathNotFoundException;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -42,7 +43,6 @@ public class ContextMatcher implements IRuleCondition {
     private final String contextKeyQualifier = "contextKey";
     private final String contextTypeQualifier = "contextType";
     private final String expressionsQualifier = ContextType.expressions.toString();
-    private final String objectQualifier = ContextType.object.toString();
     private final String objectKeyPathQualifier = "objectKeyPath";
     private final String objectValueQualifier = "objectValue";
     private final String stringQualifier = ContextType.string.toString();
@@ -90,15 +90,60 @@ public class ContextMatcher implements IRuleCondition {
             }
 
             if (configs.containsKey(contextTypeQualifier)) {
-                contextType = configs.get(contextTypeQualifier);
-                if (configs.get(contextTypeQualifier).equals(expressionsQualifier)) {
-                    expressions = expressionProvider.parseExpressions(configs.get(expressionsQualifier));
-                } else if (configs.get(contextTypeQualifier).equals(objectQualifier)) {
-                    object = new ObjectValue(configs.get(objectKeyPathQualifier), configs.get(objectValueQualifier));
-                } else {
-                    string = configs.get(stringQualifier);
+                ContextType parsedContextType = parseContextType(configs.get(contextTypeQualifier));
+                contextType = parsedContextType.toString();
+                switch (parsedContextType) {
+                    case expressions -> {
+                        String configuredExpressions = configs.get(expressionsQualifier);
+                        expressions = configuredExpressions == null ? null : expressionProvider.parseExpressions(configuredExpressions);
+                    }
+                    case object -> object = new ObjectValue(configs.get(objectKeyPathQualifier), configs.get(objectValueQualifier));
+                    case string -> string = configs.get(stringQualifier);
                 }
             }
+        }
+    }
+
+    /**
+     * Rejects an unknown {@code contextType} instead of silently treating it as
+     * {@code string} — the silent fallback left the type-specific field unset and
+     * produced a NullPointerException at conversation time.
+     */
+    private ContextType parseContextType(String configuredContextType) {
+        if (configuredContextType != null) {
+            try {
+                return ContextType.valueOf(configuredContextType.trim());
+            } catch (IllegalArgumentException e) {
+                // fall through to the shared error message below
+            }
+        }
+
+        throw new IllegalArgumentException(String.format("Unknown '%s' value '%s' — legal values are %s.", contextTypeQualifier,
+                configuredContextType, Arrays.toString(ContextType.values())));
+    }
+
+    @Override
+    public void validateConfiguration() {
+        if (contextKey == null || contextKey.isBlank()) {
+            throw new IllegalArgumentException(String.format("'%s' requires a '%s' config value.", ID, contextKeyQualifier));
+        }
+
+        if (contextType == null) {
+            throw new IllegalArgumentException(String.format("'%s' requires a '%s' config value — legal values are %s.", ID,
+                    contextTypeQualifier, Arrays.toString(ContextType.values())));
+        }
+
+        switch (ContextType.valueOf(contextType)) {
+            case expressions -> requireConfigValue(expressions, expressionsQualifier);
+            case object -> requireConfigValue(object == null ? null : object.getObjectKeyPath(), objectKeyPathQualifier);
+            case string -> requireConfigValue(string, stringQualifier);
+        }
+    }
+
+    private void requireConfigValue(Object value, String qualifier) {
+        if (value == null || (value instanceof List<?> list && list.isEmpty())) {
+            throw new IllegalArgumentException(
+                    String.format("'%s' with '%s' set to '%s' requires a '%s' config value.", ID, contextTypeQualifier, contextType, qualifier));
         }
     }
 
@@ -111,14 +156,18 @@ public class ContextMatcher implements IRuleCondition {
         for (IData<Context> contextDatum : contextData) {
             Context context = contextDatum.getResult();
             if (contextDatum.getKey().equals(CONTEXT + ":" + contextKey)) {
+                if (!isMatchableContext(context)) {
+                    continue;
+                }
+
                 switch (context.getType()) {
                     case expressions :
                         Expressions contextExpressions = expressionProvider.parseExpressions(context.getValue().toString());
-                        success = Collections.indexOfSubList(contextExpressions, expressions) != -1;
+                        success = expressions != null && Collections.indexOfSubList(contextExpressions, expressions) != -1;
                         break;
                     case object :
                         try {
-                            if (object.getObjectKeyPath() != null) {
+                            if (object != null && object.getObjectKeyPath() != null) {
                                 final String contextObjectAsJson = jsonSerialization.serialize(context.getValue());
                                 Object foundObjectValue = findObjectValue(contextObjectAsJson);
                                 if (foundObjectValue != null) { // key exists in context, so we continue
@@ -133,7 +182,7 @@ public class ContextMatcher implements IRuleCondition {
 
                     default :
                     case string :
-                        success = string.equals(context.getValue().toString());
+                        success = string != null && string.equals(context.getValue().toString());
                         break;
                 }
             }
@@ -141,6 +190,26 @@ public class ContextMatcher implements IRuleCondition {
 
         state = success ? ExecutionState.SUCCESS : ExecutionState.FAIL;
         return state;
+    }
+
+    /**
+     * The runtime context carries its own type, which may differ from the one this
+     * matcher was configured with (only the configured type's field is populated).
+     * A mismatch is a non-match, not a NullPointerException that kills the turn.
+     */
+    private boolean isMatchableContext(Context context) {
+        if (context == null || context.getType() == null || context.getValue() == null) {
+            log.debugf("Context '%s' is not evaluable (context, type or value is null) — treated as non-match.", contextKey);
+            return false;
+        }
+
+        if (!context.getType().toString().equals(contextType)) {
+            log.debugf("Context '%s' is of type '%s' but '%s' is configured for type '%s' — treated as non-match.", contextKey,
+                    context.getType(), ID, contextType);
+            return false;
+        }
+
+        return true;
     }
 
     private Object findObjectValue(String contextObjectAsJson) {
