@@ -68,7 +68,8 @@
     "docs": "Documentation",
     "modeManager": "Manager",
     "modeWorkforce": "Workforce",
-    "switchMode": "Switch workspace"
+    "switchMode": "Switch workspace",
+    "operator": "Platform Operator"
   },
   "theme": {
     "light": "Light",
@@ -3048,7 +3049,7 @@
       "hideDetails": "Hide details panel",
       "editAgent": "Edit Agent",
       "auditLogs": "Audit Logs",
-    "openStudio": "Open in Manager",
+      "openStudio": "Open in Manager",
       "triggers": "View Triggers",
       "starterSelected": "Prompt added to chat input"
     },
@@ -3073,5 +3074,120 @@
       "noLlm": "No LLM configured",
       "noTools": "None configured"
     }
+  },
+  "operator": {
+    "title": "Platform Operator",
+    "subtitle": "Ask about this EDDI deployment — it looks things up for you.",
+    "readOnlyChip": "Read-only",
+    "configError": "Couldn't load the operator configuration",
+    "empty": {
+      "title": "The Platform Operator is off",
+      "description": "Turn it on to chat with an agent that can inspect your agents, workflows, conversations, deployments and logs — and explain what it finds. It is read-only and cannot change anything.",
+      "action": "Activate the Platform Operator"
+    },
+    "discovery": {
+      "title": "Meet your Platform Operator",
+      "description": "An assistant that inspects and explains this deployment. Off by default, read-only, one click to activate.",
+      "action": "Activate"
+    },
+    "activation": {
+      "title": "Activate the Platform Operator",
+      "subtitle": "Choose the model that will run the operator, review its instructions, and deploy.",
+      "modelStep": "Model",
+      "reviewStep": "Prompt & review",
+      "provider": "Provider",
+      "model": "Model",
+      "baseUrl": "Base URL",
+      "apiKey": "Model API key",
+      "apiKeyHint": "The key for your LLM provider. This is not an EDDI credential.",
+      "apiKeyPlaceholder": "Paste your API key, or pick a vault key",
+      "vaultDown": "The secrets vault is unavailable, so keys cannot be stored in it right now. A key entered here is passed through to the backend, which vaults it if it can.",
+      "environment": "Environment",
+      "authMode": "How the operator authenticates",
+      "authModeHint": "The operator calls your EDDI admin API. This decides what credentials those calls carry.",
+      "authNoneBlocked": "This deployment has authentication enabled, so unauthenticated tool calls would be rejected. The operator would deploy successfully and then fail every lookup. Choose \"Your identity\" instead.",
+      "safetyPreamble": "Safety rules (not editable)",
+      "safetyPreambleHint": "Always prepended. It tells the operator to treat everything its tools return as untrusted data.",
+      "promptBody": "Operator instructions",
+      "promptBodyHint": "Edit how the operator introduces itself and how it works.",
+      "tools": "Tools it will be given ({{toolCount}})",
+      "activate": "Activate & deploy",
+      "callerIdentityNote": "EDDI substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.",
+      "rebuildWarning": "Saving builds a new operator agent and removes the current one. Your existing operator conversation will not carry over.",
+      "environmentHint": "Where the operator agent itself runs. It can still read any environment."
+    },
+    "authMode": {
+      "none": {
+        "label": "No credentials",
+        "description": "Tool calls carry no Authorization header. Works only when this EDDI deployment has authentication disabled."
+      },
+      "caller-identity": {
+        "label": "Your identity",
+        "description": "Tool calls run as the signed-in user, with that user's permissions and audit trail. Required when authentication is enabled."
+      }
+    },
+    "stage": {
+      "idle": "",
+      "validating": "Checking this deployment exposes the endpoints the operator needs…",
+      "provisioning": "Creating the operator agent…",
+      "resolving-version": "Resolving the agent version…",
+      "saving": "Saving configuration…",
+      "done": "Done",
+      "canary": "Checking the operator can reach your platform…"
+    },
+    "status": {
+      "title": "Operator",
+      "provider": "Provider",
+      "environment": "Environment",
+      "authMode": "Authenticates as",
+      "version": "Version",
+      "checking": "Checking…",
+      "ready": "Deployed",
+      "inProgress": "Deploying…",
+      "error": "Deployment error",
+      "notFound": "Not deployed",
+      "errorHelp": "The operator agent failed to deploy. Reconfigure it to try again, or check the platform logs for the underlying error.",
+      "reconfigure": "Reconfigure",
+      "deactivate": "Deactivate",
+      "reset": "Delete operator",
+      "deactivateConfirmTitle": "Deactivate the Platform Operator?",
+      "deactivateConfirmBody": "The operator is undeployed and stops responding. Its configuration is kept, so you can turn it back on later.",
+      "resetConfirmTitle": "Delete the Platform Operator?",
+      "resetConfirmBody": "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone.",
+      "connectionCheck": "Check connection"
+    },
+    "chat": {
+      "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",
+      "placeholder": "Ask about agents, conversations, deployments, logs…",
+      "send": "Send",
+      "stop": "Stop",
+      "newConversation": "Start a new conversation",
+      "transcript": "Operator conversation"
+    },
+    "starters": {
+      "whatsDeployed": "What's deployed right now?",
+      "recentConversations": "Show me the most recent conversations",
+      "healthCheck": "Is anything unhealthy on this platform?",
+      "diagnoseAgent": "Why is one of my agents failing to deploy?"
+    },
+    "toast": {
+      "activated": "Platform Operator activated",
+      "deactivated": "Platform Operator deactivated",
+      "reset": "Platform Operator deleted",
+      "activatedButUnreachable": "Operator deployed, but it could not read your platform"
+    },
+    "canary": {
+      "genericFailure": "The connection check did not succeed.",
+      "passed": "The operator can reach your platform.",
+      "recheck": "Check again",
+      "title": "The operator deployed, but could not read your platform."
+    },
+    "paused": {
+      "title": "The Platform Operator is paused",
+      "description": "It is still configured — turning it back on redeploys the same agent. Nothing has been deleted.",
+      "action": "Turn back on"
+    },
+    "managedAgentBadge": "Operator",
+    "managedAgentHint": "Provisioned and managed by the Platform Operator screen. Editing or deleting it here will break that screen."
   }
 }

@@ -68,7 +68,8 @@
     "docs": "Documentación",
     "modeManager": "Gestor",
     "modeWorkforce": "Equipo",
-    "switchMode": "Cambiar espacio"
+    "switchMode": "Cambiar espacio",
+    "operator": "Operador de plataforma"
   },
   "theme": {
     "light": "Claro",
@@ -3046,5 +3047,120 @@
       "noLlm": "Sin LLM configurado",
       "noTools": "Sin configurar"
     }
+  },
+  "operator": {
+    "title": "Operador de plataforma",
+    "subtitle": "Pregunta sobre esta instalación de EDDI: el operador lo consulta por ti.",
+    "readOnlyChip": "Solo lectura",
+    "configError": "No se pudo cargar la configuración del operador",
+    "empty": {
+      "title": "El operador de plataforma está desactivado",
+      "description": "Actívalo para chatear con un agente que puede inspeccionar tus agentes, flujos de trabajo, conversaciones, despliegues y registros, y explicarte lo que encuentra. Es de solo lectura y no puede modificar nada.",
+      "action": "Activar el operador de plataforma"
+    },
+    "discovery": {
+      "title": "Tu operador de plataforma",
+      "description": "Un asistente que inspecciona y explica esta instalación. Desactivado por defecto, de solo lectura, un clic para activarlo.",
+      "action": "Activar"
+    },
+    "activation": {
+      "title": "Activar el operador de plataforma",
+      "subtitle": "Elige el modelo que ejecutará el operador, revisa sus instrucciones y despliégalo.",
+      "modelStep": "Modelo",
+      "reviewStep": "Prompt y revisión",
+      "provider": "Proveedor",
+      "model": "Modelo",
+      "baseUrl": "URL base",
+      "apiKey": "Clave de API del modelo",
+      "apiKeyHint": "La clave de tu proveedor de LLM. No es una credencial de EDDI.",
+      "apiKeyPlaceholder": "Pega tu clave de API o elige una clave del almacén",
+      "vaultDown": "El almacén de secretos no está disponible, por lo que ahora mismo no se pueden guardar claves en él. Una clave introducida aquí se envía al backend, que la guardará en el almacén si puede.",
+      "environment": "Entorno",
+      "authMode": "Cómo se autentica el operador",
+      "authModeHint": "El operador llama a tu API de administración de EDDI. Esto determina qué credenciales llevan esas llamadas.",
+      "authNoneBlocked": "Esta instalación tiene la autenticación activada, por lo que las llamadas de herramientas sin autenticar serían rechazadas. El operador se desplegaría correctamente y luego fallaría en cada consulta. Elige «Tu identidad» en su lugar.",
+      "safetyPreamble": "Reglas de seguridad (no editables)",
+      "safetyPreambleHint": "Se anteponen siempre. Indican al operador que trate todo lo que devuelvan sus herramientas como datos no fiables.",
+      "promptBody": "Instrucciones del operador",
+      "promptBodyHint": "Edita cómo se presenta el operador y cómo trabaja.",
+      "tools": "Herramientas que recibirá ({{toolCount}})",
+      "activate": "Activar y desplegar",
+      "callerIdentityNote": "EDDI inserta tu token en el momento de la llamada. Nunca se almacena en la conversación y solo se envía de vuelta a esta instalación.",
+      "rebuildWarning": "Al guardar se crea un nuevo agente operador y se elimina el actual. Tu conversación de operador existente no se conservará.",
+      "environmentHint": "Dónde se ejecuta el propio agente operador. Aun así puede leer cualquier entorno."
+    },
+    "authMode": {
+      "none": {
+        "label": "Sin credenciales",
+        "description": "Las llamadas de herramientas no llevan cabecera Authorization. Solo funciona si esta instalación de EDDI tiene la autenticación desactivada."
+      },
+      "caller-identity": {
+        "label": "Tu identidad",
+        "description": "Las llamadas de herramientas se ejecutan como el usuario que ha iniciado sesión, con sus permisos y su rastro de auditoría. Necesario cuando la autenticación está activada."
+      }
+    },
+    "stage": {
+      "idle": "",
+      "validating": "Comprobando que esta instalación expone los endpoints que el operador necesita…",
+      "provisioning": "Creando el agente operador…",
+      "resolving-version": "Resolviendo la versión del agente…",
+      "saving": "Guardando la configuración…",
+      "done": "Listo",
+      "canary": "Comprobando que el operador puede acceder a tu plataforma…"
+    },
+    "status": {
+      "title": "Operador",
+      "provider": "Proveedor",
+      "environment": "Entorno",
+      "authMode": "Se autentica como",
+      "version": "Versión",
+      "checking": "Comprobando…",
+      "ready": "Desplegado",
+      "inProgress": "Desplegando…",
+      "error": "Error de despliegue",
+      "notFound": "No desplegado",
+      "errorHelp": "El agente operador no se pudo desplegar. Reconfigúralo para volver a intentarlo o consulta los registros de la plataforma para ver el error subyacente.",
+      "reconfigure": "Reconfigurar",
+      "deactivate": "Desactivar",
+      "reset": "Eliminar operador",
+      "deactivateConfirmTitle": "¿Desactivar el operador de plataforma?",
+      "deactivateConfirmBody": "El operador se retira del despliegue y deja de responder. Su configuración se conserva, así que puedes volver a activarlo más adelante.",
+      "resetConfirmTitle": "¿Eliminar el operador de plataforma?",
+      "resetConfirmBody": "El agente operador y todos los recursos creados para él se eliminan de forma permanente, junto con su configuración guardada. Esta acción no se puede deshacer.",
+      "connectionCheck": "Comprobar conexión"
+    },
+    "chat": {
+      "empty": "Pregunta sobre tu instalación. El operador lo consulta y te muestra cada llamada que hace.",
+      "placeholder": "Pregunta por agentes, conversaciones, despliegues, registros…",
+      "send": "Enviar",
+      "stop": "Detener",
+      "newConversation": "Iniciar una conversación nueva",
+      "transcript": "Conversación con el operador"
+    },
+    "starters": {
+      "whatsDeployed": "¿Qué hay desplegado ahora mismo?",
+      "recentConversations": "Muéstrame las conversaciones más recientes",
+      "healthCheck": "¿Hay algo que no funcione bien en esta plataforma?",
+      "diagnoseAgent": "¿Por qué falla el despliegue de uno de mis agentes?"
+    },
+    "toast": {
+      "activated": "Operador de plataforma activado",
+      "deactivated": "Operador de plataforma desactivado",
+      "reset": "Operador de plataforma eliminado",
+      "activatedButUnreachable": "Operador desplegado, pero no pudo leer tu plataforma"
+    },
+    "canary": {
+      "genericFailure": "La comprobación de conexión no se completó correctamente.",
+      "passed": "El operador puede acceder a tu plataforma.",
+      "recheck": "Comprobar de nuevo",
+      "title": "El operador se desplegó, pero no pudo leer tu plataforma."
+    },
+    "paused": {
+      "title": "El operador de plataforma está en pausa",
+      "description": "Sigue configurado: al volver a activarlo se despliega el mismo agente. No se ha eliminado nada.",
+      "action": "Volver a activar"
+    },
+    "managedAgentBadge": "Operador",
+    "managedAgentHint": "Aprovisionado y gestionado por la pantalla del operador de plataforma. Editarlo o eliminarlo aquí romperá esa pantalla."
   }
 }

@@ -99,11 +99,13 @@ src/
 │   │   ├── pipeline-railroad.tsx      # Visual pipeline step list
 │   │   └── studio-editor-panel.tsx    # In-place editor for selected stage
 │   ├── layout/               # Sidebar, top-bar, theme-provider
+│   ├── operator/             # Platform Operator (activation, chat, status)
 │   ├── shared/               # Reusable shared components (command palette, view toggle, etc.)
 │   └── ui/                   # Low-level UI primitives (button, badge, dialog, etc.)
 ├── hooks/                    # TanStack Query hooks
 ├── lib/
 │   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, etc.)
+│   ├── operator/             # Operator tool allow-list + system prompt
 │   ├── api-client.ts         # Base fetch wrapper with auth header injection
 │   └── constants.ts          # Shared constants (ENVIRONMENTS, etc.)
 ├── i18n/locales/             # 11 locale JSON files
@@ -171,7 +173,28 @@ All 9 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPE
 - **Always add to `en.json` first**, then propagate to all 10 other locale files
 - Use inline fallbacks: `t("key", "Fallback")`
 
-#### 5. Tests
+#### 5. Platform Operator
+
+An opt-in, admin-activated agent that inspects this EDDI deployment and explains
+what it finds. Off by default. Worth knowing before touching it:
+
+- **It is a real EDDI agent**, provisioned through `setup-api` from EDDI's own
+  OpenAPI spec. It shows up in the Agents list with an "Operator" badge; editing
+  or deleting it there breaks the operator screen.
+- **Its capability boundary is the allow-list** in `src/lib/operator/tool-scopes.ts`
+  — an allow-list, never a deny-list, because a deny-list silently grants any
+  endpoint the backend adds later. Writes are unreachable until an approval
+  handler exists (`isWriteScopeAvailable`).
+- **Config is one atomic JSON blob** in the `platform.operator` global variable.
+  Activation writes several values that must land together and the variable
+  store has no transaction.
+- **`authMode: "caller-identity"`** makes tool calls run as the signed-in user
+  via the backend's `${caller:token}` resolver (EDDI 6.2.0+). `"none"` is
+  blocked at activation when OIDC is on, because every tool call would 401.
+- **Activation runs a canary** — one probe read counting tool calls — because a
+  READY deployment badge says nothing about whether the tools can authenticate.
+
+#### 6. Tests
 
 - Unit tests in `src/pages/__tests__/` — naming: `resource-detail-{type}.test.tsx`
 - Use `renderPage(type)` helper with `MemoryRouter` + `QueryClient` + `ThemeProvider`

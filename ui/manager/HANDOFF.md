@@ -120,12 +120,17 @@
 - Boardroom files: `src/pages/boardroom/`, `src/components/boardroom/`, `src/styles/advisory.css`
 
 ### Test Counts
-- 277 test files passing (EDDI-Manager)
-- 4013 Tests passing (`npm run test`)
+- 281 test files passing (EDDI-Manager)
+- 4127 Tests passing (`npm run test`)
 - 112 Backend tenancy tests passing (`mvn test`)
 
 ### Last Commit Focus
-- Frontend: `feat: fix live logs — REST seeding, SSE resilience, better empty states` on `fix/group-chat-defensive-rendering` (`e5303c5e`)
+- Frontend: `feat(operator): add the Platform Operator agent (P1, read-only)` on `feat/platform-operator-agent`
+  - Opt-in, admin-activated agent that inspects this EDDI deployment through its own REST API, exposed as tools via `setup-api`. Read-only allow-list (`src/lib/operator/tool-scopes.ts`), non-editable safety preamble, single-blob `platform.operator` config, activation flow with a post-provision spec check, operator screen with a live tool-activity trace, dashboard discovery card, kill switch, `operator.*` i18n across 11 locales.
+  - **Design correction:** the design assumed EDDI forwards the caller's token to an API agent's tool calls. It did not. That gap is now closed in the backend (labsai/EDDI#613) by a `${caller:token}` resolver, and the operator's `authMode: "caller-identity"` uses it: EDDI substitutes the token while building the request, releasing it only for a same-origin call, only into a header, and never persisting it. `"none"` remains the default and is blocked at activation when OIDC is on, since every tool call would 401.
+  - **Review pass:** added the post-deploy canary the design asked for (one probe read; it counts tool calls and detects 401s, since a READY badge proves nothing about whether the generated tools can authenticate), made activation honour setup-api's `deployed`/`deploymentStatus` and reject the `"unknown"` agent-id fallback, added a redeploy-in-place path so re-enabling a paused operator no longer rebuilds it, fixed the activation form's accessibility (not one control had an accessible name), and stopped `{{count}}` triggering i18next pluralization.
+  - **Contract bug fixed:** `createApiAgent` sent `name`; the backend requires `agentName` and rejects a blank one, so the wizard's API-agent path was broken. Fixed in the type, the wizard, the MSW mock (now rejects blank, as the backend does) and three tests that had been passing vacuously.
+- Previous frontend: `feat: fix live logs — REST seeding, SSE resilience, better empty states` on `fix/group-chat-defensive-rendering` (`e5303c5e`)
   - REST API seeding on first SSE connect (session-log-store.ts), BearerEventSource \r\n handling + 45s inactivity timeout, `seeded` state exposed through use-logs hook, 3-state empty view (loading/no-activity/connecting), 3 new i18n keys across 11 locales, 3 new tests
 - Backend: `feat: add SSE heartbeat to log stream endpoint` on `feat/v6.2.0-prep` (`cd0551925`)
   - 15s heartbeat comment events in RestLogAdmin.streamLogs(), AtomicLong lastEventTime tracking, 3 new Mockito tests (idle heartbeat, recent-event suppression, closed-sink stop)

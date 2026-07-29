@@ -19,13 +19,21 @@ export interface SetupAgentRequest {
 }
 
 export interface CreateApiAgentRequest {
-  name: string;
+  /**
+   * Backend field name is `agentName` — see the `CreateApiAgentRequest` record in
+   * `AgentSetupService`, which rejects a blank one with "Agent name is required".
+   * This used to be sent as `name`, which the backend silently dropped.
+   */
+  agentName: string;
   systemPrompt: string;
   openApiSpec: string;
   provider?: string;
   model?: string;
   apiKey?: string;
+  /** Target server of the generated tools. */
   apiBaseUrl?: string;
+  /** Base URL of the LLM provider itself (Ollama, Jlama) — not the tool target. */
+  llmBaseUrl?: string;
   apiAuth?: string;
   endpoints?: string;
   enableQuickReplies?: boolean;

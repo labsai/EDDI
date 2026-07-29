@@ -10,12 +10,14 @@ import {
   ExternalLink,
   Download,
   MessageSquare,
+  Sparkles,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useDeploymentStatus, useDeployAgent, useUndeployAgent } from "@/hooks/use-agents";
 
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation } from "@/hooks/use-chat";
+import { useOperatorConfig } from "@/hooks/use-operator";
 import { getErrorMessage } from "@/lib/api-client";
 import type { AgentDescriptor } from "@/lib/api/agents";
 import { useState, useCallback, useRef, useEffect } from "react";
@@ -38,6 +40,8 @@ const statusIcons = {
 };
 
 export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardProps) {
+  const { data: operatorConfig } = useOperatorConfig();
+  const isOperatorAgent = Boolean(operatorConfig?.agentId && operatorConfig.agentId === agent.id);
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
@@ -112,6 +116,20 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
           <StatusIcon className="h-3.5 w-3.5" />
           {statusLabel}
         </div>
+
+        {/* The Platform Operator agent is provisioned and owned by the operator
+            screen. Editing or deleting it here leaves that screen pointing at
+            nothing, so say who owns it. */}
+        {isOperatorAgent && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+            data-testid={`agent-managed-${agent.id}`}
+            title={t("operator.managedAgentHint", "Provisioned and managed by the Platform Operator screen. Editing or deleting it here will break that screen.")}
+          >
+            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+            {t("operator.managedAgentBadge", "Operator")}
+          </span>
+        )}
 
         {/* Context menu */}
         <div className="relative">

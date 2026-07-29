@@ -68,7 +68,8 @@
     "docs": "文档",
     "modeManager": "管理器",
     "modeWorkforce": "团队",
-    "switchMode": "切换工作区"
+    "switchMode": "切换工作区",
+    "operator": "平台操作员"
   },
   "theme": {
     "light": "浅色",
@@ -3021,7 +3022,7 @@
       "hideDetails": "隐藏详情面板",
       "editAgent": "编辑智能体",
       "auditLogs": "审计日志",
-    "openStudio": "在管理器中打开",
+      "openStudio": "在管理器中打开",
       "triggers": "查看触发器",
       "starterSelected": "提示词已添加到输入框"
     },
@@ -3046,5 +3047,120 @@
       "noLlm": "未配置 LLM",
       "noTools": "未配置"
     }
+  },
+  "operator": {
+    "title": "平台操作员",
+    "subtitle": "询问这套 EDDI 部署的情况——它会替你查。",
+    "readOnlyChip": "只读",
+    "configError": "无法加载操作员配置",
+    "empty": {
+      "title": "平台操作员已关闭",
+      "description": "开启后，你可以与一个智能体对话，它能查看你的智能体、工作流、会话、部署和日志，并解释所发现的内容。它是只读的，无法做任何修改。",
+      "action": "启用平台操作员"
+    },
+    "discovery": {
+      "title": "认识你的平台操作员",
+      "description": "一个能查看并解释本部署的助手。默认关闭，只读，一键启用。",
+      "action": "启用"
+    },
+    "activation": {
+      "title": "启用平台操作员",
+      "subtitle": "选择驱动操作员的模型，检查它的指令，然后部署。",
+      "modelStep": "模型",
+      "reviewStep": "提示词与检查",
+      "provider": "提供商",
+      "model": "模型",
+      "baseUrl": "基础 URL",
+      "apiKey": "模型 API 密钥",
+      "apiKeyHint": "你的大模型提供商的密钥，不是 EDDI 的凭据。",
+      "apiKeyPlaceholder": "粘贴 API 密钥，或选择一个保险库密钥",
+      "vaultDown": "密钥保险库当前不可用，因此暂时无法将密钥存入其中。在此输入的密钥会传给后端，后端会在可行时将其存入保险库。",
+      "environment": "环境",
+      "authMode": "操作员的身份验证方式",
+      "authModeHint": "操作员会调用你的 EDDI 管理 API。此设置决定这些调用携带何种凭据。",
+      "authNoneBlocked": "本部署已启用身份验证，未经身份验证的工具调用会被拒绝。操作员虽能成功部署，但随后每次查询都会失败。请改选「你的身份」。",
+      "safetyPreamble": "安全规则（不可编辑）",
+      "safetyPreambleHint": "始终置于最前。它要求操作员将工具返回的一切内容视为不可信数据。",
+      "promptBody": "操作员指令",
+      "promptBodyHint": "编辑操作员如何自我介绍以及如何工作。",
+      "tools": "将授予它的工具（{{toolCount}} 个）",
+      "activate": "启用并部署",
+      "callerIdentityNote": "EDDI 在发起调用时才代入你的令牌。它不会存入会话，也只会发回本部署。",
+      "rebuildWarning": "保存会新建一个操作员智能体并移除当前的。你现有的操作员会话不会保留。",
+      "environmentHint": "操作员智能体自身运行的位置。它仍可读取任意环境。"
+    },
+    "authMode": {
+      "none": {
+        "label": "不带凭据",
+        "description": "工具调用不携带 Authorization 头。仅当本 EDDI 部署关闭了身份验证时才可用。"
+      },
+      "caller-identity": {
+        "label": "你的身份",
+        "description": "工具调用以当前登录用户的身份执行，使用该用户的权限并记入其审计轨迹。启用身份验证时必须选择此项。"
+      }
+    },
+    "stage": {
+      "idle": "",
+      "validating": "正在检查本部署是否提供操作员所需的接口……",
+      "provisioning": "正在创建操作员智能体……",
+      "resolving-version": "正在解析智能体版本……",
+      "saving": "正在保存配置……",
+      "done": "完成",
+      "canary": "正在检查操作员能否访问你的平台……"
+    },
+    "status": {
+      "title": "操作员",
+      "provider": "提供商",
+      "environment": "环境",
+      "authMode": "身份",
+      "version": "版本",
+      "checking": "检查中……",
+      "ready": "已部署",
+      "inProgress": "部署中……",
+      "error": "部署错误",
+      "notFound": "未部署",
+      "errorHelp": "操作员智能体部署失败。可重新配置后再试，或查看平台日志了解具体错误。",
+      "reconfigure": "重新配置",
+      "deactivate": "停用",
+      "reset": "删除操作员",
+      "deactivateConfirmTitle": "停用平台操作员？",
+      "deactivateConfirmBody": "操作员将被取消部署并停止响应。其配置会保留，你可以稍后重新启用。",
+      "resetConfirmTitle": "删除平台操作员？",
+      "resetConfirmBody": "操作员智能体及为其创建的所有资源，连同已保存的配置，都会被永久删除。此操作无法撤销。",
+      "connectionCheck": "检查连接"
+    },
+    "chat": {
+      "empty": "来问问你的部署。操作员会去查，并向你展示它发出的每一次调用。",
+      "placeholder": "询问智能体、会话、部署、日志……",
+      "send": "发送",
+      "stop": "停止",
+      "newConversation": "开始新会话",
+      "transcript": "操作员对话"
+    },
+    "starters": {
+      "whatsDeployed": "现在部署了哪些内容？",
+      "recentConversations": "显示最近的会话",
+      "healthCheck": "这个平台上有什么异常吗？",
+      "diagnoseAgent": "为什么我的某个智能体部署失败？"
+    },
+    "toast": {
+      "activated": "平台操作员已启用",
+      "deactivated": "平台操作员已停用",
+      "reset": "平台操作员已删除",
+      "activatedButUnreachable": "操作员已部署，但无法读取你的平台"
+    },
+    "canary": {
+      "genericFailure": "连接检查未通过。",
+      "passed": "操作员可以访问你的平台。",
+      "recheck": "重新检查",
+      "title": "操作员已部署，但无法读取你的平台。"
+    },
+    "paused": {
+      "title": "平台操作员已暂停",
+      "description": "配置仍然保留——重新开启会再次部署同一个智能体。没有删除任何内容。",
+      "action": "重新开启"
+    },
+    "managedAgentBadge": "操作员",
+    "managedAgentHint": "由平台操作员页面创建并管理。在此编辑或删除会导致该页面失效。"
   }
 }

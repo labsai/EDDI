@@ -1019,6 +1019,39 @@ export const handlers = [
   // --- Chat / Agent Engine ---
 
   // Start conversation (v6: POST /agents/:agentId/start)
+  // NOTE: must stay above the broad `*/agents/:conversationId` handler below —
+  // MSW's `*` spans path segments, so that pattern also matches this URL and
+  // would otherwise answer setup-api with a conversation snapshot.
+  http.post("*/administration/agents/setup-api", async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    // Mirror the backend contract: AgentSetupService rejects a blank `agentName`
+    // with "Agent name is required". Sending `name` (the old manager bug) must fail.
+    const agentName = body.agentName;
+    if (typeof agentName !== "string" || agentName.trim() === "") {
+      return HttpResponse.json(
+        { message: "Agent name is required" },
+        { status: 400 },
+      );
+    }
+    return HttpResponse.json(
+      {
+        action: "api_agent_created",
+        agentId: `api-agent-${Date.now()}`,
+        agentName,
+        provider: body.provider ?? "anthropic",
+        model: body.model ?? "claude-sonnet-4-6",
+        deployed: body.deploy !== false,
+        deploymentStatus: body.deploy !== false ? "READY" : undefined,
+        endpointCount: 5,
+        groups: ["Users", "Orders"],
+        quickRepliesEnabled: body.enableQuickReplies ?? false,
+        sentimentAnalysisEnabled: body.enableSentimentAnalysis ?? false,
+        resources: { agentLocation: "/agentstore/agents/mock-api-agent?version=1" },
+      },
+      { status: 201 },
+    );
+  }),
+
   http.post("*/agents/:agentId/start", () => {
     return new HttpResponse(null, {
       status: 201,
@@ -3483,26 +3516,6 @@ export const scheduleHandlers = [
     );
   }),
 
-  http.post("*/administration/agents/setup-api", async ({ request }) => {
-    const body = (await request.json()) as Record<string, unknown>;
-    return HttpResponse.json(
-      {
-        action: "api_agent_created",
-        agentId: `api-agent-${Date.now()}`,
-        agentName: body.name ?? "API Agent",
-        provider: body.provider ?? "anthropic",
-        model: body.model ?? "claude-sonnet-4-6",
-        deployed: body.deploy !== false,
-        deploymentStatus: body.deploy !== false ? "READY" : undefined,
-        endpointCount: 5,
-        groups: ["Users", "Orders"],
-        quickRepliesEnabled: body.enableQuickReplies ?? false,
-        sentimentAnalysisEnabled: body.enableSentimentAnalysis ?? false,
-        resources: { agentLocation: "/agentstore/agents/mock-api-agent?version=1" },
-      },
-      { status: 201 },
-    );
-  }),
 
   // ==========================================
   // === Secrets Vault Mocks ===

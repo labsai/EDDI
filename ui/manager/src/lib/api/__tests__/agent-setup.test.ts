@@ -77,7 +77,7 @@ describe("agent-setup API", () => {
   describe("createApiAgent", () => {
     it("creates an API agent", async () => {
       const result = await createApiAgent({
-        name: "API Agent",
+        agentName: "API Agent",
         systemPrompt: "You are an API agent.",
         openApiSpec: "https://example.com/openapi.json",
         provider: "openai",
@@ -85,6 +85,17 @@ describe("agent-setup API", () => {
       });
       expect(result).toBeDefined();
       expect(result.agentId).toBeDefined();
+    });
+
+    // Regression guard: the manager used to send `name`, which the backend drops,
+    // making setup-api fail with "Agent name is required".
+    it("sends the name as `agentName`, the field the backend requires", async () => {
+      const result = await createApiAgent({
+        agentName: "Named Correctly",
+        systemPrompt: "You are an API agent.",
+        openApiSpec: "https://example.com/openapi.json",
+      });
+      expect(result.agentName).toBe("Named Correctly");
     });
   });
 });
