@@ -242,6 +242,34 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private String httpCallRag;
 
         /**
+         * Maximum number of characters of retrieved RAG context that may be appended to
+         * the system prompt, per retrieval block (vector-store RAG and httpCall RAG are
+         * capped independently).
+         * <p>
+         * {@code maxContextTokens} deliberately excludes the system prompt, so nothing
+         * used to bound this: {@code enableWorkflowRag} across N knowledge bases
+         * concatenated every chunk from every matched KB, and the serialized httpCall
+         * RAG response was appended whole ({@code toolResponseLimits} does not apply to
+         * it). The prompt then grew until the provider rejected the request.
+         * <p>
+         * {@code -1} (or {@code 0}) disables the cap and restores the previous
+         * unbounded behavior. Default: 20000.
+         */
+        private Integer maxRagContextChars = 20000;
+
+        /**
+         * Hard ceiling on the assembled system prompt, in characters, applied after all
+         * RAG context, counterweight, identity-masking and response-format blocks have
+         * been appended. This is the last line of defence for a prompt that grows from
+         * sources the agent designer does not directly author.
+         * <p>
+         * {@code -1} (default) leaves the assembled prompt untouched — the
+         * designer-authored prompt is under their own control, so only opt in when the
+         * deployment needs a hard bound.
+         */
+        private Integer maxSystemPromptChars = -1;
+
+        /**
          * Retry configuration for LLM calls.
          *
          * @see ai.labs.eddi.configs.shared.RetryConfiguration
@@ -678,6 +706,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setHttpCallRag(String httpCallRag) {
             this.httpCallRag = httpCallRag;
+        }
+
+        public Integer getMaxRagContextChars() {
+            return maxRagContextChars;
+        }
+
+        public void setMaxRagContextChars(Integer maxRagContextChars) {
+            this.maxRagContextChars = maxRagContextChars;
+        }
+
+        public Integer getMaxSystemPromptChars() {
+            return maxSystemPromptChars;
+        }
+
+        public void setMaxSystemPromptChars(Integer maxSystemPromptChars) {
+            this.maxSystemPromptChars = maxSystemPromptChars;
         }
 
         public RetryConfiguration getRetry() {
@@ -1646,11 +1690,23 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Master switch — summary is only generated when enabled. */
         private boolean enabled = false;
 
-        /** LLM provider for summarization (should be cheap/fast). */
-        private String llmProvider = "anthropic";
+        /**
+         * LLM provider for summarization (should be cheap/fast). When unset, the parent
+         * LLM task's provider is inherited.
+         * <p>
+         * Finding F13: this used to default to a hardcoded {@code "anthropic"}, so
+         * enabling {@code conversationSummary} on, say, an OpenAI agent silently tried
+         * to call a vendor the deployment may hold no credentials for — and the failure
+         * was swallowed as a WARN, leaving the rolling summary permanently empty.
+         */
+        private String llmProvider;
 
-        /** Model for summarization. Default: claude-sonnet-4-6. */
-        private String llmModel = "claude-sonnet-4-6";
+        /**
+         * Model for summarization. When unset, the parent LLM task's model is inherited
+         * (previously hardcoded to a specific Anthropic model — see
+         * {@link #llmProvider}).
+         */
+        private String llmModel;
 
         /** Maximum tokens for the generated summary. */
         private int maxSummaryTokens = 800;
@@ -1696,12 +1752,10 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             if (maxSummaryTokens < 100) {
                 maxSummaryTokens = 800;
             }
-            if (llmProvider == null || llmProvider.isBlank()) {
-                llmProvider = "anthropic";
-            }
-            if (llmModel == null || llmModel.isBlank()) {
-                llmModel = "claude-sonnet-4-6";
-            }
+            // llmProvider/llmModel are deliberately NOT defaulted here any more: a blank
+            // value means "inherit the parent LLM task", which only the caller can
+            // resolve (see LlmTask.resolveEffectiveSummaryConfig). Defaulting them to a
+            // vendor here is what made the summary unauthenticatable (finding F13).
         }
 
         public boolean isEnabled() {

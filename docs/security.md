@@ -125,6 +125,42 @@ When an LLM is given access to tools, every argument it supplies must be treated
 
 ---
 
+## Caller Identity Forwarding — `CallerIdentityResolver`
+
+**Applies to:** apicall headers that reference `${caller:token}` / `${caller:userId}`.
+
+An agent that calls an API needs a credential. Baking a static one into the
+config is the wrong shape when the API is EDDI's own: an OIDC token expires
+within the hour, cannot be least-privilege, and attributes every action to a
+single synthetic principal. Instead, a header may reference the authenticated
+caller, and EDDI substitutes that user's own token while building the request.
+
+```json
+"headers": { "Authorization": "Bearer ${caller:token}" }
+```
+
+Forwarding a user's token is only safe under strict conditions, so resolution
+fails the call loudly rather than degrading quietly:
+
+| Control | Behaviour |
+| ------- | --------- |
+| **Same-origin only** | The token is released only when the outbound call targets the exact `scheme://host:port` the caller addressed. That origin comes from the inbound request, never from configuration — so an agent config naming a third-party host cannot exfiltrate the token, and no allow-list is required for this to hold by default. |
+| **Headers only** | `${caller:token}` in a query parameter is rejected. Tokens in URLs leak through access logs, proxies and browser history. `${caller:userId}` is not a secret and is also resolved in query parameters. |
+| **Authenticated turns only** | The identity is captured from the request driving the turn. Scheduled jobs and triggers have no caller and cannot satisfy the reference. |
+| **Fails closed** | An unsatisfiable reference throws rather than resolving to an empty string, which would send `Bearer ` and surface downstream as a confusing `401`. |
+| **Never persisted** | Resolution happens while building the request; `scrubSensitiveHeaders` strips authorization headers before the request is written to conversation memory. |
+
+**Thread safety.** A conversation turn is built on the request thread but
+executed on pool threads, where request-scoped beans no longer resolve. The
+identity is captured while the request context is live and bound to the
+executing thread by `CallerIdentityContext`, always cleared in a `finally` —
+those threads are reused across conversations, so a leaked binding would be
+readable by the next caller's turn.
+
+Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
+
+---
+
 ## SSRF Protection — `UrlValidationUtils`
 
 **Applies to:** PDF Reader, Web Scraper, and any future tool that fetches remote resources.

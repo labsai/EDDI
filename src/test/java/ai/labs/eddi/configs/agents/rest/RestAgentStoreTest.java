@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.agents.rest;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -48,6 +49,8 @@ class RestAgentStoreTest {
     private IScheduleStore scheduleStore;
     @Mock
     private CapabilityRegistryService capabilityRegistryService;
+    @Mock
+    private IDeploymentStore deploymentStore;
 
     private RestAgentStore restAgentStore;
 
@@ -55,7 +58,7 @@ class RestAgentStoreTest {
     void setUp() {
         openMocks(this);
         restAgentStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
-                capabilityRegistryService);
+                capabilityRegistryService, deploymentStore);
     }
 
     /** Helper to create a dummy DocumentDescriptor for reference-count mocking */
@@ -77,6 +80,39 @@ class RestAgentStoreTest {
         }
 
         @Test
+        @DisplayName("should delete the Agent's deployment records even without cascade")
+        void deleteAgent_deletesDeploymentRecords() throws Exception {
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
+
+            // A surviving record makes the runtime retry a doomed redeploy
+            // of a now-missing Agent on every startup.
+            verify(deploymentStore).deleteDeploymentInfos(AGENT_ID);
+        }
+
+        @Test
+        @DisplayName("should keep deployment records when the Agent delete itself fails")
+        void deleteAgent_keepsDeploymentRecordsWhenDeleteFails() throws Exception {
+            // A stale/unknown version is rejected inside restVersionInfo.delete.
+            // Clearing first would strip a still-live Agent of what it needs.
+            doThrow(new IResourceStore.ResourceModifiedException("not the latest version")).when(AgentStore).delete(AGENT_ID, 1);
+
+            assertThrows(IResourceStore.ResourceModifiedException.class, () -> restAgentStore.deleteAgent(AGENT_ID, 1, false, false));
+
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
+        }
+
+        @Test
+        @DisplayName("should still delete the Agent when clearing its deployment records fails")
+        void deleteAgent_deploymentCleanupFailureIsNotFatal() throws Exception {
+            when(deploymentStore.deleteDeploymentInfos(AGENT_ID))
+                    .thenThrow(new IResourceStore.ResourceStoreException("boom", new RuntimeException()));
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
+
+            verify(AgentStore).delete(eq(AGENT_ID), eq(1));
+        }
+
+        @Test
         @DisplayName("should cascade-delete packages when cascade=true and packages are not shared")
         void deleteAgent_cascade() throws Exception {
             AgentConfiguration config = new AgentConfiguration();
@@ -93,6 +129,20 @@ class RestAgentStoreTest {
             verify(restWorkflowStore).deleteWorkflow(PKG1_ID, 2, true, true);
             verify(restWorkflowStore).deleteWorkflow(PKG2_ID, 1, true, true);
             verify(AgentStore).deleteAllPermanently(AGENT_ID);
+        }
+
+        @Test
+        @DisplayName("should delete deployment records on the cascade path too")
+        void deleteAgent_cascade_alsoDeletesDeploymentRecords() throws Exception {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 1, false)).thenReturn(List.of(dummyDescriptor()));
+            when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, true, true);
+
+            verify(deploymentStore).deleteDeploymentInfos(AGENT_ID);
         }
 
         @Test

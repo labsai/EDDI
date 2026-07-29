@@ -14,6 +14,7 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.jboss.logging.Logger;
 
 import java.util.HashMap;
@@ -36,6 +37,20 @@ class StreamingLegacyChatExecutor {
     private static final Logger LOGGER = Logger.getLogger(StreamingLegacyChatExecutor.class);
     private static final long DEFAULT_TIMEOUT_SECONDS = 120;
     private static final String KEY_TIMEOUT = "timeout";
+
+    /**
+     * Optional — used to count providers that never emit partial responses (finding
+     * F8). {@code null} in the direct-construction unit tests.
+     */
+    private final MeterRegistry meterRegistry;
+
+    StreamingLegacyChatExecutor() {
+        this(null);
+    }
+
+    StreamingLegacyChatExecutor(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
 
     /**
      * Result of a streaming chat execution, including response text and metadata.
@@ -205,6 +220,14 @@ class StreamingLegacyChatExecutor {
             }
             // Round up so a sub-second timeout never collapses the backstop to zero.
             long seconds = (millis + 999) / 1000;
+            // Finding F11: the raise-only floor is deliberate (see the javadoc above),
+            // but it used to be silent — an operator configuring timeout=5000 still
+            // waited the full 120s with nothing in the log explaining why. Say so.
+            if (seconds < DEFAULT_TIMEOUT_SECONDS) {
+                LOGGER.warnf("The 'timeout' parameter (%dms ≈ %ds) is SHORTER than the %ds streaming backstop and does NOT shorten it — "
+                        + "the provider's own client timeout still applies, but this executor will wait up to %ds. "
+                        + "Set 'streamingTimeoutSeconds' to lower the backstop.", millis, seconds, DEFAULT_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
+            }
             return Math.max(DEFAULT_TIMEOUT_SECONDS, seconds);
         } catch (NumberFormatException e) {
             LOGGER.debugf("Ignoring non-numeric 'timeout' parameter '%s' when deriving the streaming backstop", timeoutMs);
@@ -335,6 +358,40 @@ class StreamingLegacyChatExecutor {
             }
             metadata.putAll(buildMetadata(responseRef.get()));
 
+            // Finding F8: a provider that completes without ever calling
+            // onPartialResponse leaves the accumulated buffer empty, and the buffer used
+            // to be the ONLY text source — onCompleteResponse's ChatResponse was read for
+            // metadata and its aiMessage().text() thrown away. The turn then returned a
+            // silent empty answer with no error, warning or metric. Fall back to the
+            // complete response, and emit the token to the sink so the SSE client is not
+            // left with nothing.
+            if (!timedOut && !interrupted && errorRef.get() == null && responseText.isEmpty()) {
+                String completeText = completeResponseText(responseRef.get());
+                if (completeText != null && !completeText.isEmpty()) {
+                    LOGGER.warnf("Streaming provider emitted no partial responses; falling back to the complete response (%d chars). "
+                            + "This provider does not support incremental streaming.", completeText.length());
+                    metadata.put("streamingNoPartials", true);
+                    // putIfAbsent, NOT put: buildMetadata may already have recorded
+                    // "truncated" (finishReason=LENGTH) or "content_filter" — the only
+                    // signals LlmTask.applyResponseValidation dispatches on. Overwriting
+                    // them here would silently disable responseValidation.onTruncation /
+                    // onContentFilter for this provider. The transport-capability note is
+                    // the weaker signal and is already carried by streamingNoPartials.
+                    metadata.putIfAbsent("warning", "streaming_no_partials");
+                    incrementNoPartials();
+                    responseText = completeText;
+                    synchronized (streamLock) {
+                        if (!abandoned.get()) {
+                            try {
+                                eventSink.onToken(completeText);
+                            } catch (Exception e) {
+                                LOGGER.warnf("Error sending fallback token event: %s", e.getMessage());
+                            }
+                        }
+                    }
+                }
+            }
+
             // An interrupt is a cancellation request — the cascade cancelling a step, or
             // the request being aborted. Never retry it (that would ignore the
             // cancellation) and never report it as a successful empty response, which
@@ -396,6 +453,23 @@ class StreamingLegacyChatExecutor {
         }
 
         return new StreamingResult(responseText, metadata);
+    }
+
+    /**
+     * The text of a completed streaming response, or {@code null} when the provider
+     * gave none. Finding F8 — this value was previously never read.
+     */
+    static String completeResponseText(ChatResponse response) {
+        if (response == null || response.aiMessage() == null) {
+            return null;
+        }
+        return response.aiMessage().text();
+    }
+
+    private void incrementNoPartials() {
+        if (meterRegistry != null) {
+            meterRegistry.counter("eddi.llm.streaming.no_partials").increment();
+        }
     }
 
     private static Map<String, Object> buildMetadata(ChatResponse response) {

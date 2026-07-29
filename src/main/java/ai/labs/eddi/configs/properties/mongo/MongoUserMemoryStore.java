@@ -8,8 +8,10 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.*;
@@ -46,6 +48,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     private static final Logger LOGGER = Logger.getLogger(MongoUserMemoryStore.class);
 
     private static final String COLLECTION_MEMORIES = "usermemories";
+    private static final String FIELD_ID = "_id";
     private static final String FIELD_USER_ID = "userId";
     private static final String FIELD_KEY = "key";
     private static final String FIELD_VALUE = "value";
@@ -58,6 +61,23 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     private static final String FIELD_ACCESS_COUNT = "accessCount";
     private static final String FIELD_CREATED_AT = "createdAt";
     private static final String FIELD_UPDATED_AT = "updatedAt";
+
+    /** Recall order that ranks entries by how often they have been recalled. */
+    private static final String RECALL_ORDER_MOST_ACCESSED = "most_accessed";
+
+    /**
+     * Share of the recall window reserved for the most recently updated entries
+     * when {@link #RECALL_ORDER_MOST_ACCESSED} is used (1/5th of the window, at
+     * least one slot).
+     * <p>
+     * Without this reservation {@code most_accessed} is self-reinforcing: only
+     * entries that are already inside the window get their {@code accessCount}
+     * incremented, so a freshly written entry (count 0) can never climb in once the
+     * window is full. The reserved slots act as the recency term of the ranking — a
+     * new entry always gets at least one chance to be recalled (and thereby to
+     * start accumulating access counts).
+     */
+    private static final int RECENCY_RESERVATION_DIVISOR = 5;
 
     private final MongoCollection<Document> memoriesCollection;
 
@@ -83,6 +103,11 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // Category filtering
         memoriesCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_USER_ID), Indexes.ascending(FIELD_CATEGORY)),
                 new IndexOptions().name("idx_user_category").background(true));
+
+        // Ordering index for "most_accessed" recall — without it the top-k is an
+        // in-memory sort over every entry of the user on every conversation init.
+        memoriesCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_USER_ID), Indexes.descending(FIELD_ACCESS_COUNT)),
+                new IndexOptions().name("idx_user_access_count").background(true));
     }
 
     // === Flat property view (reads/writes global entries in usermemories) ===
@@ -149,8 +174,17 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         Bson filter = buildUpsertFilter(entry);
         Instant now = Instant.now();
 
+        // A global entry is keyed on (userId, key, visibility) ONLY — it is shared
+        // across agents, so any agent that merely RECALLS it would otherwise rewrite
+        // sourceAgentId to itself and silently steal ownership. setOnInsert pins the
+        // owner to the agent that created the entry; self/group entries are keyed per
+        // agent, so there sourceAgentId is part of the identity and $set is correct.
+        Bson sourceAgentUpdate = entry.visibility() == Visibility.global
+                ? Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId())
+                : Updates.set(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId());
+
         Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
-                Updates.set(FIELD_VISIBILITY, entry.visibility().name()), Updates.set(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()),
+                Updates.set(FIELD_VISIBILITY, entry.visibility().name()), sourceAgentUpdate,
                 Updates.set(FIELD_GROUP_IDS, entry.groupIds()), Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
                 Updates.set(FIELD_CONFLICTED, entry.conflicted()), Updates.set(FIELD_UPDATED_AT, now.toString()),
                 Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
@@ -158,14 +192,15 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
 
         var options = new UpdateOptions().upsert(true);
 
-        // Check for cross-agent global overwrite
+        // Check for cross-agent global write (value changes, ownership does not)
         if (entry.visibility() == Visibility.global) {
             Document existing = memoriesCollection.find(filter).first();
             if (existing != null) {
                 String existingAgent = existing.getString(FIELD_SOURCE_AGENT_ID);
                 if (existingAgent != null && !existingAgent.equals(entry.sourceAgentId())) {
-                    LOGGER.infof("[MEMORY] Cross-agent global overwrite: key='%s', user='%s', " + "previous agent='%s', new agent='%s'", entry.key(),
-                            entry.userId(), existingAgent, entry.sourceAgentId());
+                    LOGGER.infof("[MEMORY] Cross-agent global write: key='%s', user='%s', " + "owning agent='%s' (preserved), writing agent='%s'",
+                            LogSanitizer.sanitize(entry.key()), LogSanitizer.sanitize(entry.userId()), LogSanitizer.sanitize(existingAgent),
+                            LogSanitizer.sanitize(entry.sourceAgentId()));
                 }
             }
         }
@@ -200,7 +235,21 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
             throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
 
-        // Build visibility filter: self(agentId) OR group(groupIds) OR global
+        Bson filter = buildVisibilityFilter(userId, agentId, groupIds);
+
+        if (!RECALL_ORDER_MOST_ACCESSED.equals(recallOrder)) {
+            List<UserMemoryEntry> entries = new ArrayList<>();
+            collectInto(new LinkedHashMap<>(), entries, filter, descending(FIELD_UPDATED_AT), maxEntries > 0 ? maxEntries : -1);
+            return entries;
+        }
+
+        return mostAccessedWithRecencyReservation(filter, maxEntries);
+    }
+
+    /**
+     * Visibility filter for a recall: self(agentId) OR group(groupIds) OR global.
+     */
+    private Bson buildVisibilityFilter(String userId, String agentId, List<String> groupIds) {
         List<Bson> visibilityFilters = new ArrayList<>();
 
         // Self: entries created by this agent for this user
@@ -214,19 +263,55 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // Global: all global entries for this user
         visibilityFilters.add(eq(FIELD_VISIBILITY, Visibility.global.name()));
 
-        Bson filter = and(eq(FIELD_USER_ID, userId), or(visibilityFilters));
-        Bson sort = "most_accessed".equals(recallOrder) ? descending(FIELD_ACCESS_COUNT) : descending(FIELD_UPDATED_AT);
+        return and(eq(FIELD_USER_ID, userId), or(visibilityFilters));
+    }
 
-        List<UserMemoryEntry> entries = new ArrayList<>();
-        for (Document doc : memoriesCollection.find(filter).sort(sort).limit(maxEntries)) {
-            entries.add(documentToEntry(doc));
+    /**
+     * {@code most_accessed} recall: the bulk of the window is filled by access
+     * count, a reserved slice by recency (see
+     * {@link #RECENCY_RESERVATION_DIVISOR}), and the {@code accessCount} increments
+     * are applied in ONE batched write AFTER both cursors are drained — never
+     * per-document inside an open cursor.
+     */
+    private List<UserMemoryEntry> mostAccessedWithRecencyReservation(Bson filter, int maxEntries) {
+        int recencySlots = maxEntries > 0 ? Math.max(1, maxEntries / RECENCY_RESERVATION_DIVISOR) : 0;
+        int accessSlots = maxEntries > 0 ? maxEntries - recencySlots : -1;
 
-            // Increment access count when using most_accessed ordering
-            if ("most_accessed".equals(recallOrder)) {
-                memoriesCollection.updateOne(eq("_id", doc.getObjectId("_id")), Updates.inc(FIELD_ACCESS_COUNT, 1));
+        Map<ObjectId, UserMemoryEntry> recalled = new LinkedHashMap<>();
+        List<UserMemoryEntry> ordered = new ArrayList<>();
+        collectInto(recalled, ordered, filter, descending(FIELD_ACCESS_COUNT), accessSlots);
+        collectInto(recalled, ordered, filter, descending(FIELD_UPDATED_AT), recencySlots);
+
+        if (!recalled.isEmpty()) {
+            memoriesCollection.updateMany(in(FIELD_ID, recalled.keySet()), Updates.inc(FIELD_ACCESS_COUNT, 1));
+        }
+
+        return ordered;
+    }
+
+    /**
+     * Drains one sorted query into {@code ordered}, de-duplicating against
+     * {@code seen} (keyed by document id). {@code limit < 0} means "no limit";
+     * {@code limit == 0} skips the query entirely (a Mongo {@code limit(0)} would
+     * mean unlimited, which is never what a zero-slot budget wants).
+     */
+    private void collectInto(Map<ObjectId, UserMemoryEntry> seen, List<UserMemoryEntry> ordered, Bson filter, Bson sort, int limit) {
+        if (limit == 0) {
+            return;
+        }
+        FindIterable<Document> found = memoriesCollection.find(filter).sort(sort);
+        if (limit > 0) {
+            found = found.limit(limit);
+        }
+        for (Document doc : found) {
+            var entry = documentToEntry(doc);
+            ObjectId id = doc.getObjectId(FIELD_ID);
+            if (id == null) {
+                ordered.add(entry);
+            } else if (seen.putIfAbsent(id, entry) == null) {
+                ordered.add(entry);
             }
         }
-        return entries;
     }
 
     @Override

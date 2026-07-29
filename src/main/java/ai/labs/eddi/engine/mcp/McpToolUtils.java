@@ -10,6 +10,8 @@ import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 
+import java.util.Map;
+
 /**
  * Shared utility methods for MCP tool implementations.
  *
@@ -65,17 +67,35 @@ final class McpToolUtils {
     }
 
     /**
-     * Parse an environment string to the corresponding enum value. Defaults to
-     * {@link Environment#production} if null, blank, or unrecognized.
+     * Parse an environment string to the corresponding enum value. Delegates to
+     * {@link Environment#parseStrict(String)}, the single place that knows the
+     * mapping: only an absent (null/blank) environment defaults to
+     * {@link Environment#production} — an environment the platform does not know is
+     * rejected with an {@link UnknownEnvironmentException} rather than silently
+     * resolving to production. A typo such as {@code "staging"} must never deploy
+     * to, undeploy from, or talk to production.
+     *
+     * @throws UnknownEnvironmentException
+     *             if {@code environment} is neither blank nor a known environment
      */
     static Environment parseEnvironment(String environment) {
-        if (environment == null || environment.isBlank()) {
-            return Environment.production;
-        }
         try {
-            return Environment.valueOf(environment.trim().toLowerCase());
+            return Environment.parseStrict(environment);
         } catch (IllegalArgumentException e) {
-            return Environment.production;
+            throw new UnknownEnvironmentException(e.getMessage());
+        }
+    }
+
+    /**
+     * An MCP caller passed an environment EDDI does not know. Distinct type so a
+     * tool can tell bad caller input apart from a server-side failure; the message
+     * names both the rejected value and the valid ones, so an MCP client (and the
+     * model driving it) can self-correct instead of retrying the same call.
+     */
+    static final class UnknownEnvironmentException extends IllegalArgumentException {
+
+        UnknownEnvironmentException(String message) {
+            super(message);
         }
     }
 
@@ -118,7 +138,7 @@ final class McpToolUtils {
      * the error path. {@code errorCode} and {@code details} may be null/blank/empty
      * (omitted when so).
      */
-    static String errorJson(String message, String errorCode, java.util.Map<String, String> details) {
+    static String errorJson(String message, String errorCode, Map<String, String> details) {
         var sb = new StringBuilder();
         sb.append("{\"error\":\"").append(escapeJsonString(message)).append("\"");
         if (errorCode != null && !errorCode.isBlank()) {

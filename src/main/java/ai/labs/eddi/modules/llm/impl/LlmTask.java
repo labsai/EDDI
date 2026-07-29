@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -104,6 +105,7 @@ public class LlmTask implements ILifecycleTask {
     private final GlobalVariableResolver globalVariableResolver;
     private final CounterweightService counterweightService;
     private final IdentityMaskingService identityMaskingService;
+    private final MeterRegistry meterRegistry;
 
     /**
      * The tool-calling agent loop — an injected collaborator, so a test can pass a
@@ -156,7 +158,7 @@ public class LlmTask implements ILifecycleTask {
             CounterweightService counterweightService,
             IdentityMaskingService identityMaskingService,
             AgentOrchestrator agentOrchestrator, ConversationHistoryBuilder conversationHistoryBuilder,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry, CallerIdentityContext callerIdentityContext) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -164,10 +166,11 @@ public class LlmTask implements ILifecycleTask {
         this.jsonSerialization = jsonSerialization;
         this.prePostUtils = prePostUtils;
 
+        this.meterRegistry = meterRegistry;
         this.chatModelRegistry = chatModelRegistry;
         this.conversationHistoryBuilder = conversationHistoryBuilder;
         this.legacyChatExecutor = new LegacyChatExecutor();
-        this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();
+        this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor(meterRegistry);
         this.agentOrchestrator = agentOrchestrator;
         this.ragContextProvider = ragContextProvider;
         this.tokenCounterFactory = tokenCounterFactory;
@@ -180,7 +183,7 @@ public class LlmTask implements ILifecycleTask {
         this.counterweightService = counterweightService;
         this.identityMaskingService = identityMaskingService;
         this.cascadingModelExecutor = new CascadingModelExecutor(chatModelRegistry, globalVariableResolver, templatingEngine, legacyChatExecutor,
-                streamingLegacyChatExecutor, meterRegistry);
+                streamingLegacyChatExecutor, meterRegistry, callerIdentityContext);
     }
 
     @Override
@@ -303,11 +306,17 @@ public class LlmTask implements ILifecycleTask {
         String userInput = extractUserInput(memory);
         String taskId = task.getId() != null ? task.getId() : "default";
 
+        // Finding F7: maxContextTokens explicitly excludes the system prompt, so
+        // nothing bounded the RAG blocks appended to it. Both appends below are capped
+        // by the task's maxRagContextChars.
+        int maxRagContextChars = RagContextProvider.resolveMaxChars(task);
+
         // Phase 8c-0: Zero-infrastructure RAG via named httpCall
         String httpCallRag = task.getHttpCallRag();
         if (!isNullOrEmpty(httpCallRag) && userInput != null) {
             try {
-                String httpCallContext = executeHttpCallRag(memory, httpCallRag, userInput, templateDataObjects);
+                String httpCallContext = capRagContext(executeHttpCallRag(memory, httpCallRag, userInput, templateDataObjects), maxRagContextChars,
+                        "httpCall RAG '" + httpCallRag + "'");
                 if (httpCallContext != null) {
                     systemMessage += "\n\n## Search Results:\n" + httpCallContext;
                     LOGGER.infof("httpCall RAG context injected for task '%s': %d chars", taskId, httpCallContext.length());
@@ -323,7 +332,8 @@ public class LlmTask implements ILifecycleTask {
         // Vector store RAG: retrieve from knowledge bases in the workflow
         if (userInput != null) {
             try {
-                String ragContext = ragContextProvider.retrieveContext(memory, task, userInput);
+                String ragContext = capRagContext(ragContextProvider.retrieveContext(memory, task, userInput), maxRagContextChars,
+                        "vector RAG for task '" + taskId + "'");
                 if (ragContext != null) {
                     systemMessage += "\n\n## Relevant Context:\n" + ragContext;
                     LOGGER.infof("RAG context injected for task '%s': %d chars", taskId, ragContext.length());
@@ -363,6 +373,11 @@ public class LlmTask implements ILifecycleTask {
                         + "Output ONLY the raw JSON object starting with '{'.";
             }
         }
+
+        // Finding F7: last line of defence — the assembled prompt has now absorbed RAG
+        // context, counterweight, identity masking and format blocks, none of which
+        // maxContextTokens covers. Opt-in (-1 by default).
+        systemMessage = capSystemPrompt(systemMessage, task.getMaxSystemPromptChars(), taskId);
 
         // Build conversation messages — token-aware or step-count
         // If rolling summary is active, inject summary prefix and skip summarized steps
@@ -562,6 +577,7 @@ public class LlmTask implements ILifecycleTask {
                 responseMetadata = new HashMap<>(agentResult.responseMetadata());
                 usedToolMode = true;
                 if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
+                    recordStreamingDowngrade(responseMetadata, task, responseContent);
                     eventSink.onToken(responseContent);
                 }
             } else {
@@ -593,6 +609,7 @@ public class LlmTask implements ILifecycleTask {
                 usedToolMode = true;
                 // Stream the final agent response if streaming is active
                 if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
+                    recordStreamingDowngrade(responseMetadata, task, responseContent);
                     eventSink.onToken(responseContent);
                 }
             } else if (eventSink != null) {
@@ -728,7 +745,24 @@ public class LlmTask implements ILifecycleTask {
                                 .map(e -> e.getKey() + " = " + e.getValue().getValueString()).reduce((a, b) -> a + "\n" + b).orElse(null);
                     }
                 }
-                conversationSummarizer.updateIfNeeded(memory, summaryConfig, propertiesContext);
+                // Finding F13: the summarizer used to be pinned to a hardcoded
+                // vendor/model default (anthropic/claude-sonnet-4-6) that had no way to
+                // reach the parent task's credentials. Resolve an effective config that
+                // inherits the parent's provider and model when the summary config leaves
+                // them unset, so enabling conversationSummary works with only the parent
+                // task configured.
+                // Resolving the provider and model is only half of F13 — without the
+                // parent task's apiKey/baseUrl the summarizer cannot authenticate at all,
+                // and the failure is swallowed below as a WARN, which is exactly how the
+                // rolling summary came to silently never materialise. Pass the resolved
+                // parameters through so inheritance actually reaches ChatModelRegistry.
+                // Those parameters are the PARENT provider's, so what may travel is
+                // decided by resolveInheritedSummaryParameters — a summary config naming a
+                // different vendor gets the neutral tuning values and none of the
+                // credentials.
+                var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType, resolveModelName(processedParams));
+                conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
+                        resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()));
             } catch (Exception e) {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
                         sanitize(memory.getConversationId()));
@@ -1119,6 +1153,172 @@ public class LlmTask implements ILifecycleTask {
             return inputData.getResult();
         }
         return null;
+    }
+
+    /**
+     * Finding F13: build the {@link LlmConfiguration.ConversationSummaryConfig} the
+     * summarizer should actually run with.
+     * <p>
+     * When the summary config names no provider/model of its own, the parent task's
+     * are inherited — matching how {@link ToolResponseTruncator} builds its
+     * summarizer. Returns a fresh copy: the task configuration object is cached and
+     * shared across conversations, so it must never be mutated.
+     *
+     * @return a copy with provider/model resolved, or the original when it already
+     *         names both
+     */
+    static LlmConfiguration.ConversationSummaryConfig resolveEffectiveSummaryConfig(LlmConfiguration.ConversationSummaryConfig configured,
+                                                                                    String parentProvider, String parentModel) {
+        if (configured == null) {
+            return null;
+        }
+        boolean providerMissing = isNullOrEmpty(configured.getLlmProvider());
+        boolean modelMissing = isNullOrEmpty(configured.getLlmModel());
+        if (!providerMissing && !modelMissing) {
+            return configured;
+        }
+
+        var effective = new LlmConfiguration.ConversationSummaryConfig();
+        effective.setEnabled(configured.isEnabled());
+        effective.setLlmProvider(providerMissing ? parentProvider : configured.getLlmProvider());
+        effective.setLlmModel(modelMissing ? parentModel : configured.getLlmModel());
+        effective.setMaxSummaryTokens(configured.getMaxSummaryTokens());
+        effective.setExcludePropertiesFromSummary(configured.isExcludePropertiesFromSummary());
+        effective.setRecentWindowSteps(configured.getRecentWindowSteps());
+        effective.setMaxRecallTurns(configured.getMaxRecallTurns());
+        effective.setSummarizationPrompt(configured.getSummarizationPrompt());
+        return effective;
+    }
+
+    /**
+     * Parameter keys that belong to the provider that issued them: credentials and
+     * the endpoint coordinates that address that provider's account. Everything
+     * else (temperature, maxTokens, timeout, …) is vendor-neutral and safe to carry
+     * across a provider boundary.
+     */
+    private static final Set<String> PROVIDER_BOUND_PARAMETERS = Set.of(
+            "apiKey", "accessToken", "authToken", "nonAzureApiKey", "signingSecret", "appPassword", "botToken",
+            "baseUrl", "endpoint", "deploymentName",
+            "compartmentId", "configProfile", "projectId", "region", "location");
+
+    /**
+     * The second half of the F13 inheritance decision: <em>which</em> of the parent
+     * task's resolved parameters may travel to the summarizer.
+     * <p>
+     * {@link #resolveEffectiveSummaryConfig} deliberately honours a
+     * {@code conversationSummary.llmProvider} that names a <em>different</em>
+     * vendor than the parent task. The parameter map, however, is the parent
+     * provider's: inheriting it wholesale would hand one vendor's plaintext
+     * {@code apiKey} (the vault reference is expanded downstream by
+     * {@code ChatModelRegistry}) to another vendor's endpoint, and an inherited
+     * {@code baseUrl} would redirect the summarization request — which carries the
+     * condensed transcript — at the parent provider's host. Sibling inheritance in
+     * {@code ToolResponseTruncator} cannot hit this because it always builds its
+     * summarizer with the parent's own type.
+     * <p>
+     * So credentials and endpoint coordinates are inherited only when the
+     * summarizer runs on the parent's provider. On a mismatch they are dropped (the
+     * summary provider must supply its own, e.g. via a global variable or a
+     * vault-backed deployment default) while the vendor-neutral tuning parameters
+     * still carry over.
+     *
+     * @param parentParameters
+     *            the parent task's resolved parameters; may be null
+     * @param parentProvider
+     *            the parent task's resolved provider type
+     * @param summaryProvider
+     *            the provider the summarizer will actually run on
+     * @return the parameters safe to inherit, or {@code null} when there are none
+     */
+    static Map<String, String> resolveInheritedSummaryParameters(Map<String, String> parentParameters, String parentProvider,
+                                                                 String summaryProvider) {
+        if (parentParameters == null || parentParameters.isEmpty()) {
+            return parentParameters;
+        }
+        if (!isNullOrEmpty(parentProvider) && !isNullOrEmpty(summaryProvider)
+                && parentProvider.trim().equalsIgnoreCase(summaryProvider.trim())) {
+            return parentParameters;
+        }
+
+        var safeParameters = new LinkedHashMap<String, String>();
+        var dropped = new ArrayList<String>();
+        parentParameters.forEach((key, value) -> {
+            if (key != null && PROVIDER_BOUND_PARAMETERS.stream().anyMatch(key::equalsIgnoreCase)) {
+                dropped.add(key);
+            } else {
+                safeParameters.put(key, value);
+            }
+        });
+
+        if (!dropped.isEmpty()) {
+            LOGGER.warnf("[SUMMARY] conversationSummary runs on provider '%s' while the task runs on '%s' — not inheriting %s. "
+                    + "Credentials must never cross a provider boundary; configure them for '%s' "
+                    + "(global variable or vault-backed default), or omit llmProvider to reuse the task's model.",
+                    sanitize(summaryProvider), sanitize(parentProvider), dropped, sanitize(summaryProvider));
+        }
+        return safeParameters;
+    }
+
+    /**
+     * Finding F10: a tool-enabled task can never stream token-by-token — the agent
+     * loop runs synchronously and the whole answer is pushed through a single
+     * {@code onToken}. From the client's point of view that is a long silence
+     * followed by one enormous token event, indistinguishable from a slow stream.
+     * <p>
+     * Record the downgrade so it is observable: a {@code streamingDowngraded} flag
+     * in {@code responseMetadata} (surfaced through
+     * {@code responseMetadataObjectName}, so an agent designer can branch on it)
+     * and an {@code eddi.llm.streaming.downgraded} counter.
+     */
+    private void recordStreamingDowngrade(Map<String, Object> responseMetadata, LlmConfiguration.Task task, String responseContent) {
+        if (responseMetadata != null) {
+            responseMetadata.put("streamingDowngraded", true);
+            responseMetadata.put("streamingDowngradeReason", "tools_enabled");
+        }
+        if (meterRegistry != null) {
+            meterRegistry.counter("eddi.llm.streaming.downgraded", "reason", "tools_enabled").increment();
+        }
+        LOGGER.infof("Streaming downgraded to a single chunk for task '%s': the tool-calling loop is synchronous (%d chars emitted at once)",
+                task.getId(), responseContent.length());
+    }
+
+    /**
+     * Finding F7: cap a RAG context block before it is appended to the system
+     * prompt.
+     * <p>
+     * {@code toolResponseLimits} governs tool results inside the agent loop; it has
+     * never applied to the httpCall-RAG response, which was serialized and appended
+     * whole. {@code maxContextTokens} covers conversation history only, explicitly
+     * not the system prompt.
+     *
+     * @param context
+     *            the retrieved context (may be null)
+     * @param maxChars
+     *            character ceiling; {@code -1} = unbounded
+     * @param source
+     *            human-readable source name, used in the warning
+     * @return the context, truncated with an explanatory marker when it exceeded
+     *         the cap
+     */
+    static String capRagContext(String context, int maxChars, String source) {
+        if (context == null || maxChars <= 0 || context.length() <= maxChars) {
+            return context;
+        }
+        LOGGER.warnf("%s produced %d chars of context, capped at %d (maxRagContextChars). "
+                + "Narrow the retrieval or raise the cap.", source, context.length(), maxChars);
+        return context.substring(0, maxChars) + "\n[... context truncated at " + maxChars + " characters ...]";
+    }
+
+    /**
+     * Finding F7: hard ceiling on the fully assembled system prompt.
+     * {@code maxChars <= 0} leaves the prompt untouched (the default).
+     */
+    static String capSystemPrompt(String systemMessage, Integer maxChars, String taskId) {
+        if (systemMessage == null || maxChars == null || maxChars <= 0 || systemMessage.length() <= maxChars) {
+            return systemMessage;
+        }
+        LOGGER.warnf("System prompt for task '%s' is %d chars, capped at %d (maxSystemPromptChars).", taskId, systemMessage.length(), maxChars);
+        return systemMessage.substring(0, maxChars) + "\n[... system prompt truncated at " + maxChars + " characters ...]";
     }
 
     /**

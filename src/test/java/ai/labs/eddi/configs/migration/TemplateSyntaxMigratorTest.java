@@ -186,6 +186,36 @@ class TemplateSyntaxMigratorTest {
         assertEquals(expected, migrator.migrate(input));
     }
 
+    @Test
+    void migrateStringConcat_unescapedOutputExpression() {
+        assertEquals("{baseUrl}/{path}", migrator.migrate("[(${baseUrl + '/' + path})]"));
+    }
+
+    // --- B13: concatenation rewriting must not touch non-Thymeleaf content ---
+
+    @Test
+    void migrateJsonBodyWithArithmetic_leavesJsonUntouched() {
+        // The body is migrated because of the Thymeleaf expression in it — the JSON
+        // around that expression, including {"a": 1+2}, must survive verbatim.
+        String input = "{\"a\": 1+2, \"user\": \"[[${properties.name}]]\"}";
+        String expected = "{\"a\": 1+2, \"user\": \"{properties.name}\"}";
+        assertEquals(expected, migrator.migrate(input));
+    }
+
+    @Test
+    void migrateJsonBodyWithConcatenatedStringValue_leavesJsonUntouched() {
+        String input = "{\"expr\": \"{total + surcharge}\", \"id\": \"[[${conversationInfo.conversationId}]]\"}";
+        String expected = "{\"expr\": \"{total + surcharge}\", \"id\": \"{conversationInfo.conversationId}\"}";
+        assertEquals(expected, migrator.migrate(input));
+    }
+
+    @Test
+    void migrateThIfWithArithmetic_conditionIsNotSplit() {
+        String input = "[# th:if=\"${count + offset}\"]visible[/]";
+        String expected = "{#if count + offset}visible{/if}";
+        assertEquals(expected, migrator.migrate(input));
+    }
+
     // --- #json and #encoder namespaces ---
 
     @Test

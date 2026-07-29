@@ -192,4 +192,49 @@ class AuditStoreTest {
         when(cursor.hasNext()).thenReturn(true, false);
         when(cursor.next()).thenReturn(doc);
     }
+
+    // ==================== G18: sequence round-trip ====================
+
+    /**
+     * The sequence is part of the signed payload, so a store that dropped it on
+     * write would make every one of its rows verify as tampered. This store
+     * advertises support for it — and must actually persist it.
+     */
+    @Test
+    @DisplayName("supportsSequence — the sequence survives a write")
+    void sequenceIsPersisted() {
+        AuditEntry entry = createEntry("conv-1", "agent-1").withSequence(11);
+
+        assertTrue(store.supportsSequence());
+
+        store.appendEntry(entry);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(Document.class);
+        verify(collection).insertOne(captor.capture());
+        assertEquals(11L, ((Number) captor.getValue().get("sequence")).longValue());
+    }
+
+    @Test
+    @DisplayName("a document written before sequencing reads back as unsequenced")
+    void legacyDocumentReadsBackUnsequenced() {
+        // createAuditDoc() has no "sequence" field — exactly a pre-upgrade row.
+        setupQueryIteration(createAuditDoc());
+
+        List<AuditEntry> result = store.getEntries("conv-1", 0, 10);
+
+        assertEquals(1, result.size());
+        assertEquals(AuditEntry.UNSEQUENCED, result.getFirst().sequence());
+    }
+
+    @Test
+    @DisplayName("a stored sequence reads back unchanged")
+    void storedSequenceReadsBack() {
+        Document doc = createAuditDoc();
+        doc.put("sequence", 11L);
+        setupQueryIteration(doc);
+
+        List<AuditEntry> result = store.getEntries("conv-1", 0, 10);
+
+        assertEquals(11L, result.getFirst().sequence());
+    }
 }

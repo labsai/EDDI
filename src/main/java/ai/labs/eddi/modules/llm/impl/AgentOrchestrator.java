@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
@@ -32,6 +33,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
@@ -262,6 +264,11 @@ class AgentOrchestrator {
     // call it directly — untouched.
     @Inject
     volatile IAttachmentStore attachmentStore;
+
+    // Same reason. Handed to TeardownAgentTool so a deleted dynamic agent leaves
+    // no deployment record the runtime keeps trying to redeploy.
+    @Inject
+    volatile IDeploymentStore deploymentStore;
 
     @Inject
     volatile AttachmentTextExtractor attachmentTextExtractor;
@@ -917,27 +924,64 @@ class AgentOrchestrator {
         List<ToolSpecification> builtInSpecs = new ArrayList<>(toolSpecs);
 
         // Merge httpcall tools discovered from workflow (if any)
-        if (httpCallTools != null && !httpCallTools.toolSpecs().isEmpty()) {
-            toolSpecs.addAll(httpCallTools.toolSpecs());
-            toolExecutors.putAll(httpCallTools.executors());
-            httpCallTools.executors().keySet().forEach(name -> toolSources.put(name, "http"));
+        if (httpCallTools != null) {
+            mergeExternalTools(httpCallTools.toolSpecs(), httpCallTools.executors(), "http", toolSpecs, toolExecutors, toolSources);
         }
 
         // Merge mcpcalls tools discovered from workflow (if any)
-        if (mcpCallWorkflowTools != null && !mcpCallWorkflowTools.toolSpecs().isEmpty()) {
-            toolSpecs.addAll(mcpCallWorkflowTools.toolSpecs());
-            toolExecutors.putAll(mcpCallWorkflowTools.executors());
-            mcpCallWorkflowTools.executors().keySet().forEach(name -> toolSources.put(name, "mcp"));
+        if (mcpCallWorkflowTools != null) {
+            mergeExternalTools(mcpCallWorkflowTools.toolSpecs(), mcpCallWorkflowTools.executors(), "mcp", toolSpecs, toolExecutors, toolSources);
         }
 
         // Merge A2A agent tools (if any)
-        if (a2aTools != null && !a2aTools.toolSpecs().isEmpty()) {
-            toolSpecs.addAll(a2aTools.toolSpecs());
-            toolExecutors.putAll(a2aTools.executors());
-            a2aTools.executors().keySet().forEach(name -> toolSources.put(name, "a2a"));
+        if (a2aTools != null) {
+            mergeExternalTools(a2aTools.toolSpecs(), a2aTools.executors(), "a2a", toolSpecs, toolExecutors, toolSources);
         }
 
         return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames));
+    }
+
+    /**
+     * Merge one source of externally-discovered tools into the registry, refusing
+     * any name that is already taken.
+     * <p>
+     * Finding F15: the merge used to be {@code toolSpecs.addAll} +
+     * {@code toolExecutors.putAll}. Specs accumulated in a List, so a duplicate
+     * name reached the model TWICE, while executors went into a Map where the last
+     * write won — a remote MCP server advertising {@code calculator} silently
+     * replaced the built-in one for every call the model made.
+     * {@code toolsWhitelist} filters by name and cannot express "must not collide".
+     * <p>
+     * Precedence follows merge order: built-in beats http beats mcp beats a2a. The
+     * loser is dropped, never silently substituted, and every collision is logged.
+     */
+    static void mergeExternalTools(List<ToolSpecification> incomingSpecs, Map<String, ToolExecutor> incomingExecutors, String source,
+                                   List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors, Map<String, String> toolSources) {
+        if (incomingSpecs == null || incomingSpecs.isEmpty()) {
+            return;
+        }
+        for (ToolSpecification spec : incomingSpecs) {
+            String name = spec.name();
+            if (name == null) {
+                LOGGER.warnf("Skipping %s tool with no name", source);
+                continue;
+            }
+            if (toolExecutors.containsKey(name)) {
+                String incumbent = toolSources.getOrDefault(name, "builtin");
+                LOGGER.warnf("Tool name collision: %s tool '%s' clashes with the already-registered %s tool of the same name — "
+                        + "the %s tool is DROPPED and the %s tool keeps the name. Rename the remote tool or exclude it via "
+                        + "toolsBlacklist.", source, sanitize(name), incumbent, source, incumbent);
+                continue;
+            }
+            ToolExecutor executor = incomingExecutors != null ? incomingExecutors.get(name) : null;
+            if (executor == null) {
+                LOGGER.warnf("%s tool '%s' has a specification but no executor — skipping", source, sanitize(name));
+                continue;
+            }
+            toolSpecs.add(spec);
+            toolExecutors.put(name, executor);
+            toolSources.put(name, source);
+        }
     }
 
     /**
@@ -2064,7 +2108,13 @@ class AgentOrchestrator {
                 addConversationRecallToolIfEnabled(tools, task, memory);
             // Dynamic agent tools (whitelist-gated, shared tracking lists)
             {
-                List<String> sharedCreatedIds = new java.util.concurrent.CopyOnWriteArrayList<>();
+                // Finding F17: this list used to start EMPTY on every buildToolList call,
+                // i.e. once per LLM task execution — so maxCreatedAgentsPerDiscussion was
+                // enforced per TURN, and a 5-member x 3-phase discussion with the default
+                // cap of 5 could deploy up to 75 agents to production. Seed it with the
+                // agents already created in this conversation so the cap actually bounds
+                // the discussion.
+                List<String> sharedCreatedIds = new java.util.concurrent.CopyOnWriteArrayList<>(seedCreatedAgentIds(memory));
                 Set<String> sharedRetainedIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
                 String parentAgentId = memory.getAgentId();
                 String userId = memory.getUserId();
@@ -2075,19 +2125,33 @@ class AgentOrchestrator {
                     tools.add(new CreateSubAgentTool(agentSetupService,
                             conversationService, parentAgentId, userId, dynamicConfig,
                             sharedCreatedIds, sharedRetainedIds));
-                    LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                    LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s' (%d already created)",
+                            sanitize(parentAgentId), sharedCreatedIds.size());
                     anyDynamicToolAdded = true;
                 }
                 if (whitelist.contains("converse_with_agent") && conversationService != null) {
-                    tools.add(new ConverseWithAgentTool(conversationService, userId));
-                    LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                    // Findings F18/I4: the tool used to take only (service, userId) and
+                    // consult no guardrails at all — allowDelegation was never read and
+                    // nothing bounded delegation depth or target.
+                    int delegationDepth = resolveDelegationDepth(memory);
+                    tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth));
+                    LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
+                            sanitize(parentAgentId), delegationDepth);
                 }
+                // Finding I4: allowRecruitment was documented as an enforced cap but was
+                // never read. Capability lookup is the recruitment entry point, so it is
+                // gated here.
                 if (whitelist.contains("find_agents_by_capability") && capabilityRegistryService != null) {
-                    tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService));
-                    LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool enabled for agent='%s'", sanitize(parentAgentId));
+                    if (dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()) {
+                        tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService));
+                        LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool enabled for agent='%s'", sanitize(parentAgentId));
+                    } else {
+                        LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool suppressed for agent='%s': allowRecruitment is off",
+                                sanitize(parentAgentId));
+                    }
                 }
                 if (whitelist.contains("teardown_agent") && agentFactory != null && agentStore != null) {
-                    tools.add(new TeardownAgentTool(agentFactory, agentStore, sharedCreatedIds, sharedRetainedIds));
+                    tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds));
                     LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
                     anyDynamicToolAdded = true;
                 }
@@ -2259,7 +2323,7 @@ class AgentOrchestrator {
             var contextData = currentStep.getLatestData("context:dynamicAgentConfig");
             if (contextData != null) {
                 Object value = contextData.getResult();
-                if (value instanceof ai.labs.eddi.engine.model.Context ctx && ctx.getValue() instanceof DynamicAgentConfig groupConfig) {
+                if (value instanceof Context ctx && ctx.getValue() instanceof DynamicAgentConfig groupConfig) {
                     LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
                     return groupConfig;
                 }
@@ -2267,6 +2331,128 @@ class AgentOrchestrator {
         }
         // Fallback: standalone agent — use permissive defaults
         return createDefaultDynamicConfig();
+    }
+
+    /**
+     * Finding F17: the agent IDs already created in this conversation, so
+     * {@code maxCreatedAgentsPerDiscussion} bounds the discussion instead of a
+     * single turn.
+     * <p>
+     * Two sources are consulted, in order:
+     * <ol>
+     * <li>a {@code dynamicCreatedAgentIds} context variable, so an orchestrator
+     * that owns the true discussion-wide total (the group conversation) can inject
+     * it;</li>
+     * <li>every {@code dynamic:created_agent_ids} entry already written to this
+     * conversation's memory by an earlier turn.</li>
+     * </ol>
+     * Returns a de-duplicated list, never null.
+     */
+    static List<String> seedCreatedAgentIds(IConversationMemory memory) {
+        Set<String> seeded = new LinkedHashSet<>();
+
+        var currentStep = memory.getCurrentStep();
+        if (currentStep != null) {
+            IData<Object> contextData = currentStep.getLatestData("context:dynamicCreatedAgentIds");
+            if (contextData != null && contextData.getResult() instanceof Context ctx) {
+                collectAgentIds(ctx.getValue(), seeded);
+            }
+        }
+
+        var allSteps = memory.getAllSteps();
+        if (allSteps != null) {
+            List<IData<Object>> priorEntries = allSteps.getAllLatestData(KEY_DYNAMIC_CREATED_AGENT_IDS);
+            if (priorEntries != null) {
+                for (IData<Object> entry : priorEntries) {
+                    if (entry != null) {
+                        collectAgentIds(entry.getResult(), seeded);
+                    }
+                }
+            }
+        }
+
+        return new ArrayList<>(seeded);
+    }
+
+    /**
+     * Add every String element of {@code value} (if it is a collection) to sink.
+     */
+    private static void collectAgentIds(Object value, Set<String> sink) {
+        if (value instanceof Collection<?> collection) {
+            for (Object element : collection) {
+                if (element instanceof String agentId && !agentId.isBlank()) {
+                    sink.add(agentId);
+                }
+            }
+        } else if (value instanceof String single && !single.isBlank()) {
+            sink.add(single);
+        }
+    }
+
+    /**
+     * Finding F18: how many delegation hops led to the current conversation.
+     * {@code ConverseWithAgentTool} propagates this as a {@code delegationDepth}
+     * context variable on the callee's start context AND on every message it sends,
+     * mirroring the {@code groupDepth} mechanism. 0 when a human started the
+     * conversation.
+     * <p>
+     * The current step is consulted first — that is where the per-turn context
+     * lands. Earlier steps are the fallback: the start context materializes on step
+     * 0 only, and a turn issued without the delegation context (a resume, or any
+     * other caller saying into the delegated conversation) must not silently reset
+     * an already-delegated conversation back to depth 0. Without that fallback the
+     * guard is inert on exactly the turns that matter.
+     */
+    static int resolveDelegationDepth(IConversationMemory memory) {
+        String contextKey = "context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH;
+
+        var currentStep = memory.getCurrentStep();
+        if (currentStep != null) {
+            Integer depth = parseDelegationDepth(currentStep.getLatestData(contextKey));
+            if (depth != null) {
+                return depth;
+            }
+        }
+
+        var allSteps = memory.getAllSteps();
+        if (allSteps != null) {
+            List<IData<Object>> priorEntries = allSteps.getAllLatestData(contextKey);
+            if (priorEntries != null) {
+                int deepest = 0;
+                for (IData<Object> entry : priorEntries) {
+                    Integer depth = parseDelegationDepth(entry);
+                    if (depth != null) {
+                        deepest = Math.max(deepest, depth);
+                    }
+                }
+                return deepest;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * The hop count carried by a {@code context:delegationDepth} entry, or
+     * {@code null} when the entry is absent, not a {@link Context}, or carries a
+     * non-numeric value.
+     */
+    private static Integer parseDelegationDepth(IData<Object> contextData) {
+        if (contextData == null || !(contextData.getResult() instanceof Context ctx)) {
+            return null;
+        }
+        Object value = ctx.getValue();
+        if (value instanceof Number number) {
+            return Math.max(0, number.intValue());
+        }
+        if (value instanceof String text) {
+            try {
+                return Math.max(0, Integer.parseInt(text.trim()));
+            } catch (NumberFormatException e) {
+                LOGGER.debugf("Ignoring non-numeric delegationDepth context value '%s'", sanitize(text));
+            }
+        }
+        return null;
     }
 
     /**

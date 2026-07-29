@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -118,7 +119,7 @@ class ConversationServiceTest {
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
                 jsonSerialization,
-                new SimpleMeterRegistry(), hitlResumeCompletedEvent, AGENT_TIMEOUT);
+                new SimpleMeterRegistry(), hitlResumeCompletedEvent, new CallerIdentityContext(null, null), AGENT_TIMEOUT);
     }
 
     // =========================================================================

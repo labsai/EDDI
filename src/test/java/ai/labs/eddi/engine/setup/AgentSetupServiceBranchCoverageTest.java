@@ -40,40 +40,59 @@ class AgentSetupServiceBranchCoverageTest {
         service = new AgentSetupService(restInterfaceFactory, agentAdmin, secretProvider, "http://localhost:11434");
     }
 
-    // ─── parseEnvironment ────────────────────────────────────────────────
+    // ─── environment resolution ──────────────────────────────────────────
 
     @Nested
-    @DisplayName("parseEnvironment")
+    @DisplayName("environment resolution")
     class ParseEnvironment {
 
         @Test
         @DisplayName("null returns production")
         void nullEnv() {
-            assertEquals(Deployment.Environment.production, AgentSetupService.parseEnvironment(null));
+            assertEquals(Deployment.Environment.production, service.resolveParams(null, null, null, null).env());
         }
 
         @Test
         @DisplayName("blank returns production")
         void blankEnv() {
-            assertEquals(Deployment.Environment.production, AgentSetupService.parseEnvironment("  "));
+            assertEquals(Deployment.Environment.production, service.resolveParams(null, null, null, "  ").env());
         }
 
         @Test
         @DisplayName("'test' returns test")
         void testEnv() {
-            assertEquals(Deployment.Environment.test, AgentSetupService.parseEnvironment("test"));
+            assertEquals(Deployment.Environment.test, service.resolveParams(null, null, null, "test").env());
         }
 
         @Test
         @DisplayName("'PRODUCTION' returns production")
         void productionUpperCase() {
-            assertEquals(Deployment.Environment.production, AgentSetupService.parseEnvironment("PRODUCTION"));
+            assertEquals(Deployment.Environment.production, service.resolveParams(null, null, null, "PRODUCTION").env());
         }
 
         @Test
-        @DisplayName("invalid value returns production")
+        @DisplayName("invalid value is rejected instead of resolving to production")
         void invalidEnv() {
-            assertEquals(Deployment.Environment.production, AgentSetupService.parseEnvironment("staging"));
+            var exception = assertThrows(IllegalArgumentException.class, () -> service.resolveParams(null, null, null, "staging"));
+            assertEquals("Unknown environment 'staging'. Valid values: production, test", exception.getMessage());
+        }
+
+        /**
+         * The whole point: with the old lenient parse, setupAgent("staging") built and
+         * deployed the agent to production. Now it fails validation before a single
+         * resource is created — so the REST proxy factory is never touched.
+         */
+        @Test
+        @DisplayName("setupAgent with an unknown environment creates nothing")
+        void setupAgentRejectsUnknownEnvironment() {
+            var request = new SetupAgentRequest("MyAgent", "You are helpful.", "anthropic", "claude-sonnet-4-6", "sk-test", null, null, false, null,
+                    false, false, null, true, "staging");
+
+            var exception = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(request));
+
+            assertEquals("Unknown environment 'staging'. Valid values: production, test", exception.getMessage());
+            verifyNoInteractions(restInterfaceFactory);
+            verifyNoInteractions(agentAdmin);
         }
     }
 

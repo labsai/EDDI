@@ -50,6 +50,14 @@
                 <artifactId>jinjava</artifactId>
                 <version>2.8.3</version>
             </dependency>
+            <!-- Override jackson-core to fix GHSA-r7wm-3cxj-wff9 (async parser DoS, <2.22.1).
+                 Managed transitively by the Quarkus BOM at 2.22.0. Trivy blocks the image
+                 push on this, so it must be overridden here rather than waiting for the BOM. -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+                <version>2.22.1</version>
+            </dependency>
             <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai) -->
             <dependency>
                 <groupId>io.projectreactor.netty</groupId>

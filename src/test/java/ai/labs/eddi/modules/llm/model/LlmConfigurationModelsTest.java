@@ -234,8 +234,10 @@ class LlmConfigurationModelsTest {
         void defaults() {
             var csc = new LlmConfiguration.ConversationSummaryConfig();
             assertFalse(csc.isEnabled());
-            assertEquals("anthropic", csc.getLlmProvider());
-            assertEquals("claude-sonnet-4-6", csc.getLlmModel());
+            // Finding F13: no hardcoded vendor default — blank means "inherit the
+            // parent LLM task", which only LlmTask can resolve.
+            assertNull(csc.getLlmProvider());
+            assertNull(csc.getLlmModel());
             assertEquals(800, csc.getMaxSummaryTokens());
             assertTrue(csc.isExcludePropertiesFromSummary());
             assertEquals(5, csc.getRecentWindowSteps());
@@ -273,8 +275,10 @@ class LlmConfigurationModelsTest {
             assertEquals(5, csc.getRecentWindowSteps());
             assertEquals(20, csc.getMaxRecallTurns());
             assertEquals(800, csc.getMaxSummaryTokens());
-            assertEquals("anthropic", csc.getLlmProvider());
-            assertEquals("claude-sonnet-4-6", csc.getLlmModel());
+            // Finding F13: validate() must NOT invent a vendor — an unset provider
+            // stays unset so the parent task's provider is inherited.
+            assertEquals("", csc.getLlmProvider());
+            assertNull(csc.getLlmModel());
         }
 
         @Test

@@ -262,6 +262,89 @@ class PostgresUserMemoryStoreTest extends PostgresTestBase {
         }
     }
 
+    // ─── Recall ordering and ownership (MongoDB parity) ─────────
+
+    /**
+     * Cross-backend parity with {@code MongoUserMemoryStoreRecallScopeTest}: these
+     * two guarantees (G5 recency reservation, G7 global ownership) were implemented
+     * on the MongoDB store only. Unlike the mocked Mongo tests these run against
+     * the real schema, so they also prove the DDL and the SQL agree.
+     */
+    @Nested
+    @DisplayName("Recall ordering and ownership")
+    class RecallAndOwnership {
+
+        @Test
+        @DisplayName("G7 — a global entry keeps its original owning agent when another agent rewrites its value")
+        void globalUpsertDoesNotTransferOwnership() throws IResourceStore.ResourceStoreException {
+            store.upsert(createEntry("user1", "shared_pref", "de", "preference", Visibility.global, "agentA"));
+
+            // agentB legitimately changes the shared value
+            store.upsert(createEntry("user1", "shared_pref", "en", "preference", Visibility.global, "agentB"));
+
+            var found = store.getByKey("user1", "shared_pref").orElseThrow();
+            assertEquals("en", found.value(), "the value must be updated by the second writer");
+            assertEquals("agentA", found.sourceAgentId(),
+                    "ownership of a shared global entry must stay with the agent that created it");
+        }
+
+        @Test
+        @DisplayName("G7 — a self entry is keyed per agent, so each agent keeps its own row")
+        void selfEntriesRemainPerAgent() throws IResourceStore.ResourceStoreException {
+            store.upsert(createEntry("user1", "note", "a-value", "fact", Visibility.self, "agentA"));
+            store.upsert(createEntry("user1", "note", "b-value", "fact", Visibility.self, "agentB"));
+
+            assertEquals(2, store.getAllEntries("user1").size(), "self entries are per-agent rows, not one shared row");
+        }
+
+        @Test
+        @DisplayName("G5 — a brand-new entry (accessCount 0) still reaches a full most_accessed window")
+        void mostAccessedReservesSlotsForRecentEntries() throws Exception {
+            // 12 long-established entries with high, strictly descending access counts,
+            // plus one freshly written entry with accessCount 0 and the newest
+            // updated_at. With a plain "ORDER BY access_count DESC LIMIT 10" the
+            // newcomer can never enter the window — and, never being recalled, never
+            // accumulates a count either.
+            store.countEntries("user1"); // force schema creation before raw SQL
+            for (int i = 0; i < 12; i++) {
+                insertRow("user1", "established_" + i, "agentA", 100 - i, 1000 - i);
+            }
+            insertRow("user1", "brand_new", "agentA", 0, 0);
+
+            List<UserMemoryEntry> recalled = store.getVisibleEntries("user1", "agentA", null, "most_accessed", 10);
+
+            List<String> keys = recalled.stream().map(UserMemoryEntry::key).toList();
+            assertTrue(keys.contains("brand_new"),
+                    "a newly written entry must reach the most_accessed recall window; got: " + keys);
+            assertEquals(10, recalled.size(), "8 access slots + 2 reserved recency slots, de-duplicated");
+            // 10 entries, 1/5th reserved => 8 by access count
+            assertTrue(keys.contains("established_0"), keys.toString());
+            assertFalse(keys.contains("established_8"), "slot 9/10 belongs to the recency reservation: " + keys);
+
+            // The newcomer must also be counted as accessed, otherwise it drops straight
+            // back out of the window and most_accessed stays self-reinforcing.
+            assertEquals(1, accessCount("user1", "brand_new"),
+                    "the entry recalled through the reserved recency slot must be counted as accessed too");
+            assertEquals(101, accessCount("user1", "established_0"));
+            assertEquals(92, accessCount("user1", "established_8"),
+                    "an entry that was NOT recalled must not be incremented");
+        }
+
+        @Test
+        @DisplayName("G5 — access_count is indexed so most_accessed is not a full scan + sort")
+        void accessCountIsIndexed() throws Exception {
+            store.countEntries("user1"); // force schema creation
+            try (var conn = ds.getConnection();
+                    var ps = conn.prepareStatement("SELECT indexdef FROM pg_indexes WHERE tablename = 'usermemories' AND indexname = ?")) {
+                ps.setString(1, "idx_um_user_access_count");
+                try (var rs = ps.executeQuery()) {
+                    assertTrue(rs.next(), "expected an index on (user_id, access_count) for the most_accessed top-k");
+                    assertTrue(rs.getString("indexdef").contains("access_count"), rs.getString("indexdef"));
+                }
+            }
+        }
+    }
+
     // ─── Filter and Category ────────────────────────────────────
 
     @Nested
@@ -331,6 +414,40 @@ class PostgresUserMemoryStoreTest extends PostgresTestBase {
     }
 
     // ─── Helpers ────────────────────────────────────────────────
+
+    /**
+     * Inserts a row with an explicit {@code access_count} and an {@code updated_at}
+     * {@code secondsAgo} in the past — neither is settable through
+     * {@link PostgresUserMemoryStore#upsert}.
+     */
+    private static void insertRow(String userId, String key, String agentId, int accessCount, int secondsAgo) throws SQLException {
+        String sql = """
+                INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
+                    group_ids, access_count, updated_at)
+                VALUES (?, ?, ?::jsonb, 'fact', 'self', ?, '[]'::jsonb, ?, CURRENT_TIMESTAMP - INTERVAL '1 second' * ?)
+                """;
+        try (var conn = ds.getConnection(); var ps = conn.prepareStatement(sql)) {
+            ps.setString(1, userId);
+            ps.setString(2, key);
+            ps.setString(3, "\"v-" + key + "\"");
+            ps.setString(4, agentId);
+            ps.setInt(5, accessCount);
+            ps.setInt(6, secondsAgo);
+            ps.executeUpdate();
+        }
+    }
+
+    private static int accessCount(String userId, String key) throws SQLException {
+        try (var conn = ds.getConnection();
+                var ps = conn.prepareStatement("SELECT access_count FROM usermemories WHERE user_id = ? AND key = ?")) {
+            ps.setString(1, userId);
+            ps.setString(2, key);
+            try (var rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "expected a row for key " + key);
+                return rs.getInt(1);
+            }
+        }
+    }
 
     private static UserMemoryEntry createEntry(String userId, String key, Object value,
                                                String category, Visibility visibility,

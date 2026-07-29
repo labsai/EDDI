@@ -6,6 +6,8 @@ package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
@@ -26,6 +28,7 @@ import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -65,13 +68,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final PrePostUtils prePostUtils;
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
+    private final CallerIdentityResolver callerIdentityResolver;
+    private final CallerIdentityContext callerIdentityContext;
     private final boolean ssrfProtectionEnabled;
     private final long defaultTimeoutInMillis;
     private final int defaultMaxResponseSizeInBytes;
 
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
-            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
+            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
+            CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
             @ConfigProperty(name = "eddi.httpcalls.default-timeout-millis", defaultValue = "30000") long defaultTimeoutInMillis,
             @ConfigProperty(name = "eddi.httpcalls.default-max-response-size-bytes", defaultValue = "2000000") int defaultMaxResponseSizeInBytes) {
@@ -81,6 +87,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.prePostUtils = prePostUtils;
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
+        this.callerIdentityResolver = callerIdentityResolver;
+        this.callerIdentityContext = callerIdentityContext;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.defaultTimeoutInMillis = defaultTimeoutInMillis;
         this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
@@ -116,100 +124,108 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 IResponse response = null;
                 boolean retryCall = false;
                 int amountOfExecutions = 0;
-                boolean validationError = false;
                 Map<String, Object> result = new HashMap<>();
 
-                try {
-                    do {
-                        request = buildRequest(targetServerUrl, call, templateDataObjects);
-                        var objectName = call.getName() + "Request";
-                        var requestMap = request.toMap();
-                        // Scrub resolved secrets from request map before persisting to conversation
-                        // memory.
-                        // The actual request (with secrets) was already built — this only affects the
-                        // debug record.
-                        scrubSensitiveHeaders(requestMap);
-                        prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
-                        response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
+                do {
+                    request = buildRequest(targetServerUrl, call, templateDataObjects);
+                    var objectName = call.getName() + "Request";
+                    var requestMap = request.toMap();
+                    // Scrub resolved secrets from request map before persisting to conversation
+                    // memory.
+                    // The actual request (with secrets) was already built — this only affects the
+                    // debug record.
+                    scrubSensitiveHeaders(requestMap);
+                    prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
+                    response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
-                        var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
-                        if (!isResponseSuccessful) {
-                            String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
-                            LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
-                            LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
+                    var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
+                    if (!isResponseSuccessful) {
+                        String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
+                        LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
+                        LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
 
-                            // Store error body in memory so downstream templates / rules can inspect it
-                            if (call.getSaveResponse()) {
-                                String errorBody = response.getContentAsString();
-                                String errorObjectName = call.getResponseObjectName() + "Error";
-                                if (errorBody != null && !errorBody.isBlank()) {
-                                    String truncatedError = errorBody.length() > 2000
-                                            ? errorBody.substring(0, 2000)
-                                            : errorBody;
-                                    prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
-                                    templateDataObjects.put(errorObjectName, truncatedError);
-                                }
-                                prePostUtils.createMemoryEntry(currentStep, response.getHttpCode(),
-                                        call.getResponseObjectName() + "HttpCode", KEY_HTTP_CALLS);
-                                templateDataObjects.put(call.getResponseObjectName() + "HttpCode", response.getHttpCode());
+                        // Store error body in memory so downstream templates / rules can inspect it
+                        if (call.getSaveResponse()) {
+                            String errorBody = response.getContentAsString();
+                            String errorObjectName = call.getResponseObjectName() + "Error";
+                            if (errorBody != null && !errorBody.isBlank()) {
+                                String truncatedError = errorBody.length() > 2000
+                                        ? errorBody.substring(0, 2000)
+                                        : errorBody;
+                                prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
+                                templateDataObjects.put(errorObjectName, truncatedError);
                             }
+                            prePostUtils.createMemoryEntry(currentStep, response.getHttpCode(),
+                                    call.getResponseObjectName() + "HttpCode", KEY_HTTP_CALLS);
+                            templateDataObjects.put(call.getResponseObjectName() + "HttpCode", response.getHttpCode());
+                        }
+                    }
+
+                    var responseHeaderObjectName = call.getResponseHeaderObjectName();
+                    if (!isNullOrEmpty(responseHeaderObjectName)) {
+                        var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
+                        templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
+                        prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
+                        result.put("headers", responseObjectHeader);
+                    }
+
+                    if (isResponseSuccessful && call.getSaveResponse()) {
+                        // Success bodies land in conversation memory, which is persisted as a
+                        // single document — cap them just like the error bodies above.
+                        final String responseBody = truncateResponseBody(response.getContentAsString(), resolveMaxResponseSize(call),
+                                call.getName());
+                        String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
+                        if (actualContentType != null) {
+                            actualContentType = actualContentType.split(";")[0];
+                        } else {
+                            actualContentType = "<not-present>";
                         }
 
-                        var responseHeaderObjectName = call.getResponseHeaderObjectName();
-                        if (!isNullOrEmpty(responseHeaderObjectName)) {
-                            var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
-                            templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
-                            prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
-                            result.put("headers", responseObjectHeader);
-                        }
-
-                        if (isResponseSuccessful && call.getSaveResponse()) {
-                            // Success bodies land in conversation memory, which is persisted as a
-                            // single document — cap them just like the error bodies above.
-                            final String responseBody = truncateResponseBody(response.getContentAsString(), resolveMaxResponseSize(call),
-                                    call.getName());
-                            String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
-                            if (actualContentType != null) {
-                                actualContentType = actualContentType.split(";")[0];
-                            } else {
-                                actualContentType = "<not-present>";
-                            }
-
-                            Object responseObject;
-                            if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
-                                try {
-                                    responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-                                } catch (java.io.IOException jsonEx) {
-                                    LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s",
-                                            call.getName(), jsonEx.getMessage());
-                                    responseObject = responseBody;
-                                }
-                            } else {
-                                if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
-                                    var message = "ApiCall (%s) didn't return application/json, text/plain nor text/html "
-                                            + "as content-type, instead was (%s)";
-                                    LOGGER.warn(format(message, call.getName(), actualContentType));
-                                }
+                        Object responseObject;
+                        if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
+                            try {
+                                responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                            } catch (java.io.IOException jsonEx) {
+                                LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s",
+                                        call.getName(), jsonEx.getMessage());
                                 responseObject = responseBody;
                             }
-
-                            var responseObjectName = call.getResponseObjectName();
-                            templateDataObjects.put(responseObjectName, responseObject);
-                            prePostUtils.createMemoryEntry(currentStep, responseObject, responseObjectName, KEY_HTTP_CALLS);
-                            result.put("body", responseObject);
-                            result.put("httpCode", response.getHttpCode());
+                        } else {
+                            if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
+                                var message = "ApiCall (%s) didn't return application/json, text/plain nor text/html "
+                                        + "as content-type, instead was (%s)";
+                                LOGGER.warn(format(message, call.getName(), actualContentType));
+                            }
+                            responseObject = responseBody;
                         }
 
-                        amountOfExecutions++;
-                        retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions, response.getHttpCode(),
-                                response.getContentAsString());
-                    } while (retryCall);
-                } catch (ApiCallsValidationException e) {
-                    validationError = true;
-                }
+                        var responseObjectName = call.getResponseObjectName();
+                        templateDataObjects.put(responseObjectName, responseObject);
+                        prePostUtils.createMemoryEntry(currentStep, responseObject, responseObjectName, KEY_HTTP_CALLS);
+                        result.put("body", responseObject);
+                        result.put("httpCode", response.getHttpCode());
+                    }
 
-                prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, response != null ? response.getHttpCode() : 500,
-                        validationError);
+                    amountOfExecutions++;
+                    retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions, response.getHttpCode(),
+                            response.getContentAsString());
+                } while (retryCall);
+
+                // This executor has no response-validation stage, so a post-response
+                // property instruction never sees a validation error. Passing the flag
+                // explicitly keeps the (unused) `runOnValidationError` semantics visible
+                // should validation ever be added.
+                //
+                // `response` is non-null here, and the `!= null` ternary that used to guard
+                // this call was removed rather than reinforced: the do-while assigns it
+                // unconditionally with no continue/break, executeAndMeasureRequest
+                // dereferences it before returning (so it cannot hand back null), and the
+                // loop condition itself reads response.getHttpCode(). Anything that fails
+                // earlier lands in the catch below instead of reaching this line. The dead
+                // branch was actively harmful: it was the sole reason static analysis
+                // inferred the variable nullable and reported the loop body as an NPE risk,
+                // and a fabricated 500 would have masked a real defect instead of surfacing it.
+                prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, response.getHttpCode(), false);
 
                 return result;
             }
@@ -249,7 +265,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 batchRequest.setExecuteCallsSequentially(false);
             }
 
-            runtime.submitCallable(() -> {
+            // A batch runs on a thread of its own, where the caller binding does not
+            // follow, so ${caller:...} in these requests would fail closed without
+            // propagate() carrying it across.
+            runtime.submitCallable(callerIdentityContext.propagate(() -> {
                 List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
                         batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
 
@@ -267,7 +286,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     }
                 }
                 return null;
-            }, null);
+            }), null);
         } else {
             IRequest request = buildRequest(targetServerUrl, call, templateDataObjects);
             executeFireAndForgetCall(request, callName);
@@ -373,8 +392,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     private boolean retryCall(HttpPostResponse postResponse, Map<String, Object> conversationValues, int amountOfExecutions, int httpCode,
-                              String contentAsString)
-            throws ApiCallsValidationException {
+                              String contentAsString) {
 
         if (isNullOrEmpty(postResponse)) {
             return false;
@@ -422,6 +440,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // Resolve global variable references, then vault references in URL
         targetUriStr = globalVariableResolver.resolveValue(targetUriStr);
         targetUriStr = secretResolver.resolveValue(targetUriStr);
+        // The path is not caller-resolved either, and a surviving reference would
+        // reach URI.create() to fail as "Illegal character in path" — an error that
+        // names the symptom and not the cause.
+        callerIdentityResolver.rejectAnyReference(targetUriStr, "the request path");
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
         // Resolve global variable references, then vault references in request body
@@ -435,7 +457,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
             UrlValidationUtils.validateUrl(targetUri.toString());
         }
 
-        var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase());
+        // Locale.ROOT is defensive rather than a live fix: no current Method
+        // constant contains an 'i', so no locale changes the result today. It would
+        // the moment one did — "options" uppercases to "OPTİONS" under tr-TR.
+        var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase(Locale.ROOT));
         IRequest request = httpClient.newRequest(targetUri, method);
         // Bound the call in time and in size. Without these an httpcall can occupy the
         // conversation thread until the client's own fallback expires, and can pull an
@@ -450,12 +475,20 @@ public class ApiCallExecutor implements IApiCallExecutor {
             request.setBodyEntity(requestBody, UTF_8, !isNullOrEmpty(contentType) ? contentType : TEXT_PLAIN);
         }
 
+        // The body is never caller-resolved, so ANY reference there would be sent as
+        // a literal placeholder — not just a token one. Reject the lot instead of
+        // shipping nonsense to the API.
+        callerIdentityResolver.rejectAnyReference(requestBody, "a request body");
+
         Map<String, String> headers = requestConfig.getHeaders();
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
             // Resolve global variable references, then vault references in headers
             headerValue = globalVariableResolver.resolveValue(headerValue);
             headerValue = secretResolver.resolveValue(headerValue);
+            // Caller identity resolves last and needs the target URI: the token is
+            // only released when the call goes back to the caller's own origin.
+            headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
             request.setHttpHeader(headerName, headerValue);
         }
 
@@ -465,6 +498,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Resolve global variable references, then vault references in query params
             qpValue = globalVariableResolver.resolveValue(qpValue);
             qpValue = secretResolver.resolveValue(qpValue);
+            // A token in a query string leaks via access logs and proxies.
+            callerIdentityResolver.rejectTokenReference(qpValue, "a query parameter");
+            qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
             request.setQueryParam(queryParam, qpValue);
         }
         return request;
@@ -474,27 +510,35 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * Scrub sensitive header values from the request map before it is stored in
      * conversation memory. This prevents resolved secrets (API keys, bearer tokens)
      * from being persisted to the database.
+     * <p>
+     * Header-name matching only catches conventional names, so a resolved caller
+     * token is additionally matched by value — otherwise placing it in an
+     * arbitrarily named header would defeat the redaction.
      */
     @SuppressWarnings("unchecked")
-    private static void scrubSensitiveHeaders(Map<String, Object> requestMap) {
+    private void scrubSensitiveHeaders(Map<String, Object> requestMap) {
         Object headersObj = requestMap.get("headers");
         if (headersObj instanceof Map) {
             var headers = (Map<String, Object>) headersObj;
             var scrubbed = new HashMap<>(headers);
             for (var entry : scrubbed.entrySet()) {
-                String headerName = entry.getKey().toLowerCase();
+                // Locale.ROOT, not the default locale: under a Turkish locale
+                // "Authorization" lowercases to "authorızation" (dotless i), every
+                // name test below misses, and the header is persisted unredacted.
+                String headerName = entry.getKey().toLowerCase(Locale.ROOT);
                 if (headerName.contains("authorization") || headerName.contains("api-key") || headerName.contains("api_key")
                         || headerName.contains("apikey") || headerName.contains("x-api-key") || headerName.contains("token")
                         || headerName.contains("secret") || headerName.contains("credential")) {
                     entry.setValue("<REDACTED>");
                 } else if (entry.getValue() instanceof String val && (val.contains("${vault:") || val.contains("${eddivault:"))) {
                     entry.setValue("<REDACTED>");
+                } else if (entry.getValue() instanceof String val) {
+                    // Catches a caller token placed in an unconventionally named
+                    // header, which the name patterns above would miss.
+                    entry.setValue(callerIdentityResolver.redactCallerToken(val, "<REDACTED>"));
                 }
             }
             requestMap.put("headers", scrubbed);
         }
-    }
-
-    private static class ApiCallsValidationException extends Exception {
     }
 }

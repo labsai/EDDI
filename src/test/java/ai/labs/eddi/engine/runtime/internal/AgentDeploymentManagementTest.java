@@ -102,6 +102,79 @@ class AgentDeploymentManagementTest {
         }
 
         @Test
+        @DisplayName("retires a deployment record whose Agent config no longer exists")
+        void retiresStaleDeploymentRecord() throws Exception {
+            var info = new DeploymentInfo();
+            info.setEnvironment(Environment.production);
+            info.setAgentId("deletedAgent");
+            info.setAgentVersion(1);
+
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(info));
+            when(agentStore.read("deletedAgent", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            management.checkDeployments();
+
+            // Without this the runtime re-attempts the deploy and logs an ERROR
+            // on every startup.
+            verify(agentFactory, never()).deployAgent(any(), eq("deletedAgent"), anyInt(), any());
+            // Deleted, not marked undeployed: setDeploymentInfo upserts, so marking would
+            // resurrect a row the delete cascade may have already removed.
+            verify(deploymentStore).deleteDeploymentInfo("production", "deletedAgent", 1);
+            verify(deploymentStore, never()).setDeploymentInfo(any(), any(), any(), any());
+            // Scoped, never agent-wide — sibling versions were not checked.
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
+        }
+
+        @Test
+        @DisplayName("still deploys when the Agent lookup fails for a reason other than not-found")
+        void doesNotRetireOnStoreTrouble() throws Exception {
+            var info = new DeploymentInfo();
+            info.setEnvironment(Environment.production);
+            info.setAgentId("agent1");
+            info.setAgentVersion(1);
+
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(info));
+            when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceStoreException("db down", new RuntimeException()));
+
+            management.checkDeployments();
+
+            // A store outage is not proof the Agent is gone — the record must survive.
+            verify(agentFactory).deployAgent(Environment.production, "agent1", 1, null);
+            verify(deploymentStore, never()).deleteDeploymentInfo(any(), any(), any());
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
+        }
+
+        @Test
+        @DisplayName("retires only the missing version, leaving a sibling version deployed")
+        void retiresOnlyTheMissingVersion() throws Exception {
+            var missing = new DeploymentInfo();
+            missing.setEnvironment(Environment.production);
+            missing.setAgentId("agent1");
+            missing.setAgentVersion(1);
+
+            var live = new DeploymentInfo();
+            live.setEnvironment(Environment.production);
+            live.setAgentId("agent1");
+            live.setAgentVersion(2);
+
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(missing, live));
+            when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("v1 gone"));
+            when(agentStore.read("agent1", 2)).thenReturn(new AgentConfiguration());
+
+            management.checkDeployments();
+
+            // v1's record goes, exactly once.
+            verify(deploymentStore, times(1)).deleteDeploymentInfo("production", "agent1", 1);
+            // v2 must survive and still deploy. Asserting only the v1 delete would let a
+            // regression that removes the live sibling too slip through, so pin the
+            // negative: no delete of version 2, in any environment, by either method.
+            verify(deploymentStore, never()).deleteDeploymentInfo(any(), any(), eq(2));
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
+            verify(agentFactory).deployAgent(Environment.production, "agent1", 2, null);
+            verify(agentFactory, never()).deployAgent(any(), eq("agent1"), eq(1), any());
+        }
+
+        @Test
         @DisplayName("skips agents with null agentId")
         void skipsNullAgentId() throws Exception {
             var info = new DeploymentInfo();

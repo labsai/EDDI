@@ -9,11 +9,13 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.modules.llm.model.ToolExecutionTrace;
 import ai.labs.eddi.modules.llm.model.ToolExecutionTrace.ToolCall;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -26,17 +28,26 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
 
 /**
  * REST API for tool execution history, metrics, and management. Phase 4:
  * Exposes tool call history and metrics to clients.
+ * <p>
+ * This is the tool <em>control plane</em>: resetting a rate limiter unenforces
+ * a per-tool budget, resetting costs unenforces the spend ceiling, and clearing
+ * the cache invalidates deployment-wide state. It is therefore
+ * {@code eddi-admin}-only by default; the single conversation-scoped read
+ * ({@link #getToolHistory(String)}) widens that to the conversation's own
+ * owner.
  */
 @Path("/llm/tools")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Tools / Tool History", description = "Tool execution history, cache, rate limits, and cost tracking")
+@RolesAllowed("eddi-admin")
 @ApplicationScoped
 public class RestToolHistory {
     private static final Logger LOGGER = Logger.getLogger(RestToolHistory.class);
@@ -45,24 +56,33 @@ public class RestToolHistory {
     private final ToolRateLimiter rateLimiter;
     private final ToolCostTracker costTracker;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final ConversationAccessGuard conversationAccessGuard;
 
     @Inject
     public RestToolHistory(ToolCacheService cacheService,
             ToolRateLimiter rateLimiter,
             ToolCostTracker costTracker,
-            IConversationMemoryStore conversationMemoryStore) {
+            IConversationMemoryStore conversationMemoryStore,
+            ConversationAccessGuard conversationAccessGuard) {
         this.cacheService = cacheService;
         this.rateLimiter = rateLimiter;
         this.costTracker = costTracker;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.conversationAccessGuard = conversationAccessGuard;
     }
 
     /**
-     * Get tool execution history for a conversation
+     * Get tool execution history for a conversation.
+     * <p>
+     * The trace carries the raw tool ARGUMENTS and RESULTS of the conversation, so
+     * it is gated on conversation ownership — a role check alone would let any
+     * authenticated user read any conversation's tool traffic.
      */
     @GET
     @Path("/history/{conversationId}")
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
     public Response getToolHistory(@PathParam("conversationId") String conversationId) {
+        conversationAccessGuard.requireConversationOwner(conversationId);
         try {
             ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             ToolExecutionTrace trace = new ToolExecutionTrace();
@@ -102,9 +122,23 @@ public class RestToolHistory {
         } catch (ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Conversation not found")).build();
         } catch (Exception e) {
-            LOGGER.error("Error retrieving tool history", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+            return internalError("Error retrieving tool history", e);
         }
+    }
+
+    /**
+     * Builds a 500 that carries NO internal detail. The raw exception message from
+     * a store or driver names collections, hosts, and replica-set members — logging
+     * it is fine, returning it is an information leak. The correlation id is the
+     * only thing shared with the caller: it ties their failed request to the logged
+     * stack trace without describing the deployment.
+     */
+    private Response internalError(String context, Exception e) {
+        String correlationId = UUID.randomUUID().toString();
+        LOGGER.errorf(e, "%s [correlationId=%s]", context, correlationId);
+        return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                .entity(Map.of("error", "Internal server error", "correlationId", correlationId))
+                .build();
     }
 
     private void processStepTrace(List<Map<String, Object>> stepTrace, List<ToolCall> toolCalls) {
@@ -148,8 +182,7 @@ public class RestToolHistory {
             return Response.ok(response).build();
 
         } catch (Exception e) {
-            LOGGER.error("Error fetching cache stats", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+            return internalError("Error fetching cache stats", e);
         }
     }
 
@@ -168,8 +201,7 @@ public class RestToolHistory {
             return Response.ok(response).build();
 
         } catch (Exception e) {
-            LOGGER.error("Error fetching tool TTL", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+            return internalError("Error fetching tool TTL", e);
         }
     }
 
@@ -199,8 +231,7 @@ public class RestToolHistory {
             return Response.ok(Map.of("message", "Cache cleared successfully")).build();
 
         } catch (Exception e) {
-            LOGGER.error("Error clearing cache", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+            return internalError("Error clearing cache", e);
         }
     }
 
@@ -219,8 +250,7 @@ public class RestToolHistory {
             return Response.ok(response).build();
 
         } catch (Exception e) {
-            LOGGER.error("Error fetching rate limit info", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+            return internalError("Error fetching rate limit info", e);
         }
     }
 
@@ -235,8 +265,7 @@ public class RestToolHistory {
             return Response.ok(Map.of("message", "Rate limit reset for " + toolName)).build();
 
         } catch (Exception e) {
-            LOGGER.error("Error resetting rate limit", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+            return internalError("Error resetting rate limit", e);
         }
     }
 
@@ -254,8 +283,7 @@ public class RestToolHistory {
             return Response.ok(response).build();
 
         } catch (Exception e) {
-            LOGGER.error("Error fetching cost summary", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+            return internalError("Error fetching cost summary", e);
         }
     }
 
@@ -278,8 +306,7 @@ public class RestToolHistory {
             return Response.ok(response).build();
 
         } catch (Exception e) {
-            LOGGER.error("Error fetching conversation costs", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+            return internalError("Error fetching conversation costs", e);
         }
     }
 
@@ -302,8 +329,7 @@ public class RestToolHistory {
             return Response.ok(response).build();
 
         } catch (Exception e) {
-            LOGGER.error("Error fetching tool costs", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+            return internalError("Error fetching tool costs", e);
         }
     }
 
@@ -318,8 +344,7 @@ public class RestToolHistory {
             return Response.ok(Map.of("message", "All cost tracking reset")).build();
 
         } catch (Exception e) {
-            LOGGER.error("Error resetting costs", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+            return internalError("Error resetting costs", e);
         }
     }
 }

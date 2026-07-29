@@ -369,6 +369,50 @@ class ConversationHistoryBuilderTest {
             assertTrue(messages.size() < 22, "Should not include all messages");
         }
 
+        /**
+         * When {@code anchorFirstSteps} met or exceeded the message count, every
+         * message became an anchor: {@code effectiveAnchor == size} made
+         * {@code lastIsAnchored} true, which both zeroed the current-turn reservation
+         * and disabled the anchor-trim loop (guarded on {@code !lastIsAnchored}).
+         * Nothing could then be dropped, and the windowing path — whose entire job is
+         * to stay under budget — returned a prompt well over it.
+         * <p>
+         * Reachable with any generous {@code anchorFirstSteps} while a conversation is
+         * still shorter than it, which is every conversation's opening turns.
+         */
+        @Test
+        @DisplayName("anchorFirstSteps larger than the history still trims to the budget")
+        void anchorLargerThanHistoryStillTrims() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 6; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message " + i + " with a good deal of padding text to consume the token budget quickly");
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // The budget must be one the history genuinely exceeds, or old and new code
+            // both return everything and the test proves nothing.
+            int fullHistoryTokens = builder.buildTokenAwareMessages(memory, null, null, Integer.MAX_VALUE, 0, true, estimator).stream()
+                    .mapToInt(estimator::estimateTokenCountInMessage).sum();
+            int budget = fullHistoryTokens / 3;
+
+            // anchorFirstSteps (50) far exceeds the 6 messages available.
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, "System", null, budget, 50, true, estimator);
+
+            assertTrue(messages.size() < 7, "every message was anchored and nothing could be trimmed — the window did not window");
+
+            int historyTokens = messages.stream().filter(m -> !(m instanceof SystemMessage)).mapToInt(estimator::estimateTokenCountInMessage).sum();
+            assertTrue(historyTokens <= budget, "returned an over-budget prompt: " + historyTokens + " tokens against a " + budget + " budget");
+
+            // The G13 guarantee must survive the fix: the turn being answered is still
+            // present.
+            assertInstanceOf(UserMessage.class, messages.getLast());
+            assertTrue(((UserMessage) messages.getLast()).singleText().contains("Message 5"), "the current turn must never be dropped");
+        }
+
         @Test
         @DisplayName("prompt replacement works in token-aware mode")
         void promptReplacement() {
@@ -469,7 +513,7 @@ class ConversationHistoryBuilderTest {
         }
 
         @Test
-        @DisplayName("anchored tokens exceed budget — graceful degradation, only anchored returned")
+        @DisplayName("G13: anchored tokens exceed budget — anchors are trimmed, the current turn survives")
         void anchoredTokensExceedBudget() {
             IConversationMemory memory = mock(IConversationMemory.class);
 
@@ -490,12 +534,20 @@ class ConversationHistoryBuilderTest {
 
             List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, null, null, 50, 2, true, estimator);
 
-            // 2 anchored UserMessages + 1 gap marker SystemMessage (omitted turns exist
-            // after anchor)
-            assertEquals(3, messages.size(), "Should contain 2 anchored messages + gap marker");
-            // Verify gap marker is present
+            // Finding G13: the oversized anchors used to consume the whole budget, so
+            // the backward fill produced nothing and the model received anchors + an
+            // omission marker WITHOUT the question it was supposed to answer. Anchors
+            // are now trimmed instead, and the current turn is always present.
+            ChatMessage last = messages.getLast();
+            assertInstanceOf(UserMessage.class, last, "The current turn must be the final message");
+            assertTrue(((UserMessage) last).singleText().contains("Short msg 9"),
+                    "The current user question must survive the window: " + ((UserMessage) last).singleText());
+            // The 500-char anchors cannot fit alongside it and must have been dropped
+            assertTrue(messages.stream().filter(m -> m instanceof UserMessage).noneMatch(m -> ((UserMessage) m).singleText().startsWith("AAAA")),
+                    "Oversized anchors should be trimmed, not the current turn");
+            // Gap marker still reports the omitted middle section
             assertTrue(messages.stream().filter(m -> m instanceof SystemMessage).anyMatch(m -> ((SystemMessage) m).text().contains("omitted")),
-                    "Gap marker should be present for omitted recent messages");
+                    "Gap marker should be present for omitted messages");
         }
 
         @Test
@@ -535,7 +587,7 @@ class ConversationHistoryBuilderTest {
         }
 
         @Test
-        @DisplayName("budget too small for any message — returns only anchored (empty recent)")
+        @DisplayName("G13: budget too small for any message — the current turn is still included")
         void budgetTooSmallForRecent() {
             IConversationMemory memory = mock(IConversationMemory.class);
 
@@ -553,11 +605,15 @@ class ConversationHistoryBuilderTest {
 
             List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, null, null, 1, 1, true, estimator);
 
-            // 1 anchored UserMessage + 1 gap marker SystemMessage (remaining messages can't
-            // fit)
-            assertEquals(2, messages.size(), "Anchored message + gap marker when budget exhausted");
-            assertInstanceOf(UserMessage.class, messages.getFirst());
-            assertInstanceOf(SystemMessage.class, messages.getLast());
+            // Finding G13: with a 1-token budget the anchor used to consume everything
+            // and the model received only the anchor plus an omission marker — no user
+            // question at all. The anchor is now surrendered instead, so the prompt is
+            // the gap marker plus the turn that actually has to be answered.
+            assertEquals(2, messages.size(), "Gap marker + the current turn");
+            assertInstanceOf(SystemMessage.class, messages.getFirst(), "the omission marker precedes the surviving turn");
+            assertInstanceOf(UserMessage.class, messages.getLast(), "the current question must never be dropped");
+            assertTrue(((UserMessage) messages.getLast()).singleText().contains("number 9"),
+                    "the SURVIVING message must be the latest turn: " + ((UserMessage) messages.getLast()).singleText());
         }
     }
 

@@ -58,6 +58,247 @@ Two gaps closed in the `/v1` adapter, both from the honest support assessment of
 
 ---
 
+## 🧠 fix(llm): code-review findings wave 2b — LLM core, persistent memory, migration, import/export (2026-07-28)
+
+**Repo:** EDDI (`fix/code-review-llm-memory`)
+
+Second half of wave 2, stacked on the access-control PR. Covers the LLM tool pipeline, the persistent-memory subsystem, the v5→v6 migrations, and import/export.
+
+### Pre-merge review pass — and corrections to the claims below (2026-07-29)
+
+This PR reached "approved" having been reviewed by **no CI run and no review bot**: CodeRabbit reported `Review skipped: reviews are disabled for this base branch` because it was stacked on a disabled base, and a base-branch retarget fires `edited`, which is not in the default `pull_request` trigger set — so no workflow ever ran on its head SHA. A dedicated review pass over the 91-file diff found **16 findings that survived adversarial verification**, plus 21 from completeness/test critics. All are fixed here except one, named below. **Several entries further down overstated what the code delivered; those claims are corrected here rather than quietly edited away.**
+
+Fixes with user-visible consequence:
+
+- **F14 broke the error path it was meant to unify.** Routing rule-triggered MCP calls through `ToolExecutionService.executeToolWrapped` was right in intent, but that wrapper *catches every exception and returns an error string*. `RetryConfiguration.executeWithRetry` therefore never saw a throwable: retry never retried, `continueOnError` became dead code, and a failed MCP call was **stored as a successful response**. The metering wrapper is kept; a real failure signal is restored on top of it.
+- **F18's delegation-depth guard was inert in production.** `delegationDepth` was injected only into the callee's `startConversation` context, landing on step 0; the follow-up `say` carried no context, so the turn that actually decides delegation read nothing. The claim below that F18 was "mutation-checked" was true of the *test*, not of production — the test drove the mechanism directly and never crossed the `say` boundary where the value was lost. The depth now propagates to the turn that reads it.
+- **F15 was fixed on two of three merge routes.** Within-server dedupe and the `AgentOrchestrator` source merge were handled; the cross-server merge in `discoverTools()` was still `addAll`/`putAll`, so two MCP servers advertising the same tool name still shadowed silently.
+- **G12 / G5 / G7 shipped on MongoDB only.** The "a turn is never silently discarded" guarantee, the `most_accessed` recency reservation, and global-entry ownership preservation were all absent from the PostgreSQL adapter — which answered benignly rather than signalling the gap. Now ported, with tests. **This is the third cross-backend gap in this stack** (after schedule `userId` and the audit `sequence`), which is no longer coincidence: each was a feature built against one backend, silently missing on the other, and invisible because the degraded answer looked like a normal one. The cross-backend conformance suite (D4/J3) is the real fix and remains outstanding.
+- **A summarizer could be handed another vendor's API key.** When `conversationSummary` names a different `llmProvider` than the parent task, the parent's resolved parameters — `apiKey`, `baseUrl` — were inherited and passed to that other vendor's client. Not theoretical: the pre-PR POJO defaults serialized `llmProvider: "anthropic"` into stored configs. Credential- and endpoint-bearing keys now stop at a provider boundary; vendor-neutral tuning keys still travel.
+- **Validation moved to the boundary where rejecting is safe.** `McpCallsTask.configure()` and RAG retrieval were both throwing/dropping on *stored* configs — a workflow-load failure and a silently empty knowledge base respectively. Both are now lenient on read (stored configs stay loadable, which is the one backward-compat contract that matters) and strict on write, in `RestMcpCallsStore` and `RestRagStore`.
+- Also fixed: the v6 rename migration aborting permanently when a v6 collection merely *exists* (EDDI creates those itself via `createIndex`) instead of skipping; the new pre-migration backup duplicating conversation transcripts outside the reach of GDPR erasure; export cleanup recursively deleting a shared `tmp/<agentId>` it could not prove it created, reaching `tmp/import/`; and the streaming no-partials fallback overwriting the `warning` key that `responseValidation` dispatches on, silently skipping `onTruncation`/`onContentFilter`.
+
+**Still not fixed — I5.** `AgentConfiguration.maxCheckpointsPerConversation` is *still ignored at runtime*. The test named `explicitRetentionIsHonoured` exercises an overload no production path calls, so it proved nothing; the misleading label is removed rather than left to imply coverage. Wiring the value through needs a session-scope slot on `IConversationMemory` and propagation via `IAgent`/`Agent`, which is a larger change than a review fix should smuggle in. **Any statement below that I5 is complete is wrong.**
+
+One critic finding was investigated and **rejected**: the `ExpressionFactory.setDomain` removal was claimed to change `and(...)`/`or(...)` parsing, but domain splitting happens only in `setExpressionName(String)` and the parser builds children through constructors that assign the name verbatim — the deleted line really was a no-op.
+
+### The tool pipeline had a second door
+
+- **F14** — `executeToolWrapped` is genuinely well-built and has one production call site, so every one of the seven tool sources routes through it. Except **`McpCallsTask` doesn't** — a behaviour-rule-triggered lifecycle task invoking the *same* external MCP tools, which resolved a `ToolExecutor` and called it directly. It also bypassed `ToolApprovalGate`, so **`hitlConfig.toolApprovals` gated LLM-initiated calls and not rule-initiated ones** — a human-approval gate with a hole in it.
+- **F18** — `converse_with_agent` had **no guardrails at all**: it never consulted `DynamicAgentConfig`, and `allowDelegation` was never checked anywhere. Agent A could call B, which calls A — and with no `conversationId` a *fresh* conversation starts, so the busy-guard never breaks the cycle. Prompt injection in a user message was sufficient to start it. Now enforces `allowDelegation`, a target allowlist, and a delegation-depth counter propagated through conversation context (reusing the mechanism groups already use for `groupDepth`).
+- **F17** — `maxCreatedAgentsPerDiscussion` was enforced **per turn, not per discussion**, because `sharedCreatedIds` was created fresh in every `buildToolList` call. A 5-member × 3-phase discussion with the default cap of 5 permitted **up to 75 agents deployed to production**.
+- **F15/F16** — Remote MCP tools silently **shadowed built-in tools** (specs accumulated in a `List`, executors in a `Map`, so duplicates reached the model and last-write-won), and their **descriptions entered the prompt verbatim** with no length cap or sanitisation — whitelisting operates on names, so a whitelisted tool whose description changes was ungoverned.
+- **A10** — The MCP client did **no URL validation at all**, unlike its A2A sibling, while a discovery endpoint echoed the response body — a full SSRF read primitive.
+
+### Two real bugs found by the tests, not by the review
+
+The review's F12 fix (cache the workflow traversal that runs 3–4× per LLM task per turn) introduced two defects that only surfaced when `WorkflowTraversalTest` started returning 0 instead of 1:
+
+1. **The cache memoized failure-derived results.** A traversal whose workflow read threw still cached its empty result for the full TTL, and replayed it to the other traversals of the same turn — an agent silently losing its httpcalls/mcpcalls/RAG configuration with nothing in the logs but one WARN. Now only complete traversals are cached.
+2. **The cache key omitted the target class** while the value was cast with an unchecked `(List<StepConfig<T>>)`. Justified by a comment asserting a 1:1 mapping that nothing enforces — any future caller asking for the same step type with a different class would get another caller's entry and a `ClassCastException` from a cache hit with no connection to the calling code.
+
+This is why the triage pass asked "stale test, bad fixture, or **real bug**?" for every failure rather than adjusting tests until green.
+
+### F13 was fixed but unreachable
+
+The wave-2 agent added `inheritedParameters` overloads to `SummarizationService` and tested them directly — but **no caller in `src/main` passed them**. `ConversationSummarizer` still called the 4-arg overload, so the rolling summary still could not authenticate and still silently never materialised. Threading the parent task's resolved parameters through `LlmTask → ConversationSummarizer → SummarizationService` is what actually closes it; both hops now have tests that fail if the parameters are dropped.
+
+`DreamService` remains on the un-inherited path — it is a background job with no parent task, so it needs a credential source of its own. That is part of wiring Dream up (finding I1), scheduled for wave 3.
+
+### Memory & properties
+
+- **G2** — `scope: "secret"` **failed open to plaintext**. On vault failure the method returned the plaintext *before* the scrub block, persisting the secret twice: as a conversation property *and* as raw `input:initial` data. Vault-disabled is the **default** (`eddi.vault.master-key` ships empty), so this was the common path. Now fails closed, scrubbing first.
+- **G1** — User-memory search and delete **crossed agent boundaries**: `getVisibleEntries` builds a proper self/group/global filter, but `filterEntries` and `getByKey` filter on `userId` alone — and the tool path used that unscoped pair.
+- **G13** — Token-aware windowing could emit a prompt with **no user message at all**: the backward fill breaks on the first message that doesn't fit, and if the anchors alone exceed the budget the code only warned. The model then answered with no idea what was asked. The final user message is now reserved first; anchors get trimmed instead.
+- **G12** — A turn could be **silently lost**: `replaceOne` with no upsert whose `UpdateResult` was discarded, so a conversation deleted mid-turn by erasure or a retention sweep discarded the turn while the caller got a normal response.
+- **G5/G6/G7** — `most_accessed` recall did an N+1 write *inside* an open read cursor and was self-reinforcing (only already-top-N entries got incremented, so a new entry could never climb in); `storePropertiesPermanently` refreshed `updatedAt` on every longTerm property every turn, so `most_recent` degenerated to "everything is recent" and `deleteOlderThan` never expired anything for an active user; and re-upserting a recalled entry **silently flipped its owner** to the reading agent.
+- **G9/G10/G11** — `ConversationProperties` broke the `Map` contract (`clear()`/`remove()` left the template map stale, so a checkpoint rollback left post-checkpoint properties visible); `scope: "step"` was persisted despite the docs; one malformed field failed the entire conversation load.
+
+### Migration & import/export
+
+- **B12** — Migration **irrecoverably erased typed BSON values**: it deleted the legacy `value` field unconditionally but only wrote a replacement for String/Map/Integer/Float, dropping doubles, longs, booleans and arrays with no error.
+- **B13** — The template migrator rewrote **any** `{...+...}` sequence, corrupting JSON bodies and arithmetic that merely sat in a document containing Thymeleaf syntax.
+- **B14** — The rename migration **skipped when the v6 collection already existed** and still marked itself complete, abandoning the v5 data.
+- **D11/D12** — Import had no rollback (any failure mid-way left every already-created resource orphaned), and neither import nor export ever deleted their temp directories — `ZipResourceSource` is `AutoCloseable` and its `close()` does the cleanup, but two call sites constructed it outside try-with-resources.
+
+### Verification
+
+Full unit suite: 12,384 tests, **0 non-environmental failures**. G2 and G12 mutation-checked, plus a second sharper mutation for G2 that removes only the input-scrub call — both halves are independently covered. F13's new wiring is mutation-checked at the `LlmTask` hop.
+## 🧵 fix(security): carry caller identity across the cascade and group dispatches (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+The caller binding is a `ThreadLocal`, and four more dispatch sites hand a turn to a fresh virtual
+thread without carrying it. A `${caller:token}` apicall reached from any of them failed closed with
+"the conversation turn has no authenticated caller" — safe, but invisible to the agent designer and
+dependent on unrelated configuration.
+
+- `CascadingModelExecutor:577` — every cascade step runs on `TIMEOUT_EXECUTOR`. The same agent config
+  worked or failed purely on whether `modelCascade` was set.
+- `GroupConversationService:282` — the whole discussion is dispatched to a virtual thread, so *no*
+  member agent had a caller.
+- `GroupConversationService:2366` — parallel-phase speakers fan out to further threads.
+- `GroupConversationService:3772` — the HITL resume path.
+
+`CallerIdentityContext` gains `withIdentity` for `Runnable`/`Callable`, `withIdentitySupplying` for
+`Supplier` (needed by `CompletableFuture.supplyAsync`), and `captureOrCurrent()`, which prefers the
+active request and falls back to the thread's binding — the group discussion is dispatched from the
+REST thread, the cascade from mid-pipeline.
+
+**Design note.** The `Supplier` variant is named apart from the `withIdentity` overloads on purpose:
+a value-returning lambda satisfies both `Callable` and `Supplier`, so same-named overloads are
+ambiguous at every call site.
+
+**Review round two** found a fifth site and two flaws in the wrapper itself:
+
+- `GroupConversationService:1788` — the task-force EXECUTE phase fans out again through
+  `CompletableFuture.runAsync`, so every task wave lost the caller. Missed first time because the
+  search pattern covered `submit` and `supplyAsync` but not `runAsync`.
+- The parallel-phase fan-out captured with `current()`, which is null when `discuss()` is called
+  synchronously on the REST thread — only `captureOrCurrent()` sees the request there.
+- **A null identity was a no-op**, so work dispatched *without* a caller inherited whatever binding
+  the pooled thread still carried from the turn before. It now binds null, masking it.
+- **Nested wrappers cleared instead of restoring**, so an inner wrapper wiped the outer caller and
+  the rest of that turn ran unauthenticated. The previous binding is now saved and restored.
+
+**Note on scope.** A group member agent now acts as the person who started the discussion. That
+follows the feature's model — the operator acts as the chatting user — but it is worth stating,
+because a member agent's reads are now attributed to that user in the audit trail.
+
+1204 tests pass across the affected suites. Neutering the `Runnable` wrapper fails the propagation
+test, so the binding is pinned rather than assumed.
+
+---
+
+## 🔓 fix(security): ${caller:token} never reached its resolver (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+A critical review of the caller-identity PR found the feature was **dead on arrival**, and the same
+defect silently disables two older documented features.
+
+`ApiCallExecutor.buildRequest` runs every header value through `prePostUtils.templateValues`
+*before* the caller-identity, global-variable and vault resolvers. `TemplatingEngine`'s trigger
+regex `\{[a-zA-Z#/!]` matches `{c`, so `Bearer ${caller:token}` is handed to Qute, which parses
+`{caller:token}` as a namespaced expression. An unresolvable namespace is a hard failure regardless
+of `strictRendering`, and no `caller` resolver existed. Proven against the project's own build:
+
+```text
+Bearer ${caller:token} -> THREW: No namespace resolver found for [caller]
+Bearer ${vault:my-key} -> THREW: No namespace resolver found for [vault]
+${vars:default-model}  -> THREW: No namespace resolver found for [vars]
+```
+
+So `${vault:...}` and `${vars:...}` in apicall headers have never worked either.
+
+**Fix.** `CallerNamespaceResolver` returns the `caller` placeholder verbatim so it round-trips
+through templating to the real resolver. It resolves nothing itself.
+
+**Deliberately `caller` only.** `vault`/`eddivault` keep failing loudly in templated positions.
+Letting them through would widen where a secret is substituted, and the resolved request *body* is
+written to conversation memory unscrubbed — a vault reference in a body template would put a
+plaintext API key into MongoDB. Docs claiming vault works in apicall headers were the bug, not the
+behaviour.
+
+**Why no test caught it:** all three `ApiCallExecutor` suites stub templating as a pass-through, and
+`CallerIdentityResolverTest` calls the resolver directly. Nothing exercised header -> Qute ->
+resolver. `CallerNamespaceResolverTest` now does, including a guard-rail test that fails without the
+resolver and one asserting vault still refuses.
+
+**Also fixed**
+- `setup-api` hardcoded `null` for the LLM base URL while the manager sent Ollama's URL as
+  `apiBaseUrl` — the *tool target* — pointing every generated tool at the model server.
+  `CreateApiAgentRequest` gains an `llmBaseUrl` field, passed to `createLlmConfig`.
+- The by-value token redaction added last round was untested through `ApiCallExecutor`; deleting the
+  call kept every test green. Now covered with a real resolver and mutation-checked.
+- Docs overclaimed: `${caller:userId}` is resolved in headers and query parameters, not "anywhere";
+  `rejectTokenReference`'s Javadoc claimed request bodies are checked.
+
+---
+
+## 🔐 feat(security): forward the caller's identity to apicall headers (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+An agent could only call an API with a *static* credential baked into its apicall config. That is the wrong shape whenever the API being called is EDDI's own: an OIDC token expires within the hour, cannot be least-privilege, and collapses every action to one synthetic principal in the audit trail. The EDDI-Manager "Platform Operator" needs exactly this — an agent that reads the platform on behalf of whoever is chatting with it — and could only be built by smuggling the user's bearer through the per-turn conversation `context`, which persists the token to MongoDB.
+
+**What changed.** Apicall *headers* may now reference the authenticated caller:
+
+- `${caller:token}` — the caller's raw bearer token
+- `${caller:userId}` — the caller's principal name (not a secret)
+
+`ApiCallExecutor` resolves these last in the header chain (after global variables and vault refs), because resolution needs the target URI.
+
+**Files**
+- `engine/security/CallerIdentity.java` — record (token, userId, origin); deliberately not part of `IConversationMemory`.
+- `engine/security/CallerIdentityContext.java` — captures the identity on the REST request thread and binds it to whichever pool thread runs the turn.
+- `engine/security/CallerIdentityResolver.java` — the `${caller:...}` resolver, mirroring `SecretResolver` / `GlobalVariableResolver`.
+- `engine/security/OriginMatcher.java` — scheme/host/port comparison with default-port normalization.
+- `engine/internal/ConversationService.java` — captures in `processConversationStep` and decorates the callable.
+- `modules/apicalls/impl/ApiCallExecutor.java` — resolves in headers; rejects a token reference in a query parameter.
+
+**Threading — the non-obvious part.** A turn is built on the request thread but executed twice removed from it: `submitInOrder` hands it to a coordinator thread, which hands the pipeline to *another* thread via `runtime.submitCallable`. Request-scoped beans (`SecurityIdentity`) resolve at none of those points. So the identity is captured while the request context is still live and travels **with the callable** (`withCallerIdentity`), not with a thread. Binding the coordinator thread would have missed the pipeline entirely — an easy and silent mistake.
+
+**Design decisions**
+1. **Same-origin only.** The token is released only when the outbound call targets the exact `scheme://host:port` the caller addressed, taken from the inbound request rather than configuration. An agent config naming a third-party host therefore cannot exfiltrate a user's token, and the feature needs no allow-list to be safe out of the box.
+2. **Headers only.** `${caller:token}` in a query parameter or request body is rejected — tokens in URLs leak through access logs, proxies and browser history, and outside a header the reference is never substituted. `${caller:userId}` is resolved in headers and query parameters.
+3. **Fails closed.** An unsatisfiable reference throws rather than resolving to `""`, which would silently send `Bearer ` and surface far away as a puzzling 401.
+4. **Never stored.** Resolution happens while building the request, and `scrubSensitiveHeaders` redacts it before the request is written to conversation memory. Header-*name* matching alone was not enough — a token placed in an unconventionally named header would have slipped through — so the resolved token is additionally matched by value.
+5. **Opt-out.** `eddi.caller-identity.enabled` (default `true`) forbids the feature outright.
+
+**Async boundaries.** Two further hand-offs lose a `ThreadLocal` binding and had to be covered explicitly, or `${caller:token}` would fail closed for no reason the config author could see: the HITL **resume** path (`runtime.submitCallable(resumeCallable, ...)`) and **fire-and-forget batch** calls in `ApiCallExecutor`. `CallerIdentityContext.propagate()` carries the binding across the latter; the resume path captures its own caller, since a resume is itself an authenticated request.
+
+**Tests.** `CallerIdentityResolverTest` (24) and `CallerIdentityContextTest` (10) — same-origin refusals (host, port, scheme downgrade), fail-closed paths, regex-escaping of tokens containing `$`/`\`, thread isolation, and clearing on pooled threads. Disabling the same-origin guard fails 4 tests (mutation-checked). All 227 `ConversationService*Test` tests still pass.
+
+**Note for the manager:** the operator ships this as its `caller-identity` auth mode, provisioning `apiAuth` as `Bearer ${caller:token}`; the conversation-context workaround and its token-at-rest warning are gone.
+
+---
+
+## 🔐 fix(security): code-review findings wave 2a — access control, A2A ownership, GDPR & audit ledger (2026-07-28)
+
+**Repo:** EDDI (`fix/code-review-access-control`)
+
+Second wave of the 124-finding external code review, split into two PRs so each stays under CodeRabbit's 100-file review limit (wave 1 at 151 files was skipped by it entirely). This half is the access-control and compliance surface.
+
+### The guard triad existed — it just wasn't called everywhere
+
+EDDI already has `OwnershipValidator`, `ConversationAccessGuard` and `HitlAccessGuard`, used correctly in `engine/internal`, `engine/hitl` and the MCP surface. Every finding here is a place that never called them.
+
+- **A1 (critical)** — The **SSE turn endpoint had no ownership check** while its non-streaming twin did. The turn then executed under the *target* conversation's `userId`, loading that user's long-term memories into the prompt and running tool calls in their context. Fixed in two layers: the guard moved **down into `ConversationService.say`/`sayStreaming`** so no future REST adapter can omit it, *before* the memory snapshot loads — plus a REST-layer check so denial is a plain 403 rather than an error event on an already-200 SSE stream.
+- **A2 (critical)** — Attachment endpoints **authorised the path parameter, not the caller**. `IAttachmentStore.load(ref, requestingConversationId)` checks that the *named* conversation owns the blob — and the caller supplies that name, so the check was self-satisfying. All five methods now require caller ownership, checked on the request thread *before* the async hop (`SecurityIdentity` is request-scoped).
+- **A3** — `?deleteOlderThanDays=0` permanently deleted **every ended conversation in the deployment**, from an endpoint with no role at all. Now admin-only with a minimum of 1 day.
+- **A4** — The tool control plane carried no `@RolesAllowed` at all: rate-limiter reset, cost-budget reset, and a history endpoint dumping **raw tool arguments and results** for any conversation.
+- **A5** — `/propertiesstore/properties/{userId}` had neither role nor ownership check over the same `IUserMemoryStore` that `RestUserMemoryStore` guards on all nine of its methods. Writes there land in the victim's next system prompt.
+- **A6** — A **conversation-id oracle**: it returned another user's live `conversationId`, which is the discovery half of A1 and A3.
+- **A7** — Template preview read **any** conversation's memory and returned a flattened dump of properties/context/memory — and since the caller supplies the template, it was effectively a query language over someone else's conversation.
+- **A8** — Config stores with full CRUD and no role. The review named one; **the actual inventory was six**, including two it missed (`IRestCapabilityRegistry`, `IRestWorkflowStepStore`). `IRestVersionInfo` was deliberately left alone — it has no `@Path` and is a mixin, reasoning recorded in the code.
+- **A9** — A2A sat entirely outside the ownership model: caches keyed on a caller-supplied id, `contextId` as an unauthenticated read+write conversation handle, conversations created with `userId = null` (which `OwnershipValidator` treats as "legacy — allow", so permanently unowned), and raw `e.getMessage()` returned to arbitrary peers.
+- **A12** — The global exception mapper returned the **raw driver message** as the 500 body — collection names, hostnames, replica-set topology. Now logged at ERROR with a correlation id.
+
+### GDPR & audit (G14–G20)
+
+- **G14** — Erasure was **served stale indefinitely** from a Caffeine cache with no TTL that erasure never invalidated.
+- **G15** — The erasure cascade missed three stores while `docs/gdpr-compliance.md` asserted it "covers all data stores": conversation **checkpoints** (which carry `propertiesCopy` including PII, behind a javadoc claiming it was "used during GDPR erasure" when its only caller was unreachable), **group transcripts**, and **schedules** that kept firing under an erased user's id.
+- **G16** — `AuditHmac.verifyHmac` had **zero production callers**; the docs told operators to "recompute the HMAC and compare it" and the product shipped no way to do so. Added admin verification endpoints.
+- **G17** — GDPR pseudonymisation did `updateMany($set userId)` with no HMAC recompute, and `userId` is a *signed* field — so **every routine erasure produced rows cryptographically indistinguishable from tampered ones**. The class javadoc claiming a write-once contract was literally true and substantively false.
+- **G18** — No hash chain: entries were independently signed, so **deletion and reordering were undetectable**. Added a per-conversation sequence inside the signed payload (chosen over a global chain, which would serialise all audit writes).
+  - **Follow-up (review):** the first cut shipped this on **MongoDB only**. `PostgresAuditStore` persisted no sequence and left `supportsSequence()` at its `false` default, so `AuditLedgerService` skipped assigning one entirely — **every PostgreSQL deployment silently had no deletion detection**, reported as `UNAVAILABLE`, which reads like "not applicable" rather than "unprotected". Added the column, an idempotent `ALTER TABLE` defaulting old rows to the `UNSEQUENCED` sentinel, the `(conversation_id, sequence)` index verification reads, and `supportsSequence() = true`. This is the second cross-backend gap in this PR (after schedule `userId`), both in compliance code, both invisible because the degraded answer looked benign — the case for the deferred D4/J3 conformance suite.
+- **G19** — `eddi.vault.master-key` ships empty, so entries were written **unsigned by default** while the docs present the ledger as evidence-grade. `ComplianceStartupChecks` had zero references to vault/HMAC/audit.
+- **G20** — Unbounded audit queue that **re-offered failed batches into itself** — an OOM loop under a slow store.
+
+### Documentation corrected (I7–I13)
+
+Several docs described behaviour that did not exist. `docs/semantic-parser.md` documented a **stemming extension that does not exist**, four times, including inside the flagship copy-paste config — copying it throws `UnrecognizedExtensionException` and the agent will not start. The same doc's expression table claimed `number(42)` and `time(15:00)` where the code emits `integer(42)` and epoch millis, so rules written from it never fired. `docs/conversation-memory.md` and `docs/properties.md` both contradicted AGENTS.md §5.1 on the template model (`{properties.X.valueString}` fails at runtime — `MemoryItemConverter` puts raw values).
+
+### Verification
+
+Full unit suite: 12,384 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature — this machine cannot bind sockets; CI is the gate for those). Five high-stakes fixes were **mutation-checked** — revert the fix, confirm a test actually fails, restore: G2, G12, A1, A2 and F18 all bite, verified against whole test classes (a `-Dtest=Class#method` filter silently runs 0 tests and exits 0 when the method is in a `@Nested` class, which reads exactly like a pass).
+
+---
+
+
+---
+
 ## 🐞 fix(engine): code-review findings wave 1 — parser, rules, templating, apicalls, datastore, LLM infra, deployment (2026-07-28)
 
 **Repo:** EDDI (`fix/code-review-findings`)
@@ -374,6 +615,69 @@ That last fix required the theme's **first JavaScript** (`resources/js/eddi-a11y
 3. **The `install.sh` realm update was executed, not just written.** Against a realm reset to `loginTheme: ""`, the GET-modify-PUT returns 204, sets all three fields, and is idempotent on a second run.
 4. **A dead CSS selector removed.** `.pf-v5-c-login__main-header-desc` matches nothing and appears in no `keycloak.v2` template — the same mistake (styling an element the theme never emits) that killed the original `div.kc-logo-text` approach, reproduced at low stakes. Found by auditing every selector in our stylesheet against the live DOM. `.pf-v5-c-login__main-footer-band` was checked the same way and **kept**: it is emitted by `login.ftl` and only hidden because `registrationAllowed: false`. Also verified the keyboard focus ring — `:focus-visible` needs a real key event to match, and does then give `solid 2px #f59e0b` at 8.25:1 on the card, past WCAG 2.2's 3:1 for non-text indicators.
 
+
+---
+
+## 🧹 fix(release): retire stale deployment records, quiet the Postgres health line, revive two dead checks (2026-07-27)
+
+**Repo:** EDDI (`fix/release-6.2-polish`) + eddi-chat-ui (`fix/release-6.2-polish`)
+
+Findings from a full smoke test of `labsai/eddi:6.2.0-b638` against **both** datastore backends (MongoDB and PostgreSQL). Agent CRUD, multi-turn conversations, PropertySetter + Qute templating, undo/redo, group conversations (ROUND_TABLE, followup/continue/close), MCP handshake and SSE streaming all behaved identically on both — no engine defects found. The items below are the rough edges that surfaced.
+
+### 1. Deleting an Agent orphaned its deployment record (both datastores)
+
+`RestAgentStore.deleteAgent` cascaded to schedules, workflows and the capability registry but never to `deployments`, and `IDeploymentStore` had no delete method to call. Every deleted-but-once-deployed Agent therefore left a row at status `deployed`; on each startup the runtime retried the redeploy, failed with `ResourceNotFoundException`, and logged a full ERROR stack trace — forever, accumulating with each deletion. Reproduced on current code; this instance had an orphan dating to 2026-04-01.
+
+`AgentDeploymentManagement.checkDeployments` *already* carried self-heal logic for exactly this case (`isCausedByResourceNotFound` → mark `undeployed`), but it was unreachable: `AgentFactory.deployAgent` returns `void` and swallows the `ServiceException` internally, so the catch blocks never fired. That is why the April orphan survived for months despite the code being there.
+
+- `IDeploymentStorage` / `IDeploymentStore`: added `deleteDeploymentInfos(agentId)`, implemented in `MongoDeploymentStorage` (`deleteMany`) and `PostgresDeploymentStorage` (`DELETE … WHERE AGENT_ID = ?`)
+- `RestAgentStore.deleteAgent`: clears the Agent's deployment records; a failure here logs a warning and still deletes the Agent
+- `AgentDeploymentManagement.checkDeployments`: checks up front whether the Agent config still exists and retires the record instead of attempting a doomed deploy. `isAgentConfigMissing` treats **only** `ResourceNotFoundException` as proof of absence — a store outage leaves the record untouched, so a transient DB failure can never mass-retire live deployments.
+
+Three call sites delete Agents, not one. `McpAdminTools.deleteAgent` delegates to `RestAgentStore` and inherits the cascade, but `GroupConversationService`'s ephemeral cleanup and `TeardownAgentTool` call `agentStore.deleteAllPermanently` directly — and dynamic sub-agents *do* get deployment records, because `AgentSetupService.deployAndWait` goes through `RestAgentAdministration`. Every ephemeral group agent was therefore orphaning a record. Both now retire their records too (null-tolerant, non-fatal), following the existing field-injection pattern in those classes so the directly-constructed unit tests keep working.
+
+**Ordering:** the cascade runs *after* `restVersionInfo.delete`, not before. That method validates its arguments internally and throws on a stale or unknown version — clearing the records first would strip a still-live Agent of what it needs to come back up. Pinned by a test.
+
+**Design note:** the pre-check was chosen over making `deployAgent` rethrow — that method's dummy-agent-on-failure contract is relied on by the on-demand deploy path, and widening it for this would have been a far riskier change than a cheap existence check.
+
+Verified against the real Postgres instance: the April orphan was retired, the ERROR + stack trace was replaced by a single `WARN … retiring stale deployment record`, and deleting a fresh Agent logged `Cascade-deleted 1 deployment record(s)` with the row gone.
+
+> That run was observed against the first implementation, which retired a record by marking it `undeployed` — so the orphan was seen flipping `deployed` → `undeployed`. The review pass below replaced that with a scoped **delete**, so the record is now simply absent. The ERROR-to-WARN result and the cascade behaviour are unchanged.
+
+### 2. MongoDB health check reported UP with no MongoDB (postgres profile)
+
+Under `QUARKUS_PROFILE=postgres`, with the Mongo container stopped and its hostname unresolvable, `/q/health` still listed `"MongoDB connection health check": "UP"` — noise that would equally mask a genuine outage in Mongo mode.
+
+The obvious `%postgres.quarkus.mongodb.health.enabled=false` **does not work**: that property is fixed at build time, so it cannot apply to one image pointed at either datastore (confirmed — even passing it as a runtime env var leaves the check in place). Disabled through smallrye-health instead, which *is* runtime-scoped:
+
+    %postgres.quarkus.smallrye-health.check."io.quarkus.mongodb.health.MongoHealthCheck".enabled=false
+
+### 3. Two checks that could never fail
+
+- `InfrastructureIT.openApiSpec` asserted `anyOf(200, 404)` against `/q/openapi` — a path that never serves the spec (`quarkus.smallrye-openapi.path=/openapi`). It passed whether or not OpenAPI worked. Now asserts `200` on `/openapi` plus real body content.
+- `AGENTS.md` documented EDDI-Manager as served at `/chat/production`. It is served at `/manage`; `/` redirects to the `/welcome` chooser and `/workforce` is the group workspace. `/chat/production` is the standalone chat widget. The wrong path in this file is what sent an earlier review to the wrong URL.
+
+### 4. eddi-chat-ui: dead-end landing and an agent name that never loaded
+
+- `main.tsx` routed its catch-all to a hard-coded `/chat/production/default`. No instance has an agent literally named `default`, so this 404'd and left the visitor on a spinner that never resolved. Replaced with a new `AgentPicker` that lists the instance's actual agents, with explicit empty and error states. Reached only by deep-linking `/chat/production` without an agent id — the Manager's own chat (`/manage/chat`) was never affected.
+- `fetchAgentDescriptor` called `GET /agentstore/agents/{id}` with no `version`, which answers `400`. Even fixed, that endpoint returns the Agent config and carries no name at all — so the agent name had never rendered. Now resolves the current version and reads `/descriptorstore/descriptors/{id}?version=N`.
+
+**Note:** eddi-chat-ui builds its bundle directly into `EDDI/src/main/resources/META-INF/resources/`, so the two repos ship together. The superseded `chat-ui.p4wYUapg.js` / `chat-ui.D213XXZR.css` were removed; `chat.html` now points at the new hashes.
+
+### Review pass on PR #611
+
+- **CodeQL log injection (RestAgentStore).** `id` is a raw REST path parameter and reached two `log.infof`/`warnf` calls unsanitized. Now routed through `LogSanitizer.sanitize`, the pattern already used across the config REST stores. The equivalent logs in `TeardownAgentTool` and `GroupConversationService` were left raw on purpose: both only reach them after the id has passed a `createdAgentIds.contains(...)` check, so the value is a server-generated agent id, and every neighbouring log line in those classes prints it the same way.
+- **Retire scoped, not agent-wide (CodeRabbit, Major).** The sweep proves only that *one* `(environment, agentId, version)` is missing, so retiring with an agent-wide `deleteDeploymentInfos(agentId)` acted far beyond its evidence — it would take out sibling records for versions nobody checked. Added `deleteDeploymentInfo(environment, agentId, version)` and use it here; the agent-wide variant stays for the delete cascade, where the whole Agent really is gone. In practice the harmful case is hard to construct — `HistorizedResourceStore.read` falls back to history, so an older version normally still resolves — but the mismatch between what is checked and what is acted on is the kind that bites once versioning semantics shift. Covered by a mixed-version regression test.
+- **Pin the sibling in the mixed-version test.** The regression test asserted the missing version's record was deleted and that no agent-wide delete happened — but it would still have passed if the code had *also* removed the live sibling through the scoped API. Added the explicit negative (`never()` on version 2, in any environment) and `times(1)` on the deletion that should happen. Mutation-checked: injecting a sibling delete now fails the test, where before it slipped through. While there, the `never()` verifications in these classes moved from `anyString()`/`anyInt()` to `any()`, which also matches null — `anyString()` does not, so a null-argument regression would have verified vacuously.
+- **Retire by delete, not by upsert.** `setDeploymentInfo` upserts. If an Agent were deleted between the sweep reading the deployment list and reaching the retire branch, marking it `undeployed` would *resurrect* the row the delete cascade had just removed — an inert but permanent tombstone. The sweep now calls `deleteDeploymentInfos`, which is idempotent, and an Agent that no longer exists has nothing to undeploy.
+- **TOCTOU between the pre-check and the deploy (CodeRabbit, Major) — acknowledged, not fixed.** If an Agent is deleted in the window between `isAgentConfigMissing` and `deployAgent`, the record can stay `deployed` and be cached in `deploymentInfos` until the next restart. The suggested remedy is to make `deployAgent` surface a definitive missing-result — the contract change deliberately avoided above, since the dummy-agent-on-failure behaviour is relied on by the on-demand deploy path. The window is milliseconds, the consequence is one stale row, and it self-corrects on restart, so it is not worth widening a core contract on a release-polish branch.
+- CodeRabbit nitpicks, all taken: `.gitattributes` marks the chat-ui bundles and Vite assets `linguist-generated` so reviewers stop being handed minified output; `MongoDeploymentStorage` gains an `agentId`-leading index, since the existing compound index starts with `deploymentStatus` and cannot serve the new agentId-only delete; and two coverage gaps closed — deployment cleanup on the cascade-success path, and the guarantee that a *failed* permanent delete leaves the records alone.
+- Style nits from Copilot: imports instead of inline `java.util.concurrent.*` FQNs in `TeardownAgentTool` (per §4.7), and four comments the Eclipse formatter had reflowed into orphaned fragments (`// throws`, `// path`, `// it`, `// up.`). Comment lines are now short enough to survive `formatter:format`.
+
+### Not fixed here (deployment config, not the release artifact)
+
+- The stored Anthropic API key is invalid — every LLM-backed agent fails with `invalid x-api-key`. EDDI handles it correctly (non-retryable, conversation `ERROR`, no stack trace to the client), but any demo needs a working key.
+- `VaultSaltManager` reports existing DEKs with no per-deployment salt and is falling back to the legacy fixed salt; the KEK migration should be run.
 
 ---
 

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -78,15 +79,18 @@ class CascadingModelExecutor {
     private final LegacyChatExecutor legacyChatExecutor;
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final MeterRegistry meterRegistry;
+    private final CallerIdentityContext callerIdentityContext;
 
     CascadingModelExecutor(ChatModelRegistry registry, GlobalVariableResolver globalVariableResolver, ITemplatingEngine templatingEngine,
-            LegacyChatExecutor legacyChatExecutor, StreamingLegacyChatExecutor streamingLegacyChatExecutor, MeterRegistry meterRegistry) {
+            LegacyChatExecutor legacyChatExecutor, StreamingLegacyChatExecutor streamingLegacyChatExecutor, MeterRegistry meterRegistry,
+            CallerIdentityContext callerIdentityContext) {
         this.registry = registry;
         this.globalVariableResolver = globalVariableResolver;
         this.templatingEngine = templatingEngine;
         this.legacyChatExecutor = legacyChatExecutor;
         this.streamingLegacyChatExecutor = streamingLegacyChatExecutor;
         this.meterRegistry = meterRegistry;
+        this.callerIdentityContext = callerIdentityContext;
     }
 
     /**
@@ -308,9 +312,17 @@ class CascadingModelExecutor {
                 // the actual answer; and only when the provider supports streaming.
                 boolean guaranteedAccept = isLastStep || step.getConfidenceThreshold() == null
                         || (EvaluationStrategy.fromConfig(effectiveStrategy) == EvaluationStrategy.NONE && step.getConfidenceThreshold() <= 1.0);
+                // Finding F9: "guaranteed accept" only holds while the step SUCCEEDS. A
+                // non-final step that dies mid-stream has already pushed N tokens into the
+                // sink, and the next step then streams its own full answer into the SAME
+                // sink — the client renders step N's fragment glued to step N+1's answer.
+                // The last-step failure path is handled explicitly (it marks the fallback
+                // streamedLive so LlmTask does not re-emit); there is no equivalent
+                // recovery for a mid-cascade step, and this executor cannot un-send tokens.
+                // So only the last step streams live; every earlier step is buffered.
                 boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode
                         && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
-                        && guaranteedAccept;
+                        && guaranteedAccept && isLastStep;
                 StreamingChatModel streamingModel = streamLiveCandidate ? registry.getOrCreateStreaming(modelType, mergedParams) : null;
                 stepStreamedLive = streamingModel != null;
 
@@ -574,7 +586,11 @@ class CascadingModelExecutor {
                                               ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws Exception {
 
-        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(() -> {
+        // A cascade step runs on a virtual thread, so the caller binding on the
+        // pipeline thread does not reach the tools this step invokes — an apicall
+        // tool using ${caller:token} would fail closed for no reason the agent
+        // designer could see, and only when a cascade is configured.
+        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(callerIdentityContext.propagate(() -> {
             if (useAgentMode) {
                 return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
                         heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
@@ -582,7 +598,7 @@ class CascadingModelExecutor {
                 return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
                         heuristicConfig, jsonPolicy);
             }
-        });
+        }));
 
         try {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);

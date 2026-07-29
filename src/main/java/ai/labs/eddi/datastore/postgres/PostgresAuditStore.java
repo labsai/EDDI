@@ -50,24 +50,39 @@ public class PostgresAuditStore implements IAuditStore {
                 cost DOUBLE PRECISION NOT NULL DEFAULT 0,
                 hmac TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                sequence BIGINT NOT NULL DEFAULT -1,
                 data JSONB NOT NULL
             )
             """;
 
+    /**
+     * Adds {@code sequence} to ledgers created before it existed. Without it this
+     * backend cannot persist the per-conversation sequence, so
+     * {@link #supportsSequence()} would have to stay false and deletion/reordering
+     * of audit rows would be undetectable on PostgreSQL while MongoDB deployments
+     * were protected. Defaults to the UNSEQUENCED sentinel so pre-existing rows
+     * keep reporting the chain as UNAVAILABLE rather than BROKEN.
+     */
+    private static final String ADD_SEQUENCE_COLUMN = "ALTER TABLE audit_ledger ADD COLUMN IF NOT EXISTS sequence BIGINT NOT NULL DEFAULT -1";
+
     private static final String CREATE_INDEX_CONV = "CREATE INDEX IF NOT EXISTS idx_audit_conv ON audit_ledger (conversation_id)";
+    /** Chain verification reads a conversation's entries in sequence order. */
+    private static final String CREATE_INDEX_CONV_SEQ = "CREATE INDEX IF NOT EXISTS idx_audit_conv_seq ON audit_ledger (conversation_id, sequence)";
+
     private static final String CREATE_INDEX_AGENT = "CREATE INDEX IF NOT EXISTS idx_audit_agent ON audit_ledger (AGENT_ID, AGENT_VERSION)";
     private static final String CREATE_INDEX_TS = "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_ledger (created_at DESC)";
 
     private static final String INSERT_SQL = """
             INSERT INTO audit_ledger
                 (id, conversation_id, AGENT_ID, AGENT_VERSION, user_id, environment,
-                 step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data)
-            VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+                 step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data, sequence)
+            VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
             """;
 
     private static final String SELECT_ALL = """
             id, conversation_id, AGENT_ID, AGENT_VERSION, user_id, environment,
-            step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data
+            step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data,
+            sequence
             """;
 
     private final Instance<DataSource> dataSourceInstance;
@@ -85,7 +100,9 @@ public class PostgresAuditStore implements IAuditStore {
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
+            stmt.execute(ADD_SEQUENCE_COLUMN); // idempotent upgrade for pre-existing ledgers
             stmt.execute(CREATE_INDEX_CONV);
+            stmt.execute(CREATE_INDEX_CONV_SEQ);
             stmt.execute(CREATE_INDEX_AGENT);
             stmt.execute(CREATE_INDEX_TS);
             schemaInitialized = true;
@@ -203,6 +220,7 @@ public class PostgresAuditStore implements IAuditStore {
         ps.setString(13, entry.hmac());
         ps.setTimestamp(14, entry.timestamp() != null ? Timestamp.from(entry.timestamp()) : Timestamp.from(Instant.now()));
         ps.setString(15, jsonSerialization.serialize(data));
+        ps.setLong(16, entry.sequence());
     }
 
     private List<AuditEntry> queryEntries(String sql, String param, int limit, int skip) {
@@ -236,8 +254,19 @@ public class PostgresAuditStore implements IAuditStore {
                 rs.getInt("task_index"), rs.getLong("duration_ms"), (Map<String, Object>) data.get("input"), (Map<String, Object>) data.get("output"),
                 (Map<String, Object>) data.get("llmDetail"), (Map<String, Object>) data.get("toolCalls"),
                 data.get("actions") instanceof List<?> list ? (List<String>) list : null, rs.getDouble("cost"), ts != null ? ts.toInstant() : null,
-                rs.getString("hmac"), null);
+                rs.getString("hmac"), null, rs.getLong("sequence"));
     }
+    /**
+     * PostgreSQL persists the per-conversation sequence, so the chain continuity
+     * check applies here exactly as it does on MongoDB. Without this the ledger
+     * silently degraded to HMAC-only on one of the two supported backends, and a
+     * deleted audit row would have gone unnoticed.
+     */
+    @Override
+    public boolean supportsSequence() {
+        return true;
+    }
+
     // === GDPR ===
 
     @Override
