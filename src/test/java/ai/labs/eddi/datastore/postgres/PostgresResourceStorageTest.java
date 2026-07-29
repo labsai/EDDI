@@ -120,6 +120,43 @@ class PostgresResourceStorageTest {
         assertFalse(all.contains("idx_resources_field_workflowsteps"), all);
     }
 
+    /**
+     * PostgreSQL truncates an identifier past 63 bytes SILENTLY. Two long hints
+     * sharing a prefix would therefore collapse onto one index name and CREATE
+     * INDEX IF NOT EXISTS would no-op for the second — the same silent miss the
+     * case handling above prevents, reached by length instead. The digest is also
+     * the part the server would cut, so it stops disambiguating exactly when it is
+     * needed.
+     */
+    @Test
+    void fieldIndexNamesStayDistinctAndWithinPostgresIdentifierLimit() throws Exception {
+        Statement indexStatement = mock(Statement.class);
+        Connection indexConnection = mock(Connection.class);
+        DataSource indexDataSource = mock(DataSource.class);
+        when(indexDataSource.getConnection()).thenReturn(indexConnection);
+        when(indexConnection.createStatement()).thenReturn(indexStatement);
+
+        // identical for the first 50 characters, differing only at the end
+        String a = "averyLongCustomerFacingConfigurationFieldNameForA_one";
+        String b = "averyLongCustomerFacingConfigurationFieldNameForA_two";
+
+        new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, a, b);
+
+        var executed = ArgumentCaptor.forClass(String.class);
+        verify(indexStatement, atLeastOnce()).execute(executed.capture());
+
+        List<String> indexNames = executed.getAllValues().stream()
+                .filter(s -> s.contains("idx_resources_field_"))
+                .map(s -> s.substring(s.indexOf("idx_resources_field_"), s.indexOf(" ON ")))
+                .toList();
+
+        assertEquals(2, indexNames.size(), indexNames.toString());
+        assertEquals(2, Set.copyOf(indexNames).size(), "long hints collapsed onto one index name: " + indexNames);
+        for (String name : indexNames) {
+            assertTrue(name.length() <= 63, "PostgreSQL would truncate and re-collapse this: " + name + " (" + name.length() + ")");
+        }
+    }
+
     @Test
     void fieldIndexNamesDistinguishHintsThatDifferOnlyInCase() throws Exception {
         Statement indexStatement = mock(Statement.class);
