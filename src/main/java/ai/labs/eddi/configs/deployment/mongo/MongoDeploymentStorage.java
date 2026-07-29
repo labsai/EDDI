@@ -43,6 +43,9 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
         this.deploymentsCollection = database.getCollection(COLLECTION_DEPLOYMENTS);
         this.documentBuilder = documentBuilder;
         deploymentsCollection.createIndex(Indexes.ascending(FIELD_DEPLOYMENT_STATUS, FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION));
+        // deleteDeploymentInfos filters on agentId alone, which the index above cannot
+        // serve: agentId is not one of its leading fields.
+        deploymentsCollection.createIndex(Indexes.ascending(FIELD_AGENT_ID));
     }
 
     @Override

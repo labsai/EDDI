@@ -132,6 +132,20 @@ class RestAgentStoreTest {
         }
 
         @Test
+        @DisplayName("should delete deployment records on the cascade path too")
+        void deleteAgent_cascade_alsoDeletesDeploymentRecords() throws Exception {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 1, false)).thenReturn(List.of(dummyDescriptor()));
+            when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, true, true);
+
+            verify(deploymentStore).deleteDeploymentInfos(AGENT_ID);
+        }
+
+        @Test
         @DisplayName("should skip cascade-delete of packages shared with other agents")
         void deleteAgent_cascade_skipsSharedWorkflows() throws Exception {
             AgentConfiguration config = new AgentConfiguration();

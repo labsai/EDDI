@@ -974,6 +974,17 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        void teardownAgent_failedDeletePreservesDeploymentRecords() throws Exception {
+            // The Agent is still there if the delete threw, so its records must stay.
+            doThrow(new RuntimeException("store down")).when(agentStore).deleteAllPermanently("created-1");
+
+            String result = tool.teardownAgent("created-1", true);
+
+            assertTrue(result.contains("deletion failed"));
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
+        }
+
+        @Test
         void teardownAgent_undeployOnlyLeavesDeploymentRecordsAlone() throws Exception {
             // Undeploy without delete: the Agent still exists, so its records must survive.
             tool.teardownAgent("created-1", false);
