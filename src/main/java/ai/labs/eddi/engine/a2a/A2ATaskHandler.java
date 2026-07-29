@@ -66,6 +66,19 @@ public class A2ATaskHandler {
     private final SecurityIdentity identity;
 
     /**
+     * Reads an optional string parameter, treating a missing key, an explicit JSON
+     * null and a blank string alike as "not supplied".
+     */
+    private static String optionalStringParam(Map<String, Object> params, String key) {
+        Object raw = params.get(key);
+        if (raw == null) {
+            return null;
+        }
+        String value = raw.toString().trim();
+        return value.isEmpty() ? null : value;
+    }
+
+    /**
      * Maps (peer, A2A taskId) → conversationId for multi-turn conversations. A task
      * that uses the same contextId should reuse the same conversation.
      */
@@ -96,8 +109,16 @@ public class A2ATaskHandler {
             throw new InvalidA2ARequestException("Missing 'message' in params");
         }
 
-        String taskId = params.containsKey("id") ? params.get("id").toString() : UUID.randomUUID().toString();
-        String contextId = params.containsKey("contextId") ? params.get("contextId").toString() : null;
+        // containsKey is true for an explicit JSON null, so a malformed peer sending
+        // {"id": null} used to NPE on toString() and surface as a generic internal
+        // error instead of the invalid-request path this method already has.
+        // A null or blank id is treated as absent, which is what a peer omitting it
+        // gets anyway.
+        String taskId = optionalStringParam(params, "id");
+        if (taskId == null) {
+            taskId = UUID.randomUUID().toString();
+        }
+        String contextId = optionalStringParam(params, "contextId");
 
         // Extract text from message parts
         String userInput = extractTextFromMessage(message);
