@@ -136,12 +136,23 @@ public class RestAuditStore implements IRestAuditStore {
      * close the gap without invalidating their own HMACs.
      */
     private static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> duplicates, boolean expectRunFromOrigin) {
-        List<Long> sequences = entries.stream().map(AuditEntry::sequence).filter(s -> s >= 0).sorted().toList();
-
-        if (sequences.isEmpty()) {
-            // Pre-sequencing rows, or a store that does not persist the field.
-            return entries.isEmpty() ? ChainStatus.INTACT : ChainStatus.UNAVAILABLE;
+        if (entries.isEmpty()) {
+            return ChainStatus.INTACT;
         }
+
+        // A window that mixes sequenced and unsequenced rows cannot be judged at all.
+        // AuditLedgerService seeds a conversation's counter from countByConversation,
+        // which COUNTS THE LEGACY ROWS — so after an upgrade the first sequenced entry
+        // starts at N, not 0, and the N positions below it were never assigned to
+        // anything. Anchoring at the origin would report them as missing and accuse
+        // the deployment of deleting audit records it never had. Unsequenced rows also
+        // make a genuine deletion undetectable, so the honest answer for a mixed window
+        // is that the chain cannot be established.
+        if (entries.stream().anyMatch(e -> e.sequence() < 0)) {
+            return ChainStatus.UNAVAILABLE;
+        }
+
+        List<Long> sequences = entries.stream().map(AuditEntry::sequence).sorted().toList();
 
         Set<Long> seen = new HashSet<>();
         for (Long sequence : sequences) {

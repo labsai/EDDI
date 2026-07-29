@@ -157,6 +157,27 @@ class RestAuditStoreTest {
     }
 
     /**
+     * An upgraded deployment has legacy rows with no sequence alongside new
+     * sequenced ones — and because the counter is seeded from countByConversation,
+     * which counts the legacy rows, the first sequenced entry starts above 0. With
+     * the origin anchor that looks exactly like a deleted prefix, so the ledger
+     * would accuse an untampered deployment of destroying records. A window that
+     * mixes the two simply cannot be judged.
+     */
+    @Test
+    @DisplayName("legacy unsequenced rows alongside sequenced ones report UNAVAILABLE, not BROKEN")
+    void mixedSequencedAndUnsequencedIsUnavailable() {
+        when(auditStore.getEntries("conv-1", 0, 1000))
+                .thenReturn(List.of(entryAt("legacy-1", -1), entryAt("id-6", 5), entryAt("id-7", 6)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(ChainStatus.UNAVAILABLE, report.chainStatus());
+        assertEquals(List.of(), report.missingSequences(), "0..4 were never assigned, not deleted");
+        assertFalse(report.intact(), "an unestablishable chain is not an intact one");
+    }
+
+    /**
      * Deleting the FIRST entry leaves no gap behind: 1,2,3 is a perfectly gap-free
      * run. Anchoring the expected range at the smallest sequence present therefore
      * made a prefix deletion completely invisible — the easiest deletion to perform
