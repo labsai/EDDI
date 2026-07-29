@@ -12,6 +12,54 @@ export interface AuthEventSourceHandle {
 }
 
 /**
+ * Parse one SSE frame — the text between blank-line separators — into its event
+ * type and data payload.
+ *
+ * Used by the frame-based readers (`sendMessageStreaming` in `chat.ts`). The
+ * incremental line-based readers — `createAuthEventSource` below and
+ * `BearerEventSource` — implement the same rules inline because they dispatch
+ * as lines arrive rather than per frame. If you touch the rules here, check
+ * those two as well.
+ *
+ * It follows the WHATWG spec on the three points that are easy to get wrong and
+ * that a hand-rolled parser reliably gets wrong:
+ *
+ *  - **Multiple `data:` lines in one frame concatenate with "\n".** They do not
+ *    overwrite. Assigning instead of appending silently truncates every
+ *    multi-line payload to its final line.
+ *  - **Only the single optional space after the colon is stripped.** Calling
+ *    `.trim()` destroys leading and trailing whitespace, which corrupts token
+ *    streams where a lone " " is a meaningful chunk.
+ *  - **A trailing "\r" from CRLF framing is removed** before the value is read.
+ *
+ * Returns `null` for a frame carrying no field lines (a `:` heartbeat comment,
+ * or blank padding), so callers can simply skip it.
+ */
+export function parseSseFrame(
+  frame: string,
+  defaultEventType = "message",
+): { type: string; data: string } | null {
+  let type = defaultEventType;
+  const dataLines: string[] = [];
+  let sawField = false;
+
+  for (const rawLine of frame.split("\n")) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line.startsWith(":")) continue; // comment / heartbeat
+    if (line.startsWith("event:")) {
+      type = (line[6] === " " ? line.slice(7) : line.slice(6)).trim();
+      sawField = true;
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line[5] === " " ? line.slice(6) : line.slice(5));
+      sawField = true;
+    }
+  }
+
+  if (!sawField) return null;
+  return { type, data: dataLines.join("\n") };
+}
+
+/**
  * Create an auth-aware SSE stream using fetch + ReadableStream.
  * Unlike native EventSource, this supports Authorization headers.
  */

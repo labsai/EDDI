@@ -13,7 +13,67 @@ export interface StructuredItem {
 // ─── Markdown Normalizer ─────────────────────────────────────────
 
 /**
- * Format and normalize markdown text to ensure proper rendering across all UI surfaces:
+ * Regions whose contents must never be rewritten by the normalizer.
+ *
+ * The normalizer repairs prose an LLM formatted badly. Applied to code, URLs or
+ * JSON it does the opposite — it corrupts them. `apiKey` is not a missing space,
+ * and `https://host/GetStarted` is not a sentence. Ordered so the widest
+ * construct is captured first (a fence may legally contain backticks).
+ */
+const PROTECTED_PATTERNS: readonly RegExp[] = [
+  /```[\s\S]*?```/g, // fenced code block
+  /~~~[\s\S]*?~~~/g, // fenced code block (tilde form)
+  /`[^`\n]*`/g, // inline code span
+  /\]\([^)\s]*(?:\s+"[^"]*")?\)/g, // markdown link / image destination
+  /<[a-zA-Z][a-zA-Z0-9+.-]*:[^>\s]*>/g, // autolink
+  /\bhttps?:\/\/[^\s)]+/g, // bare URL
+];
+
+/**
+ * Sentinel wrapping a stash index, using a Unicode Private Use Area character.
+ * PUA code points carry no meaning in real text, so the placeholder can never
+ * collide with agent output — unlike a space- or bracket-delimited token, which
+ * would swallow ordinary numbers ("in 5 minutes").
+ */
+const SENTINEL = String.fromCharCode(0xe000);
+const PLACEHOLDER = new RegExp(SENTINEL + "(\\d+)" + SENTINEL, "g");
+
+/**
+ * Replace every protected region with an opaque placeholder, returning the
+ * masked text plus a `restore` that puts the originals back.
+ *
+ * A later pattern can swallow an earlier placeholder (a bare URL followed
+ * directly by an inline code span), so `restore` loops until no placeholder
+ * remains — `String.replace` does not rescan text it just inserted.
+ */
+function maskProtectedRegions(text: string): {
+  masked: string;
+  restore: (s: string) => string;
+} {
+  const stash: string[] = [];
+  let masked = text;
+  for (const pattern of PROTECTED_PATTERNS) {
+    masked = masked.replace(pattern, (match) => {
+      stash.push(match);
+      return SENTINEL + (stash.length - 1) + SENTINEL;
+    });
+  }
+  const restore = (s: string): string => {
+    let out = s;
+    for (let i = 0; i <= PROTECTED_PATTERNS.length && out.includes(SENTINEL); i++) {
+      out = out.replace(PLACEHOLDER, (_m, idx: string) => stash[Number(idx)] ?? "");
+    }
+    return out;
+  };
+  return { masked, restore };
+}
+
+/**
+ * Format and normalize markdown text to ensure proper rendering across all UI surfaces.
+ *
+ * Code spans, fenced blocks, link destinations and URLs are masked out first, so
+ * every rule below applies to prose only.
+ *
  * 1. Fixes ATX headings missing space or glued to preceding words (e.g. `word## Header` -> `word\n\n## Header`)
  * 2. Fixes trailing hyphens/dashes attached to opening bold markers (e.g. `Das- **Logo` -> `Das - **Logo`)
  * 3. Removes illegal whitespace INSIDE bold delimiters so CommonMark parsers recognize bold text:
@@ -21,13 +81,17 @@ export interface StructuredItem {
  * 4. Ensures space BEFORE opening `**` if glued to preceding text (e.g. `word**bold**` -> `word **bold**`)
  * 5. Ensures space AFTER closing `**` if glued to following word (e.g. `**bold**word` -> `**bold** word`)
  * 6. Fixes list hyphens glued to colons (e.g. `bedeutet:- Zuerst` -> `bedeutet: - Zuerst`)
- * 7. Fixes concatenated camel-case sentence joins (e.g. `SieSind` -> `Sie Sind`)
- * 8. Fixes missing spaces after punctuation before capitalized words (e.g. `mich,Sie` -> `mich, Sie`)
+ * 7. Fixes missing spaces after punctuation before capitalized words (e.g. `mich,Sie` -> `mich, Sie`)
+ *
+ * There is deliberately NO lowercase->uppercase word splitter. It cannot tell a
+ * dropped space (`SieSind`) from an identifier (`apiKey`, `PostgreSQL`,
+ * `conversationId`), and in an agent-platform console the identifiers dominate.
  */
 export function formatMarkdownText(text: string): string {
   if (!text) return "";
 
-  let formatted = text;
+  const { masked, restore } = maskProtectedRegions(text);
+  let formatted = masked;
 
   // 1. Fix ATX headings missing space after # (e.g. "#Header" -> "# Header", "###Title" -> "### Title")
   formatted = formatted.replace(/^(#{1,6})([^\s#])/gm, "$1 $2");
@@ -58,18 +122,15 @@ export function formatMarkdownText(text: string): string {
   // 7. Fix missing space AFTER closing ** when glued to following word (e.g. "**bold**word" -> "**bold** word")
   formatted = formatted.replace(/\*\*([a-zA-Z0-9äöüßÄÖÜ][^*]*?)\*\*([a-zA-Z0-9äöüßÄÖÜ])/g, "**$1** $2");
 
-  // 8. Fix missing spaces between concatenated lowercase-uppercase words (e.g. "DifferEs" -> "Differ Es")
-  // Skip content inside markdown links [...](url) and inline code `...` to avoid corrupting URLs
-  formatted = formatted.replace(/([a-zäöüß])([A-ZÄÖÜ])/g, "$1 $2");
-
-  // 9. Fix missing spaces after punctuation before capitalized words (e.g. "mich,Sie" -> "mich, Sie")
-  // Only apply outside markdown links and inline code to avoid corrupting URLs like https://host/Release.Notes
+  // 8. Fix missing spaces after punctuation before capitalized words (e.g. "mich,Sie" -> "mich, Sie").
+  // Safe here because URLs, code and link destinations were masked out above —
+  // a query string like "?a=1,Bar" is no longer visible to this rule.
   formatted = formatted.replace(/([,;!?])([A-ZÄÖÜ])/g, "$1 $2");
 
-  // 10. Ensure headings have a blank line before them if preceded by text on a single newline
+  // 9. Ensure headings have a blank line before them if preceded by text on a single newline
   formatted = formatted.replace(/([^\n])\n(#{1,6}\s)/g, "$1\n\n$2");
 
-  return formatted;
+  return restore(formatted);
 }
 
 // ─── Content Parsing ─────────────────────────────────────────────
