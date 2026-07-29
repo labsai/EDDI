@@ -148,6 +148,11 @@ public class GracefulShutdownService {
         while (inFlight > 0 && System.nanoTime() < deadline) {
             if (!sleepQuietly(pollIntervalMillis)) {
                 interrupted = true;
+                // Re-check once before deciding: the last turn may have finished DURING
+                // this sleep, with the interrupt arriving immediately after. Reporting
+                // "still in flight" for a drain that actually completed is the same
+                // misreporting the interrupt/timeout split above exists to prevent.
+                inFlight = countInFlight();
                 break;
             }
             inFlight = countInFlight();
