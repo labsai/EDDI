@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
+import { ErrorState } from "@/components/shared/error-state";
 import {
   SlidersHorizontal,
   Activity,
@@ -24,7 +25,7 @@ const DEFAULT_TENANT = "default";
 
 export function QuotasPage() {
   const { t } = useTranslation();
-  const { data: quota, isLoading: quotaLoading } = useQuota(DEFAULT_TENANT);
+  const { data: quota, isLoading: quotaLoading, isError: quotaError, refetch: refetchQuota } = useQuota(DEFAULT_TENANT);
   const { data: usage, isLoading: usageLoading } = useQuotaUsage(DEFAULT_TENANT);
   const updateMutation = useUpdateQuota();
   const resetMutation = useResetUsage();
@@ -116,6 +117,16 @@ export function QuotasPage() {
 
       {loading ? (
         <LoadingSkeleton />
+      ) : quotaError ? (
+        /* The quota hook already treats 404 as "not configured yet" and returns
+           defaults, so reaching here means a real failure (500/503/network).
+           Rendering the form anyway would show fabricated limits as if they
+           were the deployment's actual policy. */
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetchQuota()}
+          retryLabel={t("common.retry")}
+        />
       ) : (
         <>
           {/* Enforcement disabled banner */}

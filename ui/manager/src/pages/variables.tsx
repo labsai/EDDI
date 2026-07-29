@@ -20,6 +20,7 @@ import {
   useUpsertVariable,
   useDeleteVariable,
 } from "@/hooks/use-variables";
+import { ErrorState } from "@/components/shared/error-state";
 import { isValidVariableKey } from "@/lib/api/variables";
 import type { GlobalVariable } from "@/lib/api/variables";
 
@@ -40,7 +41,7 @@ export function VariablesPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   /* ─── Queries ─── */
-  const { data: variables, isLoading } = useVariables();
+  const { data: variables, isLoading, isError, refetch } = useVariables();
   const upsertMut = useUpsertVariable();
   const deleteMut = useDeleteVariable();
 
@@ -232,6 +233,16 @@ export function VariablesPage() {
         </div>
       )}
 
+      {/* Error state — without this a failed fetch rendered the empty state,
+          telling the user there are no variables when the request never landed. */}
+      {isError && !isLoading && (
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
+      )}
+
       {/* Loading state (no data yet) */}
       {isLoading && !variables && (
         <div className="flex items-center justify-center py-12">
@@ -367,7 +378,7 @@ export function VariablesPage() {
       )}
 
       {/* Empty state */}
-      {variables && variables.length === 0 && (
+      {variables && variables.length === 0 && !isError && (
         <div
           className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border p-12 text-center"
           data-testid="variables-empty"

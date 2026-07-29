@@ -28,6 +28,7 @@ import {
   HandMetal,
 } from "lucide-react";
 import { useAuditTrail, useAuditTrailByAgent } from "@/hooks/use-audit";
+import { ErrorState } from "@/components/shared/error-state";
 import type { AuditEntry } from "@/lib/api/audit";
 import { useDeployedAgents } from "@/hooks/use-chat";
 
@@ -515,6 +516,10 @@ export function AuditPage() {
 
   const pageEntries = mode === "conversation" ? convQuery.data : agentQuery.data;
   const isLoading = mode === "conversation" ? convQuery.isLoading : agentQuery.isLoading;
+  // Without this a 500 rendered the "No audit entries found" empty state — the
+  // most misleading possible result on a compliance screen.
+  const isError = mode === "conversation" ? convQuery.isError : agentQuery.isError;
+  const refetch = () => (mode === "conversation" ? convQuery.refetch() : agentQuery.refetch());
   const isFetching = mode === "conversation" ? convQuery.isFetching : agentQuery.isFetching;
   const hasSearched = mode === "conversation" ? !!searchValue : !!activeAgentId;
 
@@ -943,7 +948,15 @@ export function AuditPage() {
       )}
 
       {/* Empty state - no results */}
-      {hasSearched && !isLoading && entries.length === 0 && (
+      {hasSearched && !isLoading && isError && (
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
+      )}
+
+      {hasSearched && !isLoading && !isError && entries.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 py-16">
           <ShieldCheck className="h-12 w-12 text-muted-foreground/30" />
           <p className="mt-4 text-sm font-medium text-foreground/60">

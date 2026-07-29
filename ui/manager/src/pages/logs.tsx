@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
+import { ErrorState } from "@/components/shared/error-state";
 import {
   ScrollText,
   Pause,
@@ -442,7 +443,7 @@ function HistoryTab() {
   const [levelFilter, setLevelFilter] = useState("");
   const [textSearch, setTextSearch] = useState("");
 
-  const { data: logs, isLoading, refetch } = useHistoryLogs(filters);
+  const { data: logs, isLoading, isError, refetch } = useHistoryLogs(filters);
 
   const updateFilter = useCallback(
     (key: keyof HistoryFilters, value: string) => {
@@ -604,6 +605,16 @@ function HistoryTab() {
         {isLoading ? (
           <div className="flex h-full items-center justify-center p-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : isError ? (
+          <div className="p-8">
+            {/* A failed fetch used to fall through to the empty state below, which
+                told the user there is no data when the request never landed. */}
+            <ErrorState
+              message={t("common.error")}
+              onRetry={() => refetch()}
+              retryLabel={t("common.retry")}
+            />
           </div>
         ) : !logs || logs.length === 0 ? (
           <div

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
+import { ErrorState } from "@/components/shared/error-state";
 import {
   Clock,
   Plus,
@@ -1116,7 +1117,7 @@ export function SchedulesPage() {
     return () => clearTimeout(timer);
   }, [maybeAutoStart]);
 
-  const { data: schedules, isLoading } = useSchedules();
+  const { data: schedules, isLoading, isError, refetch } = useSchedules();
   const { data: failedFires } = useFailedFires();
   const deleteMutation = useDeleteSchedule();
   const toggleMutation = useToggleSchedule();
@@ -1402,6 +1403,16 @@ export function SchedulesPage() {
           {isLoading ? (
             <div className="p-8 text-center">
               <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          ) : isError ? (
+            <div className="p-8">
+              {/* A failed fetch used to fall through to the empty state below, which
+                  told the user there is no data when the request never landed. */}
+              <ErrorState
+                message={t("common.error")}
+                onRetry={() => refetch()}
+                retryLabel={t("common.retry")}
+              />
             </div>
           ) : !schedules || schedules.length === 0 ? (
             <div

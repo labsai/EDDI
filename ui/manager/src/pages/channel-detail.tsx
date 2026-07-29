@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { parseChannelResourceUri } from "@/lib/api/channels";
 import { getErrorMessage } from "@/lib/api-client";
 import { useTranslation } from "react-i18next";
+import { ErrorState } from "@/components/shared/error-state";
 import {
   Cable, Save, Trash2, ArrowLeft, Plus, X, Copy, Check,
   Bot, Users, ChevronDown, ChevronUp, Hash,
@@ -124,7 +125,7 @@ export function ChannelDetailPage() {
   const parsedVersion = Number(searchParams.get("version") ?? "1");
   const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
 
-  const { data: config, isLoading } = useChannel(id!, version);
+  const { data: config, isLoading, isError, refetch } = useChannel(id!, version);
   const updateMutation = useUpdateChannel();
   const deleteMutation = useDeleteChannel();
 
@@ -219,6 +220,20 @@ export function ChannelDetailPage() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // A missing channel or bad version previously left the skeleton spinning
+  // forever, because only `isLoading` was consulted.
+  if (isError) {
+    return (
+      <div className="p-6" data-testid="channel-detail-error">
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
+      </div>
+    );
+  }
 
   if (isLoading || !draft) {
     return (
