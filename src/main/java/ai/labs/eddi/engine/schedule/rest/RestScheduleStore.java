@@ -184,8 +184,22 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return guard;
             }
 
-            // Checked on the incoming BODY: this is the path that would re-point an
-            // otherwise harmless schedule at another user's identity.
+            // BOTH sides matter, and checking only one is the bug this replaces.
+            //
+            // STORED userId — "may I touch this schedule at all?". Guarding only the
+            // body let a non-admin PUT over a schedule owned by victim-42 as long as
+            // the body left userId unset (or "system:scheduler", which is exempt):
+            // the guard passed and the update ran, so the caller could retarget the
+            // agent/cron/message or effectively disarm the victim's dream schedule.
+            // fireNow already checks the stored value for exactly this reason.
+            //
+            // BODY userId — "may I make it act as this identity?", i.e. the re-point
+            // path that would aim an otherwise harmless schedule at another user.
+            Response storedOwnerGuard = requireOwnUserIdOfStoredSchedule(scheduleId, "update");
+            if (storedOwnerGuard != null) {
+                return storedOwnerGuard;
+            }
+
             Response ownerGuard = requireOwnUserId(schedule != null ? schedule.getUserId() : null, "update");
             if (ownerGuard != null) {
                 return ownerGuard;
@@ -422,6 +436,34 @@ public class RestScheduleStore implements IRestScheduleStore {
                         + "unset to run as the system scheduler. Only an administrator may " + operation
                         + " a schedule that runs as another user.")
                 .build();
+    }
+
+    /**
+     * The other half of {@link #requireOwnUserId}: may this caller touch the
+     * schedule that is <em>already stored</em> under {@code scheduleId}?
+     * <p>
+     * Checking the request body alone is not enough. A body that simply omits
+     * {@code userId} is exempt (it means "run as the system scheduler"), so a
+     * body-only guard let a non-admin overwrite a schedule stored against another
+     * user — retargeting its agent, cron or message, or disarming it outright.
+     * {@code fireNow} reads the stored value for the same reason.
+     * <p>
+     * A missing schedule is left to the caller's own not-found handling rather than
+     * being reported as forbidden, so this guard cannot be used to probe which
+     * schedule ids exist.
+     */
+    private Response requireOwnUserIdOfStoredSchedule(String scheduleId, String operation) {
+        ScheduleConfiguration stored;
+        try {
+            stored = scheduleStore.readSchedule(scheduleId);
+        } catch (Exception e) {
+            // Not found / unreadable: let the normal path produce the 404.
+            return null;
+        }
+        if (stored == null) {
+            return null;
+        }
+        return requireOwnUserId(stored.getUserId(), operation);
     }
 
     /**

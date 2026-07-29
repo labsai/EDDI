@@ -472,7 +472,14 @@ class GroupConversationServiceConcurrencyTest {
     @Test
     @DisplayName("C8: the batch budget is one member's attempt envelope, never the batch size")
     void parallelBatchBudget_isDerivedFromOneMembersAttemptEnvelope() {
-        // SKIP / ABORT never retry: one attempt plus the 1s setup grace.
+        // The grace is max(1s, 10% of the per-attempt budget) — a flat second is a
+        // large share of a 2s timeout and a rounding error against a 180s one, and
+        // setup cost does not shrink just because the timeout is short. Whenever the
+        // grace is too small the orchestrator wins the race again and the member's
+        // own RETRY/ABORT/attributed-SKIP handling is unreachable, which is the whole
+        // defect this budget exists to avoid.
+        //
+        // SKIP / ABORT never retry: one attempt plus the grace (10 -> max(1, 1) = 1).
         assertEquals(11L, GroupConversationService.parallelBatchBudgetSeconds(
                 new ProtocolConfig(10, ProtocolConfig.MemberFailurePolicy.SKIP, 2,
                         ProtocolConfig.MemberUnavailablePolicy.SKIP)));
@@ -483,11 +490,19 @@ class GroupConversationServiceConcurrencyTest {
         assertEquals(31L, GroupConversationService.parallelBatchBudgetSeconds(
                 new ProtocolConfig(10, ProtocolConfig.MemberFailurePolicy.RETRY, 2,
                         ProtocolConfig.MemberUnavailablePolicy.SKIP)));
+        // A short timeout keeps the 1s FLOOR rather than 10% of 2s.
+        assertEquals(3L, GroupConversationService.parallelBatchBudgetSeconds(
+                new ProtocolConfig(2, ProtocolConfig.MemberFailurePolicy.SKIP, 0,
+                        ProtocolConfig.MemberUnavailablePolicy.SKIP)));
         // Unset values fall back to the same defaults executeAgentTurn applies:
-        // 180s per attempt, 2 retries.
-        assertEquals(541L, GroupConversationService.parallelBatchBudgetSeconds(
+        // 180s per attempt, 2 retries -> 540 + ceil(18) = 558.
+        assertEquals(558L, GroupConversationService.parallelBatchBudgetSeconds(
                 new ProtocolConfig(0, ProtocolConfig.MemberFailurePolicy.RETRY, 0,
                         ProtocolConfig.MemberUnavailablePolicy.SKIP)));
+        // The grace itself: floor below 10s, proportional above it.
+        assertEquals(1L, GroupConversationService.parallelBatchGraceSeconds(2));
+        assertEquals(1L, GroupConversationService.parallelBatchGraceSeconds(10));
+        assertEquals(18L, GroupConversationService.parallelBatchGraceSeconds(180));
         // An absurd config is capped instead of overflowing the deadline into the past.
         assertEquals(TimeUnit.HOURS.toSeconds(24), GroupConversationService.parallelBatchBudgetSeconds(
                 new ProtocolConfig(Integer.MAX_VALUE, ProtocolConfig.MemberFailurePolicy.RETRY, Integer.MAX_VALUE,

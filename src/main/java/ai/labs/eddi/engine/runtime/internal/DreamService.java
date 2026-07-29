@@ -184,11 +184,21 @@ public class DreamService {
         try {
             int version = agentVersion != null && agentVersion > 0
                     ? agentVersion
-                    : agentStore.getCurrentResourceId(agentId).getVersion();
+                    : currentVersionOf(agentId);
+            if (version <= 0) {
+                // getCurrentResourceId returns null on PostgreSQL for an agent with no
+                // deployed version (GroupConversationService documents the same). Left
+                // implicit it became an NPE whose message is null, so the operator-facing
+                // reason read "Could not read agent 'x': null" — the one string that has
+                // to be actionable, since every rejection here explains a misconfigured
+                // Dream schedule.
+                return rejected(userId, start, "Agent '" + agentId + "' has no current version — deploy it before scheduling a dream cycle, "
+                        + "or pin an explicit agentVersion on the schedule.");
+            }
             agentConfiguration = agentStore.read(agentId, version);
         } catch (Exception e) {
             LOGGER.errorf(e, "[DREAM] Could not read agent '%s' (version=%s) for a scheduled dream cycle", agentId, agentVersion);
-            return rejected(userId, start, "Could not read agent '" + agentId + "': " + e.getMessage());
+            return rejected(userId, start, "Could not read agent '" + agentId + "': " + describe(e));
         }
 
         if (agentConfiguration == null) {
@@ -323,7 +333,7 @@ public class DreamService {
             cyclesFailedCounter.increment();
             LOGGER.errorf(e, "[DREAM] Failed for user='%s'", userId);
             return new DreamResult(userId, pruned, contradictions, summarized, Duration.between(start, Instant.now()).toMillis(), estimatedCost,
-                    e.getMessage());
+                    describe(e));
         }
     }
 
@@ -878,6 +888,30 @@ public class DreamService {
      *            {@code null} on success; otherwise the cause, which the schedule
      *            dispatcher turns into a FAILED fire
      */
+    /**
+     * A never-null, always-informative description of a failure.
+     * <p>
+     * {@code DreamResult.isSuccess()} is {@code error == null}, and
+     * {@link Throwable#getMessage()} is null for plenty of real exceptions
+     * (NullPointerException among them) — so passing the raw message through made a
+     * crashed cycle report itself as a SUCCESSFUL one, and the schedule's failure
+     * bookkeeping never ran.
+     */
+    private static String describe(Throwable e) {
+        String message = e.getMessage();
+        return (message == null || message.isBlank()) ? e.getClass().getSimpleName() : e.getClass().getSimpleName() + ": " + message;
+    }
+
+    /**
+     * Current version of an agent, or {@code -1} when it has none. Isolated so the
+     * null {@code getCurrentResourceId} contract is handled in one place rather
+     * than surfacing as an NPE at the call site.
+     */
+    private int currentVersionOf(String agentId) throws Exception {
+        var currentId = agentStore.getCurrentResourceId(agentId);
+        return currentId == null || currentId.getVersion() == null ? -1 : currentId.getVersion();
+    }
+
     public record DreamResult(String userId, int entriesPruned, int contradictionsFound, int entriesSummarized, long durationMs,
             double estimatedCostUsd, String error) {
 

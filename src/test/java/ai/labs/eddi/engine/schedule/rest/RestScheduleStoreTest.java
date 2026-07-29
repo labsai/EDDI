@@ -490,6 +490,49 @@ class RestScheduleStoreTest {
         verify(scheduleStore, never()).updateSchedule(eq("r1"), any());
     }
 
+    /**
+     * The body-only guard was not enough, and this is the hole it left. A body that
+     * omits {@code userId} is exempt — it means "run as the system scheduler" — so
+     * a non-admin could PUT over a schedule STORED against a victim and pass the
+     * check with room to spare, retargeting its agent/cron/message or disarming it.
+     * Update has to answer both questions: may I touch THIS schedule (stored
+     * owner), and may I make it act as THAT identity (body owner)?
+     */
+    @Test
+    void updateSchedule_ofAnotherUsersStoredSchedule_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+        // Stored schedule belongs to the victim...
+        when(scheduleStore.readSchedule("v1")).thenReturn(dreamSchedule("v1", "victim-42"));
+
+        // ...and the body leaves userId unset, which the body-only guard waved through.
+        Response response = rest.updateSchedule("v1", makeCronSchedule("v1"));
+
+        assertEquals(403, response.getStatus(), "a non-admin must not overwrite a schedule owned by another user");
+        verify(scheduleStore, never()).updateSchedule(eq("v1"), any());
+    }
+
+    @Test
+    void updateSchedule_ofOwnStoredSchedule_allowedForEditor() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("m1")).thenReturn(dreamSchedule("m1", "editor-1"));
+
+        Response response = rest.updateSchedule("m1", dreamSchedule("m1", "editor-1"));
+
+        assertEquals(200, response.getStatus());
+        verify(scheduleStore).updateSchedule(eq("m1"), any());
+    }
+
+    @Test
+    void updateSchedule_ofAnotherUsersStoredSchedule_allowedForAdmin() throws Exception {
+        asAdmin("root");
+        when(scheduleStore.readSchedule("v1")).thenReturn(dreamSchedule("v1", "victim-42"));
+
+        Response response = rest.updateSchedule("v1", dreamSchedule("v1", "victim-42"));
+
+        assertEquals(200, response.getStatus());
+        verify(scheduleStore).updateSchedule(eq("v1"), any());
+    }
+
     @Test
     void fireNow_scheduleActingAsAnotherUser_forbiddenForEditor() throws Exception {
         asEditor("editor-1");

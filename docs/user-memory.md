@@ -60,7 +60,6 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
       "summarizeTargetEntries": 2,
       "summarizeGroupBy": "category",
       "preserveAgentProvenance": false,
-      "maxSummarizationCalls": 10,
       "maxCostPerRun": 0.50
     }
   },

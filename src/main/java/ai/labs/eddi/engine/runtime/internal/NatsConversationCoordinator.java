@@ -370,8 +370,13 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     }
 
     /**
-     * Route a failed message to the dead-letter stream after all retries are
-     * exhausted.
+     * Route a failed message to the dead-letter stream.
+     * <p>
+     * On the FIRST failure, not after retries are exhausted: a task that reports
+     * failure has already run — possibly calling an LLM, executing tools and
+     * spending money — so re-running it would repeat those side effects. The
+     * retry-then-dead-letter wording this replaced described the behaviour before
+     * the no-retry change and contradicted the code directly above.
      */
     private void routeToDeadLetter(String conversationId, Throwable failure) {
         String deadLetterSubject = DEAD_LETTER_PREFIX + sanitizeSubject(conversationId);

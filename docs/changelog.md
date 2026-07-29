@@ -78,7 +78,9 @@ Per the repo owner's decision, `DreamService` is now registered with `ScheduleFi
 
 ### Verification
 
-Clean compile passed **first attempt**, with no repairs needed despite three cross-workstream signature changes. Full suite: 12,633 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature; this machine cannot bind sockets). All four mutation checks bite — C1, C5, C9 and B2 each fail a test when reverted, verified against whole test classes and with surefire reports checked to confirm the new classes actually executed rather than being silently skipped.
+Clean compile passed **first attempt**, with no repairs needed despite three cross-workstream signature changes. Full suite **as of the original wave-3 work**: 12,633 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature; this machine cannot bind sockets). All four mutation checks bite — C1, C5, C9 and B2 each fail a test when reverted, verified against whole test classes and with surefire reports checked to confirm the new classes actually executed rather than being silently skipped.
+
+> The pre-merge review pass above re-ran the suite after its fixes: **12,912 tests**, failures confined to the same 15 known network-dependent classes. Both figures are real runs at different points — the earlier one is not superseded, it just predates ~280 added tests.
 
 ---
 

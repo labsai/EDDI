@@ -109,11 +109,25 @@ public class GroupConversationService implements IGroupConversationService {
     /**
      * Slack added on top of a member's own budget when a parallel phase arms its
      * batch deadline. A member reaches its {@code responseFuture.get(timeout)} only
-     * after agent lookup, conversation start and attachment sharing, so without a
-     * grace the orchestrator's deadline — armed the instant the batch is dispatched
-     * — expires while the member is still legitimately inside its own budget.
+     * after agent lookup, conversation start, attachment grants and prior-entry
+     * verification — several store round trips — so without a grace the
+     * orchestrator's deadline, armed the instant the batch is dispatched, expires
+     * while the member is still legitimately inside its own budget.
+     * <p>
+     * The floor is absolute, but it cannot be ONLY absolute: setup cost does not
+     * shrink with a short configured {@code agentTimeoutSeconds}, so a flat second
+     * is a large fraction of a 2s budget and a rounding error against a 180s one.
+     * The grace is therefore {@code max(floor, timeout * fraction)} — see
+     * {@link #parallelBatchGraceSeconds}.
      */
-    private static final int PARALLEL_BATCH_GRACE_SECONDS = 1;
+    private static final int PARALLEL_BATCH_GRACE_FLOOR_SECONDS = 1;
+
+    /**
+     * Fraction of a member's per-attempt budget also allowed for setup, so the
+     * grace scales instead of being swamped by a large timeout or dominating a
+     * small one.
+     */
+    private static final double PARALLEL_BATCH_GRACE_FRACTION = 0.1;
 
     /**
      * Ceiling on the derived parallel-batch budget, so an absurd
@@ -1700,8 +1714,8 @@ public class GroupConversationService implements IGroupConversationService {
      * It is derived from what ONE member turn may legitimately consume — its
      * per-attempt {@code agentTimeoutSeconds} multiplied by the number of attempts
      * {@code onAgentFailure} allows (only {@code RETRY} retries, and it retries at
-     * most {@code maxRetries} times) — plus {@link #PARALLEL_BATCH_GRACE_SECONDS}.
-     * The normalisation of both protocol values is deliberately identical to
+     * most {@code maxRetries} times) — plus {@link #parallelBatchGraceSeconds}. The
+     * normalisation of both protocol values is deliberately identical to
      * {@code executeAgentTurn}'s: if the orchestrator's deadline is shorter than
      * the member's own, the member's timeout handling (retry / abort / attributed
      * SKIP) becomes unreachable.
@@ -1714,7 +1728,23 @@ public class GroupConversationService implements IGroupConversationService {
         long attempts = protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY
                 ? (protocol.maxRetries() > 0 ? protocol.maxRetries() : DEFAULT_MAX_RETRIES) + 1L
                 : 1L;
-        return Math.min(timeout * attempts + PARALLEL_BATCH_GRACE_SECONDS, MAX_PARALLEL_BATCH_BUDGET_SECONDS);
+        return Math.min(timeout * attempts + parallelBatchGraceSeconds(timeout), MAX_PARALLEL_BATCH_BUDGET_SECONDS);
+    }
+
+    /**
+     * Setup slack for a parallel batch: the larger of an absolute floor and a
+     * fraction of the member's per-attempt budget.
+     * <p>
+     * A purely absolute grace loses the race again whenever setup outruns it, which
+     * is likeliest with a SHORT configured timeout — there one second is both a big
+     * share of the budget and quite possibly less than the store round trips take.
+     * Scaling with the timeout keeps the orchestrator's deadline behind the
+     * member's own in both directions, which is the property that makes
+     * {@code executeAgentTurn}'s retry / abort / attributed-SKIP branches reachable
+     * at all.
+     */
+    static long parallelBatchGraceSeconds(long perAttemptTimeoutSeconds) {
+        return Math.max(PARALLEL_BATCH_GRACE_FLOOR_SECONDS, (long) Math.ceil(perAttemptTimeoutSeconds * PARALLEL_BATCH_GRACE_FRACTION));
     }
 
     // =================================================================
