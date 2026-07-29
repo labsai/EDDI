@@ -17,6 +17,8 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -39,6 +41,9 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 class WorkflowTraversal {
     private static final Logger LOGGER = Logger.getLogger(WorkflowTraversal.class);
+
+    /** Matches the numeric value of a {@code version=} query param. */
+    private static final Pattern VERSION_PARAM = Pattern.compile("version=(\\d+)");
 
     /**
      * Cache lifetime. Deliberately tiny — long enough to dedupe the several
@@ -178,7 +183,25 @@ class WorkflowTraversal {
                 degraded = true;
                 continue;
             }
-            int workflowVersion = Integer.parseInt(workflowQuery.replaceAll(".*version=(\\d+).*", "$1"));
+            // replaceAll returns the string UNCHANGED when the pattern does not match, so
+            // "version=abc" reached parseInt as "version=abc" and threw — escaping the
+            // degrade-and-continue contract every other branch here honours, and aborting
+            // discovery for the whole turn over one malformed workflow URI. Match
+            // explicitly
+            // instead, and treat "present but unusable" exactly like "absent".
+            Matcher versionMatcher = VERSION_PARAM.matcher(workflowQuery);
+            int workflowVersion;
+            try {
+                if (!versionMatcher.find()) {
+                    throw new NumberFormatException("no numeric version in query");
+                }
+                workflowVersion = Integer.parseInt(versionMatcher.group(1));
+            } catch (NumberFormatException e) {
+                // Also covers a digit run too large for an int.
+                LOGGER.warnf("Workflow URI has an unusable version query: %s", workflowUri);
+                degraded = true;
+                continue;
+            }
 
             try {
                 WorkflowConfiguration workflowConfig = restWorkflowStore.readWorkflow(workflowId, workflowVersion);

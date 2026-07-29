@@ -19,9 +19,12 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -60,6 +63,47 @@ class WorkflowTraversalCacheTest {
         var workflowConfig = new WorkflowConfiguration();
         workflowConfig.setWorkflowSteps(List.of());
         when(workflowStore.readWorkflow(anyString(), anyInt())).thenReturn(workflowConfig);
+    }
+
+    /**
+     * Every other malformed-URI branch here warns, marks the traversal degraded and
+     * moves on. The version parse did not: {@code String.replaceAll} returns the
+     * input UNCHANGED when the pattern does not match, so a URI carrying
+     * {@code ?version=abc} passed the {@code contains("version=")} guard and
+     * reached {@code parseInt} as the literal {@code "version=abc"}. The
+     * NumberFormatException escaped discovery entirely, so one malformed workflow
+     * URI aborted tool discovery for the whole turn instead of skipping that one
+     * workflow.
+     */
+    @Test
+    @DisplayName("a non-numeric version degrades that workflow instead of aborting the turn")
+    void nonNumericVersionDoesNotAbortDiscovery() throws Exception {
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaabbbbccccddddeeeeffff?version=abc")));
+        when(agentStore.readAgent(anyString(), anyInt())).thenReturn(agentConfig);
+
+        var configs = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+
+        assertNotNull(configs, "discovery must return a result, not blow up the turn");
+        assertTrue(configs.isEmpty(), "the unusable workflow contributes nothing");
+        verify(workflowStore, never()).readWorkflow(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("a version too large for an int degrades the same way")
+    void overflowingVersionDoesNotAbortDiscovery() throws Exception {
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(
+                List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaabbbbccccddddeeeeffff?version=99999999999999")));
+        when(agentStore.readAgent(anyString(), anyInt())).thenReturn(agentConfig);
+
+        var configs = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+
+        assertNotNull(configs);
+        assertTrue(configs.isEmpty());
+        verify(workflowStore, never()).readWorkflow(anyString(), anyInt());
     }
 
     @Test

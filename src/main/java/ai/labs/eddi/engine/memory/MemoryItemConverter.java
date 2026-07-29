@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.modules.llm.impl.PromptSnippetService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -103,7 +104,7 @@ public class MemoryItemConverter implements IMemoryItemConverter {
                     conversationDataObjects.put(KEY_SNIPPETS, snippets);
                 }
             } catch (RuntimeException e) {
-                LOGGER.warnf("Could not resolve prompt snippets for template data: %s", e.getMessage());
+                LOGGER.warnf("Could not resolve prompt snippets for template data: %s", LogSanitizer.sanitize(e.getMessage()));
             }
         }
 
@@ -114,7 +115,7 @@ public class MemoryItemConverter implements IMemoryItemConverter {
                     conversationDataObjects.put(KEY_VARS, globalVars);
                 }
             } catch (RuntimeException e) {
-                LOGGER.warnf("Could not resolve global variables for template data: %s", e.getMessage());
+                LOGGER.warnf("Could not resolve global variables for template data: %s", LogSanitizer.sanitize(e.getMessage()));
             }
         }
     }
