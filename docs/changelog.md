@@ -81,6 +81,16 @@ Per the repo owner's decision, `DreamService` is now registered with `ScheduleFi
 Clean compile passed **first attempt**, with no repairs needed despite three cross-workstream signature changes. Full suite **as of the original wave-3 work**: 12,633 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature; this machine cannot bind sockets). All four mutation checks bite — C1, C5, C9 and B2 each fail a test when reverted, verified against whole test classes and with surefire reports checked to confirm the new classes actually executed rather than being silently skipped.
 
 > The pre-merge review pass above re-ran the suite after its fixes: **12,912 tests**, failures confined to the same 15 known network-dependent classes. Both figures are real runs at different points — the earlier one is not superseded, it just predates ~280 added tests.
+## 🔎 fix(llm): review follow-ups — workflow version parse, log sanitization (2026-07-29)
+
+**Repo:** EDDI (`fix/review-followup-workflow-version`)
+
+Two findings Copilot raised against #618 after it had already been approved, kept out of that PR so they arrive small enough for CodeRabbit to actually review (#618 reached 120 files, past CodeRabbit's 100-file limit, so it merged without ever getting a CodeRabbit pass).
+
+- **`WorkflowTraversal` aborted tool discovery for a whole turn over one malformed URI.** Every other malformed-URI branch in that loop warns, marks the traversal degraded and continues. The version parse did not. `String.replaceAll` returns its input **unchanged** when the pattern does not match, so a workflow URI carrying `?version=abc` passed the `contains("version=")` guard and reached `Integer.parseInt` as the literal string `"version=abc"`. The `NumberFormatException` escaped `discoverConfigs` entirely — so a single bad workflow URI took out httpcall, mcpcall and RAG tool discovery for that turn, rather than skipping the one workflow that was broken. Now matched explicitly, with "present but unusable" treated exactly like "absent" (and a digit run too large for an `int` folded into the same path).
+
+- **`MemoryItemConverter` logged raw exception messages** in both the prompt-snippet and global-variable catch blocks. Exception text can carry user-controlled values, so this is the same CWE-117 class CodeQL flagged five times in #618; routed through `LogSanitizer`.
+
 ## 🐳 fix(demo): the Open WebUI seeder did nothing on a second run (2026-07-29)
 
 **Repo:** EDDI (`feat/openai-api-adapter`)
