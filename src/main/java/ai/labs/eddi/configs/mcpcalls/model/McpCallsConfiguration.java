@@ -34,7 +34,14 @@ public class McpCallsConfiguration {
     /** Optional display name for this MCP server connection */
     private String name;
 
-    /** Transport type: "http" (default, StreamableHTTP) or "sse" */
+    /**
+     * Transport type. Only StreamableHTTP is implemented, so the accepted tokens
+     * are {@link #SUPPORTED_TRANSPORTS} — {@code "http"} (the default),
+     * {@code "https"}, {@code "streamable-http"} or {@code "streamablehttp"}.
+     * {@code "sse"} and {@code "stdio"} were once documented here but never
+     * implemented; a stored config carrying one still loads (with a logged error)
+     * but its MCP server will not connect.
+     */
     private String transport = "http";
 
     /**
@@ -73,7 +80,14 @@ public class McpCallsConfiguration {
     public static final Set<String> SUPPORTED_TRANSPORTS = Set.of("http", "https", "streamable-http", "streamablehttp");
 
     /**
-     * Validate this configuration at deploy time.
+     * Validate this configuration.
+     * <p>
+     * This is the <em>write-boundary</em> validator: it is meant for REST
+     * create/update and import, where a rejection is recoverable by the author.
+     * Loading an already-stored config is deliberately lenient — {@code
+     * McpCallsTask.configure()} only logs what this method reports, so a config
+     * that predates these rules cannot brick an entire agent (the MCP step itself
+     * still fails closed at connection time).
      * <p>
      * Two silently-ignored settings are rejected here rather than accepted and
      * dropped:

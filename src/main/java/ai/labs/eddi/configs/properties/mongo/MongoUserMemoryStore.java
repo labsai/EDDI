@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.FindIterable;
@@ -198,7 +199,8 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 String existingAgent = existing.getString(FIELD_SOURCE_AGENT_ID);
                 if (existingAgent != null && !existingAgent.equals(entry.sourceAgentId())) {
                     LOGGER.infof("[MEMORY] Cross-agent global write: key='%s', user='%s', " + "owning agent='%s' (preserved), writing agent='%s'",
-                            entry.key(), entry.userId(), existingAgent, entry.sourceAgentId());
+                            LogSanitizer.sanitize(entry.key()), LogSanitizer.sanitize(entry.userId()), LogSanitizer.sanitize(existingAgent),
+                            LogSanitizer.sanitize(entry.sourceAgentId()));
                 }
             }
         }

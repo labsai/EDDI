@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -121,7 +122,7 @@ class LlmTaskCoverageTest {
                 ragContextProvider, new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
 
         lenient().when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData d = mock(IData.class);

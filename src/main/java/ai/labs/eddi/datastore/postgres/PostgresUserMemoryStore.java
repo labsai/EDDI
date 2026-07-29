@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.arc.DefaultBean;
@@ -64,7 +65,27 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 ON usermemories (user_id, key) WHERE visibility = 'global';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_um_upsert_agent
                 ON usermemories (user_id, key, source_agent_id) WHERE visibility != 'global';
+            CREATE INDEX IF NOT EXISTS idx_um_user_access_count
+                ON usermemories (user_id, access_count DESC);
             """;
+
+    /** Recall order that ranks entries by how often they have been recalled. */
+    private static final String RECALL_ORDER_MOST_ACCESSED = "most_accessed";
+
+    /**
+     * Share of the recall window reserved for the most recently updated entries
+     * when {@link #RECALL_ORDER_MOST_ACCESSED} is used (1/5th of the window, at
+     * least one slot).
+     * <p>
+     * Without this reservation {@code most_accessed} is self-reinforcing: only
+     * entries that are already inside the window get their {@code access_count}
+     * incremented, so a freshly written entry (count 0) can never climb in once the
+     * window is full. The reserved slots act as the recency term of the ranking — a
+     * new entry always gets at least one chance to be recalled (and thereby to
+     * start accumulating access counts). Mirrors
+     * {@code MongoUserMemoryStore.RECENCY_RESERVATION_DIVISOR}.
+     */
+    private static final int RECENCY_RESERVATION_DIVISOR = 5;
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
@@ -174,8 +195,11 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                     if (rs.next()) {
                         String existingAgent = rs.getString("source_agent_id");
                         if (existingAgent != null && !existingAgent.equals(entry.sourceAgentId())) {
-                            LOGGER.infof("[MEMORY] Cross-agent global overwrite: key='%s', user='%s', " + "previous agent='%s', new agent='%s'",
-                                    entry.key(), entry.userId(), existingAgent, entry.sourceAgentId());
+                            LOGGER.infof(
+                                    "[MEMORY] Cross-agent global write: key='%s', user='%s', "
+                                            + "owning agent='%s' (preserved), writing agent='%s'",
+                                    LogSanitizer.sanitize(entry.key()), LogSanitizer.sanitize(entry.userId()),
+                                    LogSanitizer.sanitize(existingAgent), LogSanitizer.sanitize(entry.sourceAgentId()));
                         }
                     }
                 }
@@ -187,13 +211,20 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         // Build upsert SQL based on visibility
         String upsertSql;
         if (entry.visibility() == Visibility.global) {
+            // A global entry is keyed on (user_id, key) ONLY — it is shared across
+            // agents, so any agent that merely RECALLS and rewrites it would otherwise
+            // take over source_agent_id and silently steal ownership. Leaving
+            // source_agent_id out of the DO UPDATE SET list is the SQL equivalent of
+            // MongoDB's $setOnInsert: the INSERT still stamps the creating agent, later
+            // updates keep it. Self/group entries are keyed per agent, so there
+            // source_agent_id is part of the identity and updating it is correct.
             upsertSql = """
                     INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
                         group_ids, source_conversation_id, conflicted)
                     VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
                     ON CONFLICT (user_id, key) WHERE visibility = 'global'
                     DO UPDATE SET value = EXCLUDED.value, category = EXCLUDED.category,
-                        source_agent_id = EXCLUDED.source_agent_id, group_ids = EXCLUDED.group_ids,
+                        group_ids = EXCLUDED.group_ids,
                         source_conversation_id = EXCLUDED.source_conversation_id,
                         conflicted = EXCLUDED.conflicted, updated_at = CURRENT_TIMESTAMP
                     RETURNING id
@@ -268,6 +299,28 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     public List<UserMemoryEntry> getVisibleEntries(String userId, String agentId, List<String> groupIds, String recallOrder, int maxEntries)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
+        String visibilityQuery = buildVisibilityQuery(groupIds);
+
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            if (!RECALL_ORDER_MOST_ACCESSED.equals(recallOrder)) {
+                List<UserMemoryEntry> entries = new ArrayList<>();
+                collectInto(conn, new LinkedHashSet<>(), entries, visibilityQuery, userId, agentId, groupIds, " ORDER BY updated_at DESC",
+                        maxEntries > 0 ? maxEntries : -1);
+                return entries;
+            }
+
+            return mostAccessedWithRecencyReservation(conn, visibilityQuery, userId, agentId, groupIds, maxEntries);
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to get visible entries", e);
+        }
+    }
+
+    /**
+     * Visibility filter for a recall: self(agentId) OR group(groupIds) OR global.
+     * The {@code ??|} is the JDBC escape for PostgreSQL's {@code ?|} JSONB overlap
+     * operator — a single {@code ?} would be parsed as a bind parameter.
+     */
+    private String buildVisibilityQuery(List<String> groupIds) {
         StringBuilder sql = new StringBuilder("""
                 SELECT * FROM usermemories WHERE user_id = ? AND (
                     (visibility = 'self' AND source_agent_id = ?)
@@ -281,12 +334,52 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             }
             sql.append("])");
         }
-        sql.append(")");
+        return sql.append(")").toString();
+    }
 
-        String orderBy = "most_accessed".equals(recallOrder) ? " ORDER BY access_count DESC" : " ORDER BY updated_at DESC";
-        sql.append(orderBy).append(" LIMIT ?");
+    /**
+     * {@code most_accessed} recall: the bulk of the window is filled by access
+     * count, a reserved slice by recency (see
+     * {@link #RECENCY_RESERVATION_DIVISOR}), and the {@code access_count}
+     * increments are applied in ONE set-based statement AFTER both result sets are
+     * drained. Mirrors
+     * {@code MongoUserMemoryStore.mostAccessedWithRecencyReservation}.
+     */
+    private List<UserMemoryEntry> mostAccessedWithRecencyReservation(Connection conn, String visibilityQuery, String userId, String agentId,
+                                                                     List<String> groupIds, int maxEntries)
+            throws SQLException {
+        int recencySlots = maxEntries > 0 ? Math.max(1, maxEntries / RECENCY_RESERVATION_DIVISOR) : 0;
+        int accessSlots = maxEntries > 0 ? maxEntries - recencySlots : -1;
 
-        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+        Set<String> recalled = new LinkedHashSet<>();
+        List<UserMemoryEntry> ordered = new ArrayList<>();
+        collectInto(conn, recalled, ordered, visibilityQuery, userId, agentId, groupIds, " ORDER BY access_count DESC", accessSlots);
+        collectInto(conn, recalled, ordered, visibilityQuery, userId, agentId, groupIds, " ORDER BY updated_at DESC", recencySlots);
+
+        if (!recalled.isEmpty()) {
+            String updateSql = "UPDATE usermemories SET access_count = access_count + 1 WHERE id = ANY (?)";
+            try (PreparedStatement up = conn.prepareStatement(updateSql)) {
+                up.setArray(1, conn.createArrayOf("varchar", recalled.toArray(new String[0])));
+                up.executeUpdate();
+            }
+        }
+
+        return ordered;
+    }
+
+    /**
+     * Drains one sorted query into {@code ordered}, de-duplicating against
+     * {@code seen} (keyed by row id). {@code limit < 0} means "no limit";
+     * {@code limit == 0} skips the query entirely.
+     */
+    private void collectInto(Connection conn, Set<String> seen, List<UserMemoryEntry> ordered, String visibilityQuery, String userId,
+                             String agentId, List<String> groupIds, String orderBy, int limit)
+            throws SQLException {
+        if (limit == 0) {
+            return;
+        }
+        String sql = visibilityQuery + orderBy + (limit > 0 ? " LIMIT ?" : "");
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             int paramIndex = 1;
             ps.setString(paramIndex++, userId);
             ps.setString(paramIndex++, agentId);
@@ -295,29 +388,17 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                     ps.setString(paramIndex++, gid);
                 }
             }
-            ps.setInt(paramIndex, maxEntries);
-
-            List<UserMemoryEntry> entries = new ArrayList<>();
+            if (limit > 0) {
+                ps.setInt(paramIndex, limit);
+            }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    entries.add(resultSetToEntry(rs));
-                }
-            }
-
-            // Increment access count when using most_accessed ordering
-            if ("most_accessed".equals(recallOrder) && !entries.isEmpty()) {
-                String updateSql = "UPDATE usermemories SET access_count = access_count + 1 WHERE id = ?";
-                try (PreparedStatement up = conn.prepareStatement(updateSql)) {
-                    for (UserMemoryEntry e : entries) {
-                        up.setString(1, e.id());
-                        up.addBatch();
+                    var entry = resultSetToEntry(rs);
+                    if (entry.id() == null || seen.add(entry.id())) {
+                        ordered.add(entry);
                     }
-                    up.executeBatch();
                 }
             }
-            return entries;
-        } catch (SQLException e) {
-            throw new IResourceStore.ResourceStoreException("Failed to get visible entries", e);
         }
     }
 

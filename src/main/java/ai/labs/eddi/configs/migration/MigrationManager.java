@@ -82,8 +82,28 @@ public class MigrationManager implements IMigrationManager {
     /**
      * Documents are copied here in their pre-migration state before they are
      * rewritten, so a bad migration stays recoverable.
+     * <p>
+     * The copy is deliberately narrowed to the fields a migration can actually
+     * rewrite (see {@link #backupProjection(String, Document)}). Conversation
+     * memories are reduced to {@code _id} + {@code conversationProperties}: copying
+     * the whole snapshot would duplicate every conversation step — verbatim user
+     * input — and the owning {@code userId} into a collection that no retention
+     * sweep and no GDPR erasure knows about. Personal data must not survive in a
+     * store nothing ever deletes.
+     * <p>
+     * Backups are still not erased automatically. Drop them once the migration is
+     * verified, or set {@code eddi.migration.backupBeforeWrite=false} to skip them
+     * entirely; a WARN naming the collection is logged whenever one is written.
      */
     public static final String BACKUP_COLLECTION_SUFFIX = ".premigrationbackup";
+
+    /**
+     * The only part of a conversation-memory document
+     * {@link #migrateConversationMemory()} rewrites, plus the id needed to restore
+     * it. Everything else — most of all the conversation steps — stays out of the
+     * backup.
+     */
+    private static final List<String> CONVERSATION_MEMORY_BACKUP_FIELDS = List.of(ID_FIELD, FIELD_NAME_CONVERSATION_PROPERTIES);
 
     private static final String LEGACY_UUID_EXPRESSION = "[[${@java.util.UUID@randomUUID()}]]";
     private static final String QUTE_UUID_EXPRESSION = "{uuidUtils:generateUUID()}";
@@ -231,16 +251,27 @@ public class MigrationManager implements IMigrationManager {
 
         boolean migrationHasExecuted = false;
         var backupCollection = resolveBackupCollection(documentType, isHistory);
+        int backedUp = 0;
         for (var document : documents) {
             // snapshot before the migration mutates the document in place — a rewrite
             // that turns out to be wrong must stay recoverable
-            var originalDocument = backupCollection != null ? deepCopy(document) : null;
+            var originalDocument = backupCollection != null ? backupProjection(documentType, document) : null;
             var migratedDocument = migration.migrate(document);
             if (migratedDocument != null) {
-                backupDocument(backupCollection, originalDocument);
+                if (backupDocument(backupCollection, originalDocument)) {
+                    backedUp++;
+                }
                 saveToPersistence(documentType, migratedDocument, isHistory, collection);
                 migrationHasExecuted = true;
             }
+        }
+
+        if (backedUp > 0) {
+            // operators have to know this collection exists: nothing reads, expires or
+            // erases it, so it is theirs to drop once the migration is verified
+            LOGGER.warnf("Kept %d pre-migration document(s) in '%s'. Nothing removes that collection automatically — "
+                    + "drop it once the migration is verified, or set eddi.migration.backupBeforeWrite=false to skip "
+                    + "the pre-migration backup entirely.", backedUp, backupCollectionName(documentType, isHistory));
         }
 
         return migrationHasExecuted;
@@ -251,19 +282,55 @@ public class MigrationManager implements IMigrationManager {
             return null;
         }
 
-        return database.getCollection(documentType + (isHistory ? ".history" : "") + BACKUP_COLLECTION_SUFFIX);
+        return database.getCollection(backupCollectionName(documentType, isHistory));
     }
 
-    private void backupDocument(MongoCollection<Document> backupCollection, Document originalDocument) {
+    private static String backupCollectionName(String documentType, boolean isHistory) {
+        return documentType + (isHistory ? ".history" : "") + BACKUP_COLLECTION_SUFFIX;
+    }
+
+    /**
+     * Pre-migration copy of the fields the migration for {@code documentType} can
+     * rewrite.
+     * <p>
+     * Configuration documents (propertysetter, apicalls, outputs) are copied whole
+     * — they hold no personal data and a whole-document restore is the safest thing
+     * to have. Conversation memories are projected down to
+     * {@link #CONVERSATION_MEMORY_BACKUP_FIELDS}, because
+     * {@link #migrateConversationMemory()} only ever rewrites
+     * {@code conversationProperties}: the narrowed copy restores everything the
+     * migration touched, while transcripts and the owning {@code userId} never
+     * reach a collection that GDPR erasure does not know about.
+     */
+    private static Document backupProjection(String documentType, Document document) {
+        if (!COLLECTION_CONVERSATION_MEMORY.equals(documentType)) {
+            return deepCopy(document);
+        }
+
+        var projection = new Document();
+        for (String field : CONVERSATION_MEMORY_BACKUP_FIELDS) {
+            if (document.containsKey(field)) {
+                projection.put(field, deepCopyValue(document.get(field)));
+            }
+        }
+        return projection;
+    }
+
+    /**
+     * @return true if the pre-migration state was actually stored
+     */
+    private boolean backupDocument(MongoCollection<Document> backupCollection, Document originalDocument) {
         if (backupCollection == null || originalDocument == null) {
-            return;
+            return false;
         }
 
         try {
             backupCollection.insertOne(originalDocument);
+            return true;
         } catch (Exception e) {
             // a failed backup must not abort the migration, but it has to be visible
             LOGGER.warnf("Could not back up document before migrating it: %s", e.getLocalizedMessage());
+            return false;
         }
     }
 

@@ -113,7 +113,7 @@ public class RestAttachmentUpload {
 
         // On the request thread, before the async hop: the guard reads the caller's
         // SecurityIdentity, which is request-scoped.
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        conversationAccessGuard.requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -205,7 +205,7 @@ public class RestAttachmentUpload {
                                 @Parameter(description = "Conversation ID to list attachments for.")
                                 @PathParam("conversationId") String conversationId,
                                 @Suspended AsyncResponse asyncResponse) {
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        conversationAccessGuard.requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -236,7 +236,7 @@ public class RestAttachmentUpload {
                                    @Parameter(description = "Storage reference of the attachment.")
                                    @PathParam("storageRef") String storageRef,
                                    @Suspended AsyncResponse asyncResponse) {
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        conversationAccessGuard.requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -292,7 +292,7 @@ public class RestAttachmentUpload {
                                  @Parameter(description = "Storage reference of the attachment.")
                                  @PathParam("storageRef") String storageRef,
                                  @Suspended AsyncResponse asyncResponse) {
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        conversationAccessGuard.requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -331,7 +331,7 @@ public class RestAttachmentUpload {
                                   @Parameter(description = "Conversation ID to delete attachments for.")
                                   @PathParam("conversationId") String conversationId,
                                   @Suspended AsyncResponse asyncResponse) {
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        conversationAccessGuard.requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {

@@ -25,7 +25,16 @@ import static org.mockito.Mockito.*;
  * {@code ConversationProperties}) so the {@code clear(); forEach(put)} sequence
  * in {@code restoreProperties} is exercised end to end.
  * <p>
- * I5 — the checkpoint retention is no longer hardcoded.
+ * I5 — covers the retention ARGUMENT of
+ * {@code createCheckpoint(memory, triggeredBy, triggeredByClass, maxCheckpoints)}
+ * only. It is deliberately NOT a behavioural guarantee that
+ * {@code AgentConfiguration.SessionManagement#maxCheckpointsPerConversation}
+ * reaches the store: the sole production caller
+ * ({@code AgentOrchestrator#executeSingleToolCallResult}) still uses the 3-arg
+ * overload, and the agent-level setting has no route onto
+ * {@code IConversationMemory} yet, so auto-checkpointing prunes to
+ * {@link MemorySnapshotService#DEFAULT_MAX_CHECKPOINTS} at runtime. See the
+ * wiring note on {@code AgentConfiguration.SessionManagement}.
  */
 class MemorySnapshotServiceRollbackTest {
 
@@ -69,8 +78,8 @@ class MemorySnapshotServiceRollbackTest {
     }
 
     @Test
-    @DisplayName("I5 — an explicit retention is honoured instead of the hardcoded default")
-    void explicitRetentionIsHonoured() {
+    @DisplayName("I5 — the createCheckpoint retention argument reaches pruneOldest (API-level; no production caller passes it yet)")
+    void explicitRetentionArgumentReachesPruneOldest() {
         var memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
 
         snapshotService.createCheckpoint(memory, "before_tool:x", "TestClass", 25);

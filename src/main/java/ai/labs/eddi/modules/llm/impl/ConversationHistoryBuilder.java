@@ -223,8 +223,29 @@ class ConversationHistoryBuilder {
 
         // === Token-aware windowing with anchored opening ===
 
-        // Step 1: Reserve budget for anchored steps
-        int effectiveAnchor = Math.min(anchorFirstSteps, allMessages.size());
+        // Step 1: Reserve budget for anchored steps.
+        //
+        // The current turn is never an anchor. If it were, anchorFirstSteps >= size
+        // would
+        // make effectiveAnchor == size, so lastIsAnchored below turned true — which
+        // both
+        // zeroes currentTurnTokens and disables the trim loop (guarded on
+        // !lastIsAnchored).
+        // Every message then became an untrimmable anchor and the builder returned an
+        // over-budget prompt from inside the windowing path, the one place whose whole
+        // job
+        // is to stay under budget. Capping the anchor range one short of the end keeps
+        // the
+        // G13 "current turn is non-negotiable" guarantee — it is force-included in step
+        // 2
+        // instead — while leaving the anchors trimmable.
+        //
+        // Math.max(0, ...) matters for the empty case: with no messages lastIndex is -1
+        // and lastIsAnchored must stay true, or the currentTurnTokens estimate below
+        // would
+        // index allMessages.get(-1).
+        int anchorCeiling = Math.max(0, allMessages.size() - 1);
+        int effectiveAnchor = Math.min(anchorFirstSteps, anchorCeiling);
         var anchoredMessages = new ArrayList<ChatMessage>();
         int anchoredTokens = 0;
 

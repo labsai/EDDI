@@ -69,6 +69,24 @@ Clean compile passed **first attempt**, with no repairs needed despite three cro
 
 Second half of wave 2, stacked on the access-control PR. Covers the LLM tool pipeline, the persistent-memory subsystem, the v5→v6 migrations, and import/export.
 
+### Pre-merge review pass — and corrections to the claims below (2026-07-29)
+
+This PR reached "approved" having been reviewed by **no CI run and no review bot**: CodeRabbit reported `Review skipped: reviews are disabled for this base branch` because it was stacked on a disabled base, and a base-branch retarget fires `edited`, which is not in the default `pull_request` trigger set — so no workflow ever ran on its head SHA. A dedicated review pass over the 91-file diff found **16 findings that survived adversarial verification**, plus 21 from completeness/test critics. All are fixed here except one, named below. **Several entries further down overstated what the code delivered; those claims are corrected here rather than quietly edited away.**
+
+Fixes with user-visible consequence:
+
+- **F14 broke the error path it was meant to unify.** Routing rule-triggered MCP calls through `ToolExecutionService.executeToolWrapped` was right in intent, but that wrapper *catches every exception and returns an error string*. `RetryConfiguration.executeWithRetry` therefore never saw a throwable: retry never retried, `continueOnError` became dead code, and a failed MCP call was **stored as a successful response**. The metering wrapper is kept; a real failure signal is restored on top of it.
+- **F18's delegation-depth guard was inert in production.** `delegationDepth` was injected only into the callee's `startConversation` context, landing on step 0; the follow-up `say` carried no context, so the turn that actually decides delegation read nothing. The claim below that F18 was "mutation-checked" was true of the *test*, not of production — the test drove the mechanism directly and never crossed the `say` boundary where the value was lost. The depth now propagates to the turn that reads it.
+- **F15 was fixed on two of three merge routes.** Within-server dedupe and the `AgentOrchestrator` source merge were handled; the cross-server merge in `discoverTools()` was still `addAll`/`putAll`, so two MCP servers advertising the same tool name still shadowed silently.
+- **G12 / G5 / G7 shipped on MongoDB only.** The "a turn is never silently discarded" guarantee, the `most_accessed` recency reservation, and global-entry ownership preservation were all absent from the PostgreSQL adapter — which answered benignly rather than signalling the gap. Now ported, with tests. **This is the third cross-backend gap in this stack** (after schedule `userId` and the audit `sequence`), which is no longer coincidence: each was a feature built against one backend, silently missing on the other, and invisible because the degraded answer looked like a normal one. The cross-backend conformance suite (D4/J3) is the real fix and remains outstanding.
+- **A summarizer could be handed another vendor's API key.** When `conversationSummary` names a different `llmProvider` than the parent task, the parent's resolved parameters — `apiKey`, `baseUrl` — were inherited and passed to that other vendor's client. Not theoretical: the pre-PR POJO defaults serialized `llmProvider: "anthropic"` into stored configs. Credential- and endpoint-bearing keys now stop at a provider boundary; vendor-neutral tuning keys still travel.
+- **Validation moved to the boundary where rejecting is safe.** `McpCallsTask.configure()` and RAG retrieval were both throwing/dropping on *stored* configs — a workflow-load failure and a silently empty knowledge base respectively. Both are now lenient on read (stored configs stay loadable, which is the one backward-compat contract that matters) and strict on write, in `RestMcpCallsStore` and `RestRagStore`.
+- Also fixed: the v6 rename migration aborting permanently when a v6 collection merely *exists* (EDDI creates those itself via `createIndex`) instead of skipping; the new pre-migration backup duplicating conversation transcripts outside the reach of GDPR erasure; export cleanup recursively deleting a shared `tmp/<agentId>` it could not prove it created, reaching `tmp/import/`; and the streaming no-partials fallback overwriting the `warning` key that `responseValidation` dispatches on, silently skipping `onTruncation`/`onContentFilter`.
+
+**Still not fixed — I5.** `AgentConfiguration.maxCheckpointsPerConversation` is *still ignored at runtime*. The test named `explicitRetentionIsHonoured` exercises an overload no production path calls, so it proved nothing; the misleading label is removed rather than left to imply coverage. Wiring the value through needs a session-scope slot on `IConversationMemory` and propagation via `IAgent`/`Agent`, which is a larger change than a review fix should smuggle in. **Any statement below that I5 is complete is wrong.**
+
+One critic finding was investigated and **rejected**: the `ExpressionFactory.setDomain` removal was claimed to change `and(...)`/`or(...)` parsing, but domain splitting happens only in `setExpressionName(String)` and the parser builds children through constructors that assign the name verbatim — the deleted line really was a no-op.
+
 ### The tool pipeline had a second door
 
 - **F14** — `executeToolWrapped` is genuinely well-built and has one production call site, so every one of the seven tool sources routes through it. Except **`McpCallsTask` doesn't** — a behaviour-rule-triggered lifecycle task invoking the *same* external MCP tools, which resolved a `ToolExecutor` and called it directly. It also bypassed `ToolApprovalGate`, so **`hitlConfig.toolApprovals` gated LLM-initiated calls and not rule-initiated ones** — a human-approval gate with a hole in it.
@@ -111,6 +129,133 @@ The wave-2 agent added `inheritedParameters` overloads to `SummarizationService`
 ### Verification
 
 Full unit suite: 12,384 tests, **0 non-environmental failures**. G2 and G12 mutation-checked, plus a second sharper mutation for G2 that removes only the input-scrub call — both halves are independently covered. F13's new wiring is mutation-checked at the `LlmTask` hop.
+## 🧵 fix(security): carry caller identity across the cascade and group dispatches (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+The caller binding is a `ThreadLocal`, and four more dispatch sites hand a turn to a fresh virtual
+thread without carrying it. A `${caller:token}` apicall reached from any of them failed closed with
+"the conversation turn has no authenticated caller" — safe, but invisible to the agent designer and
+dependent on unrelated configuration.
+
+- `CascadingModelExecutor:577` — every cascade step runs on `TIMEOUT_EXECUTOR`. The same agent config
+  worked or failed purely on whether `modelCascade` was set.
+- `GroupConversationService:282` — the whole discussion is dispatched to a virtual thread, so *no*
+  member agent had a caller.
+- `GroupConversationService:2366` — parallel-phase speakers fan out to further threads.
+- `GroupConversationService:3772` — the HITL resume path.
+
+`CallerIdentityContext` gains `withIdentity` for `Runnable`/`Callable`, `withIdentitySupplying` for
+`Supplier` (needed by `CompletableFuture.supplyAsync`), and `captureOrCurrent()`, which prefers the
+active request and falls back to the thread's binding — the group discussion is dispatched from the
+REST thread, the cascade from mid-pipeline.
+
+**Design note.** The `Supplier` variant is named apart from the `withIdentity` overloads on purpose:
+a value-returning lambda satisfies both `Callable` and `Supplier`, so same-named overloads are
+ambiguous at every call site.
+
+**Review round two** found a fifth site and two flaws in the wrapper itself:
+
+- `GroupConversationService:1788` — the task-force EXECUTE phase fans out again through
+  `CompletableFuture.runAsync`, so every task wave lost the caller. Missed first time because the
+  search pattern covered `submit` and `supplyAsync` but not `runAsync`.
+- The parallel-phase fan-out captured with `current()`, which is null when `discuss()` is called
+  synchronously on the REST thread — only `captureOrCurrent()` sees the request there.
+- **A null identity was a no-op**, so work dispatched *without* a caller inherited whatever binding
+  the pooled thread still carried from the turn before. It now binds null, masking it.
+- **Nested wrappers cleared instead of restoring**, so an inner wrapper wiped the outer caller and
+  the rest of that turn ran unauthenticated. The previous binding is now saved and restored.
+
+**Note on scope.** A group member agent now acts as the person who started the discussion. That
+follows the feature's model — the operator acts as the chatting user — but it is worth stating,
+because a member agent's reads are now attributed to that user in the audit trail.
+
+1204 tests pass across the affected suites. Neutering the `Runnable` wrapper fails the propagation
+test, so the binding is pinned rather than assumed.
+
+---
+
+## 🔓 fix(security): ${caller:token} never reached its resolver (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+A critical review of the caller-identity PR found the feature was **dead on arrival**, and the same
+defect silently disables two older documented features.
+
+`ApiCallExecutor.buildRequest` runs every header value through `prePostUtils.templateValues`
+*before* the caller-identity, global-variable and vault resolvers. `TemplatingEngine`'s trigger
+regex `\{[a-zA-Z#/!]` matches `{c`, so `Bearer ${caller:token}` is handed to Qute, which parses
+`{caller:token}` as a namespaced expression. An unresolvable namespace is a hard failure regardless
+of `strictRendering`, and no `caller` resolver existed. Proven against the project's own build:
+
+```text
+Bearer ${caller:token} -> THREW: No namespace resolver found for [caller]
+Bearer ${vault:my-key} -> THREW: No namespace resolver found for [vault]
+${vars:default-model}  -> THREW: No namespace resolver found for [vars]
+```
+
+So `${vault:...}` and `${vars:...}` in apicall headers have never worked either.
+
+**Fix.** `CallerNamespaceResolver` returns the `caller` placeholder verbatim so it round-trips
+through templating to the real resolver. It resolves nothing itself.
+
+**Deliberately `caller` only.** `vault`/`eddivault` keep failing loudly in templated positions.
+Letting them through would widen where a secret is substituted, and the resolved request *body* is
+written to conversation memory unscrubbed — a vault reference in a body template would put a
+plaintext API key into MongoDB. Docs claiming vault works in apicall headers were the bug, not the
+behaviour.
+
+**Why no test caught it:** all three `ApiCallExecutor` suites stub templating as a pass-through, and
+`CallerIdentityResolverTest` calls the resolver directly. Nothing exercised header -> Qute ->
+resolver. `CallerNamespaceResolverTest` now does, including a guard-rail test that fails without the
+resolver and one asserting vault still refuses.
+
+**Also fixed**
+- `setup-api` hardcoded `null` for the LLM base URL while the manager sent Ollama's URL as
+  `apiBaseUrl` — the *tool target* — pointing every generated tool at the model server.
+  `CreateApiAgentRequest` gains an `llmBaseUrl` field, passed to `createLlmConfig`.
+- The by-value token redaction added last round was untested through `ApiCallExecutor`; deleting the
+  call kept every test green. Now covered with a real resolver and mutation-checked.
+- Docs overclaimed: `${caller:userId}` is resolved in headers and query parameters, not "anywhere";
+  `rejectTokenReference`'s Javadoc claimed request bodies are checked.
+
+---
+
+## 🔐 feat(security): forward the caller's identity to apicall headers (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+An agent could only call an API with a *static* credential baked into its apicall config. That is the wrong shape whenever the API being called is EDDI's own: an OIDC token expires within the hour, cannot be least-privilege, and collapses every action to one synthetic principal in the audit trail. The EDDI-Manager "Platform Operator" needs exactly this — an agent that reads the platform on behalf of whoever is chatting with it — and could only be built by smuggling the user's bearer through the per-turn conversation `context`, which persists the token to MongoDB.
+
+**What changed.** Apicall *headers* may now reference the authenticated caller:
+
+- `${caller:token}` — the caller's raw bearer token
+- `${caller:userId}` — the caller's principal name (not a secret)
+
+`ApiCallExecutor` resolves these last in the header chain (after global variables and vault refs), because resolution needs the target URI.
+
+**Files**
+- `engine/security/CallerIdentity.java` — record (token, userId, origin); deliberately not part of `IConversationMemory`.
+- `engine/security/CallerIdentityContext.java` — captures the identity on the REST request thread and binds it to whichever pool thread runs the turn.
+- `engine/security/CallerIdentityResolver.java` — the `${caller:...}` resolver, mirroring `SecretResolver` / `GlobalVariableResolver`.
+- `engine/security/OriginMatcher.java` — scheme/host/port comparison with default-port normalization.
+- `engine/internal/ConversationService.java` — captures in `processConversationStep` and decorates the callable.
+- `modules/apicalls/impl/ApiCallExecutor.java` — resolves in headers; rejects a token reference in a query parameter.
+
+**Threading — the non-obvious part.** A turn is built on the request thread but executed twice removed from it: `submitInOrder` hands it to a coordinator thread, which hands the pipeline to *another* thread via `runtime.submitCallable`. Request-scoped beans (`SecurityIdentity`) resolve at none of those points. So the identity is captured while the request context is still live and travels **with the callable** (`withCallerIdentity`), not with a thread. Binding the coordinator thread would have missed the pipeline entirely — an easy and silent mistake.
+
+**Design decisions**
+1. **Same-origin only.** The token is released only when the outbound call targets the exact `scheme://host:port` the caller addressed, taken from the inbound request rather than configuration. An agent config naming a third-party host therefore cannot exfiltrate a user's token, and the feature needs no allow-list to be safe out of the box.
+2. **Headers only.** `${caller:token}` in a query parameter or request body is rejected — tokens in URLs leak through access logs, proxies and browser history, and outside a header the reference is never substituted. `${caller:userId}` is resolved in headers and query parameters.
+3. **Fails closed.** An unsatisfiable reference throws rather than resolving to `""`, which would silently send `Bearer ` and surface far away as a puzzling 401.
+4. **Never stored.** Resolution happens while building the request, and `scrubSensitiveHeaders` redacts it before the request is written to conversation memory. Header-*name* matching alone was not enough — a token placed in an unconventionally named header would have slipped through — so the resolved token is additionally matched by value.
+5. **Opt-out.** `eddi.caller-identity.enabled` (default `true`) forbids the feature outright.
+
+**Async boundaries.** Two further hand-offs lose a `ThreadLocal` binding and had to be covered explicitly, or `${caller:token}` would fail closed for no reason the config author could see: the HITL **resume** path (`runtime.submitCallable(resumeCallable, ...)`) and **fire-and-forget batch** calls in `ApiCallExecutor`. `CallerIdentityContext.propagate()` carries the binding across the latter; the resume path captures its own caller, since a resume is itself an authenticated request.
+
+**Tests.** `CallerIdentityResolverTest` (24) and `CallerIdentityContextTest` (10) — same-origin refusals (host, port, scheme downgrade), fail-closed paths, regex-escaping of tokens containing `$`/`\`, thread isolation, and clearing on pooled threads. Disabling the same-origin guard fails 4 tests (mutation-checked). All 227 `ConversationService*Test` tests still pass.
+
+**Note for the manager:** the operator ships this as its `caller-identity` auth mode, provisioning `apiAuth` as `Bearer ${caller:token}`; the conversation-context workaround and its token-at-rest warning are gone.
 
 ---
 
@@ -142,6 +287,7 @@ EDDI already has `OwnershipValidator`, `ConversationAccessGuard` and `HitlAccess
 - **G16** — `AuditHmac.verifyHmac` had **zero production callers**; the docs told operators to "recompute the HMAC and compare it" and the product shipped no way to do so. Added admin verification endpoints.
 - **G17** — GDPR pseudonymisation did `updateMany($set userId)` with no HMAC recompute, and `userId` is a *signed* field — so **every routine erasure produced rows cryptographically indistinguishable from tampered ones**. The class javadoc claiming a write-once contract was literally true and substantively false.
 - **G18** — No hash chain: entries were independently signed, so **deletion and reordering were undetectable**. Added a per-conversation sequence inside the signed payload (chosen over a global chain, which would serialise all audit writes).
+  - **Follow-up (review):** the first cut shipped this on **MongoDB only**. `PostgresAuditStore` persisted no sequence and left `supportsSequence()` at its `false` default, so `AuditLedgerService` skipped assigning one entirely — **every PostgreSQL deployment silently had no deletion detection**, reported as `UNAVAILABLE`, which reads like "not applicable" rather than "unprotected". Added the column, an idempotent `ALTER TABLE` defaulting old rows to the `UNSEQUENCED` sentinel, the `(conversation_id, sequence)` index verification reads, and `supportsSequence() = true`. This is the second cross-backend gap in this PR (after schedule `userId`), both in compliance code, both invisible because the degraded answer looked benign — the case for the deferred D4/J3 conformance suite.
 - **G19** — `eddi.vault.master-key` ships empty, so entries were written **unsigned by default** while the docs present the ledger as evidence-grade. `ComplianceStartupChecks` had zero references to vault/HMAC/audit.
 - **G20** — Unbounded audit queue that **re-offered failed batches into itself** — an OOM loop under a slow store.
 
@@ -247,6 +393,9 @@ The two backends had silently diverged, because nothing tests them against each 
 `./mvnw clean test-compile` green from scratch (deliberately clean, not incremental — several signature changes crossed workstream boundaries, and incremental builds reuse stale `.class` files for unedited callers). 158 targeted tests pass. E1's fix was mutation-checked: reverting it fails 2 tests in `RuleTest`.
 
 **Deliberately deferred to later waves:** E6 (write-time config validation), E12, D4/J3 (cross-backend conformance suite — needs Testcontainers), the `pom.xml` batch (H4/H11/H15 + J1/J8/J9), and the doc corrections these fixes imply (I7, I8, I12, `semantic-parser.md`, `httpcalls.md`).
+
+---
+
 ## 🎨 Keycloak login theme matching the EDDI corporate identity (2026-07-27)
 
 **Repo:** EDDI (`feat/keycloak-eddi-theme`)

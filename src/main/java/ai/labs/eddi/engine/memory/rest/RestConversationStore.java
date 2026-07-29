@@ -371,7 +371,7 @@ public class RestConversationStore implements IRestConversationStore {
     @Scheduled(every = "24h")
     public void deleteEndedConversationsOlderThanXDays() {
         if (deleteEndedConversationsOnceOlderThanDays == null || deleteEndedConversationsOnceOlderThanDays < MIN_RETENTION_DAYS) {
-            log.debug("Ended-conversation retention sweep disabled (deleteEndedConversationsOnceOlderThanDays < 1)");
+            log.debugf("Ended-conversation retention sweep disabled (deleteEndedConversationsOnceOlderThanDays < %d)", MIN_RETENTION_DAYS);
             return;
         }
 

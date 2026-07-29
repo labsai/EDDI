@@ -814,6 +814,38 @@ When embedding `{properties.x}` in HTTP call body templates, be aware:
 - Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`
 - User-entered text containing `{` or `}` will be interpreted as Qute expressions, potentially eating content
 
+#### Calling an API as the signed-in user
+
+An HTTP call **header** may reference the authenticated caller, so the agent
+calls the API with that user's credentials instead of a static one:
+
+| Reference | Resolves to |
+| --------- | ----------- |
+| `${caller:token}` | The caller's raw bearer token |
+| `${caller:userId}` | The caller's principal name (not a secret) |
+
+```json
+"headers": { "Authorization": "Bearer ${caller:token}" }
+```
+
+Use this whenever the agent calls **EDDI's own API**. A static credential there
+expires within the hour, cannot be least-privilege, and attributes every action
+to one synthetic principal.
+
+Resolution is narrow and fails loudly rather than degrading quietly:
+- **Same origin only** — released only to the exact `scheme://host:port` the
+  caller addressed (read from the inbound request, not config), so a config
+  naming a third-party host cannot exfiltrate the token.
+- **Headers only** — `${caller:token}` in a query parameter is rejected.
+  `${caller:userId}` is allowed in headers and query parameters.
+- **Authenticated turns only** — scheduled jobs and triggers cannot satisfy it.
+- **Fails closed** — an unsatisfiable reference errors instead of sending
+  `Bearer `.
+
+The token is never persisted: authorization headers are scrubbed before the
+request is written to conversation memory. Disable with
+`eddi.caller-identity.enabled=false`. Full reference: [`docs/httpcalls.md`](docs/httpcalls.md).
+
 #### Requesting specialized input fields from the UI
 
 The output system supports an `inputField` output type that tells the UI to switch its input control. Both **EDDI-Manager** (`SecretInputField` in `chat-panel.tsx`) and **eddi-chat-ui** (`SecretInput.tsx`) handle this natively.

@@ -371,7 +371,13 @@ class StreamingLegacyChatExecutor {
                     LOGGER.warnf("Streaming provider emitted no partial responses; falling back to the complete response (%d chars). "
                             + "This provider does not support incremental streaming.", completeText.length());
                     metadata.put("streamingNoPartials", true);
-                    metadata.put("warning", "streaming_no_partials");
+                    // putIfAbsent, NOT put: buildMetadata may already have recorded
+                    // "truncated" (finishReason=LENGTH) or "content_filter" — the only
+                    // signals LlmTask.applyResponseValidation dispatches on. Overwriting
+                    // them here would silently disable responseValidation.onTruncation /
+                    // onContentFilter for this provider. The transport-capability note is
+                    // the weaker signal and is already carried by streamingNoPartials.
+                    metadata.putIfAbsent("warning", "streaming_no_partials");
                     incrementNoPartials();
                     responseText = completeText;
                     synchronized (streamLock) {

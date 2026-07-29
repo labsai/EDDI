@@ -22,8 +22,10 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.configs.migration.MigrationManager.BACKUP_COLLECTION_SUFFIX;
+import static ai.labs.eddi.configs.migration.MigrationManager.COLLECTION_CONVERSATION_MEMORY;
 import static ai.labs.eddi.configs.migration.MigrationManager.COLLECTION_PROPERTYSETTER;
 import static ai.labs.eddi.configs.migration.MigrationManager.MIGRATION_CONFIRMATION;
 import static org.junit.jupiter.api.Assertions.*;
@@ -271,6 +273,60 @@ class MigrationManagerValueMigrationTest {
 
             verify(backupCollection, never()).insertOne(any(Document.class));
             verify(propertySetter).replaceOne(any(), eq(document));
+        }
+
+        @Test
+        @DisplayName("a conversation-memory backup keeps only the id and the properties it rewrites — no transcript, no userId")
+        @SuppressWarnings("unchecked")
+        void conversationMemoryBackupHoldsNoTranscriptAndNoUserId() {
+            var property = new HashMap<String, Object>();
+            property.put("value", "de");
+            var conversationProperties = new HashMap<String, Object>();
+            conversationProperties.put("lang", property);
+
+            var conversationId = new ObjectId();
+            Document document = new Document("_id", conversationId)
+                    .append("userId", "u1")
+                    .append("conversationProperties", conversationProperties)
+                    .append("conversationSteps", List.of(Map.of("input", "my mother's maiden name is Krause")));
+
+            MongoCollection<Document> conversationMemories = collectionReturning(document);
+            MongoCollection<Document> backupCollection = emptyCollection();
+            MongoCollection<Document> otherCollections = emptyCollection();
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> {
+                String name = invocation.getArgument(0);
+                if (COLLECTION_CONVERSATION_MEMORY.equals(name)) {
+                    return conversationMemories;
+                }
+                if ((COLLECTION_CONVERSATION_MEMORY + BACKUP_COLLECTION_SUFFIX).equals(name)) {
+                    return backupCollection;
+                }
+                return otherCollections;
+            });
+            when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
+
+            // skipConversationMemories = false — the shipped default
+            var manager = new MigrationManager(database, migrationLogStore, false);
+            manager.startMigrationIfFirstTimeRun(() -> {
+            });
+
+            ArgumentCaptor<Document> captor = ArgumentCaptor.forClass(Document.class);
+            verify(backupCollection).insertOne(captor.capture());
+            Document backup = captor.getValue();
+
+            // Nothing reads, expires or erases the backup collection, and GDPR erasure
+            // only targets "conversationmemories" — so a full snapshot would leave
+            // transcripts and the owning userId behind forever after an Art. 17 request.
+            assertEquals(Set.of("_id", "conversationProperties"), backup.keySet(),
+                    "the backup must not duplicate personal data that erasure cannot reach");
+            assertEquals(conversationId, backup.get("_id"), "the id is what makes the properties restorable");
+
+            // ...while still restoring everything the migration actually rewrote.
+            var backedUpProperties = (Map<String, Map<String, Object>>) backup.get("conversationProperties");
+            assertEquals("de", backedUpProperties.get("lang").get("value"), "the backup must hold the pre-migration state");
+            assertFalse(backedUpProperties.get("lang").containsKey("valueString"), "the backup must not share the migrated nested maps");
+            assertEquals("de", property.get("valueString"), "the live document is still migrated");
         }
 
         @SuppressWarnings("unchecked")

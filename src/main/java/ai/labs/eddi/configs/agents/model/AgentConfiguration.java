@@ -857,8 +857,11 @@ public class AgentConfiguration {
      * — {@link AutoSnapshot#isEnabled()} and {@link AutoSnapshot#getTriggerOn()}
      * are NOT consulted yet, and {@link #getMaxCheckpointsPerConversation()} is
      * honoured only where a caller passes it to
-     * {@code MemorySnapshotService#createCheckpoint(..., int)}; the default
-     * retention applies otherwise.
+     * {@code MemorySnapshotService#createCheckpoint(..., int)}. No production
+     * caller does: {@code AgentOrchestrator} uses the 3-arg overload because
+     * {@code SessionManagement} has no slot on {@code IConversationMemory} (unlike
+     * {@link UserMemoryConfig} and {@link MemoryPolicy}), so auto-checkpointing
+     * always prunes to the service default of 10.
      *
      * @since 6.0.0
      */

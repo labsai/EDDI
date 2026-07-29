@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -228,7 +229,8 @@ class CascadingModelExecutorErrorPathTest {
     private static CascadingModelExecutor executor(ChatModelRegistry registry) {
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        return new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+        return new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null,
+                new CallerIdentityContext(null, null));
     }
 
     private static ModelCascadeConfig enabledCascade(CascadeStep... steps) {

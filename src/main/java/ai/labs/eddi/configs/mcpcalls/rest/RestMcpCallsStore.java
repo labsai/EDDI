@@ -17,6 +17,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -70,11 +71,13 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
 
     @Override
     public Response updateMcpCalls(String id, Integer version, McpCallsConfiguration mcpCallsConfiguration) {
+        validateForWrite(mcpCallsConfiguration);
         return restVersionInfo.update(id, version, mcpCallsConfiguration);
     }
 
     @Override
     public Response createMcpCalls(McpCallsConfiguration mcpCallsConfiguration) {
+        validateForWrite(mcpCallsConfiguration);
         return restVersionInfo.create(mcpCallsConfiguration);
     }
 
@@ -88,6 +91,35 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
         restVersionInfo.validateParameters(id, version);
         McpCallsConfiguration config = restVersionInfo.read(id, version);
         return restVersionInfo.create(config);
+    }
+
+    /**
+     * Rejects a configuration the engine cannot honour, at the only boundary where
+     * rejecting is safe.
+     * <p>
+     * {@code McpCallsTask.configure()} deliberately only logs a validation failure:
+     * it runs at workflow load, where throwing would make an already-stored
+     * configuration take down the whole workflow — configs already in MongoDB are
+     * the one backward-compatibility contract that matters. That leniency is only
+     * defensible if the strict check lives here, on the way in; otherwise an
+     * unusable MCP server is accepted with 201 and fails much later, at connect
+     * time, far from the person who typed the URL.
+     * <p>
+     * {@code duplicateMcpCalls} deliberately does <em>not</em> call this: it copies
+     * an already-stored config, and refusing to duplicate a document the store is
+     * happy to serve would be a new failure mode rather than a guard.
+     */
+    private void validateForWrite(McpCallsConfiguration mcpCallsConfiguration) {
+        if (mcpCallsConfiguration == null) {
+            // RestVersionInfo produces its own error for a missing body.
+            return;
+        }
+
+        try {
+            mcpCallsConfiguration.validate();
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException(e.getMessage(), e);
+        }
     }
 
     @Override

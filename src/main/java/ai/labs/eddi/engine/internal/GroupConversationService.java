@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
@@ -111,6 +112,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final ITemplatingEngine templatingEngine;
     private final IJsonSerialization jsonSerialization;
     private final int maxDepth;
+    private final CallerIdentityContext callerIdentityContext;
     private final ExecutorService executorService;
     private final AgentSigningService agentSigningService;
     private final IAgentStore agentStore;
@@ -158,10 +160,11 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
             AgentSigningService agentSigningService, IAgentStore agentStore, IScheduleStore scheduleStore,
-            NonceCacheService nonceCacheService, AuditLedgerService auditLedgerService,
+            NonceCacheService nonceCacheService, AuditLedgerService auditLedgerService, CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
+        this.callerIdentityContext = callerIdentityContext;
         this.conversationStore = conversationStore;
         this.conversationService = conversationService;
         this.agentFactory = agentFactory;
@@ -288,8 +291,12 @@ public class GroupConversationService implements IGroupConversationService {
 
         // Run the discussion in a virtual thread — reuse the same gc (no duplicate
         // creation)
+        // Captured on the REST thread: everything below runs on virtual threads with
+        // no request context, so a member agent's ${caller:token} apicall would
+        // otherwise fail closed for the whole discussion.
+        final var discussionCaller = callerIdentityContext.captureOrCurrent();
         try {
-            executorService.submit(() -> {
+            executorService.submit(callerIdentityContext.withIdentity(discussionCaller, () -> {
                 try {
                     executeDiscussion(gc, config, phases, question, listener, 0);
                 } catch (Exception e) {
@@ -301,7 +308,7 @@ public class GroupConversationService implements IGroupConversationService {
                                 "The group discussion could not be started."));
                     }
                 }
-            });
+            }));
         } catch (RuntimeException e) {
             // Executor saturated/shut down — no thread will ever run this
             // discussion. Fail it instead of leaving an IN_PROGRESS zombie.
@@ -1882,6 +1889,9 @@ public class GroupConversationService implements IGroupConversationService {
 
             // Execute agents in parallel, tasks per agent sequentially
             List<CompletableFuture<Void>> futures = new ArrayList<>();
+            // Task workers are a further fan-out of their own; without this every
+            // task wave loses ${caller:...}.
+            final var waveCaller = callerIdentityContext.captureOrCurrent();
 
             for (Map.Entry<String, List<TaskItem>> agentEntry : tasksByAgent.entrySet()) {
                 String agentId = agentEntry.getKey();
@@ -1893,7 +1903,7 @@ public class GroupConversationService implements IGroupConversationService {
                     continue;
                 }
 
-                CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                CompletableFuture<Void> future = CompletableFuture.runAsync(callerIdentityContext.withIdentity(waveCaller, () -> {
                     for (TaskItem task : agentTasks) {
                         try {
                             // Claim the turn budget and the task itself under the task-list
@@ -1974,7 +1984,7 @@ public class GroupConversationService implements IGroupConversationService {
                                     new GroupDiscussionException(e.getMessage(), e));
                         }
                     }
-                }, executorService);
+                }), executorService);
                 futures.add(future);
             }
 
@@ -2546,25 +2556,33 @@ public class GroupConversationService implements IGroupConversationService {
             }
         }
 
-        List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
-            try {
-                String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
-                return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
-            } catch (MemberTurnCancelledException e) {
-                // The orchestrator stopped waiting for this batch — surface the
-                // cancellation instead of fabricating a contribution for it.
-                throw new java.util.concurrent.CompletionException(e);
-            } catch (GroupDiscussionException e) {
-                if (e.getCause() instanceof QuotaExceededException) {
-                    throw new java.util.concurrent.CompletionException(e);
-                }
-                LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
-                return errorEntry(speaker, phaseIdx, phase, e.getMessage());
-            } catch (Exception e) {
-                LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
-                return errorEntry(speaker, phaseIdx, phase, e.getMessage());
-            }
-        }, executorService)).toList();
+        // Each speaker fans out to a further virtual thread; a ThreadLocal does not
+        // follow, so carry the caller explicitly. captureOrCurrent, not current: a
+        // synchronous discuss() runs on the REST thread, where nothing has bound a
+        // caller yet and only the request can supply one.
+        final var phaseCaller = callerIdentityContext.captureOrCurrent();
+        List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream()
+                .map(speaker -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(phaseCaller, () -> {
+                    try {
+                        String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
+                        return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
+                    } catch (MemberTurnCancelledException e) {
+                        // The orchestrator stopped waiting for this batch — surface the
+                        // cancellation instead of fabricating a contribution for it.
+                        // Must stay ABOVE the Exception catch, which would otherwise
+                        // convert a cancellation into an error transcript entry.
+                        throw new java.util.concurrent.CompletionException(e);
+                    } catch (GroupDiscussionException e) {
+                        if (e.getCause() instanceof QuotaExceededException) {
+                            throw new java.util.concurrent.CompletionException(e);
+                        }
+                        LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
+                        return errorEntry(speaker, phaseIdx, phase, e.getMessage());
+                    } catch (Exception e) {
+                        LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
+                        return errorEntry(speaker, phaseIdx, phase, e.getMessage());
+                    }
+                }), executorService)).toList();
 
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
         // ONE deadline for the whole batch: these turns run concurrently, so giving
@@ -4034,7 +4052,7 @@ public class GroupConversationService implements IGroupConversationService {
             }
         };
         try {
-            executorService.submit(resumeWork);
+            executorService.submit(callerIdentityContext.withIdentity(callerIdentityContext.captureOrCurrent(), resumeWork));
         } catch (RuntimeException e) {
             // Executor saturated/shut down — no thread will run the resume. The CAS
             // above already consumed the pause; restore it so the approval remains

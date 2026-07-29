@@ -126,14 +126,61 @@ public class McpToolProviderManager {
     }
 
     /**
+     * Why a configured MCP server contributed no tools. Distinguishes a static
+     * misconfiguration (which no retry will heal, and which an operator must fix)
+     * from a transient connectivity problem.
+     */
+    public enum McpFailureKind {
+        /** URL/transport rejected before any request was made — fix the config. */
+        INVALID_CONFIGURATION,
+        /** The server was contacted but the discovery call failed. */
+        CONNECTION_FAILURE,
+        /** Skipped because the circuit breaker is open for this server. */
+        CIRCUIT_OPEN
+    }
+
+    /**
+     * One server that did not contribute tools, and why.
+     *
+     * @param serverName
+     *            configured name, or the URL when unnamed
+     * @param url
+     *            configured URL (may be {@code null}/empty for the empty-URL case)
+     * @param kind
+     *            failure classification
+     * @param message
+     *            human-readable reason
+     */
+    public record McpServerFailure(String serverName, String url, McpFailureKind kind, String message) {
+    }
+
+    /**
      * Result of discovering tools from MCP servers.
      *
      * @param toolSpecs
      *            list of tool specifications discovered
      * @param executors
      *            map of tool name → executor for each discovered tool
+     * @param failures
+     *            servers that contributed nothing, with the reason — an empty tool
+     *            list alone cannot tell "rejected as misconfigured" apart from
+     *            "server genuinely has no tools"
      */
-    public record McpToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
+    public record McpToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors,
+            List<McpServerFailure> failures) {
+
+        /** Convenience for callers that build a result without failures. */
+        public McpToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
+            this(toolSpecs, executors, List.of());
+        }
+
+        /**
+         * @return true if at least one server was rejected because its configuration is
+         *         invalid (a 4xx-shaped condition, not a 5xx-shaped one)
+         */
+        public boolean hasConfigurationErrors() {
+            return failures.stream().anyMatch(f -> f.kind() == McpFailureKind.INVALID_CONFIGURATION);
+        }
     }
 
     /**
@@ -141,11 +188,13 @@ public class McpToolProviderManager {
      * <p>
      * Returns the combined tool specifications and executors from all servers.
      * Failed connections log a warning but don't prevent other servers from being
-     * used.
+     * used; every server that contributed nothing is reported in
+     * {@link McpToolsResult#failures()} so the caller can tell a rejected
+     * configuration apart from a server that genuinely exposes no tools.
      *
      * @param mcpServers
      *            list of MCP server configurations
-     * @return combined tools from all reachable servers
+     * @return combined tools from all reachable servers, plus per-server failures
      */
     public McpToolsResult discoverTools(List<McpServerConfig> mcpServers) {
         if (mcpServers == null || mcpServers.isEmpty()) {
@@ -154,41 +203,57 @@ public class McpToolProviderManager {
 
         List<ToolSpecification> allSpecs = new ArrayList<>();
         Map<String, ToolExecutor> allExecutors = new HashMap<>();
+        List<McpServerFailure> failures = new ArrayList<>();
 
         for (McpServerConfig serverConfig : mcpServers) {
-            if (isNullOrEmpty(serverConfig.getUrl())) {
-                LOGGER.warn("Skipping MCP server with empty URL");
+            String url = serverConfig.getUrl();
+            String serverName = serverConfig.getName() != null ? serverConfig.getName() : url;
+
+            if (isNullOrEmpty(url)) {
+                LOGGER.errorf("MCP server '%s' has no URL configured — it contributes no tools", sanitize(serverName));
+                failures.add(new McpServerFailure(serverName, url, McpFailureKind.INVALID_CONFIGURATION,
+                        "MCP server URL must not be empty"));
                 continue;
             }
 
             // Circuit breaker: skip servers that failed too often recently
-            if (isCircuitOpen(serverConfig.getUrl())) {
-                String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
+            if (isCircuitOpen(url)) {
                 LOGGER.warnf("Circuit breaker OPEN for MCP server '%s' — skipping (>=%d failures in last %ds)",
                         sanitize(serverName), CIRCUIT_FAILURE_THRESHOLD, CIRCUIT_WINDOW_SECONDS);
+                failures.add(new McpServerFailure(serverName, url, McpFailureKind.CIRCUIT_OPEN,
+                        "Circuit breaker open after " + CIRCUIT_FAILURE_THRESHOLD + " or more recent failures"));
+                continue;
+            }
+
+            // F12: serve the tool list from the TTL cache when it is still fresh —
+            // a live tools/list RPC per server per turn was pure overhead. Nothing
+            // reaches the cache without having passed validation first, so this is
+            // checked before the (potentially DNS-resolving) validation below.
+            CachedTools cached = toolCache.get(url);
+            if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
+                LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
+                mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), cached.executors(), serverName);
+                continue;
+            }
+
+            // A10/I3: a rejected URL or an unimplemented transport is a static
+            // CONFIGURATION error, not a connectivity blip — validate before contacting
+            // the server so it is reported as such, logged at ERROR, and never counted
+            // as a circuit-breaker failure (the breaker shields flaky servers, not typos).
+            try {
+                validateServerUrl(url);
+                validateTransport(serverConfig.getTransport());
+            } catch (IllegalArgumentException e) {
+                LOGGER.errorf("MCP server '%s' was NOT contacted because its configuration is invalid: %s — "
+                        + "the agent runs without this server's tools until the config is fixed",
+                        sanitize(serverName), sanitize(e.getMessage()));
+                failures.add(new McpServerFailure(serverName, url, McpFailureKind.INVALID_CONFIGURATION, e.getMessage()));
                 continue;
             }
 
             try {
-                String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
-
-                // F12: serve the tool list from the TTL cache when it is still fresh —
-                // a live tools/list RPC per server per turn was pure overhead.
-                CachedTools cached = toolCache.get(serverConfig.getUrl());
-                if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
-                    allSpecs.addAll(cached.toolSpecs());
-                    allExecutors.putAll(cached.executors());
-                    LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
-                    continue;
-                }
-
-                McpClient client = getOrCreateClient(serverConfig);
-
-                // Use McpToolProvider to discover tools from this server
-                McpToolProvider toolProvider = McpToolProvider.builder().mcpClients(List.of(client)).build();
-
                 // Discover tools — McpToolProvider returns ToolProviderResult
-                ToolProviderResult result = toolProvider.provideTools(null);
+                ToolProviderResult result = fetchToolsFromServer(serverConfig);
 
                 List<ToolSpecification> serverSpecs = new ArrayList<>();
                 Map<String, ToolExecutor> serverExecutors = new HashMap<>();
@@ -199,6 +264,12 @@ public class McpToolProviderManager {
                         // before it becomes prompt content.
                         ToolSpecification spec = governDescription(toolEntry.getKey(), serverName);
                         ToolExecutor executor = toolEntry.getValue();
+
+                        if (executor == null) {
+                            LOGGER.warnf("MCP server '%s' advertises tool '%s' without an executor — dropping it",
+                                    sanitize(serverName), sanitize(spec.name()));
+                            continue;
+                        }
 
                         // F15: within one server, a duplicate tool name would silently
                         // overwrite the earlier executor while both specs reach the model.
@@ -214,22 +285,67 @@ public class McpToolProviderManager {
                     LOGGER.infof("Discovered %d tools from MCP server '%s'", serverSpecs.size(), sanitize(serverName));
                 }
 
-                toolCache.put(serverConfig.getUrl(), new CachedTools(List.copyOf(serverSpecs), Map.copyOf(serverExecutors),
+                toolCache.put(url, new CachedTools(List.copyOf(serverSpecs), Map.copyOf(serverExecutors),
                         System.currentTimeMillis()));
-                allSpecs.addAll(serverSpecs);
-                allExecutors.putAll(serverExecutors);
+                mergeServerTools(allSpecs, allExecutors, serverSpecs, serverExecutors, serverName);
 
                 // Success — clear failure history for this server
-                recordSuccess(serverConfig.getUrl());
+                recordSuccess(url);
 
             } catch (Exception e) {
-                String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
                 LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
-                recordFailure(serverConfig.getUrl());
+                failures.add(new McpServerFailure(serverName, url, McpFailureKind.CONNECTION_FAILURE, e.getMessage()));
+                recordFailure(url);
             }
         }
 
-        return new McpToolsResult(allSpecs, allExecutors);
+        return new McpToolsResult(allSpecs, allExecutors, List.copyOf(failures));
+    }
+
+    /**
+     * Merge one server's tools into the combined result.
+     * <p>
+     * F15 (cross-server half): deduping only inside a single server left two MCP
+     * servers advertising the same tool name colliding on {@code putAll} — the
+     * model saw two identically named specs while every call was dispatched to the
+     * server that happened to be merged last. The first server to claim a name
+     * keeps it, and the collision is logged instead of being silent.
+     */
+    private void mergeServerTools(List<ToolSpecification> allSpecs, Map<String, ToolExecutor> allExecutors,
+                                  List<ToolSpecification> serverSpecs, Map<String, ToolExecutor> serverExecutors, String serverName) {
+        for (ToolSpecification spec : serverSpecs) {
+            ToolExecutor executor = serverExecutors.get(spec.name());
+            if (executor == null) {
+                continue;
+            }
+            ToolExecutor alreadyRegistered = allExecutors.get(spec.name());
+            if (alreadyRegistered != null) {
+                if (alreadyRegistered != executor) {
+                    // Same name, different server: the model would otherwise see two
+                    // identical names and every call would land on whichever server was
+                    // merged last.
+                    LOGGER.warnf("MCP server '%s' advertises tool '%s', which another MCP server already provides — "
+                            + "keeping the first, dropping this one", sanitize(serverName), sanitize(spec.name()));
+                }
+                continue;
+            }
+            allSpecs.add(spec);
+            allExecutors.put(spec.name(), executor);
+        }
+    }
+
+    /**
+     * Issue the {@code tools/list} discovery call against a single server.
+     * Package-private and overridable purely as a seam so tests can exercise
+     * {@link #discoverTools} without a live MCP server.
+     */
+    ToolProviderResult fetchToolsFromServer(McpServerConfig serverConfig) {
+        McpClient client = getOrCreateClient(serverConfig);
+
+        // Use McpToolProvider to discover tools from this server
+        McpToolProvider toolProvider = McpToolProvider.builder().mcpClients(List.of(client)).build();
+
+        return toolProvider.provideTools(null);
     }
 
     /**

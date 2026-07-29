@@ -109,10 +109,19 @@ public class SummarizationService {
      * parameters here and only {@code modelName} is overridden — the same
      * inheritance {@link ToolResponseTruncator} already performs for its
      * summarizer.
+     * <p>
+     * <strong>Caller contract:</strong> the map handed in must belong to
+     * {@code llmProvider}. This service cannot tell whose credentials it was given,
+     * so it passes them straight to that provider's builder — a map inherited from
+     * a task running on a <em>different</em> provider must have its credentials and
+     * endpoint coordinates removed first (see
+     * {@code LlmTask.resolveInheritedSummaryParameters}), or one vendor's plaintext
+     * key ends up in another vendor's auth header.
      *
      * @param inheritedParameters
-     *            the parent task's resolved parameters (apiKey, baseUrl, …); may be
-     *            null, in which case only the model name is passed
+     *            the calling task's resolved parameters (apiKey, baseUrl, …) for
+     *            {@code llmProvider}; may be null, in which case only the model
+     *            name is passed
      */
     public String summarize(String content, String instructions, String llmProvider, String llmModel,
                             Map<String, String> inheritedParameters) {
@@ -144,9 +153,12 @@ public class SummarizationService {
      * authenticate (finding F13).
      *
      * @param inheritedParameters
-     *            the parent task's resolved parameters; {@code modelName} is
-     *            overridden with {@code llmModel} and {@code responseFormat} is
-     *            stripped (a summary is plain text, never JSON)
+     *            the calling task's resolved parameters, which must belong to
+     *            {@code llmProvider} (see
+     *            {@link #summarize(String, String, String, String, Map)});
+     *            {@code modelName} is overridden with {@code llmModel} and
+     *            {@code responseFormat} is stripped (a summary is plain text, never
+     *            JSON)
      */
     public SummarizationResult summarizeWithUsage(String content, String instructions,
                                                   String llmProvider, String llmModel,
