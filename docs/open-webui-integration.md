@@ -49,6 +49,34 @@ Two things worth knowing about it:
 
 It is **not a production configuration** — `WEBUI_AUTH=false` and `allow-anonymous=true` are set so the UI is usable immediately. Both are called out inline in the compose file, and §4 has the real security model.
 
+#### Running it more than once
+
+The seeder is idempotent **per agent**, not "has anything been deployed". Each run creates only what is missing, so the normal second run — you now have a provider key and want the LLM agent too — just works:
+
+```bash
+EDDI_DEMO_LLM_API_KEY=sk-... docker compose -f docker-compose.openwebui.yml up -d
+```
+
+It reports which agents it skipped, adds the LLM one, and re-stores the key in the vault (so changing the key here rotates it rather than leaving the old one). `--build` is only needed the first time or after changing EDDI's source.
+
+#### If a port is already taken
+
+`EDDI_PORT` and `OPEN_WEBUI_PORT` remap the **host** side; the containers keep talking to each other on `7070`/`8080` regardless:
+
+```bash
+EDDI_PORT=7071 OPEN_WEBUI_PORT=3001 docker compose -f docker-compose.openwebui.yml up -d
+```
+
+Without this, Docker fails with `Bind for 0.0.0.0:7070 failed: port is already allocated` — most often because another EDDI (or the main `docker-compose.yml`) is already running.
+
+#### Shutting it down
+
+```bash
+docker compose -f docker-compose.openwebui.yml down
+```
+
+That keeps the two named volumes, so the seeded agents, the vault entry and your chat history survive and the next start needs no re-seeding. Add `-v` to discard them — that is the one irreversible step.
+
 ### Production-shaped compose
 
 ```yaml

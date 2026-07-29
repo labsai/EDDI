@@ -87,6 +87,8 @@ services:
     environment:
       - "EDDI_URL=http://eddi:7070"
       - "EDDI_API_KEY=${EDDI_OPENAI_COMPAT_API_KEY:-sk-eddi-demo}"
+      # So the closing "open this URL" line is right when the ports are remapped.
+      - "OPEN_WEBUI_URL=http://localhost:${OPEN_WEBUI_PORT:-3000}"
       # Optional. The rule-based agent proves the transport and the state
       # bridge, but it has no model, so it cannot answer questions ABOUT
       # anything — an uploaded PDF included. Set this and a second, LLM-backed

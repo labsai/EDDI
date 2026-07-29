@@ -26,11 +26,22 @@ create() {
         | awk 'tolower($1) == "location:" { print $2 }'
 }
 
-if curl -sf -H "Authorization: Bearer ${EDDI_API_KEY:-}" "$EDDI/v1/models" | grep -q '"id"'; then
-    echo "[seed] A model is already exposed — leaving it alone."
-    exit 0
-fi
+# Idempotency is checked PER AGENT, not "is anything deployed at all".
+#
+# The MongoDB volume persists, so the common second run is: rule-based agent
+# already there, and the user has now set EDDI_DEMO_LLM_API_KEY to add the LLM
+# one. A single "a model exists, exit 0" guard silently did nothing in exactly
+# that case — the user set their key, re-ran, and got no new model and no
+# explanation.
+MODELS_JSON=$(curl -sf -H "Authorization: Bearer ${EDDI_API_KEY:-}" "$EDDI/v1/models" || echo '')
 
+# Model ids are <slugified-descriptor-name>-<last 6 of agentId>, so the slug of
+# the name set below is a stable prefix to look for.
+has_model() {
+    echo "$MODELS_JSON" | grep -q "\"$1"
+}
+
+seed_rule_based_agent() {
 # A three-turn flow rather than an echo. An echo proves the transport works but
 # nothing about EDDI; this shows the thing the adapter exists to bridge —
 # conversation state surviving across turns of a stateless HTTP protocol. Open a
@@ -169,10 +180,9 @@ echo "[seed] Deploying agent $AGENT_ID v$AGENT_VERSION…"
 curl -sfS -X POST \
     "$EDDI/administration/production/deploy/$AGENT_ID?version=$AGENT_VERSION&waitForCompletion=true" \
     -o /dev/null
+}
 
-# The adapter caches its model catalogue (eddi.openai-compat.model-cache-seconds,
-# 30s by default), so a deployment made a moment ago is not visible yet. Poll
-# rather than print an empty list and leave the reader thinking it failed.
+seed_llm_agent() {
 # ── Optional second agent: a real LLM, with its key in the vault ──
 # The rule-based agent above proves the transport and the state bridge, but it
 # has no model, so it cannot answer questions ABOUT anything — an uploaded PDF
@@ -184,22 +194,8 @@ curl -sfS -X POST \
 # logged, and a literal key would travel with all of it. The vault keeps the
 # plaintext in one encrypted place and hands the config a reference, which
 # SecretRedactionFilter then redacts wherever it is printed.
-if [ -n "${EDDI_DEMO_LLM_API_KEY:-}" ]; then
     LLM_TYPE="${EDDI_DEMO_LLM_TYPE:-openai}"
     LLM_MODEL="${EDDI_DEMO_LLM_MODEL:-gpt-4o-mini}"
-    VAULT_KEY_NAME="demo-llm-api-key"
-
-    echo "[seed] Checking the vault is enabled…"
-    if ! curl -sf "$EDDI/secretstore/secrets/health" >/dev/null 2>&1; then
-        echo "[seed] ERROR: the Secrets Vault is not reachable." >&2
-        echo "[seed] EDDI_VAULT_MASTER_KEY must be set on the eddi service." >&2
-        exit 1
-    fi
-
-    echo "[seed] Storing the provider key in the vault as '$VAULT_KEY_NAME'…"
-    # Fail hard rather than fall back to embedding the key: a silent downgrade
-    # to a plaintext credential is the wrong way to be helpful.
-    curl -sfS -X PUT "$EDDI/secretstore/secrets/default/$VAULT_KEY_NAME"         -H 'Content-Type: application/json'         -d "{\"value\": \"$EDDI_DEMO_LLM_API_KEY\", \"description\": \"Demo LLM provider key (seeded by seed-demo-agent.sh)\"}"         -o /dev/null
 
     echo "[seed] Adding an LLM agent ($LLM_TYPE/$LLM_MODEL)…"
     LLM_RULES=$(create /rulestore/rulesets '{
@@ -254,25 +250,85 @@ if [ -n "${EDDI_DEMO_LLM_API_KEY:-}" ]; then
 
     curl -sf -X PATCH         "$EDDI/descriptorstore/descriptors/$LLM_AGENT_ID?version=$LLM_AGENT_VERSION"         -H 'Content-Type: application/json'         -d '{ "operation": "SET", "document": { "name": "EDDI LLM Demo", "description": "LLM-backed demo agent; provider key held in the vault" } }'         -o /dev/null || echo "[seed] Could not name the LLM descriptor — continuing."
 
-    curl -sfS -X POST         "$EDDI/administration/production/deploy/$LLM_AGENT_ID?version=$LLM_AGENT_VERSION&waitForCompletion=true"         -o /dev/null
+    curl -sfS -X POST \
+        "$EDDI/administration/production/deploy/$LLM_AGENT_ID?version=$LLM_AGENT_VERSION&waitForCompletion=true" \
+        -o /dev/null
     echo "[seed] LLM agent deployed. Its config holds \${vault:$VAULT_KEY_NAME}, not the key."
+}
+
+# Store (or rotate) the provider key. Separate from agent creation because it
+# must run even when the agent already exists — otherwise changing
+# EDDI_DEMO_LLM_API_KEY and re-running would leave the old key in the vault.
+store_vault_key() {
+    echo "[seed] Checking the vault is enabled…"
+    if ! curl -sf "$EDDI/secretstore/secrets/health" >/dev/null 2>&1; then
+        echo "[seed] ERROR: the Secrets Vault is not reachable." >&2
+        echo "[seed] EDDI_VAULT_MASTER_KEY must be set on the eddi service." >&2
+        exit 1
+    fi
+
+    echo "[seed] Storing the provider key in the vault as '$VAULT_KEY_NAME'…"
+    # Fail hard rather than fall back to embedding the key: a silent downgrade
+    # to a plaintext credential is the wrong way to be helpful.
+    curl -sfS -X PUT "$EDDI/secretstore/secrets/default/$VAULT_KEY_NAME" \
+        -H 'Content-Type: application/json' \
+        -d "{\"value\": \"$EDDI_DEMO_LLM_API_KEY\", \"description\": \"Demo LLM provider key (seeded by seed-demo-agent.sh)\"}" \
+        -o /dev/null
+}
+
+# ── What to seed ──
+VAULT_KEY_NAME="demo-llm-api-key"
+
+if has_model "eddi-demo-agent-"; then
+    echo "[seed] Rule-based demo agent already deployed — skipping."
+else
+    seed_rule_based_agent
 fi
 
-echo "[seed] Waiting for the model to appear on /v1/models…"
+if [ -n "${EDDI_DEMO_LLM_API_KEY:-}" ]; then
+    store_vault_key
+    if has_model "eddi-llm-demo-"; then
+        echo "[seed] LLM demo agent already deployed — vault key refreshed, agent left alone."
+    else
+        seed_llm_agent
+    fi
+else
+    echo "[seed] EDDI_DEMO_LLM_API_KEY not set — skipping the LLM agent."
+    echo "[seed] Set it in .env and re-run to add an agent that can actually answer questions."
+fi
+
+# The adapter caches its model catalogue (eddi.openai-compat.model-cache-seconds,
+# 30s by default), so a deployment made a moment ago is not visible yet. Poll
+# rather than print an empty list and leave the reader thinking it failed.
+#
+# Wait for the specific models expected, not merely for "some model exists".
+# The weaker condition was satisfied instantly by the rule-based agent from an
+# earlier run, so a freshly added LLM agent was missing from the final listing
+# and looked like it had failed — while in fact it just had not left the cache.
+EXPECTED="eddi-demo-agent-"
+if [ -n "${EDDI_DEMO_LLM_API_KEY:-}" ]; then
+    EXPECTED="$EXPECTED eddi-llm-demo-"
+fi
+
+echo "[seed] Waiting for the models to appear on /v1/models…"
 i=0
 while [ "$i" -lt 24 ]; do
     MODELS=$(curl -sf -H "Authorization: Bearer ${EDDI_API_KEY:-}" "$EDDI/v1/models" || echo '')
-    if echo "$MODELS" | grep -q '"id"'; then
+    MISSING=0
+    for PREFIX in $EXPECTED; do
+        echo "$MODELS" | grep -q "\"$PREFIX" || MISSING=1
+    done
+    if [ "$MISSING" -eq 0 ]; then
         echo "[seed] Ready. Models exposed on /v1:"
         echo "$MODELS"
         echo
-        echo "[seed] Open http://localhost:3000 and pick the model from the dropdown."
+        echo "[seed] Open ${OPEN_WEBUI_URL:-http://localhost:3000} and pick the model from the dropdown."
         exit 0
     fi
     i=$((i + 1))
     sleep 5
 done
 
-echo "[seed] The agent deployed, but no model appeared within 2 minutes."
-echo "[seed] Check:  curl -H 'Authorization: Bearer <key>' $EDDI/v1/models"
+echo "[seed] The agents deployed, but these did not appear within 2 minutes: $EXPECTED" >&2
+echo "[seed] Check:  curl -H 'Authorization: Bearer <key>' $EDDI/v1/models" >&2
 exit 1

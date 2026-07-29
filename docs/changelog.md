@@ -5,6 +5,24 @@
 
 ---
 
+## 🐳 fix(demo): the Open WebUI seeder did nothing on a second run (2026-07-29)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+Two defects in `src/main/docker/seed-demo-agent.sh`, both found by actually re-running the stack rather than reading it. Also `.env.example` and [`docs/open-webui-integration.md`](open-webui-integration.md) §1.
+
+**Adding an LLM key later silently did nothing.** The seeder guarded on *"is any model exposed"* and `exit 0`-ed if so. Because the MongoDB volume persists, the most common second run is exactly the case it broke: the rule-based agent is already there, the user has now set `EDDI_DEMO_LLM_API_KEY`, and they re-run to get an agent that can actually answer questions — and got no new model and no explanation. The guard is now **per agent**, keyed on the model-id prefix each descriptor name slugifies to (`eddi-demo-agent-`, `eddi-llm-demo-`), so each run creates only what is missing and says what it skipped. Vault storage was split into its own step that runs whenever a key is supplied, so changing the key rotates it instead of leaving the old one behind an "already exists" check.
+
+**The final "Ready" listing could omit the agent just created.** The poll exited on `grep -q '"id"'`, which a pre-existing agent satisfies immediately — so a freshly deployed LLM agent, still inside the adapter's 30s model-cache TTL, was absent from the output and looked like a failure. Verified it was only a display problem: re-querying after the TTL showed all four models. The loop now waits for the specific prefixes expected on this run.
+
+**Verified live, not reasoned about.** Ran the stack against a populated volume: first run created the rule-based agent, second reported `already deployed — skipping` and created no duplicate, third (with a key) added the LLM agent and listed all four models. The old code would have exited at step two.
+
+**Also:** the closing "open this URL" line hardcoded port 3000 and was wrong whenever `OPEN_WEBUI_PORT` was remapped — compose now passes `OPEN_WEBUI_URL`. `.env.example` gained an Open WebUI demo section (the demo's `.env` is gitignored, so these variables were undiscoverable from a fresh clone). The docs gained three subsections that only exist because they bit during testing: re-running, port collisions (`Bind for 0.0.0.0:7070 failed` when another EDDI holds the port), and `down` vs `down -v`.
+
+**Doc accuracy pass.** Cross-checked §3 against `application.properties` — all 11 `eddi.openai-compat.*` keys and all 11 defaults match; the §8 error table's 8 codes all exist in `OpenAiErrorResponse`; the documented endpoints match `RestOpenAiAdapter`'s `@Path`s. No drift found there.
+
+---
+
 ## 🔒 fix(openai): two CodeQL alerts — logged intent, and a regex flagged as ReDoS (2026-07-29)
 
 **Repo:** EDDI (`feat/openai-api-adapter`)
