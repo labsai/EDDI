@@ -94,13 +94,21 @@ public class MemoryItemConverter implements IMemoryItemConverter {
      * Adds the {@code snippets} and {@code vars} namespaces. Never lets a snippet /
      * variable lookup failure break a conversation turn — a missing namespace
      * renders empty, exactly as it did before it was injected here.
+     * <p>
+     * <strong>Never overwrites an existing key.</strong> The context map is
+     * flattened onto the top level before this runs, so a plain {@code put} let a
+     * deployment-wide global-variable set silently replace a client-supplied
+     * context variable literally named {@code vars} (or {@code snippets}) — a
+     * template that resolved the caller's data before this namespace was injected
+     * would suddenly resolve the deployment's. Explicit per-turn context wins, as
+     * it always did.
      */
     private void addSnippetsAndVars(Map<String, Object> conversationDataObjects) {
         if (promptSnippetService != null) {
             try {
                 Map<String, Object> snippets = promptSnippetService.getAll();
                 if (!snippets.isEmpty()) {
-                    conversationDataObjects.put(KEY_SNIPPETS, snippets);
+                    putNamespaceIfAbsent(conversationDataObjects, KEY_SNIPPETS, snippets);
                 }
             } catch (RuntimeException e) {
                 LOGGER.warnf("Could not resolve prompt snippets for template data: %s", e.getMessage());
@@ -111,11 +119,18 @@ public class MemoryItemConverter implements IMemoryItemConverter {
             try {
                 Map<String, Object> globalVars = globalVariableResolver.getTemplateData();
                 if (!globalVars.isEmpty()) {
-                    conversationDataObjects.put(KEY_VARS, globalVars);
+                    putNamespaceIfAbsent(conversationDataObjects, KEY_VARS, globalVars);
                 }
             } catch (RuntimeException e) {
                 LOGGER.warnf("Could not resolve global variables for template data: %s", e.getMessage());
             }
+        }
+    }
+
+    private static void putNamespaceIfAbsent(Map<String, Object> conversationDataObjects, String key, Map<String, Object> namespace) {
+        if (conversationDataObjects.putIfAbsent(key, namespace) != null) {
+            LOGGER.warnf("Template namespace '%s' is shadowed by a context variable of the same name — "
+                    + "the context value wins; rename the context variable to reach the '%s' namespace.", key, key);
         }
     }
 

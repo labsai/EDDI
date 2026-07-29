@@ -61,23 +61,6 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     private static final String FIELD_CREATED_AT = "createdAt";
     private static final String FIELD_UPDATED_AT = "updatedAt";
 
-    /** Recall order that ranks entries by how often they have been recalled. */
-    private static final String RECALL_ORDER_MOST_ACCESSED = "most_accessed";
-
-    /**
-     * Share of the recall window reserved for the most recently updated entries
-     * when {@link #RECALL_ORDER_MOST_ACCESSED} is used (1/5th of the window, at
-     * least one slot).
-     * <p>
-     * Without this reservation {@code most_accessed} is self-reinforcing: only
-     * entries that are already inside the window get their {@code accessCount}
-     * incremented, so a freshly written entry (count 0) can never climb in once the
-     * window is full. The reserved slots act as the recency term of the ranking — a
-     * new entry always gets at least one chance to be recalled (and thereby to
-     * start accumulating access counts).
-     */
-    private static final int RECENCY_RESERVATION_DIVISOR = 5;
-
     private final MongoCollection<Document> memoriesCollection;
 
     @Inject
@@ -266,19 +249,19 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
 
     /**
      * {@code most_accessed} recall: the bulk of the window is filled by access
-     * count, a reserved slice by recency (see
-     * {@link #RECENCY_RESERVATION_DIVISOR}), and the {@code accessCount} increments
+     * count, a reserved slice by recency (the split comes from
+     * {@link RecallWindow}, shared with the PostgreSQL store so both backends
+     * answer this recall order identically), and the {@code accessCount} increments
      * are applied in ONE batched write AFTER both cursors are drained — never
      * per-document inside an open cursor.
      */
     private List<UserMemoryEntry> mostAccessedWithRecencyReservation(Bson filter, int maxEntries) {
-        int recencySlots = maxEntries > 0 ? Math.max(1, maxEntries / RECENCY_RESERVATION_DIVISOR) : 0;
-        int accessSlots = maxEntries > 0 ? maxEntries - recencySlots : -1;
+        var window = RecallWindow.forMaxEntries(maxEntries);
 
         Map<ObjectId, UserMemoryEntry> recalled = new LinkedHashMap<>();
         List<UserMemoryEntry> ordered = new ArrayList<>();
-        collectInto(recalled, ordered, filter, descending(FIELD_ACCESS_COUNT), accessSlots);
-        collectInto(recalled, ordered, filter, descending(FIELD_UPDATED_AT), recencySlots);
+        collectInto(recalled, ordered, filter, descending(FIELD_ACCESS_COUNT), window.accessSlots());
+        collectInto(recalled, ordered, filter, descending(FIELD_UPDATED_AT), window.recencySlots());
 
         if (!recalled.isEmpty()) {
             memoriesCollection.updateMany(in(FIELD_ID, recalled.keySet()), Updates.inc(FIELD_ACCESS_COUNT, 1));

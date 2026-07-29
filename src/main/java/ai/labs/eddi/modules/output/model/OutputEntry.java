@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.output.model;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * @author ginccc
@@ -15,10 +16,25 @@ import java.util.Objects;
 public class OutputEntry implements Comparable<OutputEntry> {
     private static final Comparator<String> ACTION_COMPARATOR = Comparator.nullsFirst(Comparator.naturalOrder());
 
+    /**
+     * Hands every instance a monotonically increasing creation sequence.
+     * {@code OutputGenerationTask} builds the entries in configuration order, so
+     * this is the configuration order — and it is what makes the final tie-break of
+     * {@link #compareTo(OutputEntry)} both total and <em>stable</em>.
+     */
+    private static final AtomicLong CREATION_SEQUENCE = new AtomicLong();
+
     private String action;
     private int occurred;
     private List<OutputValue> outputs;
     private List<QuickReply> quickReplies;
+
+    /**
+     * Not part of the entry's identity — deliberately excluded from
+     * {@link #equals(Object)} / {@link #hashCode()} and never exposed as a getter,
+     * so it stays invisible to serialization.
+     */
+    private final long creationSequence = CREATION_SEQUENCE.getAndIncrement();
 
     /**
      * Orders primarily by {@code occurred}, which is what the output pipeline sorts
@@ -26,6 +42,13 @@ public class OutputEntry implements Comparable<OutputEntry> {
      * {@link #equals(Object)}: two entries only compare equal when they really are
      * equal, otherwise a {@code TreeSet}/{@code TreeMap} would silently drop
      * distinct entries that merely share the same {@code occurred} value.
+     * <p>
+     * The final tie-break is the creation sequence and NOT the content hash: the
+     * production sort site ({@code OutputGeneration#addOutputEntry}) sorts a list
+     * of entries that all share the same action, and every entry of the highest
+     * occurrence is emitted to the user in list order. Ordering those by hash would
+     * scramble configuration order into an arbitrary (though deterministic) one;
+     * ordering them by creation sequence keeps the order the agent author wrote.
      */
     @Override
     public int compareTo(OutputEntry o) {
@@ -44,9 +67,9 @@ public class OutputEntry implements Comparable<OutputEntry> {
         }
 
         // Same action and occurrence but different outputs / quick replies: the
-        // outputs are not themselves comparable, so fall back to a stable,
-        // equals-consistent discriminator instead of reporting equality.
-        return Integer.compare(hashCode(), o.hashCode());
+        // outputs are not themselves comparable, so fall back to configuration
+        // order instead of reporting equality.
+        return Long.compare(creationSequence, o.creationSequence);
     }
 
     public OutputEntry(String action, int occurred, List<OutputValue> outputs, List<QuickReply> quickReplies) {

@@ -4,12 +4,14 @@
  */
 package ai.labs.eddi.modules.output.model;
 
+import ai.labs.eddi.modules.output.impl.OutputGeneration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.TreeSet;
 
@@ -25,9 +27,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("OutputEntry — compareTo/equals consistency")
 class OutputEntryComparisonTest {
 
+    private static final String ACTION = "greet";
+    private static final int OCCURRED = 1;
+
     private static OutputEntry entry(String action, int occurred, String text) {
         return new OutputEntry(action, occurred, List.of(new OutputValue(List.of(new TextOutputItem(text)))),
                 List.of(new QuickReply("Yes", "expr", true)));
+    }
+
+    /**
+     * Builds {@code count} entries whose creation order is the exact opposite of
+     * their content-hash order, so any hash-based tie-break reorders them visibly
+     * while a creation-order tie-break leaves them alone.
+     */
+    private static List<OutputEntry> entriesCreatedInDescendingHashOrder(int count) {
+        var texts = new ArrayList<String>();
+        for (int i = 0; i < 256; i++) {
+            texts.add("output-" + i);
+        }
+        texts.sort(Comparator.comparingInt((String text) -> entry(ACTION, OCCURRED, text).hashCode()).reversed());
+
+        var entries = new ArrayList<OutputEntry>();
+        Integer previousHash = null;
+        for (String text : texts) {
+            var candidate = entry(ACTION, OCCURRED, text);
+            if (previousHash == null || candidate.hashCode() < previousHash) {
+                entries.add(candidate);
+                previousHash = candidate.hashCode();
+            }
+            if (entries.size() == count) {
+                break;
+            }
+        }
+
+        assertEquals(count, entries.size(), "fixture precondition: not enough entries with strictly descending hash codes");
+        return entries;
     }
 
     @Test
@@ -86,6 +120,31 @@ class OutputEntryComparisonTest {
         Collections.sort(sorted);
         assertEquals(1, sorted.get(0).getOccurred());
         assertEquals(5, sorted.get(1).getOccurred());
+    }
+
+    @Test
+    @DisplayName("the tie-break follows creation order, not content hash")
+    void tieBreakFollowsCreationOrderNotContentHash() {
+        var entries = entriesCreatedInDescendingHashOrder(2);
+        var createdFirst = entries.get(0);
+        var createdSecond = entries.get(1);
+
+        assertTrue(createdFirst.compareTo(createdSecond) < 0,
+                "the entry created (i.e. configured) first must sort first, even though its content hash is the larger one");
+        assertTrue(createdSecond.compareTo(createdFirst) > 0, "the tie-break must be antisymmetric");
+    }
+
+    @Test
+    @DisplayName("OutputGeneration emits same-occurrence entries in configuration order")
+    void outputGenerationPreservesConfigurationOrder() {
+        var configurationOrder = entriesCreatedInDescendingHashOrder(5);
+
+        var outputGeneration = new OutputGeneration("en");
+        configurationOrder.forEach(outputGeneration::addOutputEntry);
+
+        assertEquals(configurationOrder, outputGeneration.getOutputMapper().get(ACTION),
+                "every entry of the highest occurrence is emitted to the user in list order, so the sort must not reshuffle "
+                        + "configuration order");
     }
 
     @Test

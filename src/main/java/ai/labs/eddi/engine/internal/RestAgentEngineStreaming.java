@@ -16,12 +16,14 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -55,14 +57,61 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      */
     static final String CANCELLED_BY_CLIENT_DISCONNECT = "system:client-disconnect";
 
+    /**
+     * Default for {@code eddi.streaming.cancel-on-client-disconnect}.
+     *
+     * @see #cancelOnClientDisconnect
+     */
+    static final String DEFAULT_CANCEL_ON_CLIENT_DISCONNECT = "true";
+
     private final IConversationService conversationService;
     private final ConversationAccessGuard conversationAccessGuard;
 
+    /**
+     * Whether a vanished SSE client cancels the turn it was streaming
+     * ({@code eddi.streaming.cancel-on-client-disconnect}, default {@code true}).
+     *
+     * <p>
+     * <strong>Enabled</strong> (default) stops generation the moment the client is
+     * gone, which is the whole point: closing the tab at token 5 of 4000 otherwise
+     * still runs — and bills — the full completion and may escalate through every
+     * cascade model on the way. The trade-off is that a cancelled turn is
+     * DISCARDED, not saved: {@code ConversationService} deliberately skips
+     * persistence for a cancelled turn (a partial snapshot must never overwrite a
+     * newer or terminal state), so the user's own message and everything produced
+     * so far are lost and the conversation settles on
+     * {@code EXECUTION_INTERRUPTED}. That state is recoverable — the next
+     * {@code say} runs a fresh turn — but the dropped turn has to be re-sent.
+     * </p>
+     *
+     * <p>
+     * <strong>Disabled</strong> lets the turn run to completion and persist even
+     * though nobody is reading the stream, so a transient drop (proxy idle timeout,
+     * a phone switching from Wi-Fi to cellular) costs the generation but never
+     * loses the exchange — the client sees the full answer when it reloads the
+     * conversation. Deployments on flaky mobile networks, or ones where a lost turn
+     * is more expensive than a wasted completion, should turn this off.
+     * </p>
+     */
+    private final boolean cancelOnClientDisconnect;
+
     @Inject
     public RestAgentEngineStreaming(IConversationService conversationService,
-            ConversationAccessGuard conversationAccessGuard) {
+            ConversationAccessGuard conversationAccessGuard,
+            @ConfigProperty(name = "eddi.streaming.cancel-on-client-disconnect",
+                            defaultValue = DEFAULT_CANCEL_ON_CLIENT_DISCONNECT) boolean cancelOnClientDisconnect) {
         this.conversationService = conversationService;
         this.conversationAccessGuard = conversationAccessGuard;
+        this.cancelOnClientDisconnect = cancelOnClientDisconnect;
+    }
+
+    /**
+     * Convenience constructor for the direct-construction unit tests — applies the
+     * shipped default for {@code eddi.streaming.cancel-on-client-disconnect}.
+     */
+    RestAgentEngineStreaming(IConversationService conversationService,
+            ConversationAccessGuard conversationAccessGuard) {
+        this(conversationService, conversationAccessGuard, Boolean.parseBoolean(DEFAULT_CANCEL_ON_CLIENT_DISCONNECT));
     }
 
     @Override
@@ -147,8 +196,8 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                         public void onError(Throwable error) {
                             stream.markTerminal();
                             try {
-                                LOGGER.errorf("Streaming error for conversation %s: %s", safeConversationId, error.getMessage());
-                                stream.send("error", String.format("{\"message\":\"%s\"}", escapeJson(error.getMessage())));
+                                stream.send("error", logAndBuildOpaqueErrorEvent(
+                                        "Streaming error for conversation " + safeConversationId, error));
                             } finally {
                                 stream.close();
                             }
@@ -165,10 +214,30 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                     });
         } catch (Exception e) {
             stream.markTerminal();
-            LOGGER.errorf("Failed to start streaming for conversation %s: %s", safeConversationId, e.getMessage());
-            stream.send("error", String.format("{\"message\":\"%s\"}", escapeJson(e.getMessage())));
+            stream.send("error", logAndBuildOpaqueErrorEvent("Failed to start streaming for conversation " + safeConversationId, e));
             stream.close();
         }
+    }
+
+    /**
+     * Log the failure detail at ERROR under a fresh correlation id and return the
+     * only thing safe to push down the stream: a fixed message plus that id.
+     * <p>
+     * Same treatment {@code RestAgentManagement.logAndBuildOpaqueMessage} applies
+     * to the non-streaming twin, and for the same reason — {@code sayStreaming}
+     * loads the conversation snapshot, so sneaky-thrown
+     * {@code ResourceStoreException}s reach these catches and their messages name
+     * collections, hosts and replica-set members. Echoing them turned any failing
+     * stream into deployment reconnaissance, over a channel a browser renders
+     * directly.
+     *
+     * @return the JSON body of the {@code error} SSE event
+     */
+    private static String logAndBuildOpaqueErrorEvent(String context, Throwable error) {
+        String correlationId = UUID.randomUUID().toString();
+        LOGGER.errorf(error, "%s [correlationId=%s]: %s", context, correlationId,
+                error != null ? error.getMessage() : "null");
+        return String.format("{\"message\":\"Internal server error\",\"correlationId\":\"%s\"}", correlationId);
     }
 
     /**
@@ -190,7 +259,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      * is cancelled through {@code IConversationService.cancelConversation}, which
      * sets the cooperative cancel flag on the live conversation memory. Without it,
      * closing the tab at token 5 of 4000 still ran — and billed — the whole
-     * completion, and could escalate through every cascade model on the way.
+     * completion, and could escalate through every cascade model on the way. A
+     * cancelled turn is DISCARDED rather than saved — see
+     * {@link RestAgentEngineStreaming#cancelOnClientDisconnect} for the full
+     * semantics and the config switch that turns this off.
      * <p>
      * The cancel is issued synchronously on the calling (pipeline worker) thread
      * and at most once, so it never touches the Vert.x event loop and never
@@ -274,12 +346,23 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         /**
          * The client is no longer reading this stream. Cancel the turn it was waiting
          * on — once, and never for a stream that already delivered its terminal frame.
+         * <p>
+         * Skipped entirely when {@code eddi.streaming.cancel-on-client-disconnect} is
+         * off: the turn then finishes and persists normally, so a transient drop does
+         * not cost the user their message. See
+         * {@link RestAgentEngineStreaming#cancelOnClientDisconnect} for the trade-off.
          */
         private void onClientGone() {
             if (terminal.get() || !cancelSignalled.compareAndSet(false, true)) {
                 return;
             }
-            LOGGER.infof("SSE client disconnected from conversation %s — cancelling the in-flight turn",
+            if (!cancelOnClientDisconnect) {
+                LOGGER.infof("SSE client disconnected from conversation %s — letting the turn finish and persist "
+                        + "(eddi.streaming.cancel-on-client-disconnect is disabled)", safeConversationId);
+                return;
+            }
+            LOGGER.infof("SSE client disconnected from conversation %s — cancelling the in-flight turn; "
+                    + "its output is discarded and the conversation settles on EXECUTION_INTERRUPTED",
                     safeConversationId);
             try {
                 conversationService.cancelConversation(conversationId, ControlSignal.CANCEL_GRACEFUL,

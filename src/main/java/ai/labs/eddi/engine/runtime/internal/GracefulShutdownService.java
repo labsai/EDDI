@@ -35,8 +35,11 @@ import java.util.Map;
  * traffic to this pod. It joins the existing readiness set (alongside the agent
  * readiness check) rather than inventing a parallel mechanism;</li>
  * <li><b>stops accepting new turns</b> — {@link #isShuttingDown()} is consulted
- * by {@code ConversationService} on the start/say/sayStreaming entry points,
- * which reject with {@code RejectedExecutionException} once it flips;</li>
+ * by {@code ConversationService} on the start/say/sayStreaming/resume entry
+ * points, which reject with {@code RejectedExecutionException} once it flips. A
+ * resume is gated too: it enqueues a full turn through the same coordinator
+ * this drain is waiting on, and it is rejected BEFORE the pause is consumed, so
+ * the approval simply stays pending;</li>
  * <li><b>drains the coordinator queues</b> with a BOUNDED wait, so turns
  * already queued or executing get the chance to finish and persist.</li>
  * </ol>
@@ -56,11 +59,33 @@ public class GracefulShutdownService {
 
     private static final Logger LOGGER = Logger.getLogger(GracefulShutdownService.class);
 
+    /**
+     * The shipped drain budget must FIT INSIDE the termination grace period of the
+     * manifests this repo ships, or the drain it promises is a fiction: the
+     * orchestrator SIGKILLs the pod part-way through and the turns it was
+     * protecting are dropped anyway.
+     * <p>
+     * {@code k8s/base/eddi-deployment.yaml}, {@code k8s/quickstart.yaml} and
+     * {@code helm/eddi/templates/deployment.yaml} all set
+     * {@code terminationGracePeriodSeconds: 30}. The defaults below therefore total
+     * 3 s readiness grace + 20 s drain = 23 s, leaving headroom for the rest of the
+     * Quarkus shutdown sequence.
+     * <p>
+     * Operators who raise {@code terminationGracePeriodSeconds} can raise
+     * {@code eddi.shutdown.drain-timeout-seconds} to match — but the two must be
+     * changed TOGETHER, and the total must stay below the grace period.
+     */
+    static final String DEFAULT_DRAIN_TIMEOUT_SECONDS = "20";
+
+    /** @see #DEFAULT_DRAIN_TIMEOUT_SECONDS */
+    static final String DEFAULT_READINESS_GRACE_SECONDS = "3";
+
     private final IConversationCoordinator conversationCoordinator;
 
     /**
-     * How long to keep draining before giving up. Should be comfortably below the
-     * orchestrator's termination grace period.
+     * How long to keep draining before giving up. Must be comfortably below the
+     * orchestrator's termination grace period — see
+     * {@link #DEFAULT_DRAIN_TIMEOUT_SECONDS}.
      */
     private final long drainTimeoutMillis;
 
@@ -81,8 +106,8 @@ public class GracefulShutdownService {
 
     @Inject
     public GracefulShutdownService(IConversationCoordinator conversationCoordinator,
-            @ConfigProperty(name = "eddi.shutdown.drain-timeout-seconds", defaultValue = "30") int drainTimeoutSeconds,
-            @ConfigProperty(name = "eddi.shutdown.readiness-grace-seconds", defaultValue = "3") int readinessGraceSeconds,
+            @ConfigProperty(name = "eddi.shutdown.drain-timeout-seconds", defaultValue = DEFAULT_DRAIN_TIMEOUT_SECONDS) int drainTimeoutSeconds,
+            @ConfigProperty(name = "eddi.shutdown.readiness-grace-seconds", defaultValue = DEFAULT_READINESS_GRACE_SECONDS) int readinessGraceSeconds,
             @ConfigProperty(name = "eddi.shutdown.drain-poll-millis", defaultValue = "100") long pollIntervalMillis) {
         this(conversationCoordinator, drainTimeoutSeconds * 1000L, readinessGraceSeconds * 1000L, pollIntervalMillis);
     }

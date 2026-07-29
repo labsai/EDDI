@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -149,9 +150,32 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
         if (sanitized.isEmpty() || sanitized.contains(".")) {
             return;
         }
-        String indexName = "idx_resources_field_" + sanitized.toLowerCase();
-        createIndexQuietly(stmt,
-                "CREATE INDEX IF NOT EXISTS " + indexName + " ON resources (collection_name, (data ->> '" + sanitized + "'))");
+        createIndexQuietly(stmt, "CREATE INDEX IF NOT EXISTS " + fieldIndexName(sanitized) + " ON resources (collection_name, (data ->> '"
+                + sanitized + "'))");
+    }
+
+    /**
+     * Index name for a field hint — case-sensitive even though PostgreSQL
+     * identifiers are not.
+     * <p>
+     * JSON keys are case-sensitive, so {@code userId} and {@code userid} are two
+     * different expressions; index names are schema-global and folded to lower
+     * case, so both used to resolve to {@code idx_resources_field_userid}.
+     * {@code CREATE INDEX IF NOT EXISTS} then made whichever came second a silent
+     * no-op — it only emits a NOTICE — leaving one field unindexed while this class
+     * believed it was indexed.
+     * <p>
+     * A hint that is already all lower case keeps its historical name, so existing
+     * deployments do not grow a duplicate index on upgrade; anything with an upper
+     * case character gets a short digest of the exact expression appended, which is
+     * enough to keep case variants apart.
+     */
+    private static String fieldIndexName(String sanitizedField) {
+        String lowerCased = sanitizedField.toLowerCase(Locale.ROOT);
+        if (lowerCased.equals(sanitizedField)) {
+            return "idx_resources_field_" + lowerCased;
+        }
+        return "idx_resources_field_" + lowerCased + "_" + Integer.toHexString(sanitizedField.hashCode());
     }
 
     private void createIndexQuietly(Statement stmt, String createIndexSql) {
@@ -520,9 +544,27 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
         }
     }
 
+    /**
+     * The jsonpath existence operator, written for the JDBC driver rather than for
+     * the server.
+     * <p>
+     * pgjdbc scans the statement character by character and turns every bare
+     * {@code ?} into a bind placeholder; {@code @} is not special to it, so a
+     * literally spelled {@code data @? ?::jsonpath} is parsed as
+     * {@code data @ $1 $2::jsonpath} — three placeholders where only two values are
+     * bound, which fails at execution time on a real server. Doubling it
+     * ({@code ??}) is pgjdbc's documented escape for a literal question mark: the
+     * driver collapses the pair and sends {@code @?} to PostgreSQL. The same escape
+     * is used for the {@code ?|} operator in {@code PostgresUserMemoryStore}.
+     * <p>
+     * The operator form (rather than {@code jsonb_path_exists(...)}) is deliberate
+     * — only {@code @?} can be answered from the {@code jsonb_path_ops} GIN index.
+     */
+    private static final String JSONPATH_EXISTS = " AND data @?? ?::jsonpath";
+
     @Override
     public List<IResourceStore.IResourceId> findResourceIdsContaining(String jsonPath, String value) {
-        String sql = "SELECT id, version FROM resources WHERE collection_name = ? AND data @? ?::jsonpath";
+        String sql = "SELECT id, version FROM resources WHERE collection_name = ?" + JSONPATH_EXISTS;
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, collectionName);
             ps.setString(2, toContainmentJsonPath(jsonPath, value));
@@ -534,7 +576,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public List<IResourceStore.IResourceId> findHistoryResourceIdsContaining(String jsonPath, String value) {
-        String sql = "SELECT id, version FROM resources_history WHERE collection_name = ? AND data @? ?::jsonpath";
+        String sql = "SELECT id, version FROM resources_history WHERE collection_name = ?" + JSONPATH_EXISTS;
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, collectionName);
             ps.setString(2, toContainmentJsonPath(jsonPath, value));

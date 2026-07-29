@@ -51,6 +51,12 @@ public class ConversationMemoryUtilities {
 
         snapshot.getConversationOutputs().addAll(conversationMemory.getConversationOutputs());
         snapshot.getConversationProperties().putAll(conversationMemory.getConversationProperties());
+        // Deferred user-memory writes MUST round-trip: they are the only record that a
+        // longTerm property in conversationProperties has not reached the user-memory
+        // store yet. Dropping them here re-introduces the silent-write-loss the marker
+        // exists to prevent (the next turn's baseline is taken from those very
+        // properties, so an owed write would look "unchanged" forever).
+        snapshot.getPendingLongTermWrites().addAll(conversationMemory.getPendingLongTermWrites());
 
         return snapshot;
     }
@@ -129,6 +135,7 @@ public class ConversationMemoryUtilities {
         conversationMemory.setHitlPauseType(snapshot.getHitlPauseType());
         conversationMemory.setHitlPendingToolCalls(snapshot.getHitlPendingToolCalls());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
+        conversationMemory.setPendingLongTermWrites(snapshot.getPendingLongTermWrites());
 
         var redoSteps = iterateRedoCache(snapshot.getRedoCache());
         for (var redoStep : redoSteps) {

@@ -111,8 +111,48 @@ public class RestGroupConversation implements IRestGroupConversation {
         return gc;
     }
 
+    /**
+     * Server-side re-check of the request-body ceilings declared on
+     * {@link IRestGroupConversation}.
+     * <p>
+     * The ceilings themselves are Bean Validation constraints on a JAX-RS
+     * <em>interface</em>. Quarkus is expected to honour those on the implementing
+     * resource, but this deployment has no test that proves it (and one cannot be
+     * written without booting the HTTP layer), so a wiring regression would leave
+     * every ceiling silently inert while looking enforced. A group question is
+     * fanned out to every member agent in every phase, which makes an unbounded one
+     * an amplification surface — cheap to re-check here, and independent of the
+     * interceptor being wired.
+     *
+     * @return a client-safe rejection reason, or {@code null} when the body is
+     *         acceptable
+     */
+    private static String rejectionReason(String question, String userId) {
+        if (blank(question)) {
+            return "'question' is required.";
+        }
+        if (question.length() > MAX_QUESTION_CHARS) {
+            return "'question' must be at most " + MAX_QUESTION_CHARS + " characters.";
+        }
+        if (userId != null && userId.length() > MAX_IDENTIFIER_CHARS) {
+            return "'userId' must be at most " + MAX_IDENTIFIER_CHARS + " characters.";
+        }
+        return null;
+    }
+
+    private static Response badRequest(String reason) {
+        return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN).entity(reason).build();
+    }
+
     @Override
     public Response discuss(String groupId, DiscussRequest request) {
+        if (request == null) {
+            return badRequest("A request body is required.");
+        }
+        String rejection = rejectionReason(request.question(), request.userId());
+        if (rejection != null) {
+            return badRequest(rejection);
+        }
         try {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
             if (userId == null || userId.isBlank())
@@ -153,6 +193,12 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public void discussStreaming(String groupId, DiscussRequest request, SseEventSink eventSink, Sse sse) {
+        String rejection = request == null ? "A request body is required." : rejectionReason(request.question(), request.userId());
+        if (rejection != null) {
+            sendErrorEvent(eventSink, sse, rejection);
+            closeQuietly(eventSink);
+            return;
+        }
         try {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
             if (userId == null || userId.isBlank())
@@ -278,8 +324,15 @@ public class RestGroupConversation implements IRestGroupConversation {
         // Reject an incomplete body up front: without this a missing targetAgentId NPEs
         // during member resolution and surfaces as a 500 rather than a 400.
         if (request == null || blank(request.question()) || blank(request.targetAgentId())) {
-            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
-                    .entity("Both 'question' and 'targetAgentId' are required.").build();
+            return badRequest("Both 'question' and 'targetAgentId' are required.");
+        }
+        // Same ceilings as discuss() — see rejectionReason.
+        String rejection = rejectionReason(request.question(), request.userId());
+        if (rejection == null && request.targetAgentId().length() > MAX_IDENTIFIER_CHARS) {
+            rejection = "'targetAgentId' must be at most " + MAX_IDENTIFIER_CHARS + " characters.";
+        }
+        if (rejection != null) {
+            return badRequest(rejection);
         }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
@@ -425,9 +478,9 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response continueDiscussion(String groupId, String gcId, DiscussRequest request) {
-        if (request == null || blank(request.question())) {
-            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
-                    .entity("'question' is required.").build();
+        String rejection = request == null ? "'question' is required." : rejectionReason(request.question(), request.userId());
+        if (rejection != null) {
+            return badRequest(rejection);
         }
         if (request.attachments() != null && !request.attachments().isEmpty()) {
             return rejectAttachmentsOnContinue();
@@ -472,9 +525,10 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public void continueDiscussionStreaming(String groupId, String gcId, DiscussRequest request,
                                             SseEventSink eventSink, Sse sse) {
-        if (request == null || blank(request.question())) {
+        String rejection = request == null ? "'question' is required" : rejectionReason(request.question(), request.userId());
+        if (rejection != null) {
             sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
-                    toJson(new GroupConversationEventSink.GroupErrorEvent("'question' is required")));
+                    toJson(new GroupConversationEventSink.GroupErrorEvent(rejection)));
             closeQuietly(eventSink);
             return;
         }

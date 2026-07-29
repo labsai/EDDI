@@ -22,6 +22,15 @@ import java.util.List;
  * the surviving neighbours cannot be renumbered to hide it without breaking
  * their own HMACs.</li>
  * </ul>
+ * <p>
+ * <strong>What the chain check does not cover.</strong> A gap is only visible
+ * between two surviving entries, plus at the head when the swept page provably
+ * starts at the beginning of the conversation ({@code skip == 0} and the page
+ * did not fill its limit, so sequence 0 must be present). Removing the
+ * <em>newest</em> entries of a conversation is not detectable at all without a
+ * stored high-water mark, which this ledger does not keep — {@code INTACT}
+ * therefore means "no hole inside the swept range", not "nothing was ever
+ * removed".
  *
  * @param scope
  *            what was swept — {@code "conversation"} or {@code "agent"}
@@ -43,8 +52,14 @@ import java.util.List;
  * @param chainStatus
  *            outcome of the sequence-continuity check
  * @param missingSequences
- *            sequence numbers absent from an otherwise contiguous range — each
- *            one is a deleted entry
+ *            sequence numbers absent from an otherwise contiguous range that
+ *            this deployment cannot account for — the evidence of removal
+ * @param undeliveredSequences
+ *            sequence numbers the ledger itself never persisted (queue overflow
+ *            or a store outage that ended in the dead-letter sink). They are
+ *            holes in the record, but they are <em>this deployment's own</em>
+ *            holes, not proof that anything was deleted — see
+ *            {@code AuditLedgerService.undeliveredSequences}
  * @param duplicateSequences
  *            sequence numbers seen more than once. Not proof of tampering: two
  *            nodes writing the same conversation concurrently can both seed the
@@ -56,23 +71,45 @@ import java.util.List;
  * @since 6.2.0
  */
 public record AuditVerificationReport(String scope, String scopeId, boolean signingEnabled, int entriesChecked, int valid, int invalid, int unsigned,
-        ChainStatus chainStatus, List<Long> missingSequences, List<Long> duplicateSequences, List<EntryProblem> problems, Instant verifiedAt) {
+        ChainStatus chainStatus, List<Long> missingSequences, List<Long> undeliveredSequences, List<Long> duplicateSequences,
+        List<EntryProblem> problems, Instant verifiedAt) {
 
     /**
      * Whether the sweep found nothing wrong. False whenever an entry failed
-     * verification or the chain is broken — note that a sweep with no signing key
-     * is never {@code intact}, because it checked nothing.
+     * verification or the chain is anything other than {@code INTACT} — note that a
+     * sweep with no signing key is never {@code intact}, because it checked
+     * nothing, and that an {@code INCOMPLETE} chain is still an incomplete record
+     * even though it is not evidence of tampering.
      */
     public boolean intact() {
         return signingEnabled && invalid == 0 && unsigned == 0 && chainStatus == ChainStatus.INTACT;
+    }
+
+    /**
+     * Whether anything in the swept range points at <em>tampering</em>: an entry
+     * whose HMAC no longer recomputes, or a gap this deployment cannot account for.
+     * An {@code INCOMPLETE} chain (the ledger dropped those entries itself) and a
+     * missing signing key are explicitly not tampering.
+     */
+    public boolean tamperingSuspected() {
+        return invalid > 0 || chainStatus == ChainStatus.BROKEN;
     }
 
     /** Continuity of the per-conversation sequence chain. */
     public enum ChainStatus {
         /** Sequences form a gap-free ascending run. */
         INTACT,
-        /** At least one sequence number is missing — an entry was deleted. */
+        /**
+         * At least one sequence number is missing and cannot be attributed to this
+         * ledger's own drops — an entry was removed.
+         */
         BROKEN,
+        /**
+         * Every gap in the range is one this deployment recorded as never persisted
+         * (audit queue overflow, or a store outage that ended in the dead-letter sink).
+         * The record is incomplete, but not evidence of deletion.
+         */
+        INCOMPLETE,
         /**
          * The entries carry no sequence, so deletion cannot be detected. Applies to
          * rows written before sequencing existed and to stores that do not persist it

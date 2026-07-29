@@ -11,11 +11,38 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+
 /**
  * @author ginccc
  */
 public interface IDictionary {
     List<IFoundWord> NO_WORDS_FOUND = Collections.emptyList();
+
+    /**
+     * Whether a dictionary written for {@code dictionaryLanguageCode} applies to a
+     * conversation turn held in {@code userLanguage}. A {@code null} or blank
+     * dictionary language means "applies to every language".
+     * <p>
+     * This filter has to be applied on <em>every</em> path that consults a
+     * dictionary — the direct lookup as well as each correction. A correction that
+     * scans a language-mismatched dictionary re-introduces exactly the match the
+     * filter exists to prevent: as soon as the token is otherwise unknown, the
+     * foreign-language word comes back at distance 0 / accuracy 1.0.
+     * <p>
+     * Deliberately a static helper rather than a {@code default} method: call sites
+     * are frequently handed Mockito mocks of this interface, and a mocked default
+     * method would answer {@code false} instead of running this logic.
+     *
+     * @param dictionaryLanguageCode
+     *            the dictionary's configured language, may be {@code null}
+     * @param userLanguage
+     *            the language of the current conversation turn
+     * @return {@code true} if the dictionary may be consulted for this turn
+     */
+    static boolean appliesToLanguage(String dictionaryLanguageCode, String userLanguage) {
+        return isNullOrEmpty(dictionaryLanguageCode) || dictionaryLanguageCode.equals(userLanguage);
+    }
 
     default List<IWord> getWords() {
         return Collections.emptyList();

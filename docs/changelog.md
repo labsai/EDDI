@@ -5,6 +5,48 @@
 
 ---
 
+## 🔍 fix(all): critical re-review of the applied code-review fixes — 61 defects closed, 11 theatre tests made real (2026-07-29)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+After ~120 findings from the external review had been applied across four waves, seven reviewers re-read the whole cumulative diff adversarially — explicitly assuming the previous agents got things wrong — and a mutation runner proved, empirically, which tests would actually fail if their fix were reverted.
+
+**They found 64 defects (4 critical, 10 high) and 11 tests that pass with the fix removed.** Several of the defects were regressions introduced by the fixes themselves; one was worse than the bug it replaced. **61 closed, all 11 mutations now bite.**
+
+### The critical four
+
+- **`PostgresResourceStorage` — the D1 fix broke what it repaired.** The rewritten reverse-lookup emitted the jsonpath operator `@?` unescaped, and pgjdbc parses a bare `?` as a bind placeholder — so on a real PostgreSQL the queries now *threw* where before D1 they merely returned empty. This shipped in the wave-1 merge and was live on `main`.
+- **`RestWorkflowStore`** — consequence of the above: cascade-delete of workflow extensions was a permanent no-op on PostgreSQL, and "which agents use this workflow" returned 500.
+- **`ConverseWithAgentTool` — F18's delegation guard was inert.** The depth context was attached to `startConversation` only, while the delegated question travelled through `say()` with an empty context — so the callee always read depth 0 and the A→B→A cycle still recursed unbounded. The fix mirrors the `groupDepth` pattern groups already use: attach the context to *every* turn, including the branch that reuses an existing conversationId.
+- **`Conversation` — G6 silently dropped data.** Changed-only upserts permanently lost a `longTerm` write whenever the turn that set it never reached teardown (HITL pause, error, cancel), because the next turn's baseline already contained the un-persisted value.
+
+### The one that mattered most
+
+**G2's secret fail-closed was incomplete.** `scrubSecretInput` only rewrote `input:initial` and the `input` output — but `InputParserTask` has already written the plaintext to `input:normalized` in the same step, and every `IData` of a step is serialized into the persisted document. Worse, the scrub was a silent no-op whenever a normalizer was configured, because `{memory.current.input}` resolves to the *normalized* text, not the raw. A secret could still persist despite the fix reporting success.
+
+### Fixes that broke stored configs or existing deployments
+
+- **B7's `modelID` → `modelId` rename** had no legacy fallback, so every stored `gemini-vertex` config using the previously-working spelling silently built a **nameless model**. AGENTS.md is explicit that stored MongoDB/ZIP configs must keep working. Now reads both, preferring the canonical spelling, with a deprecation warning.
+- **I3 hard-rejected the MCP `sse` transport** that the config's own javadoc advertised — and in the agent path the throw was swallowed, so an existing agent silently lost *every* tool from that server and burned circuit-breaker budget each turn.
+- **B14's fail-closed migration aborted forever.** It refused to proceed whenever the v6 collection merely *existed* — the normal state, since every store constructor creates its collection — and never marked itself complete, so it retried and aborted indefinitely. Now distinguishes "exists and empty" from "exists with data".
+- **B9's fail-closed capability table disabled vision on Azure OpenAI**, where the model name is an operator-chosen deployment name that rarely reproduces canonical punctuation (`gpt4o-prod` failed the `gpt-4o` substring test).
+
+### Fixes that quietly negated each other
+
+**E19 and E8 collided.** E19's per-invocation random nonce was embedded in the Qute template *text*, and E8's compiled-template cache is keyed on that text — giving the httpcall output path a **100% cache miss rate** and unbounded churn through a bounded cache. E19's injection-safety is kept; the cache key is now stable.
+
+**G18 and G20 collided.** An entry the ledger dropped locally had already consumed its sequence number, so a store outage or full queue permanently made verification report `BROKEN` — the ledger accusing the deployment of deleting records it had dropped itself.
+
+### The 11 tests that were theatre
+
+A test that passes with its fix reverted is not coverage. The mutation runner proved these did exactly that, and all 11 now fail when the fix is removed — among them: the F18 delegation-depth wiring (the guardrail tests covered the *tool* and the *resolver* but nothing pinned the call site, so hard-coding the depth to 0 left all 11 green), the C10 map-entry removal, B3's configurable drain timeout (a hardcoded 10s passed it), the E19 nonce's unguessability — the actual security property — and three separate holes in the audit ledger's drop/dead-letter accounting.
+
+### Verification
+
+Clean `test-compile`, full suite with **0 non-environmental failures**, and all 11 recorded mutations re-run and confirmed biting. Not verifiable here and left to CI: anything needing Docker or a bound socket — in particular a Testcontainers test executing the corrected JSONB path against a real PostgreSQL, which is what would have caught the `@?` regression in the first place.
+
+---
+
 ## ✅ fix(configs): code-review findings wave 4a — write-time config validation (E6) and request-body validation (A11) (2026-07-29)
 
 **Repo:** EDDI (`fix/code-review-validation`)

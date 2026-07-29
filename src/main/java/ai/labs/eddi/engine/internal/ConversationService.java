@@ -42,9 +42,11 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.runtime.ExecutionAbandonedException;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
+import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
@@ -278,6 +280,9 @@ public class ConversationService implements IConversationService {
      * {@code ShutdownEvent} (B3). Turns already queued or in flight are drained by
      * the shutdown observer; admitting new ones during the drain would either be
      * dropped by the JVM exit or extend the drain indefinitely.
+     * <p>
+     * Applied on every entry point that enqueues a turn: startConversation, say,
+     * sayStreaming AND resumeConversation.
      * <p>
      * A {@code null} gate means the bean was constructed outside CDI (only the
      * direct-construction unit tests do that) and never rejects.
@@ -1044,20 +1049,52 @@ public class ConversationService implements IConversationService {
         return agent;
     }
 
-    private Callable<Void> processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
-                                                   Map<String, String> loggingContext, Callable<Void> executeConversation,
-                                                   Consumer<IConversationMemory> skipNotifier, ProcessingTurn processingTurn) {
-        return () -> {
-            try {
-                return runConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                        executeConversation, skipNotifier);
-            } finally {
-                // C11: the single guaranteed exit point of a turn. The completion
-                // consumer releases first on the happy path, but a watchdog timeout,
-                // a pipeline error or a cancelled inner future never reaches it — and
-                // an entry that is never released leaks into the gauge forever.
-                // release() is one-shot, so releasing twice is a no-op.
-                processingTurn.release();
+    private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
+                                                     Map<String, String> loggingContext, Callable<Void> executeConversation,
+                                                     Consumer<IConversationMemory> skipNotifier, ProcessingTurn processingTurn) {
+        return new IDiscardableTask() {
+            @Override
+            public Void call() {
+                try {
+                    return runConversationStep(environment, conversationMemory, conversationId, loggingContext,
+                            executeConversation, skipNotifier);
+                } finally {
+                    // C11: the single guaranteed exit point of a turn. The completion
+                    // consumer releases first on the happy path, but a watchdog timeout,
+                    // a pipeline error or a cancelled inner future never reaches it — and
+                    // an entry that is never released leaks into the gauge forever.
+                    // release() is one-shot, so releasing twice is a no-op.
+                    processingTurn.release();
+                }
+            }
+
+            /**
+             * The coordinator dropped this turn WITHOUT running it (it could not hand it to
+             * the runtime and had no caller left to roll back to). The {@code finally}
+             * above therefore never executes, so the release and the caller's completion
+             * have to happen here instead — otherwise the in-flight gauge leaks for the
+             * JVM's lifetime and the HTTP caller waits for a response that can never
+             * arrive.
+             * <p>
+             * Reported through the SKIPPED contract, which means exactly this: the turn was
+             * dropped without consuming the input. The conversation is untouched (no state
+             * write) and remains usable, so a retry runs normally.
+             */
+            @Override
+            public void onDiscarded(Throwable cause) {
+                try {
+                    contextLogger.setLoggingContext(loggingContext);
+                    LOGGER.errorf(cause, "Queued turn of conversation %s was dropped before it ran — reporting it as "
+                            + "skipped; the input was not consumed and can be retried", conversationId);
+                    if (skipNotifier != null) {
+                        skipNotifier.accept(conversationMemory);
+                    }
+                } finally {
+                    // Belt and braces: release() is one-shot, so this is a no-op when
+                    // the skip notifier already released — but a null or throwing
+                    // notifier must not leak the reference.
+                    processingTurn.release();
+                }
             }
         };
     }
@@ -1257,7 +1294,14 @@ public class ConversationService implements IConversationService {
                         // pause alone), and a late ERROR write from the zombie turn is
                         // exactly the stale overwrite the token exists to prevent.
                         // Mirrors the resume path's onFailure.
-                        if (t instanceof InterruptedException || t instanceof LifecycleException.LifecycleInterruptedException) {
+                        //
+                        // Matched on the DEDICATED abandonment type, not on the bare
+                        // InterruptedException: a genuine InterruptedException thrown
+                        // by the callable BODY means the turn never finished and no
+                        // watchdog recorded anything, so it must take the error path
+                        // below and leave an ERROR record — swallowing it at WARN left
+                        // the conversation looking untouched after a real failure.
+                        if (t instanceof ExecutionAbandonedException || t instanceof LifecycleException.LifecycleInterruptedException) {
                             String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
                             errorMessage = String.format(errorMessage, conversationId);
                             contextLogger.setLoggingContext(loggingContext);
@@ -1480,6 +1524,13 @@ public class ConversationService implements IConversationService {
                                    ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
                                    ConversationResponseHandler handler)
             throws ResourceStoreException, ResourceNotFoundException {
+        // B3: a resume enqueues a FULL turn through the same coordinator the shutdown
+        // drain is waiting on, so admitting one during the drain both extends the
+        // drain and risks the turn being SIGKILLed halfway. Rejected here, BEFORE the
+        // AWAITING_HUMAN->IN_PROGRESS CAS, so there is no state to roll back: the
+        // conversation stays paused and the approval can be resumed on another node
+        // (or after the restart) with nothing lost.
+        rejectIfShuttingDown();
         // #7: distinguish "unknown conversation" (404) from "wrong state" (409)
         // — compareAndSetState returns false for both.
         if (conversationMemoryStore.getConversationState(conversationId) == null) {
@@ -1714,7 +1765,11 @@ public class ConversationService implements IConversationService {
 
                 @Override
                 public void onFailure(Throwable t) {
-                    if (t instanceof InterruptedException || t instanceof LifecycleException.LifecycleInterruptedException) {
+                    // See the say path's onFailure: only the DEDICATED abandonment type
+                    // means "the watchdog already recorded the outcome". A genuine
+                    // InterruptedException from the body is a real failure and falls
+                    // through to logConversationError.
+                    if (t instanceof ExecutionAbandonedException || t instanceof LifecycleException.LifecycleInterruptedException) {
                         // watchdog timeout / stale completion — EXECUTION_INTERRUPTED
                         // was already persisted by the watchdog; discard this result
                         contextLogger.setLoggingContext(loggingContext);
@@ -1729,15 +1784,33 @@ public class ConversationService implements IConversationService {
             // #4: guard the resume with the same watchdog the say path uses — a
             // hung LLM call or crashed executor must not leave the conversation
             // stuck IN_PROGRESS forever.
-            Callable<Void> guardedResume = () -> {
-                try {
-                    waitForExecutionFinishOrTimeout(loggingContext, conversationId,
-                            runtime.submitCallable(resumeCallable, resumeFinished, null));
-                } finally {
-                    // value-conditional: never evict a newer execution's registration
-                    inFlightConversations.remove(conversationId, memory);
+            IDiscardableTask guardedResume = new IDiscardableTask() {
+                @Override
+                public Void call() {
+                    try {
+                        waitForExecutionFinishOrTimeout(loggingContext, conversationId,
+                                runtime.submitCallable(resumeCallable, resumeFinished, null));
+                    } finally {
+                        // value-conditional: never evict a newer execution's registration
+                        inFlightConversations.remove(conversationId, memory);
+                    }
+                    return null;
                 }
-                return null;
+
+                /**
+                 * The coordinator dropped the resume without running it. The pause's STATE was
+                 * already consumed by the AWAITING_HUMAN->IN_PROGRESS CAS above, so without
+                 * this the conversation is wedged IN_PROGRESS forever with nothing left to move
+                 * it. Same rollback the synchronous submit-rejection path performs.
+                 */
+                @Override
+                public void onDiscarded(Throwable cause) {
+                    contextLogger.setLoggingContext(loggingContext);
+                    LOGGER.errorf(cause, "Queued resume of conversation %s was dropped before it ran — "
+                            + "restoring the pause so the approval is not wedged IN_PROGRESS", conversationId);
+                    inFlightConversations.remove(conversationId, memory);
+                    restorePauseAfterFailedResume(conversationId, memory, true);
+                }
             };
 
             try {

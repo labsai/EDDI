@@ -161,17 +161,29 @@ public class McpToolProviderManager {
                 continue;
             }
 
+            String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
+
             // Circuit breaker: skip servers that failed too often recently
             if (isCircuitOpen(serverConfig.getUrl())) {
-                String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
                 LOGGER.warnf("Circuit breaker OPEN for MCP server '%s' — skipping (>=%d failures in last %ds)",
                         sanitize(serverName), CIRCUIT_FAILURE_THRESHOLD, CIRCUIT_WINDOW_SECONDS);
                 continue;
             }
 
+            // A misconfigured transport is a CONFIGURATION error, not a connectivity
+            // failure. Left inside the catch below it was logged as "Failed to connect",
+            // counted toward the circuit breaker, and would eventually open it — three
+            // wrong signals for a problem no retry can fix.
             try {
-                String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
+                validateTransport(serverConfig.getTransport());
+            } catch (IllegalArgumentException e) {
+                LOGGER.errorf("MCP server '%s' is misconfigured and was skipped: %s (configuration error — not counted "
+                        + "toward the circuit breaker)", sanitize(serverName), e.getMessage());
+                continue;
+            }
+            warnOnceAboutDeprecatedTransport(serverConfig.getUrl(), serverConfig.getTransport(), serverName);
 
+            try {
                 // F12: serve the tool list from the TTL cache when it is still fresh —
                 // a live tools/list RPC per server per turn was pure overhead.
                 CachedTools cached = toolCache.get(serverConfig.getUrl());
@@ -223,7 +235,6 @@ public class McpToolProviderManager {
                 recordSuccess(serverConfig.getUrl());
 
             } catch (Exception e) {
-                String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
                 LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
                 recordFailure(serverConfig.getUrl());
             }
@@ -251,10 +262,29 @@ public class McpToolProviderManager {
 
     /**
      * Supported MCP transport tokens. Only StreamableHTTP is implemented — every
-     * other value (e.g. {@code "stdio"}, {@code "sse"}) used to be accepted,
-     * logged, and then silently served over StreamableHTTP anyway (finding I3).
+     * other value (e.g. {@code "stdio"}) used to be accepted, logged, and then
+     * silently served over StreamableHTTP anyway (finding I3).
      */
     static final Set<String> SUPPORTED_TRANSPORTS = Set.of("http", "https", "streamable-http", "streamablehttp");
+
+    /**
+     * Transport tokens that stored configs still carry and that this manager
+     * accepted before finding I3 — served, then as now, over StreamableHTTP.
+     * {@code "sse"} was the documented alternative in
+     * {@code LlmConfiguration.McpServerConfig}, so agents written against that doc
+     * are in the wild. Hard-rejecting it strips EVERY tool from such an agent, and
+     * in the agent path the rejection is swallowed by the discovery catch — a
+     * silent capability loss, not a loud failure. Accepted with a one-time
+     * deprecation warning instead.
+     */
+    static final Set<String> DEPRECATED_TRANSPORT_ALIASES = Set.of("sse");
+
+    /**
+     * Server URLs already warned about a deprecated transport. Discovery runs per
+     * turn, so without this the warning would repeat on every turn of every
+     * conversation.
+     */
+    private final Set<String> deprecatedTransportWarned = ConcurrentHashMap.newKeySet();
 
     /**
      * Validate an MCP server URL before it is used for an outbound request.
@@ -287,15 +317,36 @@ public class McpToolProviderManager {
 
     /**
      * Reject a transport token that this manager does not actually implement
-     * (finding I3). {@code null}/blank means "use the default StreamableHTTP".
+     * (finding I3). {@code null}/blank means "use the default StreamableHTTP", and
+     * a {@link #DEPRECATED_TRANSPORT_ALIASES deprecated alias} is accepted so
+     * stored configs keep working.
      */
     static void validateTransport(String transport) {
         if (isNullOrEmpty(transport)) {
             return;
         }
-        if (!SUPPORTED_TRANSPORTS.contains(transport.trim().toLowerCase(Locale.ROOT))) {
-            throw new IllegalArgumentException("Unsupported MCP transport '" + transport + "'. Only StreamableHTTP is implemented — use "
-                    + "\"http\" (supported: " + SUPPORTED_TRANSPORTS + ").");
+        String normalised = transport.trim().toLowerCase(Locale.ROOT);
+        if (SUPPORTED_TRANSPORTS.contains(normalised) || DEPRECATED_TRANSPORT_ALIASES.contains(normalised)) {
+            return;
+        }
+        throw new IllegalArgumentException("Unsupported MCP transport '" + transport + "'. Only StreamableHTTP is implemented — use "
+                + "\"http\" (supported: " + SUPPORTED_TRANSPORTS + ").");
+    }
+
+    /** Whether {@code transport} is honoured only for backward compatibility. */
+    static boolean isDeprecatedTransport(String transport) {
+        return !isNullOrEmpty(transport) && DEPRECATED_TRANSPORT_ALIASES.contains(transport.trim().toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * One WARN per server URL — discovery runs every turn, so warning per call
+     * would repeat forever.
+     */
+    private void warnOnceAboutDeprecatedTransport(String url, String transport, String serverName) {
+        if (isDeprecatedTransport(transport) && deprecatedTransportWarned.add(url)) {
+            LOGGER.warnf("MCP server '%s' declares transport '%s', which EDDI does not implement — the connection is served over "
+                    + "StreamableHTTP, as it always has been. Update the config to \"http\"; the alias will be removed.",
+                    sanitize(serverName), sanitize(transport));
         }
     }
 

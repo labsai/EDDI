@@ -536,6 +536,13 @@ public class LlmTask implements ILifecycleTask {
             // emitted here as a single chunk, matching the standard (non-cascade) agent
             // path.
             if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
+                // F10: this is the same single-chunk downgrade the two non-cascade agent
+                // paths record. Agent mode is the DEFAULT here (enableInAgentMode defaults
+                // to true), so leaving it uninstrumented meant the most common streaming
+                // downgrade in the product was the one nobody could observe.
+                if (cascadeResult.agentResult() != null) {
+                    recordStreamingDowngrade(responseMetadata, task, responseContent);
+                }
                 eventSink.onToken(responseContent);
             }
 
@@ -755,9 +762,11 @@ public class LlmTask implements ILifecycleTask {
                 // and the failure is swallowed below as a WARN, which is exactly how the
                 // rolling summary came to silently never materialise. Pass the resolved
                 // parameters through so inheritance actually reaches ChatModelRegistry.
-                conversationSummarizer.updateIfNeeded(memory,
-                        resolveEffectiveSummaryConfig(summaryConfig, resolvedType, resolveModelName(processedParams)),
-                        propertiesContext, processedParams);
+                var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType,
+                        resolveModelName(processedParams));
+                conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
+                        inheritableSummaryParameters(effectiveSummaryConfig, resolvedType, processedParams,
+                                memory.getConversationId()));
             } catch (Exception e) {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
                         sanitize(memory.getConversationId()));
@@ -1183,6 +1192,38 @@ public class LlmTask implements ILifecycleTask {
         effective.setMaxRecallTurns(configured.getMaxRecallTurns());
         effective.setSummarizationPrompt(configured.getSummarizationPrompt());
         return effective;
+    }
+
+    /**
+     * The parent task's resolved parameters, but ONLY when the summarizer will run
+     * against the SAME provider.
+     * <p>
+     * Forwarding them unconditionally (the first half of F13) hands an Anthropic
+     * {@code apiKey} — and, for an ollama parent,
+     * {@code baseUrl=http://localhost:11434} — to a summary config that explicitly
+     * names {@code openai}. The resulting model cannot authenticate, the failure is
+     * swallowed as a WARN, and the rolling summary silently never materialises:
+     * exactly the mode F13 set out to fix, moved one config away.
+     *
+     * @return {@code processedParams} for the same-provider case, {@code null} when
+     *         the summary config names a different provider (it must then carry its
+     *         own credentials, which {@code ChatModelRegistry} resolves from the
+     *         provider defaults)
+     */
+    static Map<String, String> inheritableSummaryParameters(LlmConfiguration.ConversationSummaryConfig effective, String parentProvider,
+                                                            Map<String, String> processedParams, String conversationId) {
+        if (effective == null) {
+            return null;
+        }
+        String summaryProvider = effective.getLlmProvider();
+        if (isNullOrEmpty(summaryProvider) || isNullOrEmpty(parentProvider)
+                || summaryProvider.trim().equalsIgnoreCase(parentProvider.trim())) {
+            return processedParams;
+        }
+        LOGGER.infof("[SUMMARY] conversationSummary.llmProvider='%s' differs from the task provider '%s' for conversation '%s' — "
+                + "the parent task's credentials are NOT inherited; the summary config must carry its own apiKey/baseUrl.",
+                summaryProvider, parentProvider, sanitize(conversationId));
+        return null;
     }
 
     /**

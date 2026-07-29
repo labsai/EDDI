@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -58,6 +59,20 @@ public class PropertySetterTask implements ILifecycleTask {
     private static final String ACTIONS_IDENTIFIER = "actions";
     private static final String CATCH_ANY_INPUT_AS_PROPERTY_ACTION = "CATCH_ANY_INPUT_AS_PROPERTY";
     private static final String INPUT_INITIAL_IDENTIFIER = "input:initial";
+    /**
+     * Written by {@code InputParserTask} — which is always the FIRST workflow step
+     * — into the SAME conversation step, so a scrub that only rewrites
+     * {@code input:initial} leaves a verbatim copy of the plaintext behind.
+     */
+    private static final String INPUT_NORMALIZED_IDENTIFIER = "input:normalized";
+    /** Conversation-output key holding the echoed user input. */
+    private static final String INPUT_OUTPUT_KEY = "input";
+    /**
+     * Minimum length of the punctuation/whitespace-stripped form below which a
+     * containment match is too loose to act on. Guards against scrubbing a whole
+     * turn because a two-character input happens to appear inside the secret.
+     */
+    private static final int MIN_NORMALIZED_MATCH_LENGTH = 4;
     private static final String EXPRESSION_MEANING_USER_INPUT = "user_input";
     private static final String PROPERTIES_EXTRACTED_IDENTIFIER = "properties:extracted";
     private static final String CONTEXT_IDENTIFIER = "context";
@@ -443,29 +458,195 @@ public class PropertySetterTask implements ILifecycleTask {
             // (eddi.vault.master-key ships empty), so that was the common path.
             // Scrub the raw input BEFORE aborting so the plaintext cannot survive in the
             // conversation document that is persisted for the failed turn either.
-            scrubSecretInput(memory, plaintext);
+            scrubSecretInput(memory, keyName, plaintext);
             LOGGER.errorf("Failed to store secret in vault for property '%s': %s", keyName, e.getMessage());
             throw new LifecycleException("Cannot store property '" + keyName + "' with scope 'secret': the secrets vault is unavailable or "
                     + "disabled (set EDDI_VAULT_MASTER_KEY). Refusing to persist the value in plaintext.", e);
         }
 
-        scrubSecretInput(memory, plaintext);
+        scrubSecretInput(memory, keyName, plaintext);
 
         // Return the vault reference to be stored in properties instead of plaintext
         return ref.toReferenceString();
     }
 
     /**
-     * Scrubs the raw user input from conversation memory so the plaintext does not
-     * persist in the DB as part of the conversation history.
+     * Removes the plaintext of a {@code scope: "secret"} property from EVERY part
+     * of the current conversation step, so it cannot survive in the conversation
+     * document that gets persisted for this turn (successful or aborted).
+     * <p>
+     * Two earlier defects this closes:
+     * <ol>
+     * <li><strong>Only {@code input:initial} was rewritten.</strong>
+     * {@code InputParserTask} is always the first workflow step and has already
+     * copied the same text into {@code input:normalized} of the same step, and
+     * {@code ConversationMemoryUtilities} serializes every datum of a step
+     * (committed or not) into the stored document. Both keys — plus any other
+     * datum, context value or conversation-output entry that happens to carry the
+     * text — are rewritten now.</li>
+     * <li><strong>The scrub was gated on byte equality with
+     * {@code input:initial}.</strong> The canonical {@code valueString:
+     * "{memory.current.input}"} resolves to the NORMALIZED input, so as soon as any
+     * parser normalizer is configured the resolved secret is not byte-identical to
+     * the raw input and the scrub silently did nothing — leaking exactly what the
+     * fail-closed path claims to prevent. Matching is containment-based and
+     * additionally normalization-insensitive (punctuation/whitespace
+     * stripped).</li>
+     * </ol>
+     * A scrub that finds nothing is logged at WARN (never silently ignored): the
+     * value may legitimately come from a static config literal or a non-string
+     * context, but if it came from the user it means the raw input is still in the
+     * document.
+     *
+     * @param keyName
+     *            property name, for the diagnostic only — never the value
      */
-    private void scrubSecretInput(IConversationMemory memory, String plaintext) {
+    private void scrubSecretInput(IConversationMemory memory, String keyName, String plaintext) {
+        if (isNullOrEmpty(plaintext)) {
+            return;
+        }
         var currentStep = memory.getCurrentStep();
-        IData<String> inputData = currentStep.getLatestData(INPUT_INITIAL_IDENTIFIER);
-        if (inputData != null && plaintext.equals(inputData.getResult())) {
-            currentStep.storeData(dataFactory.createData(INPUT_INITIAL_IDENTIFIER, SECRET_INPUT_PLACEHOLDER));
-            currentStep.resetConversationOutput("input");
-            currentStep.addConversationOutputString("input", SECRET_INPUT_PLACEHOLDER);
+        boolean inputScrubbed = false;
+        boolean anythingScrubbed = false;
+
+        // (1) The known input-carrying keys of this step.
+        for (String inputKey : List.of(INPUT_INITIAL_IDENTIFIER, INPUT_NORMALIZED_IDENTIFIER)) {
+            IData<String> inputData = currentStep.getLatestData(inputKey);
+            if (inputData != null && carriesSecret(inputData.getResult(), plaintext)) {
+                storeScrubbed(currentStep, inputKey, SECRET_INPUT_PLACEHOLDER);
+                inputScrubbed = true;
+                anythingScrubbed = true;
+            }
+        }
+
+        // (2) Every other datum of the step that carries the plaintext verbatim —
+        // including a `context:<key>` value, which is how a client-supplied secret
+        // reaches a `{context.x}` property instruction.
+        for (IData<?> data : currentStep.getAllElements()) {
+            String key = data.getKey();
+            if (INPUT_INITIAL_IDENTIFIER.equals(key) || INPUT_NORMALIZED_IDENTIFIER.equals(key)) {
+                continue;
+            }
+            Object result = data.getResult();
+            Object cleaned = result instanceof Context context
+                    ? scrubContext(context, plaintext)
+                    : scrubValue(result, plaintext);
+            if (cleaned != null) {
+                storeScrubbed(currentStep, key, cleaned);
+                anythingScrubbed = true;
+            }
+        }
+
+        // (3) The conversation output of the step — the projection returned to the
+        // client and stored alongside the step data.
+        var conversationOutput = currentStep.getConversationOutput();
+        if (conversationOutput != null) {
+            for (var outputEntry : conversationOutput.entrySet()) {
+                Object cleaned = scrubValue(outputEntry.getValue(), plaintext);
+                if (cleaned != null) {
+                    outputEntry.setValue(cleaned);
+                    anythingScrubbed = true;
+                }
+            }
+        }
+
+        if (inputScrubbed) {
+            // The echoed input is replaced wholesale rather than patched: after a
+            // normalizer the echoed form need not contain the resolved secret verbatim.
+            currentStep.resetConversationOutput(INPUT_OUTPUT_KEY);
+            currentStep.addConversationOutputString(INPUT_OUTPUT_KEY, SECRET_INPUT_PLACEHOLDER);
+        }
+
+        if (!anythingScrubbed) {
+            LOGGER.warnf("Could not locate the plaintext of scope='secret' property '%s' anywhere in the current "
+                    + "conversation step — nothing was scrubbed. If the value came from user input, the raw input may "
+                    + "still be persisted in the conversation document.", keyName);
+        }
+    }
+
+    /**
+     * Whether {@code value} carries {@code plaintext}: verbatim, or equal/contained
+     * once punctuation and whitespace are stripped from both. The second form is
+     * what a configured parser normalizer produces — the resolved secret is the
+     * NORMALIZED input, never byte-identical to the raw one.
+     */
+    private static boolean carriesSecret(String value, String plaintext) {
+        if (isNullOrEmpty(value)) {
+            return false;
+        }
+        if (value.contains(plaintext)) {
+            return true;
+        }
+        String normalizedValue = alphanumericOnly(value);
+        String normalizedSecret = alphanumericOnly(plaintext);
+        if (normalizedValue.length() >= MIN_NORMALIZED_MATCH_LENGTH && normalizedSecret.contains(normalizedValue)) {
+            return true;
+        }
+        return normalizedSecret.length() >= MIN_NORMALIZED_MATCH_LENGTH && normalizedValue.contains(normalizedSecret);
+    }
+
+    /** The letters and digits of {@code value}, in order. */
+    private static String alphanumericOnly(String value) {
+        var builder = new StringBuilder(value.length());
+        value.codePoints().filter(Character::isLetterOrDigit).forEach(builder::appendCodePoint);
+        return builder.toString();
+    }
+
+    /**
+     * A copy of {@code context} with the plaintext removed from its value, or
+     * {@code null} when it does not carry it. A client-supplied secret arrives this
+     * way ({@code valueString: "{context.apiKey}"}) and {@code Conversation} stores
+     * every context entry as a step datum, so it lands in the conversation document
+     * just like the input does.
+     */
+    private static Object scrubContext(Context context, String plaintext) {
+        Object cleaned = scrubValue(context.getValue(), plaintext);
+        return cleaned != null ? new Context(context.getType(), cleaned) : null;
+    }
+
+    /**
+     * Returns a copy of {@code value} with every occurrence of {@code plaintext}
+     * replaced, or {@code null} when it does not carry the plaintext at all (so the
+     * caller can tell "nothing to do" from "replaced").
+     */
+    private static Object scrubValue(Object value, String plaintext) {
+        if (value instanceof String text) {
+            return text.contains(plaintext) ? text.replace(plaintext, SECRET_INPUT_PLACEHOLDER) : null;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list);
+            boolean changed = false;
+            for (int i = 0; i < copy.size(); i++) {
+                Object cleaned = scrubValue(copy.get(i), plaintext);
+                if (cleaned != null) {
+                    copy.set(i, cleaned);
+                    changed = true;
+                }
+            }
+            return changed ? copy : null;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            boolean changed = false;
+            for (var entry : map.entrySet()) {
+                Object cleaned = scrubValue(entry.getValue(), plaintext);
+                copy.put(String.valueOf(entry.getKey()), cleaned != null ? cleaned : entry.getValue());
+                changed |= cleaned != null;
+            }
+            return changed ? copy : null;
+        }
+        return null;
+    }
+
+    /**
+     * Replaces the datum stored under {@code key} with the scrubbed value.
+     * Tolerates a null from the data factory so a partially stubbed step in a unit
+     * test cannot turn a security scrub into an NPE.
+     */
+    private void storeScrubbed(IWritableConversationStep currentStep, String key, Object value) {
+        IData<Object> replacement = dataFactory.createData(key, value);
+        if (replacement != null) {
+            currentStep.storeData(replacement);
         }
     }
 }

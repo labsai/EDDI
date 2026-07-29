@@ -106,7 +106,10 @@ public class GdprComplianceService {
      * Cache key format used by {@code RestUserConversationStore}. Duplicated rather
      * than shared because the erasure cascade must not depend on a REST resource;
      * the two are pinned together by
-     * {@code GdprComplianceServiceTest.erasureUsesTheSameCacheKeyAsTheRestStore}.
+     * {@code GdprComplianceServiceTest.deleteUserData_invalidatesCachedConversationMappings},
+     * which drives a real {@code CacheFactory} and a real
+     * {@code RestUserConversationStore} so a divergence in the key format shows up
+     * as a stale mapping still being served after erasure.
      */
     private static String userConversationCacheKey(String intent, String userId) {
         return intent + "::" + userId;

@@ -33,6 +33,15 @@ public class RestAuditStore implements IRestAuditStore {
     /** Hard ceiling on one verification sweep, whatever the caller asks for. */
     static final int MAX_VERIFY_LIMIT = 10_000;
 
+    /**
+     * Page size used when the caller supplies no usable {@code limit}. Mirrors the
+     * {@code @DefaultValue("1000")} on {@link IRestAuditStore}: a non-positive
+     * limit falls back to the documented default, it does NOT mean "give me the
+     * hard maximum" — that sentinel reading is the same footgun
+     * {@code RestConversationStore.MIN_RETENTION_DAYS} was introduced to remove.
+     */
+    static final int DEFAULT_VERIFY_LIMIT = 1_000;
+
     private final IAuditStore auditStore;
     private final AuditLedgerService auditLedgerService;
 
@@ -59,8 +68,13 @@ public class RestAuditStore implements IRestAuditStore {
 
     @Override
     public AuditVerificationReport verifyConversation(String conversationId, int skip, int limit) {
-        List<AuditEntry> entries = auditStore.getEntries(conversationId, skip, clampLimit(limit));
-        return verify("conversation", conversationId, entries, true);
+        int effectiveLimit = clampLimit(limit);
+        List<AuditEntry> entries = auditStore.getEntries(conversationId, skip, effectiveLimit);
+        // The page provably covers the conversation from its very first entry only
+        // when nothing was skipped AND the page did not fill up — otherwise the
+        // lowest sequence present says nothing about where the chain started.
+        boolean coversHead = skip <= 0 && entries.size() < effectiveLimit;
+        return verify("conversation", conversationId, entries, true, coversHead);
     }
 
     @Override
@@ -68,14 +82,14 @@ public class RestAuditStore implements IRestAuditStore {
         List<AuditEntry> entries = auditStore.getEntriesByAgent(agentId, agentVersion, skip, clampLimit(limit));
         // An agent range spans conversations, so the sequences interleave and a
         // single ascending run is not expected — HMACs only.
-        return verify("agent", agentId, entries, false);
+        return verify("agent", agentId, entries, false, false);
     }
 
     private static int clampLimit(int limit) {
-        return limit < 1 ? MAX_VERIFY_LIMIT : Math.min(limit, MAX_VERIFY_LIMIT);
+        return limit < 1 ? DEFAULT_VERIFY_LIMIT : Math.min(limit, MAX_VERIFY_LIMIT);
     }
 
-    private AuditVerificationReport verify(String scope, String scopeId, List<AuditEntry> entries, boolean checkChain) {
+    private AuditVerificationReport verify(String scope, String scopeId, List<AuditEntry> entries, boolean checkChain, boolean coversHead) {
         boolean signingEnabled = auditLedgerService.isSigningEnabled();
         int valid = 0;
         int invalid = 0;
@@ -98,11 +112,23 @@ public class RestAuditStore implements IRestAuditStore {
         }
 
         var missing = new ArrayList<Long>();
+        var undelivered = new ArrayList<Long>();
         var duplicates = new ArrayList<Long>();
-        ChainStatus chainStatus = checkChain ? checkChain(entries, missing, duplicates) : ChainStatus.NOT_APPLICABLE;
+        ChainStatus chainStatus = checkChain
+                ? checkChain(entries, missing, undelivered, duplicates, coversHead, undeliveredFor(scopeId))
+                : ChainStatus.NOT_APPLICABLE;
 
-        return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, invalid, unsigned, chainStatus, missing, duplicates,
-                problems, Instant.now());
+        return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, invalid, unsigned, chainStatus, missing,
+                undelivered, duplicates, problems, Instant.now());
+    }
+
+    /**
+     * Chain positions this deployment knows it never persisted. Null-tolerant so a
+     * stubbed ledger service cannot turn the sweep into an NPE.
+     */
+    private Set<Long> undeliveredFor(String conversationId) {
+        Set<Long> known = auditLedgerService.undeliveredSequences(conversationId);
+        return known == null ? Set.of() : known;
     }
 
     /**
@@ -112,8 +138,20 @@ public class RestAuditStore implements IRestAuditStore {
      * removed row — nothing is left to fail verification — but the sequence is
      * inside the signed payload, so the surviving entries cannot be renumbered to
      * close the gap without invalidating their own HMACs.
+     * <p>
+     * Two refinements keep the verdict honest in both directions:
+     * <ul>
+     * <li>When {@code coversHead}, the expected run is anchored at 0 rather than at
+     * the lowest surviving sequence — otherwise deleting the <em>first</em> entries
+     * of a conversation simply moves the anchor and reads as {@code INTACT}.</li>
+     * <li>A gap the ledger itself caused (queue overflow / dead-lettered batch,
+     * reported by {@code AuditLedgerService.undeliveredSequences}) is listed
+     * separately and downgrades the verdict to {@code INCOMPLETE} instead of
+     * accusing the deployment of deletion.</li>
+     * </ul>
      */
-    private static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> duplicates) {
+    private static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> undelivered, List<Long> duplicates,
+                                          boolean coversHead, Set<Long> knownUndelivered) {
         List<Long> sequences = entries.stream().map(AuditEntry::sequence).filter(s -> s >= 0).sorted().toList();
 
         if (sequences.isEmpty()) {
@@ -128,14 +166,22 @@ public class RestAuditStore implements IRestAuditStore {
             }
         }
 
-        long first = sequences.getFirst();
+        long first = coversHead ? 0L : sequences.getFirst();
         long last = sequences.stream().max(Comparator.naturalOrder()).orElse(first);
         for (long expected = first; expected <= last; expected++) {
-            if (!seen.contains(expected)) {
+            if (seen.contains(expected)) {
+                continue;
+            }
+            if (knownUndelivered.contains(expected)) {
+                undelivered.add(expected);
+            } else {
                 missing.add(expected);
             }
         }
 
-        return missing.isEmpty() ? ChainStatus.INTACT : ChainStatus.BROKEN;
+        if (!missing.isEmpty()) {
+            return ChainStatus.BROKEN;
+        }
+        return undelivered.isEmpty() ? ChainStatus.INTACT : ChainStatus.INCOMPLETE;
     }
 }

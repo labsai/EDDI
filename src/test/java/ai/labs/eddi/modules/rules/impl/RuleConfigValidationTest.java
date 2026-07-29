@@ -158,6 +158,77 @@ class RuleConfigValidationTest {
     }
 
     @Test
+    @DisplayName("a connector without nested conditions is refused")
+    void emptyConnector_isRefused() {
+        String json = ruleSetWith("Empty Connector", """
+                [ { "type": "connector", "configs": { "operator": "AND" } } ]
+                """);
+
+        var exception = assertThrows(IllegalArgumentException.class, () -> ruleDeserialization.deserialize(json));
+
+        assertTrue(exception.getMessage().contains("Empty Connector"), exception.getMessage());
+        assertTrue(exception.getMessage().contains("connector"), exception.getMessage());
+    }
+
+    @Test
+    @DisplayName("a two-child connector is accepted (the documented form)")
+    void documentedConnector_isAccepted() throws Exception {
+        String json = ruleSetWith("Either Or", """
+                [ {
+                    "type": "connector",
+                    "configs": { "operator": "OR" },
+                    "conditions": [
+                      { "type": "actionmatcher", "configs": { "actions": "a" } },
+                      { "type": "actionmatcher", "configs": { "actions": "b" } }
+                    ]
+                } ]
+                """);
+
+        RuleSet ruleSet = ruleDeserialization.deserialize(json);
+
+        var conditions = ruleSet.getRuleGroups().get(0).getRules().get(0).getConditions();
+        assertEquals(2, conditions.get(0).getConditions().size(), "expected both children to survive deserialization");
+    }
+
+    @Test
+    @DisplayName("an occurrence without behaviorRuleName is refused")
+    void occurrenceWithoutRuleName_isRefused() {
+        String json = ruleSetWith("Nameless Occurrence", """
+                [ { "type": "occurrence", "configs": { "maxTimesOccurred": "3" } } ]
+                """);
+
+        var exception = assertThrows(IllegalArgumentException.class, () -> ruleDeserialization.deserialize(json));
+
+        assertTrue(exception.getMessage().contains("Nameless Occurrence"), exception.getMessage());
+        assertTrue(exception.getMessage().contains("behaviorRuleName"), exception.getMessage());
+    }
+
+    @Test
+    @DisplayName("an occurrence without min/max bound is refused")
+    void unboundedOccurrence_isRefused() {
+        String json = ruleSetWith("Unbounded Occurrence", """
+                [ { "type": "occurrence", "configs": { "behaviorRuleName": "greet" } } ]
+                """);
+
+        var exception = assertThrows(IllegalArgumentException.class, () -> ruleDeserialization.deserialize(json));
+
+        assertTrue(exception.getMessage().contains("Unbounded Occurrence"), exception.getMessage());
+        assertTrue(exception.getMessage().contains("minTimesOccurred"), exception.getMessage());
+    }
+
+    @Test
+    @DisplayName("a bounded, named occurrence is accepted")
+    void boundedOccurrence_isAccepted() throws Exception {
+        String json = ruleSetWith("Ask At Most Twice", """
+                [ { "type": "occurrence", "configs": { "behaviorRuleName": "greet", "maxTimesOccurred": "2" } } ]
+                """);
+
+        RuleSet ruleSet = ruleDeserialization.deserialize(json);
+
+        assertEquals(1, ruleSet.getRuleGroups().get(0).getRules().get(0).getConditions().size());
+    }
+
+    @Test
     @DisplayName("a contextmatcher with an unknown contextType is refused")
     void unknownContextType_isRefused() {
         String json = ruleSetWith("Context Rule", """

@@ -204,9 +204,14 @@ public class BaseRuntime implements IRuntime {
                     // swallowed interrupt). Route to onFailure to skip stale persistence
                     // that would overwrite newer state, and return null so the stale
                     // result cannot leak through the Future either.
+                    // ExecutionAbandonedException, NOT a bare InterruptedException:
+                    // callbacks must be able to tell "the watchdog already recorded
+                    // the outcome, discard this zombie result" apart from "the body
+                    // itself was interrupted and the work never finished", which is a
+                    // real failure and has to be recorded as one.
                     log.warnf("Execution completed after cancellation — discarding result to prevent stale persistence (thread=%s)",
                             Thread.currentThread().getName());
-                    fireFailure(callbackFired, completion, new InterruptedException(
+                    fireFailure(callbackFired, completion, new ExecutionAbandonedException(
                             "Execution completed after cancellation — result discarded"));
                     return null;
                 }

@@ -19,6 +19,7 @@ import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -145,14 +146,21 @@ public class ConverseWithAgentTool {
                 return "⚠️ Maximum delegations for this task (%d) reached.".formatted(config.getMaxDelegationsPerTask());
             }
 
+            // Propagate the hop count so the callee's own converse_with_agent knows how
+            // deep it is — the same mechanism GroupConversationService uses for
+            // groupDepth. Built ONCE and attached to BOTH the startConversation call and
+            // every say() turn: AgentOrchestrator.resolveDelegationDepth reads
+            // "context:delegationDepth" out of the CURRENT step, and Conversation only
+            // materialises context data from the contexts handed to that turn. Attaching
+            // it to startConversation alone left it on step 0 while the delegated
+            // question travelled on step 1 with an empty context — the callee read depth
+            // 0 and the A→B→A cycle still recursed unbounded.
+            Map<String, Context> delegationContext = Map.of(CONTEXT_DELEGATION_DEPTH,
+                    new Context(Context.ContextType.string, String.valueOf(currentDepth + 1)));
+
             // --- Start new conversation if no conversationId provided ---
             if (conversationId == null || conversationId.isBlank()) {
                 try {
-                    // Propagate the hop count so the callee's own converse_with_agent knows
-                    // how deep it is — the same mechanism GroupConversationService uses for
-                    // groupDepth.
-                    Map<String, Context> delegationContext = Map.of(CONTEXT_DELEGATION_DEPTH,
-                            new Context(Context.ContextType.string, String.valueOf(currentDepth + 1)));
                     ConversationResult convResult = conversationService.startConversation(
                             DEFAULT_ENV, agentId, userId, delegationContext);
                     conversationId = convResult.conversationId();
@@ -167,8 +175,13 @@ public class ConverseWithAgentTool {
             }
 
             // --- Send message and wait for response ---
+            // The context rides on the MESSAGE turn too — this is the turn the callee's
+            // AgentOrchestrator actually builds its tool list for, and the branch that
+            // reuses an existing conversationId never went through startConversation at
+            // all.
             InputData inputData = new InputData();
             inputData.setInput(message);
+            inputData.setContext(new HashMap<>(delegationContext));
 
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
             final java.util.concurrent.atomic.AtomicBoolean skipped = new java.util.concurrent.atomic.AtomicBoolean();

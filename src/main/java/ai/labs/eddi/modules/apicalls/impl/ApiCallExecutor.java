@@ -59,6 +59,18 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     static final int MAX_BACKOFF_MILLIS = 30_000;
 
+    /**
+     * Hard transport ceiling for a response body, matching the http client's own
+     * historical default. It is deliberately kept <em>above</em> the memory cap
+     * ({@code maxResponseSizeInBytes}): the client rejects anything larger outright
+     * — there is no way to keep a partial body — while everything between the
+     * memory cap and this ceiling is truncated by
+     * {@link #truncateResponseBody(String, int, String)} before it reaches
+     * conversation memory. Handing the client the memory cap instead would make
+     * that truncation unreachable and turn an oversize response into a failed turn.
+     */
+    static final int MAX_TRANSPORT_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024;
+
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
     private final IRuntime runtime;
@@ -336,12 +348,24 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
-     * Response-size cap for this call: the per-call value if configured, otherwise
-     * the deployment-wide default.
+     * How much of the response body is kept in conversation memory: the per-call
+     * value if configured, otherwise the deployment-wide default. Anything beyond
+     * this is truncated, not rejected.
      */
     private int resolveMaxResponseSize(ApiCall call) {
         Integer configuredMaxResponseSize = call.getMaxResponseSizeInBytes();
         return configuredMaxResponseSize != null && configuredMaxResponseSize > 0 ? configuredMaxResponseSize : defaultMaxResponseSizeInBytes;
+    }
+
+    /**
+     * How much the http client is allowed to buffer before it fails the call
+     * outright. Always at least {@link #MAX_TRANSPORT_RESPONSE_SIZE_BYTES}, and
+     * never below the memory cap — a call that legitimately configures a very large
+     * {@code maxResponseSizeInBytes} must not be rejected by the transport before
+     * its own cap applies.
+     */
+    private int resolveTransportResponseSize(ApiCall call) {
+        return Math.max(resolveMaxResponseSize(call), MAX_TRANSPORT_RESPONSE_SIZE_BYTES);
     }
 
     /**
@@ -437,9 +461,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
         IRequest request = httpClient.newRequest(targetUri, method);
         // Bound the call in time and in size. Without these an httpcall can occupy the
         // conversation thread until the client's own fallback expires, and can pull an
-        // arbitrarily large body into conversation memory.
+        // arbitrarily large body into conversation memory. The transport ceiling is
+        // deliberately above the memory cap so an over-long body is truncated on the
+        // way into memory rather than failing the whole turn.
         request.setTimeout(resolveTimeout(call), TimeUnit.MILLISECONDS);
-        request.setMaxResponseSize(resolveMaxResponseSize(call));
+        request.setMaxResponseSize(resolveTransportResponseSize(call));
         if (ssrfProtectionEnabled) {
             request.setFollowRedirects(false);
         }

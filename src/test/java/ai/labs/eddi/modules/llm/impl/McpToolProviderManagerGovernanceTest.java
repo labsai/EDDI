@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,6 +13,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -98,21 +101,58 @@ class McpToolProviderManagerGovernanceTest {
             assertTrue(e.getMessage().contains("stdio"), "message names the offending value: " + e.getMessage());
         }
 
+        /**
+         * {@code "sse"} is the value {@code LlmConfiguration.McpServerConfig}
+         * documented, so agent configs in MongoDB carry it. It was never implemented —
+         * the connection always went over StreamableHTTP — so hard-rejecting it does
+         * not fix anything, it just strips EVERY tool from a working agent, and in the
+         * agent path the rejection is swallowed by the discovery catch.
+         */
         @Test
-        @DisplayName("sse is rejected — it is documented but not implemented")
-        void rejectsSse() {
-            assertThrows(IllegalArgumentException.class, () -> McpToolProviderManager.validateTransport("sse"));
+        @DisplayName("sse is honoured as a deprecated alias so stored configs keep working")
+        void acceptsSseAsDeprecatedAlias() {
+            McpToolProviderManager.validateTransport("sse");
+            McpToolProviderManager.validateTransport("SSE");
+            assertTrue(McpToolProviderManager.isDeprecatedTransport("sse"),
+                    "it must still be flagged as deprecated so the operator gets a warning");
         }
 
         @Test
-        @DisplayName("http and blank are accepted")
+        @DisplayName("http and blank are accepted and are NOT flagged deprecated")
         void acceptsHttp() {
             McpToolProviderManager.validateTransport("http");
             McpToolProviderManager.validateTransport("HTTP");
             McpToolProviderManager.validateTransport("streamable-http");
             McpToolProviderManager.validateTransport(null);
             McpToolProviderManager.validateTransport("");
+            assertFalse(McpToolProviderManager.isDeprecatedTransport("http"));
+            assertFalse(McpToolProviderManager.isDeprecatedTransport(null));
         }
+
+        /**
+         * A transport EDDI cannot speak is a configuration error: no retry fixes it.
+         * Discovering it inside the connectivity catch logged "Failed to connect",
+         * recorded a circuit-breaker failure, and after three turns opened the circuit
+         * for a server that was never even contacted.
+         */
+        @Test
+        @DisplayName("an unsupported transport is skipped as a config error and does not trip the circuit breaker")
+        void unsupportedTransportDoesNotCountAsConnectionFailure() {
+            var manager = withSsrfProtection(false);
+            var config = new McpServerConfig();
+            config.setUrl("http://mcp.example.com/mcp");
+            config.setName("stdio-server");
+            config.setTransport("stdio");
+
+            for (int i = 0; i < 5; i++) {
+                var result = manager.discoverTools(List.of(config));
+                assertTrue(result.toolSpecs().isEmpty(), "a server EDDI cannot speak to contributes no tools");
+            }
+
+            assertFalse(manager.isCircuitOpen("http://mcp.example.com/mcp"),
+                    "5 configuration rejections must not open the circuit — nothing was ever connected to");
+        }
+
     }
 
     @Nested

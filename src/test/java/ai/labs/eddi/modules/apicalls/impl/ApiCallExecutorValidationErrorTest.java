@@ -21,15 +21,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.net.URI;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -89,27 +85,6 @@ class ApiCallExecutorValidationErrorTest {
     }
 
     @Test
-    @DisplayName("no dead ApiCallsValidationException is declared any more")
-    void declaresNoUnthrowableValidationException() {
-        boolean hasValidationExceptionClass = Arrays.stream(ApiCallExecutor.class.getDeclaredClasses()).map(Class::getSimpleName)
-                .anyMatch(name -> name.contains("ValidationException"));
-
-        assertFalse(hasValidationExceptionClass,
-                "ApiCallExecutor must not declare a validation exception type that no code path throws");
-    }
-
-    @Test
-    @DisplayName("retryCall declares no checked exception it can never raise")
-    void retryCallDeclaresNoCheckedException() {
-        Method retryCall = Arrays.stream(ApiCallExecutor.class.getDeclaredMethods()).filter(method -> "retryCall".equals(method.getName()))
-                .findFirst().orElseThrow(() -> new AssertionError("retryCall(..) not found on ApiCallExecutor"));
-
-        assertEquals(0, retryCall.getExceptionTypes().length,
-                "retryCall must not advertise a checked exception it never throws — got "
-                        + Arrays.toString(retryCall.getExceptionTypes()));
-    }
-
-    @Test
     @DisplayName("post-response instructions are told the call did not fail validation")
     void postResponseIsInvokedWithoutValidationError() throws Exception {
         ApiCall call = createApiCallWithRetry();
@@ -118,6 +93,18 @@ class ApiCallExecutorValidationErrorTest {
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
         verify(prePostUtils).runPostResponse(eq(memory), eq(call.getPostResponse()), any(), eq(200), eq(false));
+    }
+
+    @Test
+    @DisplayName("an error response still reports validationError=false and the real http code")
+    void errorResponseStillReportsNoValidationError() throws Exception {
+        ApiCall call = createApiCallWithRetry();
+        call.getPostResponse().getRetryApiCallInstruction().setRetryOnHttpCodes(List.of());
+        setupResponse(503, "gateway down", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(prePostUtils).runPostResponse(eq(memory), eq(call.getPostResponse()), any(), eq(503), eq(false));
     }
 
     private ApiCall createApiCallWithRetry() {

@@ -1105,7 +1105,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Optional display name for this MCP server */
         private String name;
 
-        /** Transport type: "http" (default) or "sse" */
+        /**
+         * Transport type. Only StreamableHTTP is implemented, so the accepted values
+         * are {@code "http"} (default), {@code "https"}, {@code "streamable-http"} and
+         * {@code "streamablehttp"}. {@code "sse"} was previously documented here but
+         * was never implemented — it is still accepted as a deprecated alias for
+         * StreamableHTTP so existing configs keep working, with a warning. Anything
+         * else is rejected by {@code McpToolProviderManager.validateTransport}.
+         */
         private String transport = "http";
 
         /** Optional API key or vault reference (e.g., "${vault:my-api-key}") */

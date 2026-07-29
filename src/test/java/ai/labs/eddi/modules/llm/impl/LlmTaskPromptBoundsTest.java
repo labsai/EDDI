@@ -10,6 +10,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -167,6 +169,84 @@ class LlmTaskPromptBoundsTest {
         @DisplayName("null config stays null")
         void nullSafe() {
             assertNull(LlmTask.resolveEffectiveSummaryConfig(null, "openai", "gpt-4o"));
+        }
+    }
+
+    /**
+     * The second half of F13 forwards the parent task's resolved parameters
+     * (apiKey, baseUrl, …) to the summarizer. Doing that unconditionally hands an
+     * Anthropic key — or an ollama {@code baseUrl} — to a summary config that
+     * explicitly names a different provider, and
+     * {@code SummarizationService.summarizeWithUsage} merges the map wholesale
+     * before calling {@code chatModelRegistry.getOrCreate}. The model then cannot
+     * authenticate and the failure is swallowed as a WARN: exactly the
+     * silently-empty-summary mode F13 set out to fix.
+     */
+    @Nested
+    @DisplayName("F13 — credentials are only inherited within the same provider")
+    class SummaryCredentialInheritance {
+
+        private static Map<String, String> anthropicParams() {
+            return Map.of("apiKey", "sk-ant-parent", "modelName", "claude-sonnet-4-6");
+        }
+
+        private static ConversationSummaryConfig summaryWith(String provider, String model) {
+            var config = new ConversationSummaryConfig();
+            config.setEnabled(true);
+            config.setLlmProvider(provider);
+            config.setLlmModel(model);
+            return config;
+        }
+
+        @Test
+        @DisplayName("same provider: the parent's credentials are inherited")
+        void sameProviderInherits() {
+            var params = anthropicParams();
+            var effective = summaryWith("anthropic", "claude-haiku");
+
+            assertSame(params, LlmTask.inheritableSummaryParameters(effective, "anthropic", params, "conv-1"));
+        }
+
+        @Test
+        @DisplayName("provider inherited from the parent (unset in the summary config) still inherits credentials")
+        void inheritedProviderInherits() {
+            var params = anthropicParams();
+            var effective = LlmTask.resolveEffectiveSummaryConfig(summaryWith(null, null), "anthropic", "claude-sonnet-4-6");
+
+            assertSame(params, LlmTask.inheritableSummaryParameters(effective, "anthropic", params, "conv-1"));
+        }
+
+        @Test
+        @DisplayName("cross-provider: the parent's apiKey/baseUrl must NOT be forwarded")
+        void crossProviderDoesNotInherit() {
+            var effective = summaryWith("openai", "gpt-4o-mini");
+
+            assertNull(LlmTask.inheritableSummaryParameters(effective, "anthropic", anthropicParams(), "conv-1"),
+                    "an openai summarizer handed an Anthropic apiKey cannot authenticate — "
+                            + "the summary then silently never materialises");
+        }
+
+        @Test
+        @DisplayName("cross-provider from an ollama parent: baseUrl must not leak either")
+        void crossProviderFromLocalParent() {
+            var params = Map.of("baseUrl", "http://localhost:11434", "modelName", "llama3");
+            var effective = summaryWith("openai", "gpt-4o-mini");
+
+            assertNull(LlmTask.inheritableSummaryParameters(effective, "ollama", params, "conv-1"));
+        }
+
+        @Test
+        @DisplayName("provider comparison ignores case and surrounding whitespace")
+        void providerComparisonIsLenient() {
+            var params = anthropicParams();
+            assertSame(params, LlmTask.inheritableSummaryParameters(summaryWith(" Anthropic ", "claude-haiku"),
+                    "anthropic", params, "conv-1"));
+        }
+
+        @Test
+        @DisplayName("a null effective config forwards nothing")
+        void nullConfigForwardsNothing() {
+            assertNull(LlmTask.inheritableSummaryParameters(null, "anthropic", anthropicParams(), "conv-1"));
         }
     }
 }

@@ -706,11 +706,11 @@ class ApiCallExecutorTest {
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
         verify(mockRequest).setTimeout(DEFAULT_TIMEOUT_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS);
-        verify(mockRequest).setMaxResponseSize(DEFAULT_MAX_RESPONSE_SIZE);
+        verify(mockRequest).setMaxResponseSize(ApiCallExecutor.MAX_TRANSPORT_RESPONSE_SIZE_BYTES);
     }
 
     @Test
-    void execute_perCallTimeoutAndResponseSizeOverrideDefaults() throws Exception {
+    void execute_perCallTimeoutOverridesDefault() throws Exception {
         ApiCall call = createSimpleApiCall("tight-call", false);
         call.setTimeoutInMillis(1_500);
         call.setMaxResponseSizeInBytes(4_096);
@@ -719,7 +719,40 @@ class ApiCallExecutorTest {
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
         verify(mockRequest).setTimeout(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS);
-        verify(mockRequest).setMaxResponseSize(4_096);
+    }
+
+    /**
+     * The client rejects an oversize body with an exception — there is no partial
+     * body to keep — so handing it the memory cap would make
+     * {@code truncateResponseBody} unreachable and turn every response above
+     * {@code maxResponseSizeInBytes} into a failed turn instead of a truncated one.
+     */
+    @Test
+    void execute_transportCapStaysAboveTheMemoryCapSoTruncationRemainsReachable() throws Exception {
+        ApiCall call = createSimpleApiCall("tight-call", false);
+        call.setMaxResponseSizeInBytes(4_096);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        ArgumentCaptor<Integer> transportCap = ArgumentCaptor.forClass(Integer.class);
+        verify(mockRequest).setMaxResponseSize(transportCap.capture());
+        assertTrue(transportCap.getValue() > 4_096,
+                "the transport ceiling must exceed the in-memory cap, otherwise the truncation branch is dead code — got "
+                        + transportCap.getValue());
+        assertEquals(ApiCallExecutor.MAX_TRANSPORT_RESPONSE_SIZE_BYTES, transportCap.getValue().intValue());
+    }
+
+    @Test
+    void execute_hugePerCallMemoryCapRaisesTheTransportCeiling() throws Exception {
+        int hugeCap = ApiCallExecutor.MAX_TRANSPORT_RESPONSE_SIZE_BYTES * 2;
+        ApiCall call = createSimpleApiCall("bulk-call", false);
+        call.setMaxResponseSizeInBytes(hugeCap);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest).setMaxResponseSize(hugeCap);
     }
 
     @Test

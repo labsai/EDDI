@@ -63,6 +63,15 @@ public class AuditLedgerService {
      */
     private static final int MAX_TRACKED_CONVERSATIONS = 50_000;
 
+    /**
+     * Cap on how many chain positions are remembered as "consumed but never
+     * persisted". Bounded so a permanently broken store cannot turn the attribution
+     * table itself into the leak the queue bound was added to prevent. Once the cap
+     * is hit the remaining drops go unattributed and the verifier falls back to
+     * reporting them as {@code BROKEN} — the conservative verdict.
+     */
+    private static final int MAX_TRACKED_UNDELIVERED = 10_000;
+
     private final IAuditStore auditStore;
     private final boolean enabled;
     private final int flushIntervalSeconds;
@@ -86,6 +95,12 @@ public class AuditLedgerService {
     private final AtomicInteger queueSize = new AtomicInteger(0);
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
     private final ConcurrentHashMap<String, AtomicLong> conversationSequences = new ConcurrentHashMap<>();
+    /**
+     * Chain positions that were handed out but never reached the store, keyed by
+     * conversation. See {@link #undeliveredSequences(String)}.
+     */
+    private final ConcurrentHashMap<String, Set<Long>> undelivered = new ConcurrentHashMap<>();
+    private final AtomicInteger undeliveredTracked = new AtomicInteger(0);
     private ScheduledExecutorService flushExecutor;
 
     @Inject
@@ -181,53 +196,94 @@ public class AuditLedgerService {
         if (!enabled || entry == null)
             return;
 
-        // Scrub secrets from string values in maps
-        AuditEntry scrubbed = scrubSecrets(entry);
-
-        // Assign the conversation chain position BEFORE signing — the sequence is
-        // part of the signed payload, which is what makes a deleted entry's gap
-        // impossible to close by renumbering its neighbours.
-        scrubbed = scrubbed.withSequence(nextSequence(scrubbed.conversationId()));
-
-        // Compute HMAC if key is available
-        AuditEntry signed;
-        if (hmacKey != null) {
-            String hmac = AuditHmac.computeHmac(scrubbed, hmacKey);
-            signed = scrubbed.withHmac(hmac);
-        } else {
-            signed = scrubbed;
+        // Take the queue slot BEFORE a chain position is consumed. G18 puts the
+        // sequence inside the signed payload so a deleted row leaves a gap that
+        // cannot be closed; G20 drops entries once the queue is full. Assigning
+        // the sequence first made those two collide: every entry the ledger
+        // itself dropped burned a number, and /auditstore/verify then reported
+        // ChainStatus.BROKEN — the ledger accusing the deployment of deleting
+        // records it had discarded on its own. Reserving first means a refused
+        // entry never occupies a position in the chain at all.
+        if (!reserveQueueSlot(entry.conversationId())) {
+            return;
         }
 
-        // Sign with agent's Ed25519 key if signing is enabled
-        if (agentSigningEnabled && agentSigningService != null && signed.agentId() != null) {
-            signed = applyAgentSignature(signed);
-        }
+        boolean queued = false;
+        try {
+            // Scrub secrets from string values in maps
+            AuditEntry scrubbed = scrubSecrets(entry);
 
-        offerBounded(signed);
+            // Assign the conversation chain position BEFORE signing — the sequence is
+            // part of the signed payload, which is what makes a deleted entry's gap
+            // impossible to close by renumbering its neighbours.
+            scrubbed = scrubbed.withSequence(nextSequence(scrubbed.conversationId()));
+
+            // Compute HMAC if key is available
+            AuditEntry signed;
+            if (hmacKey != null) {
+                String hmac = AuditHmac.computeHmac(scrubbed, hmacKey);
+                signed = scrubbed.withHmac(hmac);
+            } else {
+                signed = scrubbed;
+            }
+
+            // Sign with agent's Ed25519 key if signing is enabled
+            if (agentSigningEnabled && agentSigningService != null && signed.agentId() != null) {
+                signed = applyAgentSignature(signed);
+            }
+
+            queue.offer(signed);
+            queued = true;
+        } finally {
+            if (!queued) {
+                // Signing/scrubbing blew up: give the reservation back rather than
+                // leaking capacity that no entry occupies.
+                queueSize.decrementAndGet();
+            }
+        }
     }
 
     /**
-     * Enqueue one entry, refusing it once the queue is at its bound.
+     * Claim one slot in the bounded queue, or refuse (loudly, and counted on
+     * {@code eddi_audit_entries_dropped_total}) when it is full.
      * <p>
      * The queue used to be unbounded while a failed flush re-offered its whole
      * batch back into it: a store that slows down or stops therefore turned every
      * subsequent turn's entries into permanently retained heap, and the retry path
-     * fed itself. Dropping past the bound (loudly, and counted on
-     * {@code eddi_audit_entries_dropped_total}) keeps a broken ledger from taking
-     * the process down with it.
+     * fed itself. The bound keeps a broken ledger from taking the process down with
+     * it.
+     *
+     * @return true when capacity was reserved (the caller MUST either enqueue an
+     *         entry or release the reservation)
+     */
+    private boolean reserveQueueSlot(String conversationId) {
+        while (true) {
+            int current = queueSize.get();
+            if (current >= maxQueueSize) {
+                droppedCounter.increment();
+                LOGGER.warnv("Audit queue is full ({0} entries) — dropping entry for conversation {1}. "
+                        + "The audit store is not keeping up; raise eddi.audit.max-queue-size or fix the store.", maxQueueSize, conversationId);
+                return false;
+            }
+            if (queueSize.compareAndSet(current, current + 1)) {
+                return true;
+            }
+        }
+    }
+
+    /**
+     * Enqueue an already-sequenced entry, refusing it once the queue is at its
+     * bound. Used by the flush retry path, where the entry's chain position has
+     * already been consumed — a refusal there is recorded through
+     * {@link #writeToDeadLetter} so the verifier can attribute the gap.
      *
      * @return true if the entry was queued, false if it was dropped
      */
     private boolean offerBounded(AuditEntry entry) {
-        if (queueSize.get() >= maxQueueSize) {
-            droppedCounter.increment();
-            LOGGER.warnv("Audit queue is full ({0} entries) — dropping entry for conversation {1}. "
-                    + "The audit store is not keeping up; raise eddi.audit.max-queue-size or fix the store.", maxQueueSize,
-                    entry.conversationId());
+        if (!reserveQueueSlot(entry.conversationId())) {
             return false;
         }
         queue.offer(entry);
-        queueSize.incrementAndGet();
         return true;
     }
 
@@ -371,6 +427,55 @@ public class AuditLedgerService {
         }
     }
 
+    /**
+     * Chain positions this node handed out to entries that never reached the store
+     * (a full queue on the retry path, or a batch dead-lettered after
+     * {@code MAX_FLUSH_RETRIES} consecutive store failures).
+     * <p>
+     * Without this, the back-pressure protection manufactures the tamper verdict:
+     * the missing numbers look exactly like deleted rows to
+     * {@code /auditstore/verify}. A gap listed here is attributable to the ledger
+     * itself and is reported as {@code ChainStatus.INCOMPLETE} rather than
+     * {@code BROKEN}.
+     * <p>
+     * Node-local and non-persistent by design — it is an <em>exculpatory</em>
+     * record, so losing it on restart or on another cluster node can only make the
+     * verdict stricter, never laxer. The dead-letter sink (NATS or the JSONL file)
+     * remains the durable evidence.
+     *
+     * @param conversationId
+     *            the conversation to ask about
+     * @return the undelivered positions, or an empty set
+     */
+    public Set<Long> undeliveredSequences(String conversationId) {
+        if (conversationId == null) {
+            return Set.of();
+        }
+        Set<Long> tracked = undelivered.get(conversationId);
+        return tracked == null ? Set.of() : Set.copyOf(tracked);
+    }
+
+    /**
+     * Remember the chain positions of entries that are being abandoned. Bounded by
+     * {@link #MAX_TRACKED_UNDELIVERED}; past that the drops go unattributed and the
+     * verifier reports them as {@code BROKEN} (fail-strict).
+     */
+    private void recordUndelivered(List<AuditEntry> entries) {
+        for (AuditEntry entry : entries) {
+            if (entry == null || entry.conversationId() == null || entry.sequence() == AuditEntry.UNSEQUENCED) {
+                continue;
+            }
+            if (undeliveredTracked.get() >= MAX_TRACKED_UNDELIVERED) {
+                LOGGER.errorv("Undelivered-sequence table is full ({0}) — further dropped audit entries cannot be "
+                        + "distinguished from deleted ones by /auditstore/verify", MAX_TRACKED_UNDELIVERED);
+                return;
+            }
+            if (undelivered.computeIfAbsent(entry.conversationId(), id -> ConcurrentHashMap.newKeySet()).add(entry.sequence())) {
+                undeliveredTracked.incrementAndGet();
+            }
+        }
+    }
+
     // ==================== Visible for Testing ====================
 
     int getQueueSize() {
@@ -424,6 +529,11 @@ public class AuditLedgerService {
      * to a local file-based dead-letter log.
      */
     private void writeToDeadLetter(List<AuditEntry> entries) {
+        // These entries already own a chain position, so their absence from the
+        // store is a real gap. Remember it, so the verification endpoint can say
+        // "this ledger never persisted these" instead of "someone deleted them".
+        recordUndelivered(entries);
+
         // Try NATS JetStream first
         if (natsConnectionInstance != null && natsConnectionInstance.isResolvable()) {
             try {
