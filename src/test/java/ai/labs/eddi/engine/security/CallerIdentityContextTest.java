@@ -144,12 +144,17 @@ class CallerIdentityContextTest {
 
         var executor = Executors.newSingleThreadExecutor();
         try {
-            executor.submit(context.withIdentity(new CallerIdentity("stale", "mallory", "https://eddi.example:443"),
-                    (Runnable) () -> {
-                        /* leaves the thread carrying mallory if not restored */ }))
-                    .get();
+            // Seed the worker's binding directly. Going through withIdentity() would
+            // restore the worker's prior null on exit, leaving nothing stale behind —
+            // and the assertion below would then hold even if propagate() returned the
+            // work unwrapped, i.e. pass for the wrong reason.
+            var stale = new CallerIdentity("stale", "mallory", "https://eddi.example:443");
+            executor.submit(() -> context.bind(stale)).get();
+            assertEquals(stale, executor.submit(context::current).get(), "the worker really is carrying a stale caller");
+
             assertNull(executor.submit(wrapped).get(), "must not pick up the previous occupant's caller");
         } finally {
+            executor.submit(context::clear).get();
             executor.shutdownNow();
         }
     }

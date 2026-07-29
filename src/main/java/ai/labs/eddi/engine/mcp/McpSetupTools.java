@@ -79,7 +79,7 @@ public class McpSetupTools {
                                      + "Each URL creates a McpCalls workflow extension that the agent auto-discovers. "
                                      + "Example: 'http://localhost:7070/mcp, http://tools.example.com/mcp'") String mcpServerUrls,
                              @ToolArg(description = "Automatically deploy the Agent after creation? (default: true)") Boolean deploy,
-                             @ToolArg(description = "Environment: 'production' (default), 'test', or 'unrestricted'") String environment) {
+                             @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
             var request = new SetupAgentRequest(agentName, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools,
@@ -118,7 +118,7 @@ public class McpSetupTools {
                                  @ToolArg(description = "Enable sentiment analysis "
                                          + "in Agent responses? (default: false)") Boolean enableSentimentAnalysis,
                                  @ToolArg(description = "Deploy after creation? (default: true)") Boolean deploy,
-                                 @ToolArg(description = "Environment: 'production' (default), 'test', or 'unrestricted'") String environment,
+                                 @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment,
                                  @ToolArg(description = "Base URL of the LLM provider itself, for local models "
                                          + "(e.g. 'http://localhost:11434' for Ollama). Not the API's base URL — that is apiBaseUrl.") String llmBaseUrl) {
         requireRole(identity, authEnabled, "eddi-editor");
