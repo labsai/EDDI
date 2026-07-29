@@ -157,6 +157,42 @@ class RestAuditStoreTest {
     }
 
     /**
+     * Deleting the FIRST entry leaves no gap behind: 1,2,3 is a perfectly gap-free
+     * run. Anchoring the expected range at the smallest sequence present therefore
+     * made a prefix deletion completely invisible — the easiest deletion to perform
+     * was the one the chain could not see.
+     */
+    @Test
+    @DisplayName("deleting the first entry is detected, not just a middle one")
+    void deletedFirstEntryIsDetected() {
+        // sequence 0 has been removed; the survivors still form an unbroken run
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-2", 1), entryAt("id-3", 2)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(0, report.invalid(), "every survivor still verifies — the hole is only visible via the sequence");
+        assertEquals(List.of(0L), report.missingSequences());
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertFalse(report.intact());
+    }
+
+    /**
+     * The origin anchor must not fire on a paginated sweep: with skip > 0 the
+     * earlier entries were legitimately not fetched, so reporting them missing
+     * would cry wolf on every second page.
+     */
+    @Test
+    @DisplayName("a paginated window is judged on internal continuity only")
+    void paginatedWindowDoesNotReportTheSkippedPrefixAsMissing() {
+        when(auditStore.getEntries("conv-1", 5, 1000)).thenReturn(List.of(entryAt("id-6", 5), entryAt("id-7", 6)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 5, 1000);
+
+        assertEquals(List.of(), report.missingSequences(), "0..4 were skipped, not deleted");
+        assertEquals(ChainStatus.INTACT, report.chainStatus());
+    }
+
+    /**
      * A gap is not the only way to break the chain. If two entries carry the SAME
      * sequence number the chain is ambiguous — one of them may have been replaced,
      * or an entry inserted — and the run has no gap to reveal it. checkChain used

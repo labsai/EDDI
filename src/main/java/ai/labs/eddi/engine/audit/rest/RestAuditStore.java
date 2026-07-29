@@ -60,7 +60,10 @@ public class RestAuditStore implements IRestAuditStore {
     @Override
     public AuditVerificationReport verifyConversation(String conversationId, int skip, int limit) {
         List<AuditEntry> entries = auditStore.getEntries(conversationId, skip, clampLimit(limit));
-        return verify("conversation", conversationId, entries, true);
+        // skip == 0 means the window starts at the conversation's own beginning, so
+        // the run must start at sequence 0. Past that we cannot know what preceded
+        // the window, and only continuity within it is checkable.
+        return verify("conversation", conversationId, entries, true, skip == 0);
     }
 
     @Override
@@ -68,14 +71,15 @@ public class RestAuditStore implements IRestAuditStore {
         List<AuditEntry> entries = auditStore.getEntriesByAgent(agentId, agentVersion, skip, clampLimit(limit));
         // An agent range spans conversations, so the sequences interleave and a
         // single ascending run is not expected — HMACs only.
-        return verify("agent", agentId, entries, false);
+        return verify("agent", agentId, entries, false, false);
     }
 
     private static int clampLimit(int limit) {
         return limit < 1 ? MAX_VERIFY_LIMIT : Math.min(limit, MAX_VERIFY_LIMIT);
     }
 
-    private AuditVerificationReport verify(String scope, String scopeId, List<AuditEntry> entries, boolean checkChain) {
+    private AuditVerificationReport verify(String scope, String scopeId, List<AuditEntry> entries, boolean checkChain,
+                                           boolean expectRunFromOrigin) {
         boolean signingEnabled = auditLedgerService.isSigningEnabled();
         int valid = 0;
         int invalid = 0;
@@ -99,11 +103,18 @@ public class RestAuditStore implements IRestAuditStore {
 
         var missing = new ArrayList<Long>();
         var duplicates = new ArrayList<Long>();
-        ChainStatus chainStatus = checkChain ? checkChain(entries, missing, duplicates) : ChainStatus.NOT_APPLICABLE;
+        ChainStatus chainStatus = checkChain ? checkChain(entries, missing, duplicates, expectRunFromOrigin) : ChainStatus.NOT_APPLICABLE;
 
         return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, invalid, unsigned, chainStatus, missing, duplicates,
                 problems, Instant.now());
     }
+
+    /**
+     * First sequence number a conversation is assigned. {@code AuditLedgerService}
+     * seeds each conversation's counter from the stored entry count and hands out
+     * {@code getAndIncrement()}, so a conversation's first entry is 0.
+     */
+    private static final long SEQUENCE_ORIGIN = 0L;
 
     /**
      * Check that the sequences present form a gap-free ascending run.
@@ -113,7 +124,7 @@ public class RestAuditStore implements IRestAuditStore {
      * inside the signed payload, so the surviving entries cannot be renumbered to
      * close the gap without invalidating their own HMACs.
      */
-    private static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> duplicates) {
+    private static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> duplicates, boolean expectRunFromOrigin) {
         List<Long> sequences = entries.stream().map(AuditEntry::sequence).filter(s -> s >= 0).sorted().toList();
 
         if (sequences.isEmpty()) {
@@ -128,7 +139,14 @@ public class RestAuditStore implements IRestAuditStore {
             }
         }
 
-        long first = sequences.getFirst();
+        // Anchoring the expected run at the smallest sequence PRESENT would make a
+        // deletion at the very start invisible: drop sequence 0 and 1,2,3 is still a
+        // gap-free run. When the window starts at the conversation's beginning the
+        // run must therefore begin at SEQUENCE_ORIGIN, so a missing prefix is
+        // reported like any other hole. For a paginated window (skip > 0) the
+        // preceding entries were legitimately not fetched, so only continuity
+        // within the window can be judged.
+        long first = expectRunFromOrigin ? SEQUENCE_ORIGIN : sequences.getFirst();
         long last = sequences.stream().max(Comparator.naturalOrder()).orElse(first);
         for (long expected = first; expected <= last; expected++) {
             if (!seen.contains(expected)) {
