@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -143,7 +144,8 @@ public class RagContextProvider {
             // nothing today.
             String unsupportedSettings = ragConfig.findUnsupportedSettings();
             if (unsupportedSettings != null) {
-                LOGGER.warnf("Knowledge base '%s': %s Retrieval continues unaffected.", kbName, unsupportedSettings);
+                LOGGER.warnf("Knowledge base '%s': %s Retrieval continues unaffected.", LogSanitizer.sanitize(kbName),
+                        LogSanitizer.sanitize(unsupportedSettings));
                 Map<String, Object> warningTrace = new HashMap<>();
                 warningTrace.put("kb", kbName);
                 warningTrace.put("warning", unsupportedSettings);

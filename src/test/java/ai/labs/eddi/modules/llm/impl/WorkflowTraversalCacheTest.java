@@ -79,7 +79,7 @@ class WorkflowTraversalCacheTest {
     void differentStepTypesAreSeparateEntries() throws Exception {
         WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
                 agentStore, workflowStore, resourceClientLibrary);
-        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.mcpCalls", Object.class,
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.mcpcalls", Object.class,
                 agentStore, workflowStore, resourceClientLibrary);
 
         verify(agentStore, times(2)).readAgent(anyString(), anyInt());
