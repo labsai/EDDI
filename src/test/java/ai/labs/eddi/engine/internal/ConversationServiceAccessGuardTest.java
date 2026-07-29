@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
@@ -94,7 +95,8 @@ class ConversationServiceAccessGuardTest {
                 cacheFactory, runtime, contextLogger, auditLedgerService, gdprComplianceService,
                 tenantQuotaService, scheduleStore, agentStore,
                 jsonSerialization,
-                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), 60);
+                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(),
+                new CallerIdentityContext(null, null), 60);
 
         conversationAccessGuard = mock(ConversationAccessGuard.class);
         conversationService.conversationAccessGuard = conversationAccessGuard;

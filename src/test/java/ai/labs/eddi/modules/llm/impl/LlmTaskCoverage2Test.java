@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
@@ -132,7 +133,7 @@ class LlmTaskCoverage2Test {
                 ragContextProvider, new TokenCounterFactory(), conversationSummarizer,
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
 
         lenient().when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData d = mock(IData.class);
@@ -848,7 +849,7 @@ class LlmTaskCoverage2Test {
 
     private CascadingModelExecutor cascadeExecutor(ChatModelRegistry registry) {
         return new CascadingModelExecutor(registry, globalVariableResolver, null, new LegacyChatExecutor(),
-                new StreamingLegacyChatExecutor(), null);
+                new StreamingLegacyChatExecutor(), null, new CallerIdentityContext(null, null));
     }
 
     @Test

@@ -591,7 +591,7 @@ class AgentSetupServiceTest {
         void nullAgentName() {
             var request = new CreateApiAgentRequest(
                     null, "prompt", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("Agent name is required"));
@@ -602,7 +602,7 @@ class AgentSetupServiceTest {
         void blankSystemPrompt() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "   ", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("System prompt is required"));
@@ -613,7 +613,7 @@ class AgentSetupServiceTest {
         void blankOpenApiSpec() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("OpenAPI spec is required"));
@@ -624,7 +624,7 @@ class AgentSetupServiceTest {
         void cloudProviderNoApiKey() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("API key is required"));

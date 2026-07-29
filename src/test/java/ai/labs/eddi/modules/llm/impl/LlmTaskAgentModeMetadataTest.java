@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -149,7 +150,7 @@ class LlmTaskAgentModeMetadataTest {
                 ragContextProvider, new TokenCounterFactory(), conversationSummarizer,
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
 
         lenient().when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData<?> d = mock(IData.class);

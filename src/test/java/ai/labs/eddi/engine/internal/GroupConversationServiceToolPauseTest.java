@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
@@ -92,7 +93,7 @@ class GroupConversationServiceToolPauseTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, null, DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
     }
 
     private AgentGroupConfiguration buildConfig(List<DiscussionPhase> phases) {
