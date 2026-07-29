@@ -279,7 +279,15 @@ public final class McpApiToolBuilder {
             MediaType jsonMedia = content.get("application/json");
             if (jsonMedia != null) {
                 request.setContentType("application/json");
-                request.setBody(buildBodyTemplate(jsonMedia.getSchema()));
+                var body = buildBodyTemplate(jsonMedia.getSchema());
+                request.setBody(body.template());
+                // The body template's variables must be declared as tool parameters,
+                // or the model has no documented way to fill them: the tool schema is
+                // built from getParameters() alone (AgentOrchestrator), and with
+                // strict-rendering off an undeclared variable renders as empty. The
+                // request would go out structurally valid and semantically empty.
+                // Path and query names win a collision — those are structural.
+                body.variables().forEach(paramDescriptions::putIfAbsent);
             }
         }
 
@@ -323,18 +331,41 @@ public final class McpApiToolBuilder {
      * Note: Only handles flat schemas (direct properties). Nested objects and
      * arrays fall back to a single {@code {requestBody}} template variable.
      */
-    private static String buildBodyTemplate(Schema<?> schema) {
+    /**
+     * A request-body template together with the tool parameters the model must
+     * supply to fill it.
+     * <p>
+     * The two travel together on purpose. A template variable that is not also
+     * declared as a parameter is invisible to the model, and renders empty rather
+     * than failing, so the call succeeds and the body is wrong.
+     *
+     * @param template
+     *            the Qute body template
+     * @param variables
+     *            variable name to description, for {@code ApiCall.parameters}
+     */
+    private record BodyTemplate(String template, Map<String, String> variables) {
+    }
+
+    /** Name of the whole-body variable used when the schema has no properties. */
+    static final String WHOLE_BODY_VARIABLE = "requestBody";
+
+    private static BodyTemplate buildBodyTemplate(Schema<?> schema) {
         if (schema == null) {
-            return "{}";
+            return new BodyTemplate("{}", Map.of());
         }
 
         @SuppressWarnings("rawtypes")
         Map<String, Schema> properties = schema.getProperties();
         if (properties == null || properties.isEmpty()) {
-            // No properties — use the raw template variable based on schema
-            return "{requestBody}";
+            // No properties to decompose — typically an unresolved $ref, which is the
+            // common case for this API. One variable carrying the whole JSON body is
+            // also the most reviewable shape: what the model wrote is what gets sent.
+            return new BodyTemplate("{" + WHOLE_BODY_VARIABLE + "}",
+                    Map.of(WHOLE_BODY_VARIABLE, "The complete JSON request body, as a single JSON object."));
         }
 
+        var variables = new LinkedHashMap<String, String>();
         var sb = new StringBuilder("{\n");
         var entries = new ArrayList<>(properties.entrySet());
         for (int i = 0; i < entries.size(); i++) {
@@ -352,13 +383,17 @@ public final class McpApiToolBuilder {
                 sb.append("{").append(propName).append("}");
             }
 
+            variables.put(propName, propSchema.getDescription() != null && !propSchema.getDescription().isBlank()
+                    ? propSchema.getDescription()
+                    : propName);
+
             if (i < entries.size() - 1) {
                 sb.append(",");
             }
             sb.append("\n");
         }
         sb.append("}");
-        return sb.toString();
+        return new BodyTemplate(sb.toString(), variables);
     }
 
     /**

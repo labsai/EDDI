@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -227,6 +228,66 @@ class McpApiToolBuilderTest {
         assertTrue(body.contains("\"age\""), "Body should have 'age' field");
         // String field should be quoted
         assertTrue(body.contains("\"{name}\""), "String param should be quoted in template");
+    }
+
+    @Test
+    @DisplayName("body template variables are declared as parameters, or the model cannot fill them")
+    void parseAndBuild_requestBodyVariablesAreDeclaredAsParameters() {
+        // The tool schema handed to the LLM is built from getParameters() alone. An
+        // undeclared body variable is invisible to the model and — with strict
+        // rendering off — renders empty, so the call succeeds with an empty body.
+        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
+        var petsConfig = result.configsByGroup().get("pets");
+
+        ApiCall createPet = petsConfig.getHttpCalls().stream().filter(c -> "createPet".equals(c.getName())).findFirst().orElseThrow();
+
+        assertNotNull(createPet.getParameters(), "a call with a body must declare parameters");
+        String body = createPet.getRequest().getBody();
+        for (String variable : List.of("name", "age")) {
+            assertTrue(body.contains("{" + variable + "}"), "template should reference " + variable);
+            assertTrue(createPet.getParameters().containsKey(variable), variable + " is in the body template but not declared as a parameter");
+        }
+    }
+
+    @Test
+    @DisplayName("a body with no decomposable properties is declared as one whole-body parameter")
+    void parseAndBuild_wholeBodyVariableIsDeclared() {
+        // The common case for this API: an unresolved $ref collapses to a single
+        // variable carrying the entire JSON body.
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things":{"post":{
+                "operationId":"createThing","tags":["things"],
+                "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Thing"}}}},
+                "responses":{"200":{"description":"ok"}}}}},
+                "components":{"schemas":{"Thing":{}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall createThing = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        assertEquals("{" + McpApiToolBuilder.WHOLE_BODY_VARIABLE + "}", createThing.getRequest().getBody());
+        assertNotNull(createThing.getParameters());
+        assertTrue(createThing.getParameters().containsKey(McpApiToolBuilder.WHOLE_BODY_VARIABLE),
+                "the whole-body variable must be declared, otherwise every POST sends an empty body");
+    }
+
+    @Test
+    @DisplayName("a path parameter wins a name collision with a body property")
+    void parseAndBuild_pathParameterWinsCollisionWithBodyProperty() {
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things/{id}":{"put":{
+                "operationId":"updateThing","tags":["things"],
+                "parameters":[{"name":"id","in":"path","required":true,"description":"The path id","schema":{"type":"string"}}],
+                "requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{
+                "id":{"type":"string","description":"A body id"},"label":{"type":"string"}}}}}},
+                "responses":{"200":{"description":"ok"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall updateThing = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        // Structural wins: the path segment must resolve, and one Qute variable
+        // cannot mean two things.
+        assertEquals("The path id", updateThing.getParameters().get("id"));
+        assertTrue(updateThing.getParameters().containsKey("label"));
     }
 
     @Test
