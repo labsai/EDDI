@@ -548,7 +548,7 @@ class RestTemplatePreviewTest {
 
         @Test
         void shouldRejectPreviewAgainstAForeignConversation() throws Exception {
-            when(conversationAccessGuard.requireConversationOwner("someone-elses-conv"))
+            when(conversationAccessGuard.requireExistingConversationOwner("someone-elses-conv"))
                     .thenThrow(new ForbiddenException("Access denied: you do not own this conversation"));
 
             assertThrows(ForbiddenException.class, () -> restTemplatePreview.previewTemplate(
@@ -557,7 +557,7 @@ class RestTemplatePreviewTest {
 
         @Test
         void shouldNotLeakMemoryOrVariableValuesWhenOwnershipIsDenied() throws Exception {
-            when(conversationAccessGuard.requireConversationOwner("someone-elses-conv"))
+            when(conversationAccessGuard.requireExistingConversationOwner("someone-elses-conv"))
                     .thenThrow(new ForbiddenException("Access denied: you do not own this conversation"));
 
             assertThrows(ForbiddenException.class, () -> restTemplatePreview.previewTemplate(
@@ -579,7 +579,7 @@ class RestTemplatePreviewTest {
             restTemplatePreview.previewTemplate(new TemplatePreviewRequest("template", "own-conv"));
 
             var order = inOrder(conversationAccessGuard, conversationMemoryStore);
-            order.verify(conversationAccessGuard).requireConversationOwner("own-conv");
+            order.verify(conversationAccessGuard).requireExistingConversationOwner("own-conv");
             order.verify(conversationMemoryStore).loadConversationMemorySnapshot("own-conv");
         }
 

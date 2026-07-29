@@ -106,7 +106,7 @@ public class RestTemplatePreview implements IRestTemplatePreview {
      * more here than that marginal reduction.)
      */
     private Map<String, Object> loadConversationData(String conversationId) {
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        conversationAccessGuard.requireExistingConversationOwner(conversationId);
         try {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             var memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
