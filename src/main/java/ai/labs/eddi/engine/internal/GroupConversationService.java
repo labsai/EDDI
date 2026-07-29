@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.utils.LogSanitizer;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -125,6 +126,11 @@ public class GroupConversationService implements IGroupConversationService {
     // materialize and share discussion attachments with member conversations.
     @Inject
     IAttachmentStore attachmentStore;
+
+    // Same reason. Ephemeral cleanup deletes the Agent directly, not via
+    // RestAgentStore, so it has to retire the deployment record itself.
+    @Inject
+    IDeploymentStore deploymentStore;
 
     // Incremental peer verification: tracks the last verified transcript index
     // per group conversation ID, so we only verify new entries each turn (O(N)
@@ -1453,11 +1459,29 @@ public class GroupConversationService implements IGroupConversationService {
 
                 if (shouldDelete) {
                     agentStore.deleteAllPermanently(agentId);
+                    retireDeploymentRecords(agentId);
                     LOGGER.infof("Ephemeral cleanup: deleted agent '%s'", agentId);
                 }
             } catch (Exception e) {
                 LOGGER.warnf("Ephemeral cleanup failed for agent '%s': %s", agentId, e.getMessage());
             }
+        }
+    }
+
+    /**
+     * A deployment record left behind by a deleted ephemeral agent makes the
+     * runtime retry a doomed redeploy. Never fatal — the agent is already gone
+     * either way, and the startup sweep in AgentDeploymentManagement retires
+     * anything missed here.
+     */
+    private void retireDeploymentRecords(String agentId) {
+        if (deploymentStore == null) {
+            return;
+        }
+        try {
+            deploymentStore.deleteDeploymentInfos(agentId);
+        } catch (Exception e) {
+            LOGGER.warnf("Ephemeral cleanup: could not clear deployment record(s) for agent '%s': %s", agentId, e.getMessage());
         }
     }
 

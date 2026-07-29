@@ -537,6 +537,69 @@ That last fix required the theme's **first JavaScript** (`resources/js/eddi-a11y
 
 ---
 
+## 🧹 fix(release): retire stale deployment records, quiet the Postgres health line, revive two dead checks (2026-07-27)
+
+**Repo:** EDDI (`fix/release-6.2-polish`) + eddi-chat-ui (`fix/release-6.2-polish`)
+
+Findings from a full smoke test of `labsai/eddi:6.2.0-b638` against **both** datastore backends (MongoDB and PostgreSQL). Agent CRUD, multi-turn conversations, PropertySetter + Qute templating, undo/redo, group conversations (ROUND_TABLE, followup/continue/close), MCP handshake and SSE streaming all behaved identically on both — no engine defects found. The items below are the rough edges that surfaced.
+
+### 1. Deleting an Agent orphaned its deployment record (both datastores)
+
+`RestAgentStore.deleteAgent` cascaded to schedules, workflows and the capability registry but never to `deployments`, and `IDeploymentStore` had no delete method to call. Every deleted-but-once-deployed Agent therefore left a row at status `deployed`; on each startup the runtime retried the redeploy, failed with `ResourceNotFoundException`, and logged a full ERROR stack trace — forever, accumulating with each deletion. Reproduced on current code; this instance had an orphan dating to 2026-04-01.
+
+`AgentDeploymentManagement.checkDeployments` *already* carried self-heal logic for exactly this case (`isCausedByResourceNotFound` → mark `undeployed`), but it was unreachable: `AgentFactory.deployAgent` returns `void` and swallows the `ServiceException` internally, so the catch blocks never fired. That is why the April orphan survived for months despite the code being there.
+
+- `IDeploymentStorage` / `IDeploymentStore`: added `deleteDeploymentInfos(agentId)`, implemented in `MongoDeploymentStorage` (`deleteMany`) and `PostgresDeploymentStorage` (`DELETE … WHERE AGENT_ID = ?`)
+- `RestAgentStore.deleteAgent`: clears the Agent's deployment records; a failure here logs a warning and still deletes the Agent
+- `AgentDeploymentManagement.checkDeployments`: checks up front whether the Agent config still exists and retires the record instead of attempting a doomed deploy. `isAgentConfigMissing` treats **only** `ResourceNotFoundException` as proof of absence — a store outage leaves the record untouched, so a transient DB failure can never mass-retire live deployments.
+
+Three call sites delete Agents, not one. `McpAdminTools.deleteAgent` delegates to `RestAgentStore` and inherits the cascade, but `GroupConversationService`'s ephemeral cleanup and `TeardownAgentTool` call `agentStore.deleteAllPermanently` directly — and dynamic sub-agents *do* get deployment records, because `AgentSetupService.deployAndWait` goes through `RestAgentAdministration`. Every ephemeral group agent was therefore orphaning a record. Both now retire their records too (null-tolerant, non-fatal), following the existing field-injection pattern in those classes so the directly-constructed unit tests keep working.
+
+**Ordering:** the cascade runs *after* `restVersionInfo.delete`, not before. That method validates its arguments internally and throws on a stale or unknown version — clearing the records first would strip a still-live Agent of what it needs to come back up. Pinned by a test.
+
+**Design note:** the pre-check was chosen over making `deployAgent` rethrow — that method's dummy-agent-on-failure contract is relied on by the on-demand deploy path, and widening it for this would have been a far riskier change than a cheap existence check.
+
+Verified against the real Postgres instance: the April orphan was retired, the ERROR + stack trace was replaced by a single `WARN … retiring stale deployment record`, and deleting a fresh Agent logged `Cascade-deleted 1 deployment record(s)` with the row gone.
+
+> That run was observed against the first implementation, which retired a record by marking it `undeployed` — so the orphan was seen flipping `deployed` → `undeployed`. The review pass below replaced that with a scoped **delete**, so the record is now simply absent. The ERROR-to-WARN result and the cascade behaviour are unchanged.
+
+### 2. MongoDB health check reported UP with no MongoDB (postgres profile)
+
+Under `QUARKUS_PROFILE=postgres`, with the Mongo container stopped and its hostname unresolvable, `/q/health` still listed `"MongoDB connection health check": "UP"` — noise that would equally mask a genuine outage in Mongo mode.
+
+The obvious `%postgres.quarkus.mongodb.health.enabled=false` **does not work**: that property is fixed at build time, so it cannot apply to one image pointed at either datastore (confirmed — even passing it as a runtime env var leaves the check in place). Disabled through smallrye-health instead, which *is* runtime-scoped:
+
+    %postgres.quarkus.smallrye-health.check."io.quarkus.mongodb.health.MongoHealthCheck".enabled=false
+
+### 3. Two checks that could never fail
+
+- `InfrastructureIT.openApiSpec` asserted `anyOf(200, 404)` against `/q/openapi` — a path that never serves the spec (`quarkus.smallrye-openapi.path=/openapi`). It passed whether or not OpenAPI worked. Now asserts `200` on `/openapi` plus real body content.
+- `AGENTS.md` documented EDDI-Manager as served at `/chat/production`. It is served at `/manage`; `/` redirects to the `/welcome` chooser and `/workforce` is the group workspace. `/chat/production` is the standalone chat widget. The wrong path in this file is what sent an earlier review to the wrong URL.
+
+### 4. eddi-chat-ui: dead-end landing and an agent name that never loaded
+
+- `main.tsx` routed its catch-all to a hard-coded `/chat/production/default`. No instance has an agent literally named `default`, so this 404'd and left the visitor on a spinner that never resolved. Replaced with a new `AgentPicker` that lists the instance's actual agents, with explicit empty and error states. Reached only by deep-linking `/chat/production` without an agent id — the Manager's own chat (`/manage/chat`) was never affected.
+- `fetchAgentDescriptor` called `GET /agentstore/agents/{id}` with no `version`, which answers `400`. Even fixed, that endpoint returns the Agent config and carries no name at all — so the agent name had never rendered. Now resolves the current version and reads `/descriptorstore/descriptors/{id}?version=N`.
+
+**Note:** eddi-chat-ui builds its bundle directly into `EDDI/src/main/resources/META-INF/resources/`, so the two repos ship together. The superseded `chat-ui.p4wYUapg.js` / `chat-ui.D213XXZR.css` were removed; `chat.html` now points at the new hashes.
+
+### Review pass on PR #611
+
+- **CodeQL log injection (RestAgentStore).** `id` is a raw REST path parameter and reached two `log.infof`/`warnf` calls unsanitized. Now routed through `LogSanitizer.sanitize`, the pattern already used across the config REST stores. The equivalent logs in `TeardownAgentTool` and `GroupConversationService` were left raw on purpose: both only reach them after the id has passed a `createdAgentIds.contains(...)` check, so the value is a server-generated agent id, and every neighbouring log line in those classes prints it the same way.
+- **Retire scoped, not agent-wide (CodeRabbit, Major).** The sweep proves only that *one* `(environment, agentId, version)` is missing, so retiring with an agent-wide `deleteDeploymentInfos(agentId)` acted far beyond its evidence — it would take out sibling records for versions nobody checked. Added `deleteDeploymentInfo(environment, agentId, version)` and use it here; the agent-wide variant stays for the delete cascade, where the whole Agent really is gone. In practice the harmful case is hard to construct — `HistorizedResourceStore.read` falls back to history, so an older version normally still resolves — but the mismatch between what is checked and what is acted on is the kind that bites once versioning semantics shift. Covered by a mixed-version regression test.
+- **Pin the sibling in the mixed-version test.** The regression test asserted the missing version's record was deleted and that no agent-wide delete happened — but it would still have passed if the code had *also* removed the live sibling through the scoped API. Added the explicit negative (`never()` on version 2, in any environment) and `times(1)` on the deletion that should happen. Mutation-checked: injecting a sibling delete now fails the test, where before it slipped through. While there, the `never()` verifications in these classes moved from `anyString()`/`anyInt()` to `any()`, which also matches null — `anyString()` does not, so a null-argument regression would have verified vacuously.
+- **Retire by delete, not by upsert.** `setDeploymentInfo` upserts. If an Agent were deleted between the sweep reading the deployment list and reaching the retire branch, marking it `undeployed` would *resurrect* the row the delete cascade had just removed — an inert but permanent tombstone. The sweep now calls `deleteDeploymentInfos`, which is idempotent, and an Agent that no longer exists has nothing to undeploy.
+- **TOCTOU between the pre-check and the deploy (CodeRabbit, Major) — acknowledged, not fixed.** If an Agent is deleted in the window between `isAgentConfigMissing` and `deployAgent`, the record can stay `deployed` and be cached in `deploymentInfos` until the next restart. The suggested remedy is to make `deployAgent` surface a definitive missing-result — the contract change deliberately avoided above, since the dummy-agent-on-failure behaviour is relied on by the on-demand deploy path. The window is milliseconds, the consequence is one stale row, and it self-corrects on restart, so it is not worth widening a core contract on a release-polish branch.
+- CodeRabbit nitpicks, all taken: `.gitattributes` marks the chat-ui bundles and Vite assets `linguist-generated` so reviewers stop being handed minified output; `MongoDeploymentStorage` gains an `agentId`-leading index, since the existing compound index starts with `deploymentStatus` and cannot serve the new agentId-only delete; and two coverage gaps closed — deployment cleanup on the cascade-success path, and the guarantee that a *failed* permanent delete leaves the records alone.
+- Style nits from Copilot: imports instead of inline `java.util.concurrent.*` FQNs in `TeardownAgentTool` (per §4.7), and four comments the Eclipse formatter had reflowed into orphaned fragments (`// throws`, `// path`, `// it`, `// up.`). Comment lines are now short enough to survive `formatter:format`.
+
+### Not fixed here (deployment config, not the release artifact)
+
+- The stored Anthropic API key is invalid — every LLM-backed agent fails with `invalid x-api-key`. EDDI handles it correctly (non-retryable, conversation `ERROR`, no stack trace to the client), but any demo needs a working key.
+- `VaultSaltManager` reports existing DEKs with no per-deployment salt and is falling back to the legacy fixed salt; the KEK migration should be run.
+
+---
+
 ## 🔒 fix(ci): remove accidentally-committed langchain4j-mcp decompiled sources (2026-07-27)
 
 **Repo:** EDDI (`feat/v6.2.0-prep`)
