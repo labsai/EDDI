@@ -85,6 +85,27 @@ headers are scrubbed before the request is recorded.
 
 Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
+### Running behind a reverse proxy
+
+The origin is taken from the inbound request as EDDI sees it. Behind a
+TLS-terminating proxy or ingress, that is the *internal* hop — something like
+`http://10.0.0.5:8080` — while the caller addressed `https://eddi.example`. The
+two do not match, so `${caller:token}` fails closed and the agent reports that
+the call targets a different origin, with nothing obviously wrong in the config.
+
+If EDDI runs behind a proxy, enable forwarded-header handling so the request
+reflects what the caller actually addressed:
+
+```properties
+quarkus.http.proxy.proxy-address-forwarding=true
+quarkus.http.proxy.enable-forwarded-host=true
+```
+
+This is deliberately **not** on by default. It makes EDDI trust `X-Forwarded-*`
+headers, which any client can send — safe when a trusted proxy overwrites them,
+wrong when EDDI is directly reachable. Turn it on only together with a proxy
+that sets those headers itself.
+
 ## HttpCalls Configuration
 
 In this article we will talk about EDDI's **`httpCalls`** **feature** (calling other `JSON` APIs).

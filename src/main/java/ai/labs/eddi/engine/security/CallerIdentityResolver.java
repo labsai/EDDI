@@ -187,8 +187,8 @@ public class CallerIdentityResolver {
         Matcher any = ANY_CALLER_PATTERN.matcher(value);
         if (any.find()) {
             throw new CallerIdentityException(any.group() + " was found in " + location
-                    + ", which is never caller-resolved — it would be sent to the API as a literal placeholder. Supported: "
-                    + SUPPORTED_REFERENCES + ", in headers and query parameters.");
+                    + ", which is never caller-resolved — it would be sent to the API as a literal placeholder. "
+                    + "${caller:token} may be used in a request header only; ${caller:userId} in a header or a query parameter.");
         }
     }
 
