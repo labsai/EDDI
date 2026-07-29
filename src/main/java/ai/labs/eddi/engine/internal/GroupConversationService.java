@@ -2703,6 +2703,21 @@ public class GroupConversationService implements IGroupConversationService {
 
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
         // Iterating a Collections.synchronizedList requires holding its monitor.
+        //
+        // The bare gc.getTranscript().add(...) calls further down this method are NOT
+        // an oversight, and reviewers have asked about the asymmetry: GroupConversation
+        // guarantees the transcript is always a Collections.synchronizedList (both the
+        // field initializer and setTranscript wrap it — no path assigns a bare list),
+        // and that wrapper's mutex IS the wrapper object, i.e. exactly what this block
+        // locks. So add() and this snapshot already exclude one another; the explicit
+        // monitor is required only because List.copyOf ITERATES, which the wrapper
+        // cannot make atomic on its own. Wrapping every append would add lock scope
+        // without removing a race.
+        //
+        // This is deliberately the opposite conclusion from the taskList guard in the
+        // task-execution wave, where the asymmetry WAS a real bug: there the two sides
+        // were a cancellation read and a document write ordered only by the monitor,
+        // not two operations on one synchronized collection.
         List<TranscriptEntry> snapshotTranscript;
         synchronized (gc.getTranscript()) {
             snapshotTranscript = List.copyOf(gc.getTranscript());
