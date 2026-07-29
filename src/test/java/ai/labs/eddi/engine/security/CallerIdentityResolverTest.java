@@ -219,8 +219,14 @@ class CallerIdentityResolverTest {
     @DisplayName("the bare Qute token form is refused in a query parameter too")
     void rejectsBareQuteTokenInQueryParameter() {
         assertThrows(CallerIdentityException.class, () -> resolver.rejectTokenReference("{caller:token}", "a query parameter"));
-        // ...while the bare userId form stays permitted there, as the $-form is.
+
+        // The bare userId form clears the token-only check — that check is about
+        // where a *token* may go...
         resolver.rejectTokenReference("{caller:userId}", "a query parameter");
+        // ...but it is still refused when the value is resolved, because nothing
+        // ever substitutes the bare form. Unlike ${caller:userId}, which resolves
+        // here, this one cannot work end to end and says so.
+        assertThrows(CallerIdentityException.class, () -> resolver.resolveValue("{caller:userId}", URI.create("https://eddi.example/x")));
     }
 
     @Test
