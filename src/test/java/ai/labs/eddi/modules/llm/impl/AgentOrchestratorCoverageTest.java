@@ -889,7 +889,7 @@ class AgentOrchestratorCoverageTest {
     // ═══════════════════════════════════════════════════════════════════
 
     private AgentOrchestrator.ToolSetup setupWith(List<ToolSpecification> all, List<ToolSpecification> builtIn) {
-        return new AgentOrchestrator.ToolSetup(all, Map.of(), Map.of(), builtIn, Map.of());
+        return new AgentOrchestrator.ToolSetup(all, Map.of(), Map.of(), builtIn, Map.of(), Map.of());
     }
 
     private ToolSpecification spec(String name) {

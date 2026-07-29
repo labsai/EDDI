@@ -18,7 +18,15 @@ import java.util.regex.Pattern;
  */
 public final class ToolApprovalPatterns {
     public static final List<String> KNOWN_SOURCES = List.of("builtin", "http", "mcp", "a2a", "dynamic", "memory", "recall");
-    private static final Pattern LEGAL_CHARS = Pattern.compile("[A-Za-z0-9_\\-.:*]+");
+    /**
+     * Also permits {@code / { }} so a pattern can name an endpoint path template
+     * such as {@code http.post:/agentstore/agents/{id}}. Braces are safe in the
+     * compiled regex because {@link #compile} quotes every non-wildcard segment.
+     */
+    private static final Pattern LEGAL_CHARS = Pattern.compile("[A-Za-z0-9_\\-.:*/{}]+");
+
+    /** HTTP methods that may qualify a source prefix, as {@code http.post:…}. */
+    private static final List<String> KNOWN_METHODS = List.of("get", "post", "put", "patch", "delete", "head", "options");
     private static final int MAX_LENGTH = 256;
 
     private ToolApprovalPatterns() {
@@ -59,12 +67,29 @@ public final class ToolApprovalPatterns {
         int colon = pattern.indexOf(':');
         if (colon > 0) {
             String prefix = pattern.substring(0, colon);
-            if (!prefix.contains("*") && !KNOWN_SOURCES.contains(prefix)) {
+            if (!prefix.contains("*") && !KNOWN_SOURCES.contains(prefix) && !isMethodQualifiedSource(prefix)) {
                 return Optional.of("unknown tool source prefix '" + prefix + ":' in pattern '" + pattern + "'"
-                        + suggestionFor(prefix) + " — known sources: " + String.join(", ", KNOWN_SOURCES));
+                        + suggestionFor(prefix) + " — known sources: " + String.join(", ", KNOWN_SOURCES)
+                        + "; a source may also be qualified by HTTP method, e.g. 'http.post:'");
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * Whether a prefix is {@code <knownSource>.<httpMethod>}, e.g.
+     * {@code http.post}.
+     * <p>
+     * Validated rather than accepted loosely so a typo like {@code http.pots:} is
+     * still reported. An unvalidated prefix would compile to a pattern that simply
+     * never matches — and a require-pattern that never matches is an ungated write.
+     */
+    private static boolean isMethodQualifiedSource(String prefix) {
+        int dot = prefix.indexOf('.');
+        if (dot <= 0) {
+            return false;
+        }
+        return KNOWN_SOURCES.contains(prefix.substring(0, dot)) && KNOWN_METHODS.contains(prefix.substring(dot + 1));
     }
 
     private static String suggestionFor(String prefix) {

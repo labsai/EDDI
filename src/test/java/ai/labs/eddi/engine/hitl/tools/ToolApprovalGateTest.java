@@ -27,6 +27,69 @@ class ToolApprovalGateTest {
         return c;
     }
 
+    // ==================== endpoint-qualified patterns ====================
+
+    /** Two generated tools whose names say nothing about what they do. */
+    private static final Map<String, String> SOURCES = Map.of("listAgents", "http", "createAgent", "http", "updateLlm", "http");
+    private static final Map<String, String> ENDPOINTS = Map.of(
+            "listAgents", "get:/agentstore/agents/descriptors",
+            "createAgent", "post:/agentstore/agents",
+            "updateLlm", "put:/llmstore/llms/{id}");
+
+    private static List<ToolExecutionRequest> allThree() {
+        return List.of(req("1", "listAgents"), req("2", "createAgent"), req("3", "updateLlm"));
+    }
+
+    @Test
+    void methodQualifiedPattern_gatesEveryMutationWithoutNamingAnyTool() {
+        // The point of the form: nobody maintains a list of write tool names, so a
+        // newly generated endpoint cannot arrive ungated.
+        var gate = new ToolApprovalGate();
+        var result = gate.classify(allThree(), SOURCES, ENDPOINTS,
+                cfg(List.of("http.post:*", "http.put:*", "http.patch:*", "http.delete:*"), null), Set.of());
+
+        assertEquals(List.of("createAgent", "updateLlm"), result.gated().stream().map(ToolExecutionRequest::name).toList());
+        assertEquals(List.of("listAgents"), result.allowed().stream().map(ToolExecutionRequest::name).toList());
+    }
+
+    @Test
+    void endpointQualifiedPattern_addressesOneEndpoint() {
+        // Different POSTs carry different weight, so a pattern must be able to name
+        // the endpoint rather than only the method.
+        var gate = new ToolApprovalGate();
+        var result = gate.classify(allThree(), SOURCES, ENDPOINTS, cfg(List.of("http.post:/agentstore/agents"), null), Set.of());
+
+        assertEquals(List.of("createAgent"), result.gated().stream().map(ToolExecutionRequest::name).toList());
+    }
+
+    @Test
+    void pathTemplateBracesAreLiterals_notRegexQuantifiers() {
+        var gate = new ToolApprovalGate();
+        var result = gate.classify(allThree(), SOURCES, ENDPOINTS, cfg(List.of("http.put:/llmstore/llms/{id}"), null), Set.of());
+
+        assertEquals(List.of("updateLlm"), result.gated().stream().map(ToolExecutionRequest::name).toList());
+    }
+
+    @Test
+    void exemptMayAlsoBeEndpointQualified() {
+        // Gate everything, then exempt reads — the only safe direction, since a
+        // missed exemption costs an approval prompt rather than an ungated write.
+        var gate = new ToolApprovalGate();
+        var result = gate.classify(allThree(), SOURCES, ENDPOINTS, cfg(List.of("http:*"), List.of("http.get:*")), Set.of());
+
+        assertEquals(List.of("createAgent", "updateLlm"), result.gated().stream().map(ToolExecutionRequest::name).toList());
+    }
+
+    @Test
+    void existingSourcePatternsKeepWorkingWithoutEndpointData() {
+        // Backward compatibility: agents configured before endpoint provenance
+        // existed pass an empty map and must gate exactly as they did.
+        var gate = new ToolApprovalGate();
+        var result = gate.classify(allThree(), SOURCES, Map.of(), cfg(List.of("http:*"), null), Set.of());
+
+        assertEquals(3, result.gated().size(), "http:* must still gate every http tool");
+    }
+
     @Test
     void nullOrEmptyConfig_gatesNothing() {
         var gate = new ToolApprovalGate();

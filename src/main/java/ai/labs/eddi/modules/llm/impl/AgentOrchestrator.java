@@ -848,7 +848,7 @@ class AgentOrchestrator {
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
-            Map<String, String> toolCanonicalNames) {
+            Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints) {
     }
 
     /**
@@ -884,6 +884,7 @@ class AgentOrchestrator {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> toolExecutors = new HashMap<>();
         Map<String, String> toolSources = new HashMap<>();
+        Map<String, String> toolEndpoints = new HashMap<>();
         Map<String, String> toolCanonicalNames = new HashMap<>();
 
         for (Object tool : tools) {
@@ -921,6 +922,7 @@ class AgentOrchestrator {
             toolSpecs.addAll(httpCallTools.toolSpecs());
             toolExecutors.putAll(httpCallTools.executors());
             httpCallTools.executors().keySet().forEach(name -> toolSources.put(name, "http"));
+            toolEndpoints.putAll(httpCallTools.endpoints());
         }
 
         // Merge mcpcalls tools discovered from workflow (if any)
@@ -937,7 +939,7 @@ class AgentOrchestrator {
             a2aTools.executors().keySet().forEach(name -> toolSources.put(name, "a2a"));
         }
 
-        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames));
+        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames), Map.copyOf(toolEndpoints));
     }
 
     /**
@@ -1172,7 +1174,7 @@ class AgentOrchestrator {
                     // calls. clearedCallIds carries the human-approved ids on resume so
                     // they are never re-gated. Inert when effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
-                    var gateResult = toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources,
+                    var gateResult = toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources, setup.toolEndpoints(),
                             effectiveToolApprovals, clearedCallIds);
 
                     if (!gateResult.gated().isEmpty()) {
@@ -2287,8 +2289,16 @@ class AgentOrchestrator {
 
     /**
      * Result of httpcall tool discovery.
+     *
+     * @param endpoints
+     *            tool name to {@code method:path} (e.g.
+     *            {@code post:/agentstore/agents}), so an approval pattern can
+     *            address the endpoint a tool calls rather than its generated name.
+     *            Names come from {@code operationId} or a slug, which drift; the
+     *            method and path are what the agent designer actually wrote in the
+     *            endpoint allow-list.
      */
-    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
+    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, Map<String, String> endpoints) {
     }
 
     /**
@@ -2302,6 +2312,7 @@ class AgentOrchestrator {
     HttpCallToolsResult discoverHttpCallTools(IConversationMemory memory) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
+        Map<String, String> endpoints = new HashMap<>();
 
         try {
             LOGGER.infof("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
@@ -2331,6 +2342,14 @@ class AgentOrchestrator {
                     }
 
                     toolSpecs.add(specBuilder.build());
+
+                    // Record what this tool actually calls, so approval patterns can be
+                    // written against the endpoint rather than the generated name.
+                    var apiRequest = apiCall.getRequest();
+                    if (apiRequest != null && apiRequest.getMethod() != null && apiRequest.getPath() != null) {
+                        endpoints.put(apiCall.getName(),
+                                apiRequest.getMethod().toLowerCase(Locale.ROOT) + ":" + apiRequest.getPath());
+                    }
 
                     executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
                         try {
@@ -2366,7 +2385,7 @@ class AgentOrchestrator {
             LOGGER.warn("Failed to discover httpcall tools from workflow", e);
         }
 
-        return new HttpCallToolsResult(toolSpecs, executors);
+        return new HttpCallToolsResult(toolSpecs, executors, endpoints);
     }
 
     // --- McpCalls auto-discovery from workflow ---

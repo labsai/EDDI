@@ -740,7 +740,7 @@ class AgentOrchestratorTest {
         List<ToolSpecification> specs = List.of(spec);
         Map<String, dev.langchain4j.service.tool.ToolExecutor> executors = Map.of();
 
-        var result = new AgentOrchestrator.HttpCallToolsResult(specs, executors);
+        var result = new AgentOrchestrator.HttpCallToolsResult(specs, executors, Map.of());
 
         assertNotNull(result);
         assertEquals(1, result.toolSpecs().size());
@@ -902,7 +902,7 @@ class AgentOrchestratorTest {
 
     @Test
     void httpCallToolsResult_emptySpecs() {
-        var result = new AgentOrchestrator.HttpCallToolsResult(List.of(), Map.of());
+        var result = new AgentOrchestrator.HttpCallToolsResult(List.of(), Map.of(), Map.of());
 
         assertTrue(result.toolSpecs().isEmpty());
         assertTrue(result.executors().isEmpty());

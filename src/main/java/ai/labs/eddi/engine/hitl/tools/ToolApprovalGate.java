@@ -32,6 +32,26 @@ public class ToolApprovalGate {
 
     public GateResult classify(List<ToolExecutionRequest> batch, Map<String, String> toolSources,
                                ToolApprovalsConfig cfg, Set<String> clearedCallIds) {
+        return classify(batch, toolSources, Map.of(), cfg, clearedCallIds);
+    }
+
+    /**
+     * As {@link #classify(List, Map, ToolApprovalsConfig, Set)}, additionally
+     * matching patterns against what an http tool actually calls.
+     * <p>
+     * A pattern may address a tool three ways: its bare name, {@code source:name},
+     * or — for httpcall tools — {@code source.method:path}, e.g.
+     * {@code http.post:/agentstore/agents}. The third form is the useful one for a
+     * generated API client: names come from {@code operationId} or a slug and drift
+     * when the spec changes, whereas {@code http.post:*} gates every mutation
+     * whether or not anyone maintained a list, and
+     * {@code http.post:/agentstore/agents} says exactly which one needs more care.
+     *
+     * @param toolEndpoints
+     *            tool name to {@code method:path}; empty for non-http tools
+     */
+    public GateResult classify(List<ToolExecutionRequest> batch, Map<String, String> toolSources,
+                               Map<String, String> toolEndpoints, ToolApprovalsConfig cfg, Set<String> clearedCallIds) {
         if (cfg == null || cfg.getRequireApproval() == null || cfg.getRequireApproval().isEmpty()) {
             return new GateResult(List.of(), List.copyOf(batch), Map.of());
         }
@@ -57,11 +77,14 @@ public class ToolApprovalGate {
             }
             String source = toolSources.get(request.name());
             String qualified = source != null ? source + ":" + request.name() : null;
-            if (firstMatch(exempt, qualified, request.name()) != null) {
+            // e.g. "http" + "." + "post:/agentstore/agents"
+            String endpoint = toolEndpoints.get(request.name());
+            String endpointQualified = source != null && endpoint != null ? source + "." + endpoint : null;
+            if (firstMatch(exempt, qualified, endpointQualified, request.name()) != null) {
                 allowed.add(request);
                 continue;
             }
-            CompiledPattern match = firstMatch(require, qualified, request.name());
+            CompiledPattern match = firstMatch(require, qualified, endpointQualified, request.name());
             if (match != null) {
                 gated.add(request);
                 if (request.id() != null) {
@@ -84,8 +107,11 @@ public class ToolApprovalGate {
         return globs.stream().map(g -> new CompiledPattern(g, ToolApprovalPatterns.compile(g))).toList();
     }
 
-    private static CompiledPattern firstMatch(List<CompiledPattern> patterns, String qualified, String bare) {
+    private static CompiledPattern firstMatch(List<CompiledPattern> patterns, String qualified, String endpointQualified, String bare) {
         for (CompiledPattern cp : patterns) {
+            if (endpointQualified != null && cp.pattern().matcher(endpointQualified).matches()) {
+                return cp;
+            }
             // bare (= request.name()) can be null: langchain4j's ToolExecutionRequest
             // does not guarantee a non-null name (some providers emit malformed tool
             // calls). Guard both matchers so a null name matches nothing and the call
