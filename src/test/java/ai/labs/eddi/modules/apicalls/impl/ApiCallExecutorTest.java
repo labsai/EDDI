@@ -382,6 +382,32 @@ class ApiCallExecutorTest {
     }
 
     @Test
+    @DisplayName("a caller reference in the path fails with a message that names the cause")
+    void execute_callerReferenceInPath_isRejectedClearly() {
+        // A real resolver, for the same reason as the redaction test above: the
+        // mocked one does nothing, so the assertion would hold either way.
+        var realContext = new CallerIdentityContext(null, null);
+        realContext.bind(new CallerIdentity("caller-jwt-value", "alice", "https://eddi.example:443"));
+        var realResolver = new CallerIdentityResolver(realContext, true);
+        var executorWithRealResolver = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
+                secretResolver, realResolver, realContext, false, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
+        try {
+            ApiCall call = createSimpleApiCall("path-ref-call", false);
+            call.getRequest().setPath("/users/${caller:userId}/profile");
+
+            // Without the guard this reaches URI.create() and dies as "Illegal
+            // character in path", naming the symptom and not the cause.
+            var e = assertThrows(LifecycleException.class,
+                    () -> executorWithRealResolver.execute(call, memory, new HashMap<>(), "http://example.com"));
+            String message = String.valueOf(e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
+            assertTrue(message.contains("${caller:userId}"), message);
+            assertTrue(message.contains("the request path"), message);
+        } finally {
+            realContext.clear();
+        }
+    }
+
+    @Test
     @DisplayName("header scrubbing survives a Turkish locale")
     void execute_sensitiveHeaders_areScrubbedUnderTurkishLocale() throws Exception {
         // "AUTHORIZATION".toLowerCase() under tr-TR gives a dotless 'ı', so a

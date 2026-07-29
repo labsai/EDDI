@@ -433,6 +433,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // Resolve global variable references, then vault references in URL
         targetUriStr = globalVariableResolver.resolveValue(targetUriStr);
         targetUriStr = secretResolver.resolveValue(targetUriStr);
+        // The path is not caller-resolved either, and a surviving reference would
+        // reach URI.create() to fail as "Illegal character in path" — an error that
+        // names the symptom and not the cause.
+        callerIdentityResolver.rejectAnyReference(targetUriStr, "the request path");
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
         // Resolve global variable references, then vault references in request body
@@ -446,7 +450,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
             UrlValidationUtils.validateUrl(targetUri.toString());
         }
 
-        var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase());
+        // Locale.ROOT is defensive rather than a live fix: no current Method
+        // constant contains an 'i', so no locale changes the result today. It would
+        // the moment one did — "options" uppercases to "OPTİONS" under tr-TR.
+        var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase(Locale.ROOT));
         IRequest request = httpClient.newRequest(targetUri, method);
         // Bound the call in time and in size. Without these an httpcall can occupy the
         // conversation thread until the client's own fallback expires, and can pull an
