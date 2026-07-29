@@ -925,7 +925,13 @@ public class ConversationService implements IConversationService {
         // callable rather than with the thread.
         // Binding is CallerIdentityContext's job — it owns the clearing semantics
         // that keep a token off the next caller's turn on a pooled thread.
-        final Callable<Void> identityBoundExecution = callerIdentityContext.withIdentity(callerIdentityContext.capture(),
+        //
+        // captureOrCurrent, not capture: a group discussion calls say() from its own
+        // virtual thread, which it has already bound to the caller. There is no
+        // request there, so capture() alone would return null — and since a null
+        // identity now masks rather than inherits, it would erase the very binding
+        // the group dispatcher established.
+        final Callable<Void> identityBoundExecution = callerIdentityContext.withIdentity(callerIdentityContext.captureOrCurrent(),
                 executeConversation);
 
         return () -> {
@@ -1447,8 +1453,10 @@ public class ConversationService implements IConversationService {
 
             // The resume is itself an authenticated request, so the pipeline it
             // continues should run as the person who approved — captured here, on
-            // the request thread, for the same reason as in the say path.
-            final CallerIdentity resumeCallerIdentity = callerIdentityContext.capture();
+            // the request thread, for the same reason as in the say path. Falls back
+            // to the thread binding for an internally driven resume, which has no
+            // request to capture from.
+            final CallerIdentity resumeCallerIdentity = callerIdentityContext.captureOrCurrent();
 
             Callable<Void> resumeCallable = () -> {
                 // #3: a cancel or a terminal end may have landed between the CAS

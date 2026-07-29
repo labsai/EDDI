@@ -106,6 +106,9 @@ class ConversationServiceResumeTest {
 
     private ConversationService conversationService;
 
+    /** Shared with the service so a test can bind a caller the way a group does. */
+    private final CallerIdentityContext callerIdentityContext = new CallerIdentityContext(null, null);
+
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() throws Exception {
@@ -117,7 +120,7 @@ class ConversationServiceResumeTest {
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
                 jsonSerialization,
-                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), AGENT_TIMEOUT);
+                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), callerIdentityContext, AGENT_TIMEOUT);
 
         // The resume path pre-checks existence via getConversationState (404 vs 409)
         doReturn(ConversationState.AWAITING_HUMAN)
@@ -176,11 +179,26 @@ class ConversationServiceResumeTest {
             IConversation conversation = mock(IConversation.class);
             doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
             var stateAtContinueTime = new java.util.concurrent.atomic.AtomicReference<ConversationState>();
+            var callerAtContinueTime = new java.util.concurrent.atomic.AtomicReference<ai.labs.eddi.engine.security.CallerIdentity>();
             doAnswer(inv -> {
                 IConversationMemory memoryArg = inv.getArgument(0);
                 stateAtContinueTime.set(memoryArg.getConversationState());
                 return conversation;
             }).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            // Hook inside the submitted callable, not continueConversation — that runs
+            // on the dispatching thread before submission, where the binding below is
+            // still in scope, so it would report the right answer for the wrong reason.
+            doAnswer(inv -> {
+                callerAtContinueTime.set(callerIdentityContext.current());
+                return null;
+            }).when(conversation).resume(any());
+
+            // An internally driven resume — a group approving on its own thread — has
+            // no request to capture from, only the binding the dispatcher left. If the
+            // service captured from the request alone it would get null, and a null
+            // identity now MASKS rather than inherits, erasing that binding.
+            var dispatcher = new ai.labs.eddi.engine.security.CallerIdentity("tok", "approver", "https://eddi.example:443");
+            callerIdentityContext.bind(dispatcher);
 
             // Capture the callable submitted to the coordinator so we can execute it
             // synchronously
@@ -213,10 +231,18 @@ class ConversationServiceResumeTest {
 
             // Execute the captured callable synchronously to trigger conversation.resume()
             Callable<Void> resumeCallable = callableCaptor.getValue();
+            // Clear first: the callable must carry the identity itself, not rely on the
+            // thread that happens to run it still being bound.
+            callerIdentityContext.clear();
             resumeCallable.call();
 
             // Assert: conversation.resume() was invoked with APPROVED decision
             verify(conversation).resume(eq(decision));
+
+            // Fail-on-revert: switching back to capture() makes this null, and every
+            // ${caller:...} in the resumed turn fails closed.
+            assertEquals(dispatcher, callerAtContinueTime.get(),
+                    "the resumed pipeline must run as the caller bound by whoever dispatched the resume");
 
             // Assert: memory was stored after resume — via the state-guarded store so
             // a concurrent terminal end/cancel can never be clobbered.

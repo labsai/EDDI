@@ -59,12 +59,21 @@ public class CallerIdentityResolver {
     static final Pattern CALLER_PATTERN = Pattern.compile("\\$\\{caller:(token|userId)\\}");
 
     /**
-     * Matches any {@code ${caller:...}} reference, including ones we do not
-     * support. {@code CallerNamespaceResolver} deliberately lets every reference in
-     * this namespace survive Qute, so a typo reaches the API as a literal
-     * placeholder unless something catches it.
+     * Matches any caller reference, including ones we do not support.
+     * {@code CallerNamespaceResolver} deliberately lets every reference in this
+     * namespace survive Qute, so a typo reaches the API as a literal placeholder
+     * unless something catches it.
+     * <p>
+     * The leading {@code $} is optional because {@code {caller:token}} is the
+     * natural Qute namespace syntax and an easy thing to write by mistake. The
+     * resolver returns that form unchanged (the {@code $} is literal template text
+     * it never adds), so the bare form is never substituted — it would simply be
+     * sent to the API as text. Matching it here turns that into a clear error.
      */
-    private static final Pattern ANY_CALLER_PATTERN = Pattern.compile("\\$\\{caller:[^}]*\\}");
+    private static final Pattern ANY_CALLER_PATTERN = Pattern.compile("\\$?\\{caller:[^}]*\\}");
+
+    /** {@code ${caller:token}} in either the documented or the bare Qute form. */
+    private static final Pattern ANY_TOKEN_PATTERN = Pattern.compile("\\$?\\{caller:token\\}");
 
     private static final String SUPPORTED_REFERENCES = "${caller:token} (headers only) and ${caller:userId}";
 
@@ -182,7 +191,7 @@ public class CallerIdentityResolver {
      *            human-readable place the reference was found, for the message
      */
     public void rejectTokenReference(String value, String location) {
-        if (value != null && value.contains("${caller:token}")) {
+        if (value != null && ANY_TOKEN_PATTERN.matcher(value).find()) {
             throw new CallerIdentityException("${caller:token} may only be used in a request header, but was found in " + location
                     + ". Outside a header it is never substituted, and a token in a URL additionally leaks through "
                     + "access logs and proxies.");

@@ -207,6 +207,23 @@ class CallerIdentityResolverTest {
     }
 
     @Test
+    @DisplayName("the bare Qute form is rejected, not shipped as text")
+    void rejectsBareQuteFormInABody() {
+        // {caller:token} is the natural Qute namespace syntax, so it is an easy
+        // mistake. The resolver returns it unchanged — it never adds the '$' — so it
+        // is never substituted and would reach the API verbatim.
+        assertThrows(CallerIdentityException.class, () -> resolver.rejectAnyReference("{\"t\":\"{caller:token}\"}", "a request body"));
+    }
+
+    @Test
+    @DisplayName("the bare Qute token form is refused in a query parameter too")
+    void rejectsBareQuteTokenInQueryParameter() {
+        assertThrows(CallerIdentityException.class, () -> resolver.rejectTokenReference("{caller:token}", "a query parameter"));
+        // ...while the bare userId form stays permitted there, as the $-form is.
+        resolver.rejectTokenReference("{caller:userId}", "a query parameter");
+    }
+
+    @Test
     @DisplayName("a typo'd reference fails loudly instead of shipping as a placeholder")
     void rejectsUnsupportedReference() {
         // Qute leaves the whole caller namespace alone, so nothing else would catch
