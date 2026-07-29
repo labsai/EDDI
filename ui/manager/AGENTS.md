@@ -27,7 +27,7 @@ All repos live under `c:\dev\git\`:
 | **Styling**        | Tailwind CSS v4 + CSS variables (black/gold)                           |
 | **State (server)** | TanStack Query v5                                                      |
 | **State (UI)**     | Zustand (chat/debug), `useState` / `useCallback` elsewhere             |
-| **Routing**        | React Router v7                                                        |
+| **Routing**        | React Router v6 (`react-router-dom` 6.x — NOT v7, do not use v7-only APIs) |
 | **i18n**           | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
 | **Test (unit)**    | Vitest + React Testing Library + MSW                                   |
 | **Test (e2e)**     | Playwright                                                             |
@@ -205,7 +205,9 @@ what it finds. Off by default. Worth knowing before touching it:
 
 - Base URL: `window.location.origin` (never hardcode)
 - Vite proxy forwards all store paths to EDDI backend in dev mode
-- **All API calls** go through `src/lib/api-client.ts` (`ApiClient` class) — this ensures Keycloak auth tokens are propagated automatically
+- **Default to `src/lib/api-client.ts`** (`ApiClient` class) for API calls — it injects the Keycloak auth token automatically
+- A handful of call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`sse-utils.ts`, `bearer-event-source.ts`), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **These must spread `api.getAuthHeader()` themselves** — forgetting it is a 401 that only appears once OIDC is switched on
+- Never add a raw `fetch` for an ordinary JSON call; route it through `ApiClient`
 - Server state via TanStack Query hooks in `src/hooks/`
 
 ### RTL Support

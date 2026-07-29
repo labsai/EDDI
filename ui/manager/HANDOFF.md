@@ -3,6 +3,16 @@
 ## Current Status (v6.0.0 Feature Work)
 
 ### Completed Phases
+- **Critical Review Hardening** (branch: `claude/repo-review-grading-13c5d7`): Full-repo review followed by fixes for every defect found. Includes:
+  - **Chat output corruption**: `formatMarkdownText` applied prose repairs to code, URLs and JSON — its comments claimed to skip link destinations and inline code but the regexes did not. Protected regions are now masked before any rule runs, and the lowercase→uppercase splitter is removed (it cannot distinguish a dropped space from `apiKey`).
+  - **SSE framing**: `chat.ts` was the only one of three parsers that assigned rather than appended `data:` lines, trimmed token payloads, and ignored CRLF. Extracted `parseSseFrame` into `sse-utils.ts` as the shared implementation.
+  - **409 rollback**: `useSendMessage` tracked its optimistic message id in a per-render `let`, so the documented rollback never ran. Now a ref.
+  - **Dead navigation**: four targets resolved to no route and fell through the catch-all to `/welcome` — command-palette agent results, the quick-create redirect, `*view` breadcrumbs, and the mobile Threads tab. Plus two reported bugs: the "Manage Workforce" tile linked to the page hosting it, and the Insights header (with the only back link) rendered only in the success branch.
+  - **Error states**: `audit`, `schedules`, `variables`, `logs`, `quotas`, `channel-detail` had no `isError` branch, so a 500 rendered the empty state.
+  - **i18n**: Arabic shipped 2 of its 6 required plural categories, so counts of 0/2/3-10/11-99 rendered in English; fr/es/pt lacked `many`; `secrets.emptyHint` was a wrong message in all 10 locales.
+  - **Docs/hygiene**: corrected six false claims (React Router version, test count, Dependabot vs Renovate, "all API calls go through ApiClient", supported versions), deduped `.gitignore`, resolved the tracked-and-ignored contradiction for `HANDOFF.md`/`.ds-sync`, removed 5 unused dependencies.
+  - **Tests**: 89 new tests across 10 files (4128 → 4217). Each fix was verified to fail without it by temporarily reverting. New permanent guards: `route-integrity.test.ts` (every `to=`/`navigate()` target must resolve off the catch-all) and `i18n-quality.test.ts` (plural completeness, interpolation integrity, untranslated-string ceiling).
+  - **Known remaining**: React Router 6.30.4 carries two open advisories; the bundle is a single 8.2 MB chunk with no code splitting; `workforce-wizard` ignores `?template=`; Workforce HITL settings write a config that gates no phase; a paused discussion has no approve/reject control in the Workforce surface.
 - Triggers UI/UX Refactoring: Replaced text inputs with dynamic `AgentPicker` combobox using `useDebounce` and backing API calls. Solved 404 proxy issues inside Vite server.
 - Triggers Table Refactoring: Enabled the list filter to filter agent deployments not just by `agentId` but also by resolved `name` leveraging `useAgentDescriptors` and `Map`. 
 - Bugfix: Fixed TypeScript build error in `src/pages/triggers.tsx` where `AgentDescriptor` incorrectly accessed an undefined `id` property instead of relying on `parseResourceUri(a.resource).id`.

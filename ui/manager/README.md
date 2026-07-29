@@ -48,7 +48,7 @@ npm run dev          # Vite dev server on http://localhost:5173
 The Vite dev proxy forwards API calls to the EDDI backend. If no backend is available, the Manager auto-starts in **standalone mode** with mock data (via [MSW](https://mswjs.io/)).
 
 ```bash
-npm run test         # 720+ Vitest unit/component tests
+npm run test         # 4,000+ Vitest unit/component tests
 npm run build        # Production build
 ```
 
@@ -60,7 +60,7 @@ npm run build        # Production build
 | UI         | React 19 + TypeScript 5 (strict)                |
 | Styling    | Tailwind CSS v4                                 |
 | State      | TanStack Query v5 + Zustand                     |
-| Routing    | React Router v7                                 |
+| Routing    | React Router v6                                 |
 | Editor     | Monaco                                          |
 | DnD        | @dnd-kit                                        |
 | Auth       | Keycloak 26 (optional)                          |

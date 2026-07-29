@@ -2,22 +2,7 @@ node_modules
 dist
 .idea
 .vscode
-*.log
-coverage
-
-# Auth / secrets
-.npmrc
-.env
-.env.*
-
-# Firebase (legacy)
-.firebaserc
-firebase.json
-
-node_modules
-dist
-.idea
-.vscode
+.vscode/settings.json
 *.log
 coverage
 
@@ -37,16 +22,17 @@ test-results.json
 test-output*.txt
 vitest-results.json
 out.txt
-
-.vscode/settings.json
-HANDOFF.md
-openapi.json
-openapi_paths.txt
 test_output.txt
 
-# design-sync (claude.ai/design)
-.ds-sync/
+# Local API spec dumps
+openapi.json
+openapi_paths.txt
+
+# design-sync (claude.ai/design) — generated caches only.
+# The `.design-sync/` and `.ds-sync/` scaffolding itself is tracked, so it must
+# not be listed here: ignoring a tracked path has no effect and only misleads.
 ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+.ds-sync/node_modules
