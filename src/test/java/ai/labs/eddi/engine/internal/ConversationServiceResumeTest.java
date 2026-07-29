@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -52,6 +53,7 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -178,8 +180,8 @@ class ConversationServiceResumeTest {
             IAgent agent = mock(IAgent.class);
             IConversation conversation = mock(IConversation.class);
             doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
-            var stateAtContinueTime = new java.util.concurrent.atomic.AtomicReference<ConversationState>();
-            var callerAtContinueTime = new java.util.concurrent.atomic.AtomicReference<ai.labs.eddi.engine.security.CallerIdentity>();
+            var stateAtContinueTime = new AtomicReference<ConversationState>();
+            var callerAtContinueTime = new AtomicReference<CallerIdentity>();
             doAnswer(inv -> {
                 IConversationMemory memoryArg = inv.getArgument(0);
                 stateAtContinueTime.set(memoryArg.getConversationState());
@@ -197,7 +199,7 @@ class ConversationServiceResumeTest {
             // no request to capture from, only the binding the dispatcher left. If the
             // service captured from the request alone it would get null, and a null
             // identity now MASKS rather than inherits, erasing that binding.
-            var dispatcher = new ai.labs.eddi.engine.security.CallerIdentity("tok", "approver", "https://eddi.example:443");
+            var dispatcher = new CallerIdentity("tok", "approver", "https://eddi.example:443");
             callerIdentityContext.bind(dispatcher);
 
             // Capture the callable submitted to the coordinator so we can execute it
@@ -384,7 +386,7 @@ class ConversationServiceResumeTest {
             IAgent agent = mock(IAgent.class);
             IConversation conversation = mock(IConversation.class);
             doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
-            var memoryRef = new java.util.concurrent.atomic.AtomicReference<IConversationMemory>();
+            var memoryRef = new AtomicReference<IConversationMemory>();
             doAnswer(inv -> {
                 memoryRef.set(inv.getArgument(0));
                 return conversation;
@@ -702,7 +704,7 @@ class ConversationServiceResumeTest {
             IAgent agent = mock(IAgent.class);
             IConversation conversation = mock(IConversation.class);
             doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
-            var memoryRef = new java.util.concurrent.atomic.AtomicReference<IConversationMemory>();
+            var memoryRef = new AtomicReference<IConversationMemory>();
             doAnswer(inv -> {
                 memoryRef.set(inv.getArgument(0));
                 return conversation;
