@@ -82,6 +82,20 @@ public class PlaceholderSyntaxContractTest {
                 "the Jinja2 form leaks the value and leaves its own tags behind");
     }
 
+    /**
+     * The unparsed block is only safe while the content cannot close it. A naive
+     * wrap of content containing the terminator resolves the expression that
+     * follows it — the escape defeats itself.
+     */
+    @Test
+    @DisplayName("content containing the terminator closes an unparsed block early")
+    void terminatorInContentClosesTheBlock() throws Exception {
+        assertEquals("a ACME b|}", render("{|a|} {properties.company_name} b|}"),
+                "naive wrapping lets the expression after the terminator resolve");
+        // splitting the pair across a block boundary keeps it literal
+        assertEquals("a|} {properties.company_name} b", render("{|a||}{|} {properties.company_name} b|}"));
+    }
+
     @Test
     @DisplayName("double braces do NOT resolve — they reach the model as literal text")
     void doubleBracesDoNotResolve() throws Exception {

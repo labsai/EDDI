@@ -35,9 +35,9 @@ import java.util.Map;
  * prompt templates. The cache auto-expires after 5 minutes (TTL) and can be
  * explicitly invalidated via {@link #invalidateCache()}.
  * <p>
- * For snippets with {@code templateEnabled=false}, the content has its template
- * markers ({@code {{}} }) escaped so the Jinja2 engine outputs them as
- * literals.
+ * For snippets with {@code templateEnabled=false}, the content is wrapped in a
+ * Qute unparsed block so its {@code {...}} markers reach the model literally
+ * instead of being resolved.
  *
  * @author ginccc
  * @since 6.0.0
@@ -51,6 +51,12 @@ public class PromptSnippetService {
      * Qute's expression marker. Not "{{" — that is Jinja2 and Qute leaves it alone.
      */
     private static final String TEMPLATE_MARKER = "{";
+
+    /**
+     * Qute's unparsed-block delimiters: everything between them renders literally.
+     */
+    private static final String UNPARSED_START = "{|";
+    private static final String UNPARSED_END = "|}";
 
     private final IPromptSnippetStore snippetStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -93,7 +99,9 @@ public class PromptSnippetService {
      * map keys are snippet names, values are snippet content strings.
      * <p>
      * For snippets with {@code templateEnabled=false}, template markers are escaped
-     * to prevent Qute resolution.
+     * to prevent Qute resolution: it is wrapped in an unparsed block, with any
+     * occurrence of the block terminator split across a boundary so it cannot close
+     * the block early.
      *
      * @return unmodifiable map of snippet name → content
      */
@@ -158,15 +166,23 @@ public class PromptSnippetService {
     }
 
     /**
-     * Escape Jinja2 template markers so the content is output literally. Uses
-     * Jinja2's built-in raw block syntax.
+     * Wrap content in a Qute unparsed block so its template markers are output
+     * literally rather than resolved.
      */
     private static String escapeTemplateMarkers(String content) {
         // Qute, not Jinja2. "{% raw %}" means nothing to Qute: it was emitted verbatim
         // into the system prompt while the "{...}" markers it was supposed to protect
         // were still resolved — the escape did the opposite of its job on both counts.
         // Qute's own literal form is {| ... |}, which renders its contents unparsed.
-        return "{|" + content + "|}";
+        //
+        // Content carrying the terminator itself would close the block early and hand
+        // the remainder back to the parser, reintroducing exactly the evaluation this
+        // is preventing. Verified: wrapping "a|} {properties.name} b" naively renders
+        // "a LEAKED b|}". So the pair is split across a block boundary — the "|" ends
+        // one unparsed block and the "}" opens the next — leaving neither block
+        // containing a terminator while the concatenated output is byte-identical.
+        String safe = content.replace(UNPARSED_END, "|" + UNPARSED_END + UNPARSED_START + "}");
+        return UNPARSED_START + safe + UNPARSED_END;
     }
 
     /**
