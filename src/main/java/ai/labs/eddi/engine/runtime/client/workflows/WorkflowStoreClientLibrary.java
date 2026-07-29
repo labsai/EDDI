@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.service.IWorkflowStoreService;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
 
@@ -92,7 +93,8 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
                     // disables a pipeline step, so say so instead of no-opping quietly.
                     LOGGER.warnf("Workflow '%s' declares step '%s', which does not use the '%s' URI scheme — "
                             + "the step is skipped and will not run.",
-                            documentDescriptor.getResource(), extensionType, URI_SCHEME_ID);
+                            LogSanitizer.sanitize(String.valueOf(documentDescriptor.getResource())),
+                            LogSanitizer.sanitize(String.valueOf(extensionType)), URI_SCHEME_ID);
                     continue;
                 }
 

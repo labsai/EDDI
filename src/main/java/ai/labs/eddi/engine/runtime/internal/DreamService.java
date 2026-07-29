@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -197,7 +198,8 @@ public class DreamService {
             }
             agentConfiguration = agentStore.read(agentId, version);
         } catch (Exception e) {
-            LOGGER.errorf(e, "[DREAM] Could not read agent '%s' (version=%s) for a scheduled dream cycle", agentId, agentVersion);
+            LOGGER.errorf(e, "[DREAM] Could not read agent '%s' (version=%s) for a scheduled dream cycle", LogSanitizer.sanitize(agentId),
+                    agentVersion);
             return rejected(userId, start, "Could not read agent '" + agentId + "': " + describe(e));
         }
 
@@ -216,7 +218,7 @@ public class DreamService {
     }
 
     private DreamResult rejected(String userId, Instant start, String reason) {
-        LOGGER.errorf("[DREAM] %s", reason);
+        LOGGER.errorf("[DREAM] %s", LogSanitizer.sanitize(reason));
         cyclesFailedCounter.increment();
         return new DreamResult(userId, 0, 0, 0, Duration.between(start, Instant.now()).toMillis(), 0.0, reason);
     }
@@ -255,7 +257,7 @@ public class DreamService {
         if (foreign > 0) {
             LOGGER.infof("[DREAM] Skipping %d of %d memory entries not owned by agent '%s' — set "
                     + "userMemoryConfig.dream.crossAgentMaintenance=true if this agent is meant to maintain "
-                    + "the user's memories across agents.", foreign, entries.size(), agentId);
+                    + "the user's memories across agents.", foreign, entries.size(), LogSanitizer.sanitize(agentId));
         }
         return owned;
     }
@@ -284,7 +286,7 @@ public class DreamService {
         String summarizationError = null;
 
         try {
-            LOGGER.infof("[DREAM] Starting dream cycle for user='%s', agent='%s'", userId, agentId);
+            LOGGER.infof("[DREAM] Starting dream cycle for user='%s', agent='%s'", LogSanitizer.sanitize(userId), LogSanitizer.sanitize(agentId));
 
             // Load entries once — shared across pruning and contradiction detection
             List<UserMemoryEntry> allEntries = scopeToOwningAgent(userMemoryStore.getAllEntries(userId), agentId, dreamConfig);
@@ -320,18 +322,20 @@ public class DreamService {
             if (summarizationError != null) {
                 cyclesFailedCounter.increment();
                 LOGGER.errorf("[DREAM] Completed WITH ERRORS for user='%s': pruned=%d, contradictions=%d, summarized=%d, "
-                        + "estimatedCost=$%.4f, duration=%dms, error=%s", userId, pruned, contradictions, summarized, estimatedCost,
+                        + "estimatedCost=$%.4f, duration=%dms, error=%s", LogSanitizer.sanitize(userId), pruned, contradictions, summarized,
+                        estimatedCost,
                         duration.toMillis(), summarizationError);
             } else {
                 LOGGER.infof("[DREAM] Completed for user='%s': pruned=%d, contradictions=%d, summarized=%d, "
-                        + "estimatedCost=$%.4f, duration=%dms", userId, pruned, contradictions, summarized, estimatedCost, duration.toMillis());
+                        + "estimatedCost=$%.4f, duration=%dms", LogSanitizer.sanitize(userId), pruned, contradictions, summarized, estimatedCost,
+                        duration.toMillis());
             }
 
             return new DreamResult(userId, pruned, contradictions, summarized, duration.toMillis(), estimatedCost, summarizationError);
 
         } catch (Exception e) {
             cyclesFailedCounter.increment();
-            LOGGER.errorf(e, "[DREAM] Failed for user='%s'", userId);
+            LOGGER.errorf(e, "[DREAM] Failed for user='%s'", LogSanitizer.sanitize(userId));
             return new DreamResult(userId, pruned, contradictions, summarized, Duration.between(start, Instant.now()).toMillis(), estimatedCost,
                     describe(e));
         }
@@ -352,13 +356,13 @@ public class DreamService {
                     pruned++;
                     entriesPrunedCounter.increment();
                 } catch (Exception e) {
-                    LOGGER.warnf("[DREAM] Failed to prune entry '%s' for user '%s': %s", entry.key(), userId, e.getMessage());
+                    LOGGER.warnf("[DREAM] Failed to prune entry '%s' for user '%s': %s", entry.key(), LogSanitizer.sanitize(userId), e.getMessage());
                 }
             }
         }
 
         if (pruned > 0) {
-            LOGGER.infof("[DREAM] Pruned %d stale entries (>%d days) for user='%s'", pruned, staleAfterDays, userId);
+            LOGGER.infof("[DREAM] Pruned %d stale entries (>%d days) for user='%s'", pruned, staleAfterDays, LogSanitizer.sanitize(userId));
         }
 
         return pruned;
@@ -379,7 +383,8 @@ public class DreamService {
                 if (!Objects.equals(existing.value(), entry.value())) {
                     contradictions++;
                     contradictionsFoundCounter.increment();
-                    LOGGER.infof("[DREAM] Contradiction found for user='%s', key='%s': '%s' vs '%s'", userId, entry.key(), existing.value(),
+                    LOGGER.infof("[DREAM] Contradiction found for user='%s', key='%s': '%s' vs '%s'", LogSanitizer.sanitize(userId), entry.key(),
+                            existing.value(),
                             entry.value());
                 }
             }
@@ -450,7 +455,7 @@ public class DreamService {
             // the primary ceiling, because a call count says nothing about spend.
             if (estimatedCostAccumulated >= config.getMaxCostPerRun()) {
                 LOGGER.infof("[DREAM] Cost ceiling ($%.4f >= $%.2f) reached for user='%s' " +
-                        "after %d calls", estimatedCostAccumulated, config.getMaxCostPerRun(), userId, llmCallsMade);
+                        "after %d calls", estimatedCostAccumulated, config.getMaxCostPerRun(), LogSanitizer.sanitize(userId), llmCallsMade);
                 break;
             }
 
@@ -463,7 +468,7 @@ public class DreamService {
                 LOGGER.warnf("[DREAM] Legacy call ceiling maxSummarizationCalls=%d reached for user='%s' "
                         + "after $%.4f of an allowed $%.2f. This field is deprecated — configure maxCostPerRun "
                         + "instead, which bounds actual spend.",
-                        config.getMaxSummarizationCalls(), userId, estimatedCostAccumulated, config.getMaxCostPerRun());
+                        config.getMaxSummarizationCalls(), LogSanitizer.sanitize(userId), estimatedCostAccumulated, config.getMaxCostPerRun());
                 break;
             }
 
@@ -502,7 +507,8 @@ public class DreamService {
                         + "consolidation is ABORTED for this cycle. If this is an authentication or endpoint error, set the "
                         + "credentials on the agent under userMemoryConfig.dream.parameters (e.g. \"apiKey\": \"${vault:my-key}\") "
                         + "— a background dream cycle has no parent LLM task to inherit them from.",
-                        userId, group.getKey(), config.getLlmProvider(), config.getLlmModel(), parameterKeys(config));
+                        LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), config.getLlmProvider(), config.getLlmModel(),
+                        parameterKeys(config));
                 return new SummarizationOutcome(totalConsolidated, estimatedCostAccumulated,
                         "Memory consolidation LLM call failed (" + config.getLlmProvider() + "/" + config.getLlmModel() + "): "
                                 + e.getMessage());
@@ -515,14 +521,14 @@ public class DreamService {
 
             if (consolidated.isEmpty()) {
                 LOGGER.warnf("[DREAM] Summarization returned empty/invalid result for " +
-                        "user='%s', group='%s'. Preserving original entries.", userId, group.getKey());
+                        "user='%s', group='%s'. Preserving original entries.", LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()));
                 continue;
             }
 
             // 5. Validate: consolidated must be fewer than originals
             if (consolidated.size() >= groupEntries.size()) {
                 LOGGER.warnf("[DREAM] LLM returned %d entries (>= %d originals). " +
-                        "Skipping group '%s'.", consolidated.size(), groupEntries.size(), group.getKey());
+                        "Skipping group '%s'.", consolidated.size(), groupEntries.size(), LogSanitizer.sanitize(group.getKey()));
                 continue;
             }
 
@@ -554,7 +560,7 @@ public class DreamService {
                 if (distinctAgents.size() > 1 && mergedVisibility == Visibility.self) {
                     LOGGER.errorf("[DREAM] Refusing to merge self-scoped entries from %d agents for user='%s', "
                             + "group='%s' — that would expose one agent's private memories to the others.",
-                            distinctAgents.size(), userId, group.getKey());
+                            distinctAgents.size(), LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()));
                     continue;
                 }
                 Instant earliestCreated = groupEntries.stream()
@@ -581,7 +587,7 @@ public class DreamService {
             } catch (Exception e) {
                 LOGGER.warnf("[DREAM] Failed to insert consolidated entries for " +
                         "user='%s', group='%s': %s. Originals preserved, rolling back %d inserts.",
-                        userId, group.getKey(), e.getMessage(), insertedIds.size());
+                        LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getMessage(), insertedIds.size());
                 // Rollback: delete any partially-inserted consolidated entries
                 for (String insertedId : insertedIds) {
                     try {
@@ -617,7 +623,7 @@ public class DreamService {
 
         if (transientFailures > 0) {
             LOGGER.warnf("[DREAM] %d of %d groups were skipped for user='%s' after transient LLM failures — "
-                    + "they are retried on the next dream cycle.", transientFailures, groups.size(), userId);
+                    + "they are retried on the next dream cycle.", transientFailures, groups.size(), LogSanitizer.sanitize(userId));
         }
 
         return new SummarizationOutcome(totalConsolidated, estimatedCostAccumulated, null);
@@ -774,7 +780,7 @@ public class DreamService {
             }
 
             LOGGER.infof("[DREAM] Group '%s' holds self-scoped memories from %d agents — consolidating each agent "
-                    + "separately so no private memory is widened.", group.getKey(), byAgent.size());
+                    + "separately so no private memory is widened.", LogSanitizer.sanitize(group.getKey()), byAgent.size());
             byAgent.forEach((agentId, agentEntries) -> result.put(group.getKey() + ":" + agentId, agentEntries));
         }
         return result;
