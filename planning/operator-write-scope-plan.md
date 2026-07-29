@@ -156,6 +156,17 @@ Tests, ordered by what they protect:
 
 **Runtime verification the tests cannot give you.** `eddi.hitl.tool.enabled=false` (`application.properties:118`) makes the gate inert deployment-wide and no API reports it. Add a **write canary** to activation, modelled on `runOperatorCanary` (`operator.ts:337`): prompt the operator to rename a descriptor, assert the turn ends `AWAITING_HUMAN` with the expected tool in `hitlPendingToolCalls`, then **REJECT** it (nothing executes). This single probe catches a disabled kill switch, wrong operationIds, and pattern typos.
 
+**Metrics (required by the repo's guideline for new features).** Emit from the backend, tagged only with a fixed vocabulary — never tool arguments, request bodies, tokens, user ids or origins:
+
+| Meter | Type | Tags | Why |
+| --- | --- | --- | --- |
+| `eddi.operator.canary` | counter | `outcome` = `pass`\|`fail`\|`unknown` | `unknown` rising means probes are erroring, not that the gate is sound — the two must not be summed |
+| `eddi.operator.canary.duration` | timer | — | a canary that starts timing out is how a disabled kill switch shows up before anyone reports it |
+| `eddi.operator.gate.verified` | gauge | — | 1 only while every provisioned version reads back with the gate; the alert is on it dropping to 0 |
+| `eddi.operator.write.approval` | counter | `decision` = `approved`\|`rejected`\|`timeout` | approvals ≫ rejections over time is the rubber-stamping signal §3 tries to prevent |
+
+The gauge is the one worth alerting on: it is the machine-readable form of "writes are reachable without a verified gate".
+
 **The canary must run after `WRITE_ENDPOINTS` is populated, not before.** Run at step 4 it cannot exercise a write at all — there is no write tool to provoke — so it would prove only that the gate exists for reads, and `gateVerified` would then be a fact established about a *different* tool set than the one step 5 enables. It therefore belongs in activation, against the real write tools, re-run per provisioning. `gateVerified` is set only on a pass; a failed **or unknown/errored** result leaves it false, so availability fails closed on an inconclusive probe rather than an explicitly negative one.
 
 ---

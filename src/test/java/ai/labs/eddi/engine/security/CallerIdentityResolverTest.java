@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.security;
 
 import ai.labs.eddi.engine.security.CallerIdentityResolver.CallerIdentityException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -204,6 +205,29 @@ class CallerIdentityResolverTest {
     void aBodyWithNoReferencePassesThrough() {
         resolver.rejectAnyReference("{\"plain\":\"json\"}", "a request body");
         resolver.rejectAnyReference(null, "a request body");
+    }
+
+    @Test
+    @DisplayName("outcomes are counted with a fixed, non-sensitive tag vocabulary")
+    void recordsResolutionOutcomes() {
+        var registry = new SimpleMeterRegistry();
+        resolver.meterRegistry = registry;
+
+        when(context.current()).thenReturn(new CallerIdentity("jwt-abc", "alice", SELF));
+        resolver.resolveValue("Bearer ${caller:token}", URI.create(SELF + "/x"));
+        assertEquals(1.0, registry.counter("eddi.caller.identity.resolution", "outcome", "resolved", "reference", "token").count());
+
+        // A refusal is the signal worth alerting on — a config aiming the caller's
+        // token at a third party.
+        assertThrows(CallerIdentityException.class,
+                () -> resolver.resolveValue("Bearer ${caller:token}", URI.create("https://elsewhere.example/x")));
+        assertEquals(1.0, registry.counter("eddi.caller.identity.resolution", "outcome", "cross_origin", "reference", "token").count());
+
+        // No tag anywhere may carry the token, the user id or the origin.
+        var tagValues = registry.getMeters().stream().flatMap(m -> m.getId().getTags().stream()).map(t -> t.getValue()).toList();
+        assertFalse(tagValues.contains("jwt-abc"), "the token must never become a metric tag");
+        assertFalse(tagValues.contains("alice"), "the user id must never become a metric tag");
+        assertFalse(tagValues.contains(SELF), "the origin must never become a metric tag");
     }
 
     @Test

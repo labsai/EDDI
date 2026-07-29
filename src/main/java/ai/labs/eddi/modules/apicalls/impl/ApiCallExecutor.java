@@ -28,6 +28,7 @@ import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -507,7 +508,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
             var headers = (Map<String, Object>) headersObj;
             var scrubbed = new HashMap<>(headers);
             for (var entry : scrubbed.entrySet()) {
-                String headerName = entry.getKey().toLowerCase();
+                // Locale.ROOT, not the default locale: under a Turkish locale
+                // "Authorization" lowercases to "authorızation" (dotless i), every
+                // name test below misses, and the header is persisted unredacted.
+                String headerName = entry.getKey().toLowerCase(Locale.ROOT);
                 if (headerName.contains("authorization") || headerName.contains("api-key") || headerName.contains("api_key")
                         || headerName.contains("apikey") || headerName.contains("x-api-key") || headerName.contains("token")
                         || headerName.contains("secret") || headerName.contains("credential")) {

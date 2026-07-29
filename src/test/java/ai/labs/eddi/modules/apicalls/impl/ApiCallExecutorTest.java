@@ -382,6 +382,42 @@ class ApiCallExecutorTest {
     }
 
     @Test
+    @DisplayName("header scrubbing survives a Turkish locale")
+    void execute_sensitiveHeaders_areScrubbedUnderTurkishLocale() throws Exception {
+        // "AUTHORIZATION".toLowerCase() under tr-TR gives a dotless 'ı', so a
+        // locale-sensitive lowercase makes every name test miss and the secret is
+        // persisted to conversation memory in the clear.
+        Locale original = Locale.getDefault();
+        Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+        try {
+            ApiCall call = createSimpleApiCall("scrub-locale-call", false);
+
+            Map<String, Object> requestMap = new HashMap<>();
+            Map<String, Object> headers = new LinkedHashMap<>();
+            headers.put("AUTHORIZATION", "Bearer secret-token");
+            headers.put("X-API-KEY", "my-api-key");
+            requestMap.put("headers", headers);
+            when(mockRequest.toMap()).thenReturn(requestMap);
+            setupSuccessResponse(200, "ok", "text/plain");
+
+            executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+            var captor = ArgumentCaptor.forClass(Object.class);
+            verify(prePostUtils, atLeastOnce()).createMemoryEntry(
+                    eq(currentStep), captor.capture(), contains("Request"), eq("httpCalls"));
+
+            @SuppressWarnings("unchecked")
+            var capturedMap = (Map<String, Object>) captor.getValue();
+            @SuppressWarnings("unchecked")
+            var scrubbedHeaders = (Map<String, Object>) capturedMap.get("headers");
+            assertEquals("<REDACTED>", scrubbedHeaders.get("AUTHORIZATION"));
+            assertEquals("<REDACTED>", scrubbedHeaders.get("X-API-KEY"));
+        } finally {
+            Locale.setDefault(original);
+        }
+    }
+
+    @Test
     void execute_vaultRefInHeaderValue_isScrubbed() throws Exception {
         ApiCall call = createSimpleApiCall("vault-call", false);
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -78,6 +79,16 @@ public class CallerIdentityResolver {
     private static final String SUPPORTED_REFERENCES = "${caller:token} (headers only) and ${caller:userId}";
 
     private static final String REF_TOKEN = "token";
+    private static final String REF_USER_ID = "userId";
+    /** Metric tag for a failure that happens before the reference is known. */
+    private static final String REF_UNKNOWN = "unknown";
+
+    /**
+     * Field-injected rather than a constructor parameter so a directly constructed
+     * instance (tests, non-CDI callers) keeps working without one.
+     */
+    @Inject
+    MeterRegistry meterRegistry;
 
     private final CallerIdentityContext callerIdentityContext;
     private final boolean enabled;
@@ -114,6 +125,7 @@ public class CallerIdentityResolver {
             return value;
         }
         if (!enabled) {
+            record("disabled", REF_UNKNOWN);
             throw new CallerIdentityException(
                     "This API call references ${caller:...}, but caller-identity forwarding is disabled "
                             + "(eddi.caller-identity.enabled=false).");
@@ -121,6 +133,7 @@ public class CallerIdentityResolver {
 
         var identity = callerIdentityContext.current();
         if (identity == null) {
+            record("no_caller", REF_UNKNOWN);
             throw new CallerIdentityException("This API call references ${caller:...}, but the conversation turn has no authenticated "
                     + "caller. Caller identity is only available for turns driven by an authenticated request.");
         }
@@ -218,8 +231,27 @@ public class CallerIdentityResolver {
         return value.contains(identity.token()) ? value.replace(identity.token(), redaction) : value;
     }
 
+    /**
+     * Count a resolution outcome.
+     * <p>
+     * Tags are a fixed, low-cardinality vocabulary — never the token, the user id
+     * or the origin. A refusal is the interesting signal here: a rising
+     * {@code cross_origin} count means a config is pointing a caller token at a
+     * third party, which is worth an alert rather than a log line nobody reads.
+     * <p>
+     * Null-safe because the registry is field-injected: a directly constructed
+     * instance (tests, non-CDI callers) simply does not record.
+     */
+    private void record(String outcome, String reference) {
+        if (meterRegistry == null) {
+            return;
+        }
+        meterRegistry.counter("eddi.caller.identity.resolution", "outcome", outcome, "reference", reference).increment();
+    }
+
     private String resolveToken(CallerIdentity identity, URI target) {
         if (!identity.hasToken()) {
+            record("no_token", REF_TOKEN);
             throw new CallerIdentityException(
                     "This API call references ${caller:token}, but the caller's request carried no bearer token.");
         }
@@ -227,9 +259,11 @@ public class CallerIdentityResolver {
             // Do not log the target's full URI at INFO — it may embed identifiers.
             LOGGER.warnf("Refusing to forward the caller token to a different origin (caller=%s, target=%s)", identity.origin(),
                     OriginMatcher.normalize(target));
+            record("cross_origin", REF_TOKEN);
             throw new CallerIdentityException("${caller:token} may only be sent back to the origin the caller came from ("
                     + identity.origin() + "), but this call targets " + OriginMatcher.normalize(target) + ".");
         }
+        record("resolved", REF_TOKEN);
         return identity.token();
     }
 
@@ -240,11 +274,13 @@ public class CallerIdentityResolver {
      * header the receiving API cannot attribute, and the failure would surface far
      * from its cause.
      */
-    private static String resolveUserId(CallerIdentity identity) {
+    private String resolveUserId(CallerIdentity identity) {
         if (identity.userId() == null || identity.userId().isBlank()) {
+            record("no_principal", REF_USER_ID);
             throw new CallerIdentityException(
                     "This API call references ${caller:userId}, but the authenticated caller has no principal name.");
         }
+        record("resolved", REF_USER_ID);
         return identity.userId();
     }
 
