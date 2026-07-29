@@ -67,6 +67,21 @@ public class PlaceholderSyntaxContractTest {
         assertEquals("claude-sonnet", render("{vars['default-model']}"));
     }
 
+    /**
+     * How a snippet with {@code templateEnabled=false} protects its content. Qute's
+     * unparsed block is <code>{|...|}</code>; the Jinja2 <code>{% raw %}</code>
+     * form that PromptSnippetService used to emit is doubly wrong — Qute leaves the
+     * tags in the prompt verbatim AND still resolves the markers they were meant to
+     * protect.
+     */
+    @Test
+    @DisplayName("Qute unparsed blocks protect content; Jinja2 raw tags do not")
+    void unparsedBlockProtectsContent() throws Exception {
+        assertEquals("Use {properties.company_name} here", render("{|Use {properties.company_name} here|}"));
+        assertEquals("{% raw %}Use ACME here{% endraw %}", render("{% raw %}Use {properties.company_name} here{% endraw %}"),
+                "the Jinja2 form leaks the value and leaves its own tags behind");
+    }
+
     @Test
     @DisplayName("double braces do NOT resolve — they reach the model as literal text")
     void doubleBracesDoNotResolve() throws Exception {

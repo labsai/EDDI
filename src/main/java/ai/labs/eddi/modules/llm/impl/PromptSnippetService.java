@@ -47,7 +47,10 @@ public class PromptSnippetService {
 
     private static final Logger LOGGER = Logger.getLogger(PromptSnippetService.class);
     private static final String CACHE_KEY = "all_snippets";
-    private static final String TEMPLATE_MARKER = "{{";
+    /**
+     * Qute's expression marker. Not "{{" — that is Jinja2 and Qute leaves it alone.
+     */
+    private static final String TEMPLATE_MARKER = "{";
 
     private final IPromptSnippetStore snippetStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -90,7 +93,7 @@ public class PromptSnippetService {
      * map keys are snippet names, values are snippet content strings.
      * <p>
      * For snippets with {@code templateEnabled=false}, template markers are escaped
-     * to prevent Jinja2 resolution.
+     * to prevent Qute resolution.
      *
      * @return unmodifiable map of snippet name → content
      */
@@ -159,8 +162,11 @@ public class PromptSnippetService {
      * Jinja2's built-in raw block syntax.
      */
     private static String escapeTemplateMarkers(String content) {
-        // Wrap the entire content in a Jinja2 raw block
-        return "{% raw %}" + content + "{% endraw %}";
+        // Qute, not Jinja2. "{% raw %}" means nothing to Qute: it was emitted verbatim
+        // into the system prompt while the "{...}" markers it was supposed to protect
+        // were still resolved — the escape did the opposite of its job on both counts.
+        // Qute's own literal form is {| ... |}, which renders its contents unparsed.
+        return "{|" + content + "|}";
     }
 
     /**

@@ -95,24 +95,24 @@ Controls whether the Qute template engine resolves template markers inside the s
 }
 ```
 
-**When `false`:** Template markers (`{{`, `}}`) are treated as literal text. The content is wrapped in Jinja2 `{% raw %}...{% endraw %}` blocks automatically. This is useful for code examples or documentation snippets:
+**When `false`:** the content is wrapped in a Qute unparsed block (`{|...|}`) automatically, so `{...}` markers inside it reach the model literally instead of being resolved. This is useful for code examples or documentation snippets:
 
 ```json
 {
   "name": "code_example_instructions",
-  "content": "When showing code examples, use the format: {{variable_name}} for placeholders.",
+  "content": "When showing code examples, use the format: {variable_name} for placeholders.",
   "templateEnabled": false
 }
 ```
 
 ### Inline Override
 
-Even when `templateEnabled` is `true`, you can protect specific sections using Jinja2 raw blocks directly in the content:
+Even when `templateEnabled` is `true`, you can protect specific sections with a Qute unparsed block directly in the content:
 
 ```json
 {
   "name": "mixed_content",
-  "content": "Hello {properties.name}! {% raw %}Use {{placeholder}} in templates.{% endraw %}",
+  "content": "Hello {properties.name}! {|Use {placeholder} in templates.|}",
   "templateEnabled": true
 }
 ```
