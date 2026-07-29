@@ -398,6 +398,45 @@ class ScheduleFireExecutorTest {
 
     // --- Helpers ---
 
+    /**
+     * B2 again, on the OTHER broad catch. {@code fire()} restores the interrupt
+     * flag with an explicit comment; the Dream fast-path added by this PR has an
+     * equally broad {@code catch (Exception)} and did not. A blocking call inside
+     * consolidation that throws InterruptedException CLEARS the flag, so swallowing
+     * it leaves the poller thread firing further schedules through a shutdown — the
+     * exact failure B2 was raised for, reachable by the second of two sibling
+     * catches in the same class.
+     */
+    @Test
+    @Timeout(10)
+    void fire_dreamScheduleInterrupted_restoresInterruptFlagAndLogsFailed() throws Exception {
+        var schedule = makeDreamSchedule("sched-dream-interrupt", "user-9");
+        schedule.setAgentVersion(1);
+
+        // Mimic a blocking call inside consolidation being interrupted: the flag is
+        // consumed by the throw, exactly as latch.await() does on the conversation
+        // path.
+        when(dreamService.processScheduledFire(any(), any(), any())).thenAnswer(inv -> {
+            Thread.interrupted();
+            throw new InterruptedException("consolidation interrupted");
+        });
+
+        assertFalse(Thread.currentThread().isInterrupted(), "precondition: flag starts clear");
+        try {
+            ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+            assertTrue(Thread.currentThread().isInterrupted(),
+                    "the Dream fast-path must re-assert the interrupt flag its catch consumed, or the poller "
+                            + "keeps firing schedules through shutdown");
+            assertEquals(FireStatus.FAILED.name(), result.status());
+            assertTrue(result.errorMessage().startsWith("InterruptedException"),
+                    "expected the interrupt to be recorded, got: " + result.errorMessage());
+            verify(scheduleStore).logFire(argThat(log -> log.status().equals(FireStatus.FAILED.name())));
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
     private static ScheduleConfiguration makeDreamSchedule(String id, String userId) {
         var s = new ScheduleConfiguration();
         s.setId(id);

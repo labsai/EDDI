@@ -208,6 +208,15 @@ public class ScheduleFireExecutor {
                         errorMessage);
             }
         } catch (Exception e) {
+            // Same B2 reasoning as fire() above, and it has to be repeated here because
+            // this catch is just as broad: a blocking call inside Dream consolidation
+            // CLEARS the interrupt flag when it throws InterruptedException, so
+            // swallowing it would leave the poller thread running further schedules
+            // through a shutdown. The fix landing on only one of two sibling catches in
+            // the same class is exactly how these gaps happen.
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             status = ScheduleConfiguration.FireStatus.FAILED.name();
             errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
             LOGGER.errorf(e, "[SCHEDULE] Dream consolidation threw for schedule '%s' (id=%s)", schedule.getName(), schedule.getId());
