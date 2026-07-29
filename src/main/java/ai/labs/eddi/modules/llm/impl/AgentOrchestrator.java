@@ -264,9 +264,8 @@ class AgentOrchestrator {
     @Inject
     volatile IAttachmentStore attachmentStore;
 
-    // Same reason: handed to TeardownAgentTool so a deleted dynamic agent doesn't
-    // leave a
-    // deployment record the runtime keeps trying to redeploy.
+    // Same reason. Handed to TeardownAgentTool so a deleted dynamic agent leaves
+    // no deployment record the runtime keeps trying to redeploy.
     @Inject
     volatile IDeploymentStore deploymentStore;
 

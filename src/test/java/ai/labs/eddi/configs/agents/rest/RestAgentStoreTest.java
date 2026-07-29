@@ -84,8 +84,7 @@ class RestAgentStoreTest {
         void deleteAgent_deletesDeploymentRecords() throws Exception {
             restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
 
-            // A surviving deployment record makes the runtime retry — and fail — the
-            // redeploy
+            // A surviving record makes the runtime retry a doomed redeploy
             // of a now-missing Agent on every startup.
             verify(deploymentStore).deleteDeploymentInfos(AGENT_ID);
         }
@@ -93,9 +92,8 @@ class RestAgentStoreTest {
         @Test
         @DisplayName("should keep deployment records when the Agent delete itself fails")
         void deleteAgent_keepsDeploymentRecordsWhenDeleteFails() throws Exception {
-            // A stale/unknown version is rejected inside restVersionInfo.delete. Clearing
-            // the
-            // records first would strip a still-live Agent of what it needs to redeploy.
+            // A stale/unknown version is rejected inside restVersionInfo.delete.
+            // Clearing first would strip a still-live Agent of what it needs.
             doThrow(new IResourceStore.ResourceModifiedException("not the latest version")).when(AgentStore).delete(AGENT_ID, 1);
 
             assertThrows(IResourceStore.ResourceModifiedException.class, () -> restAgentStore.deleteAgent(AGENT_ID, 1, false, false));

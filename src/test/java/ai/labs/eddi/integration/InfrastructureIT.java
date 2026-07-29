@@ -70,10 +70,9 @@ public class InfrastructureIT {
     @Order(5)
     @DisplayName("OpenAPI spec should return valid document")
     void openApiSpec() {
-        // Served at /openapi, not the Quarkus default /q/openapi — see
-        // quarkus.smallrye-openapi.path in application.properties. Asserting the real
-        // path
-        // with a real body; accepting 404 here would let the endpoint break unnoticed.
+        // Served at /openapi, not the Quarkus default /q/openapi.
+        // See quarkus.smallrye-openapi.path in application.properties.
+        // Accepting 404 here would let the endpoint break unnoticed.
         given()
                 .get("/openapi")
                 .then().assertThat()

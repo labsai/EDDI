@@ -966,9 +966,8 @@ class DynamicAgentToolsTest {
 
         @Test
         void teardownAgent_deleteAlsoRetiresDeploymentRecords() throws Exception {
-            // This path deletes the Agent directly rather than through RestAgentStore, so
-            // it
-            // has to clear the deployment record itself or the runtime keeps retrying it.
+            // This path deletes the Agent directly, not through RestAgentStore.
+            // So it has to clear the deployment record itself.
             tool.teardownAgent("created-1", true);
 
             verify(deploymentStore).deleteDeploymentInfos("created-1");

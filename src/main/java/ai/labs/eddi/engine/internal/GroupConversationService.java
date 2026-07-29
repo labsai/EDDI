@@ -117,8 +117,7 @@ public class GroupConversationService implements IGroupConversationService {
     @Inject
     IAttachmentStore attachmentStore;
 
-    // Same reason: ephemeral cleanup deletes the Agent directly rather than going
-    // through
+    // Same reason. Ephemeral cleanup deletes the Agent directly, not via
     // RestAgentStore, so it has to retire the deployment record itself.
     @Inject
     IDeploymentStore deploymentStore;

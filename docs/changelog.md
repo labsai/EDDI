@@ -455,6 +455,13 @@ The obvious `%postgres.quarkus.mongodb.health.enabled=false` **does not work**: 
 
 **Note:** eddi-chat-ui builds its bundle directly into `EDDI/src/main/resources/META-INF/resources/`, so the two repos ship together. The superseded `chat-ui.p4wYUapg.js` / `chat-ui.D213XXZR.css` were removed; `chat.html` now points at the new hashes.
 
+### Review pass on PR #611
+
+- **CodeQL log injection (RestAgentStore).** `id` is a raw REST path parameter and reached two `log.infof`/`warnf` calls unsanitized. Now routed through `LogSanitizer.sanitize`, the pattern already used across the config REST stores. The equivalent logs in `TeardownAgentTool` and `GroupConversationService` were left raw on purpose: both only reach them after the id has passed a `createdAgentIds.contains(...)` check, so the value is a server-generated agent id, and every neighbouring log line in those classes prints it the same way.
+- **Retire by delete, not by upsert.** `setDeploymentInfo` upserts. If an Agent were deleted between the sweep reading the deployment list and reaching the retire branch, marking it `undeployed` would *resurrect* the row the delete cascade had just removed — an inert but permanent tombstone. The sweep now calls `deleteDeploymentInfos`, which is idempotent, and an Agent that no longer exists has nothing to undeploy.
+- **TOCTOU between the pre-check and the deploy (CodeRabbit, Major) — acknowledged, not fixed.** If an Agent is deleted in the window between `isAgentConfigMissing` and `deployAgent`, the record can stay `deployed` and be cached in `deploymentInfos` until the next restart. The suggested remedy is to make `deployAgent` surface a definitive missing-result — the contract change deliberately avoided above, since the dummy-agent-on-failure behaviour is relied on by the on-demand deploy path. The window is milliseconds, the consequence is one stale row, and it self-corrects on restart, so it is not worth widening a core contract on a release-polish branch.
+- Style nits from Copilot: imports instead of inline `java.util.concurrent.*` FQNs in `TeardownAgentTool` (per §4.7), and four comments the Eclipse formatter had reflowed into orphaned fragments (`// throws`, `// path`, `// it`, `// up.`). Comment lines are now short enough to survive `formatter:format`.
+
 ### Not fixed here (deployment config, not the release artifact)
 
 - The stored Anthropic API key is invalid — every LLM-backed agent fails with `invalid x-api-key`. EDDI handles it correctly (non-retryable, conversation `ERROR`, no stack trace to the client), but any demo needs a working key.

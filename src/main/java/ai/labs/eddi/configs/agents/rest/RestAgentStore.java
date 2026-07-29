@@ -32,6 +32,7 @@ import java.util.List;
 
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 
 /**
@@ -283,21 +284,20 @@ public class RestAgentStore implements IRestAgentStore {
         }
         capabilityRegistryService.unregister(id);
 
-        // Deliberately after the delete: it validates its arguments internally and
-        // throws
-        // on a stale or unknown version, which would otherwise leave a still-live Agent
-        // stripped of the deployment records it needs to come back up.
+        // Deliberately after the delete, which throws on a stale
+        // or unknown version. Clearing first would strip a
+        // still-live Agent of what it needs to redeploy.
         Response response = restVersionInfo.delete(id, version, permanent);
 
-        // Records left behind here make the runtime retry a doomed redeploy on every
-        // startup.
+        // A record left behind makes the runtime retry a
+        // doomed redeploy on every startup.
         try {
             int deletedDeployments = deploymentStore.deleteDeploymentInfos(id);
             if (deletedDeployments > 0) {
-                log.infof("Cascade-deleted %d deployment record(s) for Agent %s", deletedDeployments, id);
+                log.infof("Cascade-deleted %d deployment record(s) for Agent %s", deletedDeployments, sanitize(id));
             }
         } catch (Exception e) {
-            log.warnf("Failed to delete deployment record(s) for Agent %s: %s", id, e.getMessage());
+            log.warnf("Failed to delete deployment record(s) for Agent %s: %s", sanitize(id), e.getMessage());
         }
 
         return response;

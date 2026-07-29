@@ -160,8 +160,11 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                             if (isAgentConfigMissing(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion())) {
                                 LOGGER.warn(format("Agent config no longer exists (id=%s, version=%d) — retiring stale deployment record",
                                         deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
-                                deploymentStore.setDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
-                                        deploymentInfo.getAgentVersion(), undeployed);
+                                // Delete rather than mark undeployed. setDeploymentInfo upserts, so if the
+                                // Agent was deleted between reading this list and getting here, marking it
+                                // would resurrect the row the delete cascade had just removed. Deleting is
+                                // idempotent, and an Agent that no longer exists has nothing to undeploy.
+                                deploymentStore.deleteDeploymentInfos(deploymentInfo.getAgentId());
                                 return;
                             }
 

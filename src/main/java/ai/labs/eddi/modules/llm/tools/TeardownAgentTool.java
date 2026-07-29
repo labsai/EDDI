@@ -15,6 +15,8 @@ import org.jboss.logging.Logger;
 
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
  * LLM tool for tearing down dynamically created agents. Constructed
@@ -52,8 +54,8 @@ public class TeardownAgentTool {
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
         this.deploymentStore = deploymentStore;
-        this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new java.util.concurrent.CopyOnWriteArrayList<>();
-        this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : new java.util.concurrent.CopyOnWriteArraySet<>();
+        this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new CopyOnWriteArrayList<>();
+        this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : new CopyOnWriteArraySet<>();
     }
 
     @Tool("Tear down (undeploy) a dynamically created agent. Only agents created during this discussion "

@@ -114,10 +114,13 @@ class AgentDeploymentManagementTest {
 
             management.checkDeployments();
 
-            // Without this the runtime re-attempts the deploy and logs an ERROR on every
-            // startup.
+            // Without this the runtime re-attempts the deploy and logs an ERROR
+            // on every startup.
             verify(agentFactory, never()).deployAgent(any(), eq("deletedAgent"), anyInt(), any());
-            verify(deploymentStore).setDeploymentInfo("production", "deletedAgent", 1, DeploymentInfo.DeploymentStatus.undeployed);
+            // Deleted, not marked undeployed: setDeploymentInfo upserts, so marking would
+            // resurrect a row the delete cascade may have already removed.
+            verify(deploymentStore).deleteDeploymentInfos("deletedAgent");
+            verify(deploymentStore, never()).setDeploymentInfo(anyString(), anyString(), anyInt(), any());
         }
 
         @Test
@@ -135,7 +138,7 @@ class AgentDeploymentManagementTest {
 
             // A store outage is not proof the Agent is gone — the record must survive.
             verify(agentFactory).deployAgent(Environment.production, "agent1", 1, null);
-            verify(deploymentStore, never()).setDeploymentInfo(anyString(), anyString(), anyInt(), eq(DeploymentInfo.DeploymentStatus.undeployed));
+            verify(deploymentStore, never()).deleteDeploymentInfos(anyString());
         }
 
         @Test
