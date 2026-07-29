@@ -5,11 +5,13 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +19,9 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -210,7 +215,7 @@ class V6RenameMigrationTest {
                         MongoNamespace ns = renameInvocation.getArgument(0);
                         renamedTo.add(ns.getCollectionName());
                         return null;
-                    }).when(coll).renameCollection(any(MongoNamespace.class));
+                    }).when(coll).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
                 } else {
                     when(coll.estimatedDocumentCount()).thenReturn(0L);
                 }
@@ -248,7 +253,7 @@ class V6RenameMigrationTest {
             migration.runIfNeeded();
 
             // renameCollection should never be called for empty collections
-            verify(emptyCollection, never()).renameCollection(any(MongoNamespace.class));
+            verify(emptyCollection, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
         }
 
         @Test
@@ -261,7 +266,7 @@ class V6RenameMigrationTest {
             when(col.estimatedDocumentCount()).thenReturn(5L);
             var exception = mock(com.mongodb.MongoCommandException.class);
             when(exception.getErrorCode()).thenReturn(48);
-            doThrow(exception).when(col).renameCollection(any(MongoNamespace.class));
+            doThrow(exception).when(col).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
 
             // After rename exceptions, code continues to migrateAgentFields /
             // migrateCollection
@@ -290,7 +295,7 @@ class V6RenameMigrationTest {
             var exception = mock(com.mongodb.MongoCommandException.class);
             when(exception.getErrorCode()).thenReturn(500);
             when(exception.getMessage()).thenReturn("Internal error");
-            doThrow(exception).when(col).renameCollection(any(MongoNamespace.class));
+            doThrow(exception).when(col).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
 
             com.mongodb.client.FindIterable<Document> emptyIterable = mock(com.mongodb.client.FindIterable.class);
             com.mongodb.client.MongoCursor<Document> emptyCursor = mock(com.mongodb.client.MongoCursor.class);
@@ -355,8 +360,8 @@ class V6RenameMigrationTest {
             // The rename would have failed and the v5 documents would then have been
             // invisible to the URI rewrite (it only scans v6 names), so the run must touch
             // nothing at all...
-            verify(bots, never()).renameCollection(any(MongoNamespace.class));
-            verify(agents, never()).renameCollection(any(MongoNamespace.class));
+            verify(bots, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            verify(agents, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
             verify(bots, never()).find();
             verify(agents, never()).find();
             // ...and above all must not claim to be done, or the v5 documents would be
@@ -382,7 +387,7 @@ class V6RenameMigrationTest {
             migration.runIfNeeded();
 
             assertTrue(migration.detectCollectionRenameConflicts().isEmpty());
-            verify(bots).renameCollection(any(MongoNamespace.class));
+            verify(bots).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
             verify(migrationLogStore).createMigrationLog(any());
         }
 
@@ -394,7 +399,8 @@ class V6RenameMigrationTest {
 
             MongoCollection<Document> bots = mock(MongoCollection.class);
             when(bots.estimatedDocumentCount()).thenReturn(5L);
-            doThrow(new IllegalStateException("rename refused")).when(bots).renameCollection(any(MongoNamespace.class));
+            doThrow(new IllegalStateException("rename refused")).when(bots)
+                    .renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
 
             // A populated v6 collection that the URI-rewrite pass would visit if the run
             // carried on past the failed rename — the witness that we really aborted.
@@ -415,7 +421,7 @@ class V6RenameMigrationTest {
 
             migration.runIfNeeded();
 
-            verify(bots).renameCollection(any(MongoNamespace.class));
+            verify(bots).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
             verify(workflows, never()).find(); // aborted before the URI rewrite pass
             verify(migrationLogStore, never()).createMigrationLog(any());
         }
@@ -431,6 +437,112 @@ class V6RenameMigrationTest {
             doReturn(false).when(cursor).hasNext();
             doReturn(cursor).when(iterable).iterator();
             return iterable;
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────
+    // An EMPTY but EXISTING v6 namespace must not deadlock the migration.
+    // MongoDB refuses renameCollection with NamespaceExists (48) whenever the
+    // target namespace exists — being empty does not help — and EDDI creates
+    // those empty v6 namespaces itself on any boot (createIndex).
+    // ───────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("empty-but-existing v6 target namespace")
+    class EmptyTargetNamespaceTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("an empty v6 target is dropped so the rename succeeds instead of failing forever with error 48")
+        void emptyExistingTargetIsDroppedAndMigrationCompletes() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            MongoCollection<Document> bots = mock(MongoCollection.class);
+            when(bots.estimatedDocumentCount()).thenReturn(5L);
+
+            var renameOptions = recordRenamesAndRejectWithoutDropTarget(bots);
+
+            // "agents" EXISTS but is empty: the estimate keeps the pre-flight quiet
+            // (it only flags pairs where BOTH sides hold documents) and the exact count
+            // proves the namespace may be dropped.
+            MongoCollection<Document> agents = mock(MongoCollection.class);
+            when(agents.estimatedDocumentCount()).thenReturn(0L);
+            when(agents.countDocuments()).thenReturn(0L);
+
+            MongoCollection<Document> emptyCollection = mock(MongoCollection.class);
+            when(emptyCollection.estimatedDocumentCount()).thenReturn(0L);
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> switch (invocation.<String>getArgument(0)) {
+                case "bots" -> bots;
+                case "agents" -> agents;
+                default -> emptyCollection;
+            });
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            assertEquals(1, renameOptions.size(), "bots → agents must be attempted exactly once");
+            assertTrue(renameOptions.getFirst().isDropTarget(),
+                    "an empty leftover v6 namespace must be dropped — otherwise the rename fails with 48, the run "
+                            + "aborts, the app re-creates the namespace on the next boot and the migration can never complete");
+            // ...and because the rename went through, the run finishes and is recorded.
+            verify(migrationLogStore).createMigrationLog(any());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a v6 target that really holds documents is never dropped, even when the cheap estimate says it is empty")
+        void populatedTargetIsNeverDroppedOnAStaleEstimate() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            MongoCollection<Document> bots = mock(MongoCollection.class);
+            when(bots.estimatedDocumentCount()).thenReturn(5L);
+
+            var renameOptions = recordRenamesAndRejectWithoutDropTarget(bots);
+
+            // estimatedDocumentCount() reads collection metadata that can be stale after
+            // an unclean shutdown; countDocuments() is the truth. Deciding on the stale
+            // estimate would drop three live agent documents.
+            MongoCollection<Document> agents = mock(MongoCollection.class);
+            when(agents.estimatedDocumentCount()).thenReturn(0L);
+            when(agents.countDocuments()).thenReturn(3L);
+
+            MongoCollection<Document> emptyCollection = mock(MongoCollection.class);
+            when(emptyCollection.estimatedDocumentCount()).thenReturn(0L);
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> switch (invocation.<String>getArgument(0)) {
+                case "bots" -> bots;
+                case "agents" -> agents;
+                default -> emptyCollection;
+            });
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            assertEquals(1, renameOptions.size(), "bots → agents must be attempted exactly once");
+            assertFalse(renameOptions.getFirst().isDropTarget(), "a target holding documents must never be dropped");
+            // The rename then legitimately fails with 48 and the run must stay incomplete.
+            verify(migrationLogStore, never()).createMigrationLog(any());
+        }
+
+        /**
+         * Models MongoDB: the rename throws NamespaceExists (48) unless dropTarget is
+         * set, and every attempt is recorded so the test can assert on the options.
+         */
+        private List<RenameCollectionOptions> recordRenamesAndRejectWithoutDropTarget(MongoCollection<Document> collection) {
+            var namespaceExists = mock(MongoCommandException.class);
+            when(namespaceExists.getErrorCode()).thenReturn(48);
+
+            var recorded = new ArrayList<RenameCollectionOptions>();
+            doAnswer(invocation -> {
+                RenameCollectionOptions options = invocation.getArgument(1);
+                recorded.add(options);
+                if (!options.isDropTarget()) {
+                    throw namespaceExists;
+                }
+                return null;
+            }).when(collection).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            return recorded;
         }
     }
 

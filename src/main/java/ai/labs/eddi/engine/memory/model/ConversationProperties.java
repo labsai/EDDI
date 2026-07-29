@@ -73,19 +73,30 @@ public class ConversationProperties extends LinkedHashMap<String, Property> impl
      * Mirrors a property into the CURRENT step's data and conversation output — the
      * persisted projection of the property.
      * <p>
-     * {@code scope: step} values are deliberately excluded: they are documented as
-     * "not persisted" and are dropped from the live map at the end of the turn, but
-     * the mirrored copies stayed in the conversation document forever and remained
-     * readable through {@code {memory.last.properties.X}}.
+     * {@code scope: step} values get the conversation-output half ONLY. They must
+     * stay resolvable through {@code {memory.current.properties.X}} during the turn
+     * that set them — the documented contract is that step scope lives FOR the turn
+     * and is cleared at the END of it — but the mirrored copies used to stay in the
+     * conversation document forever and remained readable through
+     * {@code {memory.last.properties.X}} on later turns. So the persisted step
+     * {@code Data<>} (which nothing reads for templating) is skipped, and
+     * {@code Conversation#removeOldInvalidProperties} strips the
+     * conversation-output entry again when it drops the property at the end of the
+     * turn — before the step is persisted.
      */
     private void mirrorToCurrentStep(String key, Property property) {
-        if (conversationMemory == null || property == null || property.getScope() == Scope.step) {
+        if (conversationMemory == null || property == null) {
             return;
         }
 
-        String propertiesKey = KEY_PROPERTIES + ":" + key;
         IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
-        currentStep.storeData(new Data<>(propertiesKey, Collections.singletonList(property)));
+        if (currentStep == null) {
+            return;
+        }
+        if (property.getScope() != Scope.step) {
+            String propertiesKey = KEY_PROPERTIES + ":" + key;
+            currentStep.storeData(new Data<>(propertiesKey, Collections.singletonList(property)));
+        }
 
         Object value = extractValue(property);
         if (value == null) {

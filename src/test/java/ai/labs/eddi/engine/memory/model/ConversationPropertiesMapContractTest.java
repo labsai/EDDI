@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.IData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.Map;
 
@@ -87,13 +88,19 @@ class ConversationPropertiesMapContractTest {
     }
 
     @Test
-    @DisplayName("G10 — a step-scoped property is not mirrored into the persisted step data or output")
-    void stepScopedPropertyIsNotPersisted() {
+    @DisplayName("G10 — a step-scoped property skips the persisted step data but IS mirrored for this turn's templates")
+    void stepScopedPropertyIsMirroredButNotStoredAsStepData() {
         properties.put("transient", new Property("transient", "temp", Property.Scope.step));
 
+        // the persisted step Data<> is what leaked into later turns — skip it
         verify(currentStep, never()).storeData(any(IData.class));
-        verify(currentStep, never()).addConversationOutputMap(eq("properties"), anyMap());
-        // ...but it IS live for this turn's templates
+
+        // ...but {memory.current.properties.transient} must resolve DURING this turn
+        // (Conversation#removeOldInvalidProperties strips it again at the end of it)
+        ArgumentCaptor<Map<String, Object>> mirrored = ArgumentCaptor.forClass(Map.class);
+        verify(currentStep).addConversationOutputMap(eq("properties"), mirrored.capture());
+        assertEquals("temp", mirrored.getValue().get("transient"));
+
         assertEquals("temp", properties.toMap().get("transient"));
     }
 

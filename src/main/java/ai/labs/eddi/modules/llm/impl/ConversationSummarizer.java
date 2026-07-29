@@ -112,8 +112,13 @@ public class ConversationSummarizer {
      * this overload exists purely to carry them across that gap.
      *
      * @param inheritedParameters
-     *            the parent task's resolved parameters (apiKey, baseUrl, …); may be
-     *            null, in which case only the model name reaches the registry
+     *            the parent task's resolved parameters (apiKey, baseUrl, …),
+     *            already reduced by
+     *            {@code LlmTask.resolveInheritedSummaryParameters} to what may
+     *            travel to {@code config.getLlmProvider()} — credentials and
+     *            endpoint coordinates are only present when the summarizer runs on
+     *            the parent's own provider. May be null, in which case only the
+     *            model name reaches the registry
      */
     public void updateIfNeeded(IConversationMemory memory, ConversationSummaryConfig config, String propertiesContext,
                                Map<String, String> inheritedParameters) {

@@ -183,42 +183,69 @@ class AgentSetupServiceTest {
     }
 
     @Nested
-    @DisplayName("parseEnvironment")
+    @DisplayName("environment resolution")
     class ParseEnvironmentTests {
 
         @Test
         @DisplayName("returns production for null input")
         void nullInput() {
             assertEquals(Deployment.Environment.production,
-                    AgentSetupService.parseEnvironment(null));
+                    service.resolveParams(null, null, null, null).env());
         }
 
         @Test
         @DisplayName("returns production for blank input")
         void blankInput() {
             assertEquals(Deployment.Environment.production,
-                    AgentSetupService.parseEnvironment(""));
+                    service.resolveParams(null, null, null, "").env());
         }
 
         @Test
         @DisplayName("parses 'production' correctly")
         void production() {
             assertEquals(Deployment.Environment.production,
-                    AgentSetupService.parseEnvironment("production"));
+                    service.resolveParams(null, null, null, "production").env());
         }
 
         @Test
         @DisplayName("parses 'test' correctly")
         void testEnv() {
             assertEquals(Deployment.Environment.test,
-                    AgentSetupService.parseEnvironment("test"));
+                    service.resolveParams(null, null, null, "test").env());
         }
 
         @Test
-        @DisplayName("returns production for invalid environment")
-        void invalidEnvironment() {
+        @DisplayName("legacy v5 environment names still resolve to production")
+        void legacyNames() {
             assertEquals(Deployment.Environment.production,
-                    AgentSetupService.parseEnvironment("invalid_env"));
+                    service.resolveParams(null, null, null, "unrestricted").env());
+            assertEquals(Deployment.Environment.production,
+                    service.resolveParams(null, null, null, "restricted").env());
+        }
+
+        /**
+         * An unknown environment must never silently resolve to production — the agent
+         * would be created AND deployed to the live environment. The parse fails
+         * instead, so no resource is ever created.
+         */
+        @ParameterizedTest
+        @ValueSource(strings = {"invalid_env", "staging", "stage", "prod", "dev"})
+        @DisplayName("unknown environment is rejected, never resolved to production")
+        void invalidEnvironment(String environment) {
+            var exception = assertThrows(IllegalArgumentException.class,
+                    () -> service.resolveParams(null, null, null, environment));
+
+            assertTrue(exception.getMessage().contains(environment), exception.getMessage());
+            assertTrue(exception.getMessage().contains("production, test"), exception.getMessage());
+        }
+
+        @Test
+        @DisplayName("unknown environment surfaces as an AgentSetupException (400), not a 500")
+        void invalidEnvironmentIsValidationError() {
+            var exception = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> service.resolveParamsValidated(null, null, null, "staging"));
+
+            assertEquals("Unknown environment 'staging'. Valid values: production, test", exception.getMessage());
         }
     }
 

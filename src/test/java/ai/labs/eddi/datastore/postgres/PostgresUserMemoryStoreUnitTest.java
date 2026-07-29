@@ -12,13 +12,18 @@ import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import org.mockito.ArgumentCaptor;
+
 import javax.sql.DataSource;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -33,7 +38,6 @@ class PostgresUserMemoryStoreUnitTest {
     private Connection connection;
     private Statement statement;
     private PreparedStatement preparedStatement;
-    private PreparedStatement secondPreparedStatement;
     private ResultSet resultSet;
     @SuppressWarnings("unchecked")
     private Instance<DataSource> dataSourceInstance;
@@ -45,7 +49,6 @@ class PostgresUserMemoryStoreUnitTest {
         connection = mock(Connection.class);
         statement = mock(Statement.class);
         preparedStatement = mock(PreparedStatement.class);
-        secondPreparedStatement = mock(PreparedStatement.class);
         resultSet = mock(ResultSet.class);
         dataSourceInstance = mock(Instance.class);
 
@@ -138,27 +141,96 @@ class PostgresUserMemoryStoreUnitTest {
 
     // ─── getVisibleEntries with most_accessed ────────────────────
 
+    /**
+     * G5 parity with MongoDB: {@code most_accessed} must reserve part of the recall
+     * window for the most recently updated entries, otherwise the ranking is
+     * self-reinforcing and an entry with {@code access_count = 0} can never enter a
+     * full window. The old single {@code ORDER BY access_count DESC LIMIT ?} query
+     * (plus a per-row {@code addBatch} update) fails every assertion below.
+     */
     @Test
-    void getVisibleEntries_mostAccessed_incrementsAccessCount() throws Exception {
-        // given — setup connection to return different PreparedStatements for
-        // the query and the update
-        when(connection.prepareStatement(anyString()))
-                .thenReturn(preparedStatement)
-                .thenReturn(secondPreparedStatement);
+    void getVisibleEntries_mostAccessed_reservesRecencySlotsAndIncrementsInOneStatement() throws Exception {
+        // given — one statement per ordering pass, plus one for the increment
+        PreparedStatement accessPs = mock(PreparedStatement.class);
+        PreparedStatement recencyPs = mock(PreparedStatement.class);
+        PreparedStatement updatePs = mock(PreparedStatement.class);
+        ResultSet accessRs = mock(ResultSet.class);
+        ResultSet recencyRs = mock(ResultSet.class);
+        List<String> preparedSql = new ArrayList<>();
 
-        setupResultSetForEntry();
-        when(resultSet.next()).thenReturn(true, false);
+        when(connection.prepareStatement(anyString())).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            preparedSql.add(sql);
+            if (sql.startsWith("UPDATE")) {
+                return updatePs;
+            }
+            return sql.contains("ORDER BY access_count DESC") ? accessPs : recencyPs;
+        });
+        when(accessPs.executeQuery()).thenReturn(accessRs);
+        when(recencyPs.executeQuery()).thenReturn(recencyRs);
+        stubEntryRow(accessRs, "established");
+        when(accessRs.next()).thenReturn(true, false);
+        stubEntryRow(recencyRs, "brand-new");
+        when(recencyRs.next()).thenReturn(true, false);
+        Array idArray = mock(Array.class);
+        when(connection.createArrayOf(eq("varchar"), any())).thenReturn(idArray);
 
         // when
-        List<UserMemoryEntry> entries = sut.getVisibleEntries(
-                "user1", "agent1", null, "most_accessed", 50);
+        List<UserMemoryEntry> entries = sut.getVisibleEntries("user1", "agent1", null, "most_accessed", 10);
 
-        // then
-        assertEquals(1, entries.size());
-        // The update PS should have addBatch and executeBatch called
-        verify(secondPreparedStatement).setString(1, "entry-1");
-        verify(secondPreparedStatement).addBatch();
-        verify(secondPreparedStatement).executeBatch();
+        // then — the recency pass really happened and its entry reached the window
+        assertEquals(List.of("established", "brand-new"), entries.stream().map(UserMemoryEntry::id).toList(),
+                "a freshly updated entry must reach the window through the reserved recency slots");
+        assertEquals(3, preparedSql.size(), "two ordering passes + one increment, got: " + preparedSql);
+        assertTrue(preparedSql.get(1).contains("ORDER BY updated_at DESC"), preparedSql.get(1));
+
+        // 10 entries, 1/5th reserved => 8 access slots + 2 recency slots
+        verify(accessPs).setInt(3, 8);
+        verify(recencyPs).setInt(3, 2);
+
+        // one set-based increment covering BOTH recalled entries — never a per-row
+        // batch
+        verify(updatePs, times(1)).executeUpdate();
+        verify(updatePs, never()).addBatch();
+        verify(updatePs, never()).executeBatch();
+        ArgumentCaptor<Object[]> incrementedIds = ArgumentCaptor.forClass(Object[].class);
+        verify(connection).createArrayOf(eq("varchar"), incrementedIds.capture());
+        assertArrayEquals(new Object[]{"established", "brand-new"}, incrementedIds.getValue(),
+                "the entry recalled through the reserved recency slot must be counted as accessed too");
+    }
+
+    @Test
+    void getVisibleEntries_mostAccessed_deduplicatesAcrossBothPasses() throws Exception {
+        PreparedStatement accessPs = mock(PreparedStatement.class);
+        PreparedStatement recencyPs = mock(PreparedStatement.class);
+        PreparedStatement updatePs = mock(PreparedStatement.class);
+        ResultSet accessRs = mock(ResultSet.class);
+        ResultSet recencyRs = mock(ResultSet.class);
+
+        when(connection.prepareStatement(anyString())).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.startsWith("UPDATE")) {
+                return updatePs;
+            }
+            return sql.contains("ORDER BY access_count DESC") ? accessPs : recencyPs;
+        });
+        when(accessPs.executeQuery()).thenReturn(accessRs);
+        when(recencyPs.executeQuery()).thenReturn(recencyRs);
+        // The SAME row is top of both rankings — it must be returned once, not twice.
+        stubEntryRow(accessRs, "shared");
+        when(accessRs.next()).thenReturn(true, false);
+        stubEntryRow(recencyRs, "shared");
+        when(recencyRs.next()).thenReturn(true, false);
+        Array idArray = mock(Array.class);
+        when(connection.createArrayOf(eq("varchar"), any())).thenReturn(idArray);
+
+        List<UserMemoryEntry> entries = sut.getVisibleEntries("user1", "agent1", null, "most_accessed", 10);
+
+        assertEquals(List.of("shared"), entries.stream().map(UserMemoryEntry::id).toList());
+        ArgumentCaptor<Object[]> incrementedIds = ArgumentCaptor.forClass(Object[].class);
+        verify(connection).createArrayOf(eq("varchar"), incrementedIds.capture());
+        assertArrayEquals(new Object[]{"shared"}, incrementedIds.getValue(),
+                "a row appearing in both passes must be incremented once, not twice");
     }
 
     @Test
@@ -203,6 +275,58 @@ class PostgresUserMemoryStoreUnitTest {
         // when/then
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> sut.getVisibleEntries("user1", "agent1", null, "most_recent", 50));
+    }
+
+    // ─── upsert ownership (G7 parity with MongoDB) ──────────────
+
+    /**
+     * A {@code global} entry is keyed on (user_id, key) only — it is shared across
+     * agents. Rewriting {@code source_agent_id} from EXCLUDED on conflict transfers
+     * ownership to whichever agent last changed the value. Omitting it from the DO
+     * UPDATE list is the SQL equivalent of MongoDB's {@code $setOnInsert}.
+     */
+    @Test
+    void upsert_globalEntry_doesNotRewriteSourceAgentOnConflict() throws Exception {
+        List<String> preparedSql = new ArrayList<>();
+        when(connection.prepareStatement(anyString())).thenAnswer(invocation -> {
+            preparedSql.add(invocation.getArgument(0));
+            return preparedStatement;
+        });
+        // one row for the ownership pre-check, one for the upsert's RETURNING id
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("source_agent_id")).thenReturn("agent-a");
+        when(resultSet.getString("id")).thenReturn("row-1");
+
+        var entry = new UserMemoryEntry(null, "user1", "shared", "new value", "fact",
+                Visibility.global, "agent-b", List.of(), "conv1", false, 0, null, null);
+        assertEquals("row-1", sut.upsert(entry));
+
+        String upsertSql = preparedSql.stream().filter(sql -> sql.startsWith("INSERT")).findFirst().orElseThrow();
+        assertTrue(upsertSql.contains("ON CONFLICT (user_id, key) WHERE visibility = 'global'"), upsertSql);
+        assertFalse(upsertSql.contains("source_agent_id = EXCLUDED.source_agent_id"),
+                "a conflicting global write must keep the owning agent, not adopt the writer: " + upsertSql);
+        // the INSERT half still stamps the creating agent
+        verify(preparedStatement).setString(6, "agent-b");
+    }
+
+    @Test
+    void upsert_selfEntry_stillWritesSourceAgentOnConflict() throws Exception {
+        List<String> preparedSql = new ArrayList<>();
+        when(connection.prepareStatement(anyString())).thenAnswer(invocation -> {
+            preparedSql.add(invocation.getArgument(0));
+            return preparedStatement;
+        });
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("id")).thenReturn("row-2");
+
+        var entry = new UserMemoryEntry(null, "user1", "private", "value", "fact",
+                Visibility.self, "agent-b", List.of(), "conv1", false, 0, null, null);
+        assertEquals("row-2", sut.upsert(entry));
+
+        String upsertSql = preparedSql.stream().filter(sql -> sql.startsWith("INSERT")).findFirst().orElseThrow();
+        assertTrue(upsertSql.contains("ON CONFLICT (user_id, key, source_agent_id)"), upsertSql);
+        // self/group rows are keyed per agent, so ownership is part of the identity
+        assertTrue(upsertSql.contains("visibility = EXCLUDED.visibility"), upsertSql);
     }
 
     // ─── resultSetToEntry edge cases ────────────────────────────
@@ -464,19 +588,24 @@ class PostgresUserMemoryStoreUnitTest {
     // ─── Helpers ────────────────────────────────────────────────
 
     private void setupResultSetForEntry() throws Exception {
-        when(resultSet.getString("id")).thenReturn("entry-1");
-        when(resultSet.getString("user_id")).thenReturn("user1");
-        when(resultSet.getString("key")).thenReturn("fav_color");
-        when(resultSet.getString("value")).thenReturn("\"blue\"");
-        when(resultSet.getString("category")).thenReturn("preference");
-        when(resultSet.getString("visibility")).thenReturn("self");
-        when(resultSet.getString("source_agent_id")).thenReturn("agent1");
-        when(resultSet.getString("group_ids")).thenReturn("[]");
-        when(resultSet.getString("source_conversation_id")).thenReturn("conv1");
-        when(resultSet.getBoolean("conflicted")).thenReturn(false);
-        when(resultSet.getInt("access_count")).thenReturn(0);
+        stubEntryRow(resultSet, "entry-1");
+    }
+
+    /** Stubs one full {@code usermemories} row on the given ResultSet mock. */
+    private void stubEntryRow(ResultSet rs, String id) throws Exception {
+        when(rs.getString("id")).thenReturn(id);
+        when(rs.getString("user_id")).thenReturn("user1");
+        when(rs.getString("key")).thenReturn("fav_color");
+        when(rs.getString("value")).thenReturn("\"blue\"");
+        when(rs.getString("category")).thenReturn("preference");
+        when(rs.getString("visibility")).thenReturn("self");
+        when(rs.getString("source_agent_id")).thenReturn("agent1");
+        when(rs.getString("group_ids")).thenReturn("[]");
+        when(rs.getString("source_conversation_id")).thenReturn("conv1");
+        when(rs.getBoolean("conflicted")).thenReturn(false);
+        when(rs.getInt("access_count")).thenReturn(0);
         Timestamp ts = new Timestamp(System.currentTimeMillis());
-        when(resultSet.getTimestamp("created_at")).thenReturn(ts);
-        when(resultSet.getTimestamp("updated_at")).thenReturn(ts);
+        when(rs.getTimestamp("created_at")).thenReturn(ts);
+        when(rs.getTimestamp("updated_at")).thenReturn(ts);
     }
 }

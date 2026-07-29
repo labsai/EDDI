@@ -71,7 +71,12 @@ class RestMcpCallsStoreTest {
             when(resourceId.getId()).thenReturn("new-id");
             when(resourceId.getVersion()).thenReturn(1);
             when(mcpCallsStore.create(any())).thenReturn(resourceId);
-            assertEquals(201, restStore.createMcpCalls(new McpCallsConfiguration()).getStatus());
+            // This test is about delegation to the store; the write boundary now
+            // refuses a config the engine could never connect to, so it needs a
+            // valid one. Rejection is covered by RestMcpCallsStoreWriteValidationTest.
+            var config = new McpCallsConfiguration();
+            config.setMcpServerUrl("https://mcp.example.com/tools");
+            assertEquals(201, restStore.createMcpCalls(config).getStatus());
         }
     }
 

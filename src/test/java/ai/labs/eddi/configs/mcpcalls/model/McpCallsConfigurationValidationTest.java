@@ -12,7 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Findings A10 / I3 — a configuration the engine cannot honour as written is
- * rejected at deploy time instead of being accepted and silently ignored.
+ * reported instead of being accepted and silently ignored.
+ * <p>
+ * This is the write-boundary contract: {@code validate()} throws. Loading an
+ * already-stored config is deliberately lenient (see
+ * {@code McpCallsTaskFailurePathTest.ConfigureBackwardCompatibility}), so a
+ * pre-existing config cannot take a whole agent down.
  */
 @DisplayName("McpCallsConfiguration.validate()")
 class McpCallsConfigurationValidationTest {

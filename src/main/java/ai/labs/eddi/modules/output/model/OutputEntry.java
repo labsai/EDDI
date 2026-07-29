@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.modules.output.model;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
@@ -13,40 +12,32 @@ import java.util.Objects;
  */
 
 public class OutputEntry implements Comparable<OutputEntry> {
-    private static final Comparator<String> ACTION_COMPARATOR = Comparator.nullsFirst(Comparator.naturalOrder());
-
     private String action;
     private int occurred;
     private List<OutputValue> outputs;
     private List<QuickReply> quickReplies;
 
     /**
-     * Orders primarily by {@code occurred}, which is what the output pipeline sorts
-     * on. The remaining steps exist so the ordering stays consistent with
-     * {@link #equals(Object)}: two entries only compare equal when they really are
-     * equal, otherwise a {@code TreeSet}/{@code TreeMap} would silently drop
-     * distinct entries that merely share the same {@code occurred} value.
+     * Orders by {@code occurred} only — deliberately.
+     * <p>
+     * {@code OutputGeneration} keeps one {@link List} of entries per action and
+     * re-sorts it with {@code Collections.sort(..)} on every insert. That sort is
+     * stable, so entries that share the same {@code occurred} value keep the order
+     * in which they were declared in the {@code output.json} config — and that is
+     * exactly the order in which {@code OutputGenerationTask} emits them as
+     * separate chat bubbles. Adding any further tie-breaker (action, content hash,
+     * …) would silently re-order user-visible output.
+     * <p>
+     * This ordering is therefore intentionally <em>not</em> consistent with
+     * {@link #equals(Object)}. {@code OutputEntry} must never be put into a
+     * {@code TreeSet}/{@code TreeMap}, which would drop distinct entries sharing an
+     * occurrence; no production code does (duplicates are filtered by
+     * {@code List.contains}, i.e. by {@code equals}, in
+     * {@code OutputGeneration.addOutputEntry}).
      */
     @Override
     public int compareTo(OutputEntry o) {
-        int result = Integer.compare(occurred, o.occurred);
-        if (result != 0) {
-            return result;
-        }
-
-        result = ACTION_COMPARATOR.compare(action, o.action);
-        if (result != 0) {
-            return result;
-        }
-
-        if (equals(o)) {
-            return 0;
-        }
-
-        // Same action and occurrence but different outputs / quick replies: the
-        // outputs are not themselves comparable, so fall back to a stable,
-        // equals-consistent discriminator instead of reporting equality.
-        return Integer.compare(hashCode(), o.hashCode());
+        return Integer.compare(occurred, o.occurred);
     }
 
     public OutputEntry(String action, int occurred, List<OutputValue> outputs, List<QuickReply> quickReplies) {

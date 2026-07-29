@@ -755,9 +755,13 @@ public class LlmTask implements ILifecycleTask {
                 // and the failure is swallowed below as a WARN, which is exactly how the
                 // rolling summary came to silently never materialise. Pass the resolved
                 // parameters through so inheritance actually reaches ChatModelRegistry.
-                conversationSummarizer.updateIfNeeded(memory,
-                        resolveEffectiveSummaryConfig(summaryConfig, resolvedType, resolveModelName(processedParams)),
-                        propertiesContext, processedParams);
+                // Those parameters are the PARENT provider's, so what may travel is
+                // decided by resolveInheritedSummaryParameters — a summary config naming a
+                // different vendor gets the neutral tuning values and none of the
+                // credentials.
+                var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType, resolveModelName(processedParams));
+                conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
+                        resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()));
             } catch (Exception e) {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
                         sanitize(memory.getConversationId()));
@@ -1183,6 +1187,75 @@ public class LlmTask implements ILifecycleTask {
         effective.setMaxRecallTurns(configured.getMaxRecallTurns());
         effective.setSummarizationPrompt(configured.getSummarizationPrompt());
         return effective;
+    }
+
+    /**
+     * Parameter keys that belong to the provider that issued them: credentials and
+     * the endpoint coordinates that address that provider's account. Everything
+     * else (temperature, maxTokens, timeout, …) is vendor-neutral and safe to carry
+     * across a provider boundary.
+     */
+    private static final Set<String> PROVIDER_BOUND_PARAMETERS = Set.of(
+            "apiKey", "accessToken", "authToken", "nonAzureApiKey", "signingSecret", "appPassword", "botToken",
+            "baseUrl", "endpoint", "deploymentName",
+            "compartmentId", "configProfile", "projectId", "region", "location");
+
+    /**
+     * The second half of the F13 inheritance decision: <em>which</em> of the parent
+     * task's resolved parameters may travel to the summarizer.
+     * <p>
+     * {@link #resolveEffectiveSummaryConfig} deliberately honours a
+     * {@code conversationSummary.llmProvider} that names a <em>different</em>
+     * vendor than the parent task. The parameter map, however, is the parent
+     * provider's: inheriting it wholesale would hand one vendor's plaintext
+     * {@code apiKey} (the vault reference is expanded downstream by
+     * {@code ChatModelRegistry}) to another vendor's endpoint, and an inherited
+     * {@code baseUrl} would redirect the summarization request — which carries the
+     * condensed transcript — at the parent provider's host. Sibling inheritance in
+     * {@code ToolResponseTruncator} cannot hit this because it always builds its
+     * summarizer with the parent's own type.
+     * <p>
+     * So credentials and endpoint coordinates are inherited only when the
+     * summarizer runs on the parent's provider. On a mismatch they are dropped (the
+     * summary provider must supply its own, e.g. via a global variable or a
+     * vault-backed deployment default) while the vendor-neutral tuning parameters
+     * still carry over.
+     *
+     * @param parentParameters
+     *            the parent task's resolved parameters; may be null
+     * @param parentProvider
+     *            the parent task's resolved provider type
+     * @param summaryProvider
+     *            the provider the summarizer will actually run on
+     * @return the parameters safe to inherit, or {@code null} when there are none
+     */
+    static Map<String, String> resolveInheritedSummaryParameters(Map<String, String> parentParameters, String parentProvider,
+                                                                 String summaryProvider) {
+        if (parentParameters == null || parentParameters.isEmpty()) {
+            return parentParameters;
+        }
+        if (!isNullOrEmpty(parentProvider) && !isNullOrEmpty(summaryProvider)
+                && parentProvider.trim().equalsIgnoreCase(summaryProvider.trim())) {
+            return parentParameters;
+        }
+
+        var safeParameters = new LinkedHashMap<String, String>();
+        var dropped = new ArrayList<String>();
+        parentParameters.forEach((key, value) -> {
+            if (key != null && PROVIDER_BOUND_PARAMETERS.stream().anyMatch(key::equalsIgnoreCase)) {
+                dropped.add(key);
+            } else {
+                safeParameters.put(key, value);
+            }
+        });
+
+        if (!dropped.isEmpty()) {
+            LOGGER.warnf("[SUMMARY] conversationSummary runs on provider '%s' while the task runs on '%s' — not inheriting %s. "
+                    + "Credentials must never cross a provider boundary; configure them for '%s' "
+                    + "(global variable or vault-backed default), or omit llmProvider to reuse the task's model.",
+                    sanitize(summaryProvider), sanitize(parentProvider), dropped, sanitize(summaryProvider));
+        }
+        return safeParameters;
     }
 
     /**

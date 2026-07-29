@@ -19,9 +19,6 @@ import java.util.Map;
  */
 final class McpToolUtils {
 
-    /** The environment names an MCP caller may pass, for error messages. */
-    static final String VALID_ENVIRONMENTS = "production, test";
-
     private McpToolUtils() {
         // utility class
     }
@@ -70,50 +67,35 @@ final class McpToolUtils {
     }
 
     /**
-     * Parse an environment string to the corresponding enum value. Only an absent
-     * (null/blank) environment defaults to {@link Environment#production} — an
-     * environment the platform does not know is rejected with an
-     * {@link UnknownEnvironmentException} rather than silently resolving to
-     * production. A typo such as {@code "staging"} must never deploy to, undeploy
-     * from, or talk to production.
+     * Parse an environment string to the corresponding enum value. Delegates to
+     * {@link Environment#parseStrict(String)}, the single place that knows the
+     * mapping: only an absent (null/blank) environment defaults to
+     * {@link Environment#production} — an environment the platform does not know is
+     * rejected with an {@link UnknownEnvironmentException} rather than silently
+     * resolving to production. A typo such as {@code "staging"} must never deploy
+     * to, undeploy from, or talk to production.
      *
      * @throws UnknownEnvironmentException
      *             if {@code environment} is neither blank nor a known environment
      */
     static Environment parseEnvironment(String environment) {
-        if (environment == null || environment.isBlank()) {
-            return Environment.production;
+        try {
+            return Environment.parseStrict(environment);
+        } catch (IllegalArgumentException e) {
+            throw new UnknownEnvironmentException(e.getMessage());
         }
-        return switch (environment.trim().toLowerCase()) {
-            // "unrestricted"/"restricted" are the v5 names, both folded into production
-            case "production", "unrestricted", "restricted" -> Environment.production;
-            case "test" -> Environment.test;
-            default -> throw new UnknownEnvironmentException(environment);
-        };
     }
 
     /**
-     * An MCP caller passed an environment EDDI does not know. Carries a ready-made
-     * structured error body naming the valid values, so a tool can hand the caller
-     * something it can self-correct from instead of a generic failure.
+     * An MCP caller passed an environment EDDI does not know. Distinct type so a
+     * tool can tell bad caller input apart from a server-side failure; the message
+     * names both the rejected value and the valid ones, so an MCP client (and the
+     * model driving it) can self-correct instead of retrying the same call.
      */
     static final class UnknownEnvironmentException extends IllegalArgumentException {
 
-        private final String structuredError;
-
-        UnknownEnvironmentException(String environment) {
-            super(buildMessage(environment));
-            this.structuredError = errorJson(buildMessage(environment), "BAD_REQUEST",
-                    Map.of("environment", environment, "validValues", VALID_ENVIRONMENTS));
-        }
-
-        private static String buildMessage(String environment) {
-            return "Unknown environment '" + environment + "'. Valid values: " + VALID_ENVIRONMENTS;
-        }
-
-        /** The 400-shaped error body for this failure. */
-        String structuredError() {
-            return structuredError;
+        UnknownEnvironmentException(String message) {
+            super(message);
         }
     }
 

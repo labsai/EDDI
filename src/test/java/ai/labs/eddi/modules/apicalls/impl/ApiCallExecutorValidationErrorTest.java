@@ -21,44 +21,52 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.net.URI;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * The executor used to declare and catch a private
- * {@code ApiCallsValidationException} that no code path ever threw, which meant
- * the {@code validationError} flag handed to the post-response property
- * instructions was permanently {@code false} while pretending to be dynamic.
+ * The executor used to wrap its whole request/retry loop in a {@code try { … }
+ * catch (ApiCallsValidationException)} for an exception that no code path could
+ * ever throw; removing it re-shaped the loop and hard-coded the
+ * {@code validationError} flag handed to the post-response instructions.
+ * <p>
+ * The removal is behaviour-neutral by construction, so these tests do not try
+ * to distinguish old from new code — they pin the observable behaviour of the
+ * re-shaped loop (how many times the request is sent, which http code the
+ * post-response stage sees, what lands in conversation memory) so that a future
+ * change to that block cannot silently alter it.
  */
-@DisplayName("ApiCallExecutor — post-response validation flag")
+@DisplayName("ApiCallExecutor — request/retry loop and post-response stage")
 class ApiCallExecutorValidationErrorTest {
 
     private static final long DEFAULT_TIMEOUT_MILLIS = 30_000L;
     private static final int DEFAULT_MAX_RESPONSE_SIZE = 2_000_000;
+    private static final String KEY_HTTP_CALLS = "httpCalls";
 
+    private IJsonSerialization jsonSerialization;
     private PrePostUtils prePostUtils;
     private ApiCallExecutor executor;
     private IConversationMemory memory;
+    private IWritableConversationStep currentStep;
     private IRequest mockRequest;
-    private IResponse mockResponse;
 
     @BeforeEach
     void setUp() throws Exception {
         IHttpClient httpClient = mock(IHttpClient.class);
-        IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
+        jsonSerialization = mock(IJsonSerialization.class);
         IRuntime runtime = mock(IRuntime.class);
         prePostUtils = mock(PrePostUtils.class);
 
@@ -71,56 +79,123 @@ class ApiCallExecutorValidationErrorTest {
                 DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
 
         memory = mock(IConversationMemory.class);
-        IWritableConversationStep currentStep = mock(IWritableConversationStep.class);
+        currentStep = mock(IWritableConversationStep.class);
         when(memory.getCurrentStep()).thenReturn(currentStep);
 
         mockRequest = mock(IRequest.class);
-        mockResponse = mock(IResponse.class);
         when(mockRequest.toMap()).thenReturn(new HashMap<>());
 
         when(prePostUtils.executePreRequestPropertyInstructions(any(), any(), any())).thenAnswer(inv -> inv.getArgument(1));
         when(prePostUtils.templateValues(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
         when(httpClient.newRequest(any(URI.class), any())).thenReturn(mockRequest);
-        when(mockRequest.send()).thenReturn(mockResponse);
         when(mockRequest.setBodyEntity(any(), any(), any())).thenReturn(mockRequest);
         when(mockRequest.setHttpHeader(any(), any())).thenReturn(mockRequest);
         when(mockRequest.setQueryParam(any(), any())).thenReturn(mockRequest);
     }
 
     @Test
-    @DisplayName("no dead ApiCallsValidationException is declared any more")
-    void declaresNoUnthrowableValidationException() {
-        boolean hasValidationExceptionClass = Arrays.stream(ApiCallExecutor.class.getDeclaredClasses()).map(Class::getSimpleName)
-                .anyMatch(name -> name.contains("ValidationException"));
+    @DisplayName("a retryable http code is re-sent up to maxRetries and the post-response stage still runs exactly once")
+    void retryableHttpCodeIsResentUntilMaxRetries() throws Exception {
+        ApiCall call = apiCall(retryOn(500, 2));
+        // Build the stubs BEFORE opening the outer stubbing: response() stubs its own
+        // mock, and Mockito treats a nested when() inside an unfinished when() as
+        // UnfinishedStubbing.
+        IResponse first = response(500, "boom", null);
+        IResponse second = response(500, "boom", null);
+        IResponse third = response(500, "boom", null);
+        when(mockRequest.send()).thenReturn(first, second, third);
 
-        assertFalse(hasValidationExceptionClass,
-                "ApiCallExecutor must not declare a validation exception type that no code path throws");
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        // maxRetries=2 means one initial attempt plus two retries.
+        verify(mockRequest, times(3)).send();
+        verify(prePostUtils, times(1)).runPostResponse(eq(memory), eq(call.getPostResponse()), any(), eq(500), eq(false));
     }
 
     @Test
-    @DisplayName("retryCall declares no checked exception it can never raise")
-    void retryCallDeclaresNoCheckedException() {
-        Method retryCall = Arrays.stream(ApiCallExecutor.class.getDeclaredMethods()).filter(method -> "retryCall".equals(method.getName()))
-                .findFirst().orElseThrow(() -> new AssertionError("retryCall(..) not found on ApiCallExecutor"));
+    @DisplayName("the retry loop stops as soon as a call succeeds and the post-response stage sees the final http code")
+    void retryLoopStopsOnSuccessAndReportsFinalHttpCode() throws Exception {
+        ApiCall call = apiCall(retryOn(500, 2));
+        call.setSaveResponse(true);
+        var deserialized = Map.of("ok", true);
+        when(jsonSerialization.deserialize("{\"ok\":true}", Object.class)).thenReturn(deserialized);
+        IResponse failure = response(500, "boom", null);
+        IResponse success = response(200, "{\"ok\":true}", "application/json");
+        when(mockRequest.send()).thenReturn(failure, success);
 
-        assertEquals(0, retryCall.getExceptionTypes().length,
-                "retryCall must not advertise a checked exception it never throws — got "
-                        + Arrays.toString(retryCall.getExceptionTypes()));
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest, times(2)).send();
+        verify(prePostUtils, times(1)).runPostResponse(eq(memory), eq(call.getPostResponse()), any(), eq(200), eq(false));
+        assertSame(deserialized, result.get("body"));
+        assertEquals(200, result.get("httpCode"));
+    }
+
+    @Test
+    @DisplayName("a non-retryable error response is sent once and its body is truncated to 2000 chars in memory")
+    void errorResponseIsStoredTruncatedAndNotRetried() throws Exception {
+        ApiCall call = apiCall(new HttpPostResponse());
+        call.setSaveResponse(true);
+        String errorBody = "x".repeat(2500);
+        IResponse errorResponse = response(500, errorBody, null);
+        when(mockRequest.send()).thenReturn(errorResponse);
+
+        Map<String, Object> templateDataObjects = new HashMap<>();
+        Map<String, Object> result = executor.execute(call, memory, templateDataObjects, "http://example.com");
+
+        verify(mockRequest, times(1)).send();
+        verify(prePostUtils).createMemoryEntry(currentStep, "x".repeat(2000), "responseError", KEY_HTTP_CALLS);
+        verify(prePostUtils).createMemoryEntry(currentStep, 500, "responseHttpCode", KEY_HTTP_CALLS);
+        assertEquals("x".repeat(2000), templateDataObjects.get("responseError"));
+        assertEquals(500, templateDataObjects.get("responseHttpCode"));
+        // An error body is never promoted to the response object / result body.
+        assertFalse(result.containsKey("body"), "an unsuccessful response must not be stored as the response body");
+        verify(prePostUtils, times(1)).runPostResponse(eq(memory), eq(call.getPostResponse()), any(), eq(500), eq(false));
+    }
+
+    @Test
+    @DisplayName("response headers are exposed to templates and to the result when a header object name is configured")
+    void responseHeadersAreExposedWhenConfigured() throws Exception {
+        ApiCall call = apiCall(new HttpPostResponse());
+        call.setResponseHeaderObjectName("responseHeaders");
+        IResponse response = response(200, "{}", "application/json");
+        when(mockRequest.send()).thenReturn(response);
+
+        Map<String, Object> templateDataObjects = new HashMap<>();
+        Map<String, Object> result = executor.execute(call, memory, templateDataObjects, "http://example.com");
+
+        assertEquals(response.getHttpHeader(), result.get("headers"));
+        assertEquals(response.getHttpHeader(), templateDataObjects.get("responseHeaders"));
+        verify(prePostUtils).createMemoryEntry(currentStep, response.getHttpHeader(), "responseHeaders", KEY_HTTP_CALLS);
     }
 
     @Test
     @DisplayName("post-response instructions are told the call did not fail validation")
     void postResponseIsInvokedWithoutValidationError() throws Exception {
-        ApiCall call = createApiCallWithRetry();
-        setupResponse(200, "{}", "application/json");
+        ApiCall call = apiCall(retryOn(500, 2));
+        IResponse okResponse = response(200, "{}", "application/json");
+        when(mockRequest.send()).thenReturn(okResponse);
 
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
         verify(prePostUtils).runPostResponse(eq(memory), eq(call.getPostResponse()), any(), eq(200), eq(false));
     }
 
-    private ApiCall createApiCallWithRetry() {
+    private static HttpPostResponse retryOn(int httpCode, int maxRetries) {
+        var retryInstruction = new RetryApiCallInstruction();
+        retryInstruction.setMaxRetries(maxRetries);
+        retryInstruction.setRetryOnHttpCodes(List.of(httpCode));
+        // No backoff: a non-zero delay would push the send onto the runtime's
+        // scheduled executor, which is not what these tests are about.
+        retryInstruction.setExponentialBackoffDelayInMillis(0);
+
+        var postResponse = new HttpPostResponse();
+        postResponse.setRetryApiCallInstruction(retryInstruction);
+        return postResponse;
+    }
+
+    private static ApiCall apiCall(HttpPostResponse postResponse) {
         ApiCall call = new ApiCall();
         call.setName("test-call");
         call.setSaveResponse(false);
@@ -131,23 +206,20 @@ class ApiCallExecutorValidationErrorTest {
         request.setPath("/api/test");
         request.setMethod("GET");
         call.setRequest(request);
-
-        var retryInstruction = new RetryApiCallInstruction();
-        retryInstruction.setMaxRetries(2);
-        retryInstruction.setRetryOnHttpCodes(List.of(500));
-
-        var postResponse = new HttpPostResponse();
-        postResponse.setRetryApiCallInstruction(retryInstruction);
         call.setPostResponse(postResponse);
 
         return call;
     }
 
-    private void setupResponse(int httpCode, String body, String contentType) {
+    private static IResponse response(int httpCode, String body, String contentType) {
+        IResponse response = mock(IResponse.class);
         Map<String, String> headers = new HashMap<>();
-        headers.put("Content-Type", contentType);
-        when(mockResponse.getHttpCode()).thenReturn(httpCode);
-        when(mockResponse.getContentAsString()).thenReturn(body);
-        when(mockResponse.getHttpHeader()).thenReturn(headers);
+        if (contentType != null) {
+            headers.put("Content-Type", contentType);
+        }
+        when(response.getHttpCode()).thenReturn(httpCode);
+        when(response.getContentAsString()).thenReturn(body);
+        when(response.getHttpHeader()).thenReturn(headers);
+        return response;
     }
 }

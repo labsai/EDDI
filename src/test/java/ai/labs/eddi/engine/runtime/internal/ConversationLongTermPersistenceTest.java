@@ -9,8 +9,12 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
+import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +23,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -107,6 +112,114 @@ class ConversationLongTermPersistenceTest {
         nextTurn().say("thanks", new LinkedHashMap<>());
 
         verify(userMemoryStore, times(1)).upsert(any(UserMemoryEntry.class));
+    }
+
+    /**
+     * The baseline must model what the USER MEMORY STORE holds, not what the
+     * conversation document holds. A HITL pause persists the document (properties
+     * included) without ever upserting, so a resume that re-captured the document
+     * as its baseline would see "unchanged" and drop the property forever.
+     */
+    @Test
+    @DisplayName("G6 — a longTerm property set in a turn that HITL-pauses is still persisted on resume")
+    void longTermPropertySetBeforeAPauseIsPersistedOnResume() throws Exception {
+        IExecutableWorkflow workflow = mock(IExecutableWorkflow.class);
+        ILifecycleManager lifecycleManager = mock(ILifecycleManager.class);
+        when(workflow.getWorkflowId()).thenReturn("wf1");
+        when(workflow.getLifecycleManager()).thenReturn(lifecycleManager);
+        // The turn sets the property and THEN trips the human-approval gate.
+        doAnswer(invocation -> {
+            memory.getConversationProperties().put("dietary_restriction",
+                    new Property("dietary_restriction", "vegan", Scope.longTerm));
+            throw new ConversationPauseException("wf1", 2, "needs approval");
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        turnWith(workflow).say("I am vegan", new LinkedHashMap<>());
+
+        // The pause skips the post-conversation tasks, so nothing reached the store —
+        // but the AWAITING_HUMAN snapshot DID carry the property into the document.
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+
+        // Resume: a FRESH Conversation over the hydrated memory, as
+        // Agent#continueConversation builds for the resume request.
+        HitlDecision decision = new HitlDecision();
+        decision.setVerdict(HitlDecision.HitlVerdict.REJECTED);
+        turnWith(workflow).resume(decision);
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals("dietary_restriction", entry.getValue().key());
+        assertEquals("vegan", entry.getValue().value());
+    }
+
+    /**
+     * Same divergence, reached through a turn that ended in ERROR: the post-tasks
+     * never ran, so the restored document is not a persisted baseline either.
+     */
+    @Test
+    @DisplayName("G6 — a longTerm property left over from an ERRORed turn is persisted on the next turn")
+    void longTermPropertyFromAnErroredTurnIsPersistedOnTheNextTurn() throws Exception {
+        memory.getConversationProperties().put("favorite_color", new Property("favorite_color", "blue", Scope.longTerm));
+        memory.setConversationState(ConversationState.ERROR);
+
+        nextTurn().say("hello again", new LinkedHashMap<>());
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals("favorite_color", entry.getValue().key());
+        assertEquals("blue", entry.getValue().value());
+    }
+
+    private Conversation turnWith(IExecutableWorkflow workflow) {
+        return new Conversation(List.of(workflow), memory, propertiesHandler,
+                (IConversation.IConversationOutputRenderer) null);
+    }
+
+    /**
+     * G10 narrowed the step scope too far: the mirror that backs
+     * {@code {memory.current.properties.X}} was suppressed outright, so a
+     * step-scoped property was invisible to templates even during the turn that set
+     * it. The documented contract is that step scope lives FOR the turn and is
+     * cleared at the END of it — so the mirror is written and then stripped again
+     * when the property is dropped, before the step is persisted.
+     */
+    @Test
+    @DisplayName("G10 — a step-scoped property resolves via {memory.current.properties.X} during its turn only")
+    void stepScopedPropertyIsMirroredForTheTurnAndUnmirroredAfterIt() throws Exception {
+        IExecutableWorkflow workflow = mock(IExecutableWorkflow.class);
+        ILifecycleManager lifecycleManager = mock(ILifecycleManager.class);
+        when(workflow.getWorkflowId()).thenReturn("wf1");
+        when(workflow.getLifecycleManager()).thenReturn(lifecycleManager);
+
+        Map<String, Object> visibleDuringTurn = new LinkedHashMap<>();
+        doAnswer(invocation -> {
+            memory.getConversationProperties().put("tmp", new Property("tmp", "scratch", Scope.step));
+            memory.getConversationProperties().put("keep", new Property("keep", "kept", Scope.conversation));
+            visibleDuringTurn.putAll(mirroredProperties());
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        turnWith(workflow).say("hi", new LinkedHashMap<>());
+
+        assertEquals("scratch", visibleDuringTurn.get("tmp"),
+                "{memory.current.properties.tmp} must resolve during the turn that set it");
+        assertEquals("kept", visibleDuringTurn.get("keep"));
+
+        Map<String, Object> afterTurn = mirroredProperties();
+        assertNull(afterTurn.get("tmp"), "the step-scoped mirror must not survive into the persisted step");
+        assertEquals("kept", afterTurn.get("keep"));
+    }
+
+    /** The {@code properties} conversation output of the current step. */
+    private Map<String, Object> mirroredProperties() {
+        Object mirrored = memory.getCurrentStep().getConversationOutput().get("properties");
+        if (mirrored instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            map.forEach((key, value) -> copy.put(String.valueOf(key), value));
+            return copy;
+        }
+        return new LinkedHashMap<>();
     }
 
     @Test

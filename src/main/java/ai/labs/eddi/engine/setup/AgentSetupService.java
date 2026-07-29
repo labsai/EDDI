@@ -123,7 +123,7 @@ public class AgentSetupService {
             throw new AgentSetupException("API key is required for cloud LLM providers (anthropic, openai, gemini)");
         }
 
-        var params = resolveParams(request.provider(), request.model(), request.deploy(), request.environment());
+        var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         boolean toolsEnabled = request.enableBuiltInTools() != null && request.enableBuiltInTools();
         boolean quickReplies = request.enableQuickReplies() != null && request.enableQuickReplies();
         boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
@@ -263,7 +263,7 @@ public class AgentSetupService {
             throw new AgentSetupException("API key is required for cloud LLM providers");
         }
 
-        var params = resolveParams(request.provider(), request.model(), request.deploy(), request.environment());
+        var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         var createdResources = new LinkedHashMap<String, Object>();
 
         try {
@@ -731,9 +731,37 @@ public class AgentSetupService {
     record ResolvedParams(String providerType, String modelId, boolean shouldDeploy, Deployment.Environment env) {
     }
 
+    /**
+     * {@link #resolveParams} with the environment rejection mapped onto the
+     * service's validation channel, so an unknown environment is reported to the
+     * caller as a bad request naming the valid values instead of escaping as an
+     * unchecked exception (a 500 / "check server logs").
+     */
+    ResolvedParams resolveParamsValidated(String provider, String model, Boolean deploy, String environment) throws AgentSetupException {
+        try {
+            return resolveParams(provider, model, deploy, environment);
+        } catch (IllegalArgumentException e) {
+            throw new AgentSetupException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Resolve the caller-supplied setup parameters, applying defaults.
+     * <p>
+     * The environment is parsed with {@link Deployment.Environment#parseStrict} —
+     * the single strict parser shared with the MCP tools. An unknown value (a typo
+     * such as {@code "staging"}) is rejected instead of silently resolving to
+     * production, which would create <em>and deploy</em> the agent to the live
+     * environment. Callers turn the {@link IllegalArgumentException} into an
+     * {@link AgentSetupException}, i.e. a 400 with an actionable message.
+     *
+     * @throws IllegalArgumentException
+     *             if {@code environment} is neither blank nor a known environment
+     */
     ResolvedParams resolveParams(String provider, String model, Boolean deploy, String environment) {
         return new ResolvedParams(provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : "anthropic",
-                model != null && !model.isBlank() ? model.trim() : "claude-sonnet-4-6", deploy == null || deploy, parseEnvironment(environment));
+                model != null && !model.isBlank() ? model.trim() : "claude-sonnet-4-6", deploy == null || deploy,
+                Deployment.Environment.parseStrict(environment));
     }
 
     /**
@@ -817,17 +845,6 @@ public class AgentSetupService {
             return restInterfaceFactory.get(clazz);
         } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
             throw new RuntimeException("Failed to get REST proxy for " + clazz.getSimpleName(), e);
-        }
-    }
-
-    static Deployment.Environment parseEnvironment(String environment) {
-        if (environment == null || environment.isBlank()) {
-            return Deployment.Environment.production;
-        }
-        try {
-            return Deployment.Environment.valueOf(environment.trim().toLowerCase());
-        } catch (IllegalArgumentException e) {
-            return Deployment.Environment.production;
         }
     }
 
