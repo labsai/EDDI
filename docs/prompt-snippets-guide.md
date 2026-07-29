@@ -40,7 +40,7 @@ That's it. The snippet content is automatically injected at template resolution 
 
 ### Auto-Loading
 
-All snippets are loaded from MongoDB at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Jinja2 template engine processes the system prompt, so `{snippets.xxx}` resolves like any other template variable.
+All snippets are loaded from MongoDB at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Qute template engine processes the system prompt, so `{snippets.xxx}` resolves like any other template variable.
 
 ```
 Template Data Map:
@@ -75,7 +75,7 @@ Snippet names **must** match the pattern `[a-z0-9_]+`:
 | `tone_formal` | `with.dot` (dot) |
 | `rule_42` | `with space` (space) |
 
-This ensures safe Jinja2 dot-notation access (`{snippets.name}`).
+This ensures safe Qute dot-notation access (`{snippets.name}`).
 
 ---
 
@@ -83,7 +83,7 @@ This ensures safe Jinja2 dot-notation access (`{snippets.name}`).
 
 ### `templateEnabled` (default: `true`)
 
-Controls whether the Jinja2 template engine resolves template markers inside the snippet content.
+Controls whether the Qute template engine resolves template markers inside the snippet content.
 
 **When `true` (default):** Template variables in the snippet are resolved against the full template data map. This allows snippets to be dynamic:
 

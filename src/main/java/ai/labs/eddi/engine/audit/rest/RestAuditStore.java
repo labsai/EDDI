@@ -61,10 +61,14 @@ public class RestAuditStore implements IRestAuditStore {
     @Override
     public AuditVerificationReport verifyConversation(String conversationId, int skip, int limit) {
         List<AuditEntry> entries = auditStore.getEntries(conversationId, skip, clampLimit(limit));
-        // skip == 0 means the window starts at the conversation's own beginning, so
-        // the run must start at sequence 0. Past that we cannot know what preceded
-        // the window, and only continuity within it is checkable.
-        return verify("conversation", conversationId, entries, true, skip == 0);
+        // Anchoring the run at sequence 0 is only sound when the window provably
+        // holds the WHOLE conversation. skip == 0 does NOT establish that: getEntries
+        // sorts by timestamp DESCENDING ("newest first"), so skip == 0 is the most
+        // recent page. Verifying the latest 10 entries of a 1000-entry conversation
+        // would otherwise report ~990 deleted. Compare against the stored count
+        // instead, which is independent of sort order and paging.
+        boolean wholeConversation = entries.size() == auditStore.countByConversation(conversationId);
+        return verify("conversation", conversationId, entries, true, wholeConversation);
     }
 
     @Override

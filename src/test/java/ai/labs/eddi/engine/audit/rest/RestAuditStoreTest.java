@@ -188,6 +188,7 @@ class RestAuditStoreTest {
     void deletedFirstEntryIsDetected() {
         // sequence 0 has been removed; the survivors still form an unbroken run
         when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-2", 1), entryAt("id-3", 2)));
+        when(auditStore.countByConversation("conv-1")).thenReturn(2L); // the window holds the whole conversation
 
         var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
 
@@ -195,6 +196,26 @@ class RestAuditStoreTest {
         assertEquals(List.of(0L), report.missingSequences());
         assertEquals(ChainStatus.BROKEN, report.chainStatus());
         assertFalse(report.intact());
+    }
+
+    /**
+     * getEntries sorts newest-first, so skip == 0 is the most RECENT page, not the
+     * conversation's beginning. Using skip as the signal meant verifying the latest
+     * few entries of a long conversation anchored at 0 and reported the entire
+     * history below them as deleted. The window must be shown to hold the whole
+     * conversation before the origin can be assumed.
+     */
+    @Test
+    @DisplayName("a newest-first window that is not the whole conversation is judged on continuity only")
+    void partialNewestPageIsNotAnchoredAtOrigin() {
+        // the newest two entries of a conversation that holds 100
+        when(auditStore.getEntries("conv-1", 0, 2)).thenReturn(List.of(entryAt("id-98", 97), entryAt("id-99", 98)));
+        when(auditStore.countByConversation("conv-1")).thenReturn(100L);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 2);
+
+        assertEquals(List.of(), report.missingSequences(), "0..96 are simply not in this window");
+        assertEquals(ChainStatus.INTACT, report.chainStatus());
     }
 
     /**

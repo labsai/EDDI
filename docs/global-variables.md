@@ -15,7 +15,7 @@ EDDI includes a built-in global variable store for managing configuration values
 ┌─────────────────┐
 │  Template Layer  │
 │  {vars.<key>}  │
-│  (Jinja2/Qute)   │
+│      (Qute)      │
 └─────────────────┘
 ```
 
@@ -37,7 +37,7 @@ Global variables are available through two complementary syntaxes:
 
 ### 1. Template Syntax: `{vars.<key>}`
 
-Available in LLM task system prompts and other template contexts. Resolved by the Jinja2/Qute template engine at template processing time.
+Available in LLM task system prompts and other template contexts. Resolved by the Qute template engine at template processing time.
 
 ```text
 You are an AI assistant powered by {vars.default-model}.
@@ -87,7 +87,7 @@ Multi-tenant example:
 EDDI resolves configuration values in a strict three-step order:
 
 ```text
-1. Jinja2/Qute templates   →  {vars.x}, {snippets.x}, {properties.x}, etc.
+1. Qute templates          →  {vars.x}, {snippets.x}, {properties.x}, etc.
 2. Global variables         →  ${vars:x}   ← this feature
 3. Vault secrets           →  ${vault:x}
 ```

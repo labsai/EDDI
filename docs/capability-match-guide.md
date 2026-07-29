@@ -86,7 +86,7 @@
 
 ## Template Variables
 
-Config values support **Jinja2 template expressions**, resolved against the conversation memory at evaluation time. This enables dynamic routing:
+Config values support **Qute template expressions**, resolved against the conversation memory at evaluation time. This enables dynamic routing:
 
 ```json
 {
