@@ -5,6 +5,77 @@
 
 ---
 
+## 🐳 fix(demo): the Open WebUI seeder did nothing on a second run (2026-07-29)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+Two defects in `src/main/docker/seed-demo-agent.sh`, both found by actually re-running the stack rather than reading it. Also `.env.example` and [`docs/open-webui-integration.md`](open-webui-integration.md) §1.
+
+**Adding an LLM key later silently did nothing.** The seeder guarded on *"is any model exposed"* and `exit 0`-ed if so. Because the MongoDB volume persists, the most common second run is exactly the case it broke: the rule-based agent is already there, the user has now set `EDDI_DEMO_LLM_API_KEY`, and they re-run to get an agent that can actually answer questions — and got no new model and no explanation. The guard is now **per agent**, keyed on the model-id prefix each descriptor name slugifies to (`eddi-demo-agent-`, `eddi-llm-demo-`), so each run creates only what is missing and says what it skipped. Vault storage was split into its own step that runs whenever a key is supplied, so changing the key rotates it instead of leaving the old one behind an "already exists" check.
+
+**The final "Ready" listing could omit the agent just created.** The poll exited on `grep -q '"id"'`, which a pre-existing agent satisfies immediately — so a freshly deployed LLM agent, still inside the adapter's 30s model-cache TTL, was absent from the output and looked like a failure. Verified it was only a display problem: re-querying after the TTL showed all four models. The loop now waits for the specific prefixes expected on this run.
+
+**Verified live, not reasoned about.** Ran the stack against a populated volume: first run created the rule-based agent, second reported `already deployed — skipping` and created no duplicate, third (with a key) added the LLM agent and listed all four models. The old code would have exited at step two.
+
+**Also:** the closing "open this URL" line hardcoded port 3000 and was wrong whenever `OPEN_WEBUI_PORT` was remapped — compose now passes `OPEN_WEBUI_URL`. `.env.example` gained an Open WebUI demo section (the demo's `.env` is gitignored, so these variables were undiscoverable from a fresh clone). The docs gained three subsections that only exist because they bit during testing: re-running, port collisions (`Bind for 0.0.0.0:7070 failed` when another EDDI holds the port), and `down` vs `down -v`.
+
+**Doc accuracy pass.** Cross-checked §3 against `application.properties` — all 11 `eddi.openai-compat.*` keys and all 11 defaults match; the §8 error table's 8 codes all exist in `OpenAiErrorResponse`; the documented endpoints match `RestOpenAiAdapter`'s `@Path`s. No drift found there.
+
+---
+
+## 🔒 fix(openai): two CodeQL alerts — logged intent, and a regex flagged as ReDoS (2026-07-29)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+CodeQL failed the PR with 3 new alerts. Two are addressed here; the third is deliberately left.
+
+**`java/log-injection` (medium, `PostgresUserConversationStore:139`).** The delete path logged `intent` unsanitized. That file predates this branch, but the OpenAI adapter is what makes it carry attacker-influenced data: the intent is `channel:openai:<agentId>:<chatKey>` and the chat key comes from a request header, so a newline in it could forge log entries. Routed through the existing `LogSanitizer.sanitize()`, which the bridge already uses for its own logging. The Mongo store logs nothing, so there was no counterpart to mirror.
+
+**`java/polynomial-redos` (high, `AgentModelResolver.slugify`).** The dash trim `(^-+|-+$)` is replaced with a character walk. **This is not a fixed vulnerability, and should not be read as one.** The alert is a false positive twice over:
+
+1. The `NON_SLUG_CHARS` pass on the line immediately above collapses every run of non-slug characters into a *single* `-`, so `-+` can never match more than one character.
+2. Measured directly, the regex is linear anyway — 3ms on 400k separator characters. Java's engine anchors on `$` rather than backtracking, so the quadratic path CodeQL models does not exist here.
+
+It was replaced regardless: a standing high-severity alert competes for attention with real ones, and character walking is no harder to read than the regex was.
+
+**A vacuous test was written and then removed.** The first version of this change asserted `slugify` completed within 2 seconds on 400k separators. Measuring the *old* regex showed it finishes in 3ms — so that assertion would have passed against both implementations and proved nothing. It was deleted rather than shipped; a test that cannot fail is worse than no test. What remains asserts trimming *behaviour* across the implementation swap, and is mutation-checked: stubbing out the trim kills 3 tests.
+
+**Dismissed with justification: `java/user-controlled-bypass` (high, `OpenAiAuthFilter:84`).** The filter returns early when the request path is not under `/v1`, and the path is user-controlled — which CodeQL reads as authentication being skippable.
+
+It is not, because this filter is neither the only nor the first check in front of those paths. `application.properties` ends with `quarkus.http.auth.permission.authenticated.paths=/,/*` at policy `authenticated`, and **Quarkus HTTP authorization runs before JAX-RS request filters** — so every path the filter declines has already been required to authenticate. The one exception is `/v1/*`, which carries its own permission entry at policy `permit` precisely so the shared API key can be checked in the filter rather than rejected at the OIDC layer as a malformed JWT. That `permit` set is exactly what `isGuarded` returns `true` for. The guard therefore does not choose between *authenticated* and *anonymous*; it chooses between *the adapter's key check* and *Quarkus' own*, and declining is the safe branch.
+
+The reasoning lives in a javadoc block on `isGuarded`, not only in the GitHub dismissal, so a reader of the code finds it where the suspicious-looking early return is.
+
+**The dismissal is pinned by a test.** It rests entirely on two lines of configuration, and a security finding waved away on the strength of config that nobody re-checks is how a real bypass eventually ships. `quarkusStillGuardsEverythingThisFilterDeclines` reads `src/main/resources/application.properties` and asserts the catch-all paths, the catch-all policy, and the `/v1/*` exemption. Flipping the catch-all policy to `permit` fails it. Note it reads the file from *source*: the first version loaded `/application.properties` from the classpath, where `src/test/resources` shadows the production file and declares none of these keys — it asserted nothing and failed loudly on first run.
+
+---
+
+## ✨ feat(openai): render structured outputs, report token usage (2026-07-28)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+Two gaps closed in the `/v1` adapter, both from the honest support assessment of the previous session. Files: new `OpenAiOutputRenderer`, new `TokenUsage` + `StreamOptions` DTOs, changes to `OpenAiConversationBridge`, `OpenAiSseWriter`, `RestOpenAiAdapter`, `ChatCompletionResponse`, `ChatCompletionChunk`, `ChatCompletionRequest`. Docs: [`docs/open-webui-integration.md`](open-webui-integration.md) §7.1, §7.2, §10.
+
+**Structured outputs are no longer dropped.** An EDDI turn carries eight output types; the OpenAI protocol carries one string, and the shared `ConversationOutputExtractor` keeps only the text. Through that lens a wizard agent whose whole turn is *"Which provider?"* plus five quick replies arrived as a question with no visible answers — indistinguishable from a broken agent. `OpenAiOutputRenderer` now takes the shared extractor's text **verbatim** (a reply's wording must not depend on which channel it left through) and appends a Markdown rendering of the rest: quick replies as backticked values, images as `![alt](uri)`, application links as Markdown links, buttons as their label, input fields as a described prompt. `agentFace` and `other` are dropped deliberately — an avatar has no text equivalent, and captioning it would add a line the agent author never wrote.
+
+- **The shared extractor is untouched.** Its other callers (`GroupConversationService`, `CreateSubAgentTool`, `ConverseWithAgentTool`) feed agent-to-agent prompts, where interaction affordances are noise. The renderer is adapter-local.
+- **Quick replies render as literal values, not a numbered list.** A numbered list invites `2` as an answer, which no input matcher recognises. The `value` is what a chat UI puts on a button and therefore what a user would retype; `expressions` stays internal (asserted by test — it is an internal identifier that must not be shown).
+- **Both POJO and Map item shapes are handled** — a turn that just ran yields typed items, a rehydrated conversation yields Maps.
+- **Streaming needed a split.** When the model streamed the prose token by token, re-rendering the full text at `onComplete` would have sent the whole reply twice, so `renderExtras()` emits the affordances alone.
+
+**`usage` is now reported — the previous entry's claim that EDDI does not surface token counts was wrong.** `LlmTask` writes `audit:token_usage` (`inputTokens`/`outputTokens`/`totalTokens`) into the current step, accumulated across every model call the turn made — cascade steps and tool round-trips included.
+
+- **This required `returnDetailed=true` on both `say` and `sayStreaming`.** The filtered snapshot keeps only `input:initial`, `actions`, `output*` and `quickReplies*`, dropping every audit key — which is why the counts looked unavailable. The snapshot is read in-process and never serialized to the client, so the cost is one extra step's worth of references. This flag is load-bearing and otherwise invisible, so a test pins it: flipping it back would silently remove `usage` from every response with nothing else failing.
+- **Absent, not zero, for rule-based agents.** They call no model; `0 tokens` reads in a client as a measurement rather than an absence.
+- **`totalTokens` is derived when a provider omits it** but reports both parts — a usage block whose parts do not add up is worse than one that computes the sum.
+- **Streaming usage is opt-in via `stream_options.include_usage`**, emitted as a trailing empty-`choices` frame after `finish_reason` and before `[DONE]`, per spec. An unrequested empty-choices frame is a protocol deviation some clients reject.
+
+**Testing:** 183 adapter tests (up from 151) — new `OpenAiOutputRendererTest` (21) plus usage coverage in the bridge, SSE writer and wire-format suites. Two mutation checks were run rather than trusting green: stubbing `renderQuickReplies` to `null` killed 7 tests, and reverting `returnDetailed` to `false` killed the 2 flag-pinning tests.
+
+**Not done: exposing agent groups as models.** Assessed rather than assumed — every piece exists (groups list via `readDescriptors("ai.labs.group", …)`, `discuss()` returns a `synthesizedAnswer`, `continueDiscussion()` gives multi-turn, `GroupDiscussionEventListener` gives streaming), but it needs a second bridge with its own conversation mapping, streaming path and approval surface. That is a feature-sized change, not an addition to this one, so it is recorded as gap #1 in §10 instead of half-landed here.
+
+---
+
 ## 🧠 fix(llm): code-review findings wave 2b — LLM core, persistent memory, migration, import/export (2026-07-28)
 
 **Repo:** EDDI (`fix/code-review-llm-memory`)
@@ -243,6 +314,9 @@ Full unit suite: 12,384 tests, **0 non-environmental failures** (308 listed fail
 
 ---
 
+
+---
+
 ## 🐞 fix(engine): code-review findings wave 1 — parser, rules, templating, apicalls, datastore, LLM infra, deployment (2026-07-28)
 
 **Repo:** EDDI (`fix/code-review-findings`)
@@ -335,6 +409,90 @@ The two backends had silently diverged, because nothing tests them against each 
 `./mvnw clean test-compile` green from scratch (deliberately clean, not incremental — several signature changes crossed workstream boundaries, and incremental builds reuse stale `.class` files for unedited callers). 158 targeted tests pass. E1's fix was mutation-checked: reverting it fails 2 tests in `RuleTest`.
 
 **Deliberately deferred to later waves:** E6 (write-time config validation), E12, D4/J3 (cross-backend conformance suite — needs Testcontainers), the `pom.xml` batch (H4/H11/H15 + J1/J8/J9), and the doc corrections these fixes imply (I7, I8, I12, `semantic-parser.md`, `httpcalls.md`).
+
+---
+
+## ✨ feat(openai): OpenAI-compatible API adapter for Open WebUI (2026-07-27)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+New `/v1` surface presenting deployed agents as OpenAI "models", so Open WebUI, the Python `openai` SDK, LangChain and LiteLLM can drive EDDI conversations. New package `integrations/openai/`, parallel to `integrations/slack/`. **Disabled by default.** Full guide: [`docs/open-webui-integration.md`](open-webui-integration.md); design rationale in [`planning/openai-api-adapter-plan.md`](../planning/openai-api-adapter-plan.md).
+
+**Four earlier drafts of this plan were built on premises that turned out to be false.** Each was verified against source before implementing; the corrections shaped the design:
+
+- **Content negotiation cannot dispatch sync vs streaming.** The plan routed on `Accept` via two `@Produces` methods. But `openai-python` hardcodes `Accept: application/json` and never varies it by `stream`, and Open WebUI sends no `Accept` header at all (it sniffs the *response* content-type). Every streaming request would have landed on the JSON method. → **one method, dispatching on the `stream` field of the body**, which is what the OpenAI spec says and what vLLM/llama.cpp/LiteLLM/Ollama all do.
+- **Open WebUI does not map `chat_id` to the `user` field.** [#27174](https://github.com/open-webui/open-webui/pull/27174) is an *issue*, closed as *not planned*; `payload['user']` is set only for pipeline models and is an object, not a chat id. The plan's entire per-chat isolation mechanism did not exist. → **key on `X-OpenWebUI-Chat-Id`** ([#15813](https://github.com/open-webui/open-webui/pull/15813), gated by `ENABLE_FORWARD_USER_INFO_HEADERS`), with `user` as a defensively-typed fallback.
+- **`IRestAgentAdministration` is `@RolesAllowed({"eddi-admin","eddi-editor"})` at type level**, and Quarkus enforces it via a CDI interceptor. Injecting it for `/v1/models`, as planned, would have 403'd for every ordinary caller. → read `IAgentFactory` + `IDocumentDescriptorStore` directly. REST facades are the authorization boundary; a public surface must not reach around one.
+- **The auth story did not exist.** `quarkus.http.auth.permission.authenticated.paths=/,/*` captures `/v1/*`, so an `sk-…` bearer would be rejected by OIDC before the adapter ran. → explicit `/v1/*` permission entry plus two modes (`permit` + shared key, or `authenticated` + OIDC), constant-time key compare, and a startup guard.
+- **`UtilityAgentProvisioner` was cut.** It had an unauthenticated caller creating and deploying an agent, cloning another agent's credential reference and consuming `maxAgentsPerTenant` quota — blocked by the role checks above anyway, and in tension with Pillar 1 (the engine authoring agent config at runtime). → replaced by **`<model>:stateless` variants**: start, say, end. No writes, no roles, and useful beyond title generation.
+- **The new-chat heuristic was cut.** `userMessageCount == 1 && hasTurns → endConversation` is unreliable (regenerate and edit-and-resend look identical to a first message), destructive (memory loss is irrecoverable), and directly contradicted the plan's own recommended Open WebUI Filter, which strips history to the last user message — under which *every* turn would have destroyed the conversation. A new chat is a new chat key, which is a new intent. No inference needed.
+- **HITL was unaddressed.** `onSkipped` fires for both `AWAITING_HUMAN` and `IN_PROGRESS`; the plan mapped both to "conversation busy", which would make any agent using `PAUSE_CONVERSATION` permanently unusable with a misleading message. → sentinel-snapshot discrimination, mirroring `SlackEventHandler`, and pauses surface as **chat text with `200`**, never as an HTTP error — a 4xx makes clients discard the user's message.
+
+**Components** (`src/main/java/ai/labs/eddi/integrations/openai/`): `RestOpenAiAdapter` (`/v1`), `OpenAiConversationBridge`, `AgentModelResolver`, `OpenAiMessageMapper`, `OpenAiSseWriter`, `OpenAiAuthFilter`, `OpenAiStartupGuard`, `OpenAiCompatConfig`, `OpenAiApiException` + `OpenAiExceptionMapper`, and 11 wire DTOs under `model/`.
+
+**Other design decisions:**
+- Model ids are `<slug>-<last 6 of agentId>`. Agent names are not unique, so a bare slug would be non-deterministic with two agents called "Support". Name and slug lookups are accepted but only when unique; an ambiguous match returns 400 listing candidates rather than guessing.
+- Slugging folds accents via NFD rather than dropping them — `Übersicht` was slugging to `bersicht`, mangling every non-ASCII agent name. Caught by its own test.
+- Images map to `attachment_N` context entries, so they flow through the existing `AttachmentForwarder` with its vision gating, byte caps and SSRF-guarded fetching. Zero core changes. Two parsing fixes: `data:image/png,payload` is legal and has no `;` (scanning to `;` threw), and remote URLs get a concrete MIME from the extension — `image/*` passes the forwarder's `startsWith("image/")` gate but is rejected by providers when handed to `ImageContent.from`.
+- `usage` is omitted rather than zero-filled when the agent called no model. (This originally read "EDDI does not surface per-request token counts here" — that was wrong, and is corrected in the 2026-07-28 entry below.)
+- In-flight completions are semaphore-bounded — each holds a worker thread, since the bridge blocks on the turn as the Slack handler does.
+- **Reused, not duplicated:** `ConversationOutputExtractor.extractResponse()` already existed in `engine/memory` (added upstream) and handles more output formats than the Slack-local copy the plan proposed extracting. Phase 2 of the plan became unnecessary. Noted separately: `SlackHitlSupport.extractSlackResponseText` still duplicates it and should delegate.
+
+**Self-review pass** (after the feature was complete) found and fixed six defects, each now covered by a test:
+- **Semaphore permit leak.** The streaming path handed its permit to the `StreamingOutput` body to release. If that body never runs — a client disconnecting before serialization starts, say — the permit is never reclaimed, and after `max-concurrent-requests` such events the adapter returns 429 *permanently*, until restart. The resource now releases unconditionally and the stream body takes its own permit inside one try/finally.
+- **`GET /v1/models/{id}` echoed the caller's string, not the canonical id** — a lookup by agent name returned `{"id":"Customer Support"}`, which is absent from `GET /v1/models`, so a client round-tripping the answer would ask for a model that does not exist. `ResolvedModel` now carries requested and canonical ids separately (plus the descriptor timestamp, which was hardcoded to 0).
+- **`InterruptedException` was swallowed** in the turn wait, leaving the worker thread looking healthy with its shutdown signal gone.
+- **A null exception message rendered to the user as the literal text "null"** in the stream error path (NPEs carry no message).
+- **`hasSentContent()` lied** — it returned "the stream has started", true even after a content-free `finish()`. Renamed `hasStarted()`.
+- **The `eddi.openai.requests` counter documented in the plan was never implemented.** Added with `mode` and `outcome` tags, so `paused` (reviewers behind) and `busy` (clients racing) are distinguishable from real errors.
+
+Also verified rather than assumed: `quarkus.rest.jackson.optimization.enable-reflection-free-serializers=false` in this project, so `@JsonProperty` on record components works — `finish_reason` and `owned_by` serialize correctly. Added `OpenAiWireFormatTest` to pin that, since the non-streaming response shape had no coverage at all.
+
+Corrected a documentation claim rather than the code: unimplemented `/v1` paths (`/v1/embeddings` etc.) return Quarkus' plain 404, not an OpenAI error envelope. A catch-all route would risk shadowing the real endpoints for a cosmetic gain.
+
+**Tests:** 148 unit tests plus 16 integration tests, all green. Mutation-checked — reverting the model-ambiguity guard, the identity refusal, and the HITL sentinel distinction each makes the relevant tests fail. `RestOpenAiAdapterTest` (`@QuarkusTest`, binds a socket) is deferred to CI per the local-environment constraint.
+
+**Attachment support** covers all three binary content-part types: `image_url`, `file` (inline PDFs and documents) and `input_audio`. All map to `attachment_N` context entries, so EDDI's existing forwarder does the real work — capability gating, byte caps, PDF text extraction, SSRF-guarded fetching. Three details the wire formats make easy to get wrong, each pinned by a test:
+- `input_audio.data` is **raw base64 with no `data:` prefix**, unlike every other binary payload in the protocol, with the type in a separate `format` field. `mp3` maps to `audio/mpeg` — `"audio/" + format` would produce `audio/mp3`, which is not a real media type.
+- `file.file_data` **is** a full data URI, and the declared `filename` beats a generic `application/octet-stream` type, since clients that base64 a file without sniffing it send exactly that.
+- `file.file_id` references the OpenAI Files API, which EDDI does not implement; those parts are skipped with an actionable warning rather than becoming empty attachments.
+
+**Stateless requests** have two routes to the same behaviour. The `:stateless` model suffix exists because a model name is the only per-request dimension a UI like Open WebUI can express — its title-generation setting is a dropdown, so a query param, header or body field could not be selected there at all. It follows the ecosystem convention for behavioural model variants (OpenRouter's `:nitro`/`:floor`/`:free`, Ollama's `llama3:8b`) and has the side benefit of appearing in `GET /v1/models`, making the capability discoverable. Alongside it, a `stateless` **body field** gives programmatic callers the explicit parameter (`extra_body={"stateless": True}` in the Python SDK). The two are OR-ed rather than letting either win: `model:"x:stateless"` plus `stateless:false` is self-contradictory, and running stateless only loses continuity while running stateful would persist a conversation the caller may not have wanted. `expose-stateless-variants=false` blocks both routes, so the switch cannot be circumvented by moving the request into the body.
+
+**Gateway-agent recipe** documented in §11 of the integration guide, rather than building a passthrough proxy mode. A thin LLM-only agent behind this adapter already provides vaulted API keys, audit, tenant quotas and cost tracking — which is what the passthrough idea was actually after. Building a real proxy would mean entering the LLM-gateway market (LiteLLM, Portkey, Cloudflare AI Gateway) with a worse product, inheriting per-provider streaming/tool/vision passthrough maintenance for zero agent value, and shipping a feature with neither logic nor configuration — which is the opposite of Pillar 1. The recipe's limits are stated up front: single-turn only, one agent per model, no caching/fallbacks/virtual keys.
+
+**`OpenAiCompatIT`** closes the one gap the unit tests structurally could not. The adapter serves sync and streaming from a *single* JAX-RS method, dispatching on the `stream` body field rather than the `Accept` header — a design forced by real client behaviour. A refactor toward content negotiation would look correct in every unit test and silently return JSON to every streaming client, so the guard has to live at the HTTP layer: `stream:true` with `Accept: application/json` (what openai-python sends) and with no `Accept` header at all (what Open WebUI sends) must both yield `text/event-stream`. 16 tests also cover the response wire shape, per-chat conversation isolation end to end, the error envelopes, and tolerance of the unknown request fields every client sends.
+
+It deploys the shared minimal agent (parser/rules/output/templating), so it needs no LLM credentials and is deterministic. **Runs in CI only** — Quarkus cannot boot in the dev sandbox (`Unable to establish loopback connection`), the same environmental limit that already fails `SlackWebApiClientTest`. The test compiles and is discovered by failsafe locally; whether it passes is for CI to say.
+
+**A real defect the integration test caught immediately.** `OpenAiCompatIT.streamingBodyIsWellFormed` failed on its first CI run (passing only on failsafe's retry) with content arriving *after* the `[DONE]` sentinel. Root cause: `ConversationService.sayStreaming` ends with `conversationCoordinator.submitInOrder(...)` and **returns immediately** — every handler callback fires later on another thread. The bridge wrote the terminator in its `finally` as soon as `sayStreaming` returned, so the response closed mid-turn and late tokens raced a closing stream. Fixed by awaiting a `CompletableFuture` completed by whichever terminal callback fires (`onComplete`/`onSkipped`/`onError`), bounded by `request-timeout-seconds`.
+
+The unit tests had all passed because their Mockito stubs invoked the handler **synchronously**, hiding the asynchronous contract entirely — a mock that was more convenient than the real collaborator. A regression test now drives the handler from a background thread, and mutation-checking confirms removing the await makes it fail. This is precisely the class of bug an HTTP-level test exists to find, and it was found on the first run.
+
+**A runnable demo — and two more defects it caught.** `docker-compose.openwebui.yml` brings up MongoDB, EDDI (built from the working tree, since no published image has the adapter), Open WebUI and a seeder that deploys a small rule-based agent so the model list is not empty. Standing it up and actually talking to an agent found two bugs that 146 unit tests and 16 integration tests had not:
+
+- **`plainText` leaked into every assistant message.** Jackson treats `ChatMessage.isPlainText()` as a bean property, so responses carried a field absent from the OpenAI schema. Harmless to clients, wrong on the wire — and invisible to `OpenAiWireFormatTest`, which asserted expected fields were *present* but never that there were no extras. Fixed with `@JsonIgnore`; the tests now assert the exact field set.
+- **The create-conversation race returned a bare 500.** Open WebUI issues the completion and its title request concurrently with the same chat id, so both find no mapping and both insert. The handler caught `ResourceAlreadyExistsException` — but the Mongo store lets a raw `MongoWriteException` (E11000) out, so the catch was dead code against the real store. Now caught broadly and resolved by re-reading the mapping, which is datastore-agnostic (the Postgres store reports it differently again). Verified with four concurrent requests to one chat: all 200.
+
+Also noted while building the demo, and **not fixed here** because it is unrelated to this PR: `POST /backup/import/initialAgents` cannot import the bundled Agent Father on Linux. The ZIP's entries are correctly forward-slashed, but extraction writes them as single files with literal backslashes, so the workflow directory never exists and the import 500s. The demo seeds through the ordinary REST API instead.
+
+**A documentation error found by using the demo, and two settings verified from Open WebUI v0.11.0's notes.**
+
+The guide claimed Open WebUI injects RAG context into the **system message**. It does not, by default. Verified in the running container: `RAG_SYSTEM_CONTEXT` defaults to `False` (`open_webui/env.py`), and `middleware.py` then calls `add_or_update_user_message(...)` rather than `add_or_update_system_message(...)`. So dropping a PDF into a chat delivers several thousand tokens of `### Task: …`, `<context><source id="1">…</source></context>` and `<attached_files>` markup as `{memory.current.input}`, with the user's real question buried at the end — which breaks input matchers, makes property setters capture the whole blob, and stops quick replies firing. Corrected in the guide, added to the must-configure table, and `RAG_SYSTEM_CONTEXT=true` set in the demo compose. This was found by actually uploading a file, not by review.
+
+Also verified and documented: **`AIOHTTP_CLIENT_STREAM_IDLE_TIMEOUT`** (new in v0.11.0) ends a stream when the upstream goes quiet — sized for an LLM's time-to-first-token it will cut EDDI agents short, since a rule-based agent emits nothing at all until its turn completes; and **`passthrough_params`** on a connection forwards non-standard body fields verbatim, which makes the `stateless` field settable from the Open WebUI UI rather than only via `extra_body`.
+
+The demo agent's prompt was also reworded. A property setter bound to `{memory.current.input}` stores the *whole* turn, so answering "Gregor. What are you capable of?" stored all of it as the name and looked like a parsing bug. It now says it stores the next message verbatim — which is what a naive slot-filler does, and a fair thing for a demo to teach.
+
+**A second injection path, and an LLM-backed demo agent.** Setting `RAG_SYSTEM_CONTEXT=true` moved the retrieved chunks to the system message as intended, but an attachment-carrying turn still arrived polluted — this time with an `<attached_files>` block. Different mechanism: Open WebUI's built-in Files tool, gated by `use_builtin_tools`, which depends on a per-model `builtin_tools` capability with **no environment override**. On an EDDI model that capability is pure cost — the adapter never returns `tool_calls`, so the tools can never fire, yet enabling them rewrites the user's message. Documented as a per-model toggle in the model editor, and added to the must-configure table alongside `RAG_SYSTEM_CONTEXT`.
+
+The demo also gained an **optional LLM agent, with its provider key in the Secrets Vault**. The rule-based one demonstrates the transport and the state bridge without credentials, but it has no model, so it cannot answer questions *about* anything — which made "what is this pdf about?" look like an adapter failure when it was simply an agent with nothing to think with. Set `EDDI_DEMO_LLM_API_KEY` (plus optional `_TYPE`/`_MODEL`) and a second agent is deployed whose system prompt references `{context.openai_system_message}`, so it can answer about uploaded files. The key is stored via `PUT /secretstore/secrets/default/demo-llm-api-key` and the config holds only `${vault:demo-llm-api-key}` — an agent config is exported, diffed, rendered in the Manager UI and logged, so a literal key would travel with all of it.
+
+Verified on a clean run: both agents reach `READY`, all four models are exposed, the stored config reads `"apiKey": "${vault:demo-llm-api-key}"`, and a scan of every collection in the database finds the plaintext key in none of them. The LLM *call* itself is still unverified — the run used a deliberately fake key.
+
+Getting there also surfaced a documentation error in `AGENTS.md` §5.5: the workflow step type for LLM interaction is listed as `eddi://ai.labs.langchain`, but `LlmTask.ID` is `ai.labs.llm`, so a workflow built from the table fails to deploy with `Extension 'ai.labs.langchain' not found`. The config-store URI in that row (`eddi://ai.labs.llm/...`) was already right; only the step type was stale. Corrected.
+
+**Not implemented (v1):** `/v1/embeddings`, `tool_calls` passthrough (would cause double-execution — EDDI's tools do not exist in Open WebUI), `n > 1`, `logprobs`. ~~Quick replies and `inputField` outputs are dropped; only text reaches OpenAI clients.~~ (Superseded by the 2026-07-28 entry above — they are rendered as Markdown now.)
 
 ---
 
@@ -474,6 +632,7 @@ That last fix required the theme's **first JavaScript** (`resources/js/eddi-a11y
 2. **The verification protocol is not vacuous.** Run against that deliberately broken state, both §6 step 2 (log grep) and step 3 (html-class and stylesheet assertions) fail as designed. Checks that cannot fail are worthless; these can.
 3. **The `install.sh` realm update was executed, not just written.** Against a realm reset to `loginTheme: ""`, the GET-modify-PUT returns 204, sets all three fields, and is idempotent on a second run.
 4. **A dead CSS selector removed.** `.pf-v5-c-login__main-header-desc` matches nothing and appears in no `keycloak.v2` template — the same mistake (styling an element the theme never emits) that killed the original `div.kc-logo-text` approach, reproduced at low stakes. Found by auditing every selector in our stylesheet against the live DOM. `.pf-v5-c-login__main-footer-band` was checked the same way and **kept**: it is emitted by `login.ftl` and only hidden because `registrationAllowed: false`. Also verified the keyboard focus ring — `:focus-visible` needs a real key event to match, and does then give `solid 2px #f59e0b` at 8.25:1 on the card, past WCAG 2.2's 3:1 for non-text indicators.
+
 
 ---
 

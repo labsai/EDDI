@@ -1,0 +1,153 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# EDDI + Open WebUI — runnable demo of the OpenAI-compatible adapter (/v1)
+#
+#   docker compose -f docker-compose.openwebui.yml up --build
+#
+# Then open http://localhost:3000 and pick "agent-father-…" from the model list.
+#
+# EDDI is BUILT FROM THIS WORKING TREE, not pulled from Docker Hub: the adapter
+# is not in any published image yet, so `labsai/eddi:latest` would start fine
+# and then 404 on /v1. Dockerfile.demo compiles inside the container, so no
+# local JDK or Maven is needed — the first build is slow, later ones are cached.
+#
+# Self-contained rather than an overlay on docker-compose.yml, so it is one
+# file to read and one command to run, and cannot break on compose's
+# environment-merge semantics. It therefore repeats the MongoDB definition.
+#
+# NOT A PRODUCTION CONFIGURATION. See docs/open-webui-integration.md §4 for the
+# security model; the demo-only choices are called out inline below.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  eddi:
+    build:
+      context: .
+      dockerfile: src/main/docker/Dockerfile.demo
+    environment:
+      - "MONGODB_CONNECTIONSTRING=mongodb://eddi:changeme@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+      # DEMO ONLY: no OIDC, so EDDI's own REST API is wide open. This is what
+      # lets the seeder below call the (normally role-gated) import endpoint.
+      - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
+
+      # ── The OpenAI-compatible adapter ──
+      - "EDDI_OPENAI_COMPAT_ENABLED=true"
+      - "EDDI_OPENAI_COMPAT_API_KEY=${EDDI_OPENAI_COMPAT_API_KEY:-sk-eddi-demo}"
+      # DEMO ONLY. Open WebUI runs here with authentication disabled, so it may
+      # not forward X-OpenWebUI-User-Id; without this the adapter would refuse
+      # the request rather than guess an identity. In a real multi-user
+      # deployment leave this false — every anonymous caller would otherwise
+      # share one conversation, and its memory.
+      - "EDDI_OPENAI_COMPAT_ALLOW_ANONYMOUS=true"
+
+      # Secrets Vault — required for the optional LLM agent, whose provider key
+      # is stored here and referenced from the agent config as ${vault:...}
+      # rather than written into it.
+      #
+      # DEMO ONLY, obviously: a master key committed to a compose file protects
+      # nothing. Generate a real one per deployment:  openssl rand -base64 32
+      - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-demo-only-vault-master-key-not-for-production-use}"
+    ports:
+      - "${EDDI_PORT:-7070}:7070"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7070/q/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  mongodb:
+    image: mongo:7.0.14
+    environment:
+      - "MONGO_INITDB_ROOT_USERNAME=eddi"
+      - "MONGO_INITDB_ROOT_PASSWORD=changeme"
+    volumes:
+      - openwebui-demo-mongodb:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "-u", "eddi", "-p", "changeme", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # One-shot: creates and deploys a small rule-based agent so the model list is
+  # not empty on first start. EDDI seeds nothing automatically.
+  #
+  # It does NOT use POST /backup/import/initialAgents — see the note in
+  # seed-demo-agent.sh for why that path cannot import the bundled Agent Father
+  # on Linux today.
+  eddi-seed:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      eddi:
+        condition: service_healthy
+    environment:
+      - "EDDI_URL=http://eddi:7070"
+      - "EDDI_API_KEY=${EDDI_OPENAI_COMPAT_API_KEY:-sk-eddi-demo}"
+      # So the closing "open this URL" line is right when the ports are remapped.
+      - "OPEN_WEBUI_URL=http://localhost:${OPEN_WEBUI_PORT:-3000}"
+      # Optional. The rule-based agent proves the transport and the state
+      # bridge, but it has no model, so it cannot answer questions ABOUT
+      # anything — an uploaded PDF included. Set this and a second, LLM-backed
+      # agent is deployed alongside it:
+      #   EDDI_DEMO_LLM_API_KEY=sk-... docker compose -f docker-compose.openwebui.yml up
+      - "EDDI_DEMO_LLM_API_KEY=${EDDI_DEMO_LLM_API_KEY:-}"
+      - "EDDI_DEMO_LLM_TYPE=${EDDI_DEMO_LLM_TYPE:-openai}"
+      - "EDDI_DEMO_LLM_MODEL=${EDDI_DEMO_LLM_MODEL:-gpt-4o-mini}"
+    volumes:
+      - ./src/main/docker/seed-demo-agent.sh:/seed.sh:ro
+    entrypoint: ["/bin/sh", "/seed.sh"]
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "${OPEN_WEBUI_PORT:-3000}:8080"
+    environment:
+      - "OPENAI_API_BASE_URL=http://eddi:7070/v1"
+      - "OPENAI_API_KEY=${EDDI_OPENAI_COMPAT_API_KEY:-sk-eddi-demo}"
+      # Nothing else to talk to; without this the model list mixes in Ollama.
+      - "ENABLE_OLLAMA_API=false"
+      # LOAD-BEARING. Supplies X-OpenWebUI-Chat-Id, which is what gives each
+      # chat window its own EDDI conversation. Without it every chat you open
+      # against one agent shares a single conversation, and its memory.
+      - "ENABLE_FORWARD_USER_INFO_HEADERS=true"
+      # DEMO ONLY: skips account creation so the UI is usable immediately.
+      - "WEBUI_AUTH=false"
+      # Open WebUI drives several auxiliary LLM calls of its own — chat titles,
+      # tags, follow-up suggestions, search queries — and by default they all go
+      # to the selected model. Against an EDDI agent that means utility prompts
+      # land in the user's real conversation and advance its behaviour rules,
+      # and the parsed-out junk shows up in the UI as bogus follow-ups. Turned
+      # off here so the demo shows the agent and nothing else.
+      #
+      # In a real deployment, point these at a separate connection or at an
+      # "<agent>:stateless" model instead of disabling them — see
+      # docs/open-webui-integration.md §5.
+      - "ENABLE_TITLE_GENERATION=false"
+      - "ENABLE_FOLLOW_UP_GENERATION=false"
+      - "ENABLE_TAGS_GENERATION=false"
+      - "ENABLE_AUTOCOMPLETE_GENERATION=false"
+      - "ENABLE_SEARCH_QUERY_GENERATION=false"
+      - "ENABLE_RETRIEVAL_QUERY_GENERATION=false"
+      # LOAD-BEARING for any agent that inspects its input. Open WebUI's RAG
+      # wraps the retrieved chunks AND its own instruction template around the
+      # user's message by default (env.py: RAG_SYSTEM_CONTEXT defaults to
+      # False), so an EDDI agent receives a few thousand tokens of <source>
+      # markup as {memory.current.input} instead of what the user typed —
+      # which breaks input matchers, property setters and quick replies alike.
+      # Setting this puts the context in the system message instead, where the
+      # adapter maps it to the openai_system_message context entry and the
+      # agent can use or ignore it deliberately.
+      - "RAG_SYSTEM_CONTEXT=true"
+    volumes:
+      - openwebui-demo-data:/app/backend/data
+    depends_on:
+      eddi:
+        condition: service_healthy
+
+volumes:
+  openwebui-demo-mongodb:
+  openwebui-demo-data:
