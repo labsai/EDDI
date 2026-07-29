@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -88,6 +89,41 @@ class WorkflowTraversalCacheTest {
         assertNotNull(configs, "discovery must return a result, not blow up the turn");
         assertTrue(configs.isEmpty(), "the unusable workflow contributes nothing");
         verify(workflowStore, never()).readWorkflow(anyString(), anyInt());
+    }
+
+    /**
+     * An unanchored {@code version=} also matches inside {@code subversion=123}, so
+     * a query carrying no version at all would have parsed as version 123 and gone
+     * on to read a workflow that was never asked for. Caught independently by both
+     * CodeRabbit and Copilot on the first review of this fix.
+     */
+    @Test
+    @DisplayName("a lookalike query param is not mistaken for the version")
+    void lookalikeParamIsNotReadAsVersion() throws Exception {
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaabbbbccccddddeeeeffff?subversion=123")));
+        when(agentStore.readAgent(anyString(), anyInt())).thenReturn(agentConfig);
+
+        var configs = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+
+        assertNotNull(configs);
+        assertTrue(configs.isEmpty());
+        verify(workflowStore, never()).readWorkflow(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("the version is still read when it is not the first query param")
+    void versionAfterAnotherParamIsStillRead() throws Exception {
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaabbbbccccddddeeeeffff?foo=x&version=1")));
+        when(agentStore.readAgent(anyString(), anyInt())).thenReturn(agentConfig);
+
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+
+        // Anchoring must not break the ordinary multi-param case.
+        verify(workflowStore).readWorkflow(anyString(), eq(1));
     }
 
     @Test

@@ -42,8 +42,14 @@ import java.util.concurrent.ConcurrentHashMap;
 class WorkflowTraversal {
     private static final Logger LOGGER = Logger.getLogger(WorkflowTraversal.class);
 
-    /** Matches the numeric value of a {@code version=} query param. */
-    private static final Pattern VERSION_PARAM = Pattern.compile("version=(\\d+)");
+    /**
+     * Matches the numeric value of a real {@code version} query param.
+     * <p>
+     * Anchored to parameter boundaries on purpose: an unanchored {@code version=}
+     * also matches inside {@code subversion=123}, which would parse a version out
+     * of a query that does not carry one.
+     */
+    private static final Pattern VERSION_PARAM = Pattern.compile("(?:^|&)version=(\\d+)(?:&|$)");
 
     /**
      * Cache lifetime. Deliberately tiny — long enough to dedupe the several
