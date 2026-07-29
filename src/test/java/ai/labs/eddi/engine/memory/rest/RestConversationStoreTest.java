@@ -18,7 +18,9 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.enterprise.inject.Instance;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 
@@ -235,21 +238,44 @@ class RestConversationStoreTest {
     }
 
     @Nested
+    @DisplayName("A3 — conversation store roles")
+    class ConversationStoreRoles {
+
+        @Test
+        @DisplayName("the deployment-wide bulk delete is admin-only")
+        void bulkDeleteIsAdminOnly() throws Exception {
+            RolesAllowed roles = IRestConversationStore.class
+                    .getMethod("permanentlyDeleteEndedConversationLogs", Integer.class)
+                    .getAnnotation(RolesAllowed.class);
+
+            assertNotNull(roles, "permanentlyDeleteEndedConversationLogs must declare @RolesAllowed");
+            assertEquals(List.of("eddi-admin"), Arrays.asList(roles.value()));
+        }
+    }
+
+    @Nested
     @DisplayName("permanentlyDeleteEndedConversationLogs")
     class PermanentlyDeleteEndedConversations {
 
+        // A3: this sweep deletes EVERY ended conversation in the deployment older
+        // than the given age. An absent or sub-day age is rejected (400) rather
+        // than silently treated as "everything" — and nothing is deleted.
         @Test
-        @DisplayName("should return 0 when deleteOlderThanDays is null")
-        void nullDays() throws Exception {
-            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(null);
-            assertEquals(0, result);
+        @DisplayName("should reject a missing deleteOlderThanDays with 400 and delete nothing")
+        void nullDays() {
+            assertThrows(BadRequestException.class,
+                    () -> restConversationStore.permanentlyDeleteEndedConversationLogs(null));
+
+            verifyNoInteractions(conversationMemoryStore);
         }
 
         @Test
-        @DisplayName("should return 0 when deleteOlderThanDays is -1")
-        void negativeDays() throws Exception {
-            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(-1);
-            assertEquals(0, result);
+        @DisplayName("should reject deleteOlderThanDays=-1 with 400 and delete nothing")
+        void negativeDays() {
+            assertThrows(BadRequestException.class,
+                    () -> restConversationStore.permanentlyDeleteEndedConversationLogs(-1));
+
+            verifyNoInteractions(conversationMemoryStore);
         }
 
         @Test
@@ -302,17 +328,29 @@ class RestConversationStoreTest {
         }
 
         @Test
-        @DisplayName("should work with deleteOlderThanDays=0 (delete all)")
-        void zeroDeletes() throws Exception {
+        @DisplayName("A3: deleteOlderThanDays=0 is rejected — it would wipe every ended conversation")
+        void zeroIsRejected() {
+            assertThrows(BadRequestException.class,
+                    () -> restConversationStore.permanentlyDeleteEndedConversationLogs(0));
+
+            // The whole point: not a single conversation may be touched.
+            verifyNoInteractions(conversationMemoryStore);
+            verifyNoInteractions(documentDescriptorStore);
+            verifyNoInteractions(conversationDescriptorStore);
+        }
+
+        @Test
+        @DisplayName("A3: the smallest accepted age is 1 day, and it still deletes")
+        void oneDayIsAccepted() throws Exception {
             when(conversationMemoryStore.getEndedConversationIds())
                     .thenReturn(List.of("conv-1"));
             var descriptor = new DocumentDescriptor();
-            // Set to 2 days ago so it's reliably older than any threshold
+            // Set to 2 days ago so it's reliably older than the 1-day threshold
             descriptor.setLastModifiedOn(new Date(System.currentTimeMillis() - 2 * 86400_000L));
             when(documentDescriptorStore.readDescriptor("conv-1", 0)).thenReturn(descriptor);
 
-            // deleteOlderThanDays=0 means "delete conversations older than 0 days ago"
-            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(0);
+            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(1);
+
             assertEquals(1, result);
         }
     }
@@ -595,6 +633,19 @@ class RestConversationStoreTest {
             restConversationStore.deleteEndedConversationsOlderThanXDays();
 
             verify(runtime).submitCallable(any(), any());
+        }
+
+        @Test
+        @DisplayName("A3: a sub-day configured retention disables the sweep instead of wiping everything")
+        void disabledWhenRetentionBelowOneDay() {
+            var store = new RestConversationStore(
+                    documentDescriptorStore, conversationDescriptorStore,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
+                    0, 90, attachmentStorageInstance);
+
+            store.deleteEndedConversationsOlderThanXDays();
+
+            verifyNoInteractions(runtime);
         }
     }
     @Nested

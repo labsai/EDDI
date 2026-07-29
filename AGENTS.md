@@ -230,14 +230,14 @@ When tasks process templates (system prompts, HTTP call bodies, property instruc
 
 | Key                | Type                                         | Source                                                                     | Example Access                                   |
 | ------------------ | -------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------ |
-| `context`          | `Map<String, Object>`                        | Input context variables set per turn                                       | `{{context.language}}`                           |
+| `context`          | `Map<String, Object>`                        | Input context variables set per turn                                       | `{context.language}`                           |
 | `properties`       | `Map<String, Object>`                        | Conversation properties — raw values from `ConversationProperties.toMap()` | `{properties.preferred_language}`                |
 | `memory`           | `Map` with `current`, `last`, `past`         | Conversation step data from the pipeline                                   | `{memory.current.output}`, `{memory.last.input}` |
-| `snippets`         | `Map<String, Object>`                        | Prompt Snippets — auto-injected from `PromptSnippetService`                | `{{snippets.cautious_mode}}`                     |
-| `vars`             | `Map<String, Object>`                        | Global Variables — deployment-wide config from `GlobalVariableResolver`    | `{{vars.default-model}}`                         |
-| `userInfo`         | `Map` with `userId`                          | Authenticated user identity                                                | `{{userInfo.userId}}`                            |
-| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata                                                      | `{{conversationInfo.agentId}}`                   |
-| `conversationLog`  | `String`                                     | Formatted conversation history                                             | `{{conversationLog}}`                            |
+| `snippets`         | `Map<String, Object>`                        | Prompt Snippets — auto-injected from `PromptSnippetService`                | `{snippets.cautious_mode}`                     |
+| `vars`             | `Map<String, Object>`                        | Global Variables — deployment-wide config from `GlobalVariableResolver`    | `{vars.default-model}`                         |
+| `userInfo`         | `Map` with `userId`                          | Authenticated user identity                                                | `{userInfo.userId}`                            |
+| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata                                                      | `{conversationInfo.agentId}`                   |
+| `conversationLog`  | `String`                                     | Formatted conversation history                                             | `{conversationLog}`                            |
 
 > **Key insight**: `longTerm` properties are loaded into `conversationProperties` at conversation init and are immediately available via `{properties.key}` in any template. You do NOT need a separate template namespace for persistent data — properties IS the namespace.
 
@@ -251,7 +251,7 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
        └─→ IUserMemoryStore.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries)
        └─→ Visibility scoping: self + group + global entries are loaded
        └─→ Converted to Property objects with scope=longTerm
-       └─→ Available as {{properties.key}} in all templates
+       └─→ Available as {properties.key} in all templates
 
 2. Pipeline runs
    └─→ PropertySetterTask sets properties based on actions
@@ -339,6 +339,8 @@ A new `ILifecycleTask` requires ALL of:
 - [ ] REST implementation (`@ApplicationScoped`)
 - [ ] `ExtensionDescriptor` (UI field definitions via `getExtensionDescriptor()`)
 - [ ] Unit test with Mockito
+
+> **Note on `@ConfigurationUpdate`:** it is declared in `IResourceStore` as an `@InterceptorBinding`, but **no `@Interceptor` class currently implements it** — today the annotation has no runtime behaviour and is purely a marker documenting "this method mutates stored configuration". Keep applying it for consistency with the existing stores, but do **not** rely on it to invalidate caches or fire events; caches such as `PromptSnippetService` use an explicit `invalidateCache()` plus a Caffeine TTL instead. Whether to implement the interceptor or drop the annotation is still open.
 
 All task implementations MUST implement: `getId()` (returns `TaskId`), `getType()`, `execute()`, `configure()`, `getExtensionDescriptor()`.
 
@@ -808,7 +810,7 @@ Matcher:      "actions" : "ask_for_model"
 #### Qute template safety in HTTP call bodies
 
 When embedding `{properties.x}` in HTTP call body templates, be aware:
-- `quarkus.qute.strict-rendering=false` renders missing properties as empty strings (no error)
+- `quarkus.qute.strict-rendering=false` renders missing properties as empty strings (no error). This is set once in `application.properties` and applies to **every profile** — there is deliberately no `%prod` override, so dev, test and production all render leniently and fail identically. (Earlier releases turned strict rendering **on** in prod only, which meant a missing property rendered blank in dev but leaked the raw `{properties.x}` literal to the end user in production.)
 - Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`
 - User-entered text containing `{` or `}` will be interpreted as Qute expressions, potentially eating content
 

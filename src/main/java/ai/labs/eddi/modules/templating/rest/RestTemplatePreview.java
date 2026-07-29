@@ -8,11 +8,15 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.modules.llm.impl.PromptSnippetService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.InternalServerErrorException;
 import org.jboss.logging.Logger;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.*;
 
@@ -34,16 +38,19 @@ public class RestTemplatePreview implements IRestTemplatePreview {
     private final IConversationMemoryStore conversationMemoryStore;
     private final IMemoryItemConverter memoryItemConverter;
     private final PromptSnippetService promptSnippetService;
+    private final ConversationAccessGuard conversationAccessGuard;
 
     @Inject
     public RestTemplatePreview(ITemplatingEngine templatingEngine,
             IConversationMemoryStore conversationMemoryStore,
             IMemoryItemConverter memoryItemConverter,
-            PromptSnippetService promptSnippetService) {
+            PromptSnippetService promptSnippetService,
+            ConversationAccessGuard conversationAccessGuard) {
         this.templatingEngine = templatingEngine;
         this.conversationMemoryStore = conversationMemoryStore;
         this.memoryItemConverter = memoryItemConverter;
         this.promptSnippetService = promptSnippetService;
+        this.conversationAccessGuard = conversationAccessGuard;
     }
 
     @Override
@@ -88,15 +95,38 @@ public class RestTemplatePreview implements IRestTemplatePreview {
     /**
      * Load real conversation memory and convert it to the template data map
      * (identical to what {@code LlmTask} uses at runtime).
+     * <p>
+     * The ownership check runs <em>before</em> the snapshot is read: the response
+     * echoes back the flattened variable values, so a preview against a foreign
+     * conversationId would otherwise dump that conversation's properties, context
+     * and memory to the caller. A {@code ForbiddenException} from the guard is
+     * deliberately not caught here: it must surface as a 403 rather than be
+     * degraded into the "conversation not found" response below, which would mask a
+     * genuine authorization failure and hide it from the operator. (Collapsing 403
+     * into 404 would in fact disclose <em>less</em> — it is distinguishing the two
+     * that reveals which conversations exist — but this endpoint is already
+     * restricted to admins and editors, so an honest authorization signal is worth
+     * more here than that marginal reduction.)
      */
     private Map<String, Object> loadConversationData(String conversationId) {
+        conversationAccessGuard.requireExistingConversationOwner(conversationId);
         try {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             var memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
             return memoryItemConverter.convert(memory);
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            LOGGER.warnv("Could not load conversation for template preview: {0}", e.getMessage());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Genuinely absent — the caller reports this as "conversation not found".
+            LOGGER.debugv("No conversation to preview against: {0}", sanitize(conversationId));
             return null;
+        } catch (IResourceStore.ResourceStoreException e) {
+            // A store failure is NOT a missing conversation. Collapsing the two told an
+            // operator mid-outage that their conversation did not exist, sending them to
+            // look for the wrong problem entirely. Surface it as a server error, and keep
+            // the driver detail in the log rather than the response body (finding A12).
+            String correlationId = UUID.randomUUID().toString();
+            LOGGER.errorv(e, "Template preview could not load conversation {0} (correlationId: {1})",
+                    sanitize(conversationId), correlationId);
+            throw new InternalServerErrorException("Could not load conversation (correlationId: " + correlationId + ")");
         }
     }
 

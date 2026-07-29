@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
@@ -36,6 +37,7 @@ class RestAgentEngineStreamingExtendedTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private IConversationService conversationService;
+    private ConversationAccessGuard conversationAccessGuard;
     private RestAgentEngineStreaming streaming;
     private SseEventSink eventSink;
     private Sse sse;
@@ -44,7 +46,8 @@ class RestAgentEngineStreamingExtendedTest {
     @BeforeEach
     void setUp() {
         conversationService = mock(IConversationService.class);
-        streaming = new RestAgentEngineStreaming(conversationService);
+        conversationAccessGuard = mock(ConversationAccessGuard.class);
+        streaming = new RestAgentEngineStreaming(conversationService, conversationAccessGuard);
         eventSink = mock(SseEventSink.class);
         sse = mock(Sse.class);
         eventBuilder = mock(OutboundSseEvent.Builder.class);

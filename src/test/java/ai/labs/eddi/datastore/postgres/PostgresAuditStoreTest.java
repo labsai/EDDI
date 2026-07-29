@@ -238,6 +238,58 @@ class PostgresAuditStoreTest extends PostgresTestBase {
         assertEquals("hmac_val", found.hmac());
     }
 
+    /**
+     * G18 tamper detection rests entirely on this column: a per-entry HMAC cannot
+     * see a <em>deleted</em> row, so a gap in the chain is the only evidence a
+     * removal leaves behind. PostgreSQL originally persisted no sequence at all,
+     * which left every Postgres deployment silently without deletion detection
+     * while MongoDB had it — and reported that as UNAVAILABLE, which reads like
+     * "not applicable" rather than "unprotected".
+     * <p>
+     * Asserting the exact values (not merely that the query stops throwing) is what
+     * makes this a regression test: dropping the column from SELECT_ALL fails
+     * loudly, but so does reading back a value the writer never wrote.
+     */
+    @Test
+    @DisplayName("chain sequence survives the write/read round-trip")
+    void sequenceRoundTrip() {
+        store.appendEntry(createEntry("conv_seq", "agent1", 1, "user1", "parser", "input", 0, 0, 10L).withSequence(0L));
+        store.appendEntry(createEntry("conv_seq", "agent1", 1, "user1", "behavior", "rules", 0, 1, 20L).withSequence(1L));
+        store.appendEntry(createEntry("conv_seq", "agent1", 1, "user1", "llm", "langchain", 0, 2, 30L).withSequence(2L));
+
+        var sequences = store.getEntries("conv_seq", 0, 10).stream().map(AuditEntry::sequence).sorted().toList();
+
+        assertEquals(List.of(0L, 1L, 2L), sequences);
+    }
+
+    /**
+     * Rows written before the sequence column existed are back-filled by the
+     * migration's DEFAULT. They must read back as {@link AuditEntry#UNSEQUENCED} so
+     * verification reports them as unverifiable rather than mistaking a pre-upgrade
+     * ledger for a tampered one.
+     */
+    @Test
+    @DisplayName("pre-migration rows read back as UNSEQUENCED, not as a broken chain")
+    void legacyRowsReadAsUnsequenced() {
+        store.appendEntry(createEntry("conv_legacy", "agent1", 1, "user1", "parser", "input", 0, 0, 10L));
+
+        var results = store.getEntries("conv_legacy", 0, 10);
+
+        assertEquals(1, results.size());
+        assertEquals(AuditEntry.UNSEQUENCED, results.getFirst().sequence());
+    }
+
+    /**
+     * The store must advertise support, or {@code AuditLedgerService} skips
+     * assigning a sequence entirely and the column above is only ever written with
+     * the sentinel — the exact shape of the original defect.
+     */
+    @Test
+    @DisplayName("advertises sequence support so the ledger actually assigns one")
+    void advertisesSequenceSupport() {
+        assertTrue(store.supportsSequence());
+    }
+
     // ─── Helpers ────────────────────────────────────────────────
 
     private static AuditEntry createEntry(String convId, String agentId, int version,

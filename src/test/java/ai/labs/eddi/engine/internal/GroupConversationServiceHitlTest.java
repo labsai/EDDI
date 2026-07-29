@@ -376,10 +376,22 @@ class GroupConversationServiceHitlTest {
     @DisplayName("Double resume CAS guard")
     class DoubleResumeCas {
 
+        /**
+         * The contract: when a concurrent resume has already won, the store's CAS
+         * rejects this one and resumeDiscussion must SURFACE that rather than swallow
+         * it and run the phases twice.
+         * <p>
+         * This used to drive a real first resume before re-stubbing the mocks, which
+         * made it flaky in CI: resumeDiscussion hands the remaining phases to
+         * executorService, so that background thread was still invoking the very mocks
+         * the test was re-stubbing — a Mockito data race, not a product defect. The
+         * first call proved nothing here anyway; the store is a mock, so "the state
+         * already changed" is expressed by the stub either way, and the
+         * successful-resume path is covered by ResumePhaseIndex and TurnBudgetResume.
+         */
         @Test
-        @DisplayName("Second concurrent resume throws ResourceModifiedException")
+        @DisplayName("A resume that loses the CAS surfaces ResourceModifiedException")
         void secondResumeThrowsCas() throws Exception {
-            // Setup: GC is AWAITING_APPROVAL
             var gc = new GroupConversation();
             gc.setId("gc-cas");
             gc.setGroupId(GROUP_ID);
@@ -388,46 +400,28 @@ class GroupConversationServiceHitlTest {
             gc.setPausedPhaseName("Phase1");
             gc.setPausedAt(Instant.now());
             gc.setOriginalQuestion("CAS test?");
-
             doReturn(gc).when(conversationStore).read("gc-cas");
 
             var resId = mockResourceId();
             doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
-            var config = buildConfig(List.of(
+            doReturn(buildConfig(List.of(
                     new DiscussionPhase("Phase0", PhaseType.OPINION),
                     new DiscussionPhase("Phase1", PhaseType.CRITIQUE),
-                    new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS)));
-            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+                    new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS)))).when(groupStore).read(GROUP_ID, 1);
             stubAgentSay();
 
-            // First resume succeeds
+            // Another resume already moved the state, so the CAS rejects this one.
+            doThrow(new IResourceStore.ResourceModifiedException("Group conversation state has changed"))
+                    .when(conversationStore).updateIfState(any(), eq(GroupConversationState.AWAITING_APPROVAL));
+
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(decision);
 
-            service.resumeDiscussion("gc-cas", request, null);
-
-            // Second resume: updateIfState throws ResourceModifiedException because
-            // state is no longer AWAITING_APPROVAL
-            doThrow(new IResourceStore.ResourceModifiedException(
-                    "Group conversation state has changed"))
-                    .when(conversationStore).updateIfState(any(), eq(GroupConversationState.AWAITING_APPROVAL));
-
-            // Need to re-read the gc as AWAITING_APPROVAL for the second call
-            var gc2 = new GroupConversation();
-            gc2.setId("gc-cas");
-            gc2.setGroupId(GROUP_ID);
-            gc2.setState(GroupConversationState.AWAITING_APPROVAL);
-            gc2.setPausedAtPhaseIndex(1);
-            gc2.setPausedPhaseName("Phase1");
-            gc2.setPausedAt(Instant.now());
-            gc2.setOriginalQuestion("CAS test?");
-            doReturn(gc2).when(conversationStore).read("gc-cas");
-
             assertThrows(IResourceStore.ResourceModifiedException.class,
                     () -> service.resumeDiscussion("gc-cas", request, null),
-                    "Second concurrent resume should throw ResourceModifiedException");
+                    "a resume that loses the CAS must surface it, not run the phases a second time");
         }
     }
 
