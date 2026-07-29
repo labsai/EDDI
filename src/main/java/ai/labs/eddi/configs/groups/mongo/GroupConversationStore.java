@@ -232,6 +232,7 @@ public class GroupConversationStore implements IGroupConversationStore {
                 }
 
                 long newThisPass = 0;
+                long failedToDelete = 0;
                 for (var resourceId : resourceIds) {
                     if (!processed.add(resourceId.getId())) {
                         // already handled in an earlier pass — the query is handing back
@@ -252,17 +253,28 @@ public class GroupConversationStore implements IGroupConversationStore {
                         storage.removeAllPermanently(resourceId.getId());
                         deleted++;
                     } catch (IOException e) {
+                        failedToDelete++;
                         LOGGER.warnf("Failed to erase group conversation %s: %s", resourceId.getId(), e.getMessage());
                     }
                 }
 
-                // No row in this page was new. Either every candidate was rejected by
-                // the exact-match re-check, or the store keeps returning rows we have
-                // already removed. Re-querying would return the same page forever, so
-                // stop rather than spin. Termination therefore does not depend on the
-                // delete actually taking effect.
+                // A row this user owns that we could not remove must NOT be reported as a
+                // completed erasure. The query always runs at offset 0, so an
+                // undeletable row stays in the first page and would eventually make a
+                // pass look like "no new work", ending the sweep early with a partial
+                // count that claims success. Fail instead: a partial erasure presented
+                // as complete is the worst outcome available here.
+                if (failedToDelete > 0) {
+                    throw new IResourceStore.ResourceStoreException(
+                            "Erasure incomplete: " + failedToDelete + " group conversation(s) belonging to the user could not be deleted after "
+                                    + deleted + " successful deletion(s)");
+                }
+
+                // No row in this page was new, and nothing failed — so every remaining
+                // candidate was rejected by the exact-match re-check (the regex matched
+                // more than it should). There is genuinely nothing left to erase for
+                // this user, and re-querying would return the same page forever.
                 if (newThisPass == 0) {
-                    LOGGER.warnf("Erasure made no progress with %d candidate(s) still matching; stopping", resourceIds.size());
                     return deleted;
                 }
             }

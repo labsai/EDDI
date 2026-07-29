@@ -445,6 +445,28 @@ class GroupConversationStoreTest {
     }
 
     /**
+     * A candidate that could not be processed must not be reported as a completed
+     * erasure. The query always runs at offset 0, so an undeletable row stays in
+     * the first page and would otherwise make a later pass look like "no new work"
+     * — ending the sweep with a partial count that claims success.
+     */
+    @Test
+    @DisplayName("deleteAllForUser — fails loudly when a matching transcript cannot be deleted")
+    void deleteAllForUserFailsOnUndeletableRow() throws Exception {
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), anyInt()))
+                .thenReturn(List.of(resourceId("gc-1")));
+        // The candidate's document cannot be deserialized, so we can never establish
+        // whether it belonged to this user — and therefore cannot claim it was erased.
+        IResourceStorage.IResource<GroupConversation> unreadable = mock(IResourceStorage.IResource.class);
+        when(unreadable.getData()).thenThrow(new IOException("corrupt document"));
+        when(storage.read("gc-1", 1)).thenReturn(unreadable);
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class, () -> store.deleteAllForUser("user-1"));
+        assertTrue(thrown.getMessage().contains("Erasure incomplete"), thrown.getMessage());
+        verify(storage, never()).removeAllPermanently(anyString());
+    }
+
+    /**
      * If every candidate is rejected by the exact-match re-check, re-querying would
      * return the same page forever. The loop must stop rather than spin.
      */
