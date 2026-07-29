@@ -12,10 +12,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.postgresql.core.NativeQuery;
+import org.postgresql.core.Parser;
 
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -118,6 +121,34 @@ class PostgresResourceStorageTest {
     }
 
     @Test
+    void fieldIndexNamesDistinguishHintsThatDifferOnlyInCase() throws Exception {
+        Statement indexStatement = mock(Statement.class);
+        Connection indexConnection = mock(Connection.class);
+        DataSource indexDataSource = mock(DataSource.class);
+        when(indexDataSource.getConnection()).thenReturn(indexConnection);
+        when(indexConnection.createStatement()).thenReturn(indexStatement);
+
+        new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "userid", "userId");
+
+        var executed = ArgumentCaptor.forClass(String.class);
+        verify(indexStatement, atLeastOnce()).execute(executed.capture());
+
+        // JSON keys are case-sensitive; PostgreSQL index names are not. Naming both
+        // idx_resources_field_userid made CREATE INDEX IF NOT EXISTS skip the second
+        // one with nothing but a NOTICE, so one of the two expressions was left
+        // unindexed while this class believed it was indexed.
+        List<String> indexNames = executed.getAllValues().stream()
+                .filter(s -> s.contains("idx_resources_field_"))
+                .map(s -> s.substring(s.indexOf("idx_resources_field_"), s.indexOf(" ON ")))
+                .toList();
+        assertEquals(2, indexNames.size(), indexNames.toString());
+        assertEquals(2, Set.copyOf(indexNames).size(), "both hints collapsed onto one index name: " + indexNames);
+        // An all-lower-case hint keeps its historical name, so existing deployments
+        // do not grow a duplicate index on upgrade.
+        assertTrue(indexNames.contains("idx_resources_field_userid"), indexNames.toString());
+    }
+
+    @Test
     void shouldNotFailStartupWhenIndexCreationIsRejected() throws Exception {
         Statement indexStatement = mock(Statement.class);
         Connection indexConnection = mock(Connection.class);
@@ -163,9 +194,70 @@ class PostgresResourceStorageTest {
         var sql = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sql.capture());
         // The path (and the value inside it) must never be concatenated into SQL.
-        assertTrue(sql.getValue().contains("data @? ?::jsonpath"), sql.getValue());
         assertFalse(sql.getValue().contains("workflowSteps"), sql.getValue());
         verify(preparedStatement).setString(2, PostgresResourceStorage.toContainmentJsonPath("workflowSteps.config.uri", "eddi://out?version=1"));
+    }
+
+    /**
+     * Hand the statement to pgjdbc's own parser — the code that actually decides
+     * what a {@code ?} means — and report what the driver would send to the server.
+     * <p>
+     * Every JDBC object in this class is a Mockito mock, so
+     * {@code ps.setString(2, ...)} on a mock can never notice that the statement
+     * declares three placeholders. This is the only way to catch that without a
+     * live server.
+     */
+    private static NativeQuery asDriverWouldSend(String sql) throws SQLException {
+        return Parser.parseJdbcSql(sql, true, true, true, false, true).getFirst();
+    }
+
+    @Test
+    void findResourceIdsContaining_jsonpathOperatorIsNotSwallowedAsABindPlaceholder() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        storage.findResourceIdsContaining("workflowSteps.config.uri", "eddi://out?version=1");
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+
+        // `@` is not special to pgjdbc, so a literally spelled `data @? ?::jsonpath`
+        // leaves a bare `?` that the driver turns into a THIRD placeholder while
+        // only two values are ever bound — the query then fails at execution time
+        // on a real server instead of merely returning nothing. `@??` is pgjdbc's
+        // escape for a literal question mark.
+        NativeQuery sent = asDriverWouldSend(sql.getValue());
+        assertEquals(2, sent.bindPositions.length, "placeholders the driver found in: " + sent.nativeSql);
+        assertTrue(sent.nativeSql.contains("data @? $2::jsonpath"), sent.nativeSql);
+    }
+
+    @Test
+    void findHistoryResourceIdsContaining_jsonpathOperatorIsNotSwallowedAsABindPlaceholder() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        storage.findHistoryResourceIdsContaining("workflows", "eddi://wf?version=1");
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+
+        NativeQuery sent = asDriverWouldSend(sql.getValue());
+        assertEquals(2, sent.bindPositions.length, "placeholders the driver found in: " + sent.nativeSql);
+        assertTrue(sent.nativeSql.contains("resources_history"), sent.nativeSql);
+        assertTrue(sent.nativeSql.contains("data @? $2::jsonpath"), sent.nativeSql);
+    }
+
+    @Test
+    void findResourceIdsContaining_theBoundJsonPathIsNeverRescannedForPlaceholders() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        // The generated jsonpath itself contains `?` (the filter operator) and the
+        // value may too (`?version=1`). Those live in a bind VALUE, never in SQL,
+        // so they must not shift the placeholder count.
+        storage.findResourceIdsContaining("workflows", "eddi://wf?version=1");
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertEquals(2, asDriverWouldSend(sql.getValue()).bindPositions.length);
+        verify(preparedStatement).setString(2, PostgresResourceStorage.toContainmentJsonPath("workflows", "eddi://wf?version=1"));
     }
 
     @Test
