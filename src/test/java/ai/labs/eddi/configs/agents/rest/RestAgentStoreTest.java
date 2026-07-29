@@ -98,7 +98,7 @@ class RestAgentStoreTest {
 
             assertThrows(IResourceStore.ResourceModifiedException.class, () -> restAgentStore.deleteAgent(AGENT_ID, 1, false, false));
 
-            verify(deploymentStore, never()).deleteDeploymentInfos(anyString());
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
         }
 
         @Test

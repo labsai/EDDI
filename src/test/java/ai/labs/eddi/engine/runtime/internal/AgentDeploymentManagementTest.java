@@ -120,9 +120,9 @@ class AgentDeploymentManagementTest {
             // Deleted, not marked undeployed: setDeploymentInfo upserts, so marking would
             // resurrect a row the delete cascade may have already removed.
             verify(deploymentStore).deleteDeploymentInfo("production", "deletedAgent", 1);
-            verify(deploymentStore, never()).setDeploymentInfo(anyString(), anyString(), anyInt(), any());
+            verify(deploymentStore, never()).setDeploymentInfo(any(), any(), any(), any());
             // Scoped, never agent-wide — sibling versions were not checked.
-            verify(deploymentStore, never()).deleteDeploymentInfos(anyString());
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
         }
 
         @Test
@@ -140,8 +140,8 @@ class AgentDeploymentManagementTest {
 
             // A store outage is not proof the Agent is gone — the record must survive.
             verify(agentFactory).deployAgent(Environment.production, "agent1", 1, null);
-            verify(deploymentStore, never()).deleteDeploymentInfo(anyString(), anyString(), anyInt());
-            verify(deploymentStore, never()).deleteDeploymentInfos(anyString());
+            verify(deploymentStore, never()).deleteDeploymentInfo(any(), any(), any());
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
         }
 
         @Test
@@ -163,10 +163,13 @@ class AgentDeploymentManagementTest {
 
             management.checkDeployments();
 
-            // v1's record goes; v2 must survive and still deploy. An agent-wide delete here
-            // would silently undeploy the live version on the next restart.
-            verify(deploymentStore).deleteDeploymentInfo("production", "agent1", 1);
-            verify(deploymentStore, never()).deleteDeploymentInfos(anyString());
+            // v1's record goes, exactly once.
+            verify(deploymentStore, times(1)).deleteDeploymentInfo("production", "agent1", 1);
+            // v2 must survive and still deploy. Asserting only the v1 delete would let a
+            // regression that removes the live sibling too slip through, so pin the
+            // negative: no delete of version 2, in any environment, by either method.
+            verify(deploymentStore, never()).deleteDeploymentInfo(any(), any(), eq(2));
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
             verify(agentFactory).deployAgent(Environment.production, "agent1", 2, null);
             verify(agentFactory, never()).deployAgent(any(), eq("agent1"), eq(1), any());
         }
