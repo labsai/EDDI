@@ -224,10 +224,38 @@ class McpApiToolBuilderTest {
         assertEquals("application/json", createPet.getRequest().getContentType());
         String body = createPet.getRequest().getBody();
         assertNotNull(body);
-        assertTrue(body.contains("\"name\""), "Body should have 'name' field");
-        assertTrue(body.contains("\"age\""), "Body should have 'age' field");
-        // String field should be quoted
-        assertTrue(body.contains("\"{name}\""), "String param should be quoted in template");
+        // One variable for the whole body: the model writes the JSON itself, so
+        // there is no unescaped substitution into a per-property template.
+        assertEquals("{" + McpApiToolBuilder.WHOLE_BODY_VARIABLE + "}", body);
+        // The shape a per-property template would have implied is carried in the
+        // parameter description instead, so the model still knows what to write.
+        String bodyDescription = createPet.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE);
+        assertTrue(bodyDescription.contains("name"), bodyDescription);
+        assertTrue(bodyDescription.contains("age"), bodyDescription);
+        assertTrue(bodyDescription.contains("integer"), "the model must know age is not a quoted string: " + bodyDescription);
+    }
+
+    @Test
+    @DisplayName("required properties are marked so, and optional ones are not forced")
+    void parseAndBuild_bodyDescriptionMarksRequiredProperties() {
+        // Every declared parameter becomes a REQUIRED tool parameter, so optionality
+        // has to live in the description or a PATCH of one field would force the
+        // model to restate all the others.
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things":{"post":{
+                "operationId":"createThing","tags":["things"],
+                "requestBody":{"content":{"application/json":{"schema":{"type":"object",
+                "required":["name"],
+                "properties":{"name":{"type":"string"},"nickname":{"type":"string"}}}}}},
+                "responses":{"200":{"description":"ok"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall createThing = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        assertEquals(1, createThing.getParameters().size(), "a body contributes exactly one parameter");
+        String description = createThing.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE);
+        assertTrue(description.contains("name (string, required)"), description);
+        assertTrue(description.contains("nickname (string)") && !description.contains("nickname (string, required)"), description);
     }
 
     @Test
@@ -242,11 +270,16 @@ class McpApiToolBuilderTest {
         ApiCall createPet = petsConfig.getHttpCalls().stream().filter(c -> "createPet".equals(c.getName())).findFirst().orElseThrow();
 
         assertNotNull(createPet.getParameters(), "a call with a body must declare parameters");
-        String body = createPet.getRequest().getBody();
-        for (String variable : List.of("name", "age")) {
-            assertTrue(body.contains("{" + variable + "}"), "template should reference " + variable);
-            assertTrue(createPet.getParameters().containsKey(variable), variable + " is in the body template but not declared as a parameter");
+        // Every variable the template references must be declared — that is the
+        // invariant, whatever shape the template takes.
+        var matcher = java.util.regex.Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(createPet.getRequest().getBody());
+        int found = 0;
+        while (matcher.find()) {
+            found++;
+            assertTrue(createPet.getParameters().containsKey(matcher.group(1)),
+                    matcher.group(1) + " is in the body template but not declared as a parameter");
         }
+        assertTrue(found > 0, "a call with a request body must reference at least one variable");
     }
 
     @Test
@@ -271,8 +304,8 @@ class McpApiToolBuilderTest {
     }
 
     @Test
-    @DisplayName("a path parameter wins a name collision with a body property")
-    void parseAndBuild_pathParameterWinsCollisionWithBodyProperty() {
+    @DisplayName("a path parameter and the body no longer share a variable")
+    void parseAndBuild_pathParameterAndBodyDoNotCollide() {
         String spec = """
                 {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things/{id}":{"put":{
                 "operationId":"updateThing","tags":["things"],
@@ -284,10 +317,12 @@ class McpApiToolBuilderTest {
         var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
         ApiCall updateThing = result.configsByGroup().get("things").getHttpCalls().get(0);
 
-        // Structural wins: the path segment must resolve, and one Qute variable
-        // cannot mean two things.
+        // With the whole body in one variable there is no collision left to resolve:
+        // the path keeps {id}, and the body's own id is the model's to write.
         assertEquals("The path id", updateThing.getParameters().get("id"));
-        assertTrue(updateThing.getParameters().containsKey("label"));
+        assertTrue(updateThing.getParameters().containsKey(McpApiToolBuilder.WHOLE_BODY_VARIABLE));
+        assertFalse(updateThing.getParameters().containsKey("label"), "body properties are no longer separate parameters");
+        assertTrue(updateThing.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE).contains("label"));
     }
 
     @Test

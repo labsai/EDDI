@@ -354,46 +354,64 @@ public final class McpApiToolBuilder {
         if (schema == null) {
             return new BodyTemplate("{}", Map.of());
         }
+        // One variable carrying the whole body, always — never a per-property
+        // template. Decomposing looks more helpful and is worse in three ways:
+        //
+        // 1. Every variable becomes a REQUIRED tool parameter (AgentOrchestrator
+        // builds the schema from ApiCall.parameters and marks all of them
+        // required, and a Map<String,String> has nowhere to record optionality),
+        // so a PATCH of one field forces the model to restate every other —
+        // turning a partial update into a full overwrite.
+        // 2. Values are substituted into the JSON unescaped: the templating engine
+        // runs in TEXT mode and escapes nothing, so a model-supplied value
+        // containing a quote can break the body or add fields the schema never
+        // declared. With the whole body in one variable there is no substitution
+        // boundary to cross.
+        // 3. It is what the approver sees. The HITL card shows tool arguments, so
+        // "the arguments are the request" only holds if the model wrote the body
+        // itself.
+        //
+        // The shape the model would have inferred from a decomposed template is
+        // preserved in the parameter description instead.
+        return new BodyTemplate("{" + WHOLE_BODY_VARIABLE + "}", Map.of(WHOLE_BODY_VARIABLE, describeBodySchema(schema)));
+    }
+
+    /**
+     * A one-line description of the body shape, for the tool parameter.
+     * <p>
+     * This is the model's only clue about what to write, so it names the properties
+     * and marks which are required. Types are included because the model must
+     * produce real JSON — an integer field unquoted, a string field quoted.
+     */
+    private static String describeBodySchema(Schema<?> schema) {
+        var description = new StringBuilder("The complete JSON request body, as a single JSON object.");
 
         @SuppressWarnings("rawtypes")
         Map<String, Schema> properties = schema.getProperties();
         if (properties == null || properties.isEmpty()) {
-            // No properties to decompose — typically an unresolved $ref, which is the
-            // common case for this API. One variable carrying the whole JSON body is
-            // also the most reviewable shape: what the model wrote is what gets sent.
-            return new BodyTemplate("{" + WHOLE_BODY_VARIABLE + "}",
-                    Map.of(WHOLE_BODY_VARIABLE, "The complete JSON request body, as a single JSON object."));
+            return description.toString();
         }
 
-        var variables = new LinkedHashMap<String, String>();
-        var sb = new StringBuilder("{\n");
-        var entries = new ArrayList<>(properties.entrySet());
-        for (int i = 0; i < entries.size(); i++) {
-            var entry = entries.get(i);
-            String propName = entry.getKey();
-            Schema<?> propSchema = entry.getValue();
-
-            sb.append("  \"").append(propName).append("\": ");
-
-            String type = propSchema.getType();
-            if ("string".equals(type)) {
-                sb.append("\"{").append(propName).append("}\"");
-            } else {
-                // number, integer, boolean, object, array — unquoted template
-                sb.append("{").append(propName).append("}");
+        List<String> required = schema.getRequired() != null ? schema.getRequired() : List.of();
+        var parts = new ArrayList<String>();
+        for (var entry : properties.entrySet()) {
+            var propSchema = entry.getValue();
+            var part = new StringBuilder(entry.getKey());
+            if (propSchema.getType() != null) {
+                part.append(" (").append(propSchema.getType());
+                if (required.contains(entry.getKey())) {
+                    part.append(", required");
+                }
+                part.append(")");
+            } else if (required.contains(entry.getKey())) {
+                part.append(" (required)");
             }
-
-            variables.put(propName, propSchema.getDescription() != null && !propSchema.getDescription().isBlank()
-                    ? propSchema.getDescription()
-                    : propName);
-
-            if (i < entries.size() - 1) {
-                sb.append(",");
+            if (propSchema.getDescription() != null && !propSchema.getDescription().isBlank()) {
+                part.append(": ").append(propSchema.getDescription());
             }
-            sb.append("\n");
+            parts.add(part.toString());
         }
-        sb.append("}");
-        return new BodyTemplate(sb.toString(), variables);
+        return description.append(" Properties — ").append(String.join("; ", parts)).append(".").toString();
     }
 
     /**
