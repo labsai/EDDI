@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -149,10 +150,58 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
         if (sanitized.isEmpty() || sanitized.contains(".")) {
             return;
         }
-        String indexName = "idx_resources_field_" + sanitized.toLowerCase();
-        createIndexQuietly(stmt,
-                "CREATE INDEX IF NOT EXISTS " + indexName + " ON resources (collection_name, (data ->> '" + sanitized + "'))");
+        createIndexQuietly(stmt, "CREATE INDEX IF NOT EXISTS " + fieldIndexName(sanitized) + " ON resources (collection_name, (data ->> '"
+                + sanitized + "'))");
     }
+
+    /**
+     * Index name for a field hint — case-sensitive even though PostgreSQL
+     * identifiers are not.
+     * <p>
+     * JSON keys are case-sensitive, so {@code userId} and {@code userid} are two
+     * different expressions; index names are schema-global and folded to lower
+     * case, so both used to resolve to {@code idx_resources_field_userid}.
+     * {@code CREATE INDEX IF NOT EXISTS} then made whichever came second a silent
+     * no-op — it only emits a NOTICE — leaving one field unindexed while this class
+     * believed it was indexed.
+     * <p>
+     * A hint that is already all lower case keeps its historical name, so existing
+     * deployments do not grow a duplicate index on upgrade; anything with an upper
+     * case character gets a short digest of the exact expression appended, which is
+     * enough to keep case variants apart. A name that would exceed PostgreSQL's
+     * 63-byte identifier limit is truncated here rather than by the server, with a
+     * fixed-width digest kept at the end — server-side truncation would cut the
+     * digest off and collapse distinct hints back together.
+     */
+    private static String fieldIndexName(String sanitizedField) {
+        String lowerCased = sanitizedField.toLowerCase(Locale.ROOT);
+        String historical = INDEX_NAME_PREFIX + lowerCased;
+        if (lowerCased.equals(sanitizedField) && historical.length() <= MAX_IDENTIFIER_LENGTH) {
+            return historical;
+        }
+
+        String withDigest = historical + "_" + Integer.toHexString(sanitizedField.hashCode());
+        if (withDigest.length() <= MAX_IDENTIFIER_LENGTH) {
+            return withDigest;
+        }
+
+        // PostgreSQL truncates an over-long identifier to 63 bytes SILENTLY, so two
+        // long hints sharing a prefix would collapse to one name and CREATE INDEX IF
+        // NOT EXISTS would no-op for the second — the same silent-miss this method
+        // exists to prevent, just reached by length instead of by case. Worse, the
+        // digest is the part that gets cut, so it stops disambiguating exactly when
+        // it is needed. Truncate the BASE ourselves and keep a fixed-width digest of
+        // the full expression at the end.
+        String digest = String.format("%08x", sanitizedField.hashCode());
+        int room = MAX_IDENTIFIER_LENGTH - INDEX_NAME_PREFIX.length() - 1 - digest.length();
+        String base = lowerCased.substring(0, Math.min(lowerCased.length(), Math.max(room, 0)));
+        return INDEX_NAME_PREFIX + base + "_" + digest;
+    }
+
+    /** PostgreSQL silently truncates identifiers beyond this many bytes. */
+    private static final int MAX_IDENTIFIER_LENGTH = 63;
+
+    private static final String INDEX_NAME_PREFIX = "idx_resources_field_";
 
     private void createIndexQuietly(Statement stmt, String createIndexSql) {
         try {
@@ -520,9 +569,27 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
         }
     }
 
+    /**
+     * The jsonpath existence operator, written for the JDBC driver rather than for
+     * the server.
+     * <p>
+     * pgjdbc scans the statement character by character and turns every bare
+     * {@code ?} into a bind placeholder; {@code @} is not special to it, so a
+     * literally spelled {@code data @? ?::jsonpath} is parsed as
+     * {@code data @ $1 $2::jsonpath} — three placeholders where only two values are
+     * bound, which fails at execution time on a real server. Doubling it
+     * ({@code ??}) is pgjdbc's documented escape for a literal question mark: the
+     * driver collapses the pair and sends {@code @?} to PostgreSQL. The same escape
+     * is used for the {@code ?|} operator in {@code PostgresUserMemoryStore}.
+     * <p>
+     * The operator form (rather than {@code jsonb_path_exists(...)}) is deliberate
+     * — only {@code @?} can be answered from the {@code jsonb_path_ops} GIN index.
+     */
+    private static final String JSONPATH_EXISTS = " AND data @?? ?::jsonpath";
+
     @Override
     public List<IResourceStore.IResourceId> findResourceIdsContaining(String jsonPath, String value) {
-        String sql = "SELECT id, version FROM resources WHERE collection_name = ? AND data @? ?::jsonpath";
+        String sql = "SELECT id, version FROM resources WHERE collection_name = ?" + JSONPATH_EXISTS;
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, collectionName);
             ps.setString(2, toContainmentJsonPath(jsonPath, value));
@@ -534,7 +601,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public List<IResourceStore.IResourceId> findHistoryResourceIdsContaining(String jsonPath, String value) {
-        String sql = "SELECT id, version FROM resources_history WHERE collection_name = ? AND data @? ?::jsonpath";
+        String sql = "SELECT id, version FROM resources_history WHERE collection_name = ?" + JSONPATH_EXISTS;
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, collectionName);
             ps.setString(2, toContainmentJsonPath(jsonPath, value));

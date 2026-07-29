@@ -18,9 +18,18 @@ import java.util.*;
 /**
  * MongoDB implementation of {@link IAuditStore}.
  * <p>
- * Uses a dedicated {@code audit_ledger} collection with insert-only semantics.
- * No {@code updateOne()}, {@code replaceOne()}, or {@code deleteOne()}
- * operations are ever called — this enforces the write-once contract.
+ * Uses a dedicated {@code audit_ledger} collection with insert-only semantics,
+ * with exactly one exception: {@link #pseudonymizeByUserId} issues an
+ * {@code updateMany} to overwrite {@code userId} under GDPR Art. 17(3)(e).
+ * Nothing else mutates or removes a stored entry — no {@code deleteOne()},
+ * {@code deleteMany()}, {@code replaceOne()}, and no update of any other field.
+ * <p>
+ * That mutation does <em>not</em> invalidate the entry's HMAC: since the v3
+ * canonical form the signature covers
+ * {@link ai.labs.eddi.engine.audit.AuditHmac#identityToken}, which maps a user
+ * identifier and its pseudonym to the same value. Rows written under v1/v2
+ * (which signed {@code userId} verbatim) do not verify after pseudonymisation
+ * and are reported as such by the verification endpoint.
  * <p>
  * Annotated {@code @DefaultBean} so PostgreSQL can provide an alternative.
  *
@@ -54,6 +63,7 @@ public class AuditStore implements IAuditStore {
     private static final String F_TIMESTAMP = "timestamp";
     private static final String F_HMAC = "hmac";
     private static final String F_AGENT_SIGNATURE = "agentSignature";
+    private static final String F_SEQUENCE = "sequence";
 
     private final MongoCollection<Document> collection;
 
@@ -157,6 +167,7 @@ public class AuditStore implements IAuditStore {
             doc.put(F_HMAC, entry.hmac());
         if (entry.agentSignature() != null)
             doc.put(F_AGENT_SIGNATURE, entry.agentSignature());
+        doc.put(F_SEQUENCE, entry.sequence());
         return doc;
     }
 
@@ -170,12 +181,31 @@ public class AuditStore implements IAuditStore {
                 doc.get(F_TOOL_CALLS) instanceof Document d ? new LinkedHashMap<>(d) : null, doc.getList(F_ACTIONS, String.class),
                 doc.getDouble(F_COST) != null ? doc.getDouble(F_COST) : 0.0,
                 doc.getDate(F_TIMESTAMP) != null ? doc.getDate(F_TIMESTAMP).toInstant() : null, doc.getString(F_HMAC),
-                doc.getString(F_AGENT_SIGNATURE));
+                doc.getString(F_AGENT_SIGNATURE), readSequence(doc));
     }
+
+    /**
+     * Read the chain position, tolerating documents written before the field
+     * existed (and any numeric BSON type the driver hands back).
+     */
+    private static long readSequence(Document doc) {
+        Object raw = doc.get(F_SEQUENCE);
+        return raw instanceof Number n ? n.longValue() : AuditEntry.UNSEQUENCED;
+    }
+
+    /**
+     * Pseudonymisation is HMAC-preserving for v3 rows — see the class javadoc — so
+     * the blanket {@code updateMany} stays correct and stays cheap.
+     */
     @Override
     public long pseudonymizeByUserId(String userId, String pseudonym) {
         return collection.updateMany(
                 new Document(F_USER_ID, userId),
                 new Document("$set", new Document(F_USER_ID, pseudonym))).getModifiedCount();
+    }
+
+    @Override
+    public boolean supportsSequence() {
+        return true;
     }
 }

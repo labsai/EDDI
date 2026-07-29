@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.dictionary;
 
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -16,6 +17,7 @@ import java.util.List;
  */
 @Path("/expressions")
 @Tag(name = "Configuration / Dictionary", description = "Dictionary, expressions, and actions for NLP")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestExpression {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

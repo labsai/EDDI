@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
@@ -28,12 +30,14 @@ import static org.mockito.Mockito.*;
 class RestAgentEngineStreamingTest {
 
     private IConversationService conversationService;
+    private ConversationAccessGuard conversationAccessGuard;
     private RestAgentEngineStreaming streaming;
 
     @BeforeEach
     void setUp() {
         conversationService = mock(IConversationService.class);
-        streaming = new RestAgentEngineStreaming(conversationService);
+        conversationAccessGuard = mock(ConversationAccessGuard.class);
+        streaming = new RestAgentEngineStreaming(conversationService, conversationAccessGuard);
     }
 
     @Nested
@@ -206,6 +210,42 @@ class RestAgentEngineStreamingTest {
             handler.onCascadeEscalation(0, 1, 0.4, 0.7, "low_confidence", 42L);
             verify(eventBuilder).name("cascade_escalation");
             verify(eventSink, times(2)).send(sseEvent);
+        }
+
+        @Test
+        @DisplayName("A1: a caller who does not own the conversation is denied (403) before the turn runs")
+        void deniesForeignConversation() throws Exception {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var inputData = new InputData();
+            inputData.setInput("Hello");
+
+            // user B posting into user A's conversation
+            doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
+                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+
+            assertThrows(ForbiddenException.class,
+                    () -> streaming.sayStreaming("conv-of-user-a", false, false, List.of(), inputData, eventSink, sse));
+
+            // The turn must not have been started, and the denial must NOT be
+            // downgraded into an SSE 'error' event on an otherwise 200 stream.
+            verify(conversationService, never()).sayStreaming(anyString(), any(), any(), any(), any(), any());
+            verify(eventSink, never()).send(any(OutboundSseEvent.class));
+        }
+
+        @Test
+        @DisplayName("A1: the owner check runs on every streaming turn")
+        void checksOwnershipOnEveryTurn() throws Exception {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var inputData = new InputData();
+            inputData.setInput("Hello");
+
+            when(eventSink.isClosed()).thenReturn(false);
+
+            streaming.sayStreaming("conv-1", false, false, List.of(), inputData, eventSink, sse);
+
+            verify(conversationAccessGuard).requireConversationOwner("conv-1");
         }
 
         @Test

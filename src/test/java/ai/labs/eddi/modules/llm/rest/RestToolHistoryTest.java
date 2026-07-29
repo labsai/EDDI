@@ -10,9 +10,12 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
+import io.quarkus.security.ForbiddenException;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,6 +23,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -37,6 +41,7 @@ class RestToolHistoryTest {
     private ToolCacheService cacheService;
     private ToolRateLimiter rateLimiter;
     private ToolCostTracker costTracker;
+    private ConversationAccessGuard conversationAccessGuard;
 
     @BeforeEach
     void setUp() {
@@ -44,8 +49,114 @@ class RestToolHistoryTest {
         cacheService = mock(ToolCacheService.class);
         rateLimiter = mock(ToolRateLimiter.class);
         costTracker = mock(ToolCostTracker.class);
+        conversationAccessGuard = mock(ConversationAccessGuard.class);
 
-        restToolHistory = new RestToolHistory(cacheService, rateLimiter, costTracker, memoryStore);
+        restToolHistory = new RestToolHistory(cacheService, rateLimiter, costTracker, memoryStore, conversationAccessGuard);
+    }
+
+    // ==================== Access control (finding A4) ====================
+
+    @Nested
+    @DisplayName("A4 — tool control plane access control")
+    class AccessControl {
+
+        private List<String> rolesOn(Class<?> type) {
+            RolesAllowed roles = type.getAnnotation(RolesAllowed.class);
+            assertNotNull(roles, type.getSimpleName() + " must declare @RolesAllowed");
+            return Arrays.asList(roles.value());
+        }
+
+        private List<String> rolesOn(String methodName, Class<?>... params) throws Exception {
+            RolesAllowed roles = RestToolHistory.class.getMethod(methodName, params).getAnnotation(RolesAllowed.class);
+            assertNotNull(roles, methodName + " must declare @RolesAllowed");
+            return Arrays.asList(roles.value());
+        }
+
+        @Test
+        @DisplayName("the control plane is admin-only, so rate-limit/cost resets are unreachable for non-admins")
+        void controlPlaneIsAdminOnly() {
+            assertEquals(List.of("eddi-admin"), rolesOn(RestToolHistory.class));
+        }
+
+        @Test
+        @DisplayName("the reset endpoints inherit the admin-only class role (no widening override)")
+        void resetEndpointsStayAdminOnly() throws Exception {
+            assertNull(RestToolHistory.class.getMethod("resetRateLimit", String.class).getAnnotation(RolesAllowed.class),
+                    "resetRateLimit must not override the admin-only class role");
+            assertNull(RestToolHistory.class.getMethod("resetCosts").getAnnotation(RolesAllowed.class),
+                    "resetCosts must not override the admin-only class role");
+            assertNull(RestToolHistory.class.getMethod("clearCache").getAnnotation(RolesAllowed.class),
+                    "clearCache must not override the admin-only class role");
+        }
+
+        @Test
+        @DisplayName("tool history is readable by ordinary users — gated on conversation ownership, not role alone")
+        void historyIsOwnerScoped() throws Exception {
+            assertTrue(rolesOn("getToolHistory", String.class).contains("eddi-user"));
+        }
+
+        @Test
+        @DisplayName("history of a foreign conversation is denied before any trace is read")
+        void foreignHistoryIsDenied() throws Exception {
+            doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
+                    .when(conversationAccessGuard).requireConversationOwner("conversation-of-user-a");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restToolHistory.getToolHistory("conversation-of-user-a"));
+
+            // Tool arguments and results must never be loaded for a foreign caller.
+            verify(memoryStore, never()).loadConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("history of an owned conversation still runs the ownership check")
+        void ownedHistoryIsChecked() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationSteps(List.of());
+            when(memoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+
+            assertEquals(200, restToolHistory.getToolHistory("conv-1").getStatus());
+
+            verify(conversationAccessGuard).requireConversationOwner("conv-1");
+        }
+    }
+
+    // ==================== Error bodies (finding A12) ====================
+
+    @Nested
+    @DisplayName("A12 — 500 bodies carry no internal detail")
+    class OpaqueErrorBodies {
+
+        @Test
+        @DisplayName("a store failure returns a fixed message plus a correlation id, never the driver message")
+        void storeFailureIsOpaque() throws Exception {
+            when(memoryStore.loadConversationMemorySnapshot("conv-1"))
+                    .thenThrow(new RuntimeException("Timed out connecting to replica set [mongo-01.internal:27017] db=eddi coll=conversations"));
+
+            Response response = restToolHistory.getToolHistory("conv-1");
+
+            assertEquals(500, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("Internal server error", body.get("error"));
+            assertNotNull(body.get("correlationId"));
+            assertFalse(body.toString().contains("mongo-01.internal"), "hostname leaked into the 500 body");
+            assertFalse(body.toString().contains("conversations"), "collection name leaked into the 500 body");
+        }
+
+        @Test
+        @DisplayName("a cost-tracker failure is opaque too")
+        void costFailureIsOpaque() {
+            when(costTracker.getCostSummary()).thenThrow(new RuntimeException("jdbc:postgresql://db-primary.internal:5432/eddi refused"));
+
+            Response response = restToolHistory.getCosts();
+
+            assertEquals(500, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("Internal server error", body.get("error"));
+            assertFalse(body.toString().contains("db-primary.internal"), "hostname leaked into the 500 body");
+        }
     }
 
     // ==================== getToolHistory ====================

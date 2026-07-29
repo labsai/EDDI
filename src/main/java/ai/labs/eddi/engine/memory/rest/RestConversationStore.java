@@ -27,6 +27,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -63,6 +64,15 @@ public class RestConversationStore implements IRestConversationStore {
      * auth-disabled callers are not filtered and never reach this bound.
      */
     private static final int MAX_OWNER_SCAN = 500;
+
+    /**
+     * Smallest age (in days) the deployment-wide retention sweep accepts. Zero used
+     * to be legal and meant "every ended conversation, regardless of age" — one
+     * query parameter away from wiping the deployment. Values below this bound are
+     * rejected on the REST path and treated as "retention disabled" by the
+     * scheduled sweep.
+     */
+    static final int MIN_RETENTION_DAYS = 1;
 
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
@@ -360,6 +370,11 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Scheduled(every = "24h")
     public void deleteEndedConversationsOlderThanXDays() {
+        if (deleteEndedConversationsOnceOlderThanDays == null || deleteEndedConversationsOnceOlderThanDays < MIN_RETENTION_DAYS) {
+            log.debugf("Ended-conversation retention sweep disabled (deleteEndedConversationsOnceOlderThanDays < %d)", MIN_RETENTION_DAYS);
+            return;
+        }
+
         runtime.submitCallable(() -> {
             try {
                 var amountOfEndedConversations = permanentlyDeleteEndedConversationLogs(deleteEndedConversationsOnceOlderThanDays);
@@ -399,27 +414,31 @@ public class RestConversationStore implements IRestConversationStore {
     public Integer permanentlyDeleteEndedConversationLogs(Integer deleteOlderThanDays)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
-        int amountOfEndedConversations = 0;
-        if (deleteOlderThanDays != null && deleteOlderThanDays > -1) {
-            var deleteOlderThanThisDate = Date.from(Instant.now().minus(Duration.ofDays(deleteOlderThanDays)));
-            var endedConversationIds = conversationMemoryStore.getEndedConversationIds();
+        if (deleteOlderThanDays == null || deleteOlderThanDays < MIN_RETENTION_DAYS) {
+            throw new BadRequestException(
+                    "deleteOlderThanDays must be at least " + MIN_RETENTION_DAYS
+                            + " — a smaller value would permanently delete every ended conversation in the deployment");
+        }
 
-            for (var endedConversationId : endedConversationIds) {
-                try {
-                    var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, 0);
-                    if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
-                        documentDescriptorStore.deleteAllDescriptor(endedConversationId);
-                        conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
-                        deleteAttachmentsForConversation(endedConversationId);
-                        conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
-                        amountOfEndedConversations++;
-                    }
-                } catch (IResourceStore.ResourceNotFoundException e) {
+        int amountOfEndedConversations = 0;
+        var deleteOlderThanThisDate = Date.from(Instant.now().minus(Duration.ofDays(deleteOlderThanDays)));
+        var endedConversationIds = conversationMemoryStore.getEndedConversationIds();
+
+        for (var endedConversationId : endedConversationIds) {
+            try {
+                var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, 0);
+                if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
+                    documentDescriptorStore.deleteAllDescriptor(endedConversationId);
                     conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                     deleteAttachmentsForConversation(endedConversationId);
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
-                    log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
+                    amountOfEndedConversations++;
                 }
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
+                deleteAttachmentsForConversation(endedConversationId);
+                conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
+                log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
             }
         }
 

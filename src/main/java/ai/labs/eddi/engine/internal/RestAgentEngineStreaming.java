@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.sse.Sse;
@@ -47,10 +48,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private final IConversationService conversationService;
+    private final ConversationAccessGuard conversationAccessGuard;
 
     @Inject
-    public RestAgentEngineStreaming(IConversationService conversationService) {
+    public RestAgentEngineStreaming(IConversationService conversationService,
+            ConversationAccessGuard conversationAccessGuard) {
         this.conversationService = conversationService;
+        this.conversationAccessGuard = conversationAccessGuard;
     }
 
     @Override
@@ -58,6 +62,14 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                              InputData inputData, SseEventSink eventSink, Sse sse) {
 
         final String safeConversationId = sanitize(conversationId);
+
+        // Same owner-or-admin gate the non-streaming twin applies (RestAgentEngine)
+        // — without it, anyone who learns a conversationId could drive a turn under
+        // its owner's identity. Runs BEFORE the sink is touched so the denial
+        // surfaces as a plain 403 rather than an SSE 'error' event on a 200 stream.
+        // ConversationService re-checks: this layer is defence in depth.
+        conversationAccessGuard.requireConversationOwner(conversationId);
+
         try {
             conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                     new IConversationService.StreamingResponseHandler() {

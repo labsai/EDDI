@@ -335,6 +335,40 @@ class RestA2AEndpointTest {
         assertEquals(A2AModels.ERROR_INTERNAL, body.error().code());
     }
 
+    @Test
+    void handleJsonRpc_tasksSend_internalFailure_doesNotLeakExceptionDetail() throws Exception {
+        endpoint = createEndpoint(true, false);
+        var params = Map.<String, Object>of("message", "Hello");
+        var request = new JsonRpcRequest("2.0", "tasks/send", params, "req-1");
+        when(taskHandler.handleTaskSend(AGENT_ID, params))
+                .thenThrow(new IllegalStateException("mongodb://admin:s3cr3t@internal-db.corp:27017 connection refused"));
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+
+        var body = (JsonRpcResponse) response.getEntity();
+        assertNotNull(body.error());
+        assertEquals(A2AModels.ERROR_INTERNAL, body.error().code());
+        assertEquals(RestA2AEndpoint.INTERNAL_ERROR_MESSAGE, body.error().message());
+        assertFalse(body.error().message().contains("internal-db.corp"));
+        assertFalse(body.error().message().contains("s3cr3t"));
+    }
+
+    @Test
+    void handleJsonRpc_tasksSend_invalidRequest_returnsAuthoredMessage() throws Exception {
+        endpoint = createEndpoint(true, false);
+        var params = Map.<String, Object>of("message", "Hello");
+        var request = new JsonRpcRequest("2.0", "tasks/send", params, "req-1");
+        when(taskHandler.handleTaskSend(AGENT_ID, params))
+                .thenThrow(new InvalidA2ARequestException("No text content found in message parts"));
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+
+        var body = (JsonRpcResponse) response.getEntity();
+        assertNotNull(body.error());
+        assertEquals(A2AModels.ERROR_INVALID_PARAMS, body.error().code());
+        assertEquals("No text content found in message parts", body.error().message());
+    }
+
     // ==================== handleJsonRpc — tasks/get ====================
 
     @Test
@@ -393,6 +427,21 @@ class RestA2AEndpointTest {
         var body = (JsonRpcResponse) response.getEntity();
         assertNotNull(body.error());
         assertEquals(A2AModels.ERROR_TASK_NOT_FOUND, body.error().code());
+    }
+
+    @Test
+    void handleJsonRpc_tasksGet_notFound_doesNotEchoCallerSuppliedTaskId() {
+        endpoint = createEndpoint(true, false);
+        String probedTaskId = "task-of-another-peer-42";
+        var params = Map.<String, Object>of("id", probedTaskId);
+        var request = new JsonRpcRequest("2.0", "tasks/get", params, "req-2");
+        when(taskHandler.handleTaskGet(probedTaskId)).thenReturn(null);
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+
+        var body = (JsonRpcResponse) response.getEntity();
+        assertEquals(A2AModels.ERROR_TASK_NOT_FOUND, body.error().code());
+        assertFalse(body.error().message().contains(probedTaskId));
     }
 
     // ==================== handleJsonRpc — tasks/cancel ====================

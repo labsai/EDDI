@@ -186,6 +186,15 @@ class PromptSnippetServiceTest {
             assertEquals("Hello {{properties.name.valueString}}!", result.get("dynamic_snippet"));
         }
 
+        /**
+         * templateEnabled=false must stop Qute resolving the content. It previously
+         * wrapped it in Jinja2 {% raw %} tags, which Qute does not understand: the tags
+         * were emitted into the system prompt verbatim AND the {...} markers they were
+         * meant to protect were still resolved. Qute's unparsed block {|...|} is what
+         * actually protects it — see
+         * PlaceholderSyntaxContractTest#unparsedBlockProtectsContent, which renders
+         * both forms through the real engine.
+         */
         @Test
         void shouldEscapeWhenTemplateDisabledAndContentHasMarkers() throws Exception {
             DocumentDescriptor desc = createDescriptor("s1", 1);
@@ -193,11 +202,50 @@ class PromptSnippetServiceTest {
                     .thenReturn(List.of(desc));
             when(snippetStore.read("s1", 1))
                     .thenReturn(new PromptSnippet("code_example", "custom", null,
-                            "Use {{variable}} in your code", null, false));
+                            "Use {variable} in your code", null, false));
 
             Map<String, Object> result = service.getAll();
 
-            assertEquals("{% raw %}Use {{variable}} in your code{% endraw %}", result.get("code_example"));
+            assertEquals("{|Use {variable} in your code|}", result.get("code_example"));
+        }
+
+        /**
+         * Content carrying the unparsed-block terminator would otherwise close the
+         * block early and hand the rest back to the parser — reintroducing the very
+         * evaluation this is preventing. Verified against the real engine: a naive wrap
+         * of "a|} {properties.name} b" renders "a LEAKED b|}".
+         */
+        @Test
+        void shouldSurviveContentContainingTheBlockTerminator() throws Exception {
+            DocumentDescriptor desc = createDescriptor("s1", 1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenReturn(List.of(desc));
+            when(snippetStore.read("s1", 1))
+                    .thenReturn(new PromptSnippet("t", "custom", null,
+                            "a|} {properties.name} b", null, false));
+
+            String escaped = (String) service.getAll().get("t");
+
+            assertFalse(escaped.startsWith("{|a|} "),
+                    "the terminator must not be left able to close the block early: " + escaped);
+            assertTrue(escaped.startsWith("{|") && escaped.endsWith("|}"), escaped);
+        }
+
+        /**
+         * The marker being looked for is Qute's "{", not Jinja2's "{{". Content
+         * carrying a real Qute expression is exactly what needs protecting, and it used
+         * not to be detected at all.
+         */
+        @Test
+        void shouldEscapeSingleBraceQuteMarkers() throws Exception {
+            DocumentDescriptor desc = createDescriptor("s1", 1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenReturn(List.of(desc));
+            when(snippetStore.read("s1", 1))
+                    .thenReturn(new PromptSnippet("q", "custom", null,
+                            "Hello {properties.name}", null, false));
+
+            assertEquals("{|Hello {properties.name}|}", service.getAll().get("q"));
         }
 
         @Test

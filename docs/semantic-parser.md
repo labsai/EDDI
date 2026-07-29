@@ -14,7 +14,7 @@ The **Pattern Matcher** (historically called "Semantic Parser") is EDDI's input 
 **What it actually does:**
 
 - Matches words and phrases from dictionaries
-- Applies fuzzy matching corrections (typos, stemming)
+- Applies fuzzy matching corrections (typos, phonetics, merged terms)
 - Converts matched patterns to expression strings
 - Enables pattern-based orchestration logic
 
@@ -136,15 +136,16 @@ Brittle, hard to maintain, requires code changes for new routing rules!
    - Used for agent routing and request classification
 
 2. **Built-in Dictionaries**: Pre-configured for common patterns
-   - **Integer**: `"42"` → `number(42)`
+   - **Integer**: `"42"` → `integer(42)`
    - **Decimal**: `"3.14"` → `decimal(3.14)`
    - **Email**: `"user@example.com"` → `email(user@example.com)`
-   - **Time**: `"3pm tomorrow"` → `time(15:00, +1day)`
+   - **Time**: `"13:43"` → `time(<epoch-millis>)` — 24-hour clock only, no am/pm and no relative dates
    - **Punctuation**: `"!"` → `punctuation(exclamation_mark)`
    - **Ordinal Number**: `"1st"` → `ordinal_number(1)`
 
+   See [Dictionary Types Reference](#dictionary-types-reference) for the exact emitted expression names.
+
 3. **Corrections**: Handle typos and variations
-   - **Stemming**: `"running"` → `"run"`
    - **Levenshtein**: `"helo"` → `"hello"` (distance 1-2 characters)
    - **Phonetic**: `"nite"` → `"night"`
    - **Merged Terms**: Handles words without spaces
@@ -188,7 +189,7 @@ Regular dictionaries define custom words and phrases for agent routing. We'll cr
 
 ### Step 1: Create a Regular Dictionary for Agent Routing
 
-Make a `POST` request to `/regulardictionarystore/regulardictionaries` with this JSON:
+Make a `POST` request to `/dictionarystore/dictionaries` with this JSON:
 
 ```json
 {
@@ -240,7 +241,7 @@ Make a `POST` request to `/regulardictionarystore/regulardictionaries` with this
 **Request:**
 
 ```bash
-curl -X POST http://localhost:7070/regulardictionarystore/regulardictionaries \
+curl -X POST http://localhost:7070/dictionarystore/dictionaries \
   -H "Content-Type: application/json" \
   -d '{
     "lang": "en",
@@ -258,13 +259,13 @@ curl -X POST http://localhost:7070/regulardictionarystore/regulardictionaries \
 The response's `Location` header contains the URI of the created dictionary:
 
 ```
-Location: http://localhost:7070/regulardictionarystore/regulardictionaries/DICT_ID?version=1
+Location: http://localhost:7070/dictionarystore/dictionaries/DICT_ID?version=1
 ```
 
 This gives you the reference URI:
 
 ```
-eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/DICT_ID?version=1
+eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1
 ```
 
 **Key Points:**
@@ -310,18 +311,11 @@ Make a `POST` request to `/parserstore/parsers` with this JSON:
       {
         "type": "eddi://ai.labs.parser.dictionaries.regular",
         "config": {
-          "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<DICT_ID>?version=1"
+          "uri": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<DICT_ID>?version=1"
         }
       }
     ],
     "corrections": [
-      {
-        "type": "eddi://ai.labs.parser.corrections.stemming",
-        "config": {
-          "language": "english",
-          "lookupIfKnown": "false"
-        }
-      },
       {
         "type": "eddi://ai.labs.parser.corrections.levenshtein",
         "config": {
@@ -347,7 +341,7 @@ curl -X POST http://localhost:7070/parserstore/parsers \
       "dictionaries": [
         {"type": "eddi://ai.labs.parser.dictionaries.integer"},
         {"type": "eddi://ai.labs.parser.dictionaries.regular",
-         "config": {"uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/DICT_ID?version=1"}}
+         "config": {"uri": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1"}}
       ],
       "corrections": [
         {"type": "eddi://ai.labs.parser.corrections.levenshtein", "config": {"distance": "2"}}
@@ -372,24 +366,29 @@ eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1
 
 ### Dictionary Types Reference
 
+> **These are the exact expression names the parser emits.** Behavior rules match on the emitted name, so a rule written against a different name never fires — copy the names from this table verbatim.
+
 | Type           | EDDI URI                                           | Description                                                                                                                   | Example                                          |
 | -------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| Integer        | `eddi://ai.labs.parser.dictionaries.integer`       | Matches positive integers                                                                                                     | `"42"` → `number(42)`                            |
+| Integer        | `eddi://ai.labs.parser.dictionaries.integer`       | Matches positive integers                                                                                                     | `"42"` → `integer(42)`                           |
 | Decimal        | `eddi://ai.labs.parser.dictionaries.decimal`       | Matches decimal numbers (both `.` and `,` separators)                                                                       | `"3.14"` → `decimal(3.14)`                       |
 | Punctuation    | `eddi://ai.labs.parser.dictionaries.punctuation`   | Matches common punctuation: `!` (exclamation_mark), `?` (question_mark), `.` (dot), `,` (comma), `:` (colon), `;` (semicolon) | `"!"` → `punctuation(exclamation_mark)`          |
 | Email          | `eddi://ai.labs.parser.dictionaries.email`         | Matches email addresses                                                                                                       | `"user@example.com"` → `email(user@example.com)` |
-| Time           | `eddi://ai.labs.parser.dictionaries.time`          | Matches time formats: 01:20, 01h20, 22:40, 13:43:23                                                                           | `"3pm"` → `time(15:00)`                          |
+| Time           | `eddi://ai.labs.parser.dictionaries.time`          | Matches 24-hour clock formats only: `13:43`, `13:43:23`, `01h20`, `22h`. **No am/pm parsing** — `"3pm"` is not a time.       | `"13:43"` → `time(<epoch-millis>)`               |
 | Ordinal Number | `eddi://ai.labs.parser.dictionaries.ordinalNumber` | Ordinal numbers in English: 1st, 2nd, 3rd, etc.                                                                               | `"1st"` → `ordinal_number(1)`                    |
 | Regular        | `eddi://ai.labs.parser.dictionaries.regular`       | Custom dictionary for agent routing                                                                                           | `"billing"` → `category(billing)`                |
+
+> **Time values are epoch milliseconds, not a formatted clock string.** The matched token is converted to a `java.sql.Time` and the expression carries `Time#getTime()` — e.g. `"13:43"` becomes something like `time(45780000)` (the exact number depends on the JVM's time zone). Match on the presence of `time(*)` rather than on a literal value.
 
 ### Correction Types Reference
 
 | Type         | EDDI URI                                        | Description                                      | Example                            |
 | ------------ | ----------------------------------------------- | ------------------------------------------------ | ---------------------------------- |
-| Stemming     | `eddi://ai.labs.parser.corrections.stemming`    | Reduces words to their root form                 | `"running"` → `"run"`              |
 | Levenshtein  | `eddi://ai.labs.parser.corrections.levenshtein` | Matches words with typos (configurable distance) | `"helo"` → `"hello"` (distance=1)  |
 | Phonetic     | `eddi://ai.labs.parser.corrections.phonetic`    | Matches phonetically similar words               | `"nite"` → `"night"`               |
 | Merged Terms | `eddi://ai.labs.parser.corrections.mergedTerms` | Handles words without spaces                     | `"techsupport"` → `"tech support"` |
+
+> **There is no stemming correction.** EDDI ships exactly the three corrections above; referencing `eddi://ai.labs.parser.corrections.stemming` (or any other unregistered extension URI) makes workflow initialization fail with `UnrecognizedExtensionException` and the agent will not start.
 
 ## Testing the Pattern Matcher
 
@@ -419,11 +418,11 @@ The parser returns an array of solutions, where each solution contains expressio
 
 ## Using Pattern Matcher in Agent Orchestration
 
-To use the pattern matcher in your agent orchestration, add it to your package configuration:
+To use the pattern matcher in your agent orchestration, add it as the first step of your workflow configuration:
 
 ```json
 {
-  "packageExtensions": [
+  "workflowSteps": [
     {
       "type": "eddi://ai.labs.parser",
       "extensions": {
@@ -431,7 +430,7 @@ To use the pattern matcher in your agent orchestration, add it to your package c
           {
             "type": "eddi://ai.labs.parser.dictionaries.regular",
             "config": {
-              "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/DICT_ID?version=1"
+              "uri": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1"
             }
           }
         ],
@@ -453,11 +452,18 @@ To use the pattern matcher in your agent orchestration, add it to your package c
 }
 ```
 
-**Configuration Options:**
+**Configuration Options** (all live under the step's `config` object):
 
-- `includeUnknown`: Include expressions for unrecognized words (default: true)
-- `includeUnused`: Include expressions that weren't matched by orchestration rules (default: true)
-- `appendExpressions`: Append new expressions to existing ones (default: true)
+| Option              | Default | Description                                                                       |
+| ------------------- | ------- | --------------------------------------------------------------------------------- |
+| `includeUnknown`    | `true`  | Include `unknown(...)` expressions for unrecognized words                         |
+| `includeUnused`     | `true`  | Include `unused(...)` expressions for words that matched no dictionary entry      |
+| `appendExpressions` | `true`  | Append the freshly parsed expressions to the ones already in the step             |
+| `maxInputTokens`    | `200`   | Hard cap on tokens taken from one input; anything beyond is dropped               |
+| `maxSuggestions`    | `1000`  | Hard cap on dictionary suggestions evaluated per input                            |
+| `maxSolutions`      | `100`   | Hard cap on solutions collected per input                                         |
+
+The three `max*` limits guard against pathological inputs. Values below `1` are ignored and fall back to the default.
 
 ## Complete Example: Multi-Agent Customer Service Orchestration
 
@@ -585,14 +591,7 @@ Let's build an agent routing system for customer service:
 **Problem**: Corrections too aggressive (wrong routing)  
 **Solution**: Reduce Levenshtein distance or disable specific corrections
 
-> **Example:** To reduce the Levenshtein distance threshold for fuzzy matching, set the value in your pattern matcher configuration (e.g., in `pattern-matcher.yaml`):
->
-> ```yaml
-> fuzzy_matching:
->   levenshtein_distance: 1
-> ```
->
-> Or in JSON configuration:
+> **Example:** To reduce the Levenshtein distance threshold for fuzzy matching, lower `distance` on the correction entry in the parser configuration (there is no YAML configuration file — parsers are JSON documents stored via `/parserstore/parsers`):
 >
 > ```json
 > {

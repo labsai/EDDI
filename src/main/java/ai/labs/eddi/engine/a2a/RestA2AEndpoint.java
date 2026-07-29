@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * JAX-RS endpoints for the A2A protocol.
  * <ul>
@@ -43,6 +45,13 @@ import java.util.Set;
 public class RestA2AEndpoint {
 
     private static final Logger LOGGER = Logger.getLogger(RestA2AEndpoint.class);
+
+    /**
+     * Fixed body returned for any unexpected failure. A2A peers are remote parties
+     * outside this deployment's trust boundary, so the exception text — which can
+     * name hosts, stores or credentials — never reaches the wire.
+     */
+    static final String INTERNAL_ERROR_MESSAGE = "Internal error while processing the request";
 
     private final AgentCardService agentCardService;
     private final A2ATaskHandler taskHandler;
@@ -190,9 +199,18 @@ public class RestA2AEndpoint {
                 case "tasks/cancel" -> handleTasksCancel(request);
                 default -> jsonRpcError(request.id(), A2AModels.ERROR_METHOD_NOT_FOUND, "Unknown method: " + request.method());
             };
+        } catch (InvalidA2ARequestException e) {
+            // Message authored in the A2A layer and about the peer's own request —
+            // safe to return, and useful for a legitimate peer to fix its call.
+            LOGGER.debugf("A2A invalid request for method=%s, agentId=%s: %s",
+                    sanitize(request.method()), sanitize(agentId), sanitize(e.getMessage()));
+            return jsonRpcError(request.id(), A2AModels.ERROR_INVALID_PARAMS, e.getMessage());
         } catch (Exception e) {
-            LOGGER.errorf("A2A JSON-RPC error for method=%s, agentId=%s: %s", request.method(), agentId, e.getMessage());
-            return jsonRpcError(request.id(), A2AModels.ERROR_INTERNAL, e.getMessage());
+            // The peer is an arbitrary remote party: the exception detail stays in the
+            // server log, the wire gets a curated, non-revealing message.
+            LOGGER.errorf(e, "A2A JSON-RPC error for method=%s, agentId=%s",
+                    sanitize(request.method()), sanitize(agentId));
+            return jsonRpcError(request.id(), A2AModels.ERROR_INTERNAL, INTERNAL_ERROR_MESSAGE);
         }
     }
 
@@ -216,7 +234,11 @@ public class RestA2AEndpoint {
         A2ATask task = taskHandler.handleTaskGet(taskId);
 
         if (task == null) {
-            return jsonRpcError(request.id(), A2AModels.ERROR_TASK_NOT_FOUND, "Task not found: " + taskId);
+            // No taskId echo: the id is caller-supplied, the JSON-RPC id already
+            // correlates the response, and "unknown" must be indistinguishable from
+            // "belongs to a different peer".
+            LOGGER.debugf("A2A tasks/get missed for taskId=%s", sanitize(taskId));
+            return jsonRpcError(request.id(), A2AModels.ERROR_TASK_NOT_FOUND, "Task not found");
         }
 
         return jsonRpcSuccess(request.id(), task);
@@ -231,6 +253,7 @@ public class RestA2AEndpoint {
         boolean canceled = taskHandler.handleTaskCancel(taskId);
 
         if (!canceled) {
+            LOGGER.debugf("A2A tasks/cancel refused for taskId=%s", sanitize(taskId));
             return jsonRpcError(request.id(), A2AModels.ERROR_TASK_NOT_CANCELABLE, "Task not found or cannot be canceled");
         }
 
