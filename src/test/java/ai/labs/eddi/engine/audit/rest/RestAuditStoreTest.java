@@ -157,6 +157,26 @@ class RestAuditStoreTest {
     }
 
     /**
+     * An agent-scope sweep spans many conversations, so their sequences interleave
+     * and no single ascending run exists — the chain is deliberately reported
+     * NOT_APPLICABLE. Requiring INTACT made every clean agent sweep report
+     * intact=false, which makes the health bit worthless for the endpoint added for
+     * G16.
+     */
+    @Test
+    @DisplayName("a clean agent-scope sweep is intact despite NOT_APPLICABLE")
+    void cleanAgentSweepIsIntact() {
+        when(auditStore.getEntriesByAgent("agent-1", null, 0, 1000))
+                .thenReturn(List.of(entryAt("id-1", 0), entryAt("id-2", 7)));
+
+        var report = restAuditStore.verifyAgent("agent-1", null, 0, 1000);
+
+        assertEquals(ChainStatus.NOT_APPLICABLE, report.chainStatus());
+        assertEquals(0, report.invalid());
+        assertTrue(report.intact(), "every entry verified; the chain is simply not evaluated at agent scope");
+    }
+
+    /**
      * An upgraded deployment has legacy rows with no sequence alongside new
      * sequenced ones — and because the counter is seeded from countByConversation,
      * which counts the legacy rows, the first sequenced entry starts above 0. With

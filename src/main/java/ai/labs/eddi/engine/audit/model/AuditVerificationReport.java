@@ -63,10 +63,19 @@ public record AuditVerificationReport(String scope, String scopeId, boolean sign
      * verification or the chain is broken — note that a sweep with no signing key
      * is never {@code intact}, because it checked nothing. Duplicate sequence
      * numbers also defeat it: the chain cannot be trusted when two entries claim
-     * the same position, even where no number is missing.
+     * the same position, even where no number is missing. A chain reported
+     * {@code NOT_APPLICABLE} does not defeat it — that is an agent-scope sweep,
+     * where no single sequence run is expected in the first place.
      */
     public boolean intact() {
-        return signingEnabled && invalid == 0 && unsigned == 0 && chainStatus == ChainStatus.INTACT
+        // NOT_APPLICABLE counts as clean: an agent-scope sweep spans many
+        // conversations whose sequences interleave, so no single run is expected and
+        // the chain is deliberately not evaluated. Demanding INTACT there would make
+        // every clean agent sweep report intact=false and render the health bit
+        // useless. UNAVAILABLE is NOT clean — there the chain could not be
+        // established, so a deletion would go unseen.
+        boolean chainOk = chainStatus == ChainStatus.INTACT || chainStatus == ChainStatus.NOT_APPLICABLE;
+        return signingEnabled && invalid == 0 && unsigned == 0 && chainOk
                 && (duplicateSequences == null || duplicateSequences.isEmpty());
     }
 
