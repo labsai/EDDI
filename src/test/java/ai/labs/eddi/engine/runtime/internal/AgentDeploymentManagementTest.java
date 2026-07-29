@@ -119,8 +119,10 @@ class AgentDeploymentManagementTest {
             verify(agentFactory, never()).deployAgent(any(), eq("deletedAgent"), anyInt(), any());
             // Deleted, not marked undeployed: setDeploymentInfo upserts, so marking would
             // resurrect a row the delete cascade may have already removed.
-            verify(deploymentStore).deleteDeploymentInfos("deletedAgent");
+            verify(deploymentStore).deleteDeploymentInfo("production", "deletedAgent", 1);
             verify(deploymentStore, never()).setDeploymentInfo(anyString(), anyString(), anyInt(), any());
+            // Scoped, never agent-wide — sibling versions were not checked.
+            verify(deploymentStore, never()).deleteDeploymentInfos(anyString());
         }
 
         @Test
@@ -138,7 +140,35 @@ class AgentDeploymentManagementTest {
 
             // A store outage is not proof the Agent is gone — the record must survive.
             verify(agentFactory).deployAgent(Environment.production, "agent1", 1, null);
+            verify(deploymentStore, never()).deleteDeploymentInfo(anyString(), anyString(), anyInt());
             verify(deploymentStore, never()).deleteDeploymentInfos(anyString());
+        }
+
+        @Test
+        @DisplayName("retires only the missing version, leaving a sibling version deployed")
+        void retiresOnlyTheMissingVersion() throws Exception {
+            var missing = new DeploymentInfo();
+            missing.setEnvironment(Environment.production);
+            missing.setAgentId("agent1");
+            missing.setAgentVersion(1);
+
+            var live = new DeploymentInfo();
+            live.setEnvironment(Environment.production);
+            live.setAgentId("agent1");
+            live.setAgentVersion(2);
+
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(missing, live));
+            when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("v1 gone"));
+            when(agentStore.read("agent1", 2)).thenReturn(new AgentConfiguration());
+
+            management.checkDeployments();
+
+            // v1's record goes; v2 must survive and still deploy. An agent-wide delete here
+            // would silently undeploy the live version on the next restart.
+            verify(deploymentStore).deleteDeploymentInfo("production", "agent1", 1);
+            verify(deploymentStore, never()).deleteDeploymentInfos(anyString());
+            verify(agentFactory).deployAgent(Environment.production, "agent1", 2, null);
+            verify(agentFactory, never()).deployAgent(any(), eq("agent1"), eq(1), any());
         }
 
         @Test

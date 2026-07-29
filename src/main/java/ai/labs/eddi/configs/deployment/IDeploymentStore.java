@@ -25,9 +25,17 @@ public interface IDeploymentStore {
 
     /**
      * Deletes every deployment record belonging to an Agent, across all
-     * environments and versions.
+     * environments and versions. For when the whole Agent is gone.
      *
      * @return the number of deployment records removed
      */
     int deleteDeploymentInfos(String agentId) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Deletes the single deployment record identified by environment, Agent and
+     * version — for callers that have established only that this version is gone.
+     *
+     * @return the number of deployment records removed (0 or 1)
+     */
+    int deleteDeploymentInfo(String environment, String agentId, Integer agentVersion) throws IResourceStore.ResourceStoreException;
 }

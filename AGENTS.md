@@ -840,7 +840,7 @@ Resolution is narrow and fails loudly rather than degrading quietly:
   `${caller:userId}` is allowed in headers and query parameters.
 - **Authenticated turns only** — scheduled jobs and triggers cannot satisfy it.
 - **Fails closed** — an unsatisfiable reference errors instead of sending
-  `Bearer `.
+  `"Bearer "` with an empty token.
 
 The token is never persisted: authorization headers are scrubbed before the
 request is written to conversation memory. Disable with
