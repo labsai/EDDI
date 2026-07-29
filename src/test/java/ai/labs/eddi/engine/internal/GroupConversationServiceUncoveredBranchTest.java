@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -119,7 +120,7 @@ class GroupConversationServiceUncoveredBranchTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 meterRegistry, agentSigningService, agentStore,
-                org.mockito.Mockito.mock(IScheduleStore.class), nonceCacheService, null, "default", 3);
+                org.mockito.Mockito.mock(IScheduleStore.class), nonceCacheService, null, new CallerIdentityContext(null, null), "default", 3);
     }
 
     // === Helpers ===

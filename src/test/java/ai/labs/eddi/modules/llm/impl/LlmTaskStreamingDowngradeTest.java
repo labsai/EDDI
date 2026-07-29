@@ -23,6 +23,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.model.chat.ChatModel;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -125,7 +126,7 @@ class LlmTaskStreamingDowngradeTest {
                 ragContextProvider, new TokenCounterFactory(), conversationSummarizer,
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),
-                meterRegistry);
+                meterRegistry, new CallerIdentityContext(null, null));
 
         lenient().when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData<?> d = mock(IData.class);

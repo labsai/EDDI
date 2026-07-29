@@ -36,6 +36,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -262,6 +263,12 @@ public class AgentSetupService {
         if (!isLocalLLM && (request.apiKey() == null || request.apiKey().isBlank())) {
             throw new AgentSetupException("API key is required for cloud LLM providers");
         }
+        // Scheme-level check only. Full SSRF validation would reject loopback and
+        // private addresses, which is precisely where a local LLM provider lives —
+        // the reason this field exists.
+        if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank() && !UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
+            throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
+        }
 
         var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         var createdResources = new LinkedHashMap<String, Object>();
@@ -315,8 +322,11 @@ public class AgentSetupService {
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
             // Auto-vault the API key before storing in LLM config
             String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName());
-            var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null, null,
-                    promptResponseJson, quickReplies, sentiment, httpCallsLocations);
+            // 7th slot is the LLM's own base URL — not apiBaseUrl, which is the target
+            // server of the generated tools. Passing null here left local providers
+            // (Ollama, Jlama) with no endpoint to reach.
+            var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null,
+                    request.llmBaseUrl(), promptResponseJson, quickReplies, sentiment, httpCallsLocations);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);

@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentNotFoundExcept
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentStoreException;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import io.quarkus.security.ForbiddenException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
@@ -541,7 +542,27 @@ class RestAttachmentUploadTest {
         @BeforeEach
         void denyForeignConversation() {
             doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
-                    .when(conversationAccessGuard).requireConversationOwner(FOREIGN);
+                    .when(conversationAccessGuard).requireExistingConversationOwner(FOREIGN);
+        }
+
+        /**
+         * requireConversationOwner returns null both when the descriptor is MISSING and
+         * when the conversation exists but is unowned (a legacy row the validator
+         * deliberately admits). Calling it purely for its side effect therefore could
+         * not tell those apart, and a deleted conversation's id still reached the store
+         * — which matters here because attachment blobs can outlive the conversation
+         * that owned them. The endpoints use the variant that turns a missing
+         * conversation into a 404 instead.
+         */
+        @Test
+        void unknownConversationIsNotFoundAndNeverReachesTheStore() {
+            doThrow(new NotFoundException("Conversation not found"))
+                    .when(conversationAccessGuard).requireExistingConversationOwner("deleted-conv");
+
+            assertThrows(NotFoundException.class,
+                    () -> endpoint.listAttachments("deleted-conv", mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
         }
 
         @Test
@@ -593,7 +614,7 @@ class RestAttachmentUploadTest {
             Response response = captureAsync(ar -> endpoint.listAttachments("conv-1", ar));
 
             assertEquals(200, response.getStatus());
-            verify(conversationAccessGuard).requireConversationOwner("conv-1");
+            verify(conversationAccessGuard).requireExistingConversationOwner("conv-1");
         }
 
         @Test

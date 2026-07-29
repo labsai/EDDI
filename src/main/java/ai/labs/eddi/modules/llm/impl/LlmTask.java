@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -157,7 +158,7 @@ public class LlmTask implements ILifecycleTask {
             CounterweightService counterweightService,
             IdentityMaskingService identityMaskingService,
             AgentOrchestrator agentOrchestrator, ConversationHistoryBuilder conversationHistoryBuilder,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry, CallerIdentityContext callerIdentityContext) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -182,7 +183,7 @@ public class LlmTask implements ILifecycleTask {
         this.counterweightService = counterweightService;
         this.identityMaskingService = identityMaskingService;
         this.cascadingModelExecutor = new CascadingModelExecutor(chatModelRegistry, globalVariableResolver, templatingEngine, legacyChatExecutor,
-                streamingLegacyChatExecutor, meterRegistry);
+                streamingLegacyChatExecutor, meterRegistry, callerIdentityContext);
     }
 
     @Override

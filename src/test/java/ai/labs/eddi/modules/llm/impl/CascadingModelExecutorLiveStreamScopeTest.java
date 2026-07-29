@@ -17,6 +17,7 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
@@ -87,7 +88,8 @@ class CascadingModelExecutorLiveStreamScopeTest {
     private static CascadingModelExecutor executor(ChatModelRegistry registry) {
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        return new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+        return new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null,
+                new CallerIdentityContext(null, null));
     }
 
     private static StreamingChatModel streamingModelEmitting(String text) {

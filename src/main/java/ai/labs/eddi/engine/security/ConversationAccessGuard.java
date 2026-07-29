@@ -11,6 +11,7 @@ import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.NotFoundException;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -79,6 +80,42 @@ public class ConversationAccessGuard {
         } catch (ResourceNotFoundException e) {
             LOGGER.debugf("Conversation descriptor not found for %s", sanitize(conversationId));
             return null;
+        } catch (ResourceStoreException e) {
+            LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));
+            throw new ForbiddenException("Access denied: unable to verify conversation ownership");
+        }
+    }
+
+    /**
+     * As {@link #requireConversationOwner}, but a conversation that does not exist
+     * is a {@link NotFoundException} rather than a {@code null} return.
+     * <p>
+     * {@code requireConversationOwner} returns null for two different situations:
+     * the descriptor is missing, or the conversation exists but is unowned (a
+     * legacy row, which {@code OwnershipValidator} deliberately admits). A caller
+     * that merely invokes the guard for its side effect therefore cannot tell "no
+     * such conversation" from "allowed", and proceeds in both cases. That is
+     * harmless where the underlying store 404s on its own, but not for attachments:
+     * blobs can outlive the conversation that owned them, so a deleted
+     * conversation's id would still reach the store with no ownership established.
+     * <p>
+     * Use this wherever "the conversation is gone" must stop the request.
+     *
+     * @return the owner id, which may still be null for a legacy unowned
+     *         conversation the caller is allowed to access
+     */
+    public String requireExistingConversationOwner(String conversationId) {
+        try {
+            var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+            if (descriptor == null) {
+                throw new NotFoundException("Conversation not found");
+            }
+            ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), RESOURCE_TYPE);
+            return descriptor.getUserId();
+        } catch (ForbiddenException | NotFoundException e) {
+            throw e;
+        } catch (ResourceNotFoundException e) {
+            throw new NotFoundException("Conversation not found");
         } catch (ResourceStoreException e) {
             LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));
             throw new ForbiddenException("Access denied: unable to verify conversation ownership");

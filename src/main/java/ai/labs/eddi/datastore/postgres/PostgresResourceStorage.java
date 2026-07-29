@@ -168,15 +168,40 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
      * A hint that is already all lower case keeps its historical name, so existing
      * deployments do not grow a duplicate index on upgrade; anything with an upper
      * case character gets a short digest of the exact expression appended, which is
-     * enough to keep case variants apart.
+     * enough to keep case variants apart. A name that would exceed PostgreSQL's
+     * 63-byte identifier limit is truncated here rather than by the server, with a
+     * fixed-width digest kept at the end — server-side truncation would cut the
+     * digest off and collapse distinct hints back together.
      */
     private static String fieldIndexName(String sanitizedField) {
         String lowerCased = sanitizedField.toLowerCase(Locale.ROOT);
-        if (lowerCased.equals(sanitizedField)) {
-            return "idx_resources_field_" + lowerCased;
+        String historical = INDEX_NAME_PREFIX + lowerCased;
+        if (lowerCased.equals(sanitizedField) && historical.length() <= MAX_IDENTIFIER_LENGTH) {
+            return historical;
         }
-        return "idx_resources_field_" + lowerCased + "_" + Integer.toHexString(sanitizedField.hashCode());
+
+        String withDigest = historical + "_" + Integer.toHexString(sanitizedField.hashCode());
+        if (withDigest.length() <= MAX_IDENTIFIER_LENGTH) {
+            return withDigest;
+        }
+
+        // PostgreSQL truncates an over-long identifier to 63 bytes SILENTLY, so two
+        // long hints sharing a prefix would collapse to one name and CREATE INDEX IF
+        // NOT EXISTS would no-op for the second — the same silent-miss this method
+        // exists to prevent, just reached by length instead of by case. Worse, the
+        // digest is the part that gets cut, so it stops disambiguating exactly when
+        // it is needed. Truncate the BASE ourselves and keep a fixed-width digest of
+        // the full expression at the end.
+        String digest = String.format("%08x", sanitizedField.hashCode());
+        int room = MAX_IDENTIFIER_LENGTH - INDEX_NAME_PREFIX.length() - 1 - digest.length();
+        String base = lowerCased.substring(0, Math.min(lowerCased.length(), Math.max(room, 0)));
+        return INDEX_NAME_PREFIX + base + "_" + digest;
     }
+
+    /** PostgreSQL silently truncates identifiers beyond this many bytes. */
+    private static final int MAX_IDENTIFIER_LENGTH = 63;
+
+    private static final String INDEX_NAME_PREFIX = "idx_resources_field_";
 
     private void createIndexQuietly(Statement stmt, String createIndexSql) {
         try {

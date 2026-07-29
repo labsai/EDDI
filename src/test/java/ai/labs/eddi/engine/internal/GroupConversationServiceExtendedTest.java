@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -77,7 +78,7 @@ class GroupConversationServiceExtendedTest {
         service = new GroupConversationService(groupStore, conversationStore,
                 conversationService, agentFactory, templatingEngine,
                 jsonSerialization, new SimpleMeterRegistry(),
-                null, agentStore, null, null, null, "default", 3);
+                null, agentStore, null, null, null, new CallerIdentityContext(null, null), "default", 3);
 
         when(conversationStore.create(any())).thenReturn("gc-1");
 
@@ -806,7 +807,7 @@ class GroupConversationServiceExtendedTest {
             var svc = new GroupConversationService(groupStore, conversationStore,
                     conversationService, agentFactory, templatingEngine,
                     jsonSerialization, new SimpleMeterRegistry(),
-                    null, null, null, null, null, "default", 3);
+                    null, null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
 
             assertDoesNotThrow(svc::shutdown);
         }

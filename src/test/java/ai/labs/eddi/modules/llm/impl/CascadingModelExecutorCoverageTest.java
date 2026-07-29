@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
@@ -92,7 +93,8 @@ class CascadingModelExecutorCoverageTest {
     private CascadingModelExecutor executor(ChatModelRegistry registry, MeterRegistry mr) {
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        return new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), mr);
+        return new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), mr,
+                new CallerIdentityContext(null, null));
     }
 
     // Same as executor(...) but wired with a real (mock) templating engine so the
@@ -100,7 +102,8 @@ class CascadingModelExecutorCoverageTest {
     private CascadingModelExecutor executorWithTemplating(ChatModelRegistry registry, ITemplatingEngine templatingEngine) {
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
         when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        return new CascadingModelExecutor(registry, resolver, templatingEngine, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+        return new CascadingModelExecutor(registry, resolver, templatingEngine, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null,
+                new CallerIdentityContext(null, null));
     }
 
     // ─── Agent mode ──────────────────────────────────────────────────

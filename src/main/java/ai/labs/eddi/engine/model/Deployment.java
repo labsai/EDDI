@@ -57,6 +57,11 @@ public class Deployment {
          * {@link #production} for an unknown value — but logs a warning first, so the
          * fallback is never silent.
          * <p>
+         * {@code unrestricted} and {@code restricted} predate this two-value enum and
+         * still appear in stored documents and exported ZIPs; both map to
+         * {@link #production}. They are aliases, not environments — {@code production}
+         * and {@code test} are the only values worth offering a caller.
+         * <p>
          * The fallback is deliberate and must stay: deployment documents persisted by
          * older versions are read back through this method, and a hard failure here
          * would make a single malformed row break reading the whole deployment table

@@ -13,7 +13,10 @@ import ai.labs.eddi.modules.llm.impl.PromptSnippetService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.InternalServerErrorException;
 import org.jboss.logging.Logger;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.*;
 
@@ -106,14 +109,24 @@ public class RestTemplatePreview implements IRestTemplatePreview {
      * more here than that marginal reduction.)
      */
     private Map<String, Object> loadConversationData(String conversationId) {
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        conversationAccessGuard.requireExistingConversationOwner(conversationId);
         try {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             var memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
             return memoryItemConverter.convert(memory);
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            LOGGER.warnv("Could not load conversation for template preview: {0}", e.getMessage());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Genuinely absent — the caller reports this as "conversation not found".
+            LOGGER.debugv("No conversation to preview against: {0}", sanitize(conversationId));
             return null;
+        } catch (IResourceStore.ResourceStoreException e) {
+            // A store failure is NOT a missing conversation. Collapsing the two told an
+            // operator mid-outage that their conversation did not exist, sending them to
+            // look for the wrong problem entirely. Surface it as a server error, and keep
+            // the driver detail in the log rather than the response body (finding A12).
+            String correlationId = UUID.randomUUID().toString();
+            LOGGER.errorv(e, "Template preview could not load conversation {0} (correlationId: {1})",
+                    sanitize(conversationId), correlationId);
+            throw new InternalServerErrorException("Could not load conversation (correlationId: " + correlationId + ")");
         }
     }
 

@@ -93,11 +93,24 @@ public interface IScheduleStore {
             return 0;
         }
         int deleted = 0;
-        for (ScheduleConfiguration schedule : readAllSchedules(ERASURE_SCAN_LIMIT)) {
+        List<ScheduleConfiguration> scanned = readAllSchedules(ERASURE_SCAN_LIMIT);
+        for (ScheduleConfiguration schedule : scanned) {
             if (userId.equals(schedule.getUserId())) {
                 deleteSchedule(schedule.getId());
                 deleted++;
             }
+        }
+        // A full page means the scan hit its ceiling and there may be schedules it
+        // never looked at. Returning a count here would report a complete erasure
+        // that is not one — the worst outcome available, because the caller records
+        // the request as satisfied and the remaining schedules keep firing under the
+        // erased user's id. A backend holding more schedules than this must override
+        // the method with an indexed delete (PostgresScheduleStore does).
+        if (scanned.size() >= ERASURE_SCAN_LIMIT) {
+            throw new IResourceStore.ResourceStoreException(
+                    "Erasure incomplete: the portable scan reached its limit of " + ERASURE_SCAN_LIMIT
+                            + " schedules, so schedules belonging to this user may remain. "
+                            + "This backend must override deleteSchedulesByUserId with an indexed delete.");
         }
         return deleted;
     }

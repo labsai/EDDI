@@ -1,0 +1,294 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.security;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+
+import java.net.URI;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Resolves {@code ${caller:...}} references in outbound API call headers,
+ * letting an agent call an API <em>as the user it is talking to</em> instead of
+ * with a static credential.
+ * <p>
+ * Supported references:
+ * <ul>
+ * <li>{@code ${caller:token}} — the caller's raw bearer token</li>
+ * <li>{@code ${caller:userId}} — the caller's principal name (not a
+ * secret)</li>
+ * </ul>
+ * <p>
+ * This exists because a static credential is the wrong shape for the job: an
+ * OIDC token expires within the hour, cannot be least-privilege, and collapses
+ * every action to one synthetic principal in the audit trail. Forwarding the
+ * caller's own token means authorization stays EDDI's normal per-endpoint
+ * enforcement, and the audit trail names a real person.
+ *
+ * <h2>Why this is safe</h2>
+ * <ul>
+ * <li><b>Same-origin only.</b> {@code ${caller:token}} resolves only when the
+ * outbound request targets the exact origin the caller addressed. An agent
+ * config naming a third-party host cannot exfiltrate the token.</li>
+ * <li><b>Headers only.</b> A token in a query string ends up in access logs,
+ * proxies and browser history, so a token reference outside a header is
+ * rejected rather than resolved.</li>
+ * <li><b>Never stored.</b> The value is injected while building the request;
+ * {@code ApiCallExecutor} scrubs authorization headers before the request is
+ * written to conversation memory.</li>
+ * <li><b>Fails closed.</b> An unsatisfiable reference throws instead of
+ * resolving to an empty string, which would silently send {@code "Bearer "} and
+ * look like a puzzling 401 further downstream.</li>
+ * </ul>
+ *
+ * @author ginccc
+ * @since 6.2.0
+ */
+@ApplicationScoped
+public class CallerIdentityResolver {
+
+    private static final Logger LOGGER = Logger.getLogger(CallerIdentityResolver.class);
+
+    /** Matches {@code ${caller:token}} and {@code ${caller:userId}}. */
+    static final Pattern CALLER_PATTERN = Pattern.compile("\\$\\{caller:(token|userId)\\}");
+
+    /**
+     * Matches any caller reference, including ones we do not support.
+     * {@code CallerNamespaceResolver} deliberately lets every reference in this
+     * namespace survive Qute, so a typo reaches the API as a literal placeholder
+     * unless something catches it.
+     * <p>
+     * The leading {@code $} is optional because {@code {caller:token}} is the
+     * natural Qute namespace syntax and an easy thing to write by mistake. The
+     * resolver returns that form unchanged (the {@code $} is literal template text
+     * it never adds), so the bare form is never substituted — it would simply be
+     * sent to the API as text. Matching it here turns that into a clear error.
+     */
+    private static final Pattern ANY_CALLER_PATTERN = Pattern.compile("\\$?\\{caller:[^}]*\\}");
+
+    /** {@code ${caller:token}} in either the documented or the bare Qute form. */
+    private static final Pattern ANY_TOKEN_PATTERN = Pattern.compile("\\$?\\{caller:token\\}");
+
+    private static final String SUPPORTED_REFERENCES = "${caller:token} (headers only) and ${caller:userId}";
+
+    private static final String REF_TOKEN = "token";
+    private static final String REF_USER_ID = "userId";
+    /** Metric tag for a failure that happens before the reference is known. */
+    private static final String REF_UNKNOWN = "unknown";
+
+    /**
+     * Field-injected rather than a constructor parameter so a directly constructed
+     * instance (tests, non-CDI callers) keeps working without one.
+     */
+    @Inject
+    MeterRegistry meterRegistry;
+
+    private final CallerIdentityContext callerIdentityContext;
+    private final boolean enabled;
+
+    @Inject
+    public CallerIdentityResolver(CallerIdentityContext callerIdentityContext,
+            @ConfigProperty(name = "eddi.caller-identity.enabled", defaultValue = "true") boolean enabled) {
+        this.callerIdentityContext = callerIdentityContext;
+        this.enabled = enabled;
+    }
+
+    /** Whether a value contains any {@code ${caller:...}} reference. */
+    public static boolean containsReference(String value) {
+        return value != null && CALLER_PATTERN.matcher(value).find();
+    }
+
+    /**
+     * Resolve {@code ${caller:...}} references in a header value.
+     *
+     * @param value
+     *            the raw header value; may be {@code null} or contain no reference,
+     *            in which case it is returned unchanged
+     * @param target
+     *            the URI the request will be sent to, used for the same-origin
+     *            check
+     * @return the resolved value
+     * @throws CallerIdentityException
+     *             if a reference cannot be satisfied — no authenticated caller, the
+     *             feature is disabled, or the target is a different origin
+     */
+    public String resolveValue(String value, URI target) {
+        rejectUnsupportedReference(value);
+        if (!containsReference(value)) {
+            return value;
+        }
+        if (!enabled) {
+            record("disabled", REF_UNKNOWN);
+            throw new CallerIdentityException(
+                    "This API call references ${caller:...}, but caller-identity forwarding is disabled "
+                            + "(eddi.caller-identity.enabled=false).");
+        }
+
+        var identity = callerIdentityContext.current();
+        if (identity == null) {
+            record("no_caller", REF_UNKNOWN);
+            throw new CallerIdentityException("This API call references ${caller:...}, but the conversation turn has no authenticated "
+                    + "caller. Caller identity is only available for turns driven by an authenticated request.");
+        }
+
+        Matcher matcher = CALLER_PATTERN.matcher(value);
+        StringBuilder resolved = new StringBuilder();
+        while (matcher.find()) {
+            String reference = matcher.group(1);
+            String replacement = REF_TOKEN.equals(reference) ? resolveToken(identity, target) : resolveUserId(identity);
+            matcher.appendReplacement(resolved, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(resolved);
+        return resolved.toString();
+    }
+
+    /**
+     * Reject a {@code ${caller:...}} reference that this resolver does not support.
+     * <p>
+     * Without this a typo such as {@code ${caller:tokn}} is not an error anywhere:
+     * Qute leaves the whole namespace alone, {@link #CALLER_PATTERN} does not match
+     * it, and the placeholder is sent to the API verbatim. The config author then
+     * debugs a puzzling downstream failure rather than reading a message naming
+     * their typo.
+     */
+    public void rejectUnsupportedReference(String value) {
+        if (value == null) {
+            return;
+        }
+        Matcher any = ANY_CALLER_PATTERN.matcher(value);
+        while (any.find()) {
+            String reference = any.group();
+            if (!CALLER_PATTERN.matcher(reference).matches()) {
+                throw new CallerIdentityException(
+                        reference + " is not a supported caller reference. Supported: " + SUPPORTED_REFERENCES + ".");
+            }
+        }
+    }
+
+    /**
+     * Reject <em>any</em> caller reference, for places where none is ever
+     * substituted.
+     * <p>
+     * Stricter than {@link #rejectTokenReference} on purpose: a request body is not
+     * caller-resolved at all, so {@code ${caller:userId}} there is just as broken
+     * as a token reference — it would be shipped as a literal placeholder.
+     */
+    public void rejectAnyReference(String value, String location) {
+        if (value == null) {
+            return;
+        }
+        Matcher any = ANY_CALLER_PATTERN.matcher(value);
+        if (any.find()) {
+            throw new CallerIdentityException(any.group() + " was found in " + location
+                    + ", which is never caller-resolved — it would be sent to the API as a literal placeholder. "
+                    + "${caller:token} may be used in a request header only; ${caller:userId} in a header or a query parameter.");
+        }
+    }
+
+    /**
+     * Reject a {@code ${caller:token}} reference where a token must not go, while
+     * still allowing {@code ${caller:userId}}.
+     * <p>
+     * Called for query parameters, which are logged, cached and proxied far more
+     * freely than headers. Request bodies use {@link #rejectAnyReference} instead,
+     * since nothing is substituted there at all.
+     *
+     * @param location
+     *            human-readable place the reference was found, for the message
+     */
+    public void rejectTokenReference(String value, String location) {
+        if (value != null && ANY_TOKEN_PATTERN.matcher(value).find()) {
+            throw new CallerIdentityException("${caller:token} may only be used in a request header, but was found in " + location
+                    + ". Outside a header it is never substituted, and a token in a URL additionally leaks through "
+                    + "access logs and proxies.");
+        }
+    }
+
+    /**
+     * Redact the caller's token wherever it appears in an already-resolved value.
+     *
+     * The header-name patterns used elsewhere only catch conventional names, so a
+     * token placed in an arbitrarily named header would otherwise be persisted to
+     * conversation memory. This closes that gap by matching on the token itself.
+     *
+     * @return the value with any occurrence of the caller's token replaced
+     */
+    public String redactCallerToken(String value, String redaction) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        var identity = callerIdentityContext.current();
+        if (identity == null || !identity.hasToken()) {
+            return value;
+        }
+        return value.contains(identity.token()) ? value.replace(identity.token(), redaction) : value;
+    }
+
+    /**
+     * Count a resolution outcome.
+     * <p>
+     * Tags are a fixed, low-cardinality vocabulary — never the token, the user id
+     * or the origin. A refusal is the interesting signal here: a rising
+     * {@code cross_origin} count means a config is pointing a caller token at a
+     * third party, which is worth an alert rather than a log line nobody reads.
+     * <p>
+     * Null-safe because the registry is field-injected: a directly constructed
+     * instance (tests, non-CDI callers) simply does not record.
+     */
+    private void record(String outcome, String reference) {
+        if (meterRegistry == null) {
+            return;
+        }
+        meterRegistry.counter("eddi.caller.identity.resolution", "outcome", outcome, "reference", reference).increment();
+    }
+
+    private String resolveToken(CallerIdentity identity, URI target) {
+        if (!identity.hasToken()) {
+            record("no_token", REF_TOKEN);
+            throw new CallerIdentityException(
+                    "This API call references ${caller:token}, but the caller's request carried no bearer token.");
+        }
+        if (!OriginMatcher.sameOrigin(identity.origin(), target)) {
+            // Do not log the target's full URI at INFO — it may embed identifiers.
+            LOGGER.warnf("Refusing to forward the caller token to a different origin (caller=%s, target=%s)", identity.origin(),
+                    OriginMatcher.normalize(target));
+            record("cross_origin", REF_TOKEN);
+            throw new CallerIdentityException("${caller:token} may only be sent back to the origin the caller came from ("
+                    + identity.origin() + "), but this call targets " + OriginMatcher.normalize(target) + ".");
+        }
+        record("resolved", REF_TOKEN);
+        return identity.token();
+    }
+
+    /**
+     * The caller's principal name.
+     * <p>
+     * Fails closed like the token does: emitting an empty string would send a
+     * header the receiving API cannot attribute, and the failure would surface far
+     * from its cause.
+     */
+    private String resolveUserId(CallerIdentity identity) {
+        if (identity.userId() == null || identity.userId().isBlank()) {
+            record("no_principal", REF_USER_ID);
+            throw new CallerIdentityException(
+                    "This API call references ${caller:userId}, but the authenticated caller has no principal name.");
+        }
+        record("resolved", REF_USER_ID);
+        return identity.userId();
+    }
+
+    /** Raised when a {@code ${caller:...}} reference cannot be safely resolved. */
+    public static class CallerIdentityException extends RuntimeException {
+
+        public CallerIdentityException(String message) {
+            super(message);
+        }
+    }
+}

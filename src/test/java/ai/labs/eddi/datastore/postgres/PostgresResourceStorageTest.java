@@ -120,6 +120,43 @@ class PostgresResourceStorageTest {
         assertFalse(all.contains("idx_resources_field_workflowsteps"), all);
     }
 
+    /**
+     * PostgreSQL truncates an identifier past 63 bytes SILENTLY. Two long hints
+     * sharing a prefix would therefore collapse onto one index name and CREATE
+     * INDEX IF NOT EXISTS would no-op for the second — the same silent miss the
+     * case handling above prevents, reached by length instead. The digest is also
+     * the part the server would cut, so it stops disambiguating exactly when it is
+     * needed.
+     */
+    @Test
+    void fieldIndexNamesStayDistinctAndWithinPostgresIdentifierLimit() throws Exception {
+        Statement indexStatement = mock(Statement.class);
+        Connection indexConnection = mock(Connection.class);
+        DataSource indexDataSource = mock(DataSource.class);
+        when(indexDataSource.getConnection()).thenReturn(indexConnection);
+        when(indexConnection.createStatement()).thenReturn(indexStatement);
+
+        // identical for the first 50 characters, differing only at the end
+        String a = "averyLongCustomerFacingConfigurationFieldNameForA_one";
+        String b = "averyLongCustomerFacingConfigurationFieldNameForA_two";
+
+        new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, a, b);
+
+        var executed = ArgumentCaptor.forClass(String.class);
+        verify(indexStatement, atLeastOnce()).execute(executed.capture());
+
+        List<String> indexNames = executed.getAllValues().stream()
+                .filter(s -> s.contains("idx_resources_field_"))
+                .map(s -> s.substring(s.indexOf("idx_resources_field_"), s.indexOf(" ON ")))
+                .toList();
+
+        assertEquals(2, indexNames.size(), indexNames.toString());
+        assertEquals(2, Set.copyOf(indexNames).size(), "long hints collapsed onto one index name: " + indexNames);
+        for (String name : indexNames) {
+            assertTrue(name.length() <= 63, "PostgreSQL would truncate and re-collapse this: " + name + " (" + name.length() + ")");
+        }
+    }
+
     @Test
     void fieldIndexNamesDistinguishHintsThatDifferOnlyInCase() throws Exception {
         Statement indexStatement = mock(Statement.class);
@@ -208,7 +245,16 @@ class PostgresResourceStorageTest {
      * live server.
      */
     private static NativeQuery asDriverWouldSend(String sql) throws SQLException {
-        return Parser.parseJdbcSql(sql, true, true, true, false, true).getFirst();
+        try {
+            return Parser.parseJdbcSql(sql, true, true, true, false, true).getFirst();
+        } catch (LinkageError e) {
+            // org.postgresql.core.Parser is driver-internal and can move between
+            // versions. If it does, say so plainly rather than surfacing an opaque
+            // NoClassDefFoundError: the SQL is probably still fine and this helper
+            // needs updating. The literal-escape assertions below do not depend on
+            // it and keep pinning the intent in the meantime.
+            throw new AssertionError("pgjdbc internals moved (" + e + "); update asDriverWouldSend for the current driver", e);
+        }
     }
 
     @Test
@@ -225,6 +271,13 @@ class PostgresResourceStorageTest {
         // only two values are ever bound — the query then fails at execution time
         // on a real server instead of merely returning nothing. `@??` is pgjdbc's
         // escape for a literal question mark.
+        // Stable half: the escape must be present in the SQL we emit. This holds
+        // regardless of driver version.
+        assertTrue(sql.getValue().contains("data @?? ?::jsonpath"), sql.getValue());
+
+        // Authoritative half: what pgjdbc ACTUALLY does with it. Asserting a
+        // hand-rolled placeholder count here would only re-state our assumption about
+        // the driver — and that assumption being wrong is what caused this defect.
         NativeQuery sent = asDriverWouldSend(sql.getValue());
         assertEquals(2, sent.bindPositions.length, "placeholders the driver found in: " + sent.nativeSql);
         assertTrue(sent.nativeSql.contains("data @? $2::jsonpath"), sent.nativeSql);
@@ -238,6 +291,8 @@ class PostgresResourceStorageTest {
 
         var sql = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sql.capture());
+
+        assertTrue(sql.getValue().contains("data @?? ?::jsonpath"), sql.getValue());
 
         NativeQuery sent = asDriverWouldSend(sql.getValue());
         assertEquals(2, sent.bindPositions.length, "placeholders the driver found in: " + sent.nativeSql);
