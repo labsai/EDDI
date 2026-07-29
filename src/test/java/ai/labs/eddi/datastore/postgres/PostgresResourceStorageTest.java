@@ -208,7 +208,16 @@ class PostgresResourceStorageTest {
      * live server.
      */
     private static NativeQuery asDriverWouldSend(String sql) throws SQLException {
-        return Parser.parseJdbcSql(sql, true, true, true, false, true).getFirst();
+        try {
+            return Parser.parseJdbcSql(sql, true, true, true, false, true).getFirst();
+        } catch (LinkageError e) {
+            // org.postgresql.core.Parser is driver-internal and can move between
+            // versions. If it does, say so plainly rather than surfacing an opaque
+            // NoClassDefFoundError: the SQL is probably still fine and this helper
+            // needs updating. The literal-escape assertions below do not depend on
+            // it and keep pinning the intent in the meantime.
+            throw new AssertionError("pgjdbc internals moved (" + e + "); update asDriverWouldSend for the current driver", e);
+        }
     }
 
     @Test
@@ -225,6 +234,13 @@ class PostgresResourceStorageTest {
         // only two values are ever bound — the query then fails at execution time
         // on a real server instead of merely returning nothing. `@??` is pgjdbc's
         // escape for a literal question mark.
+        // Stable half: the escape must be present in the SQL we emit. This holds
+        // regardless of driver version.
+        assertTrue(sql.getValue().contains("data @?? ?::jsonpath"), sql.getValue());
+
+        // Authoritative half: what pgjdbc ACTUALLY does with it. Asserting a
+        // hand-rolled placeholder count here would only re-state our assumption about
+        // the driver — and that assumption being wrong is what caused this defect.
         NativeQuery sent = asDriverWouldSend(sql.getValue());
         assertEquals(2, sent.bindPositions.length, "placeholders the driver found in: " + sent.nativeSql);
         assertTrue(sent.nativeSql.contains("data @? $2::jsonpath"), sent.nativeSql);
@@ -238,6 +254,8 @@ class PostgresResourceStorageTest {
 
         var sql = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sql.capture());
+
+        assertTrue(sql.getValue().contains("data @?? ?::jsonpath"), sql.getValue());
 
         NativeQuery sent = asDriverWouldSend(sql.getValue());
         assertEquals(2, sent.bindPositions.length, "placeholders the driver found in: " + sent.nativeSql);
