@@ -206,8 +206,9 @@ what it finds. Off by default. Worth knowing before touching it:
 - Base URL: `window.location.origin` (never hardcode)
 - Vite proxy forwards all store paths to EDDI backend in dev mode
 - **Default to `src/lib/api-client.ts`** (`ApiClient` class) for API calls — it injects the Keycloak auth token automatically
-- A handful of call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`sse-utils.ts`, `bearer-event-source.ts`), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **These must spread `api.getAuthHeader()` themselves** — forgetting it is a 401 that only appears once OIDC is switched on
-- Never add a raw `fetch` for an ordinary JSON call; route it through `ApiClient`
+- Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`sse-utils.ts`, `bearer-event-source.ts`), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
+- `secrets.ts` is the exception that is *not* justified: its eight call sites are ordinary JSON CRUD on raw `fetch` for historical reasons. They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Treat it as debt to migrate onto `ApiClient`, not as the pattern to copy
+- For a new ordinary JSON call, use `ApiClient`
 - Server state via TanStack Query hooks in `src/hooks/`
 
 ### RTL Support

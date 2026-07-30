@@ -192,7 +192,8 @@
     "refresh": "Actualizar",
     "previous": "Anterior",
     "next": "Siguiente",
-    "dismiss": "Descartar"
+    "dismiss": "Descartar",
+    "refreshFailed": "No se pudo actualizar: se muestran los últimos datos cargados."
   },
   "agents": {
     "confirmDeleteDescription": "Esta acción no se puede deshacer. El agente y todos sus datos se eliminarán permanentemente.",
@@ -1499,7 +1500,7 @@
     "confirmDeleteTitle": "Eliminar secret",
     "confirmDeleteMessage": "¿Está seguro de que desea eliminar permanentemente \"{{key}}\"? Esta acción no se puede deshacer.",
     "empty": "No se encontraron secrets",
-    "emptyHint": "Aún no hay secretos almacenados para el inquilino «{{tenant}}». Haz clic en «Añadir secreto» para crear uno.",
+    "emptyHint": "Aún no hay secrets almacenados para el inquilino «{{tenant}}». Haz clic en «Añadir secret» para crear uno.",
     "vaultUp": "Vault en línea",
     "vaultDown": "Vault fuera de línea",
     "descriptionLabel": "Descripción (opcional)",

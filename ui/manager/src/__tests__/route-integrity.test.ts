@@ -178,6 +178,12 @@ function stripComments(src: string): string {
         continue;
       }
       if (c === quote) quote = null;
+      // Bound a desync: a regex literal containing an unpaired quote (`/["']/`)
+      // opens a state that never closes, and without this the scanner treats the
+      // whole rest of the file as string content and stops finding targets.
+      // Single- and double-quoted strings cannot span lines, so a newline ends
+      // them — the damage is capped at one line instead of cascading.
+      else if (c === "\n" && quote !== "`") quote = null;
       i++;
       continue;
     }
@@ -277,7 +283,11 @@ function collectTargets(): { checkable: Target[]; unresolvable: Target[] } {
 // ─── The test ────────────────────────────────────────────────────
 
 describe("route integrity", () => {
-  const routes = parseRouteTree(readFileSync(APP, "utf8"));
+  // Strip comments FIRST. Reading app.tsx raw counted a commented-out <Route> as
+  // a live route, so retiring a page by commenting it out (or writing a JSDoc
+  // example containing a <Route>) kept every link to it passing while the link
+  // was already dead at runtime.
+  const routes = parseRouteTree(stripComments(readFileSync(APP, "utf8")));
 
   it("parses a sane route table out of app.tsx", () => {
     // Sanity: if the parser silently returns nothing, the assertions below

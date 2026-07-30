@@ -193,6 +193,12 @@ export async function* sendMessageStreaming(
       }
     }
 
+    // No decoder flush here on purpose. `decode(value, {stream: true})` holds only
+    // an INCOMPLETE trailing sequence, so a complete multi-byte character is never
+    // at risk; the only thing a final `decode()` would add is a U+FFFD for a body
+    // that was truncated mid-character, which then rides into the transcript as
+    // content. Leave the malformed tail out rather than render a replacement glyph.
+    //
     // A server that closes without a trailing blank line leaves the last frame
     // in the buffer; emit it rather than dropping the final chunk of a reply.
     const tail = parseSseFrame(buffer, "token");

@@ -32,15 +32,28 @@ const PROTECTED_PATTERNS: readonly RegExp[] = [
   // Without this the prose rules rewrite the code the user is watching and it
   // visibly snaps back once the fence lands — e.g. `.btn { color:#fff }` became
   // `.btn { color:` + blank line + `#fff }` via the heading rule.
-  /```[\s\S]*$/g,
-  /~~~[\s\S]*$/g,
+  //
+  // Line-anchored (CommonMark allows up to 3 leading spaces). Unanchored, a
+  // sentence that merely MENTIONS ``` disabled every rule for the rest of the
+  // message: "Nutze ``` um Code.## Titel" lost its heading split.
+  /(?:^|\n)[ ]{0,3}```[\s\S]*$/g,
+  /(?:^|\n)[ ]{0,3}~~~[\s\S]*$/g,
 
-  /`[^`\n]*`/g, // inline code span
-  /`[^`\n]*$/gm, // unterminated inline code span, to end of line (streaming)
+  // Inline code span. The lookarounds keep this off a ``` run, which the
+  // fence patterns above own — otherwise this matched two of the three
+  // backticks and the fence anchoring was defeated.
+  /(?<!`)`(?!`)[^`\n]*`(?!`)/g,
 
-  // Indented code block (4 spaces or a tab). A standard CommonMark form that
-  // still reached the prose rules even when complete.
-  /^(?:[ ]{4}|\t).*(?:\n(?:[ ]{4}|\t).*)*/gm,
+  // Unterminated inline span, anchored to end of INPUT (no `m` flag) rather than
+  // end of each line. Mid-stream the incomplete span is by definition the last
+  // thing in the text, so this still protects it; but a stray backtick on an
+  // earlier line no longer suppresses repairs for that whole line.
+  //
+  // Residual trade-off, accepted: a single-line message ending in an unpaired
+  // backtick ("Kosten 5` pro Stueck,Dann") is indistinguishable from a message
+  // still streaming, so it keeps its literal ",Dann". Protecting code the user is
+  // watching from being visibly rewritten is worth more than one comma space.
+  /(?<!`)`(?!`)[^`\n]*$/,
 
   /\]\([^)\s]*(?:\s+"[^"]*")?\)/g, // markdown link / image destination
   /<[a-zA-Z][a-zA-Z0-9+.-]*:[^>\s]*>/g, // autolink
@@ -64,6 +77,40 @@ const PLACEHOLDER = new RegExp(SENTINEL + "(\\d+)" + SENTINEL, "g");
  * directly by an inline code span), so `restore` loops until no placeholder
  * remains — `String.replace` does not rescan text it just inserted.
  */
+/** A run of lines indented by 4 spaces or a tab. */
+const INDENTED_RUN = /^(?:[ ]{4}|\t)[^\n]*(?:\n(?:[ ]{4}|\t)[^\n]*)*/gm;
+/** A bullet or ordered-list marker, at any indent. */
+const LIST_LINE = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]/;
+/** Any indent at all — marks a list continuation line. */
+const INDENTED_CONT = /^(?:[ ]{2,}|\t)/;
+
+/**
+ * Mask indented code blocks, but NOT indented list content.
+ *
+ * A context-free indent regex cannot tell a CommonMark indented code
+ * block from a nested bullet or a list continuation paragraph, both of which are
+ * ordinary prose that must still be repaired. Treating them as code silently
+ * disabled every rule inside nested lists — a regression against the previous
+ * behaviour on the app's main output surface, since agents produce nested lists
+ * constantly.
+ *
+ * A run is prose (left alone) when the run itself starts with a list marker, or
+ * when the nearest preceding non-blank line is a list item or is itself indented.
+ */
+function maskIndentedCode(text: string, push: (m: string) => string): string {
+  return text.replace(INDENTED_RUN, (match: string, offset: number) => {
+    if (LIST_LINE.test(match)) return match;
+    const before = text.slice(0, offset).split("\n");
+    let i = before.length - 1;
+    while (i >= 0 && (before[i] ?? "").trim() === "") i--;
+    const prev = before[i];
+    if (prev !== undefined && (LIST_LINE.test(prev) || INDENTED_CONT.test(prev))) {
+      return match;
+    }
+    return push(match);
+  });
+}
+
 function maskProtectedRegions(text: string): {
   masked: string;
   restore: (s: string) => string;
@@ -77,15 +124,23 @@ function maskProtectedRegions(text: string): {
   // U+E000 is Private Use Area and carries no meaning in real content, so
   // dropping it loses nothing.
   let masked = text.split(SENTINEL).join("");
+  const push = (match: string): string => {
+    stash.push(match);
+    return SENTINEL + (stash.length - 1) + SENTINEL;
+  };
   for (const pattern of PROTECTED_PATTERNS) {
-    masked = masked.replace(pattern, (match) => {
-      stash.push(match);
-      return SENTINEL + (stash.length - 1) + SENTINEL;
-    });
+    masked = masked.replace(pattern, push);
   }
+  // Runs last, so anything a pattern already stashed (a URL inside an indented
+  // block) is a placeholder by now. That nests one stash entry inside another,
+  // which the restore loop below unwinds.
+  masked = maskIndentedCode(masked, push);
+
   const restore = (s: string): string => {
     let out = s;
-    for (let i = 0; i <= PROTECTED_PATTERNS.length && out.includes(SENTINEL); i++) {
+    // One pass per masking stage that can nest, plus one to settle.
+    const maxPasses = PROTECTED_PATTERNS.length + 2;
+    for (let i = 0; i < maxPasses && out.includes(SENTINEL); i++) {
       out = out.replace(PLACEHOLDER, (_m, idx: string) => stash[Number(idx)] ?? "");
     }
     return out;

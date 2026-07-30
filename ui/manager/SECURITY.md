@@ -72,7 +72,15 @@ We will credit you in the security advisory unless you prefer to remain anonymou
 > client SPA: `BrowserRouter` in `src/main.tsx`, declarative `<Routes>` only, no
 > `createBrowserRouter`, no data-router loaders or actions, no server runtime and
 > no `@react-router/*` server packages. The vulnerable code path is not reachable
-> here, so we stay on the newest release and accept this finding.
+> here, so we accept this finding.
+>
+> **The real fix is a v8 migration, not a version bump.** The advisory covers
+> `7.12.0 – 8.2.0`, so `react-router@8.3.0` is patched — but `react-router-dom`
+> was discontinued at `7.18.2` (v8 consolidates everything into `react-router`).
+> Adopting 8.3.0 therefore means repointing every `react-router-dom` import at
+> `react-router` plus whatever else v8 changed, which is why this branch stayed on
+> `react-router-dom@7.18.2`, the newest release of the package we actually depend
+> on. Track the v8 migration separately; it removes this allowlist entry.
 >
 > Re-evaluate if this app ever adopts the data router or any server rendering.
 

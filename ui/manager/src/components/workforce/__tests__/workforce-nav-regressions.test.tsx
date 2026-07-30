@@ -65,12 +65,37 @@ describe("QuickActions tiles", () => {
 });
 
 describe("WorkforceBottomTabs", () => {
-  it("Threads targets the board when one is in scope", () => {
-    renderPage("/workforce/board123", <WorkforceBottomTabs />, "/workforce/:boardId");
+  it("Threads targets the board from a board sub-page", () => {
+    renderPage(
+      "/workforce/board123/history",
+      <WorkforceBottomTabs />,
+      "/workforce/:boardId/history",
+    );
     fireEvent.click(screen.getByText(/threads/i));
     // Never "/workforce/board123/thread/" — that has no :memberId, matches no
     // route, and fell through to the catch-all redirect to /welcome.
     expect(mockNavigate).toHaveBeenCalledWith("/workforce/board123");
+  });
+
+  it("Threads carries ?version= through so the board is not pinned to v1", () => {
+    renderPage(
+      "/workforce/board123/history?version=7",
+      <WorkforceBottomTabs />,
+      "/workforce/:boardId/history",
+    );
+    fireEvent.click(screen.getByText(/threads/i));
+    expect(mockNavigate).toHaveBeenCalledWith("/workforce/board123?version=7");
+  });
+
+  it("Threads is disabled on the board root, where it would be a no-op", () => {
+    // Navigating to the location already displayed changes nothing visible and
+    // pushes a duplicate history entry — the dead-control problem this branch
+    // fixed for the "Manage Workforce" tile.
+    renderPage("/workforce/board123", <WorkforceBottomTabs />, "/workforce/:boardId");
+    const threads = screen.getByText(/threads/i).closest("button");
+    expect(threads).toBeDisabled();
+    fireEvent.click(threads!);
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it("Threads is disabled on the dashboard, where no board is in scope", () => {

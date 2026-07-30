@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useAuditTrail, useAuditTrailByAgent } from "@/hooks/use-audit";
 import { ErrorState } from "@/components/shared/error-state";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import type { AuditEntry } from "@/lib/api/audit";
 import { useDeployedAgents } from "@/hooks/use-chat";
 
@@ -948,12 +949,17 @@ export function AuditPage() {
       )}
 
       {/* Empty state - no results */}
-      {hasSearched && !isLoading && isError && (
+      {hasSearched && !isLoading && isError && entries.length === 0 && (
         <ErrorState
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}
         />
+      )}
+
+      {/* Rows already loaded: report the failure without hiding them. */}
+      {hasSearched && !isLoading && isError && entries.length > 0 && (
+        <RefetchErrorNotice onRetry={() => refetch()} />
       )}
 
       {hasSearched && !isLoading && !isError && entries.length === 0 && (

@@ -192,7 +192,8 @@
     "refresh": "Actualiser",
     "previous": "Précédent",
     "next": "Suivant",
-    "dismiss": "Ignorer"
+    "dismiss": "Ignorer",
+    "refreshFailed": "Actualisation impossible — affichage des dernières données chargées."
   },
   "agents": {
     "confirmDeleteDescription": "Cette action est irréversible. L'agent et toutes ses données seront définitivement supprimés.",

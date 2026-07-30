@@ -55,6 +55,73 @@ describe("formatMarkdownText", () => {
     });
   });
 
+  describe("still repairs prose inside indented list content", () => {
+    // The indented-code mask must not treat a nested bullet or a list
+    // continuation paragraph as a code block. Verified against the repo's own
+    // remark-parse: "- A\n    - ** X ** y" has NO strong node until repaired.
+    it("repairs bold inside a 4-space nested bullet", () => {
+      expect(formatMarkdownText("- Punkt eins\n    - ** Wichtig ** hier")).toBe(
+        "- Punkt eins\n    - **Wichtig** hier",
+      );
+    });
+
+    it("repairs bold inside a tab-indented nested bullet", () => {
+      expect(formatMarkdownText("- A\n\t- ** Wichtig ** hier")).toBe(
+        "- A\n\t- **Wichtig** hier",
+      );
+    });
+
+    it("repairs a 4-space list continuation paragraph", () => {
+      expect(
+        formatMarkdownText("1. Erster\n\n    Fortsetzung mit ** Fett ** hier"),
+      ).toBe("1. Erster\n\n    Fortsetzung mit **Fett** hier");
+    });
+
+    it("still protects a genuine indented code block", () => {
+      const input = "Beispiel:\n\n    .btn { color:#fff }\n    foo(a,B);\n";
+      expect(formatMarkdownText(input)).toBe(input);
+    });
+  });
+
+  describe("a bare fence marker in prose does not disable the rest", () => {
+    // Unanchored, /```[\s\S]*$/ matched an inline mention and suppressed every
+    // rule for the remainder of the message.
+    it("still splits a heading after an inline ``` mention", () => {
+      expect(formatMarkdownText("Nutze ``` um Code.## Titel")).toBe(
+        "Nutze ``` um Code.\n\n## Titel",
+      );
+    });
+
+    it("still repairs punctuation after adjacent strikethroughs", () => {
+      expect(formatMarkdownText("Alt ~~entfernt~~~~neu~~ und dann,Dann")).toBe(
+        "Alt ~~entfernt~~~~neu~~ und dann, Dann",
+      );
+    });
+
+    it("a stray backtick on an earlier line no longer suppresses that line", () => {
+      // The unterminated-span guard is anchored to end of input, not end of each
+      // line, so only the final line can be treated as a streaming frontier.
+      expect(formatMarkdownText("Kosten 5` pro Stueck,Dann\nZweite Zeile.")).toBe(
+        "Kosten 5` pro Stueck, Dann\nZweite Zeile.",
+      );
+    });
+
+    it("but still protects an unpaired backtick at the streaming frontier", () => {
+      const input = "Setze `color:#fff";
+      expect(formatMarkdownText(input)).toBe(input);
+    });
+
+    it("still protects a real fence at the start of a line", () => {
+      const input = "Hier:\n```json\n{ \"apiKey\": 1 }\n```";
+      expect(formatMarkdownText(input)).toBe(input);
+    });
+
+    it("still protects an unterminated fence while streaming", () => {
+      const input = "Hier:\n```json\n{ \"apiKey\": 1,";
+      expect(formatMarkdownText(input)).toBe(input);
+    });
+  });
+
   describe("still repairs prose", () => {
     it("adds the missing space after a comma before a capital", () => {
       expect(formatMarkdownText("Klick auf Speichern,Dann weiter.")).toBe(

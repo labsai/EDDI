@@ -192,7 +192,8 @@
     "refresh": "Aktualisieren",
     "previous": "Zurück",
     "next": "Weiter",
-    "dismiss": "Verwerfen"
+    "dismiss": "Verwerfen",
+    "refreshFailed": "Aktualisierung fehlgeschlagen — es werden die zuletzt geladenen Daten angezeigt."
   },
   "agents": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Agent und alle seine Daten werden dauerhaft entfernt.",

@@ -172,8 +172,11 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
           aria-label="Breadcrumb"
           className="hidden items-center gap-1 text-sm md:flex"
         >
+          {/* Keyed by position, not by `to`: listRouteForSegment maps a *view
+              segment onto the list route, so two crumbs can now resolve to the
+              same path (e.g. /manage/agents/agentview) and collide as keys. */}
           {breadcrumbs.map((crumb, idx) => (
-            <span key={crumb.to} className="flex items-center gap-1">
+            <span key={`${idx}-${crumb.to}`} className="flex items-center gap-1">
               {idx > 0 && (
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
               )}

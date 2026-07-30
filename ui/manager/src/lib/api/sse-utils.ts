@@ -20,7 +20,11 @@ export interface AuthEventSourceHandle {
  * so the next person does not have to rediscover it:
  *
  *  - `createAuthEventSource` (below) — incremental, line-based. Appends `data:`
- *    lines, strips `\r`, honours the optional-space rule. Equivalent.
+ *    lines, strips `\r`, honours the optional-space rule. Close, but NOT
+ *    equivalent on two inputs: it dispatches only when `eventData` is non-empty,
+ *    so a frame carrying just `event: done` (no data) is dropped where this
+ *    returns it; and because it accumulates across dispatches it treats a leading
+ *    empty `data:` line differently. Do not swap one for the other blind.
  *  - `BearerEventSource` (`src/lib/bearer-event-source.ts`) — incremental.
  *    Appends and strips `\r`, but uses `trimStart()` on the payload, so it drops
  *    more than the single optional space and does not preserve leading runs.

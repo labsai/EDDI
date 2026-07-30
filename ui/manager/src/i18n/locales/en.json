@@ -192,7 +192,8 @@
     "refresh": "Refresh",
     "previous": "Previous",
     "next": "Next",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "refreshFailed": "Could not refresh — showing the last data loaded."
   },
   "createOrWizard": {
     "title": "New {{type}}",

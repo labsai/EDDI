@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { ErrorState } from "@/components/shared/error-state";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import {
   SlidersHorizontal,
   Activity,
@@ -243,7 +244,10 @@ export function QuotasPage() {
                   Reset Counters button over an empty body — a blank panel that
                   reads as "no usage" rather than "could not load". The config
                   form above stays usable; the two concerns are independent. */}
-              {usageError && !usageLoading && (
+              {/* Full panel only when there is nothing to show. Once a reading
+                  has loaded, a failed 10s poll must not blank all four cards —
+                  keep the last values and mark them stale. */}
+              {usageError && !usageLoading && !usage && (
                 <div data-testid="quotas-usage-error">
                   <ErrorState
                     message={t("common.error")}
@@ -253,7 +257,11 @@ export function QuotasPage() {
                 </div>
               )}
 
-              {usage && !usageError && (
+              {usageError && usage && (
+                <RefetchErrorNotice onRetry={() => refetchUsage()} className="mb-3" />
+              )}
+
+              {usage && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <UsageCard
                     label={t("quotas.conversationsToday", "Conversations Today")}

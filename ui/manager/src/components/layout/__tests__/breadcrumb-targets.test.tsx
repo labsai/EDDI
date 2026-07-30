@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderPage } from "@/test/test-utils";
 import { TopBar } from "../top-bar";
@@ -41,6 +41,28 @@ describe("breadcrumb targets", () => {
       expect(hrefs).not.toContain(expected.replace(/s$/, "view"));
     });
   }
+
+  it("does not emit duplicate React keys when two crumbs resolve to the same path", () => {
+    // listRouteForSegment maps `agentview` onto /manage/agents, so a path holding
+    // both segments yields two crumbs with the same `to`. Keying by `to` alone
+    // made those collide, which React reports as an error and which can drop or
+    // duplicate children.
+    const errors: unknown[][] = [];
+    const spy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => {
+        errors.push(args);
+      });
+    try {
+      render("/manage/agents/agentview", "/manage/agents/agentview");
+    } finally {
+      spy.mockRestore();
+    }
+    const duplicateKeyErrors = errors.filter((args) =>
+      args.some((a) => typeof a === "string" && a.includes("same key")),
+    );
+    expect(duplicateKeyErrors).toEqual([]);
+  });
 
   it("emits no crumb pointing at a bare *view path", () => {
     render("/manage/agentview/abc123", "/manage/agentview/:id");

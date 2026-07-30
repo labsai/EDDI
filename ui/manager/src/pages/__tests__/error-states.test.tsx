@@ -49,6 +49,56 @@ beforeEach(() => {
   server.resetHandlers();
 });
 
+describe("a failed refetch keeps data already on screen", () => {
+  /**
+   * These pages poll (schedules and quotas every 10s) and refetch on window
+   * focus. Gating the full-panel ErrorState on `isError` alone meant one blip
+   * replaced rows the operator was reading, and on a flaky link the panel
+   * flickered in and out. The error must degrade to an inline stale-data notice
+   * once there is something to show.
+   */
+  it("Schedules keeps its rows and shows a stale notice, not the error panel", async () => {
+    let call = 0;
+    server.use(
+      http.get("*/schedulestore/schedules", () => {
+        call += 1;
+        if (call === 1) {
+          return HttpResponse.json([
+            {
+              id: "s1",
+              name: "Nightly sync",
+              enabled: true,
+              triggerType: "CRON",
+              cron: "0 0 * * *",
+              fireStatus: "PENDING",
+              timeZone: "UTC",
+            },
+          ]);
+        }
+        return HttpResponse.json({ message: "boom" }, { status: 503 });
+      }),
+    );
+
+    const { queryClient } = renderPage(
+      "/manage/schedules",
+      <SchedulesPage />,
+      "/manage/schedules",
+    );
+
+    await waitFor(() => expect(screen.getByText("Nightly sync")).toBeInTheDocument());
+
+    // Force the second (failing) fetch, standing in for the 10s poll.
+    await queryClient.refetchQueries();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("refetch-error-notice")).toBeInTheDocument(),
+    );
+    // The row must still be there, and the destructive panel must not be.
+    expect(screen.getByText("Nightly sync")).toBeInTheDocument();
+    expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("page error states", () => {
   it("Variables shows an error, not 'no variables defined'", async () => {
     server.use(
@@ -102,7 +152,7 @@ describe("page error states", () => {
     // The first version of this fix returned early on isError, which also fires
     // for a background refetch — discarding a form the user was editing. The
     // error must be surfaced without unmounting the form.
-    renderPage(
+    const { queryClient } = renderPage(
       "/manage/channels/channel1",
       <ChannelDetailPage />,
       "/manage/channels/:id",
@@ -116,6 +166,16 @@ describe("page error states", () => {
         HttpResponse.json({ message: "boom" }, { status: 500 }),
       ),
     );
+
+    // Actually run the failing refetch. Registering the handler alone left
+    // isError false, so the assertions below passed no matter what the component
+    // did — the test guarded nothing until this line existed.
+    await queryClient.refetchQueries();
+    await waitFor(() => {
+      const q = queryClient.getQueryCache().getAll();
+      expect(q.some((entry) => entry.state.status === "error")).toBe(true);
+    });
+
     // The form must still be mounted; it is never replaced by the error page.
     expect(screen.getByTestId("save-channel-btn")).toBeInTheDocument();
     expect(screen.queryByTestId("channel-detail-error")).not.toBeInTheDocument();

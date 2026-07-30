@@ -119,16 +119,33 @@ describe("i18n interpolation integrity", () => {
   const placeholders = (s: string) =>
     [...s.matchAll(/\{\{\s*([a-zA-Z0-9_]+)[^}]*\}\}/g)].map((m) => m[1]).sort();
 
+  /**
+   * Forms where dropping the numeral is idiomatic rather than a defect: the count
+   * lives in the noun itself. Arabic "وكيل واحد" (one agent) and the dual
+   * "وكيلان" (two agents) are correct without a digit.
+   */
+  const NUMERAL_OPTIONAL = /_(zero|one|two)$/;
+  const PLURAL_FORM = /_(zero|one|two|few|many|other)$/;
+
   for (const [code, locale] of Object.entries(LOCALES)) {
     it(`${code}.json keeps the interpolation variables English uses`, () => {
       const flat = flatten(locale);
       const broken: string[] = [];
-      for (const [key, source] of Object.entries(enFlat)) {
-        const target = flat[key];
-        if (typeof source !== "string" || typeof target !== "string") continue;
-        // Singular and zero forms idiomatically drop the numeral in many
-        // languages — Arabic "وكيل واحد" ("one agent") is correct, not a bug.
-        if (key.endsWith("_zero") || key.endsWith("_one")) continue;
+
+      // Iterate the LOCALE's keys, not English's. Plural categories English does
+      // not have (_two/_few/_many, required by ar and by fr/es/pt) have no
+      // English counterpart, so keying off enFlat skipped every form this repo
+      // added — a dropped {{count}} in ar.agents.count_many went unseen.
+      for (const [key, target] of Object.entries(flat)) {
+        if (typeof target !== "string") continue;
+        if (NUMERAL_OPTIONAL.test(key)) continue;
+
+        // For a plural form, compare against English's canonical `_other`.
+        const source = PLURAL_FORM.test(key)
+          ? enFlat[key.replace(PLURAL_FORM, "_other")]
+          : enFlat[key];
+        if (typeof source !== "string") continue;
+
         const a = placeholders(source).join(",");
         const b = placeholders(target).join(",");
         if (a !== b) broken.push(`${key}: en[${a}] vs ${code}[${b}]`);

@@ -30,6 +30,9 @@ export function WorkforceBottomTabs() {
     return version ? `?version=${encodeURIComponent(version)}` : "";
   })();
 
+  /** True when the board root itself is the current page (its own destination). */
+  const isBoardRoot = boardId !== null && location.pathname === `/workforce/${boardId}`;
+
   const tabs = [
     {
       key: "home" as const,
@@ -55,7 +58,13 @@ export function WorkforceBottomTabs() {
       to: boardId
         ? `/workforce/${boardId}${versionQuery}`
         : "/workforce",
-      disabled: !boardId,
+      // Disabled when there is no board AND when the board root is already the
+      // current page. Otherwise the tab looks like a destination but navigating
+      // resolves to the location already shown: nothing renders differently, no
+      // tab lights up, and each tap pushes another history entry so Back needs
+      // several presses. That is the same dead-control complaint that motivated
+      // fixing the "Manage Workforce" tile, so it must not be reintroduced here.
+      disabled: !boardId || isBoardRoot,
     },
     {
       key: "insights" as const,
