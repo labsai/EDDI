@@ -131,8 +131,8 @@
 - Boardroom files: `src/pages/boardroom/`, `src/components/boardroom/`, `src/styles/advisory.css`
 
 ### Test Counts
-- 281 test files passing (EDDI-Manager)
-- 4127 Tests passing (`npm run test`)
+- Frontend: run `npm test` for the authoritative count. Hardcoding it here meant
+  two different totals in one document; the number rots within a commit or two.
 - 112 Backend tenancy tests passing (`mvn test`)
 
 ### Last Commit Focus

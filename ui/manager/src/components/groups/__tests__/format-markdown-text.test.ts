@@ -81,6 +81,25 @@ describe("formatMarkdownText", () => {
       const input = "Beispiel:\n\n    .btn { color:#fff }\n    foo(a,B);\n";
       expect(formatMarkdownText(input)).toBe(input);
     });
+
+    it("protects an indented code block that contains a blank line", () => {
+      // The run regex stops at a blank line, so such a block arrives as several
+      // runs. For every run after the first the nearest preceding non-blank line
+      // is the previous run's indented code, which was misread as list
+      // continuation — and the punctuation rule then rewrote real code.
+      const input = "Beispiel:\n\n    foo(a,B);\n\n    bar(c,D);\n";
+      expect(formatMarkdownText(input)).toBe(input);
+    });
+
+    it("protects a tab-indented block across a blank line", () => {
+      const input = "X:\n\n\ta(1,B);\n\n\tb(2,C);\n";
+      expect(formatMarkdownText(input)).toBe(input);
+    });
+
+    it("protects every run of a three-part indented block", () => {
+      const input = "X:\n\n    a(1,B);\n\n    b(2,C);\n\n    c(3,D);\n";
+      expect(formatMarkdownText(input)).toBe(input);
+    });
   });
 
   describe("a bare fence marker in prose does not disable the rest", () => {

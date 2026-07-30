@@ -63,7 +63,12 @@ export function parseSseFrame(
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
     if (line.startsWith(":")) continue; // comment / heartbeat
     if (line.startsWith("event:")) {
-      type = (line[6] === " " ? line.slice(7) : line.slice(6)).trim();
+      // Same optional-space-only rule as `data:` — the previous `.trim()` here
+      // contradicted the contract documented above. An explicitly empty
+      // `event:` reverts to the caller's default rather than yielding type "",
+      // which no consumer switch has a case for.
+      const value = line[6] === " " ? line.slice(7) : line.slice(6);
+      type = value === "" ? defaultEventType : value;
       sawField = true;
     } else if (line.startsWith("data:")) {
       dataLines.push(line[5] === " " ? line.slice(6) : line.slice(5));

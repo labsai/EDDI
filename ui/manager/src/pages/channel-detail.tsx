@@ -5,6 +5,7 @@ import { parseChannelResourceUri } from "@/lib/api/channels";
 import { getErrorMessage } from "@/lib/api-client";
 import { useTranslation } from "react-i18next";
 import { ErrorState } from "@/components/shared/error-state";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import {
   Cable, Save, Trash2, ArrowLeft, Plus, X, Copy, Check,
   Bot, Users, ChevronDown, ChevronUp, Hash,
@@ -255,16 +256,12 @@ export function ChannelDetailPage() {
     <div className="flex flex-col gap-6 p-6 max-w-4xl">
       {/* A refetch failed while the form was already open. Non-blocking on
           purpose: the user's in-progress edits stay intact and saveable, but the
-          failure is not swallowed either. */}
+          failure is not swallowed either. Uses the shared notice like the sibling
+          pages — the previous hand-rolled banner was styled `destructive`/red,
+          which read as a severe error for what is a still-editable state. */}
       {isError && draft && (
-        <div
-          className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5"
-          data-testid="channel-detail-refetch-error"
-        >
-          <p className="text-sm text-destructive">{t("common.error")}</p>
-          <Button variant="ghost" size="sm" onClick={() => refetch()}>
-            {t("common.retry")}
-          </Button>
+        <div data-testid="channel-detail-refetch-error">
+          <RefetchErrorNotice onRetry={() => refetch()} />
         </div>
       )}
 

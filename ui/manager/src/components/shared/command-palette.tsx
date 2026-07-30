@@ -180,16 +180,26 @@ export function CommandPalette() {
                   <Command.Item
                     key={agent.resource}
                     value={`agent ${agent.name} ${agent.description ?? ""}`}
-                    onSelect={() =>
+                    onSelect={() => {
+                      // Agent detail lives at /manage/agentview/:id, and :id is
+                      // the trailing segment of the resource URI — not the URI
+                      // itself. Passing the encoded URI matched no route and
+                      // dropped the user on the catch-all.
+                      //
+                      // parseResourceUri falls back to returning the WHOLE
+                      // resource string when the URI carries no path, so guard
+                      // it: interpolating that produced
+                      // /manage/agentview/eddi://… — the same dead route this
+                      // fixed. Fall back to the agent list instead.
+                      const { id } = parseResourceUri(agent.resource);
+                      const usable = id && !id.includes("/") && !id.includes(":");
                       handleSelect(
-                        // Agent detail lives at /manage/agentview/:id, and :id is
-                        // the trailing segment of the resource URI — not the URI
-                        // itself. Passing the encoded URI matched no route and
-                        // dropped the user on the catch-all.
-                        `/manage/agentview/${parseResourceUri(agent.resource).id}`,
+                        usable
+                          ? `/manage/agentview/${encodeURIComponent(id)}`
+                          : "/manage/agents",
                         agent.name,
-                      )
-                    }
+                      );
+                    }}
                     className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground transition-colors data-[selected=true]:bg-primary/10 data-[selected=true]:text-primary"
                   >
                     <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />

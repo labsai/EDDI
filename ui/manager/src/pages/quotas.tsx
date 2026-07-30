@@ -123,12 +123,17 @@ export function QuotasPage() {
 
       {loading ? (
         <LoadingSkeleton />
-      ) : quotaError ? (
+      ) : quotaError && !quota ? (
         /* getQuota() maps only 404 to local defaults ("not configured yet"), so
            reaching here means a real failure (500/503/network) and `quota` is
            undefined — which left `form` null and rendered the config and usage
            cards with empty bodies. An operator could not tell "no policy set"
-           from "we could not read the policy". */
+           from "we could not read the policy".
+
+           Gated on `!quota`: TanStack Query keeps the last data, so a failed
+           background refetch would otherwise replace a populated policy form
+           with the full-page error — the destructive behaviour avoided on the
+           sibling pages. With data present, the inline notice below reports it. */
         <ErrorState
           message={t("common.error")}
           onRetry={() => refetchQuota()}
@@ -136,6 +141,11 @@ export function QuotasPage() {
         />
       ) : (
         <>
+          {/* Policy loaded, but the newest read failed — keep the form usable. */}
+          {quotaError && quota && (
+            <RefetchErrorNotice onRetry={() => refetchQuota()} />
+          )}
+
           {/* Enforcement disabled banner */}
           {form && !form.enabled && (
             <div

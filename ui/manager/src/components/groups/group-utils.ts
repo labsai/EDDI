@@ -98,15 +98,35 @@ const INDENTED_CONT = /^(?:[ ]{2,}|\t)/;
  * when the nearest preceding non-blank line is a list item or is itself indented.
  */
 function maskIndentedCode(text: string, push: (m: string) => string): string {
+  // Line indices already classified as code. INDENTED_RUN stops at a blank line,
+  // so a code block containing one is split into several runs; for every run
+  // after the first, the nearest preceding non-blank line is the tail of the
+  // previous CODE run and is indented. Without remembering that, INDENTED_CONT
+  // matched it, the run was misread as list-continuation prose, and the rules
+  // rewrote real code — "    bar(c,D);" became "    bar(c, D);".
+  const codeLines = new Set<number>();
+
   return text.replace(INDENTED_RUN, (match: string, offset: number) => {
-    if (LIST_LINE.test(match)) return match;
     const before = text.slice(0, offset).split("\n");
-    let i = before.length - 1;
+    const startLine = before.length - 1;
+
+    let i = startLine - 1;
     while (i >= 0 && (before[i] ?? "").trim() === "") i--;
-    const prev = before[i];
-    if (prev !== undefined && (LIST_LINE.test(prev) || INDENTED_CONT.test(prev))) {
-      return match;
-    }
+    const prev = i >= 0 ? before[i] : undefined;
+
+    const isCode =
+      // A run that itself opens with a bullet is a nested list, never code.
+      !LIST_LINE.test(match) &&
+      (prev === undefined ||
+        // Continues a block already classified as code.
+        codeLines.has(i) ||
+        // Otherwise an indented or list-marked predecessor means list content.
+        !(LIST_LINE.test(prev) || INDENTED_CONT.test(prev)));
+
+    if (!isCode) return match;
+
+    const runLineCount = match.split("\n").length;
+    for (let l = startLine; l < startLine + runLineCount; l++) codeLines.add(l);
     return push(match);
   });
 }

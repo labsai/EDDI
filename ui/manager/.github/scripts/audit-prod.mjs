@@ -97,8 +97,16 @@ function advisories(report) {
 }
 
 const prod = advisories(audit(["--omit=dev"]));
-const unaccepted = prod.filter((a) => !ALLOWLIST[a.id]);
-const accepted = prod.filter((a) => ALLOWLIST[a.id]);
+/**
+ * An entry accepts an advisory only for the package it was reasoned about.
+ * Matching on the GHSA id alone would silently suppress the same advisory if it
+ * later surfaced under a different production dependency, where the "unreachable
+ * code path" argument may not hold at all.
+ */
+const isAccepted = (a) => ALLOWLIST[a.id]?.package === a.package;
+
+const unaccepted = prod.filter((a) => !isAccepted(a));
+const accepted = prod.filter(isAccepted);
 
 for (const a of accepted) {
   console.log(`accepted  ${a.id}  ${a.package} (${a.severity})`);
