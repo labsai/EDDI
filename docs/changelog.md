@@ -5,6 +5,23 @@
 
 ---
 
+## 🧹 fix(llm): bound the streaming warn-suppression key set (2026-07-30)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+`StreamingLegacyChatExecutor` suppressed its "configured timeout is below the default" warning by remembering keys in a static `Set`, with a comment claiming it was "bounded because a config edit re-keys the entry". That reasoning is backwards: re-keying **adds** a key and leaves the previous one behind, so config edits were precisely what made the set grow. Keyed on `(taskId, timeoutMs)`, the key space is unbounded over the lifetime of a process.
+
+Now bounded by an explicit `MAX_WARNED_TIMEOUT_KEYS` (1 000) size check that clears on overflow.
+
+**Two decisions worth recording, because the obvious implementations are both wrong here:**
+
+- **Not a Caffeine cache.** This is read on the per-request path — once per streaming turn, again per cascade step — and putting cache machinery there measurably slowed it: two timing-sensitive tests failed against their 66 ms budget when it was tried. A plain key set plus an O(1) size check costs nothing per call. (Isolated by reverting: the same tests pass with the set restored.)
+- **Clear on overflow, not refuse to add.** A hard cap would silently stop warning about genuinely *new* misconfigurations — the exact failure this warning exists to prevent. The worst case after a clear is that an already-warned task warns a second time: noise, not silence.
+
+The misleading comment is replaced with the corrected reasoning rather than deleted, so the next reader does not re-derive the same wrong conclusion.
+
+---
+
 ## 🔍 fix(all): critical re-review of the applied code-review fixes — 61 defects closed, 11 theatre tests made real (2026-07-29)
 
 **Repo:** EDDI (`fix/code-review-validation`)
