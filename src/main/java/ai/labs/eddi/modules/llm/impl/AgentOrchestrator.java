@@ -84,6 +84,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import ai.labs.eddi.utils.LogSanitizer;
+
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -2516,7 +2518,7 @@ class AgentOrchestrator {
             } catch (IllegalArgumentException e) {
                 // Not parseable as a URI — a templated host, most likely. Leave it be:
                 // matching something odd is better than throwing during discovery.
-                LOGGER.debugf("Could not normalise endpoint path '%s' for approval matching", rawPath);
+                LOGGER.debugf("Could not normalise endpoint path '%s' for approval matching", LogSanitizer.sanitize(rawPath));
                 return path;
             }
         }

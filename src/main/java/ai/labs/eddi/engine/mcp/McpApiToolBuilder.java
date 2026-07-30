@@ -280,14 +280,31 @@ public final class McpApiToolBuilder {
             if (jsonMedia != null) {
                 request.setContentType("application/json");
                 var body = buildBodyTemplate(jsonMedia.getSchema());
-                request.setBody(body.template());
                 // The body template's variables must be declared as tool parameters,
                 // or the model has no documented way to fill them: the tool schema is
                 // built from getParameters() alone (AgentOrchestrator), and with
                 // strict-rendering off an undeclared variable renders as empty. The
                 // request would go out structurally valid and semantically empty.
-                // Path and query names win a collision — those are structural.
-                body.variables().forEach(paramDescriptions::putIfAbsent);
+                //
+                // A path or query parameter of the same name wins — those are
+                // structural — so the body variable is RENAMED rather than dropped.
+                // Dropping it is the empty-body bug all over again, for a spec that
+                // happens to name a parameter "requestBody".
+                String bodyTemplate = body.template();
+                for (var variable : body.variables().entrySet()) {
+                    String variableName = variable.getKey();
+                    if (paramDescriptions.containsKey(variableName)) {
+                        String renamed = variableName;
+                        while (paramDescriptions.containsKey(renamed) || body.variables().containsKey(renamed)) {
+                            renamed = renamed + "Body";
+                        }
+                        bodyTemplate = bodyTemplate.replace("{" + variableName + "}", "{" + renamed + "}");
+                        paramDescriptions.put(renamed, variable.getValue());
+                    } else {
+                        paramDescriptions.put(variableName, variable.getValue());
+                    }
+                }
+                request.setBody(bodyTemplate);
             }
         }
 

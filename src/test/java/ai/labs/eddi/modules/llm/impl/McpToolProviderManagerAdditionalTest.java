@@ -265,6 +265,38 @@ class McpToolProviderManagerAdditionalTest {
         }
     }
 
+    @Nested
+    @DisplayName("the circuit breaker isolates by credential")
+    class CircuitIsolationTests {
+
+        private McpServerConfig serverWith(String apiKey) {
+            var config = new McpServerConfig();
+            config.setUrl("http://shared-server:8080");
+            config.setApiKey(apiKey);
+            return config;
+        }
+
+        @Test
+        @DisplayName("one credential failing does not suppress discovery for another")
+        void oneCredentialsFailuresDoNotOpenTheCircuitForAnother() throws Exception {
+            // Keyed by bare URL, an agent whose key was revoked would take the other
+            // agent's working config down with it.
+            var failing = serverWith("revoked-key");
+            var working = serverWith("valid-key");
+
+            var record = McpToolProviderManager.class.getDeclaredMethod("recordFailure", String.class);
+            record.setAccessible(true);
+            var key = McpToolProviderManager.class.getDeclaredMethod("cacheKey", McpServerConfig.class);
+            key.setAccessible(true);
+            for (int i = 0; i < 3; i++) {
+                record.invoke(manager, key.invoke(null, failing));
+            }
+
+            assertTrue(manager.isCircuitOpen(failing), "the failing credential trips its own circuit");
+            assertFalse(manager.isCircuitOpen(working), "the other credential must still be discoverable");
+        }
+    }
+
     // ==================== shutdown ====================
 
     @Nested

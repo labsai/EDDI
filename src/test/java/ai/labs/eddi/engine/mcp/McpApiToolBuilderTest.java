@@ -236,6 +236,31 @@ class McpApiToolBuilderTest {
     }
 
     @Test
+    @DisplayName("a parameter named requestBody does not silently drop the body variable")
+    void parseAndBuild_bodyVariableIsRenamedOnCollision() {
+        // putIfAbsent would skip the body variable here, leaving the template
+        // referencing something undeclared — the empty-body bug again, for a spec
+        // that happens to name a parameter "requestBody".
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things/{requestBody}":{"post":{
+                "operationId":"createThing","tags":["things"],
+                "parameters":[{"name":"requestBody","in":"path","required":true,"description":"A path id","schema":{"type":"string"}}],
+                "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/T"}}}},
+                "responses":{"200":{"description":"ok"}}}}},"components":{"schemas":{"T":{}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall call = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        assertEquals("A path id", call.getParameters().get("requestBody"), "the path parameter keeps the name");
+        // Every variable the body template references must still be declared.
+        var matcher = java.util.regex.Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(call.getRequest().getBody());
+        assertTrue(matcher.find());
+        assertTrue(call.getParameters().containsKey(matcher.group(1)),
+                "the body variable was renamed to " + matcher.group(1) + " and must be declared");
+        assertNotEquals("requestBody", matcher.group(1), "it cannot keep the colliding name");
+    }
+
+    @Test
     @DisplayName("a declared body with no schema still gets a variable")
     void parseAndBuild_bodyWithNoSchemaStillDeclaresAVariable() {
         // Returning "{}" and declaring nothing recreates the original bug for this

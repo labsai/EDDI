@@ -152,8 +152,7 @@ class McpToolProviderManagerCircuitBreakerTest {
             }
 
             // After 3 failures, the circuit should be open
-            assertTrue(manager.isCircuitOpen("http://unreachable-xyz-circuit-test:9999/mcp"),
-                    "Circuit should open after 3 consecutive failures");
+            assertTrue(manager.isCircuitOpen(config), "Circuit should open after 3 consecutive failures");
         }
     }
 

@@ -251,7 +251,8 @@ public class McpToolProviderManager {
             }
 
             // Circuit breaker: skip servers that failed too often recently
-            if (isCircuitOpen(url)) {
+            String circuitKey = cacheKey(serverConfig);
+            if (isCircuitOpen(circuitKey)) {
                 LOGGER.warnf("Circuit breaker OPEN for MCP server '%s' — skipping (>=%d failures in last %ds)",
                         sanitize(serverName), CIRCUIT_FAILURE_THRESHOLD, CIRCUIT_WINDOW_SECONDS);
                 failures.add(new McpServerFailure(serverName, url, McpFailureKind.CIRCUIT_OPEN,
@@ -325,12 +326,12 @@ public class McpToolProviderManager {
                 mergeServerTools(allSpecs, allExecutors, serverSpecs, serverExecutors, serverName);
 
                 // Success — clear failure history for this server
-                recordSuccess(url);
+                recordSuccess(circuitKey);
 
             } catch (Exception e) {
                 LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
                 failures.add(new McpServerFailure(serverName, url, McpFailureKind.CONNECTION_FAILURE, e.getMessage()));
-                recordFailure(url);
+                recordFailure(circuitKey);
             }
         }
 
@@ -716,8 +717,25 @@ public class McpToolProviderManager {
      * opens when the server has failed {@value #CIRCUIT_FAILURE_THRESHOLD} or more
      * times within the last {@value #CIRCUIT_WINDOW_SECONDS} seconds.
      */
-    boolean isCircuitOpen(String url) {
-        List<Instant> failures = failureTimestamps.get(url);
+    /**
+     * @param circuitKey
+     *            the credential-aware cache key, not the bare URL: two configs may
+     *            point at one server with different credentials, and one of them
+     *            failing to authenticate must not suppress discovery for the other
+     */
+    /**
+     * Whether the circuit is open for a configured server.
+     * <p>
+     * The contract callers actually care about — the key is an implementation
+     * detail, and a credential-aware one, so asking by URL would give the wrong
+     * answer for a server configured twice with different credentials.
+     */
+    boolean isCircuitOpen(McpServerConfig config) {
+        return isCircuitOpen(cacheKey(config));
+    }
+
+    boolean isCircuitOpen(String circuitKey) {
+        List<Instant> failures = failureTimestamps.get(circuitKey);
         if (failures == null) {
             return false;
         }
