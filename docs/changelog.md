@@ -5,6 +5,64 @@
 
 ---
 
+## 🩺 fix(configs): EDDI could not read the configs EDDI writes — 8 red ITs, 3 real breakages (2026-07-30)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+The Integration Tests job went red on this branch with eight failures across `AgentConfigurationIT`, `AgentDeploymentComponentIT` and `AgentEngineIT`, every one of them nothing but:
+
+```
+Expected status code <201> but was <400>.
+```
+
+No field name, no constraint, no violation message anywhere in the job log. `main` was green, so the branch caused it. The cause turned out to be **two different mechanisms**, and the second one breaks production, not just tests.
+
+### Mechanism 1 — unknown keys became fatal, and EDDI's own fixtures had three
+
+This branch added `StrictConfigurationBodyInterceptor`, which re-parses inbound configuration bodies with `FAIL_ON_UNKNOWN_PROPERTIES` and 400s on any key the model does not declare. That is the right call for a config-driven engine — a typo'd key in `behavior.json` is a behavioural bug, not something to discard silently — and it immediately earned its keep by catching three keys EDDI had been ignoring for years:
+
+| Key | Reality |
+| --- | --- |
+| `language` on dictionaries | The model declares **`lang`**. Every shipped dictionary fixture set `language`, so `lang` was always null. |
+| `type` on `outputs[]` items | `OutputConfiguration.Output` declares only `valueAlternatives`. The outer `type` was never read. |
+| `maxOccurrence: "ever"` | Obsolete pre-v6 key. The current `Occurrence` reads `maxTimesOccurred`/`minTimesOccurred`, so the condition had **no bound at all** — which this branch's new `Occurrence` check now (correctly) refuses. |
+
+All three are corrected in the fixtures. `language` is **deleted, not renamed to `lang`** — renaming looks like the fix the original author intended, but it is a behaviour change: `IDictionary.appliesToLanguage` is `isNullOrEmpty(dictLang) || dictLang.equals(userLanguage)`, so a null `lang` applies to every language while `"en"` applies only when the turn's user language is exactly `"en"`. The ITs never set one, so renaming would have silently switched off the correction dictionaries these tests assert on. Deleting preserves the asserted behaviour exactly; opting those fixtures into language scoping is a separate, deliberate change.
+
+`maxOccurrence: "ever"` becomes `minTimesOccurred: "1"` inside its enclosing `negation` — `NOT(occurred ≥ 1)` is exactly the `maxTimesOccurred: 0` that `agentengine/rules.json` already uses to express the same "not yet welcomed" rule.
+
+### Mechanism 2 — EDDI serialized three keys it could not read back
+
+The setup wizard's 400 had a different cause, and finding it mattered more than the fixtures. `AgentSetupService` does not write to the stores directly: it builds each config as an object and posts it through EDDI's own internal typed REST clients. So every generated config crosses the same strict boundary — and `LlmConfiguration.Task` **serialized `agentMode`, which nothing could deserialize**. `isAgentMode()` is a derived getter (a pure function of `tools`, `enableBuiltInTools`, `a2aAgents`) with no field or setter behind it.
+
+A sweep for the same shape found three in total, now all `@JsonIgnore`:
+
+- `LlmConfiguration.Task.isAgentMode()` — derived from tools/builtInTools/a2aAgents
+- `LlmConfiguration.Task.getSystemMessage()` — a read-through of `parameters.systemMessage`, so it also duplicated the prompt into every stored task
+- `AgentConfiguration.MemoryPolicy.isEffectivelyEnabled()` — derived from `strictWriteDiscipline`
+
+**This was never only a test problem.** Three paths hand EDDI-serialized configs straight back to EDDI's REST boundary: the setup wizard, EDDI-Manager's GET → edit → PUT, and export → ZIP import. All three would have 400'd on any LLM or agent configuration in production. Ignoring the derived keys also stops persisting values that are recomputed on every read.
+
+### And one silently inert config, six years old
+
+`HttpPostResponse.retryApiCallInstruction` was renamed from `retryHttpCallInstruction` in the v6 http→api sweep **with no `@JsonAlias`**. Jackson discarded the old key, so every config written before the rename lost its retry policy without a word in the logs — including EDDI's own documented reference agent, where the Agent Father's `create_agent` call declares `maxRetries: 3` on 502/503 and has been running with no retry at all. The alias is added: stored and exported JSON configs are the one backward-compatibility contract EDDI keeps, and without it those documents would now 400 outright.
+
+### Four guards, because none of this was reachable from the unit suite
+
+ITs need Docker and so only fail in CI; the strict boundary and the round-trip asymmetry are both checkable in seconds without it.
+
+- **`StrictBoundaryShippedConfigsTest`** — sweeps `src/test/resources/tests` and `docs/agent-configs`, strict-parsing every config against its model (26 checked). Sweeps the tree rather than listing files, so a fixture added later is covered automatically, and prints what it skipped so "passed" can never quietly mean "looked at nothing".
+- **`StrictBoundaryRoundTripTest`** — asserts no config model serializes a property it cannot deserialize.
+- **`RuleSetStoreShippedRulesetsTest`** — runs every shipped ruleset, and the wizard's generated one, through the real save-time validation.
+- **`SetupWizardConfigsPassStrictBoundaryTest`** — round-trips each config the wizard generates, so the wizard can never again 400 on its own output with the cause buried in `"Failed to set up agent: …"`.
+
+**Two of these guards were wrong before they were right, and both mistakes are worth recording:**
+
+- The round-trip test was first written by instantiating each model from `{}` and re-parsing. It **passed on `LlmConfiguration` while the `agentMode` bug sat in its nested `Task`** — a default instance has an empty `tasks` list, so the nested model was never reached. It now uses Jackson introspection to compare serializable against deserializable property sets and walks into property types, and carries a second test asserting the traversal actually reaches `Task` — otherwise the sweep could silently regress to checking only the twelve roots.
+- The ruleset sweep initially reported that the setup wizard generates an invalid ruleset: `'inputmatcher' requires a non-empty 'expressions'`. That was **the test's fault** — `IExpressionProvider` was mocked, so every `expressions` value parsed to empty and every `inputmatcher` in every ruleset "failed". With a real `ExpressionProvider` the wizard's ruleset passes. Reported as a product bug it would have been a wild goose chase.
+
+---
+
 ## 🧹 fix(llm): bound the streaming warn-suppression key set (2026-07-30)
 
 **Repo:** EDDI (`fix/code-review-validation`)

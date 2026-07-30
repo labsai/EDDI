@@ -864,7 +864,14 @@ public class AgentConfiguration {
         /**
          * Returns true if strict write discipline is enabled and its mode is not
          * "keep_all" (which preserves backwards-compatible behavior).
+         * <p>
+         * {@code @JsonIgnore} because it is derived from {@code strictWriteDiscipline}
+         * rather than stored alongside it. Jackson wrote an {@code effectivelyEnabled}
+         * key that nothing could read back, which turned into a 400 on every agent
+         * configuration EDDI itself serializes once
+         * {@code StrictConfigurationBodyInterceptor} began rejecting unknown keys.
          */
+        @JsonIgnore
         public boolean isEffectivelyEnabled() {
             return strictWriteDiscipline != null && strictWriteDiscipline.isEnabled()
                     && !"keep_all".equals(strictWriteDiscipline.getOnFailure());
