@@ -277,6 +277,7 @@ public class McpToolProviderManager {
             try {
                 validateServerUrl(url);
                 validateTransport(serverConfig.getTransport());
+                validateCallerBoundKey(serverConfig);
             } catch (IllegalArgumentException e) {
                 LOGGER.errorf("MCP server '%s' was NOT contacted because its configuration is invalid: %s — "
                         + "the agent runs without this server's tools until the config is fixed",
@@ -453,6 +454,22 @@ public class McpToolProviderManager {
      * @throws IllegalArgumentException
      *             if the URL is unusable or targets an internal address
      */
+    /**
+     * Refuse a credential the deployment cannot resolve.
+     * <p>
+     * A {@code ${caller:...}} key needs caller-identity forwarding switched on.
+     * With it off, every tool call would throw from {@code authorizationHeader} —
+     * once per request, forever, for a mistake made once in configuration. This
+     * reports it alongside the URL and transport checks, so it surfaces as
+     * {@code INVALID_CONFIGURATION} where an operator will actually see it.
+     */
+    private void validateCallerBoundKey(McpServerConfig config) {
+        if (CallerIdentityResolver.containsReference(config.getApiKey()) && !callerIdentityResolver.isEnabled()) {
+            throw new IllegalArgumentException("apiKey uses ${caller:...} but caller-identity forwarding is disabled "
+                    + "(eddi.caller-identity.enabled=false) — set a static key or enable forwarding");
+        }
+    }
+
     void validateServerUrl(String url) {
         if (isNullOrEmpty(url)) {
             throw new IllegalArgumentException("MCP server URL must not be empty");

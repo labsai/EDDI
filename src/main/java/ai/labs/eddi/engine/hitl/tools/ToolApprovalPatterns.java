@@ -73,10 +73,27 @@ public final class ToolApprovalPatterns {
         int colon = pattern.indexOf(':');
         if (colon > 0) {
             String prefix = pattern.substring(0, colon);
-            if (!prefix.contains("*") && !KNOWN_SOURCES.contains(prefix) && !isMethodQualifiedSource(prefix)) {
+            String target = pattern.substring(colon + 1);
+            boolean wildcardPrefix = prefix.contains("*");
+            boolean methodQualified = isMethodQualifiedSource(prefix);
+
+            if (!wildcardPrefix && !KNOWN_SOURCES.contains(prefix) && !methodQualified) {
                 return Optional.of("unknown tool source prefix '" + prefix + ":' in pattern '" + pattern + "'"
                         + suggestionFor(prefix) + " — known sources: " + String.join(", ", KNOWN_SOURCES)
                         + "; only the http source may be qualified by method, e.g. 'http.post:'");
+            }
+            // The remaining shapes save cleanly and match nothing at runtime, which for
+            // a require-pattern is an ungated call. Only a method-qualified http prefix
+            // is paired with an endpoint path, and an endpoint path always begins with
+            // a slash (AgentOrchestrator#normalizeEndpointPath), so anything else here
+            // is a pattern its author believes is protecting them.
+            if (!wildcardPrefix && target.startsWith("/") && !methodQualified) {
+                return Optional.of("pattern '" + pattern + "' targets an endpoint path but is not method-qualified, so it can never match"
+                        + " — endpoint patterns look like 'http.post:" + target + "'");
+            }
+            if (methodQualified && !target.startsWith("/") && !target.startsWith("*")) {
+                return Optional.of("pattern '" + pattern + "' is method-qualified, so its target is an endpoint path and must begin with '/'"
+                        + " (or '*') — did you mean '" + prefix + ":/" + target + "'?");
             }
         }
         return Optional.empty();

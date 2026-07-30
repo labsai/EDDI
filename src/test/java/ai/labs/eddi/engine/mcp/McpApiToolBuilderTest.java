@@ -236,6 +236,25 @@ class McpApiToolBuilderTest {
     }
 
     @Test
+    @DisplayName("the body description names the container the schema declares")
+    void parseAndBuild_bodyDescriptionNamesTheRealContainer() {
+        // Telling the model "a single JSON object" for an array body makes it wrap the
+        // payload in braces, and the API rejects a request the config cannot explain.
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/bulk":{"post":{
+                "operationId":"createMany","tags":["bulk"],
+                "requestBody":{"content":{"application/json":{"schema":{"type":"array","items":{"type":"string"}}}}},
+                "responses":{"200":{"description":"ok"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall createMany = result.configsByGroup().get("bulk").getHttpCalls().get(0);
+
+        String description = createMany.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE);
+        assertTrue(description.contains("JSON array"), description);
+        assertFalse(description.contains("single JSON object"), description);
+    }
+
+    @Test
     @DisplayName("required properties are marked so, and optional ones are not forced")
     void parseAndBuild_bodyDescriptionMarksRequiredProperties() {
         // Every declared parameter becomes a REQUIRED tool parameter, so optionality

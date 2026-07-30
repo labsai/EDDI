@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.hitl.tools;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -78,6 +79,22 @@ class ToolApprovalGateTest {
         var result = gate.classify(allThree(), SOURCES, ENDPOINTS, cfg(List.of("http:*"), List.of("http.get:*")), Set.of());
 
         assertEquals(List.of("createAgent", "updateLlm"), result.gated().stream().map(ToolExecutionRequest::name).toList());
+    }
+
+    @Test
+    @DisplayName("an endpoint-shaped pattern that could never match is rejected")
+    void endpointShapedPatternsThatCannotMatchAreRejected() {
+        // Each of these saved cleanly and matched nothing: runtime emits
+        // "http.<method>:/path", so a require-rule written any other way leaves the
+        // call allowed while the config looks like protection.
+        for (String pattern : List.of("http:/agentstore/agents", "mcp:/x", "http.post:agents")) {
+            assertTrue(ToolApprovalPatterns.validate(pattern).isPresent(), pattern + " can never match, so it must not save");
+        }
+        // The forms that do match stay valid, including a wildcard method.
+        for (String pattern : List.of("http.post:/agentstore/agents", "http.post:*", "http:*", "http.*:/x", "*:/x")) {
+            assertTrue(ToolApprovalPatterns.validate(pattern).isEmpty(),
+                    pattern + " is a working pattern: " + ToolApprovalPatterns.validate(pattern));
+        }
     }
 
     @Test

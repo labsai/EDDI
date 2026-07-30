@@ -384,7 +384,17 @@ public final class McpApiToolBuilder {
      * produce real JSON — an integer field unquoted, a string field quoted.
      */
     private static String describeBodySchema(Schema<?> schema) {
-        var description = new StringBuilder("The complete JSON request body, as a single JSON object.");
+        // Name the container the schema actually declares. Saying "a single JSON
+        // object" for a top-level array makes the model wrap the payload in braces,
+        // and the request is malformed in a way the API reports and the config does
+        // not explain.
+        var description = new StringBuilder("The complete JSON request body, as ").append(switch (schema.getType() == null ? "" : schema.getType()) {
+            case "array" -> "a JSON array.";
+            case "string" -> "a JSON string.";
+            case "integer", "number" -> "a JSON number.";
+            case "boolean" -> "a JSON boolean.";
+            default -> "a single JSON object.";
+        });
 
         @SuppressWarnings("rawtypes")
         Map<String, Schema> properties = schema.getProperties();
