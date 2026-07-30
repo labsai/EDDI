@@ -197,7 +197,12 @@ class GracefulShutdownServiceTest {
         for (Annotation[] parameterAnnotations : constructor.getParameterAnnotations()) {
             for (Annotation annotation : parameterAnnotations) {
                 if (annotation instanceof ConfigProperty configProperty && propertyName.equals(configProperty.name())) {
-                    return Integer.parseInt(configProperty.defaultValue());
+                    try {
+                        return Integer.parseInt(configProperty.defaultValue());
+                    } catch (NumberFormatException e) {
+                        throw new AssertionError("@ConfigProperty " + propertyName + " has a non-numeric defaultValue '"
+                                + configProperty.defaultValue() + "'", e);
+                    }
                 }
             }
         }

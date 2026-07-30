@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag.mongo;
 
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.datastore.AbstractResourceStore;
@@ -68,7 +69,8 @@ public class RagStore extends AbstractResourceStore<RagConfiguration> implements
             return;
         }
         LOGGER.warnf("Knowledge base '%s' declares chunkStrategy '%s', which the ingestion pipeline never implemented — "
-                + "storing it as '%s', the behaviour it always had.", content.getName(), strategy, DEFAULT_CHUNK_STRATEGY);
+                + "storing it as '%s', the behaviour it always had.", LogSanitizer.sanitize(content.getName()),
+                LogSanitizer.sanitize(strategy), DEFAULT_CHUNK_STRATEGY);
         content.setChunkStrategy(DEFAULT_CHUNK_STRATEGY);
     }
 }

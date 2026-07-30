@@ -396,10 +396,16 @@ class EmbeddingStoreFactoryTest {
         @Test
         @DisplayName("more client slots than store slots, so eviction cannot close a client a cached store holds")
         void clientBoundExceedsStoreBound() {
-            assertTrue(EmbeddingStoreFactory.MAX_MONGO_CLIENTS > EmbeddingStoreFactory.MAX_STORES,
-                    "every connection string reachable from the store cache needs a client slot; "
-                            + "MAX_MONGO_CLIENTS=" + EmbeddingStoreFactory.MAX_MONGO_CLIENTS
-                            + " vs MAX_STORES=" + EmbeddingStoreFactory.MAX_STORES);
+            // MAX_MONGO_CLIENTS is DEFINED as MAX_STORES + 14, so asserting the
+            // inequality can never fail — it is guaranteed by construction, which is
+            // exactly why it asserts nothing. Pin the two bounds and the headroom
+            // instead: if someone redefines either as a bare literal, or shrinks the
+            // gap, this fails and they have to think about whether eviction can still
+            // close a client that a cached store is holding.
+            assertEquals(50, EmbeddingStoreFactory.MAX_STORES);
+            assertEquals(64, EmbeddingStoreFactory.MAX_MONGO_CLIENTS);
+            assertEquals(14, EmbeddingStoreFactory.MAX_MONGO_CLIENTS - EmbeddingStoreFactory.MAX_STORES,
+                    "client slots must exceed store slots, or evicting a client can close one a cached store holds");
         }
     }
 }

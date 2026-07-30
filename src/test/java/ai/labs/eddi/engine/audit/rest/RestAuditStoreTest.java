@@ -354,7 +354,12 @@ class RestAuditStoreTest {
         restAuditStore.verifyConversation("conv-3", 0, -5);
         verify(auditStore).getEntries("conv-3", 0, RestAuditStore.DEFAULT_VERIFY_LIMIT);
 
-        assertTrue(RestAuditStore.DEFAULT_VERIFY_LIMIT < RestAuditStore.MAX_VERIFY_LIMIT);
+        // Pinned as values, not as a relational compare: both are compile-time
+        // constants, so `DEFAULT < MAX` can never fail and asserts nothing. The
+        // property that matters is that the fallback stays below the hard ceiling,
+        // and pinning both numbers makes changing either a deliberate act.
+        assertEquals(1_000, RestAuditStore.DEFAULT_VERIFY_LIMIT);
+        assertEquals(10_000, RestAuditStore.MAX_VERIFY_LIMIT);
     }
 
     /**

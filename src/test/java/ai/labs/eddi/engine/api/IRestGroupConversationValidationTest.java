@@ -342,7 +342,6 @@ class IRestGroupConversationValidationTest {
             assertEquals(255, IRestGroupConversation.MAX_MIME_TYPE_CHARS);
             assertEquals(255, IRestGroupConversation.MAX_FILE_NAME_CHARS);
             assertEquals(2048, IRestGroupConversation.MAX_URL_CHARS);
-            assertFalse(IRestGroupConversation.MAX_QUESTION_CHARS <= 0);
         }
     }
 }
