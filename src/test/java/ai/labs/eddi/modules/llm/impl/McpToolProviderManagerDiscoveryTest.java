@@ -309,7 +309,7 @@ class McpToolProviderManagerDiscoveryTest {
                 assertFalse(result.hasConfigurationErrors(), "a flaky server is not a config error");
             }
 
-            assertTrue(manager.isCircuitOpen(URL_A));
+            assertTrue(manager.isCircuitOpen(cfg), "the circuit is keyed per credential, so ask by config");
             var afterTrip = manager.discoverTools(List.of(cfg));
             assertEquals(McpFailureKind.CIRCUIT_OPEN, afterTrip.failures().get(0).kind());
             verify(manager, times(3)).fetchToolsFromServer(any());

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -223,10 +224,167 @@ class McpApiToolBuilderTest {
         assertEquals("application/json", createPet.getRequest().getContentType());
         String body = createPet.getRequest().getBody();
         assertNotNull(body);
-        assertTrue(body.contains("\"name\""), "Body should have 'name' field");
-        assertTrue(body.contains("\"age\""), "Body should have 'age' field");
-        // String field should be quoted
-        assertTrue(body.contains("\"{name}\""), "String param should be quoted in template");
+        // One variable for the whole body: the model writes the JSON itself, so
+        // there is no unescaped substitution into a per-property template.
+        assertEquals("{" + McpApiToolBuilder.WHOLE_BODY_VARIABLE + "}", body);
+        // The shape a per-property template would have implied is carried in the
+        // parameter description instead, so the model still knows what to write.
+        String bodyDescription = createPet.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE);
+        assertTrue(bodyDescription.contains("name"), bodyDescription);
+        assertTrue(bodyDescription.contains("age"), bodyDescription);
+        assertTrue(bodyDescription.contains("integer"), "the model must know age is not a quoted string: " + bodyDescription);
+    }
+
+    @Test
+    @DisplayName("a parameter named requestBody does not silently drop the body variable")
+    void parseAndBuild_bodyVariableIsRenamedOnCollision() {
+        // putIfAbsent would skip the body variable here, leaving the template
+        // referencing something undeclared — the empty-body bug again, for a spec
+        // that happens to name a parameter "requestBody".
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things/{requestBody}":{"post":{
+                "operationId":"createThing","tags":["things"],
+                "parameters":[{"name":"requestBody","in":"path","required":true,"description":"A path id","schema":{"type":"string"}}],
+                "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/T"}}}},
+                "responses":{"200":{"description":"ok"}}}}},"components":{"schemas":{"T":{}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall call = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        assertEquals("A path id", call.getParameters().get("requestBody"), "the path parameter keeps the name");
+        // Every variable the body template references must still be declared.
+        var matcher = java.util.regex.Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(call.getRequest().getBody());
+        assertTrue(matcher.find());
+        assertTrue(call.getParameters().containsKey(matcher.group(1)),
+                "the body variable was renamed to " + matcher.group(1) + " and must be declared");
+        assertNotEquals("requestBody", matcher.group(1), "it cannot keep the colliding name");
+    }
+
+    @Test
+    @DisplayName("a declared body with no schema still gets a variable")
+    void parseAndBuild_bodyWithNoSchemaStillDeclaresAVariable() {
+        // Returning "{}" and declaring nothing recreates the original bug for this
+        // spec shape: the model cannot fill a body and every write goes out empty.
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things":{"post":{
+                "operationId":"createThing","tags":["things"],
+                "requestBody":{"content":{"application/json":{}}},
+                "responses":{"200":{"description":"ok"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall createThing = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        assertEquals("{" + McpApiToolBuilder.WHOLE_BODY_VARIABLE + "}", createThing.getRequest().getBody());
+        assertTrue(createThing.getParameters().containsKey(McpApiToolBuilder.WHOLE_BODY_VARIABLE));
+    }
+
+    @Test
+    @DisplayName("the body description names the container the schema declares")
+    void parseAndBuild_bodyDescriptionNamesTheRealContainer() {
+        // Telling the model "a single JSON object" for an array body makes it wrap the
+        // payload in braces, and the API rejects a request the config cannot explain.
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/bulk":{"post":{
+                "operationId":"createMany","tags":["bulk"],
+                "requestBody":{"content":{"application/json":{"schema":{"type":"array","items":{"type":"string"}}}}},
+                "responses":{"200":{"description":"ok"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall createMany = result.configsByGroup().get("bulk").getHttpCalls().get(0);
+
+        String description = createMany.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE);
+        assertTrue(description.contains("JSON array"), description);
+        assertFalse(description.contains("single JSON object"), description);
+    }
+
+    @Test
+    @DisplayName("required properties are marked so, and optional ones are not forced")
+    void parseAndBuild_bodyDescriptionMarksRequiredProperties() {
+        // Every declared parameter becomes a REQUIRED tool parameter, so optionality
+        // has to live in the description or a PATCH of one field would force the
+        // model to restate all the others.
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things":{"post":{
+                "operationId":"createThing","tags":["things"],
+                "requestBody":{"content":{"application/json":{"schema":{"type":"object",
+                "required":["name"],
+                "properties":{"name":{"type":"string"},"nickname":{"type":"string"}}}}}},
+                "responses":{"200":{"description":"ok"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall createThing = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        assertEquals(1, createThing.getParameters().size(), "a body contributes exactly one parameter");
+        String description = createThing.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE);
+        assertTrue(description.contains("name (string, required)"), description);
+        assertTrue(description.contains("nickname (string)") && !description.contains("nickname (string, required)"), description);
+    }
+
+    @Test
+    @DisplayName("body template variables are declared as parameters, or the model cannot fill them")
+    void parseAndBuild_requestBodyVariablesAreDeclaredAsParameters() {
+        // The tool schema handed to the LLM is built from getParameters() alone. An
+        // undeclared body variable is invisible to the model and — with strict
+        // rendering off — renders empty, so the call succeeds with an empty body.
+        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
+        var petsConfig = result.configsByGroup().get("pets");
+
+        ApiCall createPet = petsConfig.getHttpCalls().stream().filter(c -> "createPet".equals(c.getName())).findFirst().orElseThrow();
+
+        assertNotNull(createPet.getParameters(), "a call with a body must declare parameters");
+        // Every variable the template references must be declared — that is the
+        // invariant, whatever shape the template takes.
+        var matcher = java.util.regex.Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(createPet.getRequest().getBody());
+        int found = 0;
+        while (matcher.find()) {
+            found++;
+            assertTrue(createPet.getParameters().containsKey(matcher.group(1)),
+                    matcher.group(1) + " is in the body template but not declared as a parameter");
+        }
+        assertTrue(found > 0, "a call with a request body must reference at least one variable");
+    }
+
+    @Test
+    @DisplayName("a body with no decomposable properties is declared as one whole-body parameter")
+    void parseAndBuild_wholeBodyVariableIsDeclared() {
+        // The common case for this API: an unresolved $ref collapses to a single
+        // variable carrying the entire JSON body.
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things":{"post":{
+                "operationId":"createThing","tags":["things"],
+                "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Thing"}}}},
+                "responses":{"200":{"description":"ok"}}}}},
+                "components":{"schemas":{"Thing":{}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall createThing = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        assertEquals("{" + McpApiToolBuilder.WHOLE_BODY_VARIABLE + "}", createThing.getRequest().getBody());
+        assertNotNull(createThing.getParameters());
+        assertTrue(createThing.getParameters().containsKey(McpApiToolBuilder.WHOLE_BODY_VARIABLE),
+                "the whole-body variable must be declared, otherwise every POST sends an empty body");
+    }
+
+    @Test
+    @DisplayName("a path parameter and the body no longer share a variable")
+    void parseAndBuild_pathParameterAndBodyDoNotCollide() {
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things/{id}":{"put":{
+                "operationId":"updateThing","tags":["things"],
+                "parameters":[{"name":"id","in":"path","required":true,"description":"The path id","schema":{"type":"string"}}],
+                "requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{
+                "id":{"type":"string","description":"A body id"},"label":{"type":"string"}}}}}},
+                "responses":{"200":{"description":"ok"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall updateThing = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        // With the whole body in one variable there is no collision left to resolve:
+        // the path keeps {id}, and the body's own id is the model's to write.
+        assertEquals("The path id", updateThing.getParameters().get("id"));
+        assertTrue(updateThing.getParameters().containsKey(McpApiToolBuilder.WHOLE_BODY_VARIABLE));
+        assertFalse(updateThing.getParameters().containsKey("label"), "body properties are no longer separate parameters");
+        assertTrue(updateThing.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE).contains("label"));
     }
 
     @Test

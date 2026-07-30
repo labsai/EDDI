@@ -84,6 +84,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import ai.labs.eddi.utils.LogSanitizer;
+
+import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -855,7 +858,7 @@ class AgentOrchestrator {
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
-            Map<String, String> toolCanonicalNames) {
+            Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints) {
     }
 
     /**
@@ -891,6 +894,7 @@ class AgentOrchestrator {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> toolExecutors = new HashMap<>();
         Map<String, String> toolSources = new HashMap<>();
+        Map<String, String> toolEndpoints = new HashMap<>();
         Map<String, String> toolCanonicalNames = new HashMap<>();
 
         for (Object tool : tools) {
@@ -926,6 +930,9 @@ class AgentOrchestrator {
         // Merge httpcall tools discovered from workflow (if any)
         if (httpCallTools != null) {
             mergeExternalTools(httpCallTools.toolSpecs(), httpCallTools.executors(), "http", toolSpecs, toolExecutors, toolSources);
+            // Endpoint provenance travels beside the source so an approval pattern can
+            // address what a tool calls, not just what it is named.
+            toolEndpoints.putAll(httpCallTools.endpoints());
         }
 
         // Merge mcpcalls tools discovered from workflow (if any)
@@ -938,7 +945,7 @@ class AgentOrchestrator {
             mergeExternalTools(a2aTools.toolSpecs(), a2aTools.executors(), "a2a", toolSpecs, toolExecutors, toolSources);
         }
 
-        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames));
+        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames), Map.copyOf(toolEndpoints));
     }
 
     /**
@@ -1216,7 +1223,7 @@ class AgentOrchestrator {
                     // calls. clearedCallIds carries the human-approved ids on resume so
                     // they are never re-gated. Inert when effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
-                    var gateResult = toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources,
+                    var gateResult = toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources, setup.toolEndpoints(),
                             effectiveToolApprovals, clearedCallIds);
 
                     if (!gateResult.gated().isEmpty()) {
@@ -2481,8 +2488,63 @@ class AgentOrchestrator {
 
     /**
      * Result of httpcall tool discovery.
+     *
+     * @param endpoints
+     *            tool name to {@code method:path} (e.g.
+     *            {@code post:/agentstore/agents}), so an approval pattern can
+     *            address the endpoint a tool calls rather than its generated name.
+     *            Names come from {@code operationId} or a slug, which drift; the
+     *            method and path are what the agent designer actually wrote in the
+     *            endpoint allow-list.
      */
-    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
+    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, Map<String, String> endpoints) {
+    }
+
+    /**
+     * Normalise a configured path to the shape an approval pattern is written in.
+     * <p>
+     * The config accepts three shapes for the same endpoint — {@code /a/b},
+     * {@code a/b}, and an absolute {@code https://host/a/b} (see
+     * {@code ApiCallExecutor#buildRequest}, which applies the same leading-slash
+     * rule). Storing the raw value would make {@code http.post:/a/b} miss two of
+     * them, and a require-pattern that misses is an ungated write.
+     * <p>
+     * An absolute URL keeps only its path, so the same pattern matches however the
+     * target server was configured.
+     */
+    static String normalizeEndpointPath(String rawPath) {
+        String path = rawPath.trim();
+        // Request.path defaults to "", and an empty path means the target server's
+        // root — ApiCallExecutor sends the request to targetServerUrl unchanged.
+        // Returning "" here would make the key "post:", which no pattern can match,
+        // so a root endpoint would be silently ungateable.
+        if (path.isEmpty()) {
+            return "/";
+        }
+        // Only a real absolute URL, not merely a path that happens to begin "http".
+        // ApiCallExecutor tests startsWith("http"), which is loose enough that a
+        // relative path like "httpcalls/agents" would be parsed as a URI here — and an
+        // opaque one collapses to an empty path, losing the endpoint entirely.
+        String lower = path.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            try {
+                String extracted = URI.create(path).getPath();
+                // A URL with no path ("https://host", "https://host?x=1") yields an
+                // empty path. Left empty the endpoint key would be "post:", which no
+                // pattern expecting a leading slash can match — and an unmatched
+                // require-pattern is an ungated call. A root endpoint is "/".
+                path = extracted == null || extracted.isEmpty() ? "/" : extracted;
+            } catch (IllegalArgumentException e) {
+                // Not parseable as a URI — a templated host, most likely. Leave it be:
+                // matching something odd is better than throwing during discovery.
+                LOGGER.debugf("Could not normalise endpoint path '%s' for approval matching", LogSanitizer.sanitize(rawPath));
+                return path;
+            }
+        }
+        if (!path.isEmpty() && !path.startsWith("/")) {
+            path = "/" + path;
+        }
+        return path;
     }
 
     /**
@@ -2496,6 +2558,7 @@ class AgentOrchestrator {
     HttpCallToolsResult discoverHttpCallTools(IConversationMemory memory) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
+        Map<String, String> endpoints = new HashMap<>();
 
         try {
             LOGGER.infof("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
@@ -2525,6 +2588,14 @@ class AgentOrchestrator {
                     }
 
                     toolSpecs.add(specBuilder.build());
+
+                    // Record what this tool actually calls, so approval patterns can be
+                    // written against the endpoint rather than the generated name.
+                    var apiRequest = apiCall.getRequest();
+                    if (apiRequest != null && apiRequest.getMethod() != null && apiRequest.getPath() != null) {
+                        endpoints.put(apiCall.getName(),
+                                apiRequest.getMethod().toLowerCase(Locale.ROOT) + ":" + normalizeEndpointPath(apiRequest.getPath()));
+                    }
 
                     executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
                         try {
@@ -2560,7 +2631,7 @@ class AgentOrchestrator {
             LOGGER.warn("Failed to discover httpcall tools from workflow", e);
         }
 
-        return new HttpCallToolsResult(toolSpecs, executors);
+        return new HttpCallToolsResult(toolSpecs, executors, endpoints);
     }
 
     // --- McpCalls auto-discovery from workflow ---

@@ -5,6 +5,29 @@
 
 ---
 
+## 🔀 chore(merge): main (#622, caller-bound MCP) into the wave-4a branch (2026-07-30)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+`main` moved by 16 commits while #620 was open (#622, the operator-write foundation, plus caller-bound MCP credentials and HITL endpoint patterns), which put the PR into `CONFLICTING`. Worth recording because a conflicting PR has **no computable merge ref, so no workflow can run at all** — the `Integration Tests` failure GitHub was still showing on #620 was a stale result from before the fixes that address it. Resolving the conflict is what lets CI produce a real answer.
+
+Git reported exactly one textual conflict — `docs/changelog.md`, a pure union of entries — and silently auto-merged three code files: `McpToolProviderManager`, `AgentOrchestrator`, and `McpToolProviderManagerAdditionalTest`. The auto-merges were the part worth checking, and one of them was wrong.
+
+### The silent breakage
+
+#622 made the MCP **tool** cache credential-scoped, not just the client cache: `toolCache` is now keyed on `cacheKey(config)` (`url|<sha-256 of apiKey>`, or `url|anonymous`) so a tool list discovered with one credential can never be served to another. Our F12 TTL tests seeded that cache under the bare URL. After the merge the seeded entry no longer matched the lookup, and the two tests failed *differently*:
+
+- `freshEntryIsServedFromCache` failed loudly — `expected: <1> but was: <0>`.
+- `staleEntryIsNotServed` kept **passing, vacuously**. Nothing was served because nothing matched the key, not because the entry was stale. It would have gone on "passing" while testing nothing.
+
+The second is the reason this is in the changelog: a green suite after a merge is not evidence that the merge is correct.
+
+The helper now derives the key by reflectively calling the production `cacheKey` rather than reconstructing it — the same idiom #622's own tests use — so the next change to the key shape carries these tests along instead of hollowing them out. Production was correct throughout; only the test was stale.
+
+`AgentOrchestrator`'s side of the merge was javadoc-only on our branch and merged cleanly; `McpToolProviderManager`'s validation block interleaved coherently (`validateServerUrl` + our `validateTransport` + #622's `validateCallerBoundKey` in one guard, with our one-time deprecated-transport warning after it). Our URL-keyed `deprecatedTransportWarned` set is unaffected by credential scoping, which is right: the transport is a property of the server, not of the credential.
+
+---
+
 ## 🧩 fix(rag): two guards disagreed about chunkStrategy and neither test could tell (2026-07-30)
 
 **Repo:** EDDI (`fix/code-review-validation`)
@@ -194,6 +217,43 @@ Because E6 makes previously-accepted input fail, the upgrade path was verified b
 
 - The interceptor's **JAX-RS provider registration** cannot be verified locally (no loopback sockets); its logic is fully unit-tested but CI is the gate for the wiring.
 - `McpCallsConfiguration.validate()` and `LlmConfiguration.validate()` still run at conversation/execution time rather than save time — the same defect class, now trivially fixable via the new hook. Left for a follow-up rather than widened into this change.
+
+## 🔑 feat(operator): the foundation for an agent that can safely write (2026-07-29)
+
+**Repo:** EDDI (`feat/operator-write-foundation`)
+
+Groundwork for a workspace operator agent that manages a deployment — creating and updating agents and groups — while acting as the person chatting to it. Five commits, no new capability granted: the operator's endpoint allow-list is untouched and still read-only. What changes is that widening it is now safe, where before it was neither safe nor functional.
+
+**Generated writes did not work at all.** `McpApiToolBuilder.buildBodyTemplate` emitted Qute variables for a request body but registered none of them, and `AgentOrchestrator` builds the tool schema from `ApiCall.getParameters()` alone. So the model had no documented way to fill a body; with strict rendering off the variables rendered empty and every generated `POST`/`PUT`/`PATCH` went out structurally valid and semantically empty. Adding a write endpoint before this would have produced garbage requests that fail at the far end rather than at the config.
+
+**The body is now one model-written variable.** A per-property template looked more helpful and was worse three ways: every variable became a *required* tool parameter (a `Map<String,String>` has nowhere to record optionality, so a `PATCH` of one field forced the model to restate all the others); values were substituted into the JSON unescaped, since the templating engine runs in `TEXT` mode, so a value containing a quote could break the body or add fields the schema never declared; and the HITL card shows tool *arguments*, so "the arguments are the request" only holds if the body is one of them. The shape a decomposed template implied now lives in the parameter description, which names each property with its type and marks which are required.
+
+**Approval patterns can address the endpoint a tool calls.** Names come from `operationId` or a slug and drift when a spec changes, and `ToolApprovalGate` allows an unmatched call — so a renamed or newly generated write arrived ungated and silently. Method and path were available and discarded one line into registration; they now travel alongside, so a pattern may match a bare name, `source:name`, or `source.method:path`:
+
+```json
+{ "requireApproval": ["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"],
+  "exempt": ["http.get:*"] }
+```
+
+gates every mutation without naming a tool, while `http.post:/agentstore/agents` addresses exactly one. Both speak the same `METHOD /path` vocabulary as the endpoint allow-list, so the two can be generated from one source instead of maintained in two. Documented in [`docs/hitl.md`](hitl.md).
+
+**Design decision — enumerate downward, never upward.** Whether something is gated stays in `requireApproval`/`exempt`; per-endpoint tuning may only *lower* friction. A missed exemption costs an approval prompt; a missed requirement is an ungated write. The same reasoning restricts the method qualifier to `http`: it is the only source whose tools record an endpoint, so `mcp.post:` is rejected at save time rather than saved as a pattern nothing could ever match.
+
+**MCP tool calls can now run as the chatting user.** They previously ran as whatever static credential the config named, and a `${caller:token}` there passed through the global-variable and secret resolvers untouched and was sent as the literal placeholder — failing silently rather than closed. The transport supported this all along: `customHeaders` has three overloads and EDDI used the constant one. The per-request `McpHeadersSupplier` overload makes the credential per-call while the client stays cached.
+
+**Discovery must be told apart from invocation explicitly.** The first version of this decided by asking whether a caller was bound to the thread — but discovery runs *inside* the turn, on a thread that is bound, so `initialize` and `tools/list` went out with the first caller's token. Since the client is cached, that session was then reused by everyone after them, and the tool list reflected one user's permissions while being offered to the next. langchain4j distinguishes the two — `DefaultMcpClient.listTools()` delegates with a null `InvocationContext` while `McpToolExecutor` always builds one — but it does not enforce anything; EDDI has to read `McpCallContext.invocationContext()` and act on it, which it now does. Only a tool call carries the caller; discovery goes unauthenticated on a caller-bound config and the server decides.
+
+**Fixed in passing — a privilege bug.** MCP clients were cached by URL alone, so two agents naming the same server with *different* credentials silently shared whichever client was constructed first. The key now includes a digest of the configured credential: a digest so a literal key never becomes a map key, taken unresolved so configs sharing a vault reference still share a client. This does not multiply clients per user — a caller-bound config yields one client whose supplier reads the caller per request.
+
+**Not solved, deliberately.** On an expired MCP session the transport retries `initialize()` on an HTTP callback thread where the caller binding does not exist. That path now sends the request unauthenticated rather than falling back to the static key under the caller's intent — a visible failure instead of the wrong authority.
+
+**Corrections to earlier analysis, recorded because they changed decisions.** `McpCallsConfiguration.toolsWhitelist` does *not* fail closed — `AgentOrchestrator` skips filtering when the list is empty, the same shape as the approval gate. `toolApprovals` is not agent-only: `LlmConfiguration` carries a per-task override that fully replaces the agent-level block. And a `PUT` on a config does not reach a running agent, because `HistorizedResourceStore.update` creates `version + 1` while agents pin a version — so self-modification takes a chain of write, re-point, redeploy, each independently gated. The thing to guard is whatever can re-point a version reference, not `PUT` in general.
+
+**Verification.** 566 tests pass on a clean build across the affected suites; checkstyle clean. Each fix mutation-checked by reverting it. Four tests written during this work were found vacuous by that check and rewritten — three asserted against a helper or state seeded through the very wrapper under test, one seeded a thread binding that the fix then restored, so it passed either way.
+
+**Next:** per-endpoint approval friction (`timeoutPolicy`, `approvalTimeout` and the pause message are still single scalars for every gated tool), agent-readable documentation (EDDI's MCP client never reads MCP *resources*, so `eddi://docs/*` is reachable from a desktop client but not from an agent), widening the allow-list, and the Manager scope picker and approval surface.
+
+---
 
 ---
 

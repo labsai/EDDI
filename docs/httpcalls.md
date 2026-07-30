@@ -71,9 +71,11 @@ than degrading quietly:
   inbound request, not from configuration, so a config naming a third-party host
   cannot exfiltrate a user's token — and no allow-list is needed for this to be
   safe by default.
-- **Headers only.** `${caller:token}` in a query parameter is rejected; tokens
-  in URLs leak through access logs, proxies and browser history.
-  `${caller:userId}` may be used in headers and query parameters.
+- **Headers only.** `${caller:token}` in a query parameter, request body or
+  request path is rejected. Tokens in URLs leak through access logs, proxies and
+  browser history, and nothing outside a header is substituted anyway — a
+  reference there would travel to the API as literal text. `${caller:userId}`
+  may be used in headers and query parameters.
 - **Authenticated turns only.** The identity comes from the request that drove
   the turn, so scheduled jobs and triggers cannot satisfy `${caller:token}`.
 - **Fails closed.** An unsatisfiable reference raises an error instead of
@@ -84,6 +86,13 @@ The resolved token is never written to conversation memory: authorization
 headers are scrubbed before the request is recorded.
 
 Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
+
+The same reference works in an **MCP server's `apiKey`**, so a tool call reaches
+that server as the chatting user rather than as a standing service principal.
+Only the tool call carries the caller — the handshake and `tools/list` do not,
+because the client is cached and a session opened with one user's token would be
+reused by everyone after them. See
+[`mcp-server.md`](mcp-server.md#calling-an-mcp-server-as-the-chatting-user).
 
 ### Running behind a reverse proxy
 
