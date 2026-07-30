@@ -27,7 +27,7 @@ All repos live under `c:\dev\git\`:
 | **Styling**        | Tailwind CSS v4 + CSS variables (black/gold)                           |
 | **State (server)** | TanStack Query v5                                                      |
 | **State (UI)**     | Zustand (chat/debug), `useState` / `useCallback` elsewhere             |
-| **Routing**        | React Router v7                                                        |
+| **Routing**        | React Router v7 (`react-router-dom` 7.x, declarative mode — no data router) |
 | **i18n**           | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
 | **Test (unit)**    | Vitest + React Testing Library + MSW                                   |
 | **Test (e2e)**     | Playwright                                                             |
@@ -49,6 +49,31 @@ All repos live under `c:\dev\git\`:
 
 - **Branch**: **NEVER commit directly to `main`.** Always create a feature branch (e.g. `feat/…`, `fix/…`) before making changes. If you find yourself on `main`, create and switch to a new branch first.
 - **Commit often** with conventional commits: `feat: description`
+
+### ⚠️ Dependency changes on Windows break CI's `npm ci`
+
+`@tailwindcss/oxide-wasm32-wasi` is an optional package that Windows skips, so npm
+on Windows never resolves its children and **prunes them from
+`package-lock.json`** on any `npm install` / `npm uninstall`. The Linux CI runner
+then fails before it runs anything:
+
+```
+npm error `npm ci` can only install packages when your package.json and
+npm error package-lock.json are in sync.
+npm error Missing: @emnapi/core@1.11.3 from lock file
+```
+
+Neither `npm install --package-lock-only` nor `--os=linux --cpu=x64` re-adds them.
+After changing any dependency on Windows, check the lock still carries all four:
+
+```bash
+node -e "const l=require('./package-lock.json');Object.keys(l.packages).filter(k=>k.includes('emnapi')||k.includes('wasm-runtime')).forEach(k=>console.log(k,l.packages[k].version))"
+```
+
+Expect `@emnapi/core`, `@emnapi/runtime`, `@emnapi/wasi-threads` and
+`@napi-rs/wasm-runtime` nested under
+`node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/`. If any are gone,
+restore them from the last lockfile CI accepted rather than regenerating.
 
 ### Quality Gates
 
@@ -205,7 +230,10 @@ what it finds. Off by default. Worth knowing before touching it:
 
 - Base URL: `window.location.origin` (never hardcode)
 - Vite proxy forwards all store paths to EDDI backend in dev mode
-- **All API calls** go through `src/lib/api-client.ts` (`ApiClient` class) — this ensures Keycloak auth tokens are propagated automatically
+- **Default to `src/lib/api-client.ts`** (`ApiClient` class) for API calls — it injects the Keycloak auth token automatically
+- Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`sse-utils.ts`, `bearer-event-source.ts`), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
+- `secrets.ts` is the exception that is *not* justified: its eight call sites are ordinary JSON CRUD on raw `fetch` for historical reasons. They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Treat it as debt to migrate onto `ApiClient`, not as the pattern to copy
+- For a new ordinary JSON call, use `ApiClient`
 - Server state via TanStack Query hooks in `src/hooks/`
 
 ### RTL Support

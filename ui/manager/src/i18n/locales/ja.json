@@ -192,7 +192,8 @@
     "refresh": "更新",
     "previous": "前へ",
     "next": "次へ",
-    "dismiss": "破棄"
+    "dismiss": "破棄",
+    "refreshFailed": "更新できませんでした — 最後に読み込んだデータを表示しています。"
   },
   "agents": {
     "confirmDeleteDescription": "この操作は元に戻せません。エージェントとそのすべてのデータが完全に削除されます。",
@@ -1494,7 +1495,7 @@
     "confirmDeleteTitle": "Secret を削除",
     "confirmDeleteMessage": "\"{{key}}\" を完全に削除してもよろしいですか？この操作は元に戻せません。",
     "empty": "Secrets が見つかりません",
-    "emptyHint": "Secret を作成するか、上の Namespace フィルタを変更してください。",
+    "emptyHint": "テナント \"{{tenant}}\" にはまだ Secret が保存されていません。「Secret を追加」をクリックして作成してください。",
     "vaultUp": "Vault オンライン",
     "vaultDown": "Vault オフライン",
     "descriptionLabel": "説明 (任意)",
@@ -3006,7 +3007,9 @@
       "continuePlaceholder": "この議論を継続…",
       "inputDisabledClosed": "この議論は終了しました",
       "newDiscussion": "新しい議論",
-      "noResponseGenerated": "応答は生成されませんでした"
+      "noResponseGenerated": "応答は生成されませんでした",
+      "awaitingApprovalHint": "このディスカッションは人による承認を待って一時停止しています。",
+      "reviewInManager": "確認する"
     },
     "thread": {
       "fileTooLarge": "ファイルは20MB以下にしてください",
@@ -3046,6 +3049,11 @@
       "activeTools": "アクティブツール",
       "noLlm": "LLM未設定",
       "noTools": "未設定"
+    },
+    "dashboard": "ダッシュボード",
+    "settings": {
+      "hitlApprovalPointsNote": "これらの設定は承認の挙動を制御します。ディスカッションのどの時点で承認が必要かは、Manager でフェーズごとに設定します。",
+      "hitlOpenManager": "承認ポイントを設定"
     }
   },
   "operator": {

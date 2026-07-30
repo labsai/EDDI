@@ -4,7 +4,7 @@ import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronLeft, PanelRightOpen, PanelRightClose, Plus } from "lucide-react";
+import { ChevronLeft, PanelRightOpen, PanelRightClose, Plus, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   useGroup,
@@ -644,6 +644,32 @@ function WorkforceBoard() {
             onCloseDiscussion={handleCloseConversation}
           />
         )}
+
+      {/* A discussion paused for approval cannot be advanced from this surface:
+          approve/reject lives on the Manager's group page. Without this the board
+          showed a greyed-out composer reading "Awaiting approval…" and no route
+          to the control that unblocks it, leaving the user stuck with no clue
+          where to look. */}
+      {selectedConversation?.state === "AWAITING_APPROVAL" && (
+        <div
+          className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs"
+          data-testid="board-awaiting-approval-banner"
+        >
+          <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <span className="flex-1 text-muted-foreground">
+            {t(
+              "Workforce.board.awaitingApprovalHint",
+              "This discussion is paused for human approval.",
+            )}
+          </span>
+          <Link
+            to={`/manage/groups/${boardId}${version ? `?version=${version}` : ""}`}
+            className="font-medium text-amber-500 underline-offset-2 hover:underline"
+          >
+            {t("Workforce.board.reviewInManager", "Review it")}
+          </Link>
+        </div>
+      )}
 
       {/* Input bar */}
       <BoardInput

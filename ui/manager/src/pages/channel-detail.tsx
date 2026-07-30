@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { parseChannelResourceUri } from "@/lib/api/channels";
 import { getErrorMessage } from "@/lib/api-client";
 import { useTranslation } from "react-i18next";
+import { ErrorState } from "@/components/shared/error-state";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import {
   Cable, Save, Trash2, ArrowLeft, Plus, X, Copy, Check,
   Bot, Users, ChevronDown, ChevronUp, Hash,
@@ -124,7 +126,7 @@ export function ChannelDetailPage() {
   const parsedVersion = Number(searchParams.get("version") ?? "1");
   const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
 
-  const { data: config, isLoading } = useChannel(id!, version);
+  const { data: config, isLoading, isError, refetch } = useChannel(id!, version);
   const updateMutation = useUpdateChannel();
   const deleteMutation = useDeleteChannel();
 
@@ -220,6 +222,27 @@ export function ChannelDetailPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // A missing channel or bad version previously left the skeleton spinning
+  // forever, because only `isLoading` was consulted.
+  //
+  // Gated on `!draft` deliberately: this must only replace the page on an INITIAL
+  // load failure. TanStack Query also sets isError for a *background* refetch
+  // failure, and returning early then would throw away a form the user is part way
+  // through editing — trading a stuck skeleton for silent data loss. Once a draft
+  // exists the form stays mounted and a refetch failure is surfaced by the banner
+  // below instead.
+  if (isError && !draft) {
+    return (
+      <div className="p-6" data-testid="channel-detail-error">
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
+      </div>
+    );
+  }
+
   if (isLoading || !draft) {
     return (
       <div className="p-6 space-y-6" data-testid="channel-detail-loading">
@@ -231,6 +254,17 @@ export function ChannelDetailPage() {
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-4xl">
+      {/* A refetch failed while the form was already open. Non-blocking on
+          purpose: the user's in-progress edits stay intact and saveable, but the
+          failure is not swallowed either. Uses the shared notice like the sibling
+          pages — the previous hand-rolled banner was styled `destructive`/red,
+          which read as a severe error for what is a still-editable state. */}
+      {isError && draft && (
+        <div data-testid="channel-detail-refetch-error">
+          <RefetchErrorNotice onRetry={() => refetch()} />
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate("/manage/channels")}><ArrowLeft className="h-4 w-4" /></Button>

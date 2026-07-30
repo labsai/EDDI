@@ -9,6 +9,7 @@ import {
   X,
   Users,
   BarChart3,
+  LayoutDashboard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -138,6 +139,29 @@ export function WorkforceSidebar({
             )}
           </Link>
         </Button>
+      </div>
+
+      {/* ── Dashboard Link ────────────────────────────────────── */}
+      {/* Without this the only route back to the dashboard was the unlabelled
+          logo, which users did not find — reported as "no way back from
+          Insights". */}
+      <div className="shrink-0 ps-3 pe-3 pb-1">
+        <Link
+          to="/workforce"
+          className={cn(
+            "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-sm transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            collapsed && "justify-center ps-0 pe-0",
+            location.pathname === "/workforce"
+              ? "bg-muted text-foreground font-medium"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+          title={collapsed ? t("Workforce.dashboard", "Dashboard") : undefined}
+          {...(location.pathname === "/workforce" ? { "aria-current": "page" as const } : {})}
+        >
+          <LayoutDashboard className="h-4 w-4 shrink-0" />
+          {!collapsed && <span>{t("Workforce.dashboard", "Dashboard")}</span>}
+        </Link>
       </div>
 
       {/* ── Insights Link ─────────────────────────────────────── */}

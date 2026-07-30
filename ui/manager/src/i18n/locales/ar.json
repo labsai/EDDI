@@ -192,7 +192,8 @@
     "refresh": "تحديث",
     "previous": "السابق",
     "next": "التالي",
-    "dismiss": "تجاهل"
+    "dismiss": "تجاهل",
+    "refreshFailed": "تعذّر التحديث — يتم عرض أحدث البيانات المحمّلة."
   },
   "agents": {
     "confirmDeleteDescription": "لا يمكن التراجع عن هذا الإجراء. ستتم إزالة الوكيل وجميع بياناته نهائياً.",
@@ -233,7 +234,11 @@
     "emptyDescription": "استخدم المعالج لإنشاء وكيل مكوّن بالكامل في دقائق.",
     "chat": "محادثة",
     "deployAndChat": "نشر ومحادثة",
-    "openExternalChat": "فتح في تبويب جديد"
+    "openExternalChat": "فتح في تبويب جديد",
+    "count_zero": "{{count}} وكيل",
+    "count_two": "وكيلان",
+    "count_few": "{{count}} وكلاء",
+    "count_many": "{{count}} وكيل"
   },
   "agentDetail": {
     "a2aDescHint": "يظهر في بطاقة الوكيل — يساعد الوكلاء الآخرين على فهم ما يفعله هذا الوكيل",
@@ -527,7 +532,11 @@
     "confirmDelete": "هل أنت متأكد من حذف هذا Workflow؟",
     "count_one": "سير عمل واحد",
     "count_other": "{{count}} سير عمل",
-    "emptyDescription": "تحدد مسارات العمل خط أنابيب المعالجة لوكلائك."
+    "emptyDescription": "تحدد مسارات العمل خط أنابيب المعالجة لوكلائك.",
+    "count_zero": "{{count}} سير عمل",
+    "count_two": "سيرا عمل",
+    "count_few": "{{count}} سير عمل",
+    "count_many": "{{count}} سير عمل"
   },
   "packageDetail": {
     "backToAgent": "العودة إلى الوكيل",
@@ -611,7 +620,11 @@
     "olderThanDays": "أقدم من (أيام)",
     "purgeAction": "تطهير",
     "confirmEndTitle": "إنهاء المحادثات المحددة؟",
-    "confirmPurgeTitle": "تطهير المحادثات المنتهية؟"
+    "confirmPurgeTitle": "تطهير المحادثات المنتهية؟",
+    "count_zero": "{{count}} محادثة",
+    "count_two": "محادثتان",
+    "count_few": "{{count}} محادثات",
+    "count_many": "{{count}} محادثة"
   },
   "conversationDetail": {
     "backToConversations": "العودة إلى المحادثات",
@@ -751,7 +764,15 @@
         "description": "تحليل المدخلات بمعالجة اللغة الطبيعية وتهيئة القواميس"
       }
     },
-    "emptyDescription": "أنشئ أول {{type}} لاستخدامه في مسارات العمل."
+    "emptyDescription": "أنشئ أول {{type}} لاستخدامه في مسارات العمل.",
+    "itemCount_zero": "{{count}} عنصر",
+    "itemCount_two": "عنصران",
+    "itemCount_few": "{{count}} عناصر",
+    "itemCount_many": "{{count}} عنصر",
+    "count_zero": "{{count}} مورد",
+    "count_two": "موردان",
+    "count_few": "{{count}} موارد",
+    "count_many": "{{count}} مورد"
   },
   "editor": {
     "cascadePartialFailure": "فشل {{count}} من التحديثات المتتالية",
@@ -1494,7 +1515,7 @@
     "confirmDeleteTitle": "حذف Secret",
     "confirmDeleteMessage": "هل أنت متأكد من الحذف الدائم لـ \"{{key}}\"؟ لا يمكن التراجع عن هذا.",
     "empty": "لم يتم العثور على Secrets",
-    "emptyHint": "أنشئ Secret أو غيّر فلاتر namespace أعلاه.",
+    "emptyHint": "لا توجد Secrets مخزّنة للمستأجر \"{{tenant}}\" بعد. انقر على \"إضافة Secret\" لإنشاء واحد.",
     "vaultUp": "Vault متصل",
     "vaultDown": "Vault غير متصل",
     "descriptionLabel": "الوصف (اختياري)",
@@ -2331,7 +2352,11 @@
     "sendFollowup": "إرسال المتابعة",
     "closeConfirmTitle": "إغلاق هذه المناقشة؟",
     "closeConfirmButton": "إغلاق المناقشة",
-    "closeConfirmDismiss": "رجوع"
+    "closeConfirmDismiss": "رجوع",
+    "count_zero": "{{count}} مجموعة",
+    "count_two": "مجموعتان",
+    "count_few": "{{count}} مجموعات",
+    "count_many": "{{count}} مجموعة"
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -3006,7 +3031,9 @@
       "continuePlaceholder": "متابعة هذه المناقشة…",
       "inputDisabledClosed": "هذه المناقشة مغلقة",
       "newDiscussion": "مناقشة جديدة",
-      "noResponseGenerated": "لم يتم إنشاء استجابة"
+      "noResponseGenerated": "لم يتم إنشاء استجابة",
+      "awaitingApprovalHint": "هذه المناقشة متوقفة في انتظار موافقة بشرية.",
+      "reviewInManager": "مراجعتها"
     },
     "thread": {
       "fileTooLarge": "يجب أن يكون الملف أقل من 20 ميغابايت",
@@ -3046,6 +3073,11 @@
       "activeTools": "الأدوات النشطة",
       "noLlm": "لم يتم تكوين LLM",
       "noTools": "لم يتم التكوين"
+    },
+    "dashboard": "لوحة التحكم",
+    "settings": {
+      "hitlApprovalPointsNote": "تتحكم هذه الإعدادات في كيفية عمل الموافقة. أما نقاط المناقشة التي تتطلب موافقة فيتم تكوينها لكل مرحلة في الـ Manager.",
+      "hitlOpenManager": "تحديد نقاط الموافقة"
     }
   },
   "operator": {

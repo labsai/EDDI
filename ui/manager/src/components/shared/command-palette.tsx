@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Command } from "cmdk";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { useAgentDescriptors } from "@/hooks/use-agents";
+import { parseResourceUri } from "@/lib/api/agents";
 import {
   LayoutDashboard,
   Bot,
@@ -179,12 +180,31 @@ export function CommandPalette() {
                   <Command.Item
                     key={agent.resource}
                     value={`agent ${agent.name} ${agent.description ?? ""}`}
-                    onSelect={() =>
-                      handleSelect(
-                        `/manage/agents/${encodeURIComponent(agent.resource)}`,
-                        agent.name,
-                      )
-                    }
+                    onSelect={() => {
+                      // Agent detail lives at /manage/agentview/:id, and :id is
+                      // the trailing segment of the resource URI — not the URI
+                      // itself. Passing the encoded URI matched no route and
+                      // dropped the user on the catch-all.
+                      //
+                      // parseResourceUri falls back to returning the WHOLE
+                      // resource string when the URI carries no path, so guard
+                      // it: interpolating that produced
+                      // /manage/agentview/eddi://… — the same dead route this
+                      // fixed. Fall back to the agent list instead.
+                      // parseResourceUri builds a `new URL(...)`, which THROWS on
+                      // a malformed resource — uncaught, that took down the
+                      // palette on selection rather than just misrouting.
+                      let target = "/manage/agents";
+                      try {
+                        const { id } = parseResourceUri(agent.resource);
+                        if (id && !id.includes("/") && !id.includes(":")) {
+                          target = `/manage/agentview/${encodeURIComponent(id)}`;
+                        }
+                      } catch {
+                        /* fall through to the agent list */
+                      }
+                      handleSelect(target, agent.name);
+                    }}
                     className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground transition-colors data-[selected=true]:bg-primary/10 data-[selected=true]:text-primary"
                   >
                     <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />

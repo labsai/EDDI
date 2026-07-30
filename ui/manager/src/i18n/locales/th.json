@@ -192,7 +192,8 @@
     "refresh": "รีเฟรช",
     "previous": "ก่อนหน้า",
     "next": "ถัดไป",
-    "dismiss": "ปิด"
+    "dismiss": "ปิด",
+    "refreshFailed": "ไม่สามารถรีเฟรชได้ — กำลังแสดงข้อมูลที่โหลดล่าสุด"
   },
   "agents": {
     "confirmDeleteDescription": "การดำเนินการนี้ไม่สามารถย้อนกลับได้ เอเจนต์และข้อมูลทั้งหมดจะถูกลบอย่างถาวร",
@@ -1494,7 +1495,7 @@
     "confirmDeleteTitle": "ลบ Secret",
     "confirmDeleteMessage": "คุณแน่ใจหรือไม่ว่าต้องการลบ \"{{key}}\" อย่างถาวร? ไม่สามารถยกเลิกได้",
     "empty": "ไม่พบ Secrets",
-    "emptyHint": "สร้าง Secret หรือเปลี่ยนตัวกรอง Namespace ด้านบน",
+    "emptyHint": "ยังไม่มี Secret ที่จัดเก็บสำหรับผู้เช่า \"{{tenant}}\" คลิก \"เพิ่ม Secret\" เพื่อสร้าง",
     "vaultUp": "Vault ออนไลน์",
     "vaultDown": "Vault ออฟไลน์",
     "descriptionLabel": "คำอธิบาย (ไม่จำเป็น)",
@@ -3006,7 +3007,9 @@
       "continuePlaceholder": "สานต่อการอภิปรายนี้…",
       "inputDisabledClosed": "การอภิปรายนี้ปิดแล้ว",
       "newDiscussion": "การอภิปรายใหม่",
-      "noResponseGenerated": "ไม่มีการสร้างคำตอบ"
+      "noResponseGenerated": "ไม่มีการสร้างคำตอบ",
+      "awaitingApprovalHint": "การสนทนานี้ถูกหยุดไว้เพื่อรอการอนุมัติจากมนุษย์",
+      "reviewInManager": "ตรวจสอบ"
     },
     "thread": {
       "fileTooLarge": "ไฟล์ต้องมีขนาดไม่เกิน 20MB",
@@ -3046,6 +3049,11 @@
       "activeTools": "เครื่องมือที่ใช้งาน",
       "noLlm": "ไม่ได้กำหนดค่า LLM",
       "noTools": "ไม่ได้กำหนดค่า"
+    },
+    "dashboard": "แดชบอร์ด",
+    "settings": {
+      "hitlApprovalPointsNote": "การตั้งค่าเหล่านี้ควบคุมพฤติกรรมของการอนุมัติ ส่วนจุดใดในการสนทนาที่ต้องขออนุมัติจะกำหนดเป็นรายเฟสใน Manager",
+      "hitlOpenManager": "กำหนดจุดอนุมัติ"
     }
   },
   "operator": {

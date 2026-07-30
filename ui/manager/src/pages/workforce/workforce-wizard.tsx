@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo, useRef } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { X } from "lucide-react";
@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent } from "@/hooks/use-agent-setup";
 import { useCreateGroup } from "@/hooks/use-groups";
+import { useTemplates } from "@/hooks/use-templates";
 import {
   getGroupTemplates,
   buildGroupFromTemplate,
@@ -67,6 +68,12 @@ function WorkforceWizard() {
   const [boardName, setBoardName] = useState("");
   const [boardDescription, setBoardDescription] = useState("");
   const [members, setMembers] = useState<MemberSlot[]>([]);
+  /** style/maxRounds from an applied saved template, so the custom build path
+   *  reproduces how that template actually runs rather than defaulting. */
+  const [savedTemplateConfig, setSavedTemplateConfig] = useState<{
+    style: DiscussionStyle;
+    maxRounds: number;
+  } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [creationProgress, setCreationProgress] = useState<
     CreationProgressItem[]
@@ -82,7 +89,9 @@ function WorkforceWizard() {
   );
 
   const resolvedStyle: DiscussionStyle | null =
-    selectedTemplateObj?.style ?? (selectedTemplate === "custom" ? "CUSTOM" : null);
+    selectedTemplateObj?.style ??
+    savedTemplateConfig?.style ??
+    (selectedTemplate === "custom" ? "CUSTOM" : null);
 
   const steps = useMemo(
     () => [
@@ -111,6 +120,13 @@ function WorkforceWizard() {
   const handleTemplateSelect = useCallback(
     (key: string) => {
       setSelectedTemplate(key);
+      // A manual pick replaces whatever a ?template=<uuid> deep link applied.
+      // Without this, arriving via a saved template and then choosing another
+      // card — or "Custom" — kept that template's style and maxRounds, so the
+      // created group silently ran with settings the user had moved away from.
+      // The deep-link effect sets this AFTER its own selection, so the
+      // saved-template path is unaffected.
+      setSavedTemplateConfig(null);
 
       if (key === "custom") {
         setBoardName("");
@@ -132,6 +148,49 @@ function WorkforceWizard() {
     },
     [templates],
   );
+
+  /**
+   * Apply a `?template=` deep link once, on mount.
+   *
+   * Three places link here with a template pre-chosen — the onboarding hero's
+   * template cards and its Custom card, and Dashboard > Templates > Use — and the
+   * wizard ignored the parameter entirely, so every one of them landed on step 0
+   * with nothing selected and Next disabled. The user's choice was silently
+   * discarded.
+   *
+   * Two different id spaces arrive here: built-in templates are keyed by `key`
+   * ("advisory-board"), while templates the user saved are keyed by a
+   * `crypto.randomUUID()` `id` and live in localStorage. Resolve both, and ignore
+   * an unknown value rather than leaving the wizard in a half-selected state.
+   */
+  const [searchParams] = useSearchParams();
+  const savedTemplates = useTemplates();
+  const appliedDeepLink = useRef(false);
+
+  useEffect(() => {
+    if (appliedDeepLink.current) return;
+    const requested = searchParams.get("template");
+    if (!requested) return;
+    appliedDeepLink.current = true;
+
+    if (requested === "custom" || templates.some((tpl) => tpl.key === requested)) {
+      handleTemplateSelect(requested);
+      return;
+    }
+
+    const saved = savedTemplates.templates.find((tpl) => tpl.id === requested);
+    if (!saved) return; // unknown id — leave the picker untouched
+
+    setSelectedTemplate("custom");
+    setSavedTemplateConfig({ style: saved.style, maxRounds: saved.maxRounds });
+    setBoardName(saved.name);
+    setBoardDescription(saved.description);
+    setMembers(
+      saved.members.length > 0
+        ? saved.members.map((m) => emptySlot(m.displayName, m.role))
+        : [emptySlot(), emptySlot()],
+    );
+  }, [searchParams, templates, savedTemplates.templates, handleTemplateSelect]);
 
   // ─── Creation flow ──────────────────────────────────────────────────────
 
@@ -243,8 +302,12 @@ function WorkforceWizard() {
           description: boardDescription,
           members: groupMembers,
           moderatorAgentId: null,
-          style: "CUSTOM" as const,
-          maxRounds: 1,
+          // A saved template carries its own style and round count, and the
+          // Templates panel displays them — hardcoding CUSTOM/1 here meant
+          // "Use template" recreated only the member list and silently changed
+          // how the discussion runs.
+          style: savedTemplateConfig?.style ?? ("CUSTOM" as const),
+          maxRounds: savedTemplateConfig?.maxRounds ?? 1,
           phases: null,
           protocol: {
             agentTimeoutSeconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
@@ -295,6 +358,9 @@ function WorkforceWizard() {
     createGroup,
     navigate,
     creationProgress,
+    // Read in the custom build path to reproduce a saved template's style and
+    // round count. Omitting it would let this callback close over a stale value.
+    savedTemplateConfig,
   ]);
 
   // ─── Render ─────────────────────────────────────────────────────────────

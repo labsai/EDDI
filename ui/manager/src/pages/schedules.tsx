@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
+import { ErrorState } from "@/components/shared/error-state";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import {
   Clock,
   Plus,
@@ -326,7 +328,7 @@ function FailedFiresPanel({
   schedules?: ScheduleConfiguration[];
 }) {
   const { t } = useTranslation();
-  const { data: failed, isLoading } = useFailedFires();
+  const { data: failed, isLoading, isError, refetch } = useFailedFires();
   const retryMutation = useRetryDeadLetter();
   const dismissMutation = useDismissDeadLetter();
 
@@ -372,6 +374,17 @@ function FailedFiresPanel({
       {isLoading ? (
         <div className="p-8 text-center">
           <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      ) : isError && !failed ? (
+        <div className="p-8">
+          {/* The dead-letter list is its own query. Without this a 500 rendered
+              "No failed fires" — telling an operator nothing is broken at the
+              exact moment the check for broken things failed. */}
+          <ErrorState
+            message={t("common.error")}
+            onRetry={() => refetch()}
+            retryLabel={t("common.retry")}
+          />
         </div>
       ) : !failed || failed.length === 0 ? (
         <div
@@ -1116,7 +1129,7 @@ export function SchedulesPage() {
     return () => clearTimeout(timer);
   }, [maybeAutoStart]);
 
-  const { data: schedules, isLoading } = useSchedules();
+  const { data: schedules, isLoading, isError, refetch } = useSchedules();
   const { data: failedFires } = useFailedFires();
   const deleteMutation = useDeleteSchedule();
   const toggleMutation = useToggleSchedule();
@@ -1399,9 +1412,29 @@ export function SchedulesPage() {
             </h2>
           </div>
 
+          {/* This list polls every 10s. A failed poll must not wipe rows the
+              operator is reading, so keep them and mark the data stale. */}
+          {isError && schedules && (
+            <div className="px-5 pt-4">
+              <RefetchErrorNotice onRetry={() => refetch()} />
+            </div>
+          )}
+
           {isLoading ? (
             <div className="p-8 text-center">
               <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          ) : isError && !schedules ? (
+            <div className="p-8">
+              {/* A failed fetch used to fall through to the empty state below, which
+                  told the user there is no data when the request never landed.
+                  Gated on having no rows: once rows are loaded a failed 10s poll
+                  shows the inline stale notice above instead of wiping them. */}
+              <ErrorState
+                message={t("common.error")}
+                onRetry={() => refetch()}
+                retryLabel={t("common.retry")}
+              />
             </div>
           ) : !schedules || schedules.length === 0 ? (
             <div

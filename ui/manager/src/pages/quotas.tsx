@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
+import { ErrorState } from "@/components/shared/error-state";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import {
   SlidersHorizontal,
   Activity,
@@ -24,8 +26,13 @@ const DEFAULT_TENANT = "default";
 
 export function QuotasPage() {
   const { t } = useTranslation();
-  const { data: quota, isLoading: quotaLoading } = useQuota(DEFAULT_TENANT);
-  const { data: usage, isLoading: usageLoading } = useQuotaUsage(DEFAULT_TENANT);
+  const { data: quota, isLoading: quotaLoading, isError: quotaError, refetch: refetchQuota } = useQuota(DEFAULT_TENANT);
+  const {
+    data: usage,
+    isLoading: usageLoading,
+    isError: usageError,
+    refetch: refetchUsage,
+  } = useQuotaUsage(DEFAULT_TENANT);
   const updateMutation = useUpdateQuota();
   const resetMutation = useResetUsage();
 
@@ -118,6 +125,11 @@ export function QuotasPage() {
         <LoadingSkeleton />
       ) : (
         <>
+          {/* Policy loaded, but the newest read failed — keep the form usable. */}
+          {quotaError && quota && (
+            <RefetchErrorNotice onRetry={() => refetchQuota()} />
+          )}
+
           {/* Enforcement disabled banner */}
           {form && !form.enabled && (
             <div
@@ -160,7 +172,20 @@ export function QuotasPage() {
                 )}
               </div>
 
-              {form && (
+              {/* Quota and usage are independent queries. Scoping the failure to
+                  this card keeps a usage reading that loaded fine — and the Reset
+                  Counters action — on screen, instead of replacing the whole page.
+                  getQuota() maps only 404 to local defaults, so reaching here with
+                  no `quota` is a real failure (500/503/network), not "unset". */}
+              {quotaError && !quota ? (
+                <div data-testid="quotas-config-error">
+                  <ErrorState
+                    message={t("common.error")}
+                    onRetry={() => refetchQuota()}
+                    retryLabel={t("common.retry")}
+                  />
+                </div>
+              ) : form ? (
                 <div className="space-y-4">
                   <QuotaField
                     icon={<MessageSquare className="h-4 w-4 text-muted-foreground" />}
@@ -200,7 +225,7 @@ export function QuotasPage() {
                     dimmed={!form.enabled}
                   />
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Usage Card */}
@@ -220,6 +245,28 @@ export function QuotasPage() {
                   {t("quotas.resetCounters", "Reset Counters")}
                 </button>
               </div>
+
+              {/* Usage is a separate query from the quota config, so it can fail
+                  on its own. Without this the card rendered its header and the
+                  Reset Counters button over an empty body — a blank panel that
+                  reads as "no usage" rather than "could not load". The config
+                  form above stays usable; the two concerns are independent. */}
+              {/* Full panel only when there is nothing to show. Once a reading
+                  has loaded, a failed 10s poll must not blank all four cards —
+                  keep the last values and mark them stale. */}
+              {usageError && !usageLoading && !usage && (
+                <div data-testid="quotas-usage-error">
+                  <ErrorState
+                    message={t("common.error")}
+                    onRetry={() => refetchUsage()}
+                    retryLabel={t("common.retry")}
+                  />
+                </div>
+              )}
+
+              {usageError && usage && (
+                <RefetchErrorNotice onRetry={() => refetchUsage()} className="mb-3" />
+              )}
 
               {usage && (
                 <div className="grid gap-3 sm:grid-cols-2">

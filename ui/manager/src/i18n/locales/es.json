@@ -192,7 +192,8 @@
     "refresh": "Actualizar",
     "previous": "Anterior",
     "next": "Siguiente",
-    "dismiss": "Descartar"
+    "dismiss": "Descartar",
+    "refreshFailed": "No se pudo actualizar: se muestran los últimos datos cargados."
   },
   "agents": {
     "confirmDeleteDescription": "Esta acción no se puede deshacer. El agente y todos sus datos se eliminarán permanentemente.",
@@ -233,7 +234,8 @@
     "emptyDescription": "Use el asistente para crear un agente completamente configurado en minutos.",
     "chat": "Chat",
     "deployAndChat": "Desplegar y chatear",
-    "openExternalChat": "Abrir en nueva pestaña"
+    "openExternalChat": "Abrir en nueva pestaña",
+    "count_many": "{{count}} agentes"
   },
   "agentDetail": {
     "a2aDescHint": "Se muestra en la Agent Card — ayuda a otros agentes a entender qué hace este agente",
@@ -527,7 +529,8 @@
     "confirmDelete": "¿Está seguro de que desea eliminar este workflow?",
     "count_one": "{{count}} flujo de trabajo",
     "count_other": "{{count}} flujos de trabajo",
-    "emptyDescription": "Los workflows definen el pipeline de procesamiento de sus agentes."
+    "emptyDescription": "Los workflows definen el pipeline de procesamiento de sus agentes.",
+    "count_many": "{{count}} flujos de trabajo"
   },
   "packageDetail": {
     "backToAgent": "Volver al agente",
@@ -611,7 +614,8 @@
     "olderThanDays": "Más antiguas que (días)",
     "purgeAction": "Purgar",
     "confirmEndTitle": "¿Finalizar las conversaciones seleccionadas?",
-    "confirmPurgeTitle": "¿Purgar conversaciones finalizadas?"
+    "confirmPurgeTitle": "¿Purgar conversaciones finalizadas?",
+    "count_many": "{{count}} conversaciones"
   },
   "conversationDetail": {
     "backToConversations": "Volver a conversaciones",
@@ -751,7 +755,9 @@
         "description": "Análisis NLP de entradas y configuración de diccionarios"
       }
     },
-    "emptyDescription": "Cree su primer(a) {{type}} para usarlo en workflows."
+    "emptyDescription": "Cree su primer(a) {{type}} para usarlo en workflows.",
+    "itemCount_many": "{{count}} elementos",
+    "count_many": "{{count}} recursos"
   },
   "editor": {
     "cascadePartialFailure": "{{count}} actualización(es) en cascada fallaron",
@@ -1494,7 +1500,7 @@
     "confirmDeleteTitle": "Eliminar secret",
     "confirmDeleteMessage": "¿Está seguro de que desea eliminar permanentemente \"{{key}}\"? Esta acción no se puede deshacer.",
     "empty": "No se encontraron secrets",
-    "emptyHint": "Cree un secret o cambie los filtros de namespace arriba.",
+    "emptyHint": "Aún no hay secrets almacenados para el inquilino «{{tenant}}». Haz clic en «Añadir secret» para crear uno.",
     "vaultUp": "Vault en línea",
     "vaultDown": "Vault fuera de línea",
     "descriptionLabel": "Descripción (opcional)",
@@ -2331,7 +2337,8 @@
     "sendFollowup": "Enviar seguimiento",
     "closeConfirmTitle": "¿Cerrar esta discusión?",
     "closeConfirmButton": "Cerrar discusión",
-    "closeConfirmDismiss": "Volver"
+    "closeConfirmDismiss": "Volver",
+    "count_many": "{{count}} grupos"
   },
   "taskBoard": {
     "title": "Tablero de tareas",
@@ -3006,7 +3013,9 @@
       "continuePlaceholder": "Continuar esta discusión…",
       "inputDisabledClosed": "Esta discusión está cerrada",
       "newDiscussion": "Nueva discusión",
-      "noResponseGenerated": "No se generó respuesta"
+      "noResponseGenerated": "No se generó respuesta",
+      "awaitingApprovalHint": "Esta discusión está en pausa esperando aprobación humana.",
+      "reviewInManager": "Revisarla"
     },
     "thread": {
       "fileTooLarge": "El archivo debe ser menor de 20MB",
@@ -3046,6 +3055,11 @@
       "activeTools": "Herramientas activas",
       "noLlm": "Sin LLM configurado",
       "noTools": "Sin configurar"
+    },
+    "dashboard": "Panel",
+    "settings": {
+      "hitlApprovalPointsNote": "Estos ajustes controlan cómo se comporta una aprobación. Qué puntos de una discusión la requieren se configura por fase en el Manager.",
+      "hitlOpenManager": "Definir puntos de aprobación"
     }
   },
   "operator": {

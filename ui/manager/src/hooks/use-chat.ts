@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { create } from "zustand";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -350,7 +351,13 @@ export function useSendMessage() {
   // Tracks the optimistic user message added by the in-flight send, so onError
   // can remove it on a 409 (the backend never consumed it — leaving it visible
   // would misleadingly look like the message was sent and received).
-  let pendingUserMessageId: string | null = null;
+  //
+  // MUST be a ref, not a plain `let`. This hook body re-runs on every render of
+  // the calling component; a `let` is re-initialised to null each time. Adding
+  // the optimistic message triggers a re-render, so by the time TanStack Query
+  // invokes onError it is calling the *latest* render's closure — which saw a
+  // fresh null — and the rollback below silently never ran.
+  const pendingUserMessageIdRef = useRef<string | null>(null);
   return useMutation({
     mutationFn: async ({
       message,
@@ -384,7 +391,7 @@ export function useSendMessage() {
       // Add user message (masked if secret), carrying attachment chips for
       // display — never on a secret turn (they'd unmask the filename/thumbnail).
       const userMessageId = `user-${Date.now()}`;
-      pendingUserMessageId = userMessageId;
+      pendingUserMessageIdRef.current = userMessageId;
       state.addMessage({
         id: userMessageId,
         role: "user",
@@ -535,8 +542,8 @@ export function useSendMessage() {
         // indicator lingers beneath the pause banner, AND the optimistic user
         // message itself — otherwise it stays in the transcript looking sent
         // even though the backend never received it.
-        const rejectedUserMessageId = pendingUserMessageId;
-        pendingUserMessageId = null;
+        const rejectedUserMessageId = pendingUserMessageIdRef.current;
+        pendingUserMessageIdRef.current = null;
         store.setState((s) => {
           const msgs = [...s.messages];
           const last = msgs[msgs.length - 1];

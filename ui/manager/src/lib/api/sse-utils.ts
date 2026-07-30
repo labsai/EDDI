@@ -12,6 +12,75 @@ export interface AuthEventSourceHandle {
 }
 
 /**
+ * Parse one SSE frame — the text between blank-line separators — into its event
+ * type and data payload.
+ *
+ * Currently used by `sendMessageStreaming` in `chat.ts`. There are three other
+ * SSE readers in this repo and they do NOT all follow the rules below — inventory
+ * so the next person does not have to rediscover it:
+ *
+ *  - `createAuthEventSource` (below) — incremental, line-based. Appends `data:`
+ *    lines, strips `\r`, honours the optional-space rule. Close, but NOT
+ *    equivalent on two inputs: it dispatches only when `eventData` is non-empty,
+ *    so a frame carrying just `event: done` (no data) is dropped where this
+ *    returns it; and because it accumulates across dispatches it treats a leading
+ *    empty `data:` line differently. Do not swap one for the other blind.
+ *  - `BearerEventSource` (`src/lib/bearer-event-source.ts`) — incremental.
+ *    Appends and strips `\r`, but uses `trimStart()` on the payload, so it drops
+ *    more than the single optional space and does not preserve leading runs.
+ *  - `readGroupSSE` (`src/lib/api/groups.ts`) — frame-based, and the one worth
+ *    migrating. It appends `data:` lines correctly (it cites the spec) but
+ *    `.trim()`s each one, losing meaningful whitespace, and normalises CRLF per
+ *    decoded chunk, which misses a `\r\n` straddling a chunk boundary. It also
+ *    drops any frame without an explicit `event:` line.
+ *
+ * If you change the rules here, reconcile them with those three rather than
+ * assuming they match.
+ *
+ * It follows the WHATWG spec on the three points that are easy to get wrong and
+ * that a hand-rolled parser reliably gets wrong:
+ *
+ *  - **Multiple `data:` lines in one frame concatenate with "\n".** They do not
+ *    overwrite. Assigning instead of appending silently truncates every
+ *    multi-line payload to its final line.
+ *  - **Only the single optional space after the colon is stripped.** Calling
+ *    `.trim()` destroys leading and trailing whitespace, which corrupts token
+ *    streams where a lone " " is a meaningful chunk.
+ *  - **A trailing "\r" from CRLF framing is removed** before the value is read.
+ *
+ * Returns `null` for a frame carrying no field lines (a `:` heartbeat comment,
+ * or blank padding), so callers can simply skip it.
+ */
+export function parseSseFrame(
+  frame: string,
+  defaultEventType = "message",
+): { type: string; data: string } | null {
+  let type = defaultEventType;
+  const dataLines: string[] = [];
+  let sawField = false;
+
+  for (const rawLine of frame.split("\n")) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line.startsWith(":")) continue; // comment / heartbeat
+    if (line.startsWith("event:")) {
+      // Same optional-space-only rule as `data:` — the previous `.trim()` here
+      // contradicted the contract documented above. An explicitly empty
+      // `event:` reverts to the caller's default rather than yielding type "",
+      // which no consumer switch has a case for.
+      const value = line[6] === " " ? line.slice(7) : line.slice(6);
+      type = value === "" ? defaultEventType : value;
+      sawField = true;
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line[5] === " " ? line.slice(6) : line.slice(5));
+      sawField = true;
+    }
+  }
+
+  if (!sawField) return null;
+  return { type, data: dataLines.join("\n") };
+}
+
+/**
  * Create an auth-aware SSE stream using fetch + ReadableStream.
  * Unlike native EventSource, this supports Authorization headers.
  */

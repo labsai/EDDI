@@ -20,6 +20,8 @@ import {
   useUpsertVariable,
   useDeleteVariable,
 } from "@/hooks/use-variables";
+import { ErrorState } from "@/components/shared/error-state";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { isValidVariableKey } from "@/lib/api/variables";
 import type { GlobalVariable } from "@/lib/api/variables";
 
@@ -40,7 +42,7 @@ export function VariablesPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   /* ─── Queries ─── */
-  const { data: variables, isLoading } = useVariables();
+  const { data: variables, isLoading, isError, refetch } = useVariables();
   const upsertMut = useUpsertVariable();
   const deleteMut = useDeleteVariable();
 
@@ -232,6 +234,24 @@ export function VariablesPage() {
         </div>
       )}
 
+      {/* Error state — without this a failed fetch rendered the empty state,
+          telling the user there are no variables when the request never landed.
+          Gated on having no rows, like the sibling pages: with rows loaded, a
+          failed window-focus refetch would otherwise render this destructive
+          panel *in addition to* the still-populated search bar and table. */}
+      {isError && !isLoading && !variables && (
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
+      )}
+
+      {/* Rows already on screen — report the stale read without hiding them. */}
+      {isError && variables && (
+        <RefetchErrorNotice onRetry={() => refetch()} />
+      )}
+
       {/* Loading state (no data yet) */}
       {isLoading && !variables && (
         <div className="flex items-center justify-center py-12">
@@ -367,7 +387,7 @@ export function VariablesPage() {
       )}
 
       {/* Empty state */}
-      {variables && variables.length === 0 && (
+      {variables && variables.length === 0 && !isError && (
         <div
           className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border p-12 text-center"
           data-testid="variables-empty"

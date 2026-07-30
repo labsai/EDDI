@@ -35,7 +35,10 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
         const url = new URL(result.location, "http://dummy");
         const parts = url.pathname.split("/").filter(Boolean);
         const id = parts[parts.length - 1];
-        if (id) navigate(`/manage/agents/${id}`);
+        // Agent detail is /manage/agentview/:id — /manage/agents/:id is not a
+        // route, so the old target sent the user to the catch-all immediately
+        // after a successful create.
+        if (id) navigate(`/manage/agentview/${id}`);
       }
     } catch (err) {
       toast.error(getErrorMessage(err));

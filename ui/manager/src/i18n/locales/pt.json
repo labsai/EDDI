@@ -192,7 +192,8 @@
     "refresh": "Atualizar",
     "previous": "Anterior",
     "next": "Próximo",
-    "dismiss": "Dispensar"
+    "dismiss": "Dispensar",
+    "refreshFailed": "Não foi possível atualizar — a mostrar os últimos dados carregados."
   },
   "agents": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O agente e todos os seus dados serão removidos permanentemente.",
@@ -233,7 +234,8 @@
     "emptyDescription": "Use o assistente para criar um agente totalmente configurado em minutos.",
     "chat": "Chat",
     "deployAndChat": "Implantar e conversar",
-    "openExternalChat": "Abrir em nova aba"
+    "openExternalChat": "Abrir em nova aba",
+    "count_many": "{{count}} agentes"
   },
   "agentDetail": {
     "a2aDescHint": "Apresentado no Agent Card — ajuda outros agentes a entender o que este agente faz",
@@ -527,7 +529,8 @@
     "confirmDelete": "Tem certeza de que deseja excluir este workflow?",
     "count_one": "{{count}} fluxo de trabalho",
     "count_other": "{{count}} fluxos de trabalho",
-    "emptyDescription": "Os workflows definem o pipeline de processamento dos seus agentes."
+    "emptyDescription": "Os workflows definem o pipeline de processamento dos seus agentes.",
+    "count_many": "{{count}} fluxos de trabalho"
   },
   "packageDetail": {
     "backToAgent": "Voltar ao agente",
@@ -611,7 +614,8 @@
     "olderThanDays": "Mais antigas que (dias)",
     "purgeAction": "Remover",
     "confirmEndTitle": "Encerrar as conversas selecionadas?",
-    "confirmPurgeTitle": "Remover conversas encerradas?"
+    "confirmPurgeTitle": "Remover conversas encerradas?",
+    "count_many": "{{count}} conversas"
   },
   "conversationDetail": {
     "backToConversations": "Voltar às conversas",
@@ -751,7 +755,9 @@
         "description": "Análise NLP de entradas e configuração de dicionários"
       }
     },
-    "emptyDescription": "Crie seu primeiro(a) {{type}} para usar em workflows."
+    "emptyDescription": "Crie seu primeiro(a) {{type}} para usar em workflows.",
+    "itemCount_many": "{{count}} itens",
+    "count_many": "{{count}} recursos"
   },
   "editor": {
     "cascadePartialFailure": "{{count}} atualização(ões) em cascata falharam",
@@ -1494,7 +1500,7 @@
     "confirmDeleteTitle": "Excluir secret",
     "confirmDeleteMessage": "Tem certeza de que deseja excluir permanentemente \"{{key}}\"? Esta ação não pode ser desfeita.",
     "empty": "Nenhum secret encontrado",
-    "emptyHint": "Crie um secret ou altere os filtros de namespace acima.",
+    "emptyHint": "Ainda não há secrets armazenados para o inquilino \"{{tenant}}\". Clique em \"Adicionar secret\" para criar um.",
     "vaultUp": "Vault online",
     "vaultDown": "Vault offline",
     "descriptionLabel": "Descrição (opcional)",
@@ -2331,7 +2337,8 @@
     "sendFollowup": "Enviar acompanhamento",
     "closeConfirmTitle": "Encerrar esta discussão?",
     "closeConfirmButton": "Encerrar discussão",
-    "closeConfirmDismiss": "Voltar"
+    "closeConfirmDismiss": "Voltar",
+    "count_many": "{{count}} grupos"
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -3006,7 +3013,9 @@
       "continuePlaceholder": "Continuar esta discussão…",
       "inputDisabledClosed": "Esta discussão está fechada",
       "newDiscussion": "Nova discussão",
-      "noResponseGenerated": "Nenhuma resposta gerada"
+      "noResponseGenerated": "Nenhuma resposta gerada",
+      "awaitingApprovalHint": "Esta discussão está em pausa à espera de aprovação humana.",
+      "reviewInManager": "Revê-la"
     },
     "thread": {
       "fileTooLarge": "O arquivo deve ter menos de 20MB",
@@ -3046,6 +3055,11 @@
       "activeTools": "Ferramentas Ativas",
       "noLlm": "Nenhum LLM configurado",
       "noTools": "Nenhum configurado"
+    },
+    "dashboard": "Painel",
+    "settings": {
+      "hitlApprovalPointsNote": "Estas definições controlam como uma aprovação se comporta. Quais pontos de uma discussão a exigem é configurado por fase no Manager.",
+      "hitlOpenManager": "Definir pontos de aprovação"
     }
   },
   "operator": {

@@ -15,7 +15,12 @@ const LANDING_PREF_KEY = "eddi-landing-preference";
 
 function getStoredPreference(): string | null {
   try {
-    return localStorage.getItem(LANDING_PREF_KEY);
+    const stored = localStorage.getItem(LANDING_PREF_KEY);
+    // The mode switcher wrote "manager" while this page only ever accepted
+    // "manage", so choosing Manager mode never took effect and the chooser
+    // reappeared on every visit. The writer now stores "manage"; this keeps
+    // already-persisted "manager" values working.
+    return stored === "manager" ? "manage" : stored;
   } catch {
     return null;
   }

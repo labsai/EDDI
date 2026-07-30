@@ -13,6 +13,7 @@ import {
   ListTodo,
   ChevronRight,
   Clock,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -287,7 +288,11 @@ function WorkforceSettings() {
     if (moderatorAgentId !== (config.moderatorAgentId ?? null)) return true;
     if (JSON.stringify(members) !== JSON.stringify(config.members ?? [])) return true;
     if (JSON.stringify(protocol) !== JSON.stringify(config.protocol ?? DEFAULT_PROTOCOL)) return true;
-    if (JSON.stringify(hitlConfig) !== JSON.stringify({ ...DEFAULT_HITL, ...(config.hitlConfig ?? {}) })) return true;
+    // Only counts when there is a hitlConfig to persist to. This page cannot
+    // create one (approval points, which are what actually gate a pause, are set
+    // in the Manager), so tracking edits that can never be saved left the page
+    // permanently dirty after a successful save.
+    if (config.hitlConfig && JSON.stringify(hitlConfig) !== JSON.stringify({ ...DEFAULT_HITL, ...config.hitlConfig })) return true;
     if (JSON.stringify(dynamicAgents) !== JSON.stringify({ ...DEFAULT_DYNAMIC, ...(config.dynamicAgents ?? {}) })) return true;
     if (JSON.stringify(tasks) !== JSON.stringify(config.tasks ?? [])) return true;
     return false;
@@ -319,7 +324,13 @@ function WorkforceSettings() {
       moderatorAgentId,
       members,
       protocol,
-      hitlConfig,
+      // Only persist hitlConfig if the group already had one. What actually makes
+      // a discussion pause is `phase.requiresApproval` (see lib/hitl-config.ts),
+      // and this page does not touch `phases` at all — so writing a hitlConfig
+      // here invented an approval policy that gates nothing, and the Manager's
+      // group editor then reads that block as "HITL enabled" for a group where no
+      // phase is gated. Approval points are chosen in the Manager.
+      ...(config.hitlConfig ? { hitlConfig } : {}),
       dynamicAgents,
       tasks: style === "TASK_FORCE" ? tasks : config.tasks,
     };
@@ -845,9 +856,33 @@ function WorkforceSettings() {
 
         {(expandedSections.hitl ?? false) && (
           <div className="space-y-5 rounded-xl border border-border bg-card p-5 shadow-sm animate-in fade-in-0 slide-in-from-top-2 duration-200">
+            {/* These controls shape HOW an approval behaves, not WHETHER one
+                happens: a discussion pauses only where a phase carries
+                requiresApproval, and choosing those phases lives in the Manager.
+                Without saying so, the section read as "turn on approvals" and
+                saved successfully while nothing ever paused. */}
+            <div
+              className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5"
+              data-testid="hitl-approval-points-note"
+            >
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "Workforce.settings.hitlApprovalPointsNote",
+                  "These settings control how an approval behaves. Which points in a discussion require approval is configured per phase in the Manager.",
+                )}{" "}
+                <Link
+                  to={`/manage/groups/${boardId}?version=${version}`}
+                  className="font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  {t("Workforce.settings.hitlOpenManager", "Set approval points")}
+                </Link>
+              </p>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <FormField label={t("Workforce.settings.hitlGranularity", "Approval Granularity")} htmlFor="settings-hitl-granularity">
-                <select id="settings-hitl-granularity" value={hitlConfig.granularity ?? "PHASE"}
+                <select id="settings-hitl-granularity" disabled={!config?.hitlConfig} value={hitlConfig.granularity ?? "PHASE"}
                   onChange={(e) => setHitlConfig((p) => ({ ...p, granularity: e.target.value as HitlGranularity }))}
                   className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
                   <option value="PHASE">{t("Workforce.settings.granularityPhase", "Per Phase — review after each discussion phase")}</option>
@@ -855,7 +890,7 @@ function WorkforceSettings() {
                 </select>
               </FormField>
               <FormField label={t("Workforce.settings.hitlTimeout", "Approval Timeout")} htmlFor="settings-hitl-timeout">
-                <input id="settings-hitl-timeout" type="text" value={hitlConfig.approvalTimeout ?? ""}
+                <input id="settings-hitl-timeout" disabled={!config?.hitlConfig} type="text" value={hitlConfig.approvalTimeout ?? ""}
                   onChange={(e) => setHitlConfig((p) => ({ ...p, approvalTimeout: e.target.value || null }))}
                   placeholder={t("Workforce.settings.hitlTimeoutHint", "e.g. PT15M (15 min), PT1H (1 hour)")}
                   className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
@@ -866,7 +901,7 @@ function WorkforceSettings() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <FormField label={t("Workforce.settings.hitlTimeoutPolicy", "On Timeout")} htmlFor="settings-hitl-timeout-policy">
-                <select id="settings-hitl-timeout-policy" value={hitlConfig.timeoutPolicy ?? "WAIT_INDEFINITELY"}
+                <select id="settings-hitl-timeout-policy" disabled={!config?.hitlConfig} value={hitlConfig.timeoutPolicy ?? "WAIT_INDEFINITELY"}
                   onChange={(e) => setHitlConfig((p) => ({ ...p, timeoutPolicy: e.target.value as HitlTimeoutPolicy }))}
                   className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
                   <option value="WAIT_INDEFINITELY">{t("Workforce.settings.timeoutWait", "Wait indefinitely")}</option>
@@ -876,7 +911,7 @@ function WorkforceSettings() {
                 </select>
               </FormField>
               <FormField label={t("Workforce.settings.hitlRejection", "On Rejection")} htmlFor="settings-hitl-rejection">
-                <select id="settings-hitl-rejection" value={hitlConfig.onTaskRejection ?? "FAIL"}
+                <select id="settings-hitl-rejection" disabled={!config?.hitlConfig} value={hitlConfig.onTaskRejection ?? "FAIL"}
                   onChange={(e) => setHitlConfig((p) => ({ ...p, onTaskRejection: e.target.value as HitlRejectionPolicy }))}
                   className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
                   <option value="FAIL">{t("Workforce.settings.rejectionFail", "Fail — stop the task")}</option>

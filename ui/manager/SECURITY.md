@@ -4,7 +4,8 @@
 
 | Version | Supported              |
 | ------- | ---------------------- |
-| 6.0.x   | ✅ Active development  |
+| 6.2.x   | ✅ Active development  |
+| 6.0–6.1 | ⚠️ Security fixes only |
 | < 6.0   | ❌ End of life         |
 
 ## Reporting a Vulnerability
@@ -56,11 +57,40 @@ We will credit you in the security advisory unless you prefer to remain anonymou
 - EDDI backend vulnerabilities (report to [EDDI SECURITY.md](https://github.com/labsai/EDDI/blob/main/SECURITY.md))
 - Third-party LLM API vulnerabilities (OpenAI, Anthropic, etc.)
 - User configuration errors
-- Vulnerabilities in dependencies (report upstream; we monitor via Dependabot)
+- Vulnerabilities in dependencies (report upstream; we monitor via [Renovate](renovate.json))
+
+### Known accepted `npm audit` findings
+
+> **`react-router` — GHSA-qwww-vcr4-c8h2 (high, "RSC Mode CSRF Bypass")**
+>
+> **Do not "fix" this by downgrading.** `npm audit fix --force` proposes
+> `react-router-dom@7.11.0`, which falls back inside the range of
+> GHSA-wrjc-x8rr-h8h6 (open redirect via backslash in `<Link>`/`useNavigate`,
+> leading to XSS) — an advisory that *does* apply to a client-side SPA.
+>
+> The RSC advisory requires React Server Components mode. This app is a pure
+> client SPA: `BrowserRouter` in `src/main.tsx`, declarative `<Routes>` only, no
+> `createBrowserRouter`, no data-router loaders or actions, no server runtime and
+> no `@react-router/*` server packages. The vulnerable code path is not reachable
+> here, so we accept this finding.
+>
+> **The real fix is a v8 migration, not a version bump.** The advisory covers
+> `7.12.0 – 8.2.0`, so `react-router@8.3.0` is patched — but `react-router-dom`
+> was discontinued at `7.18.2` (v8 consolidates everything into `react-router`).
+> Adopting 8.3.0 therefore means repointing every `react-router-dom` import at
+> `react-router` plus whatever else v8 changed, which is why this branch stayed on
+> `react-router-dom@7.18.2`, the newest release of the package we actually depend
+> on. Track the v8 migration separately; it removes this allowlist entry.
+>
+> Re-evaluate if this app ever adopts the data router or any server rendering.
+
+The remaining `npm audit` highs are dev-only toolchain transitives (`eslint`,
+`@vitest/coverage-v8` → `glob`/`minimatch`/`brace-expansion`) and are not shipped
+in the built asset.
 
 ## Security Best Practices for Contributors
 
 - Never commit API keys, tokens, or passwords
-- All user-generated content rendered via `react-markdown` is sanitized with DOMPurify
-- Never use `dangerouslySetInnerHTML` without sanitization
-- All API calls go through `ApiClient` which handles auth token injection
+- Agent and user content is rendered through `react-markdown` **without `rehype-raw`**, so raw HTML stays escaped. The one opt-in HTML path (`agent-response-card.tsx`) sanitizes with DOMPurify first
+- Never use `dangerouslySetInnerHTML` without sanitizing or HTML-escaping the input. Agent output is attacker-influenceable via prompt injection, so treat it as untrusted
+- Prefer `ApiClient` for API calls (it injects the auth token). The raw-`fetch` call sites that exist for SSE, binary bodies and `text/plain` must spread `api.getAuthHeader()` explicitly

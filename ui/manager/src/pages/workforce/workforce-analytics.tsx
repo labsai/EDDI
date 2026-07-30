@@ -58,6 +58,38 @@ const INITIAL_FILTERS: FilterState = {
 
 // ─── Component ───────────────────────────────────────────────────
 
+/**
+ * Page header with the route back to the Workforce dashboard.
+ *
+ * Rendered by every branch below, not just the populated one. It used to live
+ * inline in the success return, so the loading, error and empty states — the
+ * states a new deployment actually starts in — offered no way back at all. On
+ * tablet the sidebar is behind a drawer, which left the user stuck.
+ */
+function AnalyticsHeader() {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex items-center gap-3 br-section-enter"
+      style={{ "--enter-delay": "0ms" } as React.CSSProperties}
+    >
+      <Link
+        to="/workforce"
+        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        aria-label={t("Workforce.back", "Back")}
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </Link>
+      <h1 className="text-xl font-semibold text-foreground">
+        {t("analyticsPage.title", "Insights")}
+      </h1>
+      <span className="text-sm text-muted-foreground">
+        {t("analyticsPage.subtitle", "Last 30 days")}
+      </span>
+    </div>
+  );
+}
+
 function WorkforceAnalytics() {
   const { t } = useTranslation();
 
@@ -154,8 +186,7 @@ function WorkforceAnalytics() {
   if (analytics.isLoading) {
     return (
       <div className="p-6 space-y-6 max-w-7xl ms-auto me-auto">
-        {/* Header skeleton */}
-        <Skeleton className="h-8 w-48" />
+        <AnalyticsHeader />
 
         {/* KPI skeleton */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -184,7 +215,11 @@ function WorkforceAnalytics() {
   // ── Error state ─────────────────────────────────────────────────
   if (analytics.hasError && !analytics.isLoading) {
     return (
-      <div className="flex h-full items-center justify-center p-8">
+      <div className="flex h-full flex-col">
+        <div className="w-full max-w-7xl ms-auto me-auto p-6 pb-0">
+          <AnalyticsHeader />
+        </div>
+        <div className="flex flex-1 items-center justify-center p-8">
         <div className="text-center max-w-sm br-section-enter">
           <div className="ms-auto me-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-destructive/10">
             <AlertCircle className="h-8 w-8 text-destructive" />
@@ -205,6 +240,7 @@ function WorkforceAnalytics() {
             {t("analyticsPage.retry", "Retry")}
           </button>
         </div>
+        </div>
       </div>
     );
   }
@@ -212,7 +248,11 @@ function WorkforceAnalytics() {
   // ── Empty state ─────────────────────────────────────────────────
   if (analytics.totalDiscussions === 0) {
     return (
-      <div className="flex h-full items-center justify-center p-8">
+      <div className="flex h-full flex-col">
+        <div className="w-full max-w-7xl ms-auto me-auto p-6 pb-0">
+          <AnalyticsHeader />
+        </div>
+        <div className="flex flex-1 items-center justify-center p-8">
         <div className="text-center max-w-sm br-section-enter">
           <div className="ms-auto me-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
             <MessageSquare className="h-8 w-8 text-muted-foreground" />
@@ -239,6 +279,7 @@ function WorkforceAnalytics() {
             {t("analyticsPage.createFirst", "Assemble Task Force")}
           </Link>
         </div>
+        </div>
       </div>
     );
   }
@@ -257,25 +298,7 @@ function WorkforceAnalytics() {
       aria-label={t("analyticsPage.title", "Insights")}
     >
     <div className="p-6 space-y-6 max-w-7xl ms-auto me-auto">
-      {/* Header */}
-      <div
-        className="flex items-center gap-3 br-section-enter"
-        style={{ "--enter-delay": "0ms" } as React.CSSProperties}
-      >
-        <Link
-          to="/workforce"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          aria-label={t("Workforce.back", "Back")}
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </Link>
-        <h1 className="text-xl font-semibold text-foreground">
-          {t("analyticsPage.title", "Insights")}
-        </h1>
-        <span className="text-sm text-muted-foreground">
-          {t("analyticsPage.subtitle", "Last 30 days")}
-        </span>
-      </div>
+      <AnalyticsHeader />
 
       {/* Filter bar */}
       <AnalyticsFilterBar

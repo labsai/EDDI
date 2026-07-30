@@ -192,7 +192,8 @@
     "refresh": "Aktualisieren",
     "previous": "Zurück",
     "next": "Weiter",
-    "dismiss": "Verwerfen"
+    "dismiss": "Verwerfen",
+    "refreshFailed": "Aktualisierung fehlgeschlagen — es werden die zuletzt geladenen Daten angezeigt."
   },
   "agents": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Agent und alle seine Daten werden dauerhaft entfernt.",
@@ -1494,7 +1495,7 @@
     "confirmDeleteTitle": "Secret löschen",
     "confirmDeleteMessage": "Möchten Sie \"{{key}}\" wirklich dauerhaft löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
     "empty": "Keine Secrets gefunden",
-    "emptyHint": "Erstellen Sie ein Secret oder ändern Sie die Namespace-Filter oben.",
+    "emptyHint": "Für den Mandanten „{{tenant}}“ sind noch keine Secrets gespeichert. Klicken Sie auf „Secret hinzufügen“, um eines zu erstellen.",
     "vaultUp": "Vault online",
     "vaultDown": "Vault offline",
     "descriptionLabel": "Beschreibung (optional)",
@@ -3006,7 +3007,9 @@
       "continuePlaceholder": "Diese Diskussion fortsetzen…",
       "inputDisabledClosed": "Diese Diskussion ist geschlossen",
       "newDiscussion": "Neue Diskussion",
-      "noResponseGenerated": "Keine Antwort generiert"
+      "noResponseGenerated": "Keine Antwort generiert",
+      "awaitingApprovalHint": "Diese Diskussion ist für eine menschliche Genehmigung angehalten.",
+      "reviewInManager": "Prüfen"
     },
     "thread": {
       "fileTooLarge": "Datei muss kleiner als 20MB sein",
@@ -3046,6 +3049,11 @@
       "activeTools": "Aktive Tools",
       "noLlm": "Kein LLM konfiguriert",
       "noTools": "Keine konfiguriert"
+    },
+    "dashboard": "Übersicht",
+    "settings": {
+      "hitlApprovalPointsNote": "Diese Einstellungen bestimmen, wie eine Genehmigung abläuft. Welche Punkte einer Diskussion eine Genehmigung erfordern, wird pro Phase im Manager konfiguriert.",
+      "hitlOpenManager": "Genehmigungspunkte festlegen"
     }
   },
   "operator": {

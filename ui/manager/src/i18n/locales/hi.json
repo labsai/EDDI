@@ -192,7 +192,8 @@
     "refresh": "ताज़ा करें",
     "previous": "पिछला",
     "next": "अगला",
-    "dismiss": "खारिज करें"
+    "dismiss": "खारिज करें",
+    "refreshFailed": "रीफ़्रेश नहीं हो सका — अंतिम लोड किया गया डेटा दिखाया जा रहा है।"
   },
   "agents": {
     "confirmDeleteDescription": "इस क्रिया को पूर्ववत नहीं किया जा सकता। एजेंट और इसका सारा डेटा स्थायी रूप से हटा दिया जाएगा।",
@@ -1494,7 +1495,7 @@
     "confirmDeleteTitle": "Secret हटाएं",
     "confirmDeleteMessage": "क्या आप वाकई \"{{key}}\" को स्थायी रूप से हटाना चाहते हैं? यह पूर्ववत नहीं किया जा सकता।",
     "empty": "कोई Secrets नहीं मिला",
-    "emptyHint": "Secret बनाएं या ऊपर Namespace फ़िल्टर बदलें।",
+    "emptyHint": "टेनेंट \"{{tenant}}\" के लिए अभी तक कोई Secret संग्रहीत नहीं है। एक बनाने के लिए \"Secret जोड़ें\" पर क्लिक करें।",
     "vaultUp": "Vault ऑनलाइन",
     "vaultDown": "Vault ऑफ़लाइन",
     "descriptionLabel": "विवरण (वैकल्पिक)",
@@ -3006,7 +3007,9 @@
       "continuePlaceholder": "इस चर्चा को जारी रखें…",
       "inputDisabledClosed": "यह चर्चा बंद है",
       "newDiscussion": "नई चर्चा",
-      "noResponseGenerated": "कोई प्रतिक्रिया उत्पन्न नहीं हुई"
+      "noResponseGenerated": "कोई प्रतिक्रिया उत्पन्न नहीं हुई",
+      "awaitingApprovalHint": "यह चर्चा मानव अनुमोदन के लिए रोकी गई है।",
+      "reviewInManager": "समीक्षा करें"
     },
     "thread": {
       "fileTooLarge": "फ़ाइल 20MB से कम होनी चाहिए",
@@ -3046,6 +3049,11 @@
       "activeTools": "सक्रिय उपकरण",
       "noLlm": "कोई LLM कॉन्फ़िगर नहीं",
       "noTools": "कोई कॉन्फ़िगर नहीं"
+    },
+    "dashboard": "डैशबोर्ड",
+    "settings": {
+      "hitlApprovalPointsNote": "ये सेटिंग्स नियंत्रित करती हैं कि अनुमोदन कैसे व्यवहार करता है। चर्चा के किन बिंदुओं पर अनुमोदन आवश्यक है, यह Manager में प्रति चरण कॉन्फ़िगर किया जाता है।",
+      "hitlOpenManager": "अनुमोदन बिंदु सेट करें"
     }
   },
   "operator": {

@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { parseSseFrame } from "./sse-utils";
 import type { SimpleConversationMemorySnapshot } from "./conversations";
 
 // --- Types ---
@@ -180,28 +181,28 @@ export async function* sendMessageStreaming(
 
       buffer += decoder.decode(value, { stream: true });
 
-      // Parse SSE lines: "event: <type>\ndata: <data>\n\n"
-      const parts = buffer.split("\n\n");
+      // Frames are separated by a blank line. CRLF framing leaves a "\r" on the
+      // preceding line, which parseSseFrame strips.
+      const parts = buffer.split(/\r?\n\r?\n/);
       buffer = parts.pop() ?? "";
 
       for (const part of parts) {
-        if (!part.trim()) continue;
-        let eventType: SSEEventType = "token";
-        let eventData = "";
-
-        for (const line of part.split("\n")) {
-          if (line.startsWith("event:")) {
-            eventType = line.slice(6).trim() as SSEEventType;
-          } else if (line.startsWith("data:")) {
-            eventData = line.slice(5).trim();
-          }
-        }
-
-        if (eventData || eventType) {
-          yield { type: eventType, data: eventData };
-        }
+        const frame = parseSseFrame(part, "token");
+        if (!frame) continue;
+        yield { type: frame.type as SSEEventType, data: frame.data };
       }
     }
+
+    // No decoder flush here on purpose. `decode(value, {stream: true})` holds only
+    // an INCOMPLETE trailing sequence, so a complete multi-byte character is never
+    // at risk; the only thing a final `decode()` would add is a U+FFFD for a body
+    // that was truncated mid-character, which then rides into the transcript as
+    // content. Leave the malformed tail out rather than render a replacement glyph.
+    //
+    // A server that closes without a trailing blank line leaves the last frame
+    // in the buffer; emit it rather than dropping the final chunk of a reply.
+    const tail = parseSseFrame(buffer, "token");
+    if (tail) yield { type: tail.type as SSEEventType, data: tail.data };
   } finally {
     reader.releaseLock();
   }

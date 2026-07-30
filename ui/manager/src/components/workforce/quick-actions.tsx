@@ -56,7 +56,10 @@ export function QuickActions({ className }: QuickActionsProps) {
         "quickActions.manageWorkforceDesc",
         "Configure and deploy digital experts",
       ),
-      to: "/workforce",
+      // The Manager's agent list — that is where experts are configured and
+      // deployed. This pointed at "/workforce", the page the tile itself sits
+      // on, so clicking it navigated to the current route and appeared dead.
+      to: "/manage/agents",
     },
   ];
 

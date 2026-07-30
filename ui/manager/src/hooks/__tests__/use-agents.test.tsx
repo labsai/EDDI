@@ -236,6 +236,50 @@ describe("useAgentVersions", () => {
     expect(result.current.data![2]!.version).toBe(1);
   });
 
+  it("returns one entry per version and excludes other agents", async () => {
+    // The API issues one descriptor query per version and flattens the results,
+    // and `filter=` is a TEXT match. So the same version arrives more than once,
+    // and an agent whose id merely contains this one does too. Rendered as
+    // key={v.version}, duplicates made React log "two children with the same key"
+    // and a foreign version was selectable in this agent's picker.
+    server.use(
+      http.get("*/agentstore/agents/descriptors", ({ request }) => {
+        const filter = new URL(request.url).searchParams.get("filter");
+        if (filter !== "agent1") return HttpResponse.json([]);
+        return HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=1",
+            name: "Agent v1",
+            lastModifiedOn: 1000,
+          },
+          // Same version again, as a second per-version query would return it.
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=1",
+            name: "Agent v1 again",
+            lastModifiedOn: 1000,
+          },
+          // A different agent matching the text filter by substring.
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent12?version=9",
+            name: "Unrelated agent",
+            lastModifiedOn: 2000,
+          },
+        ]);
+      })
+    );
+
+    const { result } = renderHook(() => useAgentVersions("agent1"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const versions = result.current.data!.map((v) => v.version);
+    expect(versions).toEqual([1]);
+    // Keys must be unique, since the version picker keys options by version.
+    expect(new Set(versions).size).toBe(versions.length);
+    expect(versions).not.toContain(9);
+  });
+
   it("is disabled when agentId is empty", () => {
     const { result } = renderHook(() => useAgentVersions(""), {
       wrapper: createWrapper(),

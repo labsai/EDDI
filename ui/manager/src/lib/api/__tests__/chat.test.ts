@@ -226,6 +226,52 @@ describe("sendMessageStreaming", () => {
     expect(events[2]).toEqual({ type: "done", data: "" });
   });
 
+  it("emits a multi-byte final character from a chunked stream with no trailing blank line", async () => {
+    // Covers the tail-frame emit: the body ends without a blank line, so the last
+    // frame only surfaces because of the post-loop parseSseFrame(buffer).
+    //
+    // The bytes are split mid-emoji, but MSW/undici reassembles the body before
+    // our reader sees it, so this does not exercise a real chunk boundary — it
+    // pins the tail-frame emit only. Removing that emit turns this red; nothing
+    // about TextDecoder behaviour is asserted here.
+    const bytes = new TextEncoder().encode("event: token\ndata: Ship 🚀");
+    const splitAt = bytes.length - 2; // mid-way through the 4-byte emoji
+
+    server.use(
+      http.post("*/agents/:conversationId/stream", () => {
+        // Deliver the halves as separate reads. Enqueuing both synchronously
+        // lets the transport coalesce them, which hides the split entirely and
+        // makes this test pass even with the decoder flush removed.
+        let sent = 0;
+        const stream = new ReadableStream({
+          async pull(controller) {
+            await new Promise((r) => setTimeout(r, 5));
+            if (sent === 0) controller.enqueue(bytes.slice(0, splitAt));
+            else if (sent === 1) controller.enqueue(bytes.slice(splitAt));
+            else controller.close();
+            sent++;
+          },
+        });
+        return new HttpResponse(stream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      })
+    );
+
+    const events: SSEEvent[] = [];
+    for await (const event of sendMessageStreaming(
+      "production",
+      "agent1",
+      "conv-mock",
+      { input: "Hello" }
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([{ type: "token", data: "Ship 🚀" }]);
+  });
+
   it("handles task_start and task_complete events", async () => {
     const sseBody =
       "event: task_start\ndata: Processing\n\n" +
