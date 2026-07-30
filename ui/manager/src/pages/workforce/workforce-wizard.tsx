@@ -68,6 +68,12 @@ function WorkforceWizard() {
   const [boardName, setBoardName] = useState("");
   const [boardDescription, setBoardDescription] = useState("");
   const [members, setMembers] = useState<MemberSlot[]>([]);
+  /** style/maxRounds from an applied saved template, so the custom build path
+   *  reproduces how that template actually runs rather than defaulting. */
+  const [savedTemplateConfig, setSavedTemplateConfig] = useState<{
+    style: DiscussionStyle;
+    maxRounds: number;
+  } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [creationProgress, setCreationProgress] = useState<
     CreationProgressItem[]
@@ -83,7 +89,9 @@ function WorkforceWizard() {
   );
 
   const resolvedStyle: DiscussionStyle | null =
-    selectedTemplateObj?.style ?? (selectedTemplate === "custom" ? "CUSTOM" : null);
+    selectedTemplateObj?.style ??
+    savedTemplateConfig?.style ??
+    (selectedTemplate === "custom" ? "CUSTOM" : null);
 
   const steps = useMemo(
     () => [
@@ -167,6 +175,7 @@ function WorkforceWizard() {
     if (!saved) return; // unknown id — leave the picker untouched
 
     setSelectedTemplate("custom");
+    setSavedTemplateConfig({ style: saved.style, maxRounds: saved.maxRounds });
     setBoardName(saved.name);
     setBoardDescription(saved.description);
     setMembers(
@@ -286,8 +295,12 @@ function WorkforceWizard() {
           description: boardDescription,
           members: groupMembers,
           moderatorAgentId: null,
-          style: "CUSTOM" as const,
-          maxRounds: 1,
+          // A saved template carries its own style and round count, and the
+          // Templates panel displays them — hardcoding CUSTOM/1 here meant
+          // "Use template" recreated only the member list and silently changed
+          // how the discussion runs.
+          style: savedTemplateConfig?.style ?? ("CUSTOM" as const),
+          maxRounds: savedTemplateConfig?.maxRounds ?? 1,
           phases: null,
           protocol: {
             agentTimeoutSeconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
@@ -338,6 +351,9 @@ function WorkforceWizard() {
     createGroup,
     navigate,
     creationProgress,
+    // Read in the custom build path to reproduce a saved template's style and
+    // round count. Omitting it would let this callback close over a stale value.
+    savedTemplateConfig,
   ]);
 
   // ─── Render ─────────────────────────────────────────────────────────────

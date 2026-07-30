@@ -288,7 +288,11 @@ function WorkforceSettings() {
     if (moderatorAgentId !== (config.moderatorAgentId ?? null)) return true;
     if (JSON.stringify(members) !== JSON.stringify(config.members ?? [])) return true;
     if (JSON.stringify(protocol) !== JSON.stringify(config.protocol ?? DEFAULT_PROTOCOL)) return true;
-    if (JSON.stringify(hitlConfig) !== JSON.stringify({ ...DEFAULT_HITL, ...(config.hitlConfig ?? {}) })) return true;
+    // Only counts when there is a hitlConfig to persist to. This page cannot
+    // create one (approval points, which are what actually gate a pause, are set
+    // in the Manager), so tracking edits that can never be saved left the page
+    // permanently dirty after a successful save.
+    if (config.hitlConfig && JSON.stringify(hitlConfig) !== JSON.stringify({ ...DEFAULT_HITL, ...config.hitlConfig })) return true;
     if (JSON.stringify(dynamicAgents) !== JSON.stringify({ ...DEFAULT_DYNAMIC, ...(config.dynamicAgents ?? {}) })) return true;
     if (JSON.stringify(tasks) !== JSON.stringify(config.tasks ?? [])) return true;
     return false;
@@ -878,7 +882,7 @@ function WorkforceSettings() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <FormField label={t("Workforce.settings.hitlGranularity", "Approval Granularity")} htmlFor="settings-hitl-granularity">
-                <select id="settings-hitl-granularity" value={hitlConfig.granularity ?? "PHASE"}
+                <select id="settings-hitl-granularity" disabled={!config?.hitlConfig} value={hitlConfig.granularity ?? "PHASE"}
                   onChange={(e) => setHitlConfig((p) => ({ ...p, granularity: e.target.value as HitlGranularity }))}
                   className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
                   <option value="PHASE">{t("Workforce.settings.granularityPhase", "Per Phase — review after each discussion phase")}</option>
@@ -886,7 +890,7 @@ function WorkforceSettings() {
                 </select>
               </FormField>
               <FormField label={t("Workforce.settings.hitlTimeout", "Approval Timeout")} htmlFor="settings-hitl-timeout">
-                <input id="settings-hitl-timeout" type="text" value={hitlConfig.approvalTimeout ?? ""}
+                <input id="settings-hitl-timeout" disabled={!config?.hitlConfig} type="text" value={hitlConfig.approvalTimeout ?? ""}
                   onChange={(e) => setHitlConfig((p) => ({ ...p, approvalTimeout: e.target.value || null }))}
                   placeholder={t("Workforce.settings.hitlTimeoutHint", "e.g. PT15M (15 min), PT1H (1 hour)")}
                   className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
@@ -897,7 +901,7 @@ function WorkforceSettings() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <FormField label={t("Workforce.settings.hitlTimeoutPolicy", "On Timeout")} htmlFor="settings-hitl-timeout-policy">
-                <select id="settings-hitl-timeout-policy" value={hitlConfig.timeoutPolicy ?? "WAIT_INDEFINITELY"}
+                <select id="settings-hitl-timeout-policy" disabled={!config?.hitlConfig} value={hitlConfig.timeoutPolicy ?? "WAIT_INDEFINITELY"}
                   onChange={(e) => setHitlConfig((p) => ({ ...p, timeoutPolicy: e.target.value as HitlTimeoutPolicy }))}
                   className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
                   <option value="WAIT_INDEFINITELY">{t("Workforce.settings.timeoutWait", "Wait indefinitely")}</option>
@@ -907,7 +911,7 @@ function WorkforceSettings() {
                 </select>
               </FormField>
               <FormField label={t("Workforce.settings.hitlRejection", "On Rejection")} htmlFor="settings-hitl-rejection">
-                <select id="settings-hitl-rejection" value={hitlConfig.onTaskRejection ?? "FAIL"}
+                <select id="settings-hitl-rejection" disabled={!config?.hitlConfig} value={hitlConfig.onTaskRejection ?? "FAIL"}
                   onChange={(e) => setHitlConfig((p) => ({ ...p, onTaskRejection: e.target.value as HitlRejectionPolicy }))}
                   className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer">
                   <option value="FAIL">{t("Workforce.settings.rejectionFail", "Fail — stop the task")}</option>
