@@ -26,7 +26,12 @@ const DEFAULT_TENANT = "default";
 export function QuotasPage() {
   const { t } = useTranslation();
   const { data: quota, isLoading: quotaLoading, isError: quotaError, refetch: refetchQuota } = useQuota(DEFAULT_TENANT);
-  const { data: usage, isLoading: usageLoading } = useQuotaUsage(DEFAULT_TENANT);
+  const {
+    data: usage,
+    isLoading: usageLoading,
+    isError: usageError,
+    refetch: refetchUsage,
+  } = useQuotaUsage(DEFAULT_TENANT);
   const updateMutation = useUpdateQuota();
   const resetMutation = useResetUsage();
 
@@ -118,10 +123,11 @@ export function QuotasPage() {
       {loading ? (
         <LoadingSkeleton />
       ) : quotaError ? (
-        /* The quota hook already treats 404 as "not configured yet" and returns
-           defaults, so reaching here means a real failure (500/503/network).
-           Rendering the form anyway would show fabricated limits as if they
-           were the deployment's actual policy. */
+        /* getQuota() maps only 404 to local defaults ("not configured yet"), so
+           reaching here means a real failure (500/503/network) and `quota` is
+           undefined — which left `form` null and rendered the config and usage
+           cards with empty bodies. An operator could not tell "no policy set"
+           from "we could not read the policy". */
         <ErrorState
           message={t("common.error")}
           onRetry={() => refetchQuota()}
@@ -232,7 +238,22 @@ export function QuotasPage() {
                 </button>
               </div>
 
-              {usage && (
+              {/* Usage is a separate query from the quota config, so it can fail
+                  on its own. Without this the card rendered its header and the
+                  Reset Counters button over an empty body — a blank panel that
+                  reads as "no usage" rather than "could not load". The config
+                  form above stays usable; the two concerns are independent. */}
+              {usageError && !usageLoading && (
+                <div data-testid="quotas-usage-error">
+                  <ErrorState
+                    message={t("common.error")}
+                    onRetry={() => refetchUsage()}
+                    retryLabel={t("common.retry")}
+                  />
+                </div>
+              )}
+
+              {usage && !usageError && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <UsageCard
                     label={t("quotas.conversationsToday", "Conversations Today")}

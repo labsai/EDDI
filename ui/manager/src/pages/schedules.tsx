@@ -327,7 +327,7 @@ function FailedFiresPanel({
   schedules?: ScheduleConfiguration[];
 }) {
   const { t } = useTranslation();
-  const { data: failed, isLoading } = useFailedFires();
+  const { data: failed, isLoading, isError, refetch } = useFailedFires();
   const retryMutation = useRetryDeadLetter();
   const dismissMutation = useDismissDeadLetter();
 
@@ -373,6 +373,17 @@ function FailedFiresPanel({
       {isLoading ? (
         <div className="p-8 text-center">
           <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      ) : isError ? (
+        <div className="p-8">
+          {/* The dead-letter list is its own query. Without this a 500 rendered
+              "No failed fires" — telling an operator nothing is broken at the
+              exact moment the check for broken things failed. */}
+          <ErrorState
+            message={t("common.error")}
+            onRetry={() => refetch()}
+            retryLabel={t("common.retry")}
+          />
         </div>
       ) : !failed || failed.length === 0 ? (
         <div

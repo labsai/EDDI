@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { matchRoutes, type RouteObject } from "react-router-dom";
+import { WORKFORCE_SUBPAGES } from "@/components/workforce/workforce-subpages";
 
 /**
  * Guards against dead in-app navigation.
@@ -57,6 +58,16 @@ function parseRouteTree(source: string): ParsedRoute[] {
     if (closeIdx !== -1 && (openIdx === -1 || closeIdx < openIdx)) {
       stack.pop();
       i = closeIdx + CLOSE.length;
+      continue;
+    }
+
+    // `<Route` is also a prefix of `<Routes`, and the enclosing <Routes> element
+    // would otherwise be parsed as a pathless route that adopts every real route
+    // as its child. matchRoutes tolerates that (a pathless parent behaves like a
+    // layout route) so it stayed invisible, but the tree shape was wrong.
+    const after = source[openIdx + OPEN.length];
+    if (after !== undefined && !/[\s>/]/.test(after)) {
+      i = openIdx + OPEN.length;
       continue;
     }
 
@@ -143,10 +154,63 @@ const APP_PATH = /["'`](\/(?:manage|workforce|welcome)(?:\/[^"'`\n]*)?)["'`]/g;
 /**
  * Remove comments before scanning: prose frequently quotes a broken path while
  * explaining why it was broken, and that must not read as a live target.
- * The `[^:]` guard keeps `https://` from being treated as a line comment.
+ *
+ * This is quote-aware on purpose. A naive "strip from the first double-slash to
+ * end of line" regex also eats the remainder of any line holding a double slash
+ * inside a string literal (`className="a//b" to="/manage/x"`), which would drop
+ * a real target and leave this test green while it silently stopped checking —
+ * the worst possible failure mode for a guard like this.
  */
 function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  let out = "";
+  let quote: string | null = null;
+  let i = 0;
+
+  while (i < src.length) {
+    const c = src[i]!;
+    const next = src[i + 1];
+
+    if (quote) {
+      out += c;
+      if (c === "\\") {
+        out += next ?? "";
+        i += 2;
+        continue;
+      }
+      if (c === quote) quote = null;
+      i++;
+      continue;
+    }
+
+    if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+      out += c;
+      i++;
+      continue;
+    }
+
+    // Line comment
+    if (c === "/" && next === "/") {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+
+    // Block comment. Must be quote-aware: `path="/Workforce/*"` contains `/*`
+    // inside a STRING, and a naive global regex paired it with a `*/` 32 lines
+    // later, deleting most of app.tsx — including the `<Navigate to=…>` targets
+    // this suite is supposed to be checking. Silent loss of coverage while
+    // staying green is the worst outcome for a guard, so it is scanned properly.
+    if (c === "/" && next === "*") {
+      i += 2;
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 interface Target {
@@ -227,6 +291,71 @@ describe("route integrity", () => {
 
   it("finds link targets to check", () => {
     expect(collectTargets().checkable.length).toBeGreaterThan(15);
+  });
+
+  it("keeps WORKFORCE_SUBPAGES in sync with the /workforce child routes", () => {
+    // workforce-bottom-tabs.tsx reads the second path segment as a board id and
+    // must exclude the app's own pages. That set duplicates router knowledge, so
+    // assert it here: adding /workforce/<page> without updating the set would
+    // otherwise make the Threads tab treat "<page>" as a board and build a URL
+    // that matches nothing.
+    const workforce = routes.find((r) => r.path === "/workforce");
+    expect(workforce, "no /workforce route found — did app.tsx change shape?").toBeDefined();
+
+    const literalChildren = (workforce!.children ?? [])
+      .map((c) => c.path)
+      .filter((p): p is string => !!p && !p.includes(":"))
+      .sort();
+
+    expect(literalChildren.length).toBeGreaterThan(0);
+    expect([...WORKFORCE_SUBPAGES].sort()).toEqual(literalChildren);
+  });
+
+  describe("stripComments", () => {
+    // If this over-strips, the suite above silently stops checking links while
+    // still reporting green. That is worse than a false alarm, so pin it.
+    it("keeps a target that follows a string containing //", () => {
+      const line = '<Link className="a//b" to="/manage/agents" />';
+      expect(stripComments(line)).toContain('to="/manage/agents"');
+    });
+
+    it("keeps a URL inside a string literal", () => {
+      const line = 'const docs = "https://docs.labs.ai/x";';
+      expect(stripComments(line)).toContain("https://docs.labs.ai/x");
+    });
+
+    it("still removes a real line comment, including a trailing one", () => {
+      expect(stripComments('// navigate("/manage/gone")').trim()).toBe("");
+      expect(stripComments('navigate("/a"); // was "/manage/gone"')).toBe('navigate("/a"); ');
+    });
+
+    it("still removes block comments", () => {
+      expect(stripComments('/* to="/manage/gone" */ const x = 1;')).toBe(" const x = 1;");
+    });
+
+    it("does not treat /* inside a string literal as a comment", () => {
+      // `path="/Workforce/*"` in app.tsx paired with a `*/` 32 lines later and
+      // deleted most of the file, so those targets went unchecked.
+      const line = 'path="/Workforce/*" caseSensitive\nto="/manage/agents"\n/* real */';
+      const out = stripComments(line);
+      expect(out).toContain('path="/Workforce/*"');
+      expect(out).toContain('to="/manage/agents"');
+      expect(out).not.toContain("real");
+    });
+
+    it("preserves every route path in the real app.tsx", () => {
+      // Direct regression guard: if the scanner ever desyncs (an unbalanced quote
+      // inside a regex literal would do it) this fails instead of the suite
+      // quietly checking a fraction of the app.
+      const raw = readFileSync(APP, "utf8");
+      const count = (s: string) => (s.match(/path="[^"]*"/g) ?? []).length;
+      expect(count(stripComments(raw))).toBe(count(raw));
+    });
+
+    it("handles an escaped quote without losing the rest of the line", () => {
+      const line = 'const s = "he said \\"hi\\""; to="/manage/agents";';
+      expect(stripComments(line)).toContain('to="/manage/agents"');
+    });
   });
 
   it("every in-app link target resolves to a real route", () => {

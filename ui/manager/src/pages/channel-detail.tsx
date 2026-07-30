@@ -223,7 +223,14 @@ export function ChannelDetailPage() {
 
   // A missing channel or bad version previously left the skeleton spinning
   // forever, because only `isLoading` was consulted.
-  if (isError) {
+  //
+  // Gated on `!draft` deliberately: this must only replace the page on an INITIAL
+  // load failure. TanStack Query also sets isError for a *background* refetch
+  // failure, and returning early then would throw away a form the user is part way
+  // through editing — trading a stuck skeleton for silent data loss. Once a draft
+  // exists the form stays mounted and a refetch failure is surfaced by the banner
+  // below instead.
+  if (isError && !draft) {
     return (
       <div className="p-6" data-testid="channel-detail-error">
         <ErrorState
@@ -246,6 +253,21 @@ export function ChannelDetailPage() {
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-4xl">
+      {/* A refetch failed while the form was already open. Non-blocking on
+          purpose: the user's in-progress edits stay intact and saveable, but the
+          failure is not swallowed either. */}
+      {isError && draft && (
+        <div
+          className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5"
+          data-testid="channel-detail-refetch-error"
+        >
+          <p className="text-sm text-destructive">{t("common.error")}</p>
+          <Button variant="ghost" size="sm" onClick={() => refetch()}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate("/manage/channels")}><ArrowLeft className="h-4 w-4" /></Button>

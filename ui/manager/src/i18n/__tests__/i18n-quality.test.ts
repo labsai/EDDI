@@ -85,6 +85,13 @@ describe("i18n translation debt", () => {
     ar: 90, hi: 93, ja: 94, ko: 94, pt: 95, th: 95, zh: 95,
   };
 
+  it("records a baseline for every locale", () => {
+    // Without this, adding a 12th locale to LOCALES but not to BASELINE compares
+    // its count against `undefined`, and the guard silently stops applying to
+    // the one locale most likely to be freshly machine-translated.
+    expect(Object.keys(BASELINE).sort()).toEqual(Object.keys(LOCALES).sort());
+  });
+
   for (const [code, locale] of Object.entries(LOCALES)) {
     it(`${code}.json has no more untranslated strings than its baseline`, () => {
       const flat = flatten(locale);

@@ -15,11 +15,23 @@ export interface AuthEventSourceHandle {
  * Parse one SSE frame — the text between blank-line separators — into its event
  * type and data payload.
  *
- * Used by the frame-based readers (`sendMessageStreaming` in `chat.ts`). The
- * incremental line-based readers — `createAuthEventSource` below and
- * `BearerEventSource` — implement the same rules inline because they dispatch
- * as lines arrive rather than per frame. If you touch the rules here, check
- * those two as well.
+ * Currently used by `sendMessageStreaming` in `chat.ts`. There are three other
+ * SSE readers in this repo and they do NOT all follow the rules below — inventory
+ * so the next person does not have to rediscover it:
+ *
+ *  - `createAuthEventSource` (below) — incremental, line-based. Appends `data:`
+ *    lines, strips `\r`, honours the optional-space rule. Equivalent.
+ *  - `BearerEventSource` (`src/lib/bearer-event-source.ts`) — incremental.
+ *    Appends and strips `\r`, but uses `trimStart()` on the payload, so it drops
+ *    more than the single optional space and does not preserve leading runs.
+ *  - `readGroupSSE` (`src/lib/api/groups.ts`) — frame-based, and the one worth
+ *    migrating. It appends `data:` lines correctly (it cites the spec) but
+ *    `.trim()`s each one, losing meaningful whitespace, and normalises CRLF per
+ *    decoded chunk, which misses a `\r\n` straddling a chunk boundary. It also
+ *    drops any frame without an explicit `event:` line.
+ *
+ * If you change the rules here, reconcile them with those three rather than
+ * assuming they match.
  *
  * It follows the WHATWG spec on the three points that are easy to get wrong and
  * that a hand-rolled parser reliably gets wrong:

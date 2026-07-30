@@ -40,18 +40,45 @@ const NPM = IS_WINDOWS ? "npm.cmd" : "npm";
 
 /** `npm audit` exits non-zero when it finds anything, so capture rather than throw. */
 function audit(extraArgs) {
+  let raw;
   try {
-    return JSON.parse(
-      execFileSync(NPM, ["audit", "--json", ...extraArgs], {
-        encoding: "utf8",
-        maxBuffer: 32 * 1024 * 1024,
-        shell: IS_WINDOWS,
-      }),
-    );
+    raw = execFileSync(NPM, ["audit", "--json", ...extraArgs], {
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+      shell: IS_WINDOWS,
+    });
   } catch (err) {
-    if (err.stdout) return JSON.parse(err.stdout);
-    throw err;
+    // npm audit exits non-zero merely because it found something, and still
+    // writes a full report to stdout. Anything else is a real failure.
+    if (!err.stdout) throw err;
+    raw = err.stdout;
   }
+
+  let report;
+  try {
+    report = JSON.parse(raw);
+  } catch {
+    throw new Error(`npm audit did not return JSON: ${String(raw).slice(0, 300)}`);
+  }
+
+  // A gate that cannot read its input must FAIL CLOSED. On a registry outage npm
+  // emits {"error": {...}} with no `vulnerabilities` key; treating that as "no
+  // findings" would print success and let anything through — worse than having no
+  // gate at all, because it looks like it is protecting you.
+  if (report.error) {
+    throw new Error(`npm audit reported an error: ${JSON.stringify(report.error).slice(0, 300)}`);
+  }
+  if (
+    typeof report.vulnerabilities !== "object" ||
+    report.vulnerabilities === null ||
+    typeof report.metadata !== "object"
+  ) {
+    throw new Error(
+      "npm audit JSON is missing the expected `vulnerabilities`/`metadata` fields — " +
+        "refusing to report success on an audit that could not be read.",
+    );
+  }
+  return report;
 }
 
 /** Collect { id, package, severity, title } for each distinct advisory. */

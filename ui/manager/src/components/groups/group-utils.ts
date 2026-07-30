@@ -21,9 +21,27 @@ export interface StructuredItem {
  * construct is captured first (a fence may legally contain backticks).
  */
 const PROTECTED_PATTERNS: readonly RegExp[] = [
+  // Closed constructs first, so a complete fence wins over the open-ended
+  // fallbacks below it.
   /```[\s\S]*?```/g, // fenced code block
   /~~~[\s\S]*?~~~/g, // fenced code block (tilde form)
+
+  // UNTERMINATED fence, to end of input. Essential, not defensive: these
+  // functions re-run on every render while tokens are still arriving, so for the
+  // whole time a code block is streaming in there is no closing fence yet.
+  // Without this the prose rules rewrite the code the user is watching and it
+  // visibly snaps back once the fence lands — e.g. `.btn { color:#fff }` became
+  // `.btn { color:` + blank line + `#fff }` via the heading rule.
+  /```[\s\S]*$/g,
+  /~~~[\s\S]*$/g,
+
   /`[^`\n]*`/g, // inline code span
+  /`[^`\n]*$/gm, // unterminated inline code span, to end of line (streaming)
+
+  // Indented code block (4 spaces or a tab). A standard CommonMark form that
+  // still reached the prose rules even when complete.
+  /^(?:[ ]{4}|\t).*(?:\n(?:[ ]{4}|\t).*)*/gm,
+
   /\]\([^)\s]*(?:\s+"[^"]*")?\)/g, // markdown link / image destination
   /<[a-zA-Z][a-zA-Z0-9+.-]*:[^>\s]*>/g, // autolink
   /\bhttps?:\/\/[^\s)]+/g, // bare URL
@@ -51,7 +69,14 @@ function maskProtectedRegions(text: string): {
   restore: (s: string) => string;
 } {
   const stash: string[] = [];
-  let masked = text;
+  // Strip any sentinel already in the input FIRST. Agent output is
+  // attacker-influenceable via prompt injection, and a literal
+  // U+E000<digits>U+E000 would otherwise be indistinguishable from a real
+  // placeholder — restore would substitute an unrelated stashed region into the
+  // message (duplicating it) or, for an out-of-range index, delete the text.
+  // U+E000 is Private Use Area and carries no meaning in real content, so
+  // dropping it loses nothing.
+  let masked = text.split(SENTINEL).join("");
   for (const pattern of PROTECTED_PATTERNS) {
     masked = masked.replace(pattern, (match) => {
       stash.push(match);

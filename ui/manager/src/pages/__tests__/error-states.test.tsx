@@ -70,7 +70,7 @@ describe("page error states", () => {
     await expectErrorNotEmpty("schedules-empty");
   });
 
-  it("Quotas shows an error instead of a form full of fabricated limits", async () => {
+  it("Quotas shows an error instead of empty config and usage cards", async () => {
     server.use(
       http.get("*/administration/quotas/*", () =>
         HttpResponse.json({ message: "boom" }, { status: 500 }),
@@ -78,6 +78,47 @@ describe("page error states", () => {
     );
     renderPage("/manage/quotas", <QuotasPage />, "/manage/quotas");
     await expectErrorNotEmpty();
+  });
+
+  it("Quotas shows a usage error without hiding the still-working config form", async () => {
+    // Usage is a separate query. When only it fails the card used to render its
+    // header and Reset button over an empty body, reading as "no usage".
+    server.use(
+      http.get("*/administration/quotas/:tenant/usage", () =>
+        HttpResponse.json({ message: "boom" }, { status: 500 }),
+      ),
+    );
+    renderPage("/manage/quotas", <QuotasPage />, "/manage/quotas");
+
+    await waitFor(
+      () => expect(screen.getByTestId("quotas-usage-error")).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+    // The quota config half loaded fine and must remain usable.
+    expect(screen.getByTestId("quotas-toggle-enabled")).toBeInTheDocument();
+  });
+
+  it("Channel detail keeps an open edit form when a background refetch fails", async () => {
+    // The first version of this fix returned early on isError, which also fires
+    // for a background refetch — discarding a form the user was editing. The
+    // error must be surfaced without unmounting the form.
+    renderPage(
+      "/manage/channels/channel1",
+      <ChannelDetailPage />,
+      "/manage/channels/:id",
+    );
+    await waitFor(() => expect(screen.getByTestId("save-channel-btn")).toBeInTheDocument(), {
+      timeout: 5000,
+    });
+
+    server.use(
+      http.get("*/channelstore/channels/*", () =>
+        HttpResponse.json({ message: "boom" }, { status: 500 }),
+      ),
+    );
+    // The form must still be mounted; it is never replaced by the error page.
+    expect(screen.getByTestId("save-channel-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("channel-detail-error")).not.toBeInTheDocument();
   });
 
   it("Channel detail shows an error instead of an endless skeleton", async () => {

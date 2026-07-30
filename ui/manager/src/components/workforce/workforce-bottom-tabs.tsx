@@ -2,9 +2,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Home, MessageSquare, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-/** Second path segments under /workforce that are app pages, not board ids. */
-const WORKFORCE_SUBPAGES = new Set(["new", "analytics", "chat"]);
+import { WORKFORCE_SUBPAGES } from "./workforce-subpages";
 
 // ─── Component ───────────────────────────────────────────────────
 
@@ -26,6 +24,12 @@ export function WorkforceBottomTabs() {
     return WORKFORCE_SUBPAGES.has(segment) ? null : segment;
   })();
 
+  /** `?version=N` from the current URL, or "" — see the Threads tab below. */
+  const versionQuery = (() => {
+    const version = new URLSearchParams(location.search).get("version");
+    return version ? `?version=${encodeURIComponent(version)}` : "";
+  })();
+
   const tabs = [
     {
       key: "home" as const,
@@ -45,7 +49,12 @@ export function WorkforceBottomTabs() {
       label: t("Workforce.tabThreads", "Threads"),
       icon: MessageSquare,
       active: isThreads,
-      to: boardId ? `/workforce/${boardId}` : "/workforce",
+      // Carry ?version= through. Every other board link in the app builds
+      // `/workforce/:id?version=N`, and the group endpoints require the version —
+      // dropping it silently pins the board to version 1.
+      to: boardId
+        ? `/workforce/${boardId}${versionQuery}`
+        : "/workforce",
       disabled: !boardId,
     },
     {
