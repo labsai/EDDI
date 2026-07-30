@@ -10,9 +10,10 @@ import java.util.List;
  * Query surface for listing resources by field, on top of the id-addressed
  * reads {@link IResourceStore} provides.
  * <p>
- * A caller passes {@link QueryFilters} groups; filters inside a group combine
- * under that group's {@link QueryFilters.ConnectingType} (AND or OR), and the
- * groups themselves are then combined. Paging is index/limit, with the same
+ * A caller passes {@link QueryFilters} groups. Filters inside a group combine
+ * under that group's {@link QueryFilters.ConnectingType} (AND or OR); the
+ * groups themselves are always combined with AND, so a group's connector never
+ * affects how it joins the other groups. Paging is index/limit, with the same
  * ceiling {@link IResourceStorage} enforces.
  * <p>
  * Used by the REST layer to back list endpoints and their search parameters.
