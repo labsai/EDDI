@@ -3013,7 +3013,9 @@
       "continuePlaceholder": "Poursuivre cette discussion…",
       "inputDisabledClosed": "Cette discussion est fermée",
       "newDiscussion": "Nouvelle discussion",
-      "noResponseGenerated": "Aucune réponse générée"
+      "noResponseGenerated": "Aucune réponse générée",
+      "awaitingApprovalHint": "Cette discussion est en pause dans l'attente d'une approbation humaine.",
+      "reviewInManager": "L'examiner"
     },
     "thread": {
       "fileTooLarge": "Le fichier doit faire moins de 20 Mo",
@@ -3054,7 +3056,11 @@
       "noLlm": "Aucun LLM configuré",
       "noTools": "Aucun configuré"
     },
-    "dashboard": "Tableau de bord"
+    "dashboard": "Tableau de bord",
+    "settings": {
+      "hitlApprovalPointsNote": "Ces paramètres définissent le comportement d'une approbation. Les points d'une discussion qui en requièrent une se configurent par phase dans le Manager.",
+      "hitlOpenManager": "Définir les points d'approbation"
+    }
   },
   "operator": {
     "title": "Opérateur de plateforme",

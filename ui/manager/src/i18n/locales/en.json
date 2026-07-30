@@ -3034,7 +3034,9 @@
       "continuePlaceholder": "Continue this discussion…",
       "inputDisabledClosed": "This discussion is closed",
       "newDiscussion": "New Discussion",
-      "noResponseGenerated": "No response generated"
+      "noResponseGenerated": "No response generated",
+      "awaitingApprovalHint": "This discussion is paused for human approval.",
+      "reviewInManager": "Review it"
     },
     "thread": {
       "fileTooLarge": "File must be under 20MB",
@@ -3075,7 +3077,11 @@
       "noLlm": "No LLM configured",
       "noTools": "None configured"
     },
-    "dashboard": "Dashboard"
+    "dashboard": "Dashboard",
+    "settings": {
+      "hitlApprovalPointsNote": "These settings control how an approval behaves. Which points in a discussion require approval is configured per phase in the Manager.",
+      "hitlOpenManager": "Set approval points"
+    }
   },
   "operator": {
     "title": "Platform Operator",
