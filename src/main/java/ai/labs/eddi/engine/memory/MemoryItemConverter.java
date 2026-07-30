@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.prepareContext;
 import static ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
@@ -128,10 +129,23 @@ public class MemoryItemConverter implements IMemoryItemConverter {
         }
     }
 
+    /**
+     * Namespaces already reported as shadowed, so the warning is emitted once per
+     * process rather than once per turn.
+     * <p>
+     * Shadowing is a legitimate (if awkward) client choice: a caller may genuinely
+     * send a context variable named {@code vars} or {@code snippets}. Warning on
+     * every turn would then produce a line per request for the lifetime of that
+     * integration, which buries the warnings that do need acting on. Bounded by
+     * construction — there are only two namespace keys — so this cannot grow.
+     */
+    private static final Set<String> shadowedNamespacesWarned = ConcurrentHashMap.newKeySet();
+
     private static void putNamespaceIfAbsent(Map<String, Object> conversationDataObjects, String key, Map<String, Object> namespace) {
-        if (conversationDataObjects.putIfAbsent(key, namespace) != null) {
+        if (conversationDataObjects.putIfAbsent(key, namespace) != null && shadowedNamespacesWarned.add(key)) {
             LOGGER.warnf("Template namespace '%s' is shadowed by a context variable of the same name — "
-                    + "the context value wins; rename the context variable to reach the '%s' namespace.", key, key);
+                    + "the context value wins; rename the context variable to reach the '%s' namespace. "
+                    + "This is reported once per process.", key, key);
         }
     }
 
